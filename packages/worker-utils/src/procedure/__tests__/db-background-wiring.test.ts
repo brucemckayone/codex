@@ -50,14 +50,15 @@ describe('DB background work is tracked, not plain waitUntil (H1)', () => {
   ] as const) {
     it(`registry.${name} defers onto the tracker`, async () => {
       const ctx = fakeExecutionCtx();
-      const background = vi.fn(<T>(p: Promise<T>) => p);
+      const tracker = createBackgroundTracker();
+      const background = vi.spyOn(tracker, 'background');
       const { registry, cleanup } = await createServiceRegistry(
         testEnv(),
         undefined,
         undefined,
         ctx,
         undefined,
-        background
+        tracker.background
       );
       try {
         waitUntilOf(registry[name])(Promise.resolve('task'));
