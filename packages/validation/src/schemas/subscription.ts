@@ -285,26 +285,21 @@ export const getSubscriptionStatsQuerySchema = z.object({
 // Stripe Connect Schemas
 // ============================================================================
 
-export const connectOnboardSchema = z.object({
-  organizationId: uuidSchema,
-  returnUrl: checkoutRedirectUrlSchema,
-  refreshUrl: checkoutRedirectUrlSchema,
-});
-
+/**
+ * `GET /connect/organization-status` — the org's read-only payout status.
+ * `organizationId` only RESOLVES the org for the membership check; the handler
+ * acts on the policy's `ctx.organizationId`, never on this value directly.
+ */
 export const connectStatusQuerySchema = z.object({
-  organizationId: uuidSchema,
-});
-
-export const connectDashboardSchema = z.object({
   organizationId: uuidSchema,
 });
 
 /**
  * Creator-scoped Connect onboarding (Codex-69t7c.3 / WP3).
  *
- * Unlike {@link connectOnboardSchema}, this carries NO `organizationId`: the
- * acting creator is always the authenticated user (`ctx.user.id`), never a
- * client-supplied id (IDOR prevention — see epic design decision D8). The
+ * Carries NO `organizationId`: the acting creator is always the authenticated
+ * user (`ctx.user.id`), never a client-supplied id (IDOR prevention — see epic
+ * design decision D8). The
  * return/refresh URLs reuse the same host-allowlisted redirect schema as
  * checkout, so an attacker cannot smuggle an open redirect through onboarding.
  *
@@ -352,5 +347,4 @@ export type ListSubscribersQueryInput = z.infer<
   typeof listSubscribersQuerySchema
 >;
 
-export type ConnectOnboardInput = z.infer<typeof connectOnboardSchema>;
 export type ConnectMeOnboardInput = z.infer<typeof connectMeOnboardSchema>;

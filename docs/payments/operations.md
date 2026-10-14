@@ -22,12 +22,23 @@ a live-mode account and every endpoint, Product, Price and portal configuration
 is recreated there (see [docs/deployment/production-go-live.md](../deployment/production-go-live.md)).
 
 **The shared sandbox.** Production and local development receive **every**
-event from the sandbox, by design. Each environment must ignore events about
-objects it did not create: every object we create carries `metadata.codex_env`,
-and handlers log and acknowledge (200) events whose object belongs to another
-environment, writing nothing — **gap**: `Codex-2hxff.5`. Until then production
-also processes local test events, which fail harmlessly on unknown users and are
-acknowledged.
+event from the sandbox, by design. Each environment ignores events about
+objects it did not create:
+
+- Every object we create carries `metadata.codex_env` — the worker's
+  `ENVIRONMENT` (`production`, `development`, `test`): Customers, Checkout
+  Sessions and, through `payment_intent_data` / `subscription_data`, their
+  PaymentIntents (whose Charges inherit it) and Subscriptions (whose Invoices
+  snapshot it in `parent.subscription_details.metadata`), Connect accounts,
+  Products, Prices and transfers.
+- `createWebhookHandler` reads the tag before any handler runs and acknowledges
+  (200) an event whose object names another environment, writing nothing.
+- An **untagged** object is processed. Everything created before tagging began —
+  every existing subscription among them — has no tag, and skipping it would
+  stop production renewals. Subscription charges, disputes and Connect
+  deauthorisations carry none of our metadata, so they are always processed;
+  they fail harmlessly on unknown rows.
+- Customer resolution by email never adopts another environment's Customer.
 
 Seed scripts clean up Stripe objects across the **whole** sandbox, so a local
 seed can archive Prices that production uses — `Codex-1ilxl` (in progress).
@@ -80,7 +91,7 @@ unique keys (payment intent, ledger rows) and deterministic idempotency keys.
 | `STRIPE_SECRET_KEY` | secret | Also needed by organization-api, which creates tier Products and Prices |
 | `STRIPE_WEBHOOK_SECRET_BOOKING`, `_PAYMENT`, `_DISPUTE`, `_SUBSCRIPTION`, `_CONNECT` | secret | One per endpoint |
 | `STRIPE_WEBHOOK_SECRET_CUSTOMER` | secret | To be removed — **gap**: `Codex-2hxff.24` |
-| `STRIPE_PORTAL_CONFIGURATION_ID` | secret or var | The locked billing-portal configuration — `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` in the sandbox — **gap**: `Codex-2hxff.4` (not read today) |
+| `STRIPE_PORTAL_CONFIGURATION_ID` | secret | The locked billing-portal configuration — `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` in the sandbox. Optional at boot; without it the billing portal refuses to open |
 | `ENVIRONMENT` | var | `production` disables the dev webhook route |
 | `WEB_APP_URL` | var | Required — agreement emails need it — **gap**: `Codex-2hxff.7` (declared optional) |
 | `API_URL` | var | Must be declared under `env.production` — **gap**: `Codex-2hxff.24` |
@@ -161,7 +172,7 @@ and again when moving to live mode.
 | Area | Setting |
 |---|---|
 | Webhook endpoints | Exactly the endpoints and events above; connect as a connected-accounts endpoint |
-| Billing customer portal | A configuration with cancelling, plan switching, pausing and profile edits **off**: `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` (created 2026-10-13; deliberately not the account default). Its id goes in `STRIPE_PORTAL_CONFIGURATION_ID`. The account default still allows cancelling, so the code must pass the id — **gap**: `Codex-2hxff.4` |
+| Billing customer portal | A configuration with cancelling, plan switching, pausing and profile edits **off**: `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` (created 2026-10-13; deliberately not the account default). Its id goes in `STRIPE_PORTAL_CONFIGURATION_ID`. The account default still allows cancelling, so every portal session passes the id |
 | Billing failed-payment retries | The retry schedule Stripe follows while a subscriber is `past_due`, with **cancel the subscription** as the action when all retries fail, so access ends when retries run out (owner decision P-3) |
 | Connect Express Dashboard features | Creators can change their payout bank account (Stripe's default) but **not** their payout schedule — schedule editing turned off (owner decision "Bank account only"). The schedule itself (a 14-day delay) is set per account by our code — **gap**: `Codex-2hxff.29` |
 | Connect branding | Platform name and icon shown during onboarding and in the Express Dashboard |

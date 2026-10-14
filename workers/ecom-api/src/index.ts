@@ -94,6 +94,9 @@ app.use(
       // dev router forwards all `charge.*` events to the payment handler.
       'STRIPE_WEBHOOK_SECRET_CUSTOMER',
       'STRIPE_WEBHOOK_SECRET_DISPUTE',
+      // Optional at boot so a worker that never opens a portal still starts;
+      // createPortalSession refuses without it (Codex-2hxff.4).
+      'STRIPE_PORTAL_CONFIGURATION_ID',
     ],
   })
 );

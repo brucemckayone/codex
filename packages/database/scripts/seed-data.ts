@@ -35,6 +35,8 @@ const TABLES_TO_TRUNCATE = [
   'verification',
   'organizations',
   'organization_memberships',
+  'organization_ownership_offers',
+  'organization_ownership_periods',
   'content',
   'categories',
   'content_categories',

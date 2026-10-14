@@ -143,5 +143,8 @@ export type {
   SaleListItem,
   SalesStats,
 } from './types';
-// Connect routing helpers (Codex-sec7i)
-export { resolvePrimaryConnect } from './utils/resolve-primary-connect';
+// Who is paid the organisation's part of a sale (Codex-2hxff.2)
+export {
+  type OrganisationPayee,
+  resolveOrganisationPayee,
+} from './utils/resolve-organisation-payee';

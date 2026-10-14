@@ -25,7 +25,7 @@ behave like an Express account:
 | `controller.requirement_collection` | `stripe` | Stripe collects identity and bank details |
 | Capabilities | `card_payments`, `transfers` | |
 | Country | `GB` | |
-| Metadata | `codex_user_id`, `codex_env` | **gap**: `Codex-2hxff.5` (no environment tag) |
+| Metadata | `codex_user_id`, `codex_env` | |
 | Idempotency key | `connect_acct_${userId}` | One account per person, even on retry |
 
 Our row is written before the onboarding link is created, so an abandoned
@@ -61,13 +61,16 @@ Owner decisions Q1 and Q2 (SEC-01).
   ever need covering (owner decision 2026-10-13, "Bank account only"). In a
   sandbox the login link is the only way in.
 - Other organisation members see the organisation's payout **status** only,
-  through one read-only organisation endpoint. They never get a login link.
+  through `GET /connect/organization-status?organizationId=` (any member). It
+  returns `isConnected`, `chargesEnabled`, `payoutsEnabled` and `status` — no
+  account id, no outstanding requirements, never a login link — and reads only
+  the organisation the membership check resolved, never one named elsewhere in
+  the request.
 - The organisation-level routes (`/connect/onboard`, `/connect/status`,
   `/connect/sync`, `/connect/dashboard` with `?organizationId=`) are retired.
-
-— **gap**: `Codex-2hxff.1`. Today `POST /connect/dashboard` checks the
-organisation in the query string but acts on the one in the body, so any
-organisation owner or admin can open any other organisation's payout dashboard.
+  Until 2026-10-13 `POST /connect/dashboard` checked the organisation in the
+  query string but acted on the one in the body, so any organisation owner or
+  admin could open any other organisation's payout dashboard (`Codex-2hxff.1`).
 
 ## Payout timing
 
@@ -98,7 +101,16 @@ Owner decisions, 2026-10-13: "The proposed ownership model seems perfect to me."
 - Money earned **before** a transfer stays with the previous owner, including
   anything still pending for them.
 
-The `organizations.primary_connect_account_user_id` pin is removed.
+The `organizations.primary_connect_account_user_id` pin is no longer read or
+written; the payee is the owner whose ownership period covers the sale's time
+(`resolveOrganisationPayee`). The column itself is dropped by `Codex-2hxff.36`.
+
+**How it is held.** The owner is the single `organization_memberships` row with
+`role='owner'` and `status='active'` (the unique index
+`uq_org_memberships_one_active_owner` allows no second one). Who is *paid* as
+owner, and from when, is `organization_ownership_periods`: one open period per
+organisation, written in the same transaction as every change of owner.
+Creating an organisation opens its creator's period.
 
 **Transferring ownership** (owner decisions 2026-10-13, see
 [status.md](status.md#decisions); the mockup and data design were reviewed on
@@ -123,11 +135,9 @@ The `organizations.primary_connect_account_user_id` pin is removed.
   the owner. An expired offer sends nothing; it shows on the Ownership card.
 - Platform support can reassign ownership through admin-api
   (`auth: 'platform_owner'`). There is no screen yet.
-
-— **gap**: `Codex-2hxff.2`. Today any admin can promote themselves to owner and
-remove the founder, an organisation can have several owners, and the pin is set
-once and never changed, so a former owner keeps receiving the organisation's
-money.
+- The members routes cannot make anyone owner, change the owner's role or
+  remove the owner (`409 OWNERSHIP_TRANSFER_REQUIRED`): ownership moves only by
+  the routes above.
 
 ## What needs payouts set up first
 

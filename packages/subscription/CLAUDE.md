@@ -56,6 +56,10 @@ payout-released email — the open defects `Codex-2hxff.7` and `Codex-2hxff.13`.
 - A price change creates new Prices (Prices are immutable) and archives the old
   ones. How existing subscribers move is specified in
   [subscriptions.md → Price changes](../../docs/payments/subscriptions.md#price-changes).
+  **NEVER** swap an existing subscriber's Price with a direct
+  `subscriptions.update` on a price change — go through `schedulePriceChange`
+  (`pending-price-change.ts`): same interval only, no proration, first renewal
+  ≥ 30 days after the email (`Codex-2hxff.3`).
 - If the DB insert fails, the new Stripe Product is archived (orphan prevention).
 - One `isRecommended` tier per organisation (enforced in a transaction).
 - `sortOrder` **is** the access hierarchy. Soft delete only; a tier with
@@ -134,7 +138,10 @@ touching `handleInvoicePaymentSucceeded`, `executeTransfers`,
   belong to. Created with controller properties (Express-equivalent), key
   `connect_acct_${userId}`.
 - Status (`active` = charges and payouts enabled) comes from `account.updated`.
-- Only the account's owner gets an Express Dashboard login link.
+- Only the account's owner gets an Express Dashboard login link. Every
+  `ConnectAccountService` method that ACTS on an account (onboard, sync, login
+  link) is keyed by the caller's own `userId`; the one org-keyed read,
+  `getOrganizationPayoutStatus`, returns status fields only (`Codex-2hxff.1`).
 
 ## Strict Rules
 
@@ -143,6 +150,11 @@ touching `handleInvoicePaymentSucceeded`, `executeTransfers`,
 - **MUST** check the organisation owner's Connect account is payable before
   creating a tier, a course plan or a subscription checkout.
 - **MUST** use deterministic idempotency keys on Stripe calls.
+- **MUST** spread `stripeEnvMetadata(this.environment)` (`@codex/constants`) into
+  the metadata of every Stripe object created — and into `payment_intent_data` /
+  `subscription_data` on a Checkout Session. Production and local dev share one
+  Stripe sandbox; an untagged object's events are processed by BOTH
+  (`Codex-2hxff.5`, docs/payments/operations.md → Environments).
 - **MUST** check for an existing live subscription before creating a checkout
   (`AlreadySubscribedError`) — and handle a duplicate that completes anyway.
 - **NEVER** process a webhook before the ecom-api worker has verified its

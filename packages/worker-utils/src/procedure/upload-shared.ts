@@ -44,7 +44,8 @@ interface UploadOrchestrationResult {
 export async function runUploadOrchestration(
   c: Context<HonoEnv>,
   policy: ProcedurePolicy,
-  obs: ObservabilityClient | undefined
+  obs: ObservabilityClient | undefined,
+  background?: BackgroundTracker['background']
 ): Promise<UploadOrchestrationResult> {
   await enforcePolicyInline(c, policy, obs);
   const organizationId = c.get('organizationId');
@@ -54,7 +55,9 @@ export async function runUploadOrchestration(
     c.env,
     obs,
     organizationId,
-    c.executionCtx
+    c.executionCtx,
+    undefined,
+    background
   );
   return {
     organizationId,
@@ -107,8 +110,16 @@ export function createBackgroundTracker(): BackgroundTracker {
       return promise;
     },
     // allSettled attaches handlers, so a rejecting task cannot surface as an
-    // unhandled rejection, and one failure never skips cleanup.
-    settled: () => Promise.allSettled(tasks),
+    // unhandled rejection, and one failure never skips cleanup. Loops because
+    // allSettled snapshots the array: a task registered while we wait (a
+    // background fan-out deferring more DB work) must hold cleanup off too.
+    settled: async () => {
+      let seen = -1;
+      while (seen !== tasks.length) {
+        seen = tasks.length;
+        await Promise.allSettled(tasks);
+      }
+    },
   };
 }
 

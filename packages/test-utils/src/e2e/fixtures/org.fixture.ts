@@ -91,6 +91,20 @@ export const orgFixture = {
       invitedBy: registeredUser.user.id, // Self-invited for test
     });
 
+    // An owner is also the org's payee from its creation (Codex-2hxff.2):
+    // production writes the ownership period with the owner membership, so
+    // the fixture does too, and payouts resolve as they do there.
+    if (data.orgRole === 'owner') {
+      await dbHttp.insert(schema.organizationOwnershipPeriods).values({
+        organizationId: organization.id,
+        userId: registeredUser.user.id,
+        // Now, not the org's created_at: a passed-in org carries only
+        // id/name/slug, and every sale in an e2e flow comes after this.
+        startedAt: new Date(),
+        source: 'created',
+      });
+    }
+
     /*
      * Can the organization-api WORKER see the org we just wrote (Codex-5ryz3)?
      *

@@ -109,8 +109,6 @@ This policy promises behaviour the code does not have yet:
 | Access is kept during retries and ends when they fail | `Codex-2hxff.10` |
 | A chargeback pauses access, and a won dispute restores it | `Codex-2hxff.9` |
 | A fraud warning triggers an automatic refund | `Codex-2hxff.9` |
-| Price changes wait for the 30-day renewal | `Codex-2hxff.3` |
-| Customers cannot cancel in the Stripe portal behind our back | `Codex-2hxff.4` |
 
 ### Questions for the lawyer
 

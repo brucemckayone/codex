@@ -26,6 +26,7 @@ import {
   CONTENT_STATUS,
   CURRENCY,
   PURCHASE_STATUS,
+  stripeEnvMetadata,
 } from '@codex/constants';
 import { getConstraintName, isUniqueViolation, toIso } from '@codex/database';
 import {
@@ -33,14 +34,17 @@ import {
   contentAccess,
   courses,
   entitlements,
-  organizationMemberships,
   payouts,
   purchases,
   refundReviews,
   stripeConnectAccounts,
   users,
 } from '@codex/database/schema';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import {
+  BaseService,
+  type ServiceConfig,
+  StripeNotConfiguredError,
+} from '@codex/service-errors';
 import type {
   CreateCheckoutInput,
   CreateCourseCheckoutInput,
@@ -83,7 +87,7 @@ import {
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
-import { resolvePrimaryConnect } from '../utils/resolve-primary-connect';
+import { resolveOrganisationPayee } from '../utils/resolve-organisation-payee';
 import { findActiveCreatorAgreementShare } from './agreement-share';
 import {
   writeContentPurchaseEntitlement,
@@ -162,6 +166,15 @@ interface PurchaseServiceConfig extends ServiceConfig {
   feeConfig?: FeeConfigService;
   mailer?: PurchaseMailer;
   webAppUrl?: string;
+  /**
+   * The locked Billing Portal configuration (`bpc_...`, from
+   * `STRIPE_PORTAL_CONFIGURATION_ID`): payment methods and invoices only, with
+   * cancelling, plan switching and pausing off. Optional so a worker that never
+   * opens a portal still boots; `createPortalSession` refuses without it rather
+   * than fall back to the account default, which allows cancelling
+   * (Codex-2hxff.4).
+   */
+  portalConfigurationId?: string;
 }
 
 /**
@@ -226,6 +239,7 @@ export class PurchaseService extends BaseService {
   private readonly feeConfig: FeeConfigService | undefined;
   private readonly mailer: PurchaseMailer | undefined;
   private readonly webAppUrl: string | undefined;
+  private readonly portalConfigurationId: string | undefined;
 
   /**
    * Initialize purchase service
@@ -239,6 +253,7 @@ export class PurchaseService extends BaseService {
     this.feeConfig = config.feeConfig;
     this.mailer = config.mailer;
     this.webAppUrl = config.webAppUrl;
+    this.portalConfigurationId = config.portalConfigurationId;
   }
 
   /**
@@ -402,7 +417,11 @@ export class PurchaseService extends BaseService {
       // as `SubscriptionService.createCheckoutSession`.
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId: customerId, email: user.email },
+        {
+          userId: customerId,
+          email: user.email,
+          environment: this.environment,
+        },
         (resolvedCustomerId) =>
           this.stripe.checkout.sessions.create({
             mode: 'payment',
@@ -445,6 +464,12 @@ export class PurchaseService extends BaseService {
               ...(organizationId !== null ? { organizationId } : {}),
               creatorId: contentRecord.creatorId,
               contentTitle: contentRecord.title,
+              ...stripeEnvMetadata(this.environment),
+            },
+            // Onto the PaymentIntent, from which Stripe snapshots it onto the
+            // Charge — so charge.refunded and friends carry the tag too.
+            payment_intent_data: {
+              metadata: stripeEnvMetadata(this.environment),
             },
             client_reference_id: customerId,
           }),
@@ -499,7 +524,8 @@ export class PurchaseService extends BaseService {
    * - Calculates revenue split from fee agreements or defaults
    * - Creates purchase record with immutable revenue snapshot
    * - Grants content access atomically in same transaction
-   * - Sets status='completed' and purchasedAt=now
+   * - Sets status='completed' and purchasedAt = the payment time
+   *   (metadata.paidAt — the webhook event's created — else now)
    *
    * Transaction Safety:
    * - Purchase + contentAccess created atomically
@@ -621,7 +647,7 @@ export class PurchaseService extends BaseService {
         // no organization and therefore no `creator_organization_agreements`
         // row — skip the query entirely (it would also fail to typecheck
         // against the nullable `organizationId`).
-        const purchasedAt = new Date();
+        const purchasedAt = metadata.paidAt ?? new Date();
         // Codex-2pryk WP-6: agreement lookup hoisted to the shared
         // `findActiveCreatorAgreementShare` (reused by the course-purchase +
         // course-subscription payout paths so all three apply IDENTICAL
@@ -730,7 +756,7 @@ export class PurchaseService extends BaseService {
             currency: metadata.currency || CURRENCY.GBP,
             stripePaymentIntentId,
             status: PURCHASE_STATUS.COMPLETED,
-            purchasedAt: new Date(),
+            purchasedAt,
             platformFeeCents: revenueSplit.platformFeeCents,
             organizationFeeCents: revenueSplit.organizationFeeCents,
             creatorPayoutCents: revenueSplit.creatorPayoutCents,
@@ -911,7 +937,11 @@ export class PurchaseService extends BaseService {
 
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId: customerId, email: user.email },
+        {
+          userId: customerId,
+          email: user.email,
+          environment: this.environment,
+        },
         (resolvedCustomerId) =>
           this.stripe.checkout.sessions.create({
             mode: 'payment',
@@ -942,6 +972,10 @@ export class PurchaseService extends BaseService {
               courseId: validated.courseId,
               customerId,
               courseTitle: course.title,
+              ...stripeEnvMetadata(this.environment),
+            },
+            payment_intent_data: {
+              metadata: stripeEnvMetadata(this.environment),
             },
             client_reference_id: customerId,
           }),
@@ -1038,7 +1072,7 @@ export class PurchaseService extends BaseService {
 
         // HARDENING §H4(a): course purchases reuse the creator's
         // `content_purchase` revenue-share agreement terms.
-        const purchasedAt = new Date();
+        const purchasedAt = metadata.paidAt ?? new Date();
         const agreementSharePercent = await findActiveCreatorAgreementShare(
           tx,
           {
@@ -1260,8 +1294,8 @@ export class PurchaseService extends BaseService {
     }
 
     // Look up Connect accounts up front: the creator's single account (by
-    // userId — one account per user, Codex-69t7c) and the org's canonical
-    // account (resolved via primaryConnectAccountUserId below).
+    // userId — one account per user, Codex-69t7c) and the org payee's account
+    // (resolved by ownership at the payment time, below).
     const [creatorConnect] =
       revenueSplit.creatorPayoutCents > 0
         ? await this.db
@@ -1289,13 +1323,19 @@ export class PurchaseService extends BaseService {
       creatorEmail = creatorRow?.email ?? null;
     }
 
-    // Codex-sec7i: org slice routes to the pinned Connect account.
-    // Codex-69t7c WP5: only resolve when there IS an org — orgless purchases
-    // never carve an org slice (organizationFeeCents is forced to 0 upstream),
-    // so this stays undefined and the org-fee branch below is skipped.
-    const orgConnect =
+    // Codex-2hxff.2: the org slice goes to whoever owned the org at the
+    // payment time — the same instant the agreement lookup used. Codex-69t7c
+    // WP5: only resolve when there IS an org — orgless purchases never carve an
+    // org slice (organizationFeeCents is forced to 0 upstream), so this stays
+    // undefined and the org-fee branch below is skipped.
+    const orgPayee =
       organizationId !== null && revenueSplit.organizationFeeCents > 0
-        ? await resolvePrimaryConnect(this.db, organizationId)
+        ? await resolveOrganisationPayee(
+            this.db,
+            organizationId,
+            purchase.purchasedAt ?? purchase.createdAt,
+            this.obs
+          )
         : undefined;
 
     // 2. Creator payout — secondary transfer with source_transaction.
@@ -1322,22 +1362,17 @@ export class PurchaseService extends BaseService {
     // `organizationId` to `string` for the resolvers below.
     if (organizationId !== null && revenueSplit.organizationFeeCents > 0) {
       // Codex-ed446: the org-fee payout row's recipient userId MUST be
-      // non-null (check_payouts_user_required). Prefer the resolved Connect
-      // account's user; when the org owner has not onboarded a Connect
-      // account, orgConnect is undefined — fall back to the org owner so a
-      // pending organization_fee row still persists and is swept (mirrors the
-      // subscription path) instead of stranding the slice via a 23514
-      // violation that the per-row catch would silently swallow.
-      const orgRowUserId =
-        orgConnect?.userId ?? (await this.resolveOrgOwnerId(organizationId));
-      if (orgRowUserId) {
+      // non-null (check_payouts_user_required). The payee is returned even
+      // when they have not onboarded Connect, so a pending organization_fee
+      // row still persists in their name and is swept later.
+      if (orgPayee) {
         await this.executePurchaseTransfer({
           purchase,
           organizationId,
           amountCents: revenueSplit.organizationFeeCents,
           payoutType: 'organization_fee',
-          rowUserId: orgRowUserId,
-          connect: orgConnect,
+          rowUserId: orgPayee.userId,
+          connect: orgPayee.account,
           stripeChargeId,
           transferGroup,
           idempotencyKey: `${stripeChargeId}_org_fee`,
@@ -1357,36 +1392,6 @@ export class PurchaseService extends BaseService {
         );
       }
     }
-  }
-
-  /**
-   * Resolve an org's owner userId (Codex-ed446). The org-fee payout row MUST
-   * carry a non-null userId (check_payouts_user_required); when the org owner
-   * has not onboarded a Connect account, `resolvePrimaryConnect` returns
-   * undefined, so we fall back to the owner here rather than writing a
-   * null-userId row that violates 23514 and strands the org slice in the
-   * platform balance. Mirrors `SubscriptionService.resolveOrgOwnerId`. No
-   * ORDER BY — matches that resolver's shape; deterministic-owner ordering
-   * across multi-owner orgs is tracked separately in Codex-rjwdm.
-   */
-  private async resolveOrgOwnerId(orgId: string): Promise<string | null> {
-    const [owner] = await this.db
-      .select({ userId: organizationMemberships.userId })
-      .from(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.organizationId, orgId),
-          eq(organizationMemberships.role, 'owner'),
-          // A removed owner keeps role='owner' with status='inactive', and the
-          // pending-payout sweep resolves its destination by payouts.userId
-          // alone — so a removed founder who later onboards Connect would
-          // receive the org fee.
-          eq(organizationMemberships.status, 'active')
-        )
-      )
-      .limit(1);
-
-    return owner?.userId ?? null;
   }
 
   /**
@@ -1539,6 +1544,7 @@ export class PurchaseService extends BaseService {
             purchase_id: purchase.id,
             type: payoutType,
             stripe_charge_id: stripeChargeId,
+            ...stripeEnvMetadata(this.environment),
           },
         },
         { idempotencyKey }
@@ -2163,6 +2169,7 @@ export class PurchaseService extends BaseService {
                   purchase_id: purchase.id,
                   payout_id: row.id,
                   type: 'refund_reversal',
+                  ...stripeEnvMetadata(this.environment),
                 },
               },
               {
@@ -2541,7 +2548,10 @@ export class PurchaseService extends BaseService {
    * Create Stripe Billing Portal session
    *
    * Allows customers to manage their billing (view invoices, update payment
-   * methods). Delegates Customer resolution to `resolveOrCreateCustomer`
+   * methods) — and nothing else. Every session passes the locked portal
+   * configuration, so a subscription can only be cancelled, switched or paused
+   * in our own UI and our database and Stripe never disagree about it
+   * (docs/payments/subscriptions.md → Billing portal). Delegates Customer resolution to `resolveOrCreateCustomer`
    * (Codex-49gev) so portal sessions open the SAME `cus_...` the user's
    * checkout sessions use — one Stripe Customer per Codex user across every
    * org (Codex-pkqxd / Codex-ssfes).
@@ -2551,6 +2561,8 @@ export class PurchaseService extends BaseService {
    * @param userId - Codex user ID (used for lookup + idempotency key)
    * @param returnUrl - URL to redirect to after portal session
    * @returns Portal session URL
+   * @throws {StripeNotConfiguredError} If no portal configuration is set —
+   *   never open the account-default portal, which allows cancelling.
    * @throws {NotFoundError} If the Codex user row is missing/soft-deleted.
    * @throws {PaymentProcessingError} If Stripe portal session creation fails.
    */
@@ -2561,6 +2573,17 @@ export class PurchaseService extends BaseService {
   ): Promise<{ url: string }> {
     const validated = createPortalSessionSchema.parse({ returnUrl });
 
+    const configuration = this.portalConfigurationId;
+    if (!configuration) {
+      // The client gets the generic STRIPE_NOT_CONFIGURED message; the operator
+      // gets the binding name here.
+      this.obs.error(
+        'STRIPE_PORTAL_CONFIGURATION_ID is not set; refusing to open the default (unlocked) billing portal',
+        { userId }
+      );
+      throw new StripeNotConfiguredError();
+    }
+
     try {
       // Resolve the unified Customer id (cached on the user row, reused by
       // every checkout + portal across every org) and self-heal if the cache
@@ -2569,11 +2592,12 @@ export class PurchaseService extends BaseService {
       // raw Stripe errors from billingPortal.sessions.create.
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId, email },
+        { userId, email, environment: this.environment },
         (stripeCustomerId) =>
           this.stripe.billingPortal.sessions.create({
             customer: stripeCustomerId,
             return_url: validated.returnUrl,
+            configuration,
           }),
         {
           onStaleRecovery: (info) =>

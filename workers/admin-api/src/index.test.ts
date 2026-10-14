@@ -130,4 +130,27 @@ describe('Admin API Worker', () => {
       expect(raw).not.toMatch(/configValue/i);
     });
   });
+
+  // Codex-2hxff.2: support assigns a new owner. Same gate as the fee routes —
+  // `platform_owner`, rejected before the handler (and so before any write).
+  describe('Ownership support route — auth gate (Codex-2hxff.2)', () => {
+    it('rejects anonymous POST /api/admin/organizations/:orgId/owner', async () => {
+      const response = await SELF.fetch(
+        'http://localhost/api/admin/organizations/00000000-0000-0000-0000-000000000001/owner',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            userId: 'user9',
+            reason: 'owner unreachable',
+          }),
+        }
+      );
+
+      expect([401, 403]).toContain(response.status);
+      const json = (await response.json()) as { error?: { code: string } };
+      expect(typeof json.error?.code).toBe('string');
+      expect(JSON.stringify(json)).not.toMatch(/ownerUserId/);
+    });
+  });
 });

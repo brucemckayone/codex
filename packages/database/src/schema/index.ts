@@ -16,6 +16,7 @@ export * from './fee-config';
 export * from './followers';
 export * from './journeys';
 export * from './notifications';
+export * from './organization-ownership';
 export * from './organizations';
 export * from './payouts';
 export * from './playback';

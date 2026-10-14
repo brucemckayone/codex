@@ -13,9 +13,10 @@
   import * as m from '$paraglide/messages';
   import MemberTable from '$lib/components/studio/MemberTable.svelte';
   import InviteMemberDialog from '$lib/components/studio/InviteMemberDialog.svelte';
-  import { Button, PageHeader } from '$lib/components/ui';
+  import { Alert, Button, PageHeader } from '$lib/components/ui';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { UserPlusIcon } from '$lib/components/ui/Icon';
+  import { ownershipErrorMessage } from '$lib/components/studio/ownership/ownership-errors';
   import {
     getOrgMembers,
     inviteMember,
@@ -95,22 +96,50 @@
     membersQuery?.refresh();
   }
 
-  async function handleChangeRole(userId: string, role: string) {
-    await updateMemberRole({
-      orgId: data.org.id,
-      userId,
-      role: role as 'owner' | 'admin' | 'creator' | 'member',
-    });
-    membersQuery?.refresh();
+  /**
+   * The last member command's failure, in words. These used to be awaited with
+   * no catch, so a refusal was an unhandled rejection and the table simply did
+   * not change. The owner's role and membership are now refused outright (409
+   * `OWNERSHIP_TRANSFER_REQUIRED`, Codex-2hxff.2), so the reason has to show.
+   */
+  let memberError = $state<string | null>(null);
+
+  async function runMemberCommand(action: () => Promise<unknown>) {
+    memberError = null;
+    try {
+      await action();
+    } catch (error) {
+      memberError = ownershipErrorMessage(error);
+    } finally {
+      // Refresh either way: a refused change must put the row back.
+      membersQuery?.refresh();
+    }
   }
 
-  async function handleRemove(userId: string) {
-    await removeMember({
-      orgId: data.org.id,
-      userId,
-    });
-    membersQuery?.refresh();
+  // `owner` is not settable — ownership moves only by transfer, from Settings.
+  function handleChangeRole(userId: string, role: string) {
+    return runMemberCommand(() =>
+      updateMemberRole({
+        orgId: data.org.id,
+        userId,
+        role: role as 'admin' | 'creator' | 'member',
+      })
+    );
   }
+
+  function handleRemove(userId: string) {
+    return runMemberCommand(() =>
+      removeMember({
+        orgId: data.org.id,
+        userId,
+      })
+    );
+  }
+
+  const ownerAction = $derived({
+    href: '/studio/settings#ownership',
+    label: isOwner ? m.team_owner_transfer() : m.team_owner_view_ownership(),
+  });
 </script>
 
 <svelte:head>
@@ -150,6 +179,10 @@
     {/snippet}
   </PageHeader>
 
+  {#if memberError}
+    <Alert variant="error">{memberError}</Alert>
+  {/if}
+
   <section class="members-section">
     {#if membersQuery?.loading}
       <div class="table-skeleton">
@@ -170,6 +203,7 @@
         onRemove={handleRemove}
         onInvite={() => (inviteDialogOpen = true)}
         {revenueShareByUser}
+        {ownerAction}
       />
     {/if}
   </section>

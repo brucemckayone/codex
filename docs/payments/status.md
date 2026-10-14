@@ -3,7 +3,7 @@
 Where the code does not yet meet this specification, the decisions the
 specification rests on, and what is still undecided.
 
-Last reviewed: 2026-10-13.
+Last reviewed: 2026-10-14.
 
 ---
 
@@ -15,18 +15,16 @@ references to today's code — is in
 [docs/audits/payments-2026-10-13/bug-ledger.md](../audits/payments-2026-10-13/bug-ledger.md)
 under the ledger ids listed on each bead.
 
-The first five carry the label `payments-fix-pr-1` and ship together in one pull
-request: the owner asked for the payout-dashboard, ownership and price-change
-fixes together ("put all of these fixes in together as one PR"), then agreed to
-add the portal lockdown (`.4`) and environment tagging (`.5`) ("Include both").
+`Codex-2hxff.1`–`.5` (label `payments-fix-pr-1`) are fixed in one pull request
+and so are not listed below: the owner asked for the payout-dashboard,
+ownership and price-change fixes together ("put all of these fixes in together
+as one PR"), then agreed to add the portal lockdown (`.4`) and environment
+tagging (`.5`) ("Include both"). Their beads close when it merges. Two
+follow-ups came out of them: `Codex-2hxff.35` (production's price-change email
+wording) and `Codex-2hxff.36` (dropping the retired Connect pin column).
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
-| `Codex-2hxff.1` | P0 | Only the account owner can open a payout dashboard; organisation Connect routes retired | [connect-and-payouts](connect-and-payouts.md#the-payout-dashboard-and-bank-details) |
-| `Codex-2hxff.2` | P1 | One owner per organisation, transfer-only; organisation money follows the current owner | [connect-and-payouts](connect-and-payouts.md#organisation-ownership) |
-| `Codex-2hxff.3` | P0 | Price changes reach existing subscribers only at their next renewal, after 30 days' notice; Studio-only prices | [subscriptions](subscriptions.md#price-changes) |
-| `Codex-2hxff.4` | P1 | The billing portal is locked down by an explicit configuration | [subscriptions](subscriptions.md#billing-portal) |
-| `Codex-2hxff.5` | P1 | Each environment tags its Stripe objects and ignores the other's events | [operations](operations.md#environments-and-stripe-accounts) |
 | `Codex-2hxff.6` | P0 | Transient webhook failures return 500 so Stripe retries | [operations](operations.md#webhook-error-policy) |
 | `Codex-2hxff.7` | P1 | Every sale path uses fee configuration, including the minimum platform fee | [fees-and-splits](fees-and-splits.md#fee-configuration) |
 | `Codex-2hxff.8` | P1 | Partial refunds keep access and claw back each increment; failed reversals are retried | [purchases](purchases.md#refunds) |
@@ -79,6 +77,8 @@ option chosen. All dated 2026-10-13 unless noted.
 | Bank details | "We likely would want the creators to be able to update their payout details, yes." |
 | Price changes (Q4–Q7) | "For 4B, the correct answer is: they move at the next renewal." Email at the change, applied at the first renewal at least 30 days later; increases and decreases alike; "Studio is the only place." |
 | Course plan price changes (P-6) | "Same rule as tiers" |
+| Price-change mechanism | "Deferred swap (Recommended)": the pending price rides on the Stripe subscription's metadata and is switched in, without proration, once the next renewal is at least 30 days after the email — not subscription schedules |
+| Two price changes in a row | "Latest wins (Recommended)": a second change replaces a pending one; one move, to the newest price |
 | Ownership | "I think there should only be one owner, and the only person who can be the owner is the person who makes the organization. The only person who can transfer ownership should therefore be the owner. The proposed ownership model seems perfect to me." Money is held as pending until a new owner sets up payouts; money earned before a transfer stays with the old owner; "No migration concerns here." |
 | Ownership transfer | Recipient "An admin or creator"; "Yes, they accept"; the previous owner becomes "Admin"; started from "Studio settings"; an offer lasts "7 days"; emails "Both + other admins"; support reassignment "Support API, no screen". Mockup review: "Card on Settings (Recommended)", "Type the org name (Recommended)", no email on expiry "No — show on next visit (Recommended)", and the previous owner's subscription income "Agreements decide (Recommended)" — an agreement they hold keeps paying; one without is warned that it stops (`Codex-2hxff.2`) |
 | One pull request | "Yeah, I think we should put all of these fixes in together as one PR, to be honest." Adding the portal lockdown and environment tagging: "Include both" |

@@ -10,6 +10,9 @@ DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main
 # Stripe (use test mode keys: sk_test_...)
 STRIPE_SECRET_KEY=sk_test_YOUR_TEST_KEY_HERE
 STRIPE_WEBHOOK_SECRET_BOOKING=whsec_YOUR_BOOKING_WEBHOOK_SECRET
+# The locked Billing Portal configuration (payment methods + invoices only).
+# Without it the billing portal refuses to open (Codex-2hxff.4).
+STRIPE_PORTAL_CONFIGURATION_ID=bpc_YOUR_LOCKED_PORTAL_CONFIG
 
 # Additional Stripe webhook secrets (future phases, not required yet)
 # STRIPE_WEBHOOK_SECRET_PAYMENT=whsec_YOUR_PAYMENT_SECRET

@@ -14,6 +14,7 @@
   import { page } from '$app/state';
   import StudioSidebar from '$lib/components/layout/StudioSidebar/StudioSidebar.svelte';
   import CommandPalette from '$lib/components/command-palette/CommandPalette.svelte';
+  import OwnershipOfferBanner from '$lib/components/studio/ownership/OwnershipOfferBanner.svelte';
   import type { LayoutData } from './$types';
   import { MenuIcon, XIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
@@ -120,6 +121,10 @@
   </aside>
 
   <main class="studio-layout__main">
+    <!-- State 5 of ownership transfer: shown to an offer's recipient on every
+         studio page until they respond. Reads the membership this layout
+         already loads — no extra request. -->
+    <OwnershipOfferBanner offer={data.pendingOwnershipOffer} orgName={data.org.name} />
     {@render children()}
   </main>
 </div>

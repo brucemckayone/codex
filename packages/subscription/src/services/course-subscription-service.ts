@@ -28,7 +28,12 @@
  * keys, mirroring `PurchaseService.writePurchasePayouts`.
  */
 
-import { BILLING_INTERVAL, CONTENT_STATUS, CURRENCY } from '@codex/constants';
+import {
+  BILLING_INTERVAL,
+  CONTENT_STATUS,
+  CURRENCY,
+  stripeEnvMetadata,
+} from '@codex/constants';
 import { getConstraintName, isUniqueViolation } from '@codex/database';
 import {
   type CourseSubscription,
@@ -47,7 +52,7 @@ import {
   type FeeConfigService,
   findActiveCreatorAgreementShare,
   refreshCourseSubscriptionEntitlementExpiry,
-  resolvePrimaryConnect,
+  resolveOrganisationPayee,
   revokeCourseSubscriptionEntitlement,
   withStaleCustomerRecovery,
   writeCourseSubscriptionEntitlement,
@@ -68,7 +73,9 @@ import {
   CourseSubscriptionPlanNotFoundError,
   SubscriptionCheckoutError,
 } from '../errors';
+import { schedulePriceChange } from './pending-price-change';
 import { resolveStatus } from './stripe-status-mapper';
+import type { TierPriceChangeMailer } from './subscription-service';
 
 /** Marks a Stripe subscription as a course sub (vs. an org tier sub). */
 export const COURSE_SUBSCRIPTION_METADATA_TYPE = 'course_subscription';
@@ -79,6 +86,23 @@ const GRANTING_STATUSES = ['active', 'cancelling', 'past_due'];
 interface CourseSubscriptionServiceConfig extends ServiceConfig {
   /** Injected so invoice payouts resolve fees via the 3-tier fallback chain. */
   feeConfig?: FeeConfigService;
+  /** Price-change notices (`subscription-tier-price-change`). Absent → no email. */
+  mailer?: TierPriceChangeMailer;
+  /** Base for the notice's manage-subscription link. */
+  webAppUrl?: string;
+  /**
+   * Runs a plan's subscriber fan-out after the response. Absent (tests) → the
+   * fan-out is awaited inline.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
+}
+
+/** One interval of a plan whose Price changed. */
+interface PlanPriceMove {
+  interval: 'month' | 'year';
+  newPriceId: string;
+  oldAmountCents: number;
+  newAmountCents: number;
 }
 
 /** Minimal per-event result so the webhook can bump the buyer's caches. */
@@ -90,11 +114,17 @@ export interface CourseSubscriptionWebhookResult {
 export class CourseSubscriptionService extends BaseService {
   private readonly stripe: Stripe;
   private readonly feeConfig: FeeConfigService | undefined;
+  private readonly mailer: TierPriceChangeMailer | undefined;
+  private readonly webAppUrl: string | undefined;
+  private readonly waitUntil: ((promise: Promise<unknown>) => void) | undefined;
 
   constructor(config: CourseSubscriptionServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
     this.feeConfig = config.feeConfig;
+    this.mailer = config.mailer;
+    this.webAppUrl = config.webAppUrl;
+    this.waitUntil = config.waitUntil;
   }
 
   // ─── Plan management (Stripe Product + 2 Prices, per course) ─────────────────
@@ -146,10 +176,9 @@ export class CourseSubscriptionService extends BaseService {
 
       // A course sub pays out to the org/creator, so the org Connect account
       // must be ready before a plan can be sold (mirrors TierService).
-      const connect = await resolvePrimaryConnect(
-        this.db,
-        course.organizationId
-      );
+      const connect = (
+        await resolveOrganisationPayee(this.db, course.organizationId)
+      )?.account;
       if (!connect?.chargesEnabled || !connect?.payoutsEnabled) {
         throw new ConnectAccountNotReadyError(course.organizationId);
       }
@@ -172,6 +201,7 @@ export class CourseSubscriptionService extends BaseService {
             codex_organization_id: course.organizationId,
             codex_course_id: courseId,
             codex_type: COURSE_SUBSCRIPTION_METADATA_TYPE,
+            ...stripeEnvMetadata(this.environment),
           },
         },
         { idempotencyKey: `course-plan-product-${idempotencyBase}` }
@@ -184,7 +214,11 @@ export class CourseSubscriptionService extends BaseService {
             unit_amount: input.priceMonthly,
             currency: CURRENCY.GBP,
             recurring: { interval: 'month' },
-            metadata: { codex_course_id: courseId, interval: 'month' },
+            metadata: {
+              codex_course_id: courseId,
+              interval: 'month',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `course-plan-price-monthly-${idempotencyBase}` }
         ),
@@ -194,7 +228,11 @@ export class CourseSubscriptionService extends BaseService {
             unit_amount: input.priceAnnual,
             currency: CURRENCY.GBP,
             recurring: { interval: 'year' },
-            metadata: { codex_course_id: courseId, interval: 'year' },
+            metadata: {
+              codex_course_id: courseId,
+              interval: 'year',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `course-plan-price-annual-${idempotencyBase}` }
         ),
@@ -310,9 +348,11 @@ export class CourseSubscriptionService extends BaseService {
    * cannot silently diverge (a diverged row would sell at a price the creator
    * never set).
    *
-   * Existing subscribers are deliberately NOT migrated: their subscription keeps
-   * billing the archived Price it was created with (grandfathering, same as org
-   * tiers). Only new checkouts see the new amount.
+   * Existing subscribers on a changed interval move to its new Price under the
+   * same rule as org tiers (owner decision P-6, "Same rule as tiers"): at their
+   * first renewal at least 30 days after they are emailed, no proration — see
+   * `movePlanSubscribers` (Codex-2hxff.3). New checkouts pay the new amount at
+   * once.
    *
    * RE-LISTS a withdrawn plan (`isActive` back to true, Stripe Product
    * un-archived). Saving an offer is the creator asserting "this is what I sell",
@@ -385,7 +425,11 @@ export class CourseSubscriptionService extends BaseService {
             unit_amount: input.priceMonthly,
             currency: CURRENCY.GBP,
             recurring: { interval: 'month' },
-            metadata: { codex_course_id: courseId, interval: 'month' },
+            metadata: {
+              codex_course_id: courseId,
+              interval: 'month',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `course-plan-reprice-monthly-${idempotencyBase}` }
         );
@@ -404,7 +448,11 @@ export class CourseSubscriptionService extends BaseService {
             unit_amount: input.priceAnnual,
             currency: CURRENCY.GBP,
             recurring: { interval: 'year' },
-            metadata: { codex_course_id: courseId, interval: 'year' },
+            metadata: {
+              codex_course_id: courseId,
+              interval: 'year',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `course-plan-reprice-annual-${idempotencyBase}` }
         );
@@ -440,6 +488,38 @@ export class CourseSubscriptionService extends BaseService {
             }
           );
         }
+
+        const moves: PlanPriceMove[] = [];
+        if (monthlyChanged && newMonthlyPriceId) {
+          moves.push({
+            interval: 'month',
+            newPriceId: newMonthlyPriceId,
+            oldAmountCents: existing.priceMonthly,
+            newAmountCents: input.priceMonthly,
+          });
+        }
+        if (annualChanged && newAnnualPriceId) {
+          moves.push({
+            interval: 'year',
+            newPriceId: newAnnualPriceId,
+            oldAmountCents: existing.priceAnnual,
+            newAmountCents: input.priceAnnual,
+          });
+        }
+        if (moves.length > 0) {
+          // After the commit, so the plan row already points at the new Prices.
+          const fanOut = this.movePlanSubscribers(existing.id, moves).catch(
+            (error) => {
+              this.obs.error('Course plan price fan-out failed', {
+                planId: existing.id,
+                courseId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          );
+          if (this.waitUntil) this.waitUntil(fanOut);
+          else await fanOut;
+        }
         return updated;
       } catch (dbError) {
         this.obs.warn(
@@ -461,6 +541,108 @@ export class CourseSubscriptionService extends BaseService {
       }
     } catch (error) {
       this.handleError(error, 'savePlanPrices');
+    }
+  }
+
+  /**
+   * Move a plan's existing subscribers on each changed interval to its new
+   * Price — at their first renewal at least 30 days after this notice, with no
+   * proration (`schedulePriceChange`), and email each one. Past-due and paused
+   * subscribers get the pending marker and move once active again. One failed
+   * subscriber never stops the rest.
+   */
+  private async movePlanSubscribers(
+    planId: string,
+    moves: PlanPriceMove[]
+  ): Promise<void> {
+    const noticeAt = new Date();
+    for (const move of moves) {
+      const rows = await this.db
+        .select({
+          id: courseSubscriptions.id,
+          stripeSubscriptionId: courseSubscriptions.stripeSubscriptionId,
+          organizationId: courseSubscriptions.organizationId,
+          userId: courseSubscriptions.userId,
+          userEmail: users.email,
+          userName: users.name,
+          courseTitle: courses.title,
+        })
+        .from(courseSubscriptions)
+        .leftJoin(users, eq(users.id, courseSubscriptions.userId))
+        .leftJoin(courses, eq(courses.id, courseSubscriptions.courseId))
+        .where(
+          and(
+            eq(courseSubscriptions.planId, planId),
+            eq(courseSubscriptions.billingInterval, move.interval),
+            inArray(courseSubscriptions.status, [
+              'active',
+              'cancelling',
+              'past_due',
+              'paused',
+            ])
+          )
+        );
+
+      const batchSize = 8;
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const batch = rows.slice(i, i + batchSize);
+        const results = await Promise.allSettled(
+          batch.map((row) =>
+            schedulePriceChange(this.stripe, {
+              stripeSubscriptionId: row.stripeSubscriptionId,
+              newPriceId: move.newPriceId,
+              newAmountCents: move.newAmountCents,
+              interval: move.interval,
+              noticeAt,
+            })
+          )
+        );
+        for (const [idx, result] of results.entries()) {
+          const row = batch[idx];
+          if (!row) continue;
+          if (result.status === 'rejected') {
+            this.obs.error('Course plan price change failed for a subscriber', {
+              planId,
+              courseSubscriptionId: row.id,
+              error:
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : String(result.reason),
+            });
+            continue;
+          }
+          const outcome = result.value;
+          if (outcome.kind !== 'applied' && outcome.kind !== 'pending')
+            continue;
+          if (!this.mailer || !row.userEmail) continue;
+          try {
+            this.mailer({
+              to: row.userEmail,
+              toName: row.userName || undefined,
+              templateName: 'subscription-tier-price-change',
+              category: 'transactional',
+              userId: row.userId,
+              organizationId: row.organizationId,
+              data: {
+                userName: row.userName || 'there',
+                planName: row.courseTitle || 'your subscription',
+                oldPriceFormatted: `£${(move.oldAmountCents / 100).toFixed(2)}`,
+                newPriceFormatted: `£${(move.newAmountCents / 100).toFixed(2)}`,
+                billingInterval: move.interval,
+                effectiveDate: outcome.effectiveAt.toLocaleDateString('en-GB', {
+                  timeZone: 'UTC',
+                }),
+                manageUrl: `${this.webAppUrl ?? ''}/account/subscriptions`,
+              },
+            });
+          } catch (error) {
+            this.obs.warn('Course plan price notice: mailer threw', {
+              courseSubscriptionId: row.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
     }
   }
 
@@ -633,11 +815,14 @@ export class CourseSubscriptionService extends BaseService {
         codex_course_id: input.courseId,
         codex_plan_id: plan.id,
         codex_organization_id: course.organizationId,
+        // On the session AND (via subscription_data) the subscription, whose
+        // invoices snapshot it — the tag the webhook guard reads (Codex-2hxff.5).
+        ...stripeEnvMetadata(this.environment),
       };
 
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId, email: user.email },
+        { userId, email: user.email, environment: this.environment },
         (stripeCustomerId) =>
           this.stripe.checkout.sessions.create({
             mode: 'subscription',
@@ -849,7 +1034,18 @@ export class CourseSubscriptionService extends BaseService {
       return { userId: row.userId, organizationId: row.organizationId ?? '' };
     }
 
-    await this.writeCoursePayouts(row, stripeInvoice.amount_paid, chargeId);
+    // The invoice's creation time decides the split (Codex-2hxff.2) — the
+    // same guard as the tier path's `invoiceCreatedAt`.
+    const invoiceCreatedAt =
+      typeof stripeInvoice.created === 'number'
+        ? new Date(stripeInvoice.created * 1000)
+        : new Date();
+    await this.writeCoursePayouts(
+      row,
+      stripeInvoice.amount_paid,
+      chargeId,
+      invoiceCreatedAt
+    );
 
     return { userId: row.userId, organizationId: row.organizationId ?? '' };
   }
@@ -935,11 +1131,16 @@ export class CourseSubscriptionService extends BaseService {
    * secondary transfers, writing `payouts` rows attributed by
    * `courseSubscriptionId` (§H3). ctx='subscription' (recurring), and per
    * HARDENING §H4 the creator's `subscription` revenue-share agreement applies.
+   *
+   * `invoiceCreatedAt` is the one clock for the split (Codex-2hxff.2): the
+   * agreements active then, and the org's owner then, decide it — so a late
+   * webhook retry pays what the sale earned, not what it would earn today.
    */
   private async writeCoursePayouts(
     sub: CourseSubscription,
     amountCents: number,
-    stripeChargeId: string
+    stripeChargeId: string,
+    invoiceCreatedAt: Date
   ): Promise<void> {
     const [course] = await this.db
       .select({
@@ -1004,7 +1205,7 @@ export class CourseSubscriptionService extends BaseService {
         organizationId,
         creatorId,
         revenueType: 'subscription',
-        at: new Date(),
+        at: invoiceCreatedAt,
       }
     );
     const effectiveOrgFeePercent =
@@ -1092,16 +1293,22 @@ export class CourseSubscriptionService extends BaseService {
 
     // 3. Organization fee — secondary transfer to the org's Connect account.
     if (split.organizationFeeCents > 0) {
-      const orgConnect = await resolvePrimaryConnect(this.db, organizationId);
-      const rowUserId = orgConnect?.userId ?? null;
-      if (rowUserId) {
+      // The owner when the invoice was created, with or without a Connect
+      // account — without one the slice is recorded pending in their name.
+      const orgPayee = await resolveOrganisationPayee(
+        this.db,
+        organizationId,
+        invoiceCreatedAt,
+        this.obs
+      );
+      if (orgPayee) {
         await this.executeCourseTransfer({
           sub,
           organizationId,
           amountCents: split.organizationFeeCents,
           payoutType: 'organization_fee',
-          rowUserId,
-          connect: orgConnect,
+          rowUserId: orgPayee.userId,
+          connect: orgPayee.account,
           stripeChargeId,
           transferGroup,
           idempotencyKey: `${stripeChargeId}_org_fee`,
@@ -1109,7 +1316,7 @@ export class CourseSubscriptionService extends BaseService {
         });
       } else {
         this.obs.error(
-          'Cannot record course-sub organization_fee payout: no org Connect/owner',
+          'Cannot record course-sub organization_fee payout: no org owner',
           { courseSubscriptionId: sub.id, organizationId }
         );
       }
@@ -1187,6 +1394,7 @@ export class CourseSubscriptionService extends BaseService {
             course_subscription_id: sub.id,
             type: payoutType,
             stripe_charge_id: stripeChargeId,
+            ...stripeEnvMetadata(this.environment),
           },
         },
         { idempotencyKey }

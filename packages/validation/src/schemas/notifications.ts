@@ -280,6 +280,39 @@ export const memberRemovedDataSchema = z.object({
   orgName: z.string(),
 });
 
+// Ownership transfer (Codex-2hxff.2). Copy is the reviewed mockup's state 10.
+
+/** To the recipient, when the owner offers them ownership. */
+export const ownershipOfferedDataSchema = z.object({
+  recipientName: z.string(),
+  offeredByName: z.string(),
+  orgName: z.string(),
+  expiresAtDisplay: z.string(),
+  deepLinkUrl: urlSchema,
+});
+
+/** To the new owner, the previous owner and every other active admin. */
+export const ownershipTransferredDataSchema = z.object({
+  orgName: z.string(),
+  newOwnerName: z.string(),
+  previousOwnerName: z.string(),
+  transferredAtDisplay: z.string(),
+  deepLinkUrl: urlSchema,
+});
+
+/**
+ * To the owner, when their offer is declined or withdrawn because the
+ * recipient stopped being eligible. An expired offer sends no email.
+ */
+export const ownershipOfferClosedDataSchema = z.object({
+  ownerName: z.string(),
+  recipientName: z.string(),
+  orgName: z.string(),
+  outcome: z.enum(['declined', 'withdrawn']),
+  outcomeSentence: z.string(),
+  deepLinkUrl: urlSchema,
+});
+
 // ============================================
 // Auth / Onboarding Templates
 // ============================================
@@ -453,6 +486,9 @@ export const templateDataSchemas = {
   'org-member-invitation': orgMemberInvitationDataSchema,
   'member-role-changed': memberRoleChangedDataSchema,
   'member-removed': memberRemovedDataSchema,
+  'ownership-offered': ownershipOfferedDataSchema,
+  'ownership-transferred': ownershipTransferredDataSchema,
+  'ownership-offer-closed': ownershipOfferClosedDataSchema,
   // Media
   'transcoding-complete': transcodingCompleteDataSchema,
   'transcoding-failed': transcodingFailedDataSchema,

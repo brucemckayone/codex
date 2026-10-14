@@ -21,6 +21,8 @@ set -e
 #     organization-api, which owns subscription-tier creation. No other worker
 #     reaches a Stripe-backed service; do not add it elsewhere without one.)
 #   - STRIPE_WEBHOOK_SECRET_* (secrets, ecom-api only — it owns all Stripe webhooks)
+#   - STRIPE_PORTAL_CONFIGURATION_ID (ecom-api only — the locked Billing Portal
+#     configuration, bpc_...; without it the portal refuses to open)
 #   - BETTER_AUTH_SECRET, SESSION_SECRET (secrets, auth only)
 #   - RUNPOD_* (secrets, media-api only)
 #   - WORKER_SHARED_SECRET (secret, every worker that makes or receives a
@@ -93,6 +95,7 @@ case "$WORKER" in
   "STRIPE_WEBHOOK_SECRET_CUSTOMER":"${STRIPE_WEBHOOK_SECRET_CUSTOMER}",
   "STRIPE_WEBHOOK_SECRET_BOOKING":"${STRIPE_WEBHOOK_SECRET_BOOKING}",
   "STRIPE_WEBHOOK_SECRET_DISPUTE":"${STRIPE_WEBHOOK_SECRET_DISPUTE}",
+  "STRIPE_PORTAL_CONFIGURATION_ID":"${STRIPE_PORTAL_CONFIGURATION_ID:-}",
   "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
 }
 EOF

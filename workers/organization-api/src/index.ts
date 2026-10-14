@@ -35,6 +35,7 @@ import devRoutes from './routes/dev';
 import followerRoutes from './routes/followers';
 import memberRoutes from './routes/members';
 import organizationRoutes from './routes/organizations';
+import ownershipRoutes from './routes/ownership';
 import settingsRoutes from './routes/settings';
 import tierRoutes from './routes/tiers';
 
@@ -88,6 +89,9 @@ app.route('/api/organizations', organizationRoutes);
 
 // Mount member routes under /api/organizations/:id/members
 app.route('/api/organizations/:id/members', memberRoutes);
+
+// Mount ownership routes under /api/organizations/:id/ownership (Codex-2hxff.2)
+app.route('/api/organizations/:id/ownership', ownershipRoutes);
 
 // Mount settings routes under /api/organizations/:id/settings
 // Settings are nested under organization to scope them properly

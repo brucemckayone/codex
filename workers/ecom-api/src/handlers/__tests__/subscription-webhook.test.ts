@@ -35,6 +35,9 @@ vi.mock('@codex/subscription', () => ({
   // Mock the class so the handler's `new TierService(...)` returns our
   // stub with controllable apply* method behaviour.
   TierService: vi.fn(),
+  // The renewal-time price swap (Codex-2hxff.3).
+  applyDuePendingPriceChange: vi.fn().mockResolvedValue(false),
+  PENDING_PRICE_ID_KEY: 'codex_pending_price_id',
   // The handler also imports `invalidateForUser` — stub it so the module
   // mock is complete. Cache-invalidation contract is tested separately in
   // `subscription-webhook-invalidation.test.ts`.
@@ -86,7 +89,11 @@ vi.mock('@codex/worker-utils', async (importOriginal) => {
 });
 
 import { createPerRequestDbClient } from '@codex/database';
-import { SubscriptionService, TierService } from '@codex/subscription';
+import {
+  applyDuePendingPriceChange,
+  SubscriptionService,
+  TierService,
+} from '@codex/subscription';
 import { sendEmailToWorker } from '@codex/worker-utils';
 import { handleSubscriptionWebhook } from '../subscription-webhook';
 
@@ -127,7 +134,7 @@ describe('handleSubscriptionWebhook', () => {
   let mockHandlePaused: ReturnType<typeof vi.fn>;
   let mockHandleResumed: ReturnType<typeof vi.fn>;
   let mockApplyProductUpdate: ReturnType<typeof vi.fn>;
-  let mockApplyPriceCreated: ReturnType<typeof vi.fn>;
+  let mockRecordPriceDrift: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -144,7 +151,7 @@ describe('handleSubscriptionWebhook', () => {
     // happy-path non-drift events exercise the non-changed branch without
     // surprising any unrelated test that fires a product/price event.
     mockApplyProductUpdate = vi.fn().mockResolvedValue(null);
-    mockApplyPriceCreated = vi.fn().mockResolvedValue(null);
+    mockRecordPriceDrift = vi.fn().mockResolvedValue(undefined);
     mockCleanup = vi.fn();
     mockDb = { mock: 'database' };
 
@@ -178,7 +185,7 @@ describe('handleSubscriptionWebhook', () => {
     (TierService as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       () => ({
         applyStripeProductUpdate: mockApplyProductUpdate,
-        applyStripePriceCreated: mockApplyPriceCreated,
+        recordStripePriceDrift: mockRecordPriceDrift,
       })
     );
   });
@@ -290,6 +297,72 @@ describe('handleSubscriptionWebhook', () => {
         'Subscription updated',
         expect.objectContaining({ subscriptionId: 'sub_update_789' })
       );
+    });
+
+    // Codex-2hxff.3: a renewal is a customer.subscription.updated — the moment
+    // a pending Studio price change becomes due.
+    it('offers the subscription to the pending-price swap AFTER the DB sync', async () => {
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_renewal_1',
+        status: 'active',
+      });
+      const { context } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      const swap = vi.mocked(applyDuePendingPriceChange);
+      expect(swap).toHaveBeenCalledWith(
+        mockStripe,
+        expect.objectContaining({ id: 'sub_renewal_1' })
+      );
+      const syncOrder = mockHandleUpdated.mock.invocationCallOrder[0] ?? 0;
+      const swapOrder = swap.mock.invocationCallOrder.at(-1) ?? 0;
+      expect(syncOrder).toBeGreaterThan(0);
+      expect(swapOrder).toBeGreaterThan(syncOrder);
+    });
+
+    // Codex-2hxff.3 review (H3): a swap Stripe refuses for good must not end
+    // as the generic "permanent error (acknowledged)" warning.
+    it('a permanent swap failure is acknowledged but logged at ERROR level with context', async () => {
+      const refused = Object.assign(new Error('No such price: price_gone'), {
+        type: 'StripeInvalidRequestError',
+        code: 'resource_missing',
+      });
+      vi.mocked(applyDuePendingPriceChange).mockRejectedValueOnce(refused);
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_swap_refused',
+        status: 'active',
+        metadata: { codex_pending_price_id: 'price_gone' },
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Pending price change could not be applied',
+        expect.objectContaining({
+          subscriptionId: 'sub_swap_refused',
+          pendingPriceId: 'price_gone',
+          errorType: 'StripeInvalidRequestError',
+          errorCode: 'resource_missing',
+        })
+      );
+    });
+
+    it('a transient swap failure is rethrown so Stripe redelivers', async () => {
+      const flaky = Object.assign(new Error('connection reset'), {
+        type: 'StripeConnectionError',
+      });
+      vi.mocked(applyDuePendingPriceChange).mockRejectedValueOnce(flaky);
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_swap_flaky',
+        status: 'active',
+      });
+      const { context } = createContext();
+
+      await expect(
+        handleSubscriptionWebhook(event, mockStripe, context)
+      ).rejects.toBe(flaky);
     });
   });
 
@@ -570,84 +643,34 @@ describe('handleSubscriptionWebhook', () => {
     });
   });
 
-  describe('price.created (Dashboard sync-back)', () => {
-    it('should adopt the new Price as canonical and invalidate the org cache', async () => {
-      mockApplyPriceCreated.mockResolvedValue({
-        tierId: 'tier-pc',
-        organizationId: 'org-pc',
-        changed: true,
-      });
+  // Studio is the only place a tier price is set (Codex-2hxff.3): a Price
+  // created in the Dashboard is handed to the drift log — never adopted, never
+  // propagated, no cache to bump.
+  describe('price.created (drift log only)', () => {
+    it('hands the Price to recordStripePriceDrift and changes nothing else', async () => {
       const fakeKV = {
         get: vi.fn(),
         put: vi.fn(),
         delete: vi.fn(),
       } as unknown as KVNamespace;
-      const { context, mock } = createContext({ CACHE_KV: fakeKV });
+      const { context } = createContext({ CACHE_KV: fakeKV });
 
       const event = createEvent(STRIPE_EVENTS.PRICE_CREATED, {
-        id: 'price_new_15_00',
+        id: 'price_dashboard_15_00',
         active: true,
         unit_amount: 1500,
         recurring: { interval: 'month' },
         product: 'prod_tier_pc',
-        metadata: { codex_organization_id: 'org-pc', interval: 'month' },
-      });
-
-      await handleSubscriptionWebhook(event, mockStripe, context);
-
-      expect(mockApplyPriceCreated).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'price_new_15_00' })
-      );
-      expect(mock._obs.info).toHaveBeenCalledWith(
-        'Adopted Stripe Dashboard-created Price as canonical',
-        expect.objectContaining({
-          tierId: 'tier-pc',
-          organizationId: 'org-pc',
-          stripePriceId: 'price_new_15_00',
-        })
-      );
-      expect(context.executionCtx.waitUntil).toHaveBeenCalledTimes(1);
-    });
-
-    it('should no-op when the service reports no change (replay on already-adopted price)', async () => {
-      mockApplyPriceCreated.mockResolvedValue({
-        tierId: 'tier-pc',
-        organizationId: 'org-pc',
-        changed: false,
-      });
-      const event = createEvent(STRIPE_EVENTS.PRICE_CREATED, {
-        id: 'price_replay',
-        active: true,
-        metadata: { codex_organization_id: 'org-pc' },
-      });
-      const { context, mock } = createContext();
-
-      await handleSubscriptionWebhook(event, mockStripe, context);
-
-      expect(mockApplyPriceCreated).toHaveBeenCalledOnce();
-      expect(mock._obs.info).not.toHaveBeenCalledWith(
-        'Adopted Stripe Dashboard-created Price as canonical',
-        expect.anything()
-      );
-      expect(context.executionCtx.waitUntil).not.toHaveBeenCalled();
-    });
-
-    it('should pass non-Codex prices through the service (which returns null)', async () => {
-      mockApplyPriceCreated.mockResolvedValue(null);
-      const event = createEvent(STRIPE_EVENTS.PRICE_CREATED, {
-        id: 'price_external',
-        active: true,
         metadata: {},
       });
-      const { context, mock } = createContext();
 
       await handleSubscriptionWebhook(event, mockStripe, context);
 
-      expect(mockApplyPriceCreated).toHaveBeenCalledOnce();
-      expect(mock._obs.info).not.toHaveBeenCalledWith(
-        'Adopted Stripe Dashboard-created Price as canonical',
-        expect.anything()
+      expect(mockRecordPriceDrift).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'price_dashboard_15_00' })
       );
+      // No org-cache invalidation and no subscriber fan-out.
+      expect(context.executionCtx.waitUntil).not.toHaveBeenCalled();
     });
   });
 

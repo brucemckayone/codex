@@ -151,7 +151,10 @@ export function procedure<
         // of 199 call sites. An absent preset resolves to the cache-disabled
         // binding, so a route that never opted in cannot be given a 75-second
         // staleness window by accident.
-        policy?.cache
+        policy?.cache,
+        // Services that defer DB work after the response register it here,
+        // so cleanup's pool.end() waits for it (Codex-2hxff.2 review).
+        tracker.background
       );
       registry = registryResult.registry;
       cleanup = registryResult.cleanup;

@@ -27,6 +27,8 @@ const TABLES_TO_TRUNCATE = [
   // Organizations
   'organizations',
   'organization_memberships',
+  'organization_ownership_offers',
+  'organization_ownership_periods',
   // Content
   'content',
   'media_items',

@@ -39,16 +39,19 @@ live course entitlement) cannot start a second checkout for it.
    (`resolve-customer.ts`): the cached `users.stripe_customer_id`, otherwise a
    Customer created with `metadata.codex_user_id` under the key
    `codex:resolve-customer:${userId}`. If Stripe reports the cached Customer
-   missing, the id is cleared and resolution runs once more. A Customer is never
-   adopted from another user or another environment — **gap**:
-   `Codex-2hxff.5`, `Codex-2hxff.23` (today a match by email can adopt one).
+   missing, the id is cleared and resolution runs once more. A Customer tagged
+   by another environment is never adopted (untagged ones, from before tagging,
+   still can be). A Customer is never adopted from another user — **gap**:
+   `Codex-2hxff.23` (today a match by email can adopt one).
 2. A Checkout Session is created:
    - `mode: 'payment'`, card payments;
    - one line item with inline `price_data` — currency `gbp`, `unit_amount`
      from our database, product name, description and image;
    - metadata: the content id (or `kind: 'course'` and the course id), the buyer
      id, the organisation id (left out for orgless content), the creator id, the
-     title, and `codex_env` — **gap**: `Codex-2hxff.5` (environment tag);
+     title, and `codex_env`; `payment_intent_data.metadata` carries `codex_env`
+     too, and Stripe snapshots it onto the Charge, so refund and dispute events
+     are tagged;
    - an idempotency key per buyer and item, and an expiry, so two open tabs can
      never both take payment — **gap**: `Codex-2hxff.14` (double purchase).
 3. Success and cancel URLs must be on an allow-listed host
@@ -66,8 +69,9 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
 2. The handler skips the event when:
    - the session is not `mode: 'payment'` (subscription checkouts belong to the
      subscription handler);
-   - the session's objects carry another environment's tag — **gap**:
-     `Codex-2hxff.5`;
+   - the session carries another environment's tag (checked for every webhook
+     before any handler runs — see
+     [operations](operations.md#environments-and-stripe-accounts));
    - `payment_status` is not `paid` — **gap**: `Codex-2hxff.14`.
 3. The charge id is read from the PaymentIntent (`latest_charge`). If that
    lookup fails, the webhook returns 500 so Stripe retries; a purchase is never

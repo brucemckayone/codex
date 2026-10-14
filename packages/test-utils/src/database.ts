@@ -59,9 +59,10 @@ import {
 } from '@codex/database';
 import * as schema from '@codex/database/schema';
 import { neonConfig } from '@neondatabase/serverless';
-import { sql as sqlOperator } from 'drizzle-orm';
+import { eq, sql as sqlOperator } from 'drizzle-orm';
 import ws from 'ws';
 import { assertDestructiveTargetAllowed } from './destructive-target';
+import { createTestOwnershipPeriodInput } from './subscription-factories';
 
 // Configure Neon serverless WebSocket for Node.js environment
 // This is required for @neondatabase/serverless in Node.js v21 and earlier
@@ -495,6 +496,27 @@ export async function executeRawSQL(
   query: string
 ): Promise<void> {
   await db.execute(sqlOperator.raw(query));
+}
+
+/**
+ * Make `userId` the org's payee for every test sale (Codex-2hxff.2): replaces
+ * the org's ownership periods with one open period from long before any test
+ * sale. The test analogue of the retired `primaryConnectAccountUserId` pin —
+ * money paths resolve the payee from ownership periods, so a test routing an
+ * org slice to a user calls this. Replacing (rather than adding) keeps it
+ * re-callable on one org without tripping the one-open-period index.
+ */
+export async function setTestOrganisationPayee(
+  db: Database,
+  orgId: string,
+  userId: string
+): Promise<void> {
+  await db
+    .delete(schema.organizationOwnershipPeriods)
+    .where(eq(schema.organizationOwnershipPeriods.organizationId, orgId));
+  await db
+    .insert(schema.organizationOwnershipPeriods)
+    .values(createTestOwnershipPeriodInput(orgId, userId));
 }
 
 /**

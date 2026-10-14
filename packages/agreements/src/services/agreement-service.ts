@@ -1080,6 +1080,67 @@ export class AgreementService extends BaseService {
   }
 
   /**
+   * The organisation's agreements in force now, with each creator's name and
+   * share — for the ownership-transfer screens (Codex-2hxff.2): the owner's
+   * "your subscription income stops" warning, and the list a recipient sees
+   * before accepting. Same "active now" predicates as
+   * {@link getActiveAgreements}; the share is the current proposal's, as in
+   * the payout path (`findActiveCreatorAgreementShare`).
+   */
+  async getActiveAgreementSummaries(organizationId: string): Promise<
+    Array<{
+      creatorId: string;
+      creatorName: string;
+      revenueType: RevenueType;
+      shareBps: number;
+      since: string;
+    }>
+  > {
+    try {
+      const now = new Date();
+      const rows = await this.db
+        .select({
+          creatorId: creatorOrganizationAgreements.creatorId,
+          creatorName: users.name,
+          revenueType: creatorOrganizationAgreements.revenueType,
+          shareBps: agreementProposals.proposedCreatorSharePercent,
+          since: creatorOrganizationAgreements.effectiveFrom,
+        })
+        .from(creatorOrganizationAgreements)
+        .innerJoin(
+          agreementProposals,
+          eq(
+            agreementProposals.id,
+            creatorOrganizationAgreements.currentProposalId
+          )
+        )
+        .innerJoin(users, eq(users.id, creatorOrganizationAgreements.creatorId))
+        .where(
+          and(
+            eq(creatorOrganizationAgreements.organizationId, organizationId),
+            eq(creatorOrganizationAgreements.status, 'active'),
+            lte(creatorOrganizationAgreements.effectiveFrom, now),
+            or(
+              isNull(creatorOrganizationAgreements.effectiveUntil),
+              gt(creatorOrganizationAgreements.effectiveUntil, now)
+            )
+          )
+        )
+        .orderBy(asc(creatorOrganizationAgreements.effectiveFrom));
+      return rows.map((row) => ({
+        creatorId: row.creatorId,
+        creatorName: row.creatorName,
+        // `revenue_type` is varchar, held to RevenueType by its CHECK.
+        revenueType: row.revenueType as RevenueType,
+        shareBps: row.shareBps,
+        since: row.since.toISOString(),
+      }));
+    } catch (error) {
+      this.handleError(error, 'getActiveAgreementSummaries');
+    }
+  }
+
+  /**
    * Creator's portfolio across all orgs — used by the creator-studio
    * /negotiations page. Filters to `status='active'` only with the same
    * temporal predicates as {@link getActiveAgreements}.

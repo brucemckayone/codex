@@ -27,7 +27,16 @@
   `fields.set(...)` below rather than `.as(type, value)`. Newer docs show the
   two-argument form; it does not typecheck here yet.
 
-  @prop data - orgId from settings layout + org/userRole from studio layout
+  OWNERSHIP (Codex-2hxff.2). The Ownership card sits after the General form
+  (mockup variant A). The guard widens for exactly one extra viewer: a creator
+  with an open ownership offer, who sees the card only, so they can accept or
+  decline — see `settingsAccess`. The card is rendered OUTSIDE the role-specific
+  branch on purpose: accepting makes that creator the owner, the layout reload
+  flips this page to full access, and a card inside the branch would remount
+  and lose its "You're now the owner" note.
+
+  @prop data - orgId from settings layout + org/userRole/pendingOwnershipOffer
+    from studio layout
 -->
 <script lang="ts">
   import { tick } from 'svelte';
@@ -37,25 +46,26 @@
   import { queryErrorMessage } from '$lib/remote/query-result';
   import { Alert, Button, Card, Label, Select } from '$lib/components/ui';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
+  import OwnershipCard from '$lib/components/studio/ownership/OwnershipCard.svelte';
+  import { settingsAccess } from '$lib/components/studio/ownership/ownership-view';
 
   let { data } = $props();
 
   const orgId = $derived(data.org?.id);
 
-  // Role guard: admin/owner only. Wait for data.userRole to populate —
-  // studio is ssr=false, so on first render data.userRole is undefined
-  // and a naive check redirects authorised users before the role is known.
+  // Role guard: admin/owner, plus a creator holding an open ownership offer
+  // (card only). `settingsAccess` is undefined until data.userRole populates —
+  // studio is ssr=false, so on first render data.userRole is undefined and a
+  // naive check redirects authorised users before the role is known.
+  const access = $derived(settingsAccess(data.userRole, data.pendingOwnershipOffer));
+
   $effect(() => {
-    if (
-      data.userRole !== undefined &&
-      data.userRole !== 'admin' &&
-      data.userRole !== 'owner'
-    ) {
+    if (access === 'none') {
       goto('/studio');
     }
   });
 
-  const isAuthorized = $derived(data.userRole === 'admin' || data.userRole === 'owner');
+  const isAuthorized = $derived(access === 'full');
 
   const contactQuery = $derived(
     isAuthorized ? getContactSettings(orgId) : null
@@ -281,7 +291,7 @@
 {/snippet}
 
 {#if !isAuthorized}
-  <!-- Redirecting... -->
+  <!-- Redirecting, or an ownership offer's recipient: the card below only. -->
 {:else if loadFailed}
   <!-- The load rejected and there is nothing to edit. Rendering the form here
        would offer eight blank inputs whose Save would wipe the live settings. -->
@@ -472,6 +482,12 @@
   </form>
 {/if}
 
+{#if (access === 'full' || access === 'ownership-only') && orgId}
+  <div class="settings-ownership">
+    <OwnershipCard {orgId} orgName={data.org.name} />
+  </div>
+{/if}
+
 <style>
   /* The FORM measure — the one that used to sit on `.settings-layout` and cap
      the masthead with it. Every control here holds a single short value (a
@@ -575,5 +591,12 @@
   .form-actions {
     display: flex;
     justify-content: flex-start;
+  }
+
+  /* Same rhythm as the cards inside the form. Every General branch roots at
+     `.settings-form`; with none rendered (a recipient's card-only view) the
+     card sits at the top with no gap above it. */
+  .settings-form + .settings-ownership {
+    margin-top: var(--space-6);
   }
 </style>
