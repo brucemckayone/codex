@@ -760,6 +760,120 @@ describe('SubscriptionService', () => {
       expect(membership.role).toBe('creator');
     });
 
+    // Codex-2hxff.2: a removed member's INACTIVE row must not win its old
+    // role back by subscribing. For an owner that would either break the
+    // one-active-owner index (the customer is charged, no row lands) or hand
+    // an ownerless org — and its money — to its removed founder.
+    describe('a removed member re-subscribing', () => {
+      async function subscribeAndReadMembership(
+        orgId: string,
+        tierId: string,
+        userId: string
+      ) {
+        const { eq } = await import('drizzle-orm');
+        const { organizationMemberships, subscriptions } = await import(
+          '@codex/database/schema'
+        );
+        const mockSub = createMockStripeSubscription({
+          metadata: {
+            codex_user_id: userId,
+            codex_organization_id: orgId,
+            codex_tier_id: tierId,
+          },
+        }) as unknown as Stripe.Subscription;
+
+        await service.handleSubscriptionCreated(mockSub);
+
+        const [subscription] = await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.stripeSubscriptionId, mockSub.id));
+        const memberships = await db
+          .select()
+          .from(organizationMemberships)
+          .where(eq(organizationMemberships.organizationId, orgId));
+        const membership = memberships.find((m) => m.userId === userId);
+        return { subscription, membership, memberships };
+      }
+
+      it('re-enters a removed owner as a subscriber when the org has an active owner', async () => {
+        const { org, tier1 } = await createFullOrg('role-removed-owner');
+        const { organizationMemberships } = await import(
+          '@codex/database/schema'
+        );
+        await db.insert(organizationMemberships).values([
+          {
+            organizationId: org.id,
+            userId: creatorId,
+            role: 'owner',
+            status: 'active',
+          },
+          {
+            organizationId: org.id,
+            userId: otherCreatorId,
+            role: 'owner',
+            status: 'inactive',
+          },
+        ]);
+
+        const { subscription, membership, memberships } =
+          await subscribeAndReadMembership(org.id, tier1.id, otherCreatorId);
+
+        expect(subscription).toBeDefined();
+        expect(membership?.role).toBe('subscriber');
+        expect(membership?.status).toBe('active');
+        expect(
+          memberships.filter((m) => m.role === 'owner' && m.status === 'active')
+        ).toHaveLength(1);
+      });
+
+      it('never makes a removed founder the owner of an ownerless org', async () => {
+        const { org, tier1 } = await createFullOrg('role-removed-founder');
+        const { organizationMemberships } = await import(
+          '@codex/database/schema'
+        );
+        await db.insert(organizationMemberships).values({
+          organizationId: org.id,
+          userId: otherCreatorId,
+          role: 'owner',
+          status: 'inactive',
+        });
+
+        const { membership, memberships } = await subscribeAndReadMembership(
+          org.id,
+          tier1.id,
+          otherCreatorId
+        );
+
+        expect(membership?.role).toBe('subscriber');
+        expect(
+          memberships.filter((m) => m.role === 'owner' && m.status === 'active')
+        ).toHaveLength(0);
+      });
+
+      it('re-enters a removed admin as a subscriber', async () => {
+        const { org, tier1 } = await createFullOrg('role-removed-admin');
+        const { organizationMemberships } = await import(
+          '@codex/database/schema'
+        );
+        await db.insert(organizationMemberships).values({
+          organizationId: org.id,
+          userId: otherCreatorId,
+          role: 'admin',
+          status: 'inactive',
+        });
+
+        const { membership } = await subscribeAndReadMembership(
+          org.id,
+          tier1.id,
+          otherCreatorId
+        );
+
+        expect(membership?.role).toBe('subscriber');
+        expect(membership?.status).toBe('active');
+      });
+    });
+
     it('should create subscriber membership when no existing membership', async () => {
       const { org, tier1 } = await createFullOrg('role-new-sub');
       const { eq, and } = await import('drizzle-orm');

@@ -119,8 +119,8 @@ async function resolveOwnerAt(
       and(
         eq(organizationMemberships.organizationId, orgId),
         eq(organizationMemberships.role, 'owner'),
-        // A removed owner keeps role='owner' with status='inactive'; they are
-        // never paid on this path.
+        // An inactive row is never paid on this path. (0097 demoted removed
+        // owners to 'member'; the filter still guards any row that slips by.)
         eq(organizationMemberships.status, 'active')
       )
     )

@@ -53,6 +53,16 @@ WHERE m."role" = 'owner'
     ORDER BY m2."created_at" ASC, m2."id" ASC
     LIMIT 1
   );--> statement-breakpoint
+-- R4: a removed owner's row (role='owner', status<>'active') becomes a plain
+-- member. From here on an owner cannot be removed, only replaced by a
+-- transfer, so 'owner' means the current owner. Left in place, the pre-deploy
+-- subscriber upsert re-activates these rows: a second active owner (the
+-- subscription insert aborts after payment) or a removed founder owning an
+-- ownerless org.
+UPDATE "organization_memberships"
+SET "role" = 'member', "updated_at" = now()
+WHERE "role" = 'owner'
+  AND "status" <> 'active';--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_org_memberships_one_active_owner" ON "organization_memberships" USING btree ("organization_id") WHERE "organization_memberships"."role" = 'owner' AND "organization_memberships"."status" = 'active';--> statement-breakpoint
 -- Backfill: one open ownership period per organisation that has an active
 -- owner, from the organisation's creation. Organisations with no active owner

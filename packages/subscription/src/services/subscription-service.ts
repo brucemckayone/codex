@@ -1178,7 +1178,13 @@ export class SubscriptionService extends BaseService {
             .onConflictDoNothing();
 
           // BUG-016: Upsert membership with role=subscriber (backward compat).
-          // Preserve higher roles (owner/admin/creator) on conflict.
+          // Preserve higher roles (owner/admin/creator) on conflict — but
+          // only on a row that is ACTIVE. A removed member's inactive row
+          // re-enters as a subscriber: re-activating a removed owner would
+          // break uq_org_memberships_one_active_owner (aborting this insert
+          // after the customer has paid) or, in an org with no active owner,
+          // hand them ownership and its money (Codex-2hxff.2). Both column
+          // refs read the EXISTING row; SET expressions never see each other.
           await tx
             .insert(organizationMemberships)
             .values({
@@ -1194,7 +1200,7 @@ export class SubscriptionService extends BaseService {
               ],
               set: {
                 status: 'active',
-                role: sql`CASE WHEN ${organizationMemberships.role} IN ('owner', 'admin', 'creator') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
+                role: sql`CASE WHEN ${organizationMemberships.status} = 'active' AND ${organizationMemberships.role} IN ('owner', 'admin', 'creator') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
                 updatedAt: new Date(),
               },
             });

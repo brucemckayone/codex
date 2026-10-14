@@ -75,10 +75,11 @@ export const organizationMemberships = pgTable(
     index('idx_org_memberships_org_active_role')
       .on(table.organizationId, table.status, table.role)
       .where(sql`${table.status} = 'active'`),
-    // One active owner per organisation (Codex-2hxff.2). Partial, so a removed
-    // founder's tombstone (role='owner', status='inactive') never collides.
-    // Checked per statement: a transfer must DEMOTE the old owner before it
-    // promotes the new one.
+    // One active owner per organisation (Codex-2hxff.2). Partial on status so
+    // an inactive row never collides — though 0097 demoted every removed
+    // owner's row to 'member', and an active owner can no longer be removed.
+    // Not deferrable, so it is checked row by row: a transfer must DEMOTE the
+    // old owner in an earlier statement than the one that promotes the new.
     uniqueIndex('uq_org_memberships_one_active_owner')
       .on(table.organizationId)
       .where(sql`${table.role} = 'owner' AND ${table.status} = 'active'`),
