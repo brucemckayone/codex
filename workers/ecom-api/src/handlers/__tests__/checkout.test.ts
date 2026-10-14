@@ -166,6 +166,27 @@ describe('handleCheckoutCompleted', () => {
       expect(mockCleanup).toHaveBeenCalled();
     });
 
+    // Codex-2hxff.2 review (H5): the sale time is the event's `created` (kept
+    // on every redelivery), never the time the webhook happens to run.
+    it("passes the event's created time as paidAt", async () => {
+      const event = createMockStripeCheckoutEvent({
+        eventId: 'evt_test_paid_at',
+        sessionId: 'cs_test_paid_at',
+        paymentIntentId: 'pi_test_paid_at',
+        metadata: { customerId: 'user_123', contentId: 'content_456' },
+      }) as unknown as Stripe.Event;
+      const created = 1_760_000_000;
+      (event as { created: number }).created = created;
+      const { context } = createContext();
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(mockCompletePurchase).toHaveBeenCalledWith(
+        'pi_test_paid_at',
+        expect.objectContaining({ paidAt: new Date(created * 1000) })
+      );
+    });
+
     it('should handle payment_intent as string', async () => {
       const event = createMockStripeCheckoutEvent({
         paymentIntentId: 'pi_string_123',

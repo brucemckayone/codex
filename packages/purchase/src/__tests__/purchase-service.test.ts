@@ -1124,6 +1124,71 @@ describe('PurchaseService Integration', () => {
       expect(stripeAccountId).toBeTruthy();
     });
 
+    // Codex-2hxff.2 review (H5): a webhook processed AFTER an ownership
+    // transfer still pays the org slice to the owner at the time of the sale —
+    // `paidAt` (the event's created), not the processing time.
+    it('pays the org slice to the owner at paidAt, not the owner when the webhook runs', async () => {
+      const { content, chargeId, paymentIntentId } =
+        await setupPaidContentWithConnect({
+          title: 'Sold Before Transfer',
+          priceCents: 10000,
+        });
+      const newOwnerId = takeFirst(await seedTestUsers(db, 1), 'new owner');
+      const now = Date.now();
+      const transferredAt = new Date(now - 60 * 60 * 1000);
+      const paidAt = new Date(now - 2 * 60 * 60 * 1000);
+      await db
+        .delete(schema.organizationOwnershipPeriods)
+        .where(
+          eq(schema.organizationOwnershipPeriods.organizationId, organizationId)
+        );
+      await db.insert(schema.organizationOwnershipPeriods).values([
+        {
+          organizationId,
+          userId,
+          startedAt: new Date(now - 30 * 24 * 60 * 60 * 1000),
+          endedAt: transferredAt,
+          source: 'created',
+        },
+        {
+          organizationId,
+          userId: newOwnerId,
+          startedAt: transferredAt,
+          source: 'transfer',
+        },
+      ]);
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi
+          .fn()
+          .mockImplementation((args: { metadata?: { type?: string } }) =>
+            Promise.resolve({
+              id: `tr_${args?.metadata?.type}_${Date.now()}`,
+            })
+          ),
+      };
+
+      const purchase = await purchaseService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+        paidAt,
+      });
+
+      expect(purchase.purchasedAt?.getTime()).toBe(paidAt.getTime());
+      const [orgRow] = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id))
+        .then((rows) =>
+          rows.filter((r) => r.payoutType === 'organization_fee')
+        );
+      expect(orgRow?.userId).toBe(userId);
+    });
+
     it('skips payouts ledger when stripeChargeId is absent', async () => {
       const { content, paymentIntentId } = await setupPaidContentWithConnect({
         title: 'No Charge Id',

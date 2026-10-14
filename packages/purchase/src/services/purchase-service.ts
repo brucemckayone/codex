@@ -524,7 +524,8 @@ export class PurchaseService extends BaseService {
    * - Calculates revenue split from fee agreements or defaults
    * - Creates purchase record with immutable revenue snapshot
    * - Grants content access atomically in same transaction
-   * - Sets status='completed' and purchasedAt=now
+   * - Sets status='completed' and purchasedAt = the payment time
+   *   (metadata.paidAt — the webhook event's created — else now)
    *
    * Transaction Safety:
    * - Purchase + contentAccess created atomically
@@ -646,7 +647,7 @@ export class PurchaseService extends BaseService {
         // no organization and therefore no `creator_organization_agreements`
         // row — skip the query entirely (it would also fail to typecheck
         // against the nullable `organizationId`).
-        const purchasedAt = new Date();
+        const purchasedAt = metadata.paidAt ?? new Date();
         // Codex-2pryk WP-6: agreement lookup hoisted to the shared
         // `findActiveCreatorAgreementShare` (reused by the course-purchase +
         // course-subscription payout paths so all three apply IDENTICAL
@@ -1071,7 +1072,7 @@ export class PurchaseService extends BaseService {
 
         // HARDENING §H4(a): course purchases reuse the creator's
         // `content_purchase` revenue-share agreement terms.
-        const purchasedAt = new Date();
+        const purchasedAt = metadata.paidAt ?? new Date();
         const agreementSharePercent = await findActiveCreatorAgreementShare(
           tx,
           {

@@ -61,6 +61,13 @@ export interface CompletePurchaseMetadata {
   /** Stripe charge id (PaymentIntent.latest_charge). Required for payouts ledger writes
    * and as `source_transaction` for the secondary organization-fee transfer. */
   stripeChargeId?: string | null;
+  /**
+   * When the customer paid — the webhook event's `created`, which a redelivery
+   * keeps. Becomes `purchasedAt`, the instant both the agreement lookup and the
+   * org payee resolve at, so a late or retried webhook after an ownership
+   * transfer still pays the owner at the sale (Codex-2hxff.2). Defaults to now.
+   */
+  paidAt?: Date;
 }
 
 /**
@@ -84,6 +91,8 @@ export interface CompleteCoursePurchaseMetadata {
   stripeApplicationFeeCents?: number | null;
   /** Stripe charge id (PaymentIntent.latest_charge) — required for payouts ledger + source_transaction. */
   stripeChargeId?: string | null;
+  /** When the customer paid — see {@link CompletePurchaseMetadata.paidAt}. */
+  paidAt?: Date;
 }
 
 /**

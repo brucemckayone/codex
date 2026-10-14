@@ -122,11 +122,25 @@ export async function handleCheckoutCompleted(
     return;
   }
 
+  // The payment time: the event's `created`, which Stripe keeps on every
+  // redelivery. The org payee and the agreements resolve at this instant, so a
+  // retry after an ownership transfer still pays the owner at the sale
+  // (Codex-2hxff.2) — processing time would pay the new one.
+  const paidAt = Number.isFinite(event.created)
+    ? new Date(event.created * 1000)
+    : undefined;
+
   // Codex-2pryk WP-6: a `kind: 'course'` session targets a COURSE, not content.
   // Route to the course completion path and return — the content metadata schema
   // below does not apply to it.
   if (session.metadata?.kind === 'course') {
-    await handleCourseCheckoutCompleted(session, paymentIntentId, stripe, c);
+    await handleCourseCheckoutCompleted(
+      session,
+      paymentIntentId,
+      paidAt,
+      stripe,
+      c
+    );
     return;
   }
 
@@ -203,6 +217,7 @@ export async function handleCheckoutCompleted(
       currency: CURRENCY.GBP,
       stripeApplicationFeeCents,
       stripeChargeId,
+      paidAt,
     });
 
     obs?.info('Purchase completed successfully', {
@@ -263,6 +278,7 @@ export async function handleCheckoutCompleted(
 async function handleCourseCheckoutCompleted(
   session: Stripe.Checkout.Session,
   paymentIntentId: string,
+  paidAt: Date | undefined,
   stripe: Stripe,
   c: Context<StripeWebhookEnv>
 ): Promise<void> {
@@ -310,6 +326,7 @@ async function handleCourseCheckoutCompleted(
         currency: CURRENCY.GBP,
         stripeApplicationFeeCents,
         stripeChargeId,
+        paidAt,
       }
     );
 
