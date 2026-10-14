@@ -213,12 +213,50 @@ describe('applyDuePendingPriceChange', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('does nothing without a pending change', async () => {
+  it('does nothing without a pending change — and costs no Stripe call', async () => {
     const sub = fakeSub({ renewal: NOTICE_SEC + 41 * DAY });
     const { stripe, update } = fakeStripe(sub);
 
     expect(await applyDuePendingPriceChange(stripe, sub)).toBe(false);
     expect(update).not.toHaveBeenCalled();
+    expect(stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+  });
+
+  // Codex-2hxff.3 review (H2): the decision is made on the LIVE subscription,
+  // never the event's copy, which can be stale.
+  describe('a stale event', () => {
+    it('carrying a superseded marker defers to the newer live one', async () => {
+      const stale = fakeSub({
+        renewal: NOTICE_SEC + 41 * DAY,
+        metadata: pending,
+      });
+      const live = fakeSub({
+        renewal: NOTICE_SEC + 41 * DAY,
+        metadata: {
+          codex_pending_price_id: 'price_newer',
+          codex_pending_price_from: String(NOTICE_SEC + 90 * DAY),
+        },
+      });
+      const { stripe, update } = fakeStripe(live);
+
+      expect(await applyDuePendingPriceChange(stripe, stale)).toBe(false);
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('whose marker was cleared live (changeTier) swaps nothing', async () => {
+      const stale = fakeSub({
+        renewal: NOTICE_SEC + 41 * DAY,
+        metadata: pending,
+      });
+      const live = fakeSub({
+        renewal: NOTICE_SEC + 41 * DAY,
+        priceId: 'price_other_tier',
+      });
+      const { stripe, update } = fakeStripe(live);
+
+      expect(await applyDuePendingPriceChange(stripe, stale)).toBe(false);
+      expect(update).not.toHaveBeenCalled();
+    });
   });
 });
 

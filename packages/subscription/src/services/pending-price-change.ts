@@ -174,11 +174,21 @@ export async function schedulePriceChange(
  * `from`, so swapping now (no proration) makes that renewal the first billed at
  * the new price. Returns true when it swapped. Safe to call on any event: the
  * swap's own `customer.subscription.updated` finds nothing pending.
+ *
+ * The event's copy is only a filter. When it carries a marker, the decision is
+ * made on the LIVE subscription: Stripe delivers events late and out of order,
+ * and a stale copy racing a newer change (or `changeTier`) would swap to a
+ * superseded Price and clear the newer marker. An event without a marker costs
+ * no Stripe call — a stale one only defers the swap to the next renewal event.
  */
 export async function applyDuePendingPriceChange(
   stripe: Stripe,
-  subscription: Stripe.Subscription
+  eventSubscription: Stripe.Subscription
 ): Promise<boolean> {
+  if (!eventSubscription.metadata?.[PENDING_PRICE_ID_KEY]) return false;
+  const subscription = await stripe.subscriptions.retrieve(
+    eventSubscription.id
+  );
   const pendingPriceId = subscription.metadata?.[PENDING_PRICE_ID_KEY];
   const from = Number(subscription.metadata?.[PENDING_PRICE_FROM_KEY]);
   if (!pendingPriceId || !Number.isFinite(from) || from <= 0) return false;
