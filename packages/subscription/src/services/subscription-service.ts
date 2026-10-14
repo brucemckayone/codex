@@ -54,6 +54,7 @@ import {
   type FeeConfig,
   type FeeConfigService,
   type FeeContext,
+  type OrganisationPayee,
   resolveOrganisationPayee,
   withStaleCustomerRecovery,
 } from '@codex/purchase';
@@ -4182,10 +4183,12 @@ export class SubscriptionService extends BaseService {
    * branch is identifiable in observability without duplicating the
    * code path.
    *
-   * If `orgConnect` is missing or `chargesEnabled === false`, the
-   * helper exits silently — the upstream org-fee transfer block above
-   * already accumulated a pending payout for the same Connect account,
-   * which is the correct end state.
+   * If the payee cannot be paid yet (no Connect account, or one with
+   * `chargesEnabled === false`), the pool is recorded as a PENDING
+   * `creator_payout_to_owner` row in the payee's name — the org-fee block
+   * above records only the org's own slice, so returning here dropped the
+   * pool with no transfer, no row and no log (Codex-2hxff.2 review: an
+   * ownership transfer may land on someone who has not onboarded yet).
    */
   private async transferCreatorPoolToOwner(
     subscriptionId: string,
@@ -4193,13 +4196,49 @@ export class SubscriptionService extends BaseService {
     chargeId: string,
     transferGroup: string,
     creatorPayoutCents: number,
-    orgConnect:
-      | { userId: string; stripeAccountId: string; chargesEnabled: boolean }
-      | null
-      | undefined,
+    orgPayee: OrganisationPayee | undefined,
     logContext: string
   ): Promise<void> {
-    if (!orgConnect?.chargesEnabled || creatorPayoutCents <= 0) {
+    if (creatorPayoutCents <= 0) {
+      return;
+    }
+    if (!orgPayee) {
+      this.obs.error(
+        `Cannot record creator pool to owner: no org owner found (${logContext})`,
+        {
+          subscriptionId,
+          organizationId: orgId,
+          amountCents: creatorPayoutCents,
+        }
+      );
+      return;
+    }
+    const orgConnect = orgPayee.account;
+    if (!orgConnect?.chargesEnabled) {
+      try {
+        await this.db.insert(payouts).values({
+          userId: orgPayee.userId,
+          organizationId: orgId,
+          subscriptionId,
+          amountCents: creatorPayoutCents,
+          payoutType: 'creator_payout_to_owner',
+          status: 'pending',
+          reason: orgConnect ? 'connect_restricted' : 'connect_not_ready',
+          // Charge correlation — see the org-fee connect_not_ready insert.
+          stripeChargeId: chargeId,
+          transferGroup,
+        });
+      } catch (insertError) {
+        this.obs.error(
+          `Failed to record pending creator pool to owner (${logContext})`,
+          {
+            subscriptionId,
+            organizationId: orgId,
+            amountCents: creatorPayoutCents,
+            error: (insertError as Error).message,
+          }
+        );
+      }
       return;
     }
     try {
@@ -4799,7 +4838,7 @@ export class SubscriptionService extends BaseService {
         chargeId,
         transferGroup,
         creatorPayoutCents,
-        orgConnect,
+        orgPayee,
         'empty_agreements'
       );
       return;
@@ -4836,7 +4875,7 @@ export class SubscriptionService extends BaseService {
         chargeId,
         transferGroup,
         creatorPayoutCents,
-        orgConnect,
+        orgPayee,
         'zero_share'
       );
       return;

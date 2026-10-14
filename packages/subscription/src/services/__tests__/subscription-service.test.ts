@@ -3150,6 +3150,102 @@ describe('SubscriptionService', () => {
       expect(rows[0]?.transferGroup).toBe(`sub_${sub.id}`);
     });
 
+    // Codex-2hxff.2 review (C1): with no creator agreements the creator pool
+    // also belongs to the owner. When the owner cannot be paid yet it must be
+    // recorded as PENDING in their name — it used to vanish: no transfer, no
+    // ledger row, no log, so the sweep never paid it.
+    describe('no-agreement creator pool when the owner cannot be paid yet', () => {
+      async function payInvoiceAndReadOwnerRows(
+        orgId: string,
+        tierId: string,
+        slug: string
+      ) {
+        const sub = takeFirst(
+          await db
+            .insert(subscriptions)
+            .values(
+              createTestSubscriptionInput(otherCreatorId, orgId, tierId, {
+                status: 'active',
+              })
+            )
+            .returning()
+        );
+        const chargeId = `ch_${slug}_${createUniqueSlug('c')}`;
+        const mockInvoice = createMockStripeInvoice({
+          amount_paid: 1000,
+          parent: {
+            subscription_details: { subscription: sub.stripeSubscriptionId },
+          },
+          payments: {
+            data: [{ payment: { charge: chargeId, payment_intent: 'pi_c1' } }],
+          },
+        }) as unknown as Stripe.Invoice;
+
+        await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+        const rows = await db
+          .select()
+          .from(payoutsTable)
+          .where(eq(payoutsTable.subscriptionId, sub.id));
+        return { sub, chargeId, rows };
+      }
+
+      it('records the pool as pending (connect_restricted) when the account cannot charge', async () => {
+        const { org, tier1 } = await createFullOrg('pool-pending-restricted');
+        await db
+          .update(stripeConnectAccounts)
+          .set({ chargesEnabled: false })
+          .where(eq(stripeConnectAccounts.organizationId, org.id));
+
+        const { sub, chargeId, rows } = await payInvoiceAndReadOwnerRows(
+          org.id,
+          tier1.id,
+          'pool_restricted'
+        );
+
+        const pool = rows.filter(
+          (r) => r.payoutType === 'creator_payout_to_owner'
+        );
+        expect(pool).toHaveLength(1);
+        expect(pool[0]?.status).toBe('pending');
+        expect(pool[0]?.reason).toBe('connect_restricted');
+        expect(pool[0]?.userId).toBe(creatorId);
+        expect(pool[0]?.stripeChargeId).toBe(chargeId);
+        expect(pool[0]?.transferGroup).toBe(`sub_${sub.id}`);
+        expect(pool[0]?.amountCents).toBeGreaterThan(0);
+        // Nothing of the payment is unaccounted for: every penny is either
+        // the platform's or a ledger obligation.
+        const total = rows.reduce((sum, r) => sum + r.amountCents, 0);
+        expect(total).toBe(1000);
+        expect(stripe.transfers.create).not.toHaveBeenCalled();
+      });
+
+      it('records the pool as pending (connect_not_ready) when the owner has no Connect account', async () => {
+        const ownerId = takeFirst(await seedTestUsers(db, 1), 'owner id');
+        const { org, tier1 } = await createFullOrg(
+          'pool-pending-none',
+          ownerId
+        );
+        await db
+          .delete(stripeConnectAccounts)
+          .where(eq(stripeConnectAccounts.userId, ownerId));
+
+        const { rows } = await payInvoiceAndReadOwnerRows(
+          org.id,
+          tier1.id,
+          'pool_none'
+        );
+
+        const pool = rows.filter(
+          (r) => r.payoutType === 'creator_payout_to_owner'
+        );
+        expect(pool).toHaveLength(1);
+        expect(pool[0]?.status).toBe('pending');
+        expect(pool[0]?.reason).toBe('connect_not_ready');
+        expect(pool[0]?.userId).toBe(ownerId);
+      });
+    });
+
     it('should skip if no subscription ID in invoice', async () => {
       const mockInvoice = createMockStripeInvoice({
         parent: null,
