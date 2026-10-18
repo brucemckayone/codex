@@ -6,6 +6,12 @@
  * Conservative default: unknown errors are treated as permanent to prevent retry storms.
  * Only explicitly recognized transient patterns return true.
  *
+ * A service never lets a raw error out: BaseService.handleError wraps it as an
+ * InternalServiceError and keeps the original on `cause`. So an error is judged
+ * by its cause chain, not its outer class — otherwise a database outage inside
+ * completePurchase looks like business logic and is acknowledged 200, and the
+ * buyer is charged with no purchase (Codex-2hxff.6).
+ *
  * Transient errors return 500 → Stripe retries with exponential backoff (~24h total).
  * Permanent errors return 200 → Stripe considers the webhook delivered.
  */
@@ -18,6 +24,36 @@ const TRANSIENT_STRIPE_TYPES = new Set([
   'StripeConnectionError',
   'StripeRateLimitError',
 ]);
+
+/**
+ * Postgres SQLSTATEs a retry can clear: a serialization failure, a deadlock,
+ * too many connections, the server shutting down or not accepting connections
+ * yet, a cancelled (timed-out) statement — plus all of class 08, connection
+ * exceptions. Their messages ("could not serialize access…") match none of
+ * the patterns below.
+ */
+const TRANSIENT_SQLSTATES = new Set([
+  '40001',
+  '40P01',
+  '53300',
+  '57P01',
+  '57P02',
+  '57P03',
+  '57014',
+]);
+
+/** Socket-level error codes, as Node and the Neon driver set them */
+const TRANSIENT_NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EAI_AGAIN',
+]);
+
+/** How far down a cause chain to look (and the guard against a cycle). */
+const MAX_CAUSE_DEPTH = 5;
 
 /** Network/DB error message patterns indicating transient failures */
 const TRANSIENT_MESSAGE_PATTERNS = [
@@ -34,16 +70,27 @@ const TRANSIENT_MESSAGE_PATTERNS = [
 /**
  * Determine if an error is transient (should trigger Stripe retry).
  *
- * Returns true for: DB connection failures, Stripe server errors (5xx),
- * Stripe rate limits, and network errors.
+ * Returns true for: DB connection failures, retryable Postgres states,
+ * Stripe server errors (5xx), Stripe rate limits, and network errors — at the
+ * top level or anywhere in the error's `cause` chain.
  *
- * Returns false for: business logic errors (ServiceError subclasses),
+ * Returns false for: business logic errors (a ServiceError with no cause),
  * Stripe client errors (4xx), and anything unrecognized.
  */
 export function isTransientError(error: unknown): boolean {
-  // ServiceError subclasses are always business logic (permanent)
-  if (error instanceof ServiceError) {
+  return isTransientAt(error, 0);
+}
+
+function isTransientAt(error: unknown, depth: number): boolean {
+  if (depth > MAX_CAUSE_DEPTH) {
     return false;
+  }
+
+  // A ServiceError a service threw on purpose (NotFound, Validation, …) has no
+  // cause and is permanent. One that WRAPS another error is as transient as
+  // what it wraps.
+  if (error instanceof ServiceError) {
+    return error.cause !== undefined && isTransientAt(error.cause, depth + 1);
   }
 
   if (error instanceof Error) {
@@ -58,12 +105,33 @@ export function isTransientError(error: unknown): boolean {
       return true;
     }
 
+    // Postgres SQLSTATE or socket error code
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string') {
+      if (
+        TRANSIENT_SQLSTATES.has(code) ||
+        (code.length === 5 && code.startsWith('08')) ||
+        TRANSIENT_NETWORK_CODES.has(code)
+      ) {
+        return true;
+      }
+    }
+
     // Check message for network/DB transient patterns
     const msg = error.message.toLowerCase();
     for (const pattern of TRANSIENT_MESSAGE_PATTERNS) {
       if (msg.includes(pattern.toLowerCase())) {
         return true;
       }
+    }
+
+    // A driver can keep the socket error underneath its own: `fetch failed`
+    // carries `cause.code = 'ECONNRESET'`, and Neon's NeonDbError keeps
+    // `sourceError`.
+    const inner =
+      error.cause ?? (error as { sourceError?: unknown }).sourceError;
+    if (inner !== undefined) {
+      return isTransientAt(inner, depth + 1);
     }
   }
 

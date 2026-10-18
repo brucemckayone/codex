@@ -122,8 +122,9 @@ driven by `checkout.session.completed`, and payment by `invoice.payment_succeede
 ### Renewals
 
 On `invoice.payment_succeeded` the charge is found from the invoice, the
-currency is checked to be GBP **before** anything is written — **gap**:
-`Codex-2hxff.6` (today it is checked after the update) — and the invoice is
+currency is checked to be GBP **before** anything is written — a non-GBP
+invoice is rejected (and acknowledged, as a permanent error) with the row
+untouched — and the invoice is
 split and paid out exactly like a sale ([fees-and-splits.md](fees-and-splits.md#organisation-subscription-invoice)).
 
 ### Cancelling, reactivating, resuming

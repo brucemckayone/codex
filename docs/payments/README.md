@@ -104,7 +104,7 @@ can each pay only one connected account, so neither can split a sale three ways.
    can never pay twice — **gap**: `Codex-2hxff.11` (ledger double-pay).
 7. **Webhooks are retried on transient failure.** A database or Stripe outage
    returns 500 so Stripe retries; only a permanent problem is acknowledged
-   with 200 — **gap**: `Codex-2hxff.6` (transient failures acked 200).
+   with 200.
 8. **One of each per person.** One Stripe Customer per user per environment;
    one Stripe Connect account per user.
 9. **Each environment ignores the other's events.** Production and local

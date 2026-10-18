@@ -1463,6 +1463,18 @@ export class SubscriptionService extends BaseService {
         : (subDetails?.subscription?.id ?? null);
     if (!stripeSubId) return;
 
+    // GBP-only enforcement (Codex-yv18n): reject a non-GBP invoice BEFORE
+    // anything is written. executeTransfers and stripe.transfers.create() are
+    // hardcoded to CURRENCY.GBP, so letting one through would mismatch the
+    // source charge at Stripe; and checking it after the self-heal and the
+    // period UPDATE (as this did until Codex-2hxff.6) left a rewritten row with
+    // no transfer or ledger row to match. Cross-currency support is a tracked
+    // future feature.
+    this.assertGbpOnly(stripeInvoice.currency, {
+      invoiceId: stripeInvoice.id,
+      stripeSubscriptionId: stripeSubId,
+    });
+
     // Resolve the source charge for transfers. Webhook payloads in Stripe
     // 2024+ do NOT include expanded `payments.data` by default — the field
     // is only populated when explicitly expanded on retrieve. Without the
@@ -1515,17 +1527,6 @@ export class SubscriptionService extends BaseService {
         updatedAt: new Date(),
       })
       .where(eq(subscriptions.id, sub.id));
-
-    // GBP-only enforcement (Codex-yv18n): explicitly reject non-GBP charges
-    // before triggering transfers. executeTransfers and downstream
-    // stripe.transfers.create() are hardcoded to CURRENCY.GBP — silently
-    // letting a non-GBP invoice through would cause a currency mismatch at
-    // Stripe. Cross-currency support is a tracked future feature.
-    this.assertGbpOnly(stripeInvoice.currency, {
-      invoiceId: stripeInvoice.id,
-      subscriptionId: sub.id,
-      stripeSubscriptionId: stripeSubId,
-    });
 
     // Execute revenue transfers.
     //

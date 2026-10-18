@@ -78,10 +78,19 @@ signing secret.
 | **500** | A **transient** failure: database connection or timeout, Stripe 5xx, rate limit or network error. Stripe retries (for up to 3 days in live mode). |
 | 200 `{ received: true }` | Processed, skipped (wrong mode, another environment, unknown type), or failed **permanently** (bad data, unknown object) |
 
-Errors wrapped as `ServiceError` by a service must still be classified by their
-cause, so a database outage inside a service returns 500 — **gap**:
-`Codex-2hxff.6`. There is no event-id table; safety on redelivery comes from
-unique keys (payment intent, ledger rows) and deterministic idempotency keys.
+Errors wrapped as `ServiceError` by a service are classified by their cause,
+so a database outage inside a service returns 500. A service never lets a raw
+error out: `handleError` wraps it as `InternalServiceError` and keeps the
+original on the standard `cause` (never serialised into a response), and
+`isTransientError` (`workers/ecom-api/src/utils/error-classification.ts`)
+follows the cause chain. A `ServiceError` thrown on purpose (not found,
+validation, conflict) has no cause and stays permanent; so does an unrecognised
+bug, so a broken handler cannot start a retry storm. Retryable Postgres states
+(class `08`, `40001`, `40P01`, `53300`, `57P01`–`57P03`, `57014`) count as
+transient by their SQLSTATE, whatever their message says.
+
+There is no event-id table; safety on redelivery comes from unique keys
+(payment intent, ledger rows) and deterministic idempotency keys.
 
 ## Secrets and configuration (ecom-api)
 

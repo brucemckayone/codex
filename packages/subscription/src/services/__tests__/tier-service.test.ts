@@ -15,7 +15,7 @@ import {
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
-import { ValidationError } from '@codex/service-errors';
+import { InternalServiceError, ValidationError } from '@codex/service-errors';
 import {
   createMockStripe,
   createTestConnectAccountInput,
@@ -892,6 +892,31 @@ describe('TierService', () => {
         ...overrides,
       } as unknown as import('stripe').default.Product;
     }
+
+    // Codex-2hxff.6 (SUB-16): a DB outage during the sync-back was wrapped as
+    // "An unexpected error occurred" with the original thrown away, so the
+    // webhook acknowledged it 200 and the Dashboard edit was lost for good.
+    // The wrap must keep the original on `cause` — that is what ecom-api's
+    // isTransientError reads to answer 500 so Stripe retries.
+    it('a database outage is rethrown with its original error as the cause', async () => {
+      const outage = new Error('Connection terminated unexpectedly');
+      const failingDb = {
+        select: () => {
+          throw outage;
+        },
+      } as unknown as typeof db;
+      const broken = new TierService(
+        { db: failingDb, dbWs: failingDb, environment: 'test' },
+        stripe
+      );
+
+      const err = await broken
+        .applyStripeProductUpdate(buildProduct())
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(InternalServiceError);
+      expect((err as Error).cause).toBe(outage);
+    });
 
     it('should mirror name + description and return changed=true', async () => {
       const org = await createOrgWithConnect('sync-prod-a');

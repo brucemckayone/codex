@@ -11159,9 +11159,10 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
       expect(err).toBeInstanceOf(UnsupportedCurrencyError);
       expect(err?.received).toBe('eur');
       expect(err?.supported).toEqual(['gbp']);
+      // No internal subscription id: the guard now runs before the row is
+      // even looked up, so nothing is read or written first (Codex-2hxff.6).
       expect(err?.context).toMatchObject({
         invoiceId: 'in_test_eur_reject',
-        subscriptionId: sub.id,
         stripeSubscriptionId: sub.stripeSubscriptionId,
       });
       expect(transferSpy).not.toHaveBeenCalled();
@@ -11187,6 +11188,49 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
 
       await service.handleInvoicePaymentSucceeded(mockInvoice);
       expect(transferSpy).toHaveBeenCalled();
+    });
+
+    // Codex-2hxff.6 (SUB-17): the guard ran AFTER the period/amount UPDATE
+    // (and after the self-heal that can INSERT a row), so a rejected invoice
+    // still rewrote the row — with a split no transfer or ledger row matched.
+    it('a non-GBP invoice writes nothing: the row keeps its period and amount, Stripe is not asked', async () => {
+      const { org, tier1 } = await seedOrg('yv18n-nowrite');
+      const sub = await seedActiveSubscription(org.id, tier1.id);
+      const before = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, sub.id))
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        id: 'in_test_usd_nowrite',
+        amount_paid: before.amountCents + 1234,
+        currency: 'usd',
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+      const retrieveSpy = vi.mocked(stripe.subscriptions.retrieve);
+      retrieveSpy.mockClear();
+
+      const err = await service
+        .handleInvoicePaymentSucceeded(mockInvoice)
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(UnsupportedCurrencyError);
+      const after = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, sub.id))
+      );
+      expect(after.amountCents).toBe(before.amountCents);
+      expect(after.currentPeriodEnd.getTime()).toBe(
+        before.currentPeriodEnd.getTime()
+      );
+      expect(after.updatedAt.getTime()).toBe(before.updatedAt.getTime());
+      expect(retrieveSpy).not.toHaveBeenCalled();
     });
   });
 

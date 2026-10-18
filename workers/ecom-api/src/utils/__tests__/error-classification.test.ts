@@ -6,6 +6,13 @@
  * - Permanent errors (return 200, acknowledged)
  */
 
+import {
+  ConflictError,
+  InternalServiceError,
+  mapErrorToResponse,
+  NotFoundError,
+  wrapError,
+} from '@codex/service-errors';
 import { describe, expect, it } from 'vitest';
 import { isTransientError } from '../error-classification';
 
@@ -147,6 +154,99 @@ describe('isTransientError', () => {
       const { ServiceError } = require('@codex/service-errors');
       const err = new ServiceError('Not found', 404);
       expect(isTransientError(err)).toBe(false);
+    });
+  });
+
+  // Codex-2hxff.6: a service wraps every unknown error (handleError →
+  // wrapError) and keeps the original on `cause`. The wrap must not hide an
+  // outage from the classifier, and must not make a bug look transient.
+  describe('errors wrapped by a service', () => {
+    it('a wrapped connection error is transient', () => {
+      expect(
+        isTransientError(wrapError(new Error('Connection terminated')))
+      ).toBe(true);
+    });
+
+    it('a wrapped bug stays permanent', () => {
+      expect(isTransientError(wrapError(new TypeError('x is undefined')))).toBe(
+        false
+      );
+    });
+
+    it('a ServiceError thrown on purpose (no cause) stays permanent', () => {
+      expect(isTransientError(new NotFoundError('Purchase not found'))).toBe(
+        false
+      );
+    });
+
+    it('a wrapped unique violation (a replay) stays permanent', () => {
+      const replay = wrapError(
+        Object.assign(
+          new Error('duplicate key value violates unique constraint "x"'),
+          { code: '23505' }
+        )
+      );
+      expect(replay).toBeInstanceOf(ConflictError);
+      expect(isTransientError(replay)).toBe(false);
+    });
+
+    it('the original is never part of the API response', () => {
+      const wrapped = wrapError(new Error('password=hunter2 connection lost'));
+      expect(
+        JSON.stringify(mapErrorToResponse(wrapped).response)
+      ).not.toContain('hunter2');
+    });
+
+    it('a cause chain that loops ends permanent instead of recursing forever', () => {
+      const a = new InternalServiceError('a');
+      const b = new InternalServiceError('b', undefined, { cause: a });
+      Object.defineProperty(a, 'cause', { value: b });
+      expect(isTransientError(a)).toBe(false);
+    });
+  });
+
+  describe('Postgres SQLSTATE codes', () => {
+    const pg = (code: string) =>
+      Object.assign(new Error('database error'), { code });
+
+    it.each([
+      ['08006', 'connection failure'],
+      ['08001', 'unable to connect'],
+      ['40001', 'serialization failure'],
+      ['40P01', 'deadlock'],
+      ['53300', 'too many connections'],
+      ['57P01', 'admin shutdown'],
+      ['57P03', 'cannot connect now'],
+      ['57014', 'statement timeout'],
+    ])('%s (%s) is transient', (code) => {
+      expect(isTransientError(pg(code))).toBe(true);
+    });
+
+    it.each([
+      ['23505', 'unique violation'],
+      ['23503', 'foreign key violation'],
+      ['22P02', 'invalid text representation'],
+      ['42703', 'undefined column'],
+    ])('%s (%s) is permanent', (code) => {
+      expect(isTransientError(pg(code))).toBe(false);
+    });
+  });
+
+  describe('socket errors under a driver error', () => {
+    it("fetch's `cause.code = 'ECONNRESET'` is transient", () => {
+      const fetchFailed = new Error('request to the database was refused', {
+        cause: Object.assign(new Error('other side closed'), {
+          code: 'ECONNRESET',
+        }),
+      });
+      expect(isTransientError(fetchFailed)).toBe(true);
+    });
+
+    it("Neon's `sourceError` is followed", () => {
+      const neon = Object.assign(new Error('Error querying the database'), {
+        sourceError: Object.assign(new Error('read'), { code: 'EPIPE' }),
+      });
+      expect(isTransientError(neon)).toBe(true);
     });
   });
 

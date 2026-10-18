@@ -43,13 +43,21 @@ export abstract class ServiceError extends Error {
   public readonly context?: Record<string, unknown>;
   public readonly statusCode: ErrorStatusCode;
 
+  /**
+   * `options.cause` keeps the error this one replaced. It is never part of an
+   * API response (`mapErrorToResponse` sends only code, message and
+   * `context`), so it may hold anything, but it lets a caller judge the
+   * failure by what actually went wrong: a webhook must answer 500 for a
+   * database outage that a service wrapped (Codex-2hxff.6).
+   */
   constructor(
     message: string,
     code: string,
     statusCode: ErrorStatusCode,
-    context?: Record<string, unknown>
+    context?: Record<string, unknown>,
+    options?: ErrorOptions
   ) {
-    super(message);
+    super(message, options);
     this.name = this.constructor.name;
     this.code = code;
     this.statusCode = statusCode;
@@ -109,8 +117,12 @@ export class ForbiddenError extends ServiceError {
  * Thrown when operation conflicts with existing state (e.g., duplicate slug)
  */
 export class ConflictError extends ServiceError {
-  constructor(message: string, context?: Record<string, unknown>) {
-    super(message, 'CONFLICT', 409, context);
+  constructor(
+    message: string,
+    context?: Record<string, unknown>,
+    options?: ErrorOptions
+  ) {
+    super(message, 'CONFLICT', 409, context, options);
   }
 }
 
@@ -150,8 +162,12 @@ export class BusinessLogicError extends ServiceError {
  * Should be logged and wrapped to prevent detail exposure
  */
 export class InternalServiceError extends ServiceError {
-  constructor(message: string, context?: Record<string, unknown>) {
-    super(message, 'INTERNAL_ERROR', 500, context);
+  constructor(
+    message: string,
+    context?: Record<string, unknown>,
+    options?: ErrorOptions
+  ) {
+    super(message, 'INTERNAL_ERROR', 500, context, options);
   }
 }
 
@@ -255,9 +271,14 @@ export function wrapError(
 
   // Database unique constraint violation
   if (error instanceof Error && error.message.includes('unique constraint')) {
-    return new ConflictError('Resource already exists', context);
+    return new ConflictError('Resource already exists', context, {
+      cause: error,
+    });
   }
 
-  // Generic fallback - never expose internal details
-  return new InternalServiceError('An unexpected error occurred', context);
+  // Generic fallback - never expose internal details. The original stays on
+  // `cause` (never serialised) so a caller can still tell an outage from a bug.
+  return new InternalServiceError('An unexpected error occurred', context, {
+    cause: error,
+  });
 }

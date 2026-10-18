@@ -293,7 +293,13 @@ export function createMockHonoContext<
       url: 'http://localhost/test',
       method: 'GET',
     },
-    json: vi.fn((data: unknown) => new Response(JSON.stringify(data))),
+    // Honour the status, as Hono's `c.json(body, status)` does. Ignoring it
+    // made every response 200, so a test asserting a webhook's 500 could
+    // never fail (Codex-2hxff.6).
+    json: vi.fn(
+      (data: unknown, status?: number) =>
+        new Response(JSON.stringify(data), { status: status ?? 200 })
+    ),
     status: vi.fn().mockReturnThis(),
   };
 

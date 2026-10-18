@@ -100,7 +100,7 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
    pending is emailed to finish payouts setup — **gap**: `Codex-2hxff.7`.
 
 **Errors.** A transient failure (database connection, Stripe outage) returns
-500 and Stripe retries — **gap**: `Codex-2hxff.6`. If a buyer is charged twice
+500 and Stripe retries. If a buyer is charged twice
 for an item they already own, the second payment is refunded automatically —
 **gap**: `Codex-2hxff.14`.
 
