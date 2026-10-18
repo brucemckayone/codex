@@ -19,9 +19,11 @@
  * On each base and each Type it may take, once every entrance has ended, each
  * clipped headline is set to texts with descenders, ascenders and accents
  * over capitals, and pictured with its clip and again with none: any pixel
- * that differs is ink the clip cuts. The faces: the gallery's brands 0 and 3
- * (Archivo Black, Syne), and Anton and Unbounded, the narrowest and the
- * widest the brand editor offers, at 1440 and 390.
+ * that differs is ink the clip cuts. Each text is weighed as Heading weighs
+ * its own (`widestRun`), so the fit draws it at the size the page would. The
+ * faces: the gallery's brands 0 and 3 (Archivo Black, Syne), and Anton and
+ * Unbounded, the narrowest and the widest the brand editor offers, at 1440
+ * and 390.
  *
  * A clip is the base's Motion, which no Type brings, so a base whose own
  * page clips no headline at a width is read once there and passed over.
@@ -34,6 +36,7 @@ import {
   TYPE_FACET_BASES,
   TYPE_FACETS,
 } from '../../src/lib/page-builder/kit/model/ids';
+import { widestRun } from '../../src/lib/page-builder/kit/model/long-heading';
 import { captureSeededCreatorCookies } from '../helpers/subscription';
 
 test.skip(!process.env.TYPE_LIFT, 'opt-in: TYPE_LIFT=1 (a development route)');
@@ -244,26 +247,43 @@ test('an entrance’s clip cuts no glyph of any Type', async ({ browser }) => {
           for (const text of TEXTS)
             for (let i = 0; i < n; i++) {
               const probe = page.locator(`[data-lift-probe="${i}"]`);
-              const box = await probe.evaluate((node, text) => {
-                const heading = node.matches('.lp-heading')
-                  ? node
-                  : node.querySelector('.lp-heading');
-                if (heading) heading.textContent = text;
-                node.scrollIntoView({ block: 'center', behavior: 'instant' });
-                const r = node.getBoundingClientRect();
-                const em = Number.parseFloat(
-                  getComputedStyle(heading ?? node).fontSize
-                );
-                return {
-                  x: r.left - em * 0.6,
-                  y: r.top - em * 0.8,
-                  right: r.right + em * 0.6,
-                  bottom: r.bottom + em * 0.8,
-                  top: r.top,
-                  foot: r.bottom,
-                  em,
-                };
-              }, text);
+              const box = await probe.evaluate(
+                (node, { text, run }) => {
+                  const heading = node.matches('.lp-heading')
+                    ? node
+                    : node.querySelector<HTMLElement>('.lp-heading');
+                  if (heading instanceof HTMLElement) {
+                    heading.textContent = text;
+                    heading.style.setProperty(
+                      '--lp-heading-run-caps',
+                      String(run.caps)
+                    );
+                    heading.style.setProperty(
+                      '--lp-heading-run-text',
+                      String(run.text)
+                    );
+                    heading.style.setProperty(
+                      '--lp-heading-run-chars',
+                      String(run.chars)
+                    );
+                  }
+                  node.scrollIntoView({ block: 'center', behavior: 'instant' });
+                  const r = node.getBoundingClientRect();
+                  const em = Number.parseFloat(
+                    getComputedStyle(heading ?? node).fontSize
+                  );
+                  return {
+                    x: r.left - em * 0.6,
+                    y: r.top - em * 0.8,
+                    right: r.right + em * 0.6,
+                    bottom: r.bottom + em * 0.8,
+                    top: r.top,
+                    foot: r.bottom,
+                    em,
+                  };
+                },
+                { text, run: widestRun(text) }
+              );
               const x = Math.max(0, box.x);
               const y = Math.max(0, box.y);
               const clip = {
