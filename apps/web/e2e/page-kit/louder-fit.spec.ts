@@ -42,7 +42,11 @@
  * The line is the heading's room, not its box: a grid item's `min-width: auto`
  * stretches its box to its longest word, past its track and over whatever
  * sits beside it, so the box is held to the room while it is read. A flex
- * item's is left as it is, since there that minimum decides what wraps.
+ * item's is left as it is, since there that minimum decides what wraps, and
+ * its line is its row's: its box grows with any word, so only the row shows
+ * a word too wide for the card it sits in. The line is read unrounded: a box
+ * that shrinks to its one word (a centred band's, a statement's) is exactly
+ * that word wide, and `clientWidth`, a whole pixel, read such a word as over.
  *
  * What the Style's size, unfitted, draws too wide is counted in the log, and
  * with `CENSUS_OUT=<file.json>` every such (heading, text) is written there,
@@ -314,13 +318,29 @@ test('a heading fits its widest word at its own size and at louder', async ({
                 )
             );
             for (const ruler of rulers) ruler.remove();
+            // The line, unrounded and untransformed (Studio tilts its cards):
+            // the content box's used width, or a flex item's row's.
+            const contentOf = (el: HTMLElement) => {
+              const cs = getComputedStyle(el);
+              const width = Number.parseFloat(cs.width);
+              return cs.boxSizing === 'border-box'
+                ? width -
+                    [
+                      cs.paddingLeft,
+                      cs.paddingRight,
+                      cs.borderLeftWidth,
+                      cs.borderRightWidth,
+                    ].reduce((sum, px) => sum + Number.parseFloat(px), 0)
+                : width;
+            };
+            const lineOf = (h: HTMLElement) =>
+              h.parentElement &&
+              /flex/.test(getComputedStyle(h.parentElement).display)
+                ? contentOf(h.parentElement)
+                : contentOf(h);
             const over = (i: number, h: HTMLElement, text: string) => {
-              const cs = getComputedStyle(h);
-              const size = Number.parseFloat(cs.fontSize);
-              const line =
-                h.clientWidth -
-                Number.parseFloat(cs.paddingLeft) -
-                Number.parseFloat(cs.paddingRight);
+              const size = Number.parseFloat(getComputedStyle(h).fontSize);
+              const line = lineOf(h);
               return split(text).filter(
                 (run) => ((per100[i].get(run) ?? 0) * size) / 100 > line + 0.5
               );
@@ -328,12 +348,8 @@ test('a heading fits its widest word at its own size and at louder', async ({
             // How far its widest run overruns the line (1 is a run that just
             // fits): what an own-size fit would have to take off (CENSUS_OUT).
             const worst = (i: number, h: HTMLElement, text: string) => {
-              const cs = getComputedStyle(h);
-              const size = Number.parseFloat(cs.fontSize);
-              const line =
-                h.clientWidth -
-                Number.parseFloat(cs.paddingLeft) -
-                Number.parseFloat(cs.paddingRight);
+              const size = Number.parseFloat(getComputedStyle(h).fontSize);
+              const line = lineOf(h);
               return Math.max(
                 ...split(text).map(
                   (run) => ((per100[i].get(run) ?? 0) * size) / 100 / line
