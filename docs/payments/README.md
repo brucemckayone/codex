@@ -21,6 +21,7 @@ Last reviewed: 2026-10-13.
 | [connect-and-payouts.md](connect-and-payouts.md) | Stripe Connect accounts, organisation ownership, the payouts ledger and how money reaches creators |
 | [access.md](access.md) | What grants access to paid content, how it is taken away, and how caches keep up |
 | [operations.md](operations.md) | Environments, webhooks, secrets, the Stripe Dashboard settings, local development and testing |
+| [release-checklist.md](release-checklist.md) | Read-only production checks to run before and after a `dev` → `main` release that moves payments data or money |
 | [status.md](status.md) | Every rule the code does not meet yet, the owner decisions behind this spec, and open questions |
 | [policy-drafts/](policy-drafts/README.md) | Drafts of the customer refund policy and the creator payout terms, for legal review — not published |
 

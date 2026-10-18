@@ -24,7 +24,8 @@ lockdown (`.4`) and environment tagging (`.5`) ("Include both"). Follow-ups:
 `0098`), `Codex-2hxff.36` (dropping the retired Connect pin column), and the
 pre-merge review's findings, `Codex-2hxff.37`–`.46`. Of those, `.37` matters
 before the production deploy: an organisation with no active owner has no
-payee, so its org slice is logged and never recorded.
+payee, so its org slice is logged and never recorded. The production checks to
+run around that release (R1–R4) are in [release-checklist.md](release-checklist.md).
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
