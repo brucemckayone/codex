@@ -107,8 +107,9 @@
 
   /* base.css spaces every `li` but the last. The picture leads on a phone. */
   .story-scroll__step {
+    --_gap: var(--space-5);
     display: grid;
-    gap: var(--space-5);
+    gap: var(--_gap);
     margin: 0;
   }
 
@@ -142,7 +143,10 @@
       align-items: center;
     }
 
+    /* Its title's room (03 X71): half the column, less the step's own gap,
+       which places it (a subgrid's gap stands in for its parents'). */
     .story-scroll__step > :global(.story-words) {
+      --lp-title-column: calc((var(--lp-column) - var(--_gap)) / 2);
       grid-column: 1;
       grid-row: 1;
     }

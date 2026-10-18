@@ -81,10 +81,12 @@
 
 <style>
   .offer {
+    --_pad: var(--space-6);
+    --_inset: calc(var(--_pad) + var(--lp-border));
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-    padding: var(--space-6);
+    padding: var(--_pad);
     border: var(--lp-border) var(--border-style) var(--lp-line);
     border-radius: var(--lp-radius-card);
     color: var(--lp-ink);
@@ -96,11 +98,14 @@
   }
 
   .offer[data-size='focus'] {
+    --_pad: clamp(var(--space-6), var(--space-4) + 3cqi, var(--space-12));
     gap: var(--space-5);
-    padding: clamp(var(--space-6), var(--space-4) + 3cqi, var(--space-12));
   }
 
+  /* The name's room (03 X71): the card's width, which the cards name
+     (`--_track`), less its inset. */
   .offer__top {
+    --lp-title-column: calc(var(--_track, var(--lp-column)) - 2 * var(--_inset));
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -180,6 +185,7 @@
 
   /* Bold: open columns under a hard ink rule; only the featured card is a block. */
   :global(.lp[data-lp-style='bold']) .offer:not([data-featured]) {
+    --_inset: 0px;
     padding-inline: 0;
     border: none;
     border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);

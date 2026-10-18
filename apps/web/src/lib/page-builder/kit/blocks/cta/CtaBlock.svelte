@@ -211,10 +211,25 @@
     max-inline-size: var(--lp-measure);
   }
 
+  /* Wide: the words beside the offer wherever the title's widest word fits
+     there, and over it where it does not (as the offer's band, 03 X70). The
+     words grow from nothing, so the narrowest they can be is that word (a
+     flex item's automatic minimum) at the size the fit draws it in the
+     column, and the row wraps before it could run into the offer, whose
+     width is its own words'. The words stack as a column, not a grid: a
+     grid's narrowest drops any child whose own minimum is 0. */
   @container (min-width: 48rem) {
     .cta[data-layout='compact'] {
-      grid-template-columns: minmax(0, 1fr) auto;
+      display: flex;
+      flex-wrap: wrap;
       align-items: center;
+      justify-content: space-between;
+    }
+
+    .cta[data-layout='compact'] > .cta__words {
+      display: flex;
+      flex: 1 1 0;
+      flex-direction: column;
     }
   }
 

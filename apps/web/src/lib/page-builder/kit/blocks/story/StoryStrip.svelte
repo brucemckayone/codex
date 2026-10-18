@@ -62,9 +62,16 @@
 </div>
 
 <style>
+  /* The strip's item is the story's own (a Style may re-set it, as Clean
+     does), so a card names its title's room from it (03 X71). */
+  .story-strip {
+    --lp-strip-item: clamp(15rem, 26cqi, 21rem);
+  }
+
   /* The strip aligns its items to the top; a card stretches to the row's
      height instead, so a Style that frames the cards draws an even row. */
   .story-strip__card {
+    --lp-title-column: var(--lp-strip-item);
     display: grid;
     align-content: start;
     align-self: stretch;

@@ -31,7 +31,9 @@
 
 <style>
   .faq-cols {
+    --_n: 1;
     display: grid;
+    grid-template-columns: repeat(var(--_n), minmax(0, 1fr));
     column-gap: var(--lp-gap);
     margin: 0;
     padding: 0;
@@ -40,7 +42,13 @@
 
   /* Rows align across the columns, so each pair reads as one line of the
      page; a short answer leaves air under it rather than a ragged stagger. */
+  /* Its question's room (03 X71): its share of the column, less its inset,
+     the padding and border a Style that boxes it gives it (Soft, below). */
   .faq-cols__item {
+    --_inset: 0px;
+    --lp-title-column: calc(
+      (var(--lp-column) - (var(--_n) - 1) * var(--lp-gap)) / var(--_n) - 2 * var(--_inset)
+    );
     display: grid;
     align-content: start;
     gap: var(--space-3);
@@ -66,7 +74,7 @@
 
   @container (min-width: 44rem) {
     .faq-cols:not([data-count='1']) {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      --_n: 2;
     }
   }
 
@@ -81,6 +89,7 @@
   }
 
   :global(.lp[data-lp-style='soft']) .faq-cols__item {
+    --_inset: calc(var(--space-6) + var(--lp-border));
     padding: var(--space-6);
     border: var(--lp-border) var(--border-style) var(--lp-line);
     border-radius: var(--lp-radius-card);
