@@ -15,13 +15,16 @@ references to today's code — is in
 [docs/audits/payments-2026-10-13/bug-ledger.md](../audits/payments-2026-10-13/bug-ledger.md)
 under the ledger ids listed on each bead.
 
-`Codex-2hxff.1`–`.5` (label `payments-fix-pr-1`) are fixed in one pull request
-and so are not listed below: the owner asked for the payout-dashboard,
-ownership and price-change fixes together ("put all of these fixes in together
-as one PR"), then agreed to add the portal lockdown (`.4`) and environment
-tagging (`.5`) ("Include both"). Their beads close when it merges. Two
-follow-ups came out of them: `Codex-2hxff.35` (production's price-change email
-wording) and `Codex-2hxff.36` (dropping the retired Connect pin column).
+`Codex-2hxff.1`–`.5` (label `payments-fix-pr-1`) were fixed in one pull request,
+#589, merged to `dev` on 2026-10-14, and so are not listed below: the owner
+asked for the payout-dashboard, ownership and price-change fixes together ("put
+all of these fixes in together as one PR"), then agreed to add the portal
+lockdown (`.4`) and environment tagging (`.5`) ("Include both"). Follow-ups:
+`Codex-2hxff.35` (production's price-change email wording — fixed by migration
+`0098`), `Codex-2hxff.36` (dropping the retired Connect pin column), and the
+pre-merge review's findings, `Codex-2hxff.37`–`.46`. Of those, `.37` matters
+before the production deploy: an organisation with no active owner has no
+payee, so its org slice is logged and never recorded.
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
