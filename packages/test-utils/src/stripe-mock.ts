@@ -51,6 +51,14 @@ function nextId(prefix: string): string {
  * - Controller properties for Connect accounts (not legacy types)
  */
 export function createMockStripe(): Stripe {
+  // Per mock instance, so tests never see each other's transfers.
+  const createdTransfers: Array<{
+    id: string;
+    created: number;
+    destination: unknown;
+    metadata: unknown;
+    [key: string]: unknown;
+  }> = [];
   const mock = {
     products: {
       create: vi
@@ -160,18 +168,43 @@ export function createMockStripe(): Stripe {
       })),
     },
 
+    // Transfers are remembered so `list` can return them: a drain looks up
+    // the transfers it already made before re-sending a row (Codex-2hxff.11).
     transfers: {
       create: vi
         .fn()
-        .mockImplementation(async (params: Record<string, unknown>) => ({
-          id: nextId('tr'),
-          amount: params.amount ?? 0,
-          currency: params.currency ?? 'gbp',
-          destination: params.destination ?? 'acct_test_1',
-          source_transaction: params.source_transaction ?? null,
-          transfer_group: params.transfer_group ?? null,
-          metadata: params.metadata ?? {},
-        })),
+        .mockImplementation(async (params: Record<string, unknown>) => {
+          const transfer = {
+            id: nextId('tr'),
+            object: 'transfer',
+            created: Math.floor(Date.now() / 1000),
+            amount: params.amount ?? 0,
+            currency: params.currency ?? 'gbp',
+            destination: params.destination ?? 'acct_test_1',
+            source_transaction: params.source_transaction ?? null,
+            transfer_group: params.transfer_group ?? null,
+            metadata: params.metadata ?? {},
+          };
+          createdTransfers.unshift(transfer);
+          return transfer;
+        }),
+      // Newest first, like Stripe; honours destination + created.gte.
+      list: vi
+        .fn()
+        .mockImplementation(
+          async (
+            params: { destination?: string; created?: { gte?: number } } = {}
+          ) => ({
+            object: 'list',
+            data: createdTransfers.filter(
+              (t) =>
+                (!params.destination || t.destination === params.destination) &&
+                (params.created?.gte === undefined ||
+                  t.created >= params.created.gte)
+            ),
+            has_more: false,
+          })
+        ),
     },
 
     paymentIntents: {

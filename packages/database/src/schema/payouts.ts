@@ -85,7 +85,10 @@ export const payouts = pgTable(
       .notNull()
       .default('subscription'),
 
-    // null for paid; one of the failure/deferral reasons otherwise
+    // null for paid, and for a pending row whose transfer is in flight (it is
+    // reserved before the transfer, Codex-2hxff.11); one of the
+    // failure/deferral reasons otherwise. `no_owner`: the organisation had no
+    // owner at the sale's time, so the row has no payee yet.
     reason: varchar('reason', { length: 32 }),
 
     attemptedAt: timestamp('attempted_at', { withTimezone: true })
@@ -145,6 +148,32 @@ export const payouts = pgTable(
       .on(table.stripeChargeId)
       .where(sql`${table.payoutType} = 'platform_fee'`),
 
+    // Codex-2hxff.11: exactly one row per slice per charge, for every slice —
+    // until this, only platform_fee was unique, so a redelivered webhook added
+    // a second pending row and the drains paid both. A writer reserves its row
+    // BEFORE transferring (ON CONFLICT DO NOTHING), so a replay finds the row
+    // and never transfers again.
+    //
+    // The organisation's slices are unique per charge WHATEVER the payee: an
+    // org has one owner at a sale's time, and a `no_owner` row (no payee yet)
+    // that support later hands to a new owner must still block a replay that
+    // would add the slice again (Codex-2hxff.37).
+    uniqueIndex('uq_payouts_org_slice_per_charge')
+      .on(table.stripeChargeId, table.payoutType)
+      .where(
+        sql`${table.stripeChargeId} IS NOT NULL AND ${table.payoutType} IN ('organization_fee', 'creator_payout_to_owner')`
+      ),
+    // A subscription invoice pays several creators; each has one slice.
+    uniqueIndex('uq_payouts_creator_slice_per_charge')
+      .on(table.stripeChargeId, table.userId)
+      .where(
+        sql`${table.stripeChargeId} IS NOT NULL AND ${table.payoutType} = 'creator_payout'`
+      ),
+    // The drains retry failed rows as well as pending ones (Codex-2hxff.11).
+    index('idx_payouts_failed')
+      .on(table.userId, table.organizationId, table.attemptedAt)
+      .where(sql`${table.status} = 'failed'`),
+
     check('check_payouts_amount_positive', sql`${table.amountCents} > 0`),
     check(
       'check_payouts_status',
@@ -152,7 +181,7 @@ export const payouts = pgTable(
     ),
     check(
       'check_payouts_reason',
-      sql`${table.reason} IS NULL OR ${table.reason} IN ('connect_not_ready', 'connect_restricted', 'transfer_failed', 'min_transfer_floor')`
+      sql`${table.reason} IS NULL OR ${table.reason} IN ('connect_not_ready', 'connect_restricted', 'transfer_failed', 'min_transfer_floor', 'no_owner')`
     ),
     check(
       'check_payouts_type',
@@ -172,10 +201,14 @@ export const payouts = pgTable(
       sql`(CASE WHEN ${table.subscriptionId} IS NULL THEN 0 ELSE 1 END) + (CASE WHEN ${table.purchaseId} IS NULL THEN 0 ELSE 1 END) + (CASE WHEN ${table.courseSubscriptionId} IS NULL THEN 0 ELSE 1 END) <= 1`
     ),
     // platform_fee rows may have a null user_id (platform isn't a user);
-    // every other row type must name its recipient.
+    // every other row type must name its recipient — except the
+    // organisation's money while the organisation has no owner: it is held
+    // pending as `no_owner` and handed to the next owner support assigns
+    // (owner decision 2026-10-18, Codex-2hxff.37). It can never be paid
+    // without a payee: only a pending row may lack one.
     check(
       'check_payouts_user_required',
-      sql`(${table.payoutType} = 'platform_fee') OR (${table.userId} IS NOT NULL)`
+      sql`(${table.payoutType} = 'platform_fee') OR (${table.userId} IS NOT NULL) OR (${table.reason} = 'no_owner' AND ${table.status} = 'pending' AND ${table.payoutType} IN ('organization_fee', 'creator_payout_to_owner'))`
     ),
     // Invariant: a paid row must carry EITHER a stripe_transfer_id (subscription
     // pipeline + secondary org-fee transfer) OR a stripe_charge_id (destination-

@@ -694,6 +694,13 @@
       "when": 1791971537674,
       "tag": "0098_price_change_email_copy",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1792342202285,
+      "tag": "0099_complete_strong_guy",
+      "breakpoints": true
     }
   ]
 }

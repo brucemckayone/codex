@@ -143,6 +143,22 @@ export type {
   SaleListItem,
   SalesStats,
 } from './types';
+// The payouts ledger's write path: one row per slice per charge, reserved
+// before any transfer (Codex-2hxff.11, .12, .37)
+export {
+  findTransfersForPayouts,
+  type LedgerDeps,
+  markPayoutFailed,
+  type PendingReason,
+  type RecordSliceInput,
+  type RecordSliceOutcome,
+  recordPlatformFee,
+  recordSlice,
+  type SlicePayee,
+  type SlicePayoutType,
+  type SliceSource,
+  settlePayoutPaid,
+} from './utils/payout-ledger';
 // Who is paid the organisation's part of a sale (Codex-2hxff.2)
 export {
   type OrganisationPayee,

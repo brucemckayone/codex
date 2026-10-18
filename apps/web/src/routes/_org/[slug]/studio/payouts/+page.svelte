@@ -336,7 +336,7 @@
 
   /**
    * Human-readable reason string. The DB enum is `connect_not_ready |
-   * connect_restricted | transfer_failed | min_transfer_floor`.
+   * connect_restricted | transfer_failed | min_transfer_floor | no_owner`.
    */
   function reasonLabel(reason: string): string {
     switch (reason) {
@@ -348,6 +348,10 @@
         return 'Transfer failed';
       case 'min_transfer_floor':
         return 'Below minimum transfer';
+      // The organisation had no owner at the sale's time (Codex-2hxff.37);
+      // held for the next owner.
+      case 'no_owner':
+        return 'Waiting for an owner';
       default:
         return reason;
     }

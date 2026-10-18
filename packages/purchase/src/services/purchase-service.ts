@@ -28,7 +28,7 @@ import {
   PURCHASE_STATUS,
   stripeEnvMetadata,
 } from '@codex/constants';
-import { getConstraintName, isUniqueViolation, toIso } from '@codex/database';
+import { isUniqueViolation, toIso } from '@codex/database';
 import {
   content,
   contentAccess,
@@ -87,6 +87,11 @@ import {
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
+import {
+  type LedgerDeps,
+  recordPlatformFee,
+  recordSlice,
+} from '../utils/payout-ledger';
 import { resolveOrganisationPayee } from '../utils/resolve-organisation-payee';
 import { findActiveCreatorAgreementShare } from './agreement-share';
 import {
@@ -561,9 +566,9 @@ export class PurchaseService extends BaseService {
         });
 
         if (existing) {
-          // Already processed - return existing; skip payouts work since the
-          // first-write path already attempted it (idempotency on transfers
-          // is provided by the deterministic `${chargeId}_org_fee` key).
+          // Already processed - return existing. Its slices are re-recorded
+          // after the transaction (repairPurchasePayouts): the ledger skips
+          // the ones already there, so a replay never transfers twice.
           return { purchase: existing, isNew: false } as const;
         }
 
@@ -814,11 +819,11 @@ export class PurchaseService extends BaseService {
         } as const;
       });
 
-      // Step 6 (post-commit): write tri-party payouts ledger rows and execute
-      // the secondary org-fee transfer. Out-of-transaction so a Stripe API
-      // failure can't roll back the purchase + access grant. On a webhook
-      // replay (`isNew: false`) we skip — the first-write path already ran,
-      // and Stripe idempotency keys protect the transfer side either way.
+      // Step 6 (post-commit): record the slices in the payouts ledger and
+      // transfer the payable ones. Out-of-transaction so a Stripe API failure
+      // can't roll back the purchase + access grant. On a webhook replay
+      // (`isNew: false`) the slices are re-recorded from the purchase's stored
+      // split — the ledger skips the ones already there (Codex-2hxff.11).
       if (txResult.isNew && metadata.stripeChargeId) {
         await this.writePurchasePayouts({
           purchase: txResult.purchase,
@@ -827,6 +832,11 @@ export class PurchaseService extends BaseService {
           organizationId: txResult.organizationId,
           stripeChargeId: metadata.stripeChargeId,
         });
+      } else if (metadata.stripeChargeId) {
+        await this.repairPurchasePayouts(
+          txResult.purchase,
+          metadata.stripeChargeId
+        );
       } else if (txResult.isNew && !metadata.stripeChargeId) {
         // Codex-69t7c WP5 hardening (a): a completed purchase with no
         // stripeChargeId means writePurchasePayouts is skipped entirely, so
@@ -1182,6 +1192,13 @@ export class PurchaseService extends BaseService {
           organizationId: txResult.organizationId,
           stripeChargeId: metadata.stripeChargeId,
         });
+      } else if (metadata.stripeChargeId) {
+        // A replay re-records the slices; the ledger skips the ones already
+        // there (Codex-2hxff.11).
+        await this.repairPurchasePayouts(
+          txResult.purchase,
+          metadata.stripeChargeId
+        );
       } else if (txResult.isNew && !metadata.stripeChargeId) {
         const errorId = crypto.randomUUID();
         this.obs.error(
@@ -1210,29 +1227,26 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Write tri-party payouts ledger rows for a freshly-completed purchase and
-   * execute the secondary creator + organization transfers (Option B platform
-   * charge model — Codex-h69cg).
+   * Record a purchase's slices in the payouts ledger and pay the ones whose
+   * payee can be paid (Option B platform charge model — Codex-h69cg): the
+   * charge lands on the platform balance and secondary transfers, linked by
+   * `source_transaction`, carve out the creator and organisation slices.
    *
-   * Charge lands fully on the platform's balance. Two secondary transfers
-   * carve out the creator + org slices, both linked to the source charge via
-   * `source_transaction` (sum is bounded by the charge amount — see Stripe
-   * docs on multiple transfers from one source_transaction).
+   * Every slice goes through `recordSlice` (Codex-2hxff.11): its row is
+   * reserved by a unique key BEFORE any transfer, so calling this again for
+   * the same charge — a webhook replay, at any age — adds only a slice that
+   * is missing and never transfers twice.
    *
-   * - `platform_fee`: status='paid', retained on platform balance — no
-   *   transfer call. `stripeChargeId` satisfies the paid invariant.
-   * - `creator_payout`: `transfers.create` with `source_transaction=chargeId`
-   *   to the creator's Connect account. On success: status='paid' with
-   *   `stripeTransferId`. On Connect-not-ready: status='pending' with
-   *   reason='connect_not_ready'. On Stripe failure: status='failed' with
-   *   reason='transfer_failed'.
-   * - `organization_fee`: same shape as `creator_payout` but to the org's
-   *   Connect account. Same pending/failed branches.
+   * - `platform_fee`: paid, retained on the platform balance, no transfer.
+   * - `creator_payout`: transferred to the creator, or pending in their name
+   *   until their payouts are set up (they are emailed to finish).
+   * - `organization_fee`: transferred to whoever owned the organisation at
+   *   the payment time; pending in their name until they can be paid; held as
+   *   `no_owner` if it had no owner (Codex-2hxff.37).
    *
-   * Per-row error isolation: a failure in any one branch logs + continues so
-   * one bad transfer or insert never poisons the rest of the ledger writes.
-   * Mirrors the pattern enforced for subscription executeTransfers
-   * (Codex-vv77x).
+   * A failed transfer is recorded as `failed` and retried by the drains. A
+   * failed INSERT is thrown: the webhook answers by its cause and Stripe
+   * retries, and this runs again on the redelivery.
    */
   private async writePurchasePayouts(params: {
     purchase: Purchase;
@@ -1256,379 +1270,185 @@ export class PurchaseService extends BaseService {
       organizationId,
       stripeChargeId,
     } = params;
+    const ledger: LedgerDeps = {
+      db: this.db,
+      stripe: this.stripe,
+      obs: this.obs,
+      environment: this.environment,
+    };
+    const source = { sourceType: 'purchase', purchaseId: purchase.id } as const;
     const transferGroup = `purchase_${purchase.id}`;
-    const now = new Date();
 
-    // 1. Platform fee — retained on platform balance, no transfer call.
-    // Codex-g9owu: ON CONFLICT against the partial unique index
-    // uq_payouts_platform_fee_per_charge so concurrent webhook
-    // redeliveries don't double-insert.
-    if (revenueSplit.platformFeeCents > 0) {
-      try {
-        await this.db
-          .insert(payouts)
-          .values({
-            userId: null,
-            organizationId,
-            purchaseId: purchase.id,
-            amountCents: revenueSplit.platformFeeCents,
-            payoutType: 'platform_fee',
-            status: 'paid',
-            sourceType: 'purchase',
-            stripeChargeId,
-            transferGroup,
-            resolvedAt: now,
-          })
-          .onConflictDoNothing({
-            target: payouts.stripeChargeId,
-            where: sql`${payouts.payoutType} = 'platform_fee'`,
-          });
-      } catch (err) {
-        this.obs.error('Failed to insert platform_fee payout row', {
-          purchaseId: purchase.id,
-          stripeChargeId,
-          amountCents: revenueSplit.platformFeeCents,
-          error: err instanceof Error ? err.message : String(err),
-        });
+    await recordPlatformFee(ledger, {
+      amountCents: revenueSplit.platformFeeCents,
+      organizationId,
+      source,
+      stripeChargeId,
+      transferGroup,
+    });
+
+    // The creator's single account (one per user, Codex-69t7c).
+    if (revenueSplit.creatorPayoutCents > 0) {
+      const [creatorConnect] = await this.db
+        .select()
+        .from(stripeConnectAccounts)
+        .where(eq(stripeConnectAccounts.userId, creatorId))
+        .limit(1);
+      const outcome = await recordSlice(ledger, {
+        payoutType: 'creator_payout',
+        amountCents: revenueSplit.creatorPayoutCents,
+        organizationId,
+        source,
+        stripeChargeId,
+        transferGroup,
+        // The purchase charge already has a transfer group; Stripe rejects a
+        // second one alongside source_transaction.
+        sendTransferGroup: false,
+        payee: { userId: creatorId, account: creatorConnect },
+        idempotencyKey: `${stripeChargeId}_creator`,
+        metadata: { purchase_id: purchase.id },
+      });
+      // Only a freshly reserved row: a replay ('exists') never re-sends it.
+      if (outcome?.kind === 'pending') {
+        await this.notifyCreatorConnectNeeded(
+          creatorId,
+          organizationId,
+          revenueSplit.creatorPayoutCents
+        );
       }
     }
 
-    // Look up Connect accounts up front: the creator's single account (by
-    // userId — one account per user, Codex-69t7c) and the org payee's account
-    // (resolved by ownership at the payment time, below).
-    const [creatorConnect] =
-      revenueSplit.creatorPayoutCents > 0
-        ? await this.db
-            .select()
-            .from(stripeConnectAccounts)
-            .where(eq(stripeConnectAccounts.userId, creatorId))
-            .limit(1)
-        : [undefined];
+    // Codex-2hxff.2: the org slice goes to whoever owned the org at the
+    // payment time — the same instant the agreement lookup used. Orgless
+    // purchases never carve an org slice (forced to 0 upstream).
+    if (organizationId !== null && revenueSplit.organizationFeeCents > 0) {
+      const orgPayee = await resolveOrganisationPayee(
+        this.db,
+        organizationId,
+        purchase.purchasedAt ?? purchase.createdAt,
+        this.obs
+      );
+      await recordSlice(ledger, {
+        payoutType: 'organization_fee',
+        amountCents: revenueSplit.organizationFeeCents,
+        organizationId,
+        source,
+        stripeChargeId,
+        transferGroup,
+        sendTransferGroup: false,
+        payee: orgPayee
+          ? { userId: orgPayee.userId, account: orgPayee.account }
+          : null,
+        idempotencyKey: `${stripeChargeId}_org_fee`,
+        metadata: { purchase_id: purchase.id },
+      });
+    }
+  }
 
-    // WP-10 (Codex-69t7c.10): resolve creator email for connect-needed
-    // notification. Only fetched when we will attempt a creator_payout and
-    // the Connect account is not ready — avoids a DB round-trip on the hot
-    // paid path. Null is safe: notification is best-effort.
-    let creatorEmail: string | null = null;
+  /**
+   * A replayed webhook re-records an existing purchase's slices from the split
+   * stored on it. The ledger skips every slice already there, so this only
+   * adds one the first delivery never wrote — the worker died between
+   * committing the purchase and writing its slices, or an insert failed and
+   * the webhook was retried (Codex-2hxff.11). Until this, a replay skipped the
+   * ledger entirely and such a slice was never paid.
+   *
+   * A purchase refunded or disputed since is left alone: adding a slice now
+   * would pay out money the buyer has been given back.
+   */
+  private async repairPurchasePayouts(
+    purchase: Purchase,
+    stripeChargeId: string
+  ): Promise<void> {
     if (
-      revenueSplit.creatorPayoutCents > 0 &&
-      !creatorConnect?.chargesEnabled &&
-      this.mailer
+      purchase.status !== PURCHASE_STATUS.COMPLETED ||
+      purchase.refundedAt ||
+      purchase.disputedAt
     ) {
+      return;
+    }
+    const creatorId = await this.findPurchaseCreator(purchase);
+    if (!creatorId) {
+      this.obs.error('Cannot re-record a purchase: its creator is unknown', {
+        purchaseId: purchase.id,
+        contentId: purchase.contentId,
+        courseId: purchase.courseId,
+      });
+      return;
+    }
+    await this.writePurchasePayouts({
+      purchase,
+      revenueSplit: {
+        platformFeeCents: purchase.platformFeeCents,
+        organizationFeeCents: purchase.organizationFeeCents,
+        creatorPayoutCents: purchase.creatorPayoutCents,
+      },
+      creatorId,
+      organizationId: purchase.organizationId,
+      stripeChargeId,
+    });
+  }
+
+  /** The creator paid for a purchase: its content's, or its course's. */
+  private async findPurchaseCreator(
+    purchase: Purchase
+  ): Promise<string | undefined> {
+    if (purchase.contentId) {
+      const row = await this.db.query.content.findFirst({
+        where: eq(content.id, purchase.contentId),
+        columns: { creatorId: true },
+      });
+      return row?.creatorId;
+    }
+    if (purchase.courseId) {
+      const row = await this.db.query.courses.findFirst({
+        where: eq(courses.id, purchase.courseId),
+        columns: { creatorId: true },
+      });
+      return row?.creatorId;
+    }
+    return undefined;
+  }
+
+  /**
+   * WP-10 (Codex-69t7c.10): tell a creator money is waiting for them to set
+   * up payouts. Best-effort and fire-and-forget: a notification miss must
+   * never block or reverse the payout.
+   */
+  private async notifyCreatorConnectNeeded(
+    creatorId: string,
+    organizationId: string | null,
+    amountCents: number
+  ): Promise<void> {
+    if (!this.mailer) return;
+    try {
       const [creatorRow] = await this.db
         .select({ email: users.email })
         .from(users)
         .where(eq(users.id, creatorId))
         .limit(1);
-      creatorEmail = creatorRow?.email ?? null;
-    }
-
-    // Codex-2hxff.2: the org slice goes to whoever owned the org at the
-    // payment time — the same instant the agreement lookup used. Codex-69t7c
-    // WP5: only resolve when there IS an org — orgless purchases never carve an
-    // org slice (organizationFeeCents is forced to 0 upstream), so this stays
-    // undefined and the org-fee branch below is skipped.
-    const orgPayee =
-      organizationId !== null && revenueSplit.organizationFeeCents > 0
-        ? await resolveOrganisationPayee(
-            this.db,
-            organizationId,
-            purchase.purchasedAt ?? purchase.createdAt,
-            this.obs
-          )
-        : undefined;
-
-    // 2. Creator payout — secondary transfer with source_transaction.
-    if (revenueSplit.creatorPayoutCents > 0) {
-      await this.executePurchaseTransfer({
-        purchase,
+      if (!creatorRow?.email) return;
+      const dashboardUrl = this.webAppUrl
+        ? `${this.webAppUrl}/studio/earnings`
+        : '/studio/earnings';
+      void this.mailer({
+        to: creatorRow.email,
+        templateName: 'creator-connect-needed',
+        category: 'transactional',
+        userId: creatorId,
         organizationId,
-        amountCents: revenueSplit.creatorPayoutCents,
-        payoutType: 'creator_payout',
-        rowUserId: creatorId,
-        connect: creatorConnect,
-        stripeChargeId,
-        transferGroup,
-        idempotencyKey: `${stripeChargeId}_creator`,
-        now,
-        creatorEmail,
-      });
-    }
-
-    // 3. Organization fee — secondary transfer with source_transaction.
-    // Codex-69t7c WP5: `organizationId !== null` is part of the guard. Orgless
-    // (bi-party) purchases force organizationFeeCents to 0 upstream, so this
-    // branch is unreachable for them; the null-check also narrows
-    // `organizationId` to `string` for the resolvers below.
-    if (organizationId !== null && revenueSplit.organizationFeeCents > 0) {
-      // Codex-ed446: the org-fee payout row's recipient userId MUST be
-      // non-null (check_payouts_user_required). The payee is returned even
-      // when they have not onboarded Connect, so a pending organization_fee
-      // row still persists in their name and is swept later.
-      if (orgPayee) {
-        await this.executePurchaseTransfer({
-          purchase,
-          organizationId,
-          amountCents: revenueSplit.organizationFeeCents,
-          payoutType: 'organization_fee',
-          rowUserId: orgPayee.userId,
-          connect: orgPayee.account,
-          stripeChargeId,
-          transferGroup,
-          idempotencyKey: `${stripeChargeId}_org_fee`,
-          now,
-        });
-      } else {
-        // No Connect account AND no resolvable org owner — cannot attribute
-        // the slice to any user, so a ledger row is impossible. Surface loudly
-        // (data-integrity event) rather than emit a 23514-bound insert.
-        this.obs.error(
-          'Cannot record organization_fee payout: no Connect account and no org owner found',
-          {
-            purchaseId: purchase.id,
-            organizationId,
-            amountCents: revenueSplit.organizationFeeCents,
-          }
-        );
-      }
-    }
-  }
-
-  /**
-   * Execute a single secondary transfer (creator or organization slice) and
-   * write the corresponding payouts ledger row.
-   *
-   * Per-row error isolation: success → paid+stripeTransferId; Connect not
-   * ready → pending+connect_not_ready; Stripe failure → failed+transfer_failed.
-   * NEVER throws — the caller relies on this method's branches to keep going.
-   */
-  private async executePurchaseTransfer(params: {
-    purchase: Purchase;
-    // Codex-69t7c WP5: nullable for orgless (bi-party) creator_payout rows.
-    // Written verbatim onto the payouts row (payouts.organization_id is
-    // nullable). The org-fee path always passes a non-null org.
-    organizationId: string | null;
-    amountCents: number;
-    payoutType: 'creator_payout' | 'organization_fee';
-    rowUserId: string | null;
-    connect:
-      | {
-          userId: string;
-          stripeAccountId: string;
-          chargesEnabled: boolean;
-        }
-      | undefined;
-    stripeChargeId: string;
-    transferGroup: string;
-    idempotencyKey: string;
-    now: Date;
-    /** WP-10: creator email for connect-needed notification (creator_payout only). */
-    creatorEmail?: string | null;
-  }): Promise<void> {
-    const {
-      purchase,
-      organizationId,
-      amountCents,
-      payoutType,
-      rowUserId,
-      connect,
-      stripeChargeId,
-      transferGroup,
-      idempotencyKey,
-      now,
-      creatorEmail,
-    } = params;
-
-    if (!connect?.chargesEnabled) {
-      // Track whether the ledger row was freshly inserted so the notification
-      // is not re-fired on idempotent replay (webhook redelivery).
-      let freshInsert = false;
-      try {
-        await this.db.insert(payouts).values({
-          userId: rowUserId,
-          organizationId,
-          purchaseId: purchase.id,
-          amountCents,
-          payoutType,
-          status: 'pending',
-          sourceType: 'purchase',
-          reason: 'connect_not_ready',
-          stripeChargeId,
-          transferGroup,
-        });
-        freshInsert = true;
-      } catch (err) {
-        if (!isUniqueViolation(err)) {
-          this.obs.error(
-            `Failed to record pending ${payoutType} payout (connect_not_ready)`,
-            {
-              purchaseId: purchase.id,
-              organizationId,
-              amountCents,
-              // Codex-ed446: surface the constraint so a CHECK violation
-              // (e.g. check_payouts_user_required, 23514) on this money-ledger
-              // insert is logged distinctly from the suppressed 23505 dup.
-              constraint: getConstraintName(err),
-              error: err instanceof Error ? err.message : String(err),
-            }
-          );
-        }
-        // freshInsert stays false for two distinct cases:
-        // 1. isUniqueViolation: idempotent replay — row already exists (skip notification).
-        // 2. Other insert error: insert failed for a non-dup reason (also skip notification).
-        // Both leave freshInsert=false and correctly suppress the mailer.
-      }
-
-      // WP-10 (Codex-69t7c.10): fire creator-connect-needed notification
-      // fire-and-forget AFTER the ledger write. Only fires on FRESH insert
-      // (idempotency: if the row already existed this was a replay, not a new
-      // park). Only for creator_payout rows (not organization_fee). Failure is
-      // swallowed — a notification miss must NEVER block or reverse the payout.
-      if (
-        freshInsert &&
-        payoutType === 'creator_payout' &&
-        creatorEmail &&
-        rowUserId &&
-        this.mailer
-      ) {
-        try {
-          const amountFormatted = `£${(amountCents / 100).toFixed(2)}`;
-          const dashboardUrl = this.webAppUrl
-            ? `${this.webAppUrl}/studio/earnings`
-            : '/studio/earnings';
-          void this.mailer({
-            to: creatorEmail,
-            templateName: 'creator-connect-needed',
-            category: 'transactional',
-            userId: rowUserId,
-            organizationId,
-            data: {
-              creatorName: creatorEmail, // fallback; template can resolve display name
-              amountFormatted,
-              dashboardUrl,
-            },
-          });
-        } catch (err) {
-          // Swallow — notification failure must not surface in the payout path.
-          this.obs.warn('creator-connect-needed notification dispatch failed', {
-            purchaseId: purchase.id,
-            organizationId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-
-      return;
-    }
-
-    try {
-      // `source_transaction` links this transfer to the platform charge.
-      // Stripe permits multiple transfers from the same source_transaction
-      // as long as their sum does not exceed charge.amount, AND bypasses
-      // the T+2 available_on wait by tracking funds against the source.
-      //
-      // `transfer_group` is OMITTED here. Multiple transfers from the same
-      // source_transaction inherit Stripe's auto-generated transfer group;
-      // passing a custom one alongside source_transaction is rejected with
-      // "You cannot use transfer_group if the source_transaction already
-      // has one set." (Same constraint as Option A.) Charge traceability
-      // is preserved via metadata.stripe_charge_id and the row's own
-      // stripeChargeId column.
-      const transfer = await this.stripe.transfers.create(
-        {
-          amount: amountCents,
-          currency: CURRENCY.GBP,
-          destination: connect.stripeAccountId,
-          source_transaction: stripeChargeId,
-          metadata: {
-            purchase_id: purchase.id,
-            type: payoutType,
-            stripe_charge_id: stripeChargeId,
-            ...stripeEnvMetadata(this.environment),
-          },
+        data: {
+          creatorName: creatorRow.email, // fallback; template can resolve display name
+          amountFormatted: `£${(amountCents / 100).toFixed(2)}`,
+          dashboardUrl,
         },
-        { idempotencyKey }
-      );
-      try {
-        await this.db.insert(payouts).values({
-          userId: rowUserId,
-          organizationId,
-          purchaseId: purchase.id,
-          amountCents,
-          payoutType,
-          status: 'paid',
-          sourceType: 'purchase',
-          stripeTransferId: transfer.id,
-          stripeChargeId,
-          transferGroup,
-          resolvedAt: now,
-        });
-      } catch (insertErr) {
-        if (!isUniqueViolation(insertErr)) {
-          // Codex-69t7c WP5 hardening (b): the Stripe transfer ALREADY fired
-          // (real money moved to the Connect account) but the ledger row
-          // failed on a non-dup DB error — the ledger is now silently out of
-          // sync with Stripe. Emit a correlatable errorId so this money-moved
-          // / ledger-silent state is loud and reconcilable.
-          const errorId = crypto.randomUUID();
-          this.obs.error(
-            `${payoutType} transfer succeeded but payouts ledger insert failed`,
-            {
-              errorId,
-              purchaseId: purchase.id,
-              organizationId,
-              stripeTransferId: transfer.id,
-              destination: connect.stripeAccountId,
-              idempotencyKey,
-              amountCents,
-              constraint: getConstraintName(insertErr),
-              error:
-                insertErr instanceof Error
-                  ? insertErr.message
-                  : String(insertErr),
-            }
-          );
-        }
-      }
-    } catch (transferErr) {
-      // Codex-69t7c WP5 hardening (c): include idempotencyKey + destination
-      // (Connect account id) so a failed transfer can be traced to the exact
-      // Stripe idempotent request and recipient during reconciliation.
-      this.obs.error(`${payoutType} transfer failed`, {
-        purchaseId: purchase.id,
-        organizationId,
-        amountCents,
-        idempotencyKey,
-        destination: connect.stripeAccountId,
-        error:
-          transferErr instanceof Error
-            ? transferErr.message
-            : String(transferErr),
       });
-      try {
-        await this.db.insert(payouts).values({
-          userId: rowUserId,
-          organizationId,
-          purchaseId: purchase.id,
-          amountCents,
-          payoutType,
-          status: 'failed',
-          sourceType: 'purchase',
-          reason: 'transfer_failed',
-        });
-      } catch (insertErr) {
-        if (!isUniqueViolation(insertErr)) {
-          this.obs.error(`Failed to record failed ${payoutType} payout row`, {
-            purchaseId: purchase.id,
-            organizationId,
-            amountCents,
-            error:
-              insertErr instanceof Error
-                ? insertErr.message
-                : String(insertErr),
-          });
-        }
-      }
+    } catch (err) {
+      this.obs.warn('creator-connect-needed notification dispatch failed', {
+        creatorId,
+        organizationId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
