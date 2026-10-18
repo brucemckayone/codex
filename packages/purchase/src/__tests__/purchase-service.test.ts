@@ -2067,17 +2067,15 @@ describe('PurchaseService Integration', () => {
         stripe
       );
 
-      const purchase = await service.completePurchase(
-        `pi_ownerless_${Date.now()}`,
-        {
-          customerId: otherUserId,
-          contentId: content.id,
-          organizationId: ownerless.id,
-          amountPaidCents: 10000,
-          currency: 'gbp',
-          stripeChargeId: `ch_ownerless_${Date.now()}`,
-        }
-      );
+      const paymentIntentId = `pi_ownerless_${crypto.randomUUID().slice(0, 12)}`;
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: ownerless.id,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: `ch_ownerless_${crypto.randomUUID().slice(0, 12)}`,
+      });
 
       const rows = await db
         .select()
@@ -2100,6 +2098,28 @@ describe('PurchaseService Integration', () => {
             'organization_fee'
         );
       expect(orgTransfers).toHaveLength(0);
+
+      // A refund cancels it like any unpaid slice. The database must admit
+      // a CANCELLED row with no payee: refused, the row would stay pending,
+      // and the next owner would be paid for a refunded sale.
+      await service.processRefund(paymentIntentId, {
+        stripeRefundId: `re_ownerless_${crypto.randomUUID().slice(0, 12)}`,
+        refundAmountCents: 10000,
+      });
+      const [held] = await db
+        .select()
+        .from(schema.payouts)
+        .where(
+          and(
+            eq(schema.payouts.purchaseId, purchase.id),
+            eq(schema.payouts.payoutType, 'organization_fee')
+          )
+        );
+      expect(held).toMatchObject({
+        status: 'cancelled_by_refund',
+        userId: null,
+        reason: 'no_owner',
+      });
       await db
         .delete(schema.payouts)
         .where(eq(schema.payouts.purchaseId, purchase.id));
@@ -3077,6 +3097,163 @@ describe('PurchaseService Integration', () => {
       expect(afterByType.get('organization_fee')?.status).toBe(
         'cancelled_by_refund'
       );
+    });
+
+    // Codex-2hxff.11: a pending row is not proof that no money moved. Its
+    // transfer can have gone out — a drain sent it and then failed to mark
+    // it paid, or it was in flight when the refund arrived — and Stripe does
+    // not reverse transfers when a charge is refunded. The refund cancels the
+    // row first, then asks Stripe, and reverses what it finds.
+    it('refund reverses a transfer that went out for a row still pending', async () => {
+      const stubFeeConfig = {
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1500,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const landedOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'Landed Transfer Org',
+            slug: createUniqueSlug('landed-refund'),
+          })
+          .returning()
+      );
+      await setTestOrganisationPayee(db, landedOrg.id, userId);
+      const creatorAccount = `acct_landed_${crypto.randomUUID().slice(0, 12)}`;
+      await db.insert(schema.stripeConnectAccounts).values({
+        userId,
+        organizationId: landedOrg.id,
+        stripeAccountId: creatorAccount,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+      });
+
+      // What Stripe holds: the transfers made to an account, newest first.
+      const landed: Array<{
+        id: string;
+        destination: string;
+        created: number;
+        metadata: Record<string, string>;
+      }> = [];
+      const reversals: Array<{ id: string; amount: number | undefined }> = [];
+      const stubStripe = {
+        ...mockStripe,
+        transfers: {
+          create: vi.fn(),
+          list: vi.fn(async (params: { destination: string }) => ({
+            data: landed.filter((t) => t.destination === params.destination),
+            has_more: false,
+          })),
+          createReversal: vi.fn(async (id: string, p: { amount?: number }) => {
+            reversals.push({ id, amount: p.amount });
+            return { id: `trr_${id}` };
+          }),
+        },
+        refunds: { create: vi.fn() },
+      } as unknown as Stripe;
+      const landedService = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const media = await mediaService.create(
+        {
+          title: 'Landed Refund Content',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/landed-refund/master.m3u8',
+          thumbnailKey: 'thumbnails/landed-refund.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const content = await contentService.create(
+        {
+          organizationId: landedOrg.id,
+          title: 'Landed Refund Content',
+          slug: createUniqueSlug('landed-refund'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          priceCents: 1000,
+          tags: [],
+        },
+        userId
+      );
+      await contentService.publish(content.id, userId);
+      // Offline at sale time, so both slices are recorded pending.
+      await db
+        .update(schema.stripeConnectAccounts)
+        .set({ chargesEnabled: false, payoutsEnabled: false })
+        .where(eq(schema.stripeConnectAccounts.userId, userId));
+
+      const run = crypto.randomUUID().slice(0, 12);
+      const paymentIntentId = `pi_landed_${run}`;
+      const purchase = await landedService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: landedOrg.id,
+        amountPaidCents: 1000,
+        currency: 'gbp',
+        stripeChargeId: `ch_landed_${run}`,
+      });
+      const before = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      const creatorRow = before.find((r) => r.payoutType === 'creator_payout');
+      const orgRow = before.find((r) => r.payoutType === 'organization_fee');
+      expect(creatorRow?.status).toBe('pending');
+      expect(orgRow?.status).toBe('pending');
+      if (!creatorRow || !orgRow) throw new Error('slices missing');
+
+      // A drain sent the creator's slice; the row was never marked paid.
+      const landedId = `tr_landed_${run}`;
+      landed.push({
+        id: landedId,
+        destination: creatorAccount,
+        created: Math.floor(Date.now() / 1000),
+        metadata: { payout_id: creatorRow.id },
+      });
+
+      await landedService.processRefund(paymentIntentId, {
+        stripeRefundId: `re_landed_${run}`,
+        refundAmountCents: 1000,
+      });
+
+      // Reversed in full, once — and only the transfer that existed.
+      expect(reversals).toEqual([
+        { id: landedId, amount: creatorRow.amountCents },
+      ]);
+      const after = new Map(
+        (
+          await db
+            .select()
+            .from(schema.payouts)
+            .where(eq(schema.payouts.purchaseId, purchase.id))
+        ).map((r) => [r.id, r])
+      );
+      expect(after.get(creatorRow.id)).toMatchObject({
+        status: 'reversed',
+        stripeTransferId: landedId,
+      });
+      // The org's slice never had a transfer: cancelled, nothing reversed.
+      expect(after.get(orgRow.id)).toMatchObject({
+        status: 'cancelled_by_refund',
+        stripeTransferId: null,
+      });
     });
   });
 
@@ -5221,9 +5398,7 @@ describe('PurchaseService Integration', () => {
       );
 
       const surfaced = errorSpy.mock.calls.find(([msg]) =>
-        String(msg).includes(
-          'Transfer made but its payout row was not marked paid'
-        )
+        String(msg).includes('Transfer made but its payout row was not settled')
       );
       expect(
         surfaced,

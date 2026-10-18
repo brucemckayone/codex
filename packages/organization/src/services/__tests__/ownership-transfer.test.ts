@@ -496,7 +496,7 @@ describe('ownership transfer', () => {
         amountCents: 135,
         currency: 'gbp',
       };
-      const [heldHere, previousOwners, heldElsewhere] = await db
+      const [heldHere, previousOwners, heldElsewhere, refunded] = await db
         .insert(schema.payouts)
         .values([
           { ...held, organizationId: orgId, stripeChargeId: charge() },
@@ -508,38 +508,60 @@ describe('ownership transfer', () => {
             stripeChargeId: charge(),
           },
           { ...held, organizationId: other.id, stripeChargeId: charge() },
+          // A held slice whose sale was refunded: cancelled, never handed on.
+          {
+            ...held,
+            organizationId: orgId,
+            status: 'cancelled_by_refund' as const,
+            resolvedAt: new Date(),
+            stripeChargeId: charge(),
+          },
         ])
         .returning();
-      if (!heldHere || !previousOwners || !heldElsewhere) {
+      if (!heldHere || !previousOwners || !heldElsewhere || !refunded) {
         throw new Error('payouts not inserted');
       }
 
-      const change = await service.reassignOwner(orgId, adminId);
+      // In `finally`: a pending row left behind feeds every suite's sweep.
+      try {
+        const change = await service.reassignOwner(orgId, adminId);
 
-      expect(change.previousOwnerUserId).toBeNull();
-      const rowAfter = async (id: string) =>
-        db.query.payouts.findFirst({ where: (p, { eq }) => eq(p.id, id) });
-      expect(await rowAfter(heldHere.id)).toMatchObject({
-        userId: adminId,
-        reason: 'connect_not_ready',
-        status: 'pending',
-      });
-      expect(await rowAfter(previousOwners.id)).toMatchObject({
-        userId: ownerId,
-      });
-      expect(await rowAfter(heldElsewhere.id)).toMatchObject({
-        userId: null,
-        reason: 'no_owner',
-      });
-      await db
-        .delete(schema.payouts)
-        .where(
-          inArray(schema.payouts.id, [
-            heldHere.id,
-            previousOwners.id,
-            heldElsewhere.id,
-          ])
-        );
+        expect(change.previousOwnerUserId).toBeNull();
+        // Support is told what the new owner received.
+        expect(change.heldPayoutsReleased).toEqual({
+          count: 1,
+          amountCents: 135,
+        });
+        const rowAfter = async (id: string) =>
+          db.query.payouts.findFirst({ where: (p, { eq }) => eq(p.id, id) });
+        expect(await rowAfter(heldHere.id)).toMatchObject({
+          userId: adminId,
+          reason: 'connect_not_ready',
+          status: 'pending',
+        });
+        expect(await rowAfter(previousOwners.id)).toMatchObject({
+          userId: ownerId,
+        });
+        expect(await rowAfter(heldElsewhere.id)).toMatchObject({
+          userId: null,
+          reason: 'no_owner',
+        });
+        expect(await rowAfter(refunded.id)).toMatchObject({
+          userId: null,
+          status: 'cancelled_by_refund',
+        });
+      } finally {
+        await db
+          .delete(schema.payouts)
+          .where(
+            inArray(schema.payouts.id, [
+              heldHere.id,
+              previousOwners.id,
+              heldElsewhere.id,
+              refunded.id,
+            ])
+          );
+      }
     });
   });
 

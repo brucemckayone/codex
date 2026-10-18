@@ -9,7 +9,7 @@ import { isForeignStripeEnvironment } from '@codex/constants';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
-import { isTransientError } from './error-classification';
+import { describeRootCause, isTransientError } from './error-classification';
 
 /**
  * Webhook handler function type
@@ -102,8 +102,10 @@ export function createWebhookHandler(
     } catch (error) {
       const err = error as Error;
       // A service's wrap says only "An unexpected error occurred"; what went
-      // wrong is the error it replaced (Codex-2hxff.6).
-      const cause = err?.cause instanceof Error ? err.cause.message : undefined;
+      // wrong is the innermost error it replaced — the driver's, with its
+      // SQLSTATE — never drizzle's query text and bound values
+      // (Codex-2hxff.6).
+      const cause = describeRootCause(error);
 
       if (isTransientError(error)) {
         // Transient failure — return 500 so Stripe retries with exponential backoff

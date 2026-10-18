@@ -62,8 +62,16 @@ transient failure inside a service; every slice of every sale is one ledger row,
 reserved before its transfer, so nothing is paid twice or dropped; failed
 transfers are retried; an organisation's money while it has no owner is held for
 the next owner (owner decision 2026-10-18, "Hold it for the next owner", and
-"All four in one PR"). Its migration `0099` adds unique indexes, so production
-must hold no duplicate slices first — see the release checklist.
+"All four in one PR"); a refund freezes an unpaid slice and reverses any
+transfer that went out for it anyway. Its migration `0099` adds unique
+indexes, so production must hold no duplicate slices first: `db:migrate`
+checks this before applying anything and stops if it finds any — see the
+release checklist (R5). Failed rows written before PR 2 are not retried; they
+are reconciled by hand (R6).
+
+Follow-ups from its review: `Codex-2hxff.47` (a transfer to a replaced Connect
+account is not found), `Codex-2hxff.48` (failed rows retry forever) and
+`Codex-2hxff.49` (a replay re-splits with the current fees).
 
 Related open beads outside the epic: `Codex-in0g4` (refund reviews for subscriptions), `Codex-rtwpv` (fee writes not
 atomic), `Codex-sing6` (tier-change epic), `Codex-1ilxl` (account-wide seed

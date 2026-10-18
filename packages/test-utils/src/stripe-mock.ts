@@ -59,6 +59,7 @@ export function createMockStripe(): Stripe {
     metadata: unknown;
     [key: string]: unknown;
   }> = [];
+  const transfersByKey = new Map<string, (typeof createdTransfers)[number]>();
   const mock = {
     products: {
       create: vi
@@ -170,39 +171,80 @@ export function createMockStripe(): Stripe {
 
     // Transfers are remembered so `list` can return them: a drain looks up
     // the transfers it already made before re-sending a row (Codex-2hxff.11).
+    // Like Stripe, a repeated idempotency key returns the first transfer
+    // instead of making another — so a test that counts transfers can tell a
+    // key collision from a real second payment.
     transfers: {
       create: vi
         .fn()
-        .mockImplementation(async (params: Record<string, unknown>) => {
-          const transfer = {
-            id: nextId('tr'),
-            object: 'transfer',
-            created: Math.floor(Date.now() / 1000),
-            amount: params.amount ?? 0,
-            currency: params.currency ?? 'gbp',
-            destination: params.destination ?? 'acct_test_1',
-            source_transaction: params.source_transaction ?? null,
-            transfer_group: params.transfer_group ?? null,
-            metadata: params.metadata ?? {},
-          };
-          createdTransfers.unshift(transfer);
-          return transfer;
-        }),
-      // Newest first, like Stripe; honours destination + created.gte.
+        .mockImplementation(
+          async (
+            params: Record<string, unknown>,
+            options?: { idempotencyKey?: string }
+          ) => {
+            const key = options?.idempotencyKey;
+            const replayed = key ? transfersByKey.get(key) : undefined;
+            if (replayed) return replayed;
+            const transfer = {
+              id: nextId('tr'),
+              object: 'transfer',
+              created: Math.floor(Date.now() / 1000),
+              amount: params.amount ?? 0,
+              currency: params.currency ?? 'gbp',
+              destination: params.destination ?? 'acct_test_1',
+              source_transaction: params.source_transaction ?? null,
+              transfer_group: params.transfer_group ?? null,
+              metadata: params.metadata ?? {},
+            };
+            createdTransfers.unshift(transfer);
+            if (key) transfersByKey.set(key, transfer);
+            return transfer;
+          }
+        ),
+      // Newest first, like Stripe; honours destination, created.gte, limit
+      // (Stripe's default 10) and starting_after.
       list: vi
         .fn()
         .mockImplementation(
           async (
-            params: { destination?: string; created?: { gte?: number } } = {}
-          ) => ({
-            object: 'list',
-            data: createdTransfers.filter(
+            params: {
+              destination?: string;
+              created?: { gte?: number };
+              limit?: number;
+              starting_after?: string;
+            } = {}
+          ) => {
+            let matching = createdTransfers.filter(
               (t) =>
                 (!params.destination || t.destination === params.destination) &&
                 (params.created?.gte === undefined ||
                   t.created >= params.created.gte)
-            ),
-            has_more: false,
+            );
+            if (params.starting_after) {
+              const after = matching.findIndex(
+                (t) => t.id === params.starting_after
+              );
+              matching = after === -1 ? [] : matching.slice(after + 1);
+            }
+            const limit = params.limit ?? 10;
+            return {
+              object: 'list',
+              data: matching.slice(0, limit),
+              has_more: matching.length > limit,
+            };
+          }
+        ),
+      createReversal: vi
+        .fn()
+        .mockImplementation(
+          async (transferId: string, params: { amount?: number } = {}) => ({
+            id: nextId('trr'),
+            object: 'transfer_reversal',
+            transfer: transferId,
+            amount:
+              params.amount ??
+              createdTransfers.find((t) => t.id === transferId)?.amount ??
+              0,
           })
         ),
     },

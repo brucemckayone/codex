@@ -257,9 +257,40 @@ describe('createWebhookHandler', () => {
       expect(mock._obs.error).toHaveBeenCalledWith(
         expect.stringContaining('transient error'),
         expect.objectContaining({
-          cause: 'Connection terminated unexpectedly',
+          cause: expect.objectContaining({
+            message: 'Connection terminated unexpectedly',
+          }),
         })
       );
+    });
+
+    it('logs the driver error under a drizzle query error — never its SQL or bound values', async () => {
+      // drizzle 0.44 wraps the driver's error: its message is the query and
+      // every bound value, so it must never reach the log.
+      const pgError = Object.assign(
+        new Error('duplicate key value violates unique constraint'),
+        { code: '23505' }
+      );
+      const drizzleError = Object.assign(
+        new Error(
+          'Failed query: insert into "payouts" values ($1)\nparams: buyer@example.com'
+        ),
+        { name: 'DrizzleQueryError', cause: pgError }
+      );
+      const { context, mock } = createContext();
+
+      await viaService(drizzleError)(context);
+
+      const [, fields] = mock._obs.warn.mock.calls.at(-1) ?? [];
+      expect(fields).toMatchObject({
+        cause: {
+          name: 'Error',
+          message: 'duplicate key value violates unique constraint',
+          code: '23505',
+        },
+      });
+      expect(JSON.stringify(fields)).not.toContain('buyer@example.com');
+      expect(JSON.stringify(fields)).not.toContain('Failed query');
     });
 
     it('a Postgres serialization failure (SQLSTATE 40001) inside a service → 500', async () => {

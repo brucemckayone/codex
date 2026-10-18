@@ -88,7 +88,9 @@ import {
   PurchaseNotFoundError,
 } from '../errors';
 import {
+  cancelUnpaidPayoutForRefund,
   type LedgerDeps,
+  type RefundCancelOutcome,
   recordPlatformFee,
   recordSlice,
 } from '../utils/payout-ledger';
@@ -824,18 +826,25 @@ export class PurchaseService extends BaseService {
       // can't roll back the purchase + access grant. On a webhook replay
       // (`isNew: false`) the slices are re-recorded from the purchase's stored
       // split — the ledger skips the ones already there (Codex-2hxff.11).
-      if (txResult.isNew && metadata.stripeChargeId) {
-        await this.writePurchasePayouts({
-          purchase: txResult.purchase,
-          revenueSplit: txResult.revenueSplit,
-          creatorId: txResult.creatorId,
-          organizationId: txResult.organizationId,
-          stripeChargeId: metadata.stripeChargeId,
-        });
-      } else if (metadata.stripeChargeId) {
-        await this.repairPurchasePayouts(
+      const { stripeChargeId } = metadata;
+      if (txResult.isNew && stripeChargeId) {
+        await this.recordPayoutsAfterCommit(
           txResult.purchase,
-          metadata.stripeChargeId
+          stripeChargeId,
+          () =>
+            this.writePurchasePayouts({
+              purchase: txResult.purchase,
+              revenueSplit: txResult.revenueSplit,
+              creatorId: txResult.creatorId,
+              organizationId: txResult.organizationId,
+              stripeChargeId,
+            })
+        );
+      } else if (stripeChargeId) {
+        await this.recordPayoutsAfterCommit(
+          txResult.purchase,
+          stripeChargeId,
+          () => this.repairPurchasePayouts(txResult.purchase, stripeChargeId)
         );
       } else if (txResult.isNew && !metadata.stripeChargeId) {
         // Codex-69t7c WP5 hardening (a): a completed purchase with no
@@ -1184,20 +1193,27 @@ export class PurchaseService extends BaseService {
       // Post-commit payouts — REUSE the Option-B fan-out verbatim. A course
       // purchase row carries a `courseId` target; `writePurchasePayouts` only
       // reads `purchase.id` + the split, so it splits the charge identically.
-      if (txResult.isNew && metadata.stripeChargeId) {
-        await this.writePurchasePayouts({
-          purchase: txResult.purchase,
-          revenueSplit: txResult.revenueSplit,
-          creatorId: txResult.creatorId,
-          organizationId: txResult.organizationId,
-          stripeChargeId: metadata.stripeChargeId,
-        });
-      } else if (metadata.stripeChargeId) {
+      const { stripeChargeId } = metadata;
+      if (txResult.isNew && stripeChargeId) {
+        await this.recordPayoutsAfterCommit(
+          txResult.purchase,
+          stripeChargeId,
+          () =>
+            this.writePurchasePayouts({
+              purchase: txResult.purchase,
+              revenueSplit: txResult.revenueSplit,
+              creatorId: txResult.creatorId,
+              organizationId: txResult.organizationId,
+              stripeChargeId,
+            })
+        );
+      } else if (stripeChargeId) {
         // A replay re-records the slices; the ledger skips the ones already
         // there (Codex-2hxff.11).
-        await this.repairPurchasePayouts(
+        await this.recordPayoutsAfterCommit(
           txResult.purchase,
-          metadata.stripeChargeId
+          stripeChargeId,
+          () => this.repairPurchasePayouts(txResult.purchase, stripeChargeId)
         );
       } else if (txResult.isNew && !metadata.stripeChargeId) {
         const errorId = crypto.randomUUID();
@@ -1270,12 +1286,7 @@ export class PurchaseService extends BaseService {
       organizationId,
       stripeChargeId,
     } = params;
-    const ledger: LedgerDeps = {
-      db: this.db,
-      stripe: this.stripe,
-      obs: this.obs,
-      environment: this.environment,
-    };
+    const ledger = this.ledger();
     const source = { sourceType: 'purchase', purchaseId: purchase.id } as const;
     const transferGroup = `purchase_${purchase.id}`;
 
@@ -1346,6 +1357,44 @@ export class PurchaseService extends BaseService {
   }
 
   /**
+   * Run a purchase's post-commit ledger write. The purchase and its access
+   * grant have committed by now, so a failure is logged as exactly that —
+   * not as a purchase that failed — with an errorId, and rethrown: the
+   * webhook answers by its cause, and a redelivery's replay re-records the
+   * missing slices. Acknowledged (a permanent cause), the slices stay
+   * missing until someone replays the event, so the errorId is the handle.
+   */
+  private async recordPayoutsAfterCommit(
+    purchase: Purchase,
+    stripeChargeId: string,
+    write: () => Promise<void>
+  ): Promise<void> {
+    try {
+      await write();
+    } catch (error) {
+      this.obs.error(
+        'Purchase committed but its payout slices were not all recorded; a redelivery re-records them',
+        {
+          errorId: crypto.randomUUID(),
+          purchaseId: purchase.id,
+          stripeChargeId,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      throw error;
+    }
+  }
+
+  private ledger(): LedgerDeps {
+    return {
+      db: this.db,
+      stripe: this.stripe,
+      obs: this.obs,
+      environment: this.environment,
+    };
+  }
+
+  /**
    * A replayed webhook re-records an existing purchase's slices from the split
    * stored on it. The ledger skips every slice already there, so this only
    * adds one the first delivery never wrote — the worker died between
@@ -1365,6 +1414,14 @@ export class PurchaseService extends BaseService {
       purchase.refundedAt ||
       purchase.disputedAt
     ) {
+      // Said out loud: if the first delivery lost a slice, a PARTIAL refund
+      // leaves part of it owed, and only a person can settle that.
+      this.obs.warn('Replay left a refunded or disputed purchase unrepaired', {
+        purchaseId: purchase.id,
+        status: purchase.status,
+        refundedAt: purchase.refundedAt?.toISOString() ?? null,
+        disputedAt: purchase.disputedAt?.toISOString() ?? null,
+      });
       return;
     }
     const creatorId = await this.findPurchaseCreator(purchase);
@@ -1389,7 +1446,12 @@ export class PurchaseService extends BaseService {
     });
   }
 
-  /** The creator paid for a purchase: its content's, or its course's. */
+  /**
+   * The creator paid for a purchase: its content's, or its course's. Read by
+   * id alone, soft-deleted rows included, on purpose: the id comes from the
+   * purchase, the result never leaves the server, and the creator of content
+   * deleted since must still be paid.
+   */
   private async findPurchaseCreator(
     purchase: Purchase
   ): Promise<string | undefined> {
@@ -1914,6 +1976,10 @@ export class PurchaseService extends BaseService {
    * the payouts row stays `status='paid'` and a `refund_reviews` row
    * captures the clawback obligation for ops to resolve.
    *
+   * A pending or failed row is cancelled, then checked in Stripe for a
+   * transfer that went out anyway, which is reversed like a paid row's
+   * (`cancelUnpaidPayoutForRefund`, Codex-2hxff.11).
+   *
    * Idempotent: rows already at `status='reversed'` or
    * `'cancelled_by_refund'` are no-ops.
    */
@@ -1952,9 +2018,48 @@ export class PurchaseService extends BaseService {
         ? `_${refundAmountCents}`
         : '';
 
-    for (const row of rows) {
+    for (const listed of rows) {
+      let row: typeof payouts.$inferSelect = listed;
       if (row.status === 'reversed' || row.status === 'cancelled_by_refund') {
         continue;
+      }
+
+      // A row never marked paid is cancelled FIRST — so nothing can settle
+      // it afterwards — then Stripe is asked whether its transfer went out
+      // anyway: in flight when the refund arrived, or made but never
+      // recorded (Codex-2hxff.11). Such a transfer is reversed below like a
+      // paid row's.
+      let transferId = row.stripeTransferId;
+      if (row.status === 'pending' || row.status === 'failed') {
+        let cancel: RefundCancelOutcome;
+        try {
+          cancel = await cancelUnpaidPayoutForRefund(this.ledger(), row);
+        } catch (cancelErr) {
+          // Logged, not thrown: the purchase is already recorded refunded, so
+          // a redelivery stops at the 'already processed' check and would
+          // never come back to this row.
+          this.obs.error('Failed to cancel payouts row for refund', {
+            errorId: crypto.randomUUID(),
+            purchaseId: purchase.id,
+            payoutId: row.id,
+            error:
+              cancelErr instanceof Error
+                ? cancelErr.message
+                : String(cancelErr),
+          });
+          continue;
+        }
+        if (cancel.kind === 'changed') {
+          // Paid since it was read: reverse it as paid. Anything else was
+          // handled by a concurrent delivery of this refund.
+          if (cancel.row?.status !== 'paid') continue;
+          row = cancel.row;
+          transferId = row.stripeTransferId;
+        } else if (cancel.transferId === undefined) {
+          continue;
+        } else {
+          transferId = cancel.transferId;
+        }
       }
 
       // Reverse the Stripe transfer when one exists. Under Option B both
@@ -1969,7 +2074,7 @@ export class PurchaseService extends BaseService {
       // ledger stays truthful: status='paid' because the original transfer
       // really did succeed.
       let skipStatusFlip = false;
-      if (row.stripeTransferId) {
+      if (transferId) {
         const amount = reversalAmount(row.amountCents);
         if (amount === 0) {
           skipStatusFlip = true;
@@ -1982,7 +2087,7 @@ export class PurchaseService extends BaseService {
         } else {
           try {
             await this.stripe.transfers.createReversal(
-              row.stripeTransferId,
+              transferId,
               {
                 amount,
                 metadata: {
@@ -1993,7 +2098,7 @@ export class PurchaseService extends BaseService {
                 },
               },
               {
-                idempotencyKey: `${row.stripeTransferId}_reversal${idempotencySuffix}`,
+                idempotencyKey: `${transferId}_reversal${idempotencySuffix}`,
               }
             );
           } catch (reverseErr) {
@@ -2001,7 +2106,7 @@ export class PurchaseService extends BaseService {
             this.obs.error('Failed to reverse Stripe transfer for refund', {
               purchaseId: purchase.id,
               payoutId: row.id,
-              stripeTransferId: row.stripeTransferId,
+              stripeTransferId: transferId,
               attemptedReversalCents: amount,
               code: code ?? null,
               error:
@@ -2028,23 +2133,19 @@ export class PurchaseService extends BaseService {
 
       if (skipStatusFlip) continue;
 
-      // Codex-92ej7 / DQ-9: pending/failed rows (transfer never happened)
-      // become 'cancelled_by_refund' — explicitly cancels the obligation
-      // without claiming a transfer existed, and keeps them out of the
-      // sweep cron's pending-row scan. Paid rows (creator/org transfers
-      // AND platform_fee retention) become 'reversed' — money moved
-      // (either to Connect or onto the platform balance) and is now
-      // being undone.
-      const nextStatus =
-        row.status === 'pending' || row.status === 'failed'
-          ? ('cancelled_by_refund' as const)
-          : ('reversed' as const);
+      // Codex-92ej7 / DQ-9: a pending/failed row whose transfer never
+      // happened was cancelled above ('cancelled_by_refund') and never gets
+      // here. Every row that does moved money — a paid creator/org transfer,
+      // the platform's retained fee, or a cancelled row whose transfer had
+      // gone out — and becomes 'reversed', with its transfer recorded.
+      const nextStatus = 'reversed' as const;
 
       try {
         await this.db
           .update(payouts)
           .set({
             status: nextStatus,
+            stripeTransferId: transferId,
             resolvedAt: row.resolvedAt ?? new Date(),
             updatedAt: new Date(),
           })

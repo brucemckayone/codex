@@ -169,10 +169,13 @@ export const payouts = pgTable(
       .where(
         sql`${table.stripeChargeId} IS NOT NULL AND ${table.payoutType} = 'creator_payout'`
       ),
-    // The drains retry failed rows as well as pending ones (Codex-2hxff.11).
-    index('idx_payouts_failed')
+    // The drains read pending AND failed rows (Codex-2hxff.11). A partial
+    // index is usable only when the query's WHERE implies its predicate, and
+    // `status = 'pending' OR (status = 'failed' AND …)` implies this IN list
+    // but neither single-status index.
+    index('idx_payouts_unresolved')
       .on(table.userId, table.organizationId, table.attemptedAt)
-      .where(sql`${table.status} = 'failed'`),
+      .where(sql`${table.status} IN ('pending', 'failed')`),
 
     check('check_payouts_amount_positive', sql`${table.amountCents} > 0`),
     check(
@@ -205,10 +208,15 @@ export const payouts = pgTable(
     // organisation's money while the organisation has no owner: it is held
     // pending as `no_owner` and handed to the next owner support assigns
     // (owner decision 2026-10-18, Codex-2hxff.37). It can never be paid
-    // without a payee: only a pending row may lack one.
+    // without a payee: only a pending row may lack one — or one a refund
+    // cancelled, which nothing ever pays.
+    //
+    // COALESCE: with `reason` NULL, `reason = 'no_owner'` is NULL, and a
+    // CHECK that evaluates to NULL PASSES. Without it a payee-less org slice
+    // with no reason would be admitted.
     check(
       'check_payouts_user_required',
-      sql`(${table.payoutType} = 'platform_fee') OR (${table.userId} IS NOT NULL) OR (${table.reason} = 'no_owner' AND ${table.status} = 'pending' AND ${table.payoutType} IN ('organization_fee', 'creator_payout_to_owner'))`
+      sql`(${table.payoutType} = 'platform_fee') OR (${table.userId} IS NOT NULL) OR (COALESCE(${table.reason} = 'no_owner', false) AND ${table.status} IN ('pending', 'cancelled_by_refund') AND ${table.payoutType} IN ('organization_fee', 'creator_payout_to_owner'))`
     ),
     // Invariant: a paid row must carry EITHER a stripe_transfer_id (subscription
     // pipeline + secondary org-fee transfer) OR a stripe_charge_id (destination-
@@ -257,7 +265,8 @@ export type PayoutReason =
   | 'connect_not_ready'
   | 'connect_restricted'
   | 'transfer_failed'
-  | 'min_transfer_floor';
+  | 'min_transfer_floor'
+  | 'no_owner';
 export type PayoutType =
   | 'platform_fee'
   | 'organization_fee'

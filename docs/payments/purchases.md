@@ -74,7 +74,8 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
      [operations](operations.md#environments-and-stripe-accounts));
    - `payment_status` is not `paid` — **gap**: `Codex-2hxff.14`.
 3. The charge id is read from the PaymentIntent (`latest_charge`). If that
-   lookup fails **temporarily**, the webhook returns 500 so Stripe retries
+   lookup fails **temporarily** — an outage, or a Stripe key or permission
+   misconfiguration — the webhook returns 500 so Stripe retries
    rather than complete the purchase without it. If it fails permanently (the
    PaymentIntent cannot be read at all), the purchase still completes — the
    buyer has paid — and the unpaid slices are logged as an error for support,
@@ -107,7 +108,9 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
    pending is emailed to finish payouts setup — **gap**: `Codex-2hxff.7`.
 
 **Errors.** A transient failure (database connection, Stripe outage) returns
-500 and Stripe retries. If a buyer is charged twice
+500 and Stripe retries. A failure writing the slices after the purchase has
+committed is logged as exactly that, with an errorId; a transient one returns
+500 and the redelivery re-records the missing slices. If a buyer is charged twice
 for an item they already own, the second payment is refunded automatically —
 **gap**: `Codex-2hxff.14`.
 
@@ -161,7 +164,14 @@ refunds).
   ([access.md](access.md#streaming-revocation)) — **gap**: `Codex-2hxff.8`
   (no block written for one-off refunds);
 - every paid creator and organisation slice is reversed in full;
-- every pending slice becomes `cancelled_by_refund`.
+- every pending or failed slice becomes `cancelled_by_refund` — first, so
+  nothing can mark it paid afterwards. Its transfer may have gone out anyway
+  (in flight when the refund came, or made but never recorded), so Stripe is
+  then asked; a transfer found is reversed in full and the slice becomes
+  `reversed`. A transfer that lands after the cancel is reversed by whoever
+  sent it ([the ledger](connect-and-payouts.md#the-payouts-ledger)).
+- an organisation slice held for no owner is cancelled the same way, and is
+  never handed to the next owner.
 
 **A partial refund** (owner decision P-1, "Keep access"):
 

@@ -18,8 +18,17 @@
  *   drain re-sends any row it looks the transfer up in Stripe by the
  *   `payout_id` metadata (`findTransfersForPayouts`), so it settles the row
  *   instead of paying twice.
+ * - **A refund freezes the row, then asks Stripe.** It cancels a pending or
+ *   failed row first, so nothing can settle it afterwards, then looks for a
+ *   transfer that went out anyway and reverses it
+ *   (`cancelUnpaidPayoutForRefund`). A transfer that lands after the cancel
+ *   finds its row cancelled and is reversed by whoever sent it
+ *   (`settleTransfer`).
  * - **A failed transfer stays payable.** It keeps its charge id and is retried
- *   by the drains.
+ *   by the drains — if this ledger made the attempt. A row the old write
+ *   paths marked failed has no attempt on record (`last_retry_at` NULL) and
+ *   its transfer may have landed under metadata no lookup can match, so it
+ *   is left for a person to reconcile (release checklist R6).
  * - **Nothing is dropped.** A slice whose payee cannot be paid yet is a
  *   pending row in their name; the organisation's slices while it has no
  *   owner are pending `no_owner` rows with no payee, handed to the next owner
@@ -33,8 +42,23 @@
 
 import { CURRENCY, stripeEnvMetadata } from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
-import { payouts } from '@codex/database/schema';
-import { and, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
+import {
+  type Payout,
+  payouts,
+  stripeConnectAccounts,
+} from '@codex/database/schema';
+import { InternalServiceError } from '@codex/service-errors';
+import {
+  and,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import type Stripe from 'stripe';
 
 /** The subset of `ObservabilityClient` the ledger logs through. */
@@ -117,9 +141,52 @@ export type RecordSliceOutcome =
    * The transfer was made but the row could not be marked paid. It stays
    * pending and the next drain settles it from Stripe — never re-sends it.
    */
-  | { kind: 'unsettled'; payoutId: string; transferId: string };
+  | { kind: 'unsettled'; payoutId: string; transferId: string }
+  /**
+   * The transfer was made, but a refund cancelled the row while it was in
+   * flight: it was reversed (`reversed`), or could not be and is logged for
+   * a person to reverse.
+   */
+  | {
+      kind: 'surplus';
+      payoutId: string;
+      transferId: string;
+      reversed: boolean;
+    };
 
+/** The statuses a transfer may still settle. */
 const DRAINABLE: Array<'pending' | 'failed'> = ['pending', 'failed'];
+
+/**
+ * The rows a drain may send: pending, or failed by an attempt this ledger
+ * made. Every attempt it makes stamps `last_retry_at` (the reserve before
+ * the first transfer, each claim after); the write paths before
+ * Codex-2hxff.11 never did. Their failed rows are excluded: the transfer
+ * they recorded as failed may have landed — a timeout, a reset connection —
+ * under metadata with no `payout_id`, so no lookup can find it, and sending
+ * again could pay twice.
+ */
+export function isDrainablePayout(): SQL {
+  return sql`(${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL))`;
+}
+
+/**
+ * The ON CONFLICT arbiter for a slice: exactly its own per-charge index. A
+ * conflict there IS the replay. A violation of any other unique index still
+ * throws, instead of reading as "already recorded".
+ */
+function sliceConflictTarget(payoutType: SlicePayoutType) {
+  if (payoutType === 'creator_payout') {
+    return {
+      target: [payouts.stripeChargeId, payouts.userId],
+      where: sql`${payouts.stripeChargeId} IS NOT NULL AND ${payouts.payoutType} = 'creator_payout'`,
+    };
+  }
+  return {
+    target: [payouts.stripeChargeId, payouts.payoutType],
+    where: sql`${payouts.stripeChargeId} IS NOT NULL AND ${payouts.payoutType} IN ('organization_fee', 'creator_payout_to_owner')`,
+  };
+}
 
 function sourceColumns(source: SliceSource) {
   if ('purchaseId' in source) return { purchaseId: source.purchaseId };
@@ -148,7 +215,13 @@ export async function recordSlice(
   if (input.amountCents <= 0) return null;
   if (input.payee === null && input.payoutType === 'creator_payout') {
     // A creator slice always has its creator; only the owner can be missing.
-    throw new Error('A creator_payout slice must name its creator');
+    throw new InternalServiceError(
+      'A creator_payout slice must name its creator',
+      {
+        organizationId: input.organizationId,
+        stripeChargeId: input.stripeChargeId,
+      }
+    );
   }
 
   const reason = pendingReasonFor(input);
@@ -169,12 +242,27 @@ export async function recordSlice(
       // the row while its first transfer is still in flight.
       ...(reason === null ? { lastRetryAt: new Date() } : {}),
     })
-    // No target: any of the per-charge slice indexes. A conflict IS the
-    // replay — the first delivery already reserved this slice.
-    .onConflictDoNothing()
+    .onConflictDoNothing(sliceConflictTarget(input.payoutType))
     // Bare `.returning()`: the client union collapses the projected overload.
     .returning();
-  if (!reserved) return { kind: 'exists' };
+  if (!reserved) {
+    await reportReplayMismatch(deps, input);
+    return { kind: 'exists' };
+  }
+
+  if (reason === 'no_owner') {
+    deps.obs.error(
+      'Organisation has no owner: its slice is held for the next one. Support must assign an owner to release it',
+      {
+        errorId: crypto.randomUUID(),
+        payoutId: reserved.id,
+        organizationId: input.organizationId,
+        payoutType: input.payoutType,
+        amountCents: input.amountCents,
+        stripeChargeId: input.stripeChargeId,
+      }
+    );
+  }
 
   const account = input.payee?.account;
   if (reason !== null || !account) {
@@ -231,12 +319,12 @@ export async function recordSlice(
     return { kind: 'failed', payoutId: reserved.id };
   }
 
+  let settled: SettleOutcome;
   try {
-    await settlePayoutPaid(deps.db, reserved.id, transfer.id);
-    return { kind: 'paid', payoutId: reserved.id, transferId: transfer.id };
+    settled = await settleTransfer(deps, reserved.id, transfer.id);
   } catch (error) {
     deps.obs.error(
-      'Transfer made but its payout row was not marked paid; the next drain settles it from Stripe',
+      'Transfer made but its payout row was not settled; the next drain settles it from Stripe',
       {
         errorId: crypto.randomUUID(),
         payoutId: reserved.id,
@@ -251,6 +339,142 @@ export async function recordSlice(
       transferId: transfer.id,
     };
   }
+  if (settled === 'settled' || settled === 'already_settled') {
+    return { kind: 'paid', payoutId: reserved.id, transferId: transfer.id };
+  }
+  return {
+    kind: 'surplus',
+    payoutId: reserved.id,
+    transferId: transfer.id,
+    reversed: settled === 'surplus_reversed',
+  };
+}
+
+/**
+ * A replay found its slice already recorded. If the replay computed a
+ * different slice — another amount, or another payee — the recorded one
+ * stands and nothing is sent, but that is a split that changed between
+ * deliveries, not a plain replay, so it is logged for a person to check.
+ */
+async function reportReplayMismatch(
+  deps: LedgerDeps,
+  input: RecordSliceInput
+): Promise<void> {
+  const [recorded] = await deps.db
+    .select({
+      id: payouts.id,
+      amountCents: payouts.amountCents,
+      userId: payouts.userId,
+    })
+    .from(payouts)
+    .where(
+      and(
+        eq(payouts.stripeChargeId, input.stripeChargeId),
+        eq(payouts.payoutType, input.payoutType),
+        input.payoutType === 'creator_payout' && input.payee
+          ? eq(payouts.userId, input.payee.userId)
+          : undefined
+      )
+    )
+    .limit(1);
+  if (!recorded) return;
+  const payeeNow = input.payee?.userId ?? null;
+  // A no_owner row handed to a new owner names them now; that is the
+  // hand-over, not a mismatch.
+  const payeeDiffers =
+    recorded.userId !== payeeNow && !(payeeNow === null && recorded.userId);
+  if (recorded.amountCents === input.amountCents && !payeeDiffers) return;
+  deps.obs.error(
+    'A replay computed a different slice than the one recorded; the recorded slice stands',
+    {
+      errorId: crypto.randomUUID(),
+      payoutId: recorded.id,
+      payoutType: input.payoutType,
+      stripeChargeId: input.stripeChargeId,
+      recordedAmountCents: recorded.amountCents,
+      replayAmountCents: input.amountCents,
+      recordedUserId: recorded.userId,
+      replayUserId: payeeNow,
+    }
+  );
+}
+
+/** What became of a transfer once its row was told about it. */
+export type SettleOutcome =
+  /** The row is now paid by this transfer. */
+  | 'settled'
+  /** The row was already paid by this same transfer (a lookup found it). */
+  | 'already_settled'
+  /**
+   * The row no longer wanted it — a refund cancelled it, or another transfer
+   * paid it — so the transfer was reversed in full.
+   */
+  | 'surplus_reversed'
+  /** As above, but the reversal failed. Logged for a person to reverse. */
+  | 'surplus_unreversed';
+
+/**
+ * Record a transfer that has just been made against its row. If the row has
+ * moved on while the transfer was in flight — a refund cancelled it, or a
+ * concurrent attempt paid it — nothing will ever account for this money, so
+ * it is taken back with a full reversal. Its key is deterministic, so a
+ * retry never reverses twice.
+ *
+ * Throws only if the database does: the caller treats that as unsettled.
+ */
+export async function settleTransfer(
+  deps: LedgerDeps,
+  payoutId: string,
+  transferId: string,
+  now: Date = new Date()
+): Promise<SettleOutcome> {
+  if (await settlePayoutPaid(deps.db, payoutId, transferId, now)) {
+    return 'settled';
+  }
+  const [row] = await deps.db
+    .select({
+      status: payouts.status,
+      stripeTransferId: payouts.stripeTransferId,
+    })
+    .from(payouts)
+    .where(eq(payouts.id, payoutId))
+    .limit(1);
+  if (row?.stripeTransferId === transferId) return 'already_settled';
+
+  const context = {
+    errorId: crypto.randomUUID(),
+    payoutId,
+    stripeTransferId: transferId,
+    rowStatus: row?.status ?? null,
+    rowTransferId: row?.stripeTransferId ?? null,
+  };
+  try {
+    await deps.stripe.transfers.createReversal(
+      transferId,
+      {
+        metadata: {
+          payout_id: payoutId,
+          type: 'surplus_reversal',
+          ...stripeEnvMetadata(deps.environment),
+        },
+      },
+      { idempotencyKey: `${transferId}_reversal_surplus` }
+    );
+  } catch (error) {
+    deps.obs.error(
+      'A transfer landed on a payout that no longer wanted it, and could NOT be reversed. Reverse it by hand',
+      {
+        ...context,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+    return 'surplus_unreversed';
+  }
+  deps.obs.error(
+    'A transfer landed on a payout that no longer wanted it; reversed it',
+    context
+  );
+  return 'surplus_reversed';
 }
 
 /**
@@ -348,22 +572,148 @@ export async function claimPayoutAttempt(
   payoutId: string,
   now: Date = new Date()
 ): Promise<number | null> {
+  return (await claimPayoutAttempts(db, [payoutId], now)).get(payoutId) ?? null;
+}
+
+/**
+ * `claimPayoutAttempt` for a drain's whole group in one statement: the
+ * attempt number of every row it claimed, by row id. A row missing from the
+ * map was not claimable.
+ */
+export async function claimPayoutAttempts(
+  db: DatabaseClient,
+  payoutIds: ReadonlyArray<string>,
+  now: Date = new Date()
+): Promise<Map<string, number>> {
+  if (payoutIds.length === 0) return new Map();
   const leaseStart = new Date(
     now.getTime() - PAYOUT_ATTEMPT_LEASE_MINUTES * 60_000
   );
-  const [claimed] = await db
+  const claimed = await db
     .update(payouts)
     .set({ retryCount: sql`${payouts.retryCount} + 1`, lastRetryAt: now })
     .where(
       and(
-        eq(payouts.id, payoutId),
-        inArray(payouts.status, DRAINABLE),
+        inArray(payouts.id, [...payoutIds]),
+        isDrainablePayout(),
         isNotNull(payouts.userId),
         or(isNull(payouts.lastRetryAt), lt(payouts.lastRetryAt, leaseStart))
       )
     )
     .returning();
-  return claimed ? claimed.retryCount : null;
+  return new Map(claimed.map((row) => [row.id, row.retryCount]));
+}
+
+/**
+ * Renew a claimed row's lease just before its transfer is sent. A drain
+ * claims a whole group, looks it up in Stripe, then sends row by row; a long
+ * group can outlive the lease, and another drain may then have claimed the
+ * row and sent it under the next attempt's key. Returns false in that case
+ * (the attempt number has moved on): this drain must not send.
+ */
+export async function renewPayoutAttempt(
+  db: DatabaseClient,
+  payoutId: string,
+  attempt: number,
+  now: Date = new Date()
+): Promise<boolean> {
+  const renewed = await db
+    .update(payouts)
+    .set({ lastRetryAt: now })
+    .where(
+      and(
+        eq(payouts.id, payoutId),
+        eq(payouts.retryCount, attempt),
+        inArray(payouts.status, DRAINABLE)
+      )
+    )
+    .returning();
+  return renewed.length > 0;
+}
+
+/** What a refund did to a row that had not been marked paid. */
+export type RefundCancelOutcome =
+  /**
+   * Cancelled. `transferId` is a transfer Stripe made for it anyway — the
+   * caller reverses it like a paid row's.
+   */
+  | { kind: 'cancelled'; transferId: string | undefined }
+  /**
+   * The row changed since it was read: paid by a transfer that landed in
+   * the meantime, or already handled by a concurrent delivery. The current
+   * row is returned for the caller to handle as it now stands.
+   */
+  | { kind: 'changed'; row: Payout | undefined };
+
+/**
+ * Cancel a pending or failed row for a refund — FIRST, so nothing can settle
+ * it afterwards — then ask Stripe whether its transfer went out anyway. A
+ * row is pending with a transfer in flight between reserve and settle, and
+ * stays so if its settle fails; a failed row's transfer may have landed
+ * despite the error. Without the lookup the refund would cancel the row and
+ * leave that money with the payee (Stripe does not reverse transfers when a
+ * charge is refunded).
+ *
+ * A transfer that lands after the cancel is the sender's to reverse: its
+ * settle finds the row cancelled (`settleTransfer`).
+ *
+ * If the Stripe lookup itself fails the row stays cancelled — most cancelled
+ * rows never had a transfer — and the miss is logged for a person to check.
+ */
+export async function cancelUnpaidPayoutForRefund(
+  deps: LedgerDeps,
+  row: Payout,
+  now: Date = new Date()
+): Promise<RefundCancelOutcome> {
+  const [cancelled] = await deps.db
+    .update(payouts)
+    .set({
+      status: 'cancelled_by_refund',
+      resolvedAt: row.resolvedAt ?? now,
+      updatedAt: now,
+    })
+    .where(and(eq(payouts.id, row.id), inArray(payouts.status, DRAINABLE)))
+    .returning();
+  if (!cancelled) {
+    const [current] = await deps.db
+      .select()
+      .from(payouts)
+      .where(eq(payouts.id, row.id))
+      .limit(1);
+    return { kind: 'changed', row: current };
+  }
+
+  // No payee: a no_owner row, never sent.
+  if (!row.userId) return { kind: 'cancelled', transferId: undefined };
+
+  try {
+    const [account] = await deps.db
+      .select({ stripeAccountId: stripeConnectAccounts.stripeAccountId })
+      .from(stripeConnectAccounts)
+      .where(eq(stripeConnectAccounts.userId, row.userId))
+      .limit(1);
+    if (!account) return { kind: 'cancelled', transferId: undefined };
+    const found = await findTransfersForPayouts(
+      deps.stripe,
+      account.stripeAccountId,
+      [row],
+      deps.obs
+    );
+    return { kind: 'cancelled', transferId: found.get(row.id) };
+  } catch (error) {
+    deps.obs.error(
+      'A refund cancelled a payout but could not ask Stripe whether its transfer went out. Check it by hand',
+      {
+        errorId: crypto.randomUUID(),
+        payoutId: row.id,
+        userId: row.userId,
+        stripeChargeId: row.stripeChargeId,
+        amountCents: row.amountCents,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+    return { kind: 'cancelled', transferId: undefined };
+  }
 }
 
 /**
@@ -374,12 +724,18 @@ export async function claimPayoutAttempt(
  * prevent it.
  *
  * Matches the `payout_id` metadata every writer sets, and `pending_payout_id`
- * from drains before Codex-2hxff.11.
+ * from drains before Codex-2hxff.11. A row that matches more than one
+ * transfer was paid twice; that is logged (with `log`) for a person to
+ * reverse, and the newest is returned.
+ *
+ * Only the payee's CURRENT account is searched: a transfer to an account
+ * they have since replaced is not found (Codex-2hxff.47).
  */
 export async function findTransfersForPayouts(
   stripe: Stripe,
   destination: string,
-  rows: ReadonlyArray<{ id: string; createdAt: Date }>
+  rows: ReadonlyArray<{ id: string; createdAt: Date }>,
+  log?: LedgerLogger
 ): Promise<Map<string, string>> {
   const found = new Map<string, string>();
   if (rows.length === 0) return found;
@@ -401,9 +757,25 @@ export async function findTransfersForPayouts(
     for (const transfer of page.data) {
       const id =
         transfer.metadata?.payout_id ?? transfer.metadata?.pending_payout_id;
-      if (id && wanted.has(id) && !found.has(id)) found.set(id, transfer.id);
+      if (!id || !wanted.has(id)) continue;
+      const first = found.get(id);
+      if (first === undefined) {
+        found.set(id, transfer.id);
+      } else {
+        log?.error(
+          'A payout matches more than one Stripe transfer: it was paid twice',
+          {
+            errorId: crypto.randomUUID(),
+            payoutId: id,
+            destination,
+            stripeTransferIds: [first, transfer.id],
+          }
+        );
+      }
     }
     startingAfter = page.has_more ? page.data.at(-1)?.id : undefined;
+    // Stops once every row is found, so a second transfer is seen only on a
+    // page already read — enough to surface it, not a full audit.
   } while (startingAfter && found.size < wanted.size);
 
   return found;

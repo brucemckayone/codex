@@ -1,5 +1,5 @@
 {
-  "id": "efdb0859-9d79-43fa-965d-0e91b99aaadb",
+  "id": "93b95f52-a325-4fa8-9909-14480d1821f5",
   "prevId": "351d4063-4b6d-4403-bcf2-0abf2711bd6b",
   "version": "7",
   "dialect": "postgresql",
@@ -7512,8 +7512,8 @@
           "method": "btree",
           "with": {}
         },
-        "idx_payouts_failed": {
-          "name": "idx_payouts_failed",
+        "idx_payouts_unresolved": {
+          "name": "idx_payouts_unresolved",
           "columns": [
             {
               "expression": "user_id",
@@ -7535,7 +7535,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"payouts\".\"status\" = 'failed'",
+          "where": "\"payouts\".\"status\" IN ('pending', 'failed')",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -7638,7 +7638,7 @@
         },
         "check_payouts_user_required": {
           "name": "check_payouts_user_required",
-          "value": "(\"payouts\".\"payout_type\" = 'platform_fee') OR (\"payouts\".\"user_id\" IS NOT NULL) OR (\"payouts\".\"reason\" = 'no_owner' AND \"payouts\".\"status\" = 'pending' AND \"payouts\".\"payout_type\" IN ('organization_fee', 'creator_payout_to_owner'))"
+          "value": "(\"payouts\".\"payout_type\" = 'platform_fee') OR (\"payouts\".\"user_id\" IS NOT NULL) OR (COALESCE(\"payouts\".\"reason\" = 'no_owner', false) AND \"payouts\".\"status\" IN ('pending', 'cancelled_by_refund') AND \"payouts\".\"payout_type\" IN ('organization_fee', 'creator_payout_to_owner'))"
         },
         "check_payouts_paid_invariant": {
           "name": "check_payouts_paid_invariant",

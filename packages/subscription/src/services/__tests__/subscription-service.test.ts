@@ -26,7 +26,7 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import type { FeeConfigService } from '@codex/purchase';
+import { claimPayoutAttempt, type FeeConfigService } from '@codex/purchase';
 import { UnsupportedCurrencyError } from '@codex/service-errors';
 import {
   createMockStripe,
@@ -4069,6 +4069,59 @@ describe('SubscriptionService', () => {
       // We don't compute the pool here (private to the service); we
       // assert the split fairness contract instead.
       expect(total).toBeGreaterThan(0);
+    });
+
+    // Codex-2hxff.12: a creator has one slice per charge. Two agreements
+    // matching the invoice for the same creator (corrupted data: one
+    // terminated after the invoice, one active since before it) used to take
+    // BOTH shares off the org's slice while the second slice hit the unique
+    // index and was skipped — that share went nowhere. Now the first counts,
+    // the second is flagged, and the org slice keeps the rest.
+    it('a creator matching two agreements is paid one share; the other stays with the org', async () => {
+      const { org, tier1 } = await createFullOrg('split-dup-creator');
+      const dup = await seedCreatorWithConnect(org.id);
+      const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      await seedAgreement(org.id, dup, 5000, { effectiveFrom: dayAgo });
+      await seedAgreement(org.id, dup, 5000, {
+        // (creator, org, effective_from, type) is unique.
+        effectiveFrom: new Date(dayAgo.getTime() - 24 * 60 * 60 * 1000),
+        status: 'terminated',
+        terminatedAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      });
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      const chargeId = `ch_split_dup_${crypto.randomUUID().slice(0, 8)}`;
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: 'pi_dup' } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      const rows = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.stripeChargeId, chargeId));
+      const creatorRows = rows.filter((r) => r.payoutType === 'creator_payout');
+      const orgRow = rows.find((r) => r.payoutType === 'organization_fee');
+      // Post-platform 900: one 50% share to the creator, the rest to the org.
+      expect(creatorRows.map((r) => r.amountCents)).toEqual([450]);
+      expect(orgRow?.amountCents).toBe(450);
+      // Every penny of the sale is in the ledger.
+      expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(1000);
     });
 
     // Owner decision 2026-10-13 (Codex-2hxff.12): the pennies the creators'
@@ -9149,6 +9202,112 @@ describe('SubscriptionService', () => {
       expect(transferSpy).not.toHaveBeenCalled();
     });
 
+    // Codex-2hxff.37: the ownership hand-over moves an org's held no_owner
+    // slices to the new owner in its own transaction. A slice written while
+    // that transaction was committing is invisible to its UPDATE, and nothing
+    // else would ever move it; the sweep gives it to the owner it missed.
+    it('sweepUnresolvedPayouts re-homes a held slice the ownership hand-over missed', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM payouts`);
+      const org = takeFirst(
+        await db
+          .insert(schema.organizations)
+          .values({ name: 'Rehome Org', slug: createUniqueSlug('rehome') })
+          .returning()
+      );
+      const longAgo = new Date(Date.now() - 60 * 60 * 1000);
+      // Support assigned an owner an hour ago…
+      await db.insert(schema.organizationOwnershipPeriods).values({
+        organizationId: org.id,
+        userId: creatorId,
+        startedAt: longAgo,
+        source: 'support',
+      });
+      // …and this slice, held for no owner, landed just after.
+      const held = takeFirst(
+        await db
+          .insert(payoutsTable)
+          .values({
+            userId: null,
+            organizationId: org.id,
+            sourceType: 'subscription',
+            amountCents: 135,
+            currency: 'gbp',
+            status: 'pending',
+            reason: 'no_owner',
+            payoutType: 'organization_fee',
+            stripeChargeId: `ch_rehome_${crypto.randomUUID().slice(0, 12)}`,
+            attemptedAt: longAgo,
+          })
+          .returning()
+      );
+      stubAccountsRetrieve(true);
+
+      try {
+        await service.sweepUnresolvedPayouts(15);
+
+        const after = takeFirst(
+          await db
+            .select()
+            .from(payoutsTable)
+            .where(eq(payoutsTable.id, held.id))
+        );
+        expect(after).toMatchObject({
+          userId: creatorId,
+          reason: 'connect_not_ready',
+          status: 'pending',
+        });
+      } finally {
+        await db.delete(payoutsTable).where(eq(payoutsTable.id, held.id));
+      }
+    });
+
+    it('sweepUnresolvedPayouts leaves a held slice alone while the organisation still has no owner', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM payouts`);
+      const org = takeFirst(
+        await db
+          .insert(schema.organizations)
+          .values({
+            name: 'Still Ownerless',
+            slug: createUniqueSlug('ownerless-sweep'),
+          })
+          .returning()
+      );
+      const held = takeFirst(
+        await db
+          .insert(payoutsTable)
+          .values({
+            userId: null,
+            organizationId: org.id,
+            sourceType: 'subscription',
+            amountCents: 135,
+            currency: 'gbp',
+            status: 'pending',
+            reason: 'no_owner',
+            payoutType: 'organization_fee',
+            stripeChargeId: `ch_ownerless_${crypto.randomUUID().slice(0, 12)}`,
+            attemptedAt: new Date(Date.now() - 60 * 60 * 1000),
+          })
+          .returning()
+      );
+      stubAccountsRetrieve(true);
+
+      try {
+        await service.sweepUnresolvedPayouts(15);
+
+        const after = takeFirst(
+          await db
+            .select()
+            .from(payoutsTable)
+            .where(eq(payoutsTable.id, held.id))
+        );
+        expect(after).toMatchObject({ userId: null, reason: 'no_owner' });
+      } finally {
+        await db.delete(payoutsTable).where(eq(payoutsTable.id, held.id));
+      }
+    });
+
     it('regression: org-scoped (tri-party) drain still resolves correctly', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
       await db.execute(rawSql`DELETE FROM payouts`);
@@ -10113,6 +10272,89 @@ describe('SubscriptionService', () => {
       expect(rows[0]?.status).toBe('cancelled_by_refund');
     });
 
+    // Codex-2hxff.11: a pending row is not proof that nothing moved. Its
+    // transfer may have landed with the row never marked paid (a drain's
+    // update failed, or it was in flight when the refund came), and Stripe
+    // does not reverse transfers when a charge is refunded.
+    it('a PENDING row whose transfer went out anyway: the refund reverses it', async () => {
+      const chargeId = `ch_landed_${crypto.randomUUID().slice(0, 12)}`;
+      const { org, tier1 } = await createFullOrg(
+        `sub-landed-${Math.random().toString(36).slice(2, 8)}`
+      );
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      const [existing] = await db
+        .select()
+        .from(stripeConnectAccounts)
+        .where(eq(stripeConnectAccounts.userId, otherCreatorId));
+      const account =
+        existing?.stripeAccountId ??
+        takeFirst(
+          await db
+            .insert(stripeConnectAccounts)
+            .values({
+              userId: otherCreatorId,
+              stripeAccountId: `acct_landed_${crypto.randomUUID().slice(0, 12)}`,
+              status: 'active',
+              chargesEnabled: true,
+              payoutsEnabled: true,
+            })
+            .returning()
+        ).stripeAccountId;
+      const row = takeFirst(
+        await db
+          .insert(payoutsTable)
+          .values({
+            userId: otherCreatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 135,
+            payoutType: 'organization_fee',
+            status: 'pending',
+            reason: null,
+            stripeChargeId: chargeId,
+            transferGroup: `sub_${sub.id}`,
+            sourceType: 'subscription',
+            lastRetryAt: new Date(),
+          })
+          .returning()
+      );
+      const landed = await stripe.transfers.create({
+        amount: 135,
+        currency: 'gbp',
+        destination: account,
+        metadata: { payout_id: row.id },
+      });
+      const createReversal = stubCreateReversal();
+
+      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
+        refundAmountCents: null,
+        stripeRefundId: 're_landed',
+      });
+
+      expect(createReversal).toHaveBeenCalledTimes(1);
+      expect(createReversal).toHaveBeenCalledWith(
+        landed.id,
+        expect.objectContaining({ amount: 135 }),
+        { idempotencyKey: `${landed.id}_reversal_re_landed` }
+      );
+      const after = takeFirst(
+        await db.select().from(payoutsTable).where(eq(payoutsTable.id, row.id))
+      );
+      expect(after).toMatchObject({
+        status: 'reversed',
+        stripeTransferId: landed.id,
+      });
+    });
+
     it('reverses proportionally on a partial refund', async () => {
       const chargeId = `ch_partial_${Date.now()}`;
       await seedSubPayouts(chargeId);
@@ -10841,6 +11083,102 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       expect(after.resolvedAt).not.toBeNull();
     });
 
+    // Codex-2hxff.11: a drain claims its whole group, then sends row by row.
+    // If the group outlives the 10-minute lease, another drain can claim a
+    // row and send it under the next attempt's key; the first must then not
+    // send its own.
+    it('a drain that lost a row to another drain sends nothing for it', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedDrainScenario('drain-lease-lost');
+      const pending = takeFirst(
+        await db
+          .insert(payoutsTable)
+          .values({
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 1750,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
+          })
+          .returning()
+      );
+      // Between this drain's claim and its send, the lease runs out and a
+      // second drain claims the row.
+      vi.mocked(stripe.transfers.list).mockImplementationOnce((async () => {
+        await claimPayoutAttempt(
+          db,
+          pending.id,
+          new Date(Date.now() + 11 * 60_000)
+        );
+        return { object: 'list', data: [], has_more: false };
+      }) as never);
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 0, failed: 0 });
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
+      const after = takeFirst(
+        await db
+          .select()
+          .from(payoutsTable)
+          .where(eq(payoutsTable.id, pending.id))
+      );
+      // Still pending, held by the second drain's attempt.
+      expect(after).toMatchObject({ status: 'pending', retryCount: 2 });
+    });
+
+    it('a refund that cancels the row while the drain transfer is in flight: the transfer is reversed', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedDrainScenario('drain-refund-race');
+      const pending = takeFirst(
+        await db
+          .insert(payoutsTable)
+          .values({
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 1750,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
+          })
+          .returning()
+      );
+      vi.mocked(stripe.transfers.create).mockImplementationOnce(async () => {
+        await db
+          .update(payoutsTable)
+          .set({ status: 'cancelled_by_refund', resolvedAt: new Date() })
+          .where(eq(payoutsTable.id, pending.id));
+        return { id: 'tr_drain_late', amount: 1750 } as never;
+      });
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 0, failed: 0 });
+      expect(stripe.transfers.createReversal).toHaveBeenCalledWith(
+        'tr_drain_late',
+        expect.anything(),
+        { idempotencyKey: 'tr_drain_late_reversal_surplus' }
+      );
+      const after = takeFirst(
+        await db
+          .select()
+          .from(payoutsTable)
+          .where(eq(payoutsTable.id, pending.id))
+      );
+      expect(after.status).toBe('cancelled_by_refund');
+    });
+
     // Codex-2hxff.11 (PAY-07): this test used to pin "failed rows are left
     // untouched" — which stranded every failed transfer's money for good.
     // A failed row keeps its charge id and the sweep retries it.
@@ -10854,10 +11192,12 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
 
       const longAgo = new Date(Date.now() - 60 * 60 * 1000);
 
-      // Seed three rows: one paid (terminal-success), one failed (its
-      // transfer failed — still payable), one pending. The sweep pays the
-      // failed and pending rows and leaves the paid one alone.
-      const [paid, failed, pending] = (await db
+      // Seed four rows: one paid (terminal-success), one failed by an
+      // attempt this ledger made (still payable), one pending, and one failed
+      // by an old write path (no attempt on record — its transfer may have
+      // landed, so it is a person's to reconcile). The sweep pays the failed
+      // and pending rows and leaves the other two alone.
+      const [paid, failed, pending, legacyFailed] = (await db
         .insert(payoutsTable)
         .values([
           {
@@ -10883,6 +11223,8 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
             status: 'failed',
             reason: 'transfer_failed',
             attemptedAt: longAgo,
+            // The attempt that failed, an hour ago: its lease is over.
+            lastRetryAt: longAgo,
           },
           {
             userId: creatorId,
@@ -10895,8 +11237,20 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
             reason: 'connect_not_ready',
             attemptedAt: longAgo,
           },
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 400,
+            currency: 'gbp',
+            payoutType: 'creator_payout',
+            status: 'failed',
+            reason: 'transfer_failed',
+            attemptedAt: longAgo,
+          },
         ])
         .returning()) as [
+        typeof payoutsTable.$inferSelect,
         typeof payoutsTable.$inferSelect,
         typeof payoutsTable.$inferSelect,
         typeof payoutsTable.$inferSelect,
@@ -10943,6 +11297,24 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       expect(pendingAfter.status).toBe('paid');
       expect(pendingAfter.stripeTransferId).toMatch(/^tr_/);
       expect(pendingAfter.resolvedAt).not.toBeNull();
+
+      // The old write path's failed row: untouched, and nothing sent for it.
+      const legacyAfter = takeFirst(
+        await db
+          .select()
+          .from(payoutsTable)
+          .where(eq(payoutsTable.id, legacyFailed.id))
+      );
+      expect(legacyAfter).toMatchObject({ status: 'failed', retryCount: 0 });
+      expect(
+        vi
+          .mocked(stripe.transfers.create)
+          .mock.calls.some(
+            ([params]) =>
+              (params as { metadata?: { payout_id?: string } }).metadata
+                ?.payout_id === legacyFailed.id
+          )
+      ).toBe(false);
 
       // Silence unused-var (stripeAccountId only needed for setup).
       void stripeAccountId;

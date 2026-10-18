@@ -18,10 +18,16 @@
 
 import { ServiceError } from '@codex/service-errors';
 
-/** Stripe error type strings (from stripe-node SDK) */
+/**
+ * Stripe error type strings (from stripe-node SDK). Authentication and
+ * permission errors are a key or account misconfiguration, not bad data: a
+ * retry succeeds once it is fixed, so Stripe should keep redelivering.
+ */
 const TRANSIENT_STRIPE_TYPES = new Set([
   'StripeAPIError',
+  'StripeAuthenticationError',
   'StripeConnectionError',
+  'StripePermissionError',
   'StripeRateLimitError',
 ]);
 
@@ -41,6 +47,12 @@ const TRANSIENT_SQLSTATES = new Set([
   '57P03',
   '57014',
 ]);
+
+/**
+ * A five-character SQLSTATE: what Postgres puts on `code`. No SQLSTATE class
+ * starts with E, so a five-letter socket code (EPIPE, EBUSY) never matches.
+ */
+const SQLSTATE = /^[0-9A-DF-Z][0-9A-Z]{4}$/;
 
 /** Socket-level error codes, as Node and the Neon driver set them */
 const TRANSIENT_NETWORK_CODES = new Set([
@@ -105,7 +117,9 @@ function isTransientAt(error: unknown, depth: number): boolean {
       return true;
     }
 
-    // Postgres SQLSTATE or socket error code
+    // Postgres SQLSTATE or socket error code. A SQLSTATE is the database's
+    // own verdict: anything not listed is permanent, whatever the message
+    // says (a constraint's or column's name can read "timeout").
     const code = (error as { code?: unknown }).code;
     if (typeof code === 'string') {
       if (
@@ -115,6 +129,16 @@ function isTransientAt(error: unknown, depth: number): boolean {
       ) {
         return true;
       }
+      if (SQLSTATE.test(code)) return false;
+    }
+
+    // Drizzle's DrizzleQueryError has no code of its own; its message is the
+    // SQL and every bound value — user data, not a verdict. Judge it by the
+    // driver error it wraps.
+    const inner =
+      error.cause ?? (error as { sourceError?: unknown }).sourceError;
+    if (error.name === 'DrizzleQueryError') {
+      return inner !== undefined && isTransientAt(inner, depth + 1);
     }
 
     // Check message for network/DB transient patterns
@@ -128,8 +152,6 @@ function isTransientAt(error: unknown, depth: number): boolean {
     // A driver can keep the socket error underneath its own: `fetch failed`
     // carries `cause.code = 'ECONNRESET'`, and Neon's NeonDbError keeps
     // `sourceError`.
-    const inner =
-      error.cause ?? (error as { sourceError?: unknown }).sourceError;
     if (inner !== undefined) {
       return isTransientAt(inner, depth + 1);
     }
@@ -137,4 +159,36 @@ function isTransientAt(error: unknown, depth: number): boolean {
 
   // Conservative default: unknown errors are permanent
   return false;
+}
+
+/**
+ * The innermost error under `error`, for a log line: its name, its message,
+ * and the deepest string `code` on the way down (a SQLSTATE or socket code).
+ * Follows the same chain isTransientError reads. A DrizzleQueryError's own
+ * message — the SQL and its bound values — is never returned: it is never
+ * the innermost error, because it always wraps the driver's.
+ */
+export function describeRootCause(
+  error: unknown
+): { name: string; message: string; code: string | undefined } | undefined {
+  let current: unknown = error;
+  let code: string | undefined;
+  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+    if (!(current instanceof Error)) break;
+    // The deepest code wins: a ServiceError's own ('INTERNAL_ERROR') is the
+    // wrapper's, the driver's SQLSTATE is the answer.
+    const ownCode = (current as { code?: unknown }).code;
+    if (typeof ownCode === 'string') code = ownCode;
+    const inner =
+      current.cause ?? (current as { sourceError?: unknown }).sourceError;
+    if (!(inner instanceof Error)) {
+      if (current === error) return undefined;
+      if (current.name === 'DrizzleQueryError') {
+        return { name: current.name, message: '(query omitted)', code };
+      }
+      return { name: current.name, message: current.message, code };
+    }
+    current = inner;
+  }
+  return undefined;
 }

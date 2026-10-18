@@ -96,6 +96,11 @@ export interface OwnershipChange {
   ownerUserId: string;
   ownerSince: string;
   previousOwnerUserId: string | null;
+  /**
+   * The money held while the organisation had no owner, handed to the new
+   * owner by this change (Codex-2hxff.37). Zero for an ordinary transfer.
+   */
+  heldPayoutsReleased: { count: number; amountCents: number };
 }
 
 export interface OwnershipOfferDto {
@@ -917,7 +922,7 @@ async function moveOwnership(
   // drains pay them once the new owner's payouts are set up — the hourly sweep
   // at the latest. Rows earned under a previous OWNER never match: they
   // already name that owner, whose money it stays.
-  await tx
+  const released = await tx
     .update(payouts)
     .set({ userId: toUserId, reason: 'connect_not_ready', updatedAt: now })
     .where(
@@ -927,11 +932,18 @@ async function moveOwnership(
         eq(payouts.reason, 'no_owner'),
         eq(payouts.status, 'pending')
       )
-    );
+    )
+    // Bare `.returning()`: the `Database | DatabaseWs` union collapses the
+    // projected overload.
+    .returning();
 
   return {
     ownerUserId: toUserId,
     ownerSince: now.toISOString(),
     previousOwnerUserId: fromUserId,
+    heldPayoutsReleased: {
+      count: released.length,
+      amountCents: released.reduce((sum, row) => sum + row.amountCents, 0),
+    },
   };
 }

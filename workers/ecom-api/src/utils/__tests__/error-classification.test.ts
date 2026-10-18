@@ -125,11 +125,17 @@ describe('isTransientError', () => {
         false
       );
     });
+  });
 
-    it('should return false for Stripe authentication error', () => {
-      expect(
-        isTransientError(createStripeError('StripeAuthenticationError', 401))
-      ).toBe(false);
+  // A bad key or a missing permission is a deploy misconfiguration, not bad
+  // data: once fixed, Stripe's redelivery succeeds. Acknowledging it would
+  // drop the event — on checkout, a sale completed with no payout slices.
+  describe('Stripe configuration errors', () => {
+    it.each([
+      ['StripeAuthenticationError', 401],
+      ['StripePermissionError', 403],
+    ])('%s is transient', (type, status) => {
+      expect(isTransientError(createStripeError(type, status))).toBe(true);
     });
   });
 
@@ -229,6 +235,58 @@ describe('isTransientError', () => {
       ['42703', 'undefined column'],
     ])('%s (%s) is permanent', (code) => {
       expect(isTransientError(pg(code))).toBe(false);
+    });
+
+    it('a permanent SQLSTATE wins over a message that reads transient', () => {
+      // A constraint or column named after a timeout must not make a CHECK
+      // violation retry for three days.
+      const check = Object.assign(
+        new Error(
+          'new row violates check constraint "check_connection_timeout"'
+        ),
+        { code: '23514' }
+      );
+      expect(isTransientError(check)).toBe(false);
+    });
+
+    // EBUSY is five letters but no SQLSTATE (no class starts with E): it
+    // must not short-circuit to "permanent" before the message is read.
+    it('a five-letter socket code is not mistaken for a SQLSTATE', () => {
+      expect(
+        isTransientError(
+          Object.assign(new Error('socket timeout: resource busy'), {
+            code: 'EBUSY',
+          })
+        )
+      ).toBe(true);
+    });
+  });
+
+  describe("drizzle's query error", () => {
+    // drizzle 0.44: message = the SQL plus every bound value; cause = the
+    // driver's error.
+    const drizzle = (params: string, cause: Error) =>
+      Object.assign(new Error(`Failed query: select 1\nparams: ${params}`), {
+        name: 'DrizzleQueryError',
+        cause,
+      });
+
+    it('is judged by the driver error, never by its bound values', () => {
+      const permanent = Object.assign(new Error('violates check'), {
+        code: '23514',
+      });
+      expect(
+        isTransientError(
+          wrapError(drizzle('a user typed "connection timeout"', permanent))
+        )
+      ).toBe(false);
+    });
+
+    it('a dropped connection under it is transient', () => {
+      const dropped = Object.assign(new Error('Connection terminated'), {
+        code: '08006',
+      });
+      expect(isTransientError(wrapError(drizzle('x', dropped)))).toBe(true);
     });
   });
 

@@ -51,18 +51,22 @@ import {
 } from '@codex/database/schema';
 import {
   applyMinPlatformFeeFloor,
-  claimPayoutAttempt,
+  cancelUnpaidPayoutForRefund,
+  claimPayoutAttempts,
   type FeeConfig,
   type FeeConfigService,
   type FeeContext,
   findTransfersForPayouts,
+  isDrainablePayout,
   type LedgerDeps,
   markPayoutFailed,
   type OrganisationPayee,
   recordPlatformFee,
   recordSlice,
+  renewPayoutAttempt,
   resolveOrganisationPayee,
   settlePayoutPaid,
+  settleTransfer,
   withStaleCustomerRecovery,
 } from '@codex/purchase';
 import {
@@ -3584,8 +3588,9 @@ export class SubscriptionService extends BaseService {
         and(
           eq(payouts.userId, connectAccount.userId),
           // Failed transfers are retried too (Codex-2hxff.11): a `failed` row
-          // keeps its charge id and stays payable.
-          inArray(payouts.status, ['pending', 'failed']),
+          // keeps its charge id and stays payable — unless an old write path
+          // failed it (see isDrainablePayout).
+          isDrainablePayout(),
           // A non-null orgId resolves BOTH that org's rows AND the creator's
           // orgless rows in one pass; a null orgId (orgless-only caller, e.g.
           // the sweep's orgless group) resolves ONLY the orgless rows. `eq`
@@ -3646,13 +3651,29 @@ export class SubscriptionService extends BaseService {
       const sourceType: 'purchase' | 'subscription' = key.endsWith('purchase')
         ? 'purchase'
         : 'subscription';
+      // One group's failure (a Stripe lookup, a fee read) never blocks the
+      // next. Its claimed rows come free when the lease runs out.
       const groupResult = await this.transferPendingGroup(
         rows,
         sourceType,
         groupOrgId,
         stripeAccountId,
         connectAccount.userId
-      );
+      ).catch((error: unknown) => {
+        this.obs.error('resolvePendingPayouts: group failed', {
+          errorId: crypto.randomUUID(),
+          organizationId: groupOrgId,
+          userId: connectAccount.userId,
+          group: key,
+          rowCount: rows.length,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      });
+      if (!groupResult) {
+        failed += rows.length;
+        continue;
+      }
       resolved += groupResult.resolved;
       failed += groupResult.failed;
       creatorPaidCents += groupResult.creatorPaidCents;
@@ -3790,16 +3811,16 @@ export class SubscriptionService extends BaseService {
     // claimed row: its update may have failed after the money moved. Such a
     // row is settled, never sent again. The rest are sent with a key per
     // attempt — see claimPayoutAttempt for why one stable key is not enough.
-    const attempts = new Map<string, number>();
-    for (const payout of group) {
-      const attempt = await claimPayoutAttempt(this.db, payout.id);
-      if (attempt !== null) attempts.set(payout.id, attempt);
-    }
+    const attempts = await claimPayoutAttempts(
+      this.db,
+      group.map((payout) => payout.id)
+    );
     const claimed = group.filter((payout) => attempts.has(payout.id));
     const alreadySent = await findTransfersForPayouts(
       this.stripe,
       stripeAccountId,
-      claimed
+      claimed,
+      this.obs
     );
 
     const paid = (payout: (typeof group)[number]) => {
@@ -3817,7 +3838,33 @@ export class SubscriptionService extends BaseService {
           pendingPayoutId: payout.id,
           stripeTransferId: earlier,
         });
-        if (await settlePayoutPaid(this.db, payout.id, earlier)) paid(payout);
+        try {
+          if (await settlePayoutPaid(this.db, payout.id, earlier)) {
+            paid(payout);
+          }
+        } catch (error) {
+          // Still pending with its lease: the next drain finds the same
+          // transfer and settles it.
+          failed++;
+          this.obs.error('Could not settle a payout already transferred', {
+            errorId: crypto.randomUUID(),
+            pendingPayoutId: payout.id,
+            stripeTransferId: earlier,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        continue;
+      }
+
+      // The lease was taken for the whole group; renew it for this row
+      // before sending. If the group outlived it and another drain has
+      // claimed the row since, that drain sends it, not this one.
+      const attempt = attempts.get(payout.id) ?? 0;
+      if (!(await renewPayoutAttempt(this.db, payout.id, attempt))) {
+        this.obs.info('Pending payout claimed by another drain; skipping', {
+          pendingPayoutId: payout.id,
+          attempt,
+        });
         continue;
       }
 
@@ -3852,7 +3899,7 @@ export class SubscriptionService extends BaseService {
               ...stripeEnvMetadata(this.environment),
             },
           },
-          { idempotencyKey: `payout_${payout.id}_${attempts.get(payout.id)}` }
+          { idempotencyKey: `payout_${payout.id}_${attempt}` }
         );
       } catch (error) {
         failed++;
@@ -3875,7 +3922,14 @@ export class SubscriptionService extends BaseService {
       }
 
       try {
-        if (await settlePayoutPaid(this.db, payout.id, transfer.id)) {
+        // A refund may have cancelled the row while the transfer was in
+        // flight: settleTransfer then reverses it rather than leave it paid.
+        const settled = await settleTransfer(
+          this.ledger(),
+          payout.id,
+          transfer.id
+        );
+        if (settled === 'settled' || settled === 'already_settled') {
           paid(payout);
         }
       } catch (error) {
@@ -4292,6 +4346,10 @@ export class SubscriptionService extends BaseService {
    * stays on the platform balance. Idempotency key `${transferId}_reversal_<suffix>`
    * makes webhook replays and repeated partial refunds safe.
    *
+   * A pending or failed row is cancelled, then checked in Stripe for a
+   * transfer that went out anyway, which is reversed like a paid row's
+   * (`cancelUnpaidPayoutForRefund`, Codex-2hxff.11).
+   *
    * Idempotent: rows already `reversed`/`cancelled_by_refund` are skipped.
    *
    * insufficient_funds (creator already withdrew their slice): logged loudly with
@@ -4340,13 +4398,35 @@ export class SubscriptionService extends BaseService {
         ? `_${refundAmountCents}`
         : '';
 
-    for (const row of rows) {
+    for (const listed of rows) {
+      let row: typeof payouts.$inferSelect = listed;
       if (row.status === 'reversed' || row.status === 'cancelled_by_refund') {
         continue;
       }
 
+      // A row never marked paid is cancelled FIRST — so nothing can settle
+      // it afterwards — then Stripe is asked whether its transfer went out
+      // anyway: in flight when the refund arrived, or made but never
+      // recorded (Codex-2hxff.11). Such a transfer is reversed below like a
+      // paid row's.
+      let transferId = row.stripeTransferId;
+      if (row.status === 'pending' || row.status === 'failed') {
+        const cancel = await cancelUnpaidPayoutForRefund(this.ledger(), row);
+        if (cancel.kind === 'changed') {
+          // Paid since it was read: reverse it as paid. Anything else was
+          // handled by a concurrent delivery of this refund.
+          if (cancel.row?.status !== 'paid') continue;
+          row = cancel.row;
+          transferId = row.stripeTransferId;
+        } else if (cancel.transferId === undefined) {
+          continue;
+        } else {
+          transferId = cancel.transferId;
+        }
+      }
+
       let skipStatusFlip = false;
-      if (row.stripeTransferId) {
+      if (transferId) {
         const amount = reversalAmount(row.amountCents);
         if (amount === 0) {
           skipStatusFlip = true;
@@ -4362,7 +4442,7 @@ export class SubscriptionService extends BaseService {
         } else {
           try {
             await this.stripe.transfers.createReversal(
-              row.stripeTransferId,
+              transferId,
               {
                 amount,
                 metadata: {
@@ -4374,7 +4454,7 @@ export class SubscriptionService extends BaseService {
                 },
               },
               {
-                idempotencyKey: `${row.stripeTransferId}_reversal${idempotencySuffix}`,
+                idempotencyKey: `${transferId}_reversal${idempotencySuffix}`,
               }
             );
           } catch (reverseErr) {
@@ -4386,7 +4466,7 @@ export class SubscriptionService extends BaseService {
                 errorId,
                 chargeId,
                 payoutId: row.id,
-                stripeTransferId: row.stripeTransferId,
+                stripeTransferId: transferId,
                 attemptedReversalCents: amount,
                 code: code ?? null,
                 error:
@@ -4421,16 +4501,17 @@ export class SubscriptionService extends BaseService {
 
       if (skipStatusFlip) continue;
 
-      const nextStatus =
-        row.status === 'pending' || row.status === 'failed'
-          ? ('cancelled_by_refund' as const)
-          : ('reversed' as const);
+      // Every row left here moved money — a paid slice, the platform's
+      // retained fee, or a cancelled row whose transfer had gone out — and
+      // is now reversed. The transfer is recorded on the row either way.
+      const nextStatus = 'reversed' as const;
 
       try {
         await this.db
           .update(payouts)
           .set({
             status: nextStatus,
+            stripeTransferId: transferId,
             resolvedAt: row.resolvedAt ?? new Date(),
             updatedAt: new Date(),
           })
@@ -4582,6 +4663,23 @@ export class SubscriptionService extends BaseService {
       sharePercent: number;
     }> = [];
     for (const row of creatorAgreementsRaw) {
+      // A creator has one slice per charge (uq_payouts_creator_slice_per_charge).
+      // Two agreements matching the same instant — corrupted data — would
+      // take two shares off the organisation's slice and record only one,
+      // so the second share would go nowhere. Count the first; flag the rest.
+      if (creatorAgreements.some((a) => a.creatorId === row.creatorId)) {
+        this.obs.error(
+          'payout: creator matches more than one agreement; using the first',
+          {
+            errorId: crypto.randomUUID(),
+            agreementId: row.agreementId,
+            organizationId: orgId,
+            creatorId: row.creatorId,
+            subscriptionId,
+          }
+        );
+        continue;
+      }
       if (row.sharePercent === null) {
         this.obs.warn(
           'payout: agreement has no current_proposal_id; skipping',
@@ -4781,6 +4879,66 @@ export class SubscriptionService extends BaseService {
   //      fired by now if it was going to.
 
   /**
+   * Give an ownerless organisation's held slices to their next owner, now
+   * that it has one. `moveOwnership` hands them over as ownership moves,
+   * but a slice written while that hand-over was committing is invisible to
+   * its UPDATE (READ COMMITTED) and would wait forever; the sweep catches it
+   * (Codex-2hxff.37). Returns how many rows moved.
+   */
+  private async rehomeHeldPayouts(orgId: string): Promise<number> {
+    // Nobody owns it now: nothing can be re-homed (an owner who came and
+    // went would have taken the held rows with them).
+    if (!(await resolveOrganisationPayee(this.db, orgId))) return 0;
+
+    const held = await this.db
+      .select()
+      .from(payouts)
+      .where(
+        and(
+          eq(payouts.organizationId, orgId),
+          isNull(payouts.userId),
+          eq(payouts.reason, 'no_owner'),
+          eq(payouts.status, 'pending')
+        )
+      );
+    let rehomed = 0;
+    // Each row's next owner is decided by its own time; there are rarely
+    // any rows here, as the hand-over normally moves them.
+    for (const row of held) {
+      const payee = await resolveOrganisationPayee(
+        this.db,
+        orgId,
+        row.createdAt,
+        this.obs
+      );
+      if (!payee) continue;
+      const moved = await this.db
+        .update(payouts)
+        .set({
+          userId: payee.userId,
+          reason: 'connect_not_ready',
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(payouts.id, row.id),
+            isNull(payouts.userId),
+            eq(payouts.status, 'pending')
+          )
+        )
+        .returning();
+      rehomed += moved.length;
+    }
+    if (rehomed > 0) {
+      this.obs.info('Held payouts re-homed to the organisation owner', {
+        organizationId: orgId,
+        rehomed,
+      });
+    }
+    return rehomed;
+  }
+
+  /**
    * Sweep pending payouts rows older than `olderThanMinutes`,
    * group by (organizationId, userId), and attempt resolution for each
    * group whose Connect account now reports charges_enabled && payouts_enabled.
@@ -4809,8 +4967,9 @@ export class SubscriptionService extends BaseService {
       .from(payouts)
       .where(
         and(
-          // Failed transfers are retried too (Codex-2hxff.11).
-          inArray(payouts.status, ['pending', 'failed']),
+          // Failed transfers are retried too (Codex-2hxff.11), unless an old
+          // write path failed them (see isDrainablePayout).
+          isDrainablePayout(),
           lt(payouts.attemptedAt, threshold)
         )
       );
@@ -4842,6 +5001,30 @@ export class SubscriptionService extends BaseService {
       // The original `!group.organizationId` guard skipped every orgless group,
       // so the cron safety-net never resolved orgless rows — stranding money.
       if (!group.userId) {
+        // Only an ownerless organisation's held money has no payee (platform
+        // fees are paid, so never here). Nothing can drain it until support
+        // assigns an owner, so every sweep says so (Codex-2hxff.37).
+        if (group.organizationId) {
+          try {
+            const rehomed = await this.rehomeHeldPayouts(group.organizationId);
+            if (rehomed === 0) {
+              this.obs.warn(
+                'sweepUnresolvedPayouts: money held for an organisation with no owner',
+                { organizationId: group.organizationId }
+              );
+            }
+          } catch (error) {
+            errors++;
+            this.obs.error(
+              'sweepUnresolvedPayouts: re-homing held payouts failed',
+              {
+                errorId: crypto.randomUUID(),
+                organizationId: group.organizationId,
+                error: error instanceof Error ? error.message : String(error),
+              }
+            );
+          }
+        }
         groupsSkipped++;
         continue;
       }
