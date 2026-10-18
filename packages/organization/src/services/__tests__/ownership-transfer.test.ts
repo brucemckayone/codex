@@ -17,7 +17,7 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import {
   afterAll,
   beforeAll,
@@ -456,6 +456,90 @@ describe('ownership transfer', () => {
         IneligibleOwnershipRecipientError
       );
       await expectOwnerAndPeriodAgree(ownerId);
+    });
+
+    // Codex-2hxff.37 — owner decision 2026-10-18, "Hold it for the next
+    // owner": what an ownerless org earned is held as pending `no_owner` rows
+    // with no payee, and becomes the owner's that support assigns — in the
+    // same transaction as the ownership change. A previous owner's money stays
+    // theirs; another org's held money is untouched.
+    it("an ownerless org: its held money becomes the assigned owner's, nobody else's", async () => {
+      // Make the org ownerless: the owner left and their period closed.
+      await db
+        .update(schema.organizationMemberships)
+        .set({ role: 'member', status: 'inactive' })
+        .where(
+          and(
+            eq(schema.organizationMemberships.organizationId, orgId),
+            eq(schema.organizationMemberships.userId, ownerId)
+          )
+        );
+      await db
+        .update(schema.organizationOwnershipPeriods)
+        .set({ endedAt: new Date() })
+        .where(
+          and(
+            eq(schema.organizationOwnershipPeriods.organizationId, orgId),
+            isNull(schema.organizationOwnershipPeriods.endedAt)
+          )
+        );
+      const other = await service.create(
+        { name: 'Another Org', slug: createUniqueSlug('ownership-other') },
+        memberId
+      );
+      const charge = () => `ch_held_${crypto.randomUUID().slice(0, 12)}`;
+      const held = {
+        status: 'pending' as const,
+        reason: 'no_owner',
+        userId: null,
+        payoutType: 'organization_fee',
+        amountCents: 135,
+        currency: 'gbp',
+      };
+      const [heldHere, previousOwners, heldElsewhere] = await db
+        .insert(schema.payouts)
+        .values([
+          { ...held, organizationId: orgId, stripeChargeId: charge() },
+          {
+            ...held,
+            organizationId: orgId,
+            userId: ownerId,
+            reason: 'connect_not_ready',
+            stripeChargeId: charge(),
+          },
+          { ...held, organizationId: other.id, stripeChargeId: charge() },
+        ])
+        .returning();
+      if (!heldHere || !previousOwners || !heldElsewhere) {
+        throw new Error('payouts not inserted');
+      }
+
+      const change = await service.reassignOwner(orgId, adminId);
+
+      expect(change.previousOwnerUserId).toBeNull();
+      const rowAfter = async (id: string) =>
+        db.query.payouts.findFirst({ where: (p, { eq }) => eq(p.id, id) });
+      expect(await rowAfter(heldHere.id)).toMatchObject({
+        userId: adminId,
+        reason: 'connect_not_ready',
+        status: 'pending',
+      });
+      expect(await rowAfter(previousOwners.id)).toMatchObject({
+        userId: ownerId,
+      });
+      expect(await rowAfter(heldElsewhere.id)).toMatchObject({
+        userId: null,
+        reason: 'no_owner',
+      });
+      await db
+        .delete(schema.payouts)
+        .where(
+          inArray(schema.payouts.id, [
+            heldHere.id,
+            previousOwners.id,
+            heldElsewhere.id,
+          ])
+        );
     });
   });
 

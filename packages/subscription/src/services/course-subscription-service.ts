@@ -789,6 +789,17 @@ export class CourseSubscriptionService extends BaseService {
         throw new AlreadyCourseSubscribedError(userId, input.courseId);
       }
 
+      // The organisation owner must be payable, as for an organisation tier
+      // (Codex-2hxff.12): every invoice carries an org slice, and the course
+      // checkout used to open without this check.
+      const payee = await resolveOrganisationPayee(
+        this.db,
+        course.organizationId
+      );
+      if (!payee?.account?.chargesEnabled || !payee.account.payoutsEnabled) {
+        throw new ConnectAccountNotReadyError(course.organizationId);
+      }
+
       const stripePriceId =
         input.billingInterval === BILLING_INTERVAL.MONTH
           ? plan.stripePriceMonthlyId

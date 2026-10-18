@@ -35,7 +35,8 @@ import {
 } from '@codex/test-utils';
 import { and, eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { ConnectAccountNotReadyError } from '../../errors';
 import {
   COURSE_SUBSCRIPTION_METADATA_TYPE,
   CourseSubscriptionService,
@@ -430,5 +431,87 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
       { status: 'pending', reason: 'no_owner', userId: null }
     );
     expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(5000);
+  });
+
+  // Codex-2hxff.12: a course-plan checkout requires the organisation owner
+  // to be payable, as a tier checkout does — every invoice carries an org
+  // slice. It used to open without the check.
+  describe('checkout requires a payable owner', () => {
+    it('a payable owner: the checkout opens', async () => {
+      const { cId } = await makeCourseWithPlan();
+      const stripe = createMockStripe();
+      // createMockStripe ships no customers stubs; checkout resolves the
+      // buyer's Stripe Customer first (as in subscription-service.test.ts).
+      (stripe as unknown as { customers: unknown }).customers = {
+        list: vi.fn().mockResolvedValue({ data: [], has_more: false }),
+        create: vi.fn().mockImplementation(async () => ({
+          id: `cus_${randomUUID().slice(0, 8)}`,
+          created: Math.floor(Date.now() / 1000),
+          metadata: {},
+        })),
+      };
+      const checkout = new CourseSubscriptionService(
+        { db, environment: 'test' },
+        stripe
+      );
+      const result = await checkout.createCheckoutSession(subscriberId, {
+        courseId: cId,
+        billingInterval: 'month',
+        successUrl: 'http://lvh.me:3000/ok',
+        cancelUrl: 'http://lvh.me:3000/cancel',
+      });
+      expect(result.sessionUrl).toBeTruthy();
+    });
+
+    it('an owner who cannot be paid: refused before Stripe is asked', async () => {
+      const [ownerWithoutPayouts] = await seedTestUsers(db, 1);
+      if (!ownerWithoutPayouts) throw new Error('seed failed');
+      const [org] = await db
+        .insert(organizations)
+        .values({ name: 'Unpayable Org', slug: createUniqueSlug('cs-unpay') })
+        .returning({ id: organizations.id });
+      if (!org) throw new Error('failed org');
+      await db.insert(organizationMemberships).values({
+        organizationId: org.id,
+        userId: ownerWithoutPayouts,
+        role: 'owner',
+        status: 'active',
+      });
+      const [course] = await db
+        .insert(courses)
+        .values({
+          organizationId: org.id,
+          creatorId,
+          slug: createUniqueSlug('cs-unpay-course'),
+          title: 'Unpayable Course',
+          status: 'published',
+          priceCents: null,
+        })
+        .returning({ id: courses.id });
+      if (!course) throw new Error('failed course');
+      await db.insert(courseSubscriptionPlans).values({
+        courseId: course.id,
+        priceMonthly: 5000,
+        priceAnnual: 50000,
+        stripeProductId: `prod_${randomUUID().slice(0, 8)}`,
+        stripePriceMonthlyId: `price_m_${randomUUID().slice(0, 8)}`,
+        stripePriceAnnualId: `price_a_${randomUUID().slice(0, 8)}`,
+      });
+      const stripe = createMockStripe();
+      const gated = new CourseSubscriptionService(
+        { db, environment: 'test' },
+        stripe
+      );
+
+      await expect(
+        gated.createCheckoutSession(subscriberId, {
+          courseId: course.id,
+          billingInterval: 'month',
+          successUrl: 'http://lvh.me:3000/ok',
+          cancelUrl: 'http://lvh.me:3000/cancel',
+        })
+      ).rejects.toThrow(ConnectAccountNotReadyError);
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    });
   });
 });

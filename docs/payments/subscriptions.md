@@ -56,8 +56,7 @@ Before a Checkout Session is created:
 - the tier (or plan) must be active and belong to the organisation;
 - the buyer must not already have a live subscription to that organisation (or
   course): `active`, `past_due` or `cancelling`;
-- the organisation owner's payouts must be set up — for course plans too —
-  **gap**: `Codex-2hxff.12` (course checkout skips the check).
+- the organisation owner's payouts must be set up — for course plans too.
 
 The session uses `mode: 'subscription'`, the buyer's single Stripe Customer and
 the tier's Price for the chosen interval. Metadata on the session and on

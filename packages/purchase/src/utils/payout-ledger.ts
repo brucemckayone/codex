@@ -34,7 +34,7 @@
 import { CURRENCY, stripeEnvMetadata } from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
 import { payouts } from '@codex/database/schema';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 
 /** The subset of `ObservabilityClient` the ledger logs through. */
@@ -165,6 +165,9 @@ export async function recordSlice(
       reason,
       stripeChargeId: input.stripeChargeId,
       transferGroup: input.transferGroup,
+      // About to transfer: this opens the attempt lease, so no drain sends
+      // the row while its first transfer is still in flight.
+      ...(reason === null ? { lastRetryAt: new Date() } : {}),
     })
     // No target: any of the per-charge slice indexes. A conflict IS the
     // replay — the first delivery already reserved this slice.
@@ -315,18 +318,52 @@ export async function settlePayoutPaid(
  */
 export async function markPayoutFailed(
   db: DatabaseClient,
-  payoutId: string,
-  now: Date = new Date()
+  payoutId: string
 ): Promise<void> {
   await db
     .update(payouts)
-    .set({
-      status: 'failed',
-      reason: 'transfer_failed',
-      retryCount: sql`${payouts.retryCount} + 1`,
-      lastRetryAt: now,
-    })
+    .set({ status: 'failed', reason: 'transfer_failed' })
     .where(and(eq(payouts.id, payoutId), inArray(payouts.status, DRAINABLE)));
+}
+
+/** How long an attempt holds a row against every other drain. */
+export const PAYOUT_ATTEMPT_LEASE_MINUTES = 10;
+
+/**
+ * Claim a row for one drain attempt. Returns the attempt number, or `null`
+ * if the row is not drainable now: paid or cancelled since it was read, held
+ * for an owner (`no_owner`, no payee), or attempted by someone else within
+ * the lease.
+ *
+ * The attempt number makes the transfer's idempotency key
+ * (`payout_${id}_${attempt}`). One stable key is not enough: Stripe replays
+ * the FIRST result for a key for ~24h, errors included ("API v1 always
+ * returns the previously-saved response of the first API request, even if it
+ * was an error"), so a transient failure would block the row for a day. A
+ * new key per attempt is safe because the lease admits one attempt at a time
+ * and the drain looks for an earlier attempt's transfer before sending.
+ */
+export async function claimPayoutAttempt(
+  db: DatabaseClient,
+  payoutId: string,
+  now: Date = new Date()
+): Promise<number | null> {
+  const leaseStart = new Date(
+    now.getTime() - PAYOUT_ATTEMPT_LEASE_MINUTES * 60_000
+  );
+  const [claimed] = await db
+    .update(payouts)
+    .set({ retryCount: sql`${payouts.retryCount} + 1`, lastRetryAt: now })
+    .where(
+      and(
+        eq(payouts.id, payoutId),
+        inArray(payouts.status, DRAINABLE),
+        isNotNull(payouts.userId),
+        or(isNull(payouts.lastRetryAt), lt(payouts.lastRetryAt, leaseStart))
+      )
+    )
+    .returning();
+  return claimed ? claimed.retryCount : null;
 }
 
 /**

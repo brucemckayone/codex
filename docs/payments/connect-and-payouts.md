@@ -100,6 +100,11 @@ Owner decisions, 2026-10-13: "The proposed ownership model seems perfect to me."
   **pending** in their name and paid once they finish.
 - Money earned **before** a transfer stays with the previous owner, including
   anything still pending for them.
+- Money earned while the organisation has **no owner** (none was assigned, or
+  the owner left) is kept as pending `no_owner` rows with no payee, and goes
+  to the **next owner** — the moment ownership moves, in the same transaction
+  (owner decision 2026-10-18, "Hold it for the next owner";
+  `Codex-2hxff.37`). It is paid once they can be paid, like any pending row.
 
 The `organizations.primary_connect_account_user_id` pin is no longer read or
 written; the payee is the owner whose ownership period covers the sale's time
@@ -146,7 +151,7 @@ Creating an organisation opens its creator's period.
 | Creating a tier | The owner is payable |
 | Subscribing to a tier | The owner is payable |
 | Creating a course plan | The owner is payable |
-| Subscribing to a course plan | The owner is payable — **gap**: `Codex-2hxff.12` |
+| Subscribing to a course plan | The owner is payable |
 | Publishing priced content | The content's creator is payable — **gap**: `Codex-2hxff.14` (only checked when marked purchasable) |
 
 If an account later stops being payable (for example Stripe restricts it for
@@ -164,19 +169,33 @@ The `payouts` table holds one row for every slice of every sale and invoice.
 |---|---|
 | `payoutType` | `platform_fee`, `organization_fee`, `creator_payout`, `creator_payout_to_owner` |
 | `status` | `paid`, `pending`, `failed`, `reversed`, `cancelled_by_refund` |
-| `reason` (when not paid) | `connect_not_ready`, `connect_restricted`, `transfer_failed`, `min_transfer_floor` |
+| `reason` (when not paid) | `connect_not_ready` (no account), `connect_restricted` (an account that cannot take charges), `transfer_failed`, `min_transfer_floor`, `no_owner` (the organisation had no owner at the sale's time — the row has no payee yet); empty on a pending row while its transfer is in flight |
 | `sourceType` | `purchase` or `subscription` (course subscriptions use `subscription`) |
 | References | the charge (`stripeChargeId`), the transfer once made, the payee, the organisation (empty for orgless sales), the purchase or subscription |
 
 Rules:
 
-- **Exactly one row per slice per charge** — unique on the charge, slice type
-  and payee, so a replayed webhook cannot add a second — **gap**:
-  `Codex-2hxff.11` (only the platform fee row is unique today).
-- **Nothing is dropped.** A slice that cannot be paid yet is a pending row —
-  **gap**: `Codex-2hxff.12`.
+- **Exactly one row per slice per charge**, so a replayed webhook cannot add a
+  second. The organisation's slices (`organization_fee`,
+  `creator_payout_to_owner`) are unique on the charge and slice type whoever
+  the payee is; a creator's slice on the charge and the creator; the platform
+  fee on the charge.
+- **The row comes first.** A writer reserves a slice's row (`pending`) before
+  any money moves, transfers, then marks it `paid` — so a replay, at any age,
+  finds the row and sends nothing, and money never moves unrecorded. Every
+  writer goes through `recordSlice` (`packages/purchase/src/utils/payout-ledger.ts`).
+  A replayed purchase webhook re-records the purchase's slices from its stored
+  split, adding only a slice the first delivery never wrote — unless the
+  purchase has been refunded or disputed since.
+- **Nothing is dropped.** A slice that cannot be paid yet is a pending row in
+  its payee's name. The organisation's money while it has **no owner** is a
+  pending `no_owner` row with no payee (owner decision 2026-10-18, "Hold it for
+  the next owner"); it becomes the next owner's — see
+  [Organisation ownership](#organisation-ownership). The pennies left by
+  rounding creators' shares go to the organisation's slice
+  ([fees-and-splits](fees-and-splits.md#organisation-subscription-invoice)).
 - **A failed transfer stays payable.** A `failed` row keeps its charge id and is
-  retried by the drains — **gap**: `Codex-2hxff.11`.
+  retried by the drains.
 - **Rows are permanent.** Deleting a user or organisation never deletes ledger
   rows — **gap**: `Codex-2hxff.23` (they cascade today).
 - A `paid` or `reversed` row always carries a transfer or charge id and the time
@@ -190,10 +209,12 @@ Rules:
 - Subscription transfers also carry `transfer_group = sub_${subscriptionId}`.
 - Every transfer is GBP, and the currency is asserted before the call. A new
   transfer call site must hard-code GBP, call the assertion, and add a test.
-- A transfer and its ledger update never disagree: before re-sending a pending
-  row, the drain checks whether a transfer for it already exists. Stripe
-  forgets idempotency keys after about 24 hours, so the key alone is not enough
-  — **gap**: `Codex-2hxff.11`.
+- A transfer and its ledger update never disagree for long. Every transfer
+  carries the row's id as `payout_id` metadata. If the row cannot be marked
+  `paid` after its transfer, it stays pending, and before re-sending any row
+  the drain looks for that transfer in Stripe and settles the row instead.
+  Stripe forgets idempotency keys after about 24 hours, so the key alone is
+  not enough.
 
 | Transfer | Idempotency key |
 |---|---|
@@ -201,11 +222,16 @@ Rules:
 | Organisation slice | `${chargeId}_org_fee` |
 | Creator slice of a subscription invoice | `${chargeId}_creator_${creatorId}` |
 | Creator pool to the owner (no agreements) | `${chargeId}_creator_pool_owner` |
-| Draining a pending row | `payout_${payoutId}` |
+| Draining a pending or failed row | `payout_${payoutId}_${attempt}` |
 | Reversing a transfer for a refund | `${transferId}_reversal_${refundId}` |
 
 Never replace a key with something random or time-based "for freshness": that
-defeats replay safety.
+defeats replay safety. The drain's key changes per **attempt**, not per call:
+Stripe replays the first result for a key for about 24 hours, errors included,
+so one key per row would block a retry for a day. Each attempt first claims
+the row for 10 minutes (no other drain, and no write-time transfer still in
+flight, can send it meanwhile) and looks for an earlier attempt's transfer
+before sending.
 
 ## Releasing pending money
 
@@ -231,10 +257,12 @@ from every organisation and from orgless sales.
    the status but releases nothing.
 3. **The hourly sweep**, a safety net.
 
-**How a drain works.** Pending rows are grouped by organisation and source. A
-group below the minimum transfer waits. Each row is transferred with key
-`payout_${payoutId}` and marked `paid`. Failed rows are included — **gap**:
-`Codex-2hxff.11`. Rows held for an open dispute are skipped — **gap**:
+**How a drain works.** A payee's pending and failed rows are grouped by
+organisation and source. A group below the minimum transfer waits. Each row is
+claimed for one attempt; a transfer Stripe already made for it is found by its
+`payout_id` and settles it; the rest are transferred with key
+`payout_${payoutId}_${attempt}` and marked `paid`, or `failed` to be retried
+next time. Rows held for an open dispute are skipped — **gap**:
 `Codex-2hxff.9`. The payee is emailed (`payout-released`) — **gap**:
 `Codex-2hxff.13`.
 

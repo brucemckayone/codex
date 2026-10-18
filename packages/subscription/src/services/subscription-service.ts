@@ -51,14 +51,18 @@ import {
 } from '@codex/database/schema';
 import {
   applyMinPlatformFeeFloor,
+  claimPayoutAttempt,
   type FeeConfig,
   type FeeConfigService,
   type FeeContext,
+  findTransfersForPayouts,
   type LedgerDeps,
+  markPayoutFailed,
   type OrganisationPayee,
   recordPlatformFee,
   recordSlice,
   resolveOrganisationPayee,
+  settlePayoutPaid,
   withStaleCustomerRecovery,
 } from '@codex/purchase';
 import {
@@ -3579,7 +3583,9 @@ export class SubscriptionService extends BaseService {
       .where(
         and(
           eq(payouts.userId, connectAccount.userId),
-          eq(payouts.status, 'pending'),
+          // Failed transfers are retried too (Codex-2hxff.11): a `failed` row
+          // keeps its charge id and stays payable.
+          inArray(payouts.status, ['pending', 'failed']),
           // A non-null orgId resolves BOTH that org's rows AND the creator's
           // orgless rows in one pass; a null orgId (orgless-only caller, e.g.
           // the sweep's orgless group) resolves ONLY the orgless rows. `eq`
@@ -3778,7 +3784,44 @@ export class SubscriptionService extends BaseService {
       };
     }
 
+    // Codex-2hxff.11: claim each row for one attempt (a 10-minute lease —
+    // a second drain, or a write-time transfer still in flight, holds it off),
+    // then ask Stripe for any transfer an EARLIER attempt already made for a
+    // claimed row: its update may have failed after the money moved. Such a
+    // row is settled, never sent again. The rest are sent with a key per
+    // attempt — see claimPayoutAttempt for why one stable key is not enough.
+    const attempts = new Map<string, number>();
     for (const payout of group) {
+      const attempt = await claimPayoutAttempt(this.db, payout.id);
+      if (attempt !== null) attempts.set(payout.id, attempt);
+    }
+    const claimed = group.filter((payout) => attempts.has(payout.id));
+    const alreadySent = await findTransfersForPayouts(
+      this.stripe,
+      stripeAccountId,
+      claimed
+    );
+
+    const paid = (payout: (typeof group)[number]) => {
+      resolved++;
+      if (payout.payoutType === 'creator_payout') {
+        creatorPaidCents += payout.amountCents;
+        creatorPaidCount++;
+      }
+    };
+
+    for (const payout of claimed) {
+      const earlier = alreadySent.get(payout.id);
+      if (earlier) {
+        this.obs.info('Pending payout already transferred; settling it', {
+          pendingPayoutId: payout.id,
+          stripeTransferId: earlier,
+        });
+        if (await settlePayoutPaid(this.db, payout.id, earlier)) paid(payout);
+        continue;
+      }
+
+      let transfer: Stripe.Transfer;
       try {
         // GBP-only enforcement (Codex-yv18n) lives INSIDE the per-row
         // try/catch so a non-GBP row counts as a per-row failure (not a
@@ -3792,7 +3835,7 @@ export class SubscriptionService extends BaseService {
         // Codex-dbzkg: pass source_transaction when the row was funded
         // by a tracked platform charge so the retry pulls from THAT
         // charge's source-linked balance, not general platform balance.
-        const transfer = await this.stripe.transfers.create(
+        transfer = await this.stripe.transfers.create(
           {
             amount: payout.amountCents,
             currency: payoutCurrency,
@@ -3801,7 +3844,7 @@ export class SubscriptionService extends BaseService {
               ? { source_transaction: payout.stripeChargeId }
               : {}),
             metadata: {
-              pending_payout_id: payout.id,
+              payout_id: payout.id,
               subscription_id: payout.subscriptionId,
               purchase_id: payout.purchaseId,
               source_type: payout.sourceType,
@@ -3809,23 +3852,8 @@ export class SubscriptionService extends BaseService {
               ...stripeEnvMetadata(this.environment),
             },
           },
-          { idempotencyKey: `payout_${payout.id}` }
+          { idempotencyKey: `payout_${payout.id}_${attempts.get(payout.id)}` }
         );
-
-        await this.db
-          .update(payouts)
-          .set({
-            status: 'paid',
-            resolvedAt: new Date(),
-            stripeTransferId: transfer.id,
-          })
-          .where(eq(payouts.id, payout.id));
-
-        resolved++;
-        if (payout.payoutType === 'creator_payout') {
-          creatorPaidCents += payout.amountCents;
-          creatorPaidCount++;
-        }
       } catch (error) {
         failed++;
         this.obs.error('Failed to resolve pending payout', {
@@ -3835,8 +3863,34 @@ export class SubscriptionService extends BaseService {
           sourceType,
           error: (error as Error).message,
         });
-        // Codex-vv77x: per-row error isolation — one Stripe failure
-        // never blocks the remaining rows in the group.
+        // Codex-vv77x: per-row error isolation — one Stripe failure never
+        // blocks the remaining rows. The row stays payable for the next drain.
+        await markPayoutFailed(this.db, payout.id).catch((updateError) => {
+          this.obs.error('Could not mark the payout failed', {
+            pendingPayoutId: payout.id,
+            error: (updateError as Error).message,
+          });
+        });
+        continue;
+      }
+
+      try {
+        if (await settlePayoutPaid(this.db, payout.id, transfer.id)) {
+          paid(payout);
+        }
+      } catch (error) {
+        // The money moved; only the row is behind. The next drain finds the
+        // transfer by its payout_id and settles the row.
+        failed++;
+        this.obs.error(
+          'Pending payout transferred but its row was not marked paid; the next drain settles it',
+          {
+            errorId: crypto.randomUUID(),
+            pendingPayoutId: payout.id,
+            stripeTransferId: transfer.id,
+            error: (error as Error).message,
+          }
+        );
       }
     }
 
@@ -4754,7 +4808,11 @@ export class SubscriptionService extends BaseService {
       })
       .from(payouts)
       .where(
-        and(eq(payouts.status, 'pending'), lt(payouts.attemptedAt, threshold))
+        and(
+          // Failed transfers are retried too (Codex-2hxff.11).
+          inArray(payouts.status, ['pending', 'failed']),
+          lt(payouts.attemptedAt, threshold)
+        )
       );
 
     const groupsScanned = groups.length;

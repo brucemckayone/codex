@@ -29,6 +29,7 @@ import {
   organizationOwnershipOffers,
   organizationOwnershipPeriods,
   organizations,
+  payouts,
   stripeConnectAccounts,
   users,
 } from '@codex/database/schema';
@@ -908,6 +909,25 @@ async function moveOwnership(
     source,
     offerId,
   });
+
+  // Money the organisation earned while it had no owner is held as pending
+  // `no_owner` rows with no payee; it goes to the next owner (owner decision
+  // 2026-10-18, Codex-2hxff.37). Handed over in this transaction, so it moves
+  // exactly when ownership does. As ordinary pending rows in their name, the
+  // drains pay them once the new owner's payouts are set up — the hourly sweep
+  // at the latest. Rows earned under a previous OWNER never match: they
+  // already name that owner, whose money it stays.
+  await tx
+    .update(payouts)
+    .set({ userId: toUserId, reason: 'connect_not_ready', updatedAt: now })
+    .where(
+      and(
+        eq(payouts.organizationId, organizationId),
+        isNull(payouts.userId),
+        eq(payouts.reason, 'no_owner'),
+        eq(payouts.status, 'pending')
+      )
+    );
 
   return {
     ownerUserId: toUserId,

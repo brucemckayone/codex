@@ -41,6 +41,7 @@ import {
   vi,
 } from 'vitest';
 import {
+  claimPayoutAttempt,
   findTransfersForPayouts,
   type LedgerDeps,
   type RecordSliceInput,
@@ -280,7 +281,71 @@ describe('payouts ledger', () => {
       status: 'failed',
       reason: 'transfer_failed',
       stripeChargeId: input.stripeChargeId,
-      retryCount: 1,
+      // Only drain attempts count; the write-time attempt opened the lease.
+      retryCount: 0,
+    });
+    expect(row?.lastRetryAt).toBeInstanceOf(Date);
+  });
+
+  describe('claimPayoutAttempt — one drain attempt at a time', () => {
+    async function pendingRow(overrides: Partial<RecordSliceInput> = {}) {
+      const input = slice({
+        payee: { userId: creatorId, account: undefined },
+        ...overrides,
+      });
+      const outcome = await recordSlice(deps, input);
+      if (outcome?.kind !== 'pending') throw new Error('expected pending');
+      createdPayoutIds.push(outcome.payoutId);
+      return outcome.payoutId;
+    }
+
+    it('numbers each attempt, and admits no second one within the lease', async () => {
+      const id = await pendingRow();
+      const now = new Date();
+
+      expect(await claimPayoutAttempt(db, id, now)).toBe(1);
+      expect(
+        await claimPayoutAttempt(db, id, new Date(now.getTime() + 60_000))
+      ).toBeNull();
+      // Past the 10-minute lease the next attempt gets a new number — a new
+      // idempotency key, so Stripe does not replay the last attempt's error.
+      expect(
+        await claimPayoutAttempt(db, id, new Date(now.getTime() + 11 * 60_000))
+      ).toBe(2);
+    });
+
+    it('a row whose write-time transfer is in flight is not claimable', async () => {
+      // A payable slice reserves with the lease open; make the transfer hang
+      // so the row stays pending + in flight.
+      vi.mocked(stripe.transfers.create).mockImplementationOnce(
+        () => new Promise(() => {}) as never
+      );
+      const input = slice();
+      void recordSlice(deps, input);
+      await vi.waitFor(async () => {
+        expect(await rowsFor(input.stripeChargeId)).toHaveLength(1);
+      });
+      const [row] = await rowsFor(input.stripeChargeId);
+      if (!row) throw new Error('row missing');
+
+      expect(await claimPayoutAttempt(db, row.id)).toBeNull();
+    });
+
+    it('a no_owner row is never claimable — there is nobody to pay', async () => {
+      const id = await pendingRow({
+        payoutType: 'organization_fee',
+        payee: null,
+      });
+      expect(await claimPayoutAttempt(db, id)).toBeNull();
+    });
+
+    it('a paid or cancelled row is never claimable', async () => {
+      const id = await pendingRow();
+      await db
+        .update(payouts)
+        .set({ status: 'cancelled_by_refund' })
+        .where(eq(payouts.id, id));
+      expect(await claimPayoutAttempt(db, id)).toBeNull();
     });
   });
 

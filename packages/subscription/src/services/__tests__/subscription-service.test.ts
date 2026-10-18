@@ -7949,8 +7949,8 @@ describe('SubscriptionService', () => {
       for (const row of payoutRows) {
         const match = transferSpy.mock.calls.find(
           ([params]) =>
-            (params as { metadata?: { pending_payout_id?: string } }).metadata
-              ?.pending_payout_id === row.id
+            (params as { metadata?: { payout_id?: string } }).metadata
+              ?.payout_id === row.id
         );
         expect(match, `no transfer for payout ${row.id}`).toBeDefined();
         const [params] = match as unknown as [Record<string, unknown>];
@@ -7959,7 +7959,7 @@ describe('SubscriptionService', () => {
           currency: 'gbp',
           destination: stripeAccountId,
           metadata: {
-            pending_payout_id: row.id,
+            payout_id: row.id,
             subscription_id: row.subscriptionId,
             type: 'pending_payout_resolution',
           },
@@ -8030,8 +8030,8 @@ describe('SubscriptionService', () => {
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
       transferSpy.mockImplementation((params) => {
-        const metadata = params.metadata as { pending_payout_id?: string };
-        if (metadata?.pending_payout_id === failingPayoutId) {
+        const metadata = params.metadata as { payout_id?: string };
+        if (metadata?.payout_id === failingPayoutId) {
           return Promise.reject(new Error('Stripe transfer rejected (test)'));
         }
         return Promise.resolve({
@@ -8179,14 +8179,16 @@ describe('SubscriptionService', () => {
       expect(transferSpy).toHaveBeenCalledTimes(2);
 
       // Every transfers.create call MUST pass `{ idempotencyKey }` as its
-      // 2nd argument, deterministically derived from the row id. Stripe
-      // dedupes on the key, so a re-attempt after a crash-before-commit
-      // returns the original Transfer instead of creating a second one.
+      // 2nd argument, derived from the row id AND the attempt number
+      // (Codex-2hxff.11): Stripe replays the FIRST result for a key for
+      // ~24h, errors included, so one stable key would block a retry for a
+      // day. A crash-before-commit is caught by the drain's Stripe lookup
+      // (see the replay test below), not by key reuse.
       for (const row of payoutRows) {
         const match = transferSpy.mock.calls.find(
           ([params]) =>
-            (params as { metadata?: { pending_payout_id?: string } }).metadata
-              ?.pending_payout_id === row.id
+            (params as { metadata?: { payout_id?: string } }).metadata
+              ?.payout_id === row.id
         );
         expect(match, `no transfer for payout ${row.id}`).toBeDefined();
         const [, options] = match as [
@@ -8194,11 +8196,16 @@ describe('SubscriptionService', () => {
           { idempotencyKey?: string } | undefined,
         ];
         expect(options).toBeDefined();
-        expect(options?.idempotencyKey).toBe(`payout_${row.id}`);
+        expect(options?.idempotencyKey).toBe(`payout_${row.id}_1`);
       }
     });
 
-    it('replay safety: clearing resolvedAt and re-running yields the SAME idempotencyKey per row (Stripe-side dedupe contract)', async () => {
+    // Codex-2hxff.11 (SUB-02) — the bead's VERIFY: "simulate the
+    // post-transfer update failing → a re-drain after key expiry finds the
+    // existing transfer and does not transfer again". The drain used to rely
+    // on re-sending the SAME key, which Stripe forgets after ~24h: past that,
+    // a second real transfer.
+    it('replay safety: a row whose paid-update never committed is settled from Stripe on the next drain — never transferred twice', async () => {
       const { org, sub, stripeAccountId } =
         await seedConnectAndSubscription('90ocz-idem-replay');
 
@@ -8245,43 +8252,49 @@ describe('SubscriptionService', () => {
         .sort();
       expect(firstKeys.every((k) => typeof k === 'string')).toBe(true);
 
-      // Simulate the worst-case replay: DB UPDATE never committed
-      // (e.g. worker crashed between Stripe success and DB write), so
-      // the rows revert to unresolved and the next account.updated
-      // webhook triggers a second pass. Defence-in-depth requires the
-      // 2nd pass to pass the SAME idempotency key per row — Stripe then
-      // returns the original Transfer instead of creating a new one.
-      const { inArray } = await import('drizzle-orm');
+      const { eq, inArray } = await import('drizzle-orm');
+      const ids = payoutRows.map((r) => r.id);
+      const paidWith = new Map(
+        (
+          await db
+            .select()
+            .from(payoutsTable)
+            .where(inArray(payoutsTable.id, ids))
+        ).map((r) => [r.id, r.stripeTransferId])
+      );
+
+      // The worst case: the money moved but the paid-update never committed
+      // (the worker died between Stripe's success and the DB write), so the
+      // rows read as unresolved — and the attempt lease has long expired.
       await db
         .update(payoutsTable)
-        .set({ status: 'pending', resolvedAt: null, stripeTransferId: null })
-        .where(
-          inArray(
-            payoutsTable.id,
-            payoutRows.map((r) => r.id)
-          )
-        );
+        .set({
+          status: 'pending',
+          resolvedAt: null,
+          stripeTransferId: null,
+          lastRetryAt: new Date(Date.now() - 60 * 60 * 1000),
+        })
+        .where(inArray(payoutsTable.id, ids));
 
       transferSpy.mockClear();
       const second = await service.resolvePendingPayouts(
         org.id,
         stripeAccountId
       );
-      expect(second).toEqual({ resolved: 2, failed: 0 });
-      const secondKeys = transferSpy.mock.calls
-        .map(
-          (call) =>
-            (call[1] as { idempotencyKey?: string } | undefined)?.idempotencyKey
-        )
-        .sort();
 
-      // SET equality — every key in the replay matches a key from the
-      // first pass. This is the Stripe-side dedupe contract.
-      expect(secondKeys).toEqual(firstKeys);
-      // And each key matches the row-id shape (no off-by-one between
-      // row.id and the key suffix).
-      for (const row of payoutRows) {
-        expect(secondKeys).toContain(`payout_${row.id}`);
+      // Both rows are settled from the transfers Stripe already made...
+      expect(second).toEqual({ resolved: 2, failed: 0 });
+      // ...and nothing is sent again.
+      expect(transferSpy).not.toHaveBeenCalled();
+      for (const id of ids) {
+        const [row] = await db
+          .select()
+          .from(payoutsTable)
+          .where(eq(payoutsTable.id, id));
+        expect(row).toMatchObject({
+          status: 'paid',
+          stripeTransferId: paidWith.get(id),
+        });
       }
     });
 
@@ -8336,7 +8349,7 @@ describe('SubscriptionService', () => {
         unknown,
         { idempotencyKey?: string } | undefined,
       ];
-      expect(options?.idempotencyKey).toBe(`payout_${row.id}`);
+      expect(options?.idempotencyKey).toBe(`payout_${row.id}_1`);
 
       // DB row stamped resolved with the (replayed) transfer id.
       const { eq } = await import('drizzle-orm');
@@ -9676,7 +9689,7 @@ describe('SubscriptionService', () => {
         currency: 'gbp',
         destination: stripeAccountId,
         metadata: expect.objectContaining({
-          pending_payout_id: payout.id,
+          payout_id: payout.id,
           type: 'pending_payout_resolution',
         }),
       });
@@ -9891,7 +9904,7 @@ describe('SubscriptionService', () => {
           amount: row.amountCents,
           destination: row.stripeAccountId,
           metadata: expect.objectContaining({
-            pending_payout_id: row.payoutId,
+            payout_id: row.payoutId,
             type: 'pending_payout_resolution',
           }),
         });
@@ -10828,7 +10841,10 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       expect(after.resolvedAt).not.toBeNull();
     });
 
-    it("sweepUnresolvedPayouts only touches status='pending' rows — paid and failed rows are left untouched", async () => {
+    // Codex-2hxff.11 (PAY-07): this test used to pin "failed rows are left
+    // untouched" — which stranded every failed transfer's money for good.
+    // A failed row keeps its charge id and the sweep retries it.
+    it('sweepUnresolvedPayouts retries pending AND failed rows — a paid row is left untouched', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
       await db.execute(rawSql`DELETE FROM payouts`);
 
@@ -10838,9 +10854,9 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
 
       const longAgo = new Date(Date.now() - 60 * 60 * 1000);
 
-      // Seed three rows: one paid (terminal-success), one failed
-      // (terminal-failure), one pending (sweep target). The sweep
-      // should only touch the pending row.
+      // Seed three rows: one paid (terminal-success), one failed (its
+      // transfer failed — still payable), one pending. The sweep pays the
+      // failed and pending rows and leaves the paid one alone.
       const [paid, failed, pending] = (await db
         .insert(payoutsTable)
         .values([
@@ -10890,7 +10906,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
 
       const result = await service.sweepUnresolvedPayouts(15);
 
-      // Only one group scanned (the pending row), and it resolved.
+      // One (org, user) group holds both the failed and the pending row.
       expect(result.groupsScanned).toBe(1);
       expect(result.groupsResolved).toBe(1);
       expect(result.errors).toBe(0);
@@ -10905,17 +10921,17 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       expect(paidAfter.stripeTransferId).toBe('tr_terminal_paid');
       expect(paidAfter.resolvedAt?.getTime()).toBe(paid.resolvedAt?.getTime());
 
-      // Failed row: status stays 'failed' (sweep does NOT retry
-      // terminal-failure rows).
+      // Failed row: retried and paid.
       const failedAfter = takeFirst(
         await db
           .select()
           .from(payoutsTable)
           .where(eq(payoutsTable.id, failed.id))
       );
-      expect(failedAfter.status).toBe('failed');
-      expect(failedAfter.stripeTransferId).toBeNull();
-      expect(failedAfter.resolvedAt).toBeNull();
+      expect(failedAfter.status).toBe('paid');
+      expect(failedAfter.reason).toBeNull();
+      expect(failedAfter.stripeTransferId).toMatch(/^tr_/);
+      expect(failedAfter.resolvedAt).not.toBeNull();
 
       // Pending row: transitioned to paid via the sweep.
       const pendingAfter = takeFirst(
