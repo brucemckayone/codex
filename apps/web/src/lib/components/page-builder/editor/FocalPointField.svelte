@@ -3,12 +3,13 @@
 
   The part of a picture that must stay in view when a layout crops it
   (03 X64): a full-width Picture is 2:1 on a wide screen, 3:2 on a tablet and
-  4:5 on a phone, and each crop is centred on this point.
+  4:5 on a phone, and each crop is centred on this point. Each layout names
+  the shapes it cuts (`focalLayouts`, Codex-61zsk.58).
 
   Tap or click the picture to place it; the arrow keys move it by 2% (Shift:
   10%). "Use the centre" removes it: the centre is what a picture with no
-  point gets, so it is never stored. The three crops show what each screen
-  keeps. In a layout that never crops, the control explains itself instead.
+  point gets, so it is never stored. The crops show what each screen keeps.
+  In a layout that never crops, the control explains itself instead.
 
   It writes the whole reference back with only `focus` changed, so the
   picture's description and size are never lost.
@@ -20,27 +21,39 @@
     readFocus,
     resolvePageImageUrl,
   } from '$lib/page-builder/page-images';
+  import type { FocalCrop } from '$lib/page-builder/kit';
   import * as m from '$paraglide/messages';
 
   interface Props {
     image: ImageRef;
     mediaBaseUrl?: string | null;
-    /** The section's layout crops this picture. */
-    active: boolean;
+    /** The shapes the section's layout cuts this picture to; none where it never crops. */
+    crops: readonly FocalCrop[];
     onChange: (next: ImageRef) => void;
   }
 
-  const { image, mediaBaseUrl = null, active, onChange }: Props = $props();
+  const { image, mediaBaseUrl = null, crops, onChange }: Props = $props();
 
   const id = $props.id();
   const focus = $derived(readFocus(image));
   const src = $derived(resolvePageImageUrl(image, 'md', mediaBaseUrl));
   const centred = $derived(focus.x === CENTRE_FOCUS.x && focus.y === CENTRE_FOCUS.y);
-  const crops = $derived([
-    { key: 'wide', ratio: '2 / 1', label: m.studio_page_editor_focus_crop_wide() },
-    { key: 'tablet', ratio: '3 / 2', label: m.studio_page_editor_focus_crop_tablet() },
-    { key: 'phone', ratio: '4 / 5', label: m.studio_page_editor_focus_crop_phone() },
-  ]);
+  const active = $derived(crops.length > 0);
+  // Each crop's column is its own width-to-height, so every crop is drawn at
+  // one height and reads as that screen's share of the picture.
+  const columns = $derived(
+    crops
+      .map(({ ratio }) => {
+        const [w = 1, h = 1] = ratio.split('/').map(Number);
+        return `${w / h}fr`;
+      })
+      .join(' ')
+  );
+  const LABELS: Record<FocalCrop['at'], () => string> = {
+    wide: m.studio_page_editor_focus_crop_wide,
+    tablet: m.studio_page_editor_focus_crop_tablet,
+    phone: m.studio_page_editor_focus_crop_phone,
+  };
 
   const clamp = (n: number) => Math.min(100, Math.max(0, Math.round(n)));
 
@@ -107,8 +120,8 @@
       {m.studio_page_editor_focus_readout({ x: focus.x, y: focus.y })}
     </p>
     <p class="focus__hint" id="{id}-hint">{m.studio_page_editor_focus_hint()}</p>
-    <div class="focus__crops">
-      {#each crops as crop (crop.key)}
+    <div class="focus__crops" style:grid-template-columns={columns}>
+      {#each crops as crop (crop.at)}
         <figure class="focus__crop">
           <img
             class="focus__crop-picture"
@@ -117,7 +130,7 @@
             style:aspect-ratio={crop.ratio}
             style:object-position="{focus.x}% {focus.y}%"
           />
-          <figcaption class="focus__crop-label">{crop.label}</figcaption>
+          <figcaption class="focus__crop-label">{LABELS[crop.at]()}</figcaption>
         </figure>
       {/each}
     </div>
@@ -194,7 +207,6 @@
 
   .focus__crops {
     display: grid;
-    grid-template-columns: 2fr 1.5fr 0.8fr;
     align-items: end;
     gap: var(--space-2);
   }

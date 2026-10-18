@@ -230,6 +230,62 @@ describe('TextBlock', () => {
       expect(document.body.querySelector('.text__head img')).toBeNull();
     });
 
+    describe('after the words (Codex-61zsk.58)', () => {
+      const asks = { ...SAMPLE, ctaLabel: 'Join', image, imageAt: 'after' };
+      const order = () =>
+        [...(document.body.querySelector('.text')?.children ?? [])].map(
+          (child) =>
+            child.classList.contains('text__media')
+              ? 'picture'
+              : child.classList.contains('text__head')
+                ? 'head'
+                : child.classList.contains('text__body')
+                  ? 'body'
+                  : child.querySelector('a, button')
+                    ? 'ask'
+                    : child.className
+        );
+
+      it.each([
+        'statement',
+        'centered',
+      ])('%s: follows the passage, before its button', async (layout) => {
+        await render(asks, { layout, mediaBaseUrl: CDN });
+        expect(order()).toEqual(['head', 'body', 'picture', 'ask']);
+        expect(
+          document.body.querySelector('.text__media')?.getAttribute('data-at')
+        ).toBe('after');
+      });
+
+      it('columns: stays in the heading column, beside the words', async () => {
+        await render(asks, { layout: 'columns', mediaBaseUrl: CDN });
+        expect(
+          document.body.querySelector('.text__head img')?.getAttribute('src')
+        ).toBe(url);
+        expect(document.body.querySelector('[data-at]')).toBeNull();
+      });
+
+      it('reads only "after", and is offered only where it moves', () => {
+        expect(textDefinition.coerce({ imageAt: 'after' }).imageAt).toBe(
+          'after'
+        );
+        for (const imageAt of ['before', 'below', 'AFTER', 1, null])
+          expect(
+            textDefinition.coerce({ imageAt }).imageAt,
+            String(imageAt)
+          ).toBeUndefined();
+        const field = textDefinition.fields.find(
+          (candidate) => candidate.key === 'imageAt'
+        );
+        expect(field?.control).toBe('choice');
+        expect(field?.options?.map((option) => option.value)).toEqual([
+          'before',
+          'after',
+        ]);
+        expect(field?.layouts).toEqual(['statement', 'centered']);
+      });
+    });
+
     it.each(
       SECTION_LAYOUTS.text
     )('%s without a CDN base draws no image and no empty header', async (layout) => {

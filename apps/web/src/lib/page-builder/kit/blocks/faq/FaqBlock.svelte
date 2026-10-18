@@ -33,6 +33,7 @@
 
   const content = $derived(faqDefinition.coerce(props));
   const layout = $derived(section.layout === 'columns' ? 'columns' : 'accordion');
+  const openFirst = $derived(content.openFirst === true);
   const items = $derived(content.items ?? []);
   const asks = $derived(Boolean(content.ctaLabel || content.note));
   const headed = $derived(hasHead(content));
@@ -99,7 +100,9 @@
   {:else if layout === 'columns'}
     <FaqColumns {items} {level} />
   {:else}
-    <FaqAccordion {items} {level} anchor={section.anchor} />
+    {#key openFirst}
+      <FaqAccordion {items} {level} anchor={section.anchor} {openFirst} />
+    {/key}
   {/if}
 {/snippet}
 

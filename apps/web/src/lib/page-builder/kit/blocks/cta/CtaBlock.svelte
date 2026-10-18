@@ -20,7 +20,7 @@
   offers every size it has, drawn at the viewport's width (Codex-61zsk.13).
 -->
 <script lang="ts">
-  import { pageImageSrcset, resolvePageImageUrl } from '../../../page-images';
+  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import { pricingView } from '../../model/offer';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
@@ -96,6 +96,7 @@
         image={backdrop}
         srcset={backdropSrcset}
         sizes="100vw"
+        focus={storedFocus(content.background)}
         alt={content.background?.alt ?? ''}
       />
     </div>

@@ -27,9 +27,9 @@
 <script lang="ts">
   import {
     pageImageSrcset,
-    readFocus,
     readSize,
     resolvePageImageUrl,
+    storedFocus,
   } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -79,7 +79,7 @@
         {sizes}
         alt={content.image?.alt ?? ''}
         ratio="var(--_ratio)"
-        focus={layout === 'full' ? readFocus(content.image) : undefined}
+        focus={layout === 'full' ? storedFocus(content.image) : undefined}
         intrinsic={size}
       />
     {:else if looked}

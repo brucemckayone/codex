@@ -5,7 +5,8 @@
   (the ARIA accordion pattern), its answer in the panel it controls. Every
   answer is open until the page's script runs; after that they open one by one,
   independently, and a closed answer is still found by find-in-page
-  (`hidden="until-found"`), which opens it.
+  (`hidden="until-found"`), which opens it. `openFirst` starts the first one
+  open, as the curriculum starts its first stage (Codex-61zsk.58).
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -19,11 +20,17 @@
     level: 2 | 3;
     /** The section's anchor, so every id on the page is unique and stable. */
     anchor: string;
+    /** Start with the first answer open. */
+    openFirst?: boolean;
   }
 
-  const { items, level, anchor }: Props = $props();
+  const { items, level, anchor, openFirst = false }: Props = $props();
 
-  const panels = new Disclosures();
+  // Read once, as the curriculum reads its first stage: a later edit must not
+  // re-open an answer the visitor closed. The editor redraws the list when the
+  // creator flips it (`FaqBlock`).
+  // svelte-ignore state_referenced_locally
+  const panels = new Disclosures(openFirst ? ['0'] : []);
   onMount(() => panels.enhance());
 </script>
 

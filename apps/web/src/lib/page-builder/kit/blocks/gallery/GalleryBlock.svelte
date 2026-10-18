@@ -22,7 +22,7 @@
 -->
 <script lang="ts">
   import { hasHead } from '../../model/read';
-  import { resolvePageImageUrl } from '../../../page-images';
+  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
@@ -51,6 +51,7 @@
       ),
       alt: item.image.alt ?? '',
       caption: item.caption,
+      focus: storedFocus(item.image),
     }))
   );
   const plates = $derived<Picture[]>(

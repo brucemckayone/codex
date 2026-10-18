@@ -90,6 +90,21 @@ export function readFocus(ref: unknown): { x: number; y: number } {
   return x === null || y === null ? { ...CENTRE_FOCUS } : { x, y };
 }
 
+/**
+ * The focal point the creator placed, or `undefined` where the picture has
+ * none to steer by (none stored, a malformed one, or the centre): a block
+ * passes it to `Media`'s `focus`, so a picture nobody pointed draws exactly
+ * as it did before focal points (Codex-61zsk.58).
+ */
+export function storedFocus(
+  ref: unknown
+): { x: number; y: number } | undefined {
+  const focus = readFocus(ref);
+  return focus.x === CENTRE_FOCUS.x && focus.y === CENTRE_FOCUS.y
+    ? undefined
+    : focus;
+}
+
 /** The picture's own size, or `null` when the reference does not carry one. */
 export function readSize(ref: unknown): { w: number; h: number } | null {
   if (!isImageRef(ref)) return null;

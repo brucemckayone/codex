@@ -4,7 +4,7 @@ import {
   headingField,
   layout,
 } from '../../model/fields';
-import { compact, readItems, readText } from '../../model/read';
+import { compact, readBool, readItems, readText } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
 import { optionalCtaFields } from '../video/definition';
 
@@ -20,6 +20,8 @@ export type FaqProps = {
   ctaLabel?: string;
   note?: string;
   items?: FaqItem[];
+  /** The expandable list opens its first answer (Codex-61zsk.58). */
+  openFirst?: boolean;
   contactLabel?: string;
   contactHref?: string;
 };
@@ -66,6 +68,16 @@ export const faqDefinition: BlockDefinition<FaqProps> = {
           maxLength: 800,
         },
       ],
+    },
+    // The curriculum's own default, on the same disclosures (census §2): the
+    // other answers start closed, and every answer is open until the page's
+    // script runs, so a page read without it loses nothing.
+    {
+      key: 'openFirst',
+      label: 'Open the first question',
+      hint: 'Its answer shows when the page opens; the others open when tapped.',
+      control: 'toggle',
+      layouts: ['accordion'],
     },
     {
       key: 'contactLabel',
@@ -156,6 +168,7 @@ export const faqDefinition: BlockDefinition<FaqProps> = {
         },
         12
       ),
+      openFirst: readBool(raw, 'openFirst'),
       contactLabel: readText(raw, 'contactLabel', 60),
       contactHref: readText(raw, 'contactHref', 500),
     }),

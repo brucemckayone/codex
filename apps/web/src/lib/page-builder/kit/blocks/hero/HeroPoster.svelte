@@ -49,6 +49,8 @@
     still: string | null;
     /** The still's stored sizes, when it is the creator's page image (`pageImageSrcset`). */
     srcset?: string;
+    /** Where its subject is, when it is the creator's page image (`storedFocus`). */
+    focus?: { x: number; y: number };
     clip: PreviewMedia | null;
     alt: string;
     /** The hero's own words: eyebrow, headline, lede and buttons. */
@@ -68,7 +70,7 @@
     reserve?: boolean;
   }
 
-  const { still, srcset = '', clip, alt, copy, chars, runs, watch, reserve = false }: Props =
+  const { still, srcset = '', focus, clip, alt, copy, chars, runs, watch, reserve = false }: Props =
     $props();
   // Wide, the picture floats at about half the band; stacked, it spans it.
   const sizes = '(min-width: 56rem) 46vw, 100vw';
@@ -91,9 +93,9 @@
     <div class="hero-poster__media hero__enter-m">
       <div class="hero-poster__reveal" data-lp-reveal="wipe">
         {#if clip}
-          <Media image={still} {clip} {srcset} {sizes} priority {alt}>{@render watch()}</Media>
+          <Media image={still} {clip} {srcset} {sizes} {focus} priority {alt}>{@render watch()}</Media>
         {:else}
-          <Media image={still} {srcset} {sizes} priority {alt} />
+          <Media image={still} {srcset} {sizes} {focus} priority {alt} />
         {/if}
       </div>
     </div>

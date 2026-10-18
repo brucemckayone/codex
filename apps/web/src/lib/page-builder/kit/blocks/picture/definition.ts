@@ -44,7 +44,13 @@ export const pictureDefinition: BlockDefinition<PictureProps> = {
       key: 'image',
       label: 'Picture',
       control: 'image',
-      focalLayouts: ['full'],
+      focalLayouts: {
+        full: [
+          { at: 'wide', ratio: '2 / 1' },
+          { at: 'tablet', ratio: '3 / 2' },
+          { at: 'phone', ratio: '4 / 5' },
+        ],
+      },
     },
     {
       key: 'caption',

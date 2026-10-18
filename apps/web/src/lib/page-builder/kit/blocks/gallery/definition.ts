@@ -51,7 +51,27 @@ export const galleryDefinition: BlockDefinition<GalleryProps> = {
       control: 'items',
       maxItems: MAX_GALLERY_ITEMS,
       itemFields: [
-        { key: 'image', label: 'Picture', control: 'image' },
+        {
+          key: 'image',
+          label: 'Picture',
+          control: 'image',
+          // Each layout's frame at 1440 and 390, in the Style that cuts it
+          // most; a mosaic's and a strip's is the tile that cuts it most.
+          focalLayouts: {
+            mosaic: [
+              { at: 'wide', ratio: '3 / 5' },
+              { at: 'phone', ratio: '13 / 5' },
+            ],
+            strip: [
+              { at: 'wide', ratio: '4 / 5' },
+              { at: 'phone', ratio: '4 / 5' },
+            ],
+            grid: [
+              { at: 'wide', ratio: '4 / 3' },
+              { at: 'phone', ratio: '4 / 3' },
+            ],
+          },
+        },
         { key: 'caption', label: 'Caption', control: 'text', maxLength: 120 },
       ],
     },

@@ -104,7 +104,9 @@ export interface BlockField {
    * `text`/`textarea` may also be edited inline on the canvas (`inline`).
    * `list` = string[] · `items` = object[] described by `itemFields` ·
    * `media` = one of the journey's sell-media slots · `image` = the creator's
-   * own uploaded image, stored as an `ImageRef` (contract A3/A5).
+   * own uploaded image, stored as an `ImageRef` (contract A3/A5) · `choice` =
+   * a few `options` side by side, the first the default, stored as the absent
+   * key (Codex-61zsk.58).
    */
   control:
     | 'text'
@@ -112,6 +114,7 @@ export interface BlockField {
     | 'url'
     | 'toggle'
     | 'select'
+    | 'choice'
     | 'list'
     | 'items'
     | 'media'
@@ -135,10 +138,22 @@ export interface BlockField {
   /** The Styles this field applies to. Absent = every Style. A Break's mark
    *  is offered only where the Style has one to draw (03 X64). */
   styles?: readonly PageStyleId[];
-  /** `image` only: the layouts that crop this picture. The inspector offers
-   *  a focal point under the upload, live in these layouts and explained in
-   *  the others (03 X64). */
-  focalLayouts?: readonly string[];
+  /** `image` only: the layouts that crop this picture, each with the shapes
+   *  it is cut to. The inspector offers a focal point under the upload, live
+   *  in these layouts with a preview of each cut, and explained in the others
+   *  (03 X64, Codex-61zsk.58). */
+  focalLayouts?: Readonly<Record<string, readonly FocalCrop[]>>;
+}
+
+/**
+ * One shape a layout cuts a picture to, on a wide screen, a tablet or a
+ * phone: what the focal point's preview shows that screen keeping. Measured
+ * in every Style, the shape a picture is drawn at where it is cut most.
+ */
+export interface FocalCrop {
+  at: 'wide' | 'tablet' | 'phone';
+  /** A CSS aspect ratio, `'2 / 1'`. */
+  ratio: string;
 }
 
 export interface BlockLayout {

@@ -22,9 +22,11 @@
     onChange: (value: Record<string, unknown>[] | undefined) => void;
     /** Passed through to an entry's `image` field. */
     mediaBaseUrl?: string | null;
+    /** The section's resolved layout, for an entry's picture's focal point. */
+    layout?: string;
   }
 
-  const { field, value, onChange, mediaBaseUrl = null }: Props = $props();
+  const { field, value, onChange, mediaBaseUrl = null, layout }: Props = $props();
 
   const id = $props.id();
   const entries = $derived(readEntries(value));
@@ -114,6 +116,7 @@
                 value={entries[index]?.[itemField.key]}
                 onChange={(next) => setKey(index, itemField.key, next)}
                 {mediaBaseUrl}
+                {layout}
               />
             {/each}
           {/if}

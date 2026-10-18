@@ -12,6 +12,7 @@
   read as a gap.
 -->
 <script lang="ts">
+  import { storedFocus } from '../../../page-images';
   import Media from '../../primitives/Media.svelte';
   import type { StoryStep } from './definition';
   import StoryWords from './StoryWords.svelte';
@@ -30,7 +31,7 @@
     <li class="story-chapter" data-lp-on-media data-pictured={images[index] ? '' : undefined}>
       {#if images[index]}
         <div class="story-chapter__media" data-lp-parallax="1">
-          <Media image={images[index]} alt={step.image?.alt ?? ''} />
+          <Media image={images[index]} alt={step.image?.alt ?? ''} focus={storedFocus(step.image)} />
         </div>
       {:else}
         <span class="lp-atmos story-chapter__glow" aria-hidden="true"></span>

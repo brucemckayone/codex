@@ -7,7 +7,8 @@
   one value: whichever is typed in, the other follows. `mediaBaseUrl` is
   only for `image` fields, which preview the stored image against it. An
   `image` field with `focalLayouts` offers its focal point under it (03 X64),
-  live in those layouts; an `action` field is a Button's destination.
+  live in those layouts; an `action` field is a Button's destination. A
+  `choice` presses one of its options, the first being the absent key.
 -->
 <script lang="ts">
   import Select from '$lib/components/ui/Select/Select.svelte';
@@ -64,12 +65,22 @@
   function writeText(next: string): void {
     onChange(next.trim() ? next : undefined);
   }
+
+  const options = $derived(field.options ?? []);
+  // A value the options don't hold reads as the default, as the block reads it.
+  const chosen = $derived(
+    options.find((option) => option.value === value)?.value ?? options[0]?.value
+  );
+
+  function choose(next: string): void {
+    onChange(next === options[0]?.value ? undefined : next);
+  }
 </script>
 
 {#if field.control === 'list'}
   <ListField {field} {value} {onChange} />
 {:else if field.control === 'items'}
-  <ItemsField {field} {value} {onChange} {mediaBaseUrl} />
+  <ItemsField {field} {value} {onChange} {mediaBaseUrl} {layout} />
 {:else if field.control === 'media'}
   <MediaField {field} />
 {:else if field.control === 'image'}
@@ -84,7 +95,7 @@
     <FocalPointField
       image={value}
       {mediaBaseUrl}
-      active={layout !== undefined && field.focalLayouts.includes(layout)}
+      crops={(layout !== undefined && field.focalLayouts[layout]) || []}
       onChange={(next) => onChange(next)}
     />
   {/if}
@@ -99,6 +110,29 @@
       aria-describedby={field.hint ? `${id}-hint` : undefined}
       onCheckedChange={(checked) => onChange(checked ? true : undefined)}
     />
+    {#if field.hint}<p class="field__hint" id="{id}-hint">{field.hint}</p>{/if}
+  </div>
+{:else if field.control === 'choice'}
+  <div class="field">
+    <span class="field__label" id="{id}-label">{field.label}</span>
+    <div
+      class="field__choices"
+      role="group"
+      aria-labelledby="{id}-label"
+      aria-describedby={field.hint ? `${id}-hint` : undefined}
+      style:--_count={options.length}
+    >
+      {#each options as option (option.value)}
+        <button
+          type="button"
+          class="field__choice"
+          aria-pressed={chosen === option.value}
+          onclick={() => choose(option.value)}
+        >
+          {option.label}
+        </button>
+      {/each}
+    </div>
     {#if field.hint}<p class="field__hint" id="{id}-hint">{field.hint}</p>{/if}
   </div>
 {:else if field.control === 'select'}
@@ -180,6 +214,45 @@
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     color: var(--color-text);
+  }
+
+  /* The spacing control's group (SpacingControl): a well, the pressed option
+     raised on it. */
+  .field__choices {
+    display: grid;
+    grid-template-columns: repeat(var(--_count), minmax(0, 1fr));
+    gap: var(--space-0-5);
+    padding: var(--space-0-5);
+    border-radius: var(--radius-md);
+    background: color-mix(in oklab, var(--color-text) 6%, transparent);
+  }
+
+  .field__choice {
+    min-block-size: var(--tap-target-min);
+    padding: var(--space-1) var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-secondary);
+    font: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .field__choice:hover {
+    color: var(--color-text);
+  }
+
+  .field__choice[aria-pressed='true'] {
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-weight: var(--font-medium);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .field__choice:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-text);
+    outline-offset: var(--focus-offset);
   }
 
   .field__input {

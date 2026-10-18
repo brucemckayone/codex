@@ -14,6 +14,7 @@
   import type { ColourSchemeId } from '../../model/ids';
   import Heading from '../../primitives/Heading.svelte';
   import Media from '../../primitives/Media.svelte';
+  import { storedFocus } from '../../../page-images';
   import { bentoTiles } from './bento';
   import type { BenefitItem } from './definition';
 
@@ -44,10 +45,10 @@
         <div class="benefits-bento__picture">
           {#if index === 0}
             <div class="benefits-bento__drift" data-lp-parallax="1">
-              <Media image={images[index]} alt={item.image?.alt ?? ''} />
+              <Media image={images[index]} alt={item.image?.alt ?? ''} focus={storedFocus(item.image)} />
             </div>
           {:else}
-            <Media image={images[index]} alt={item.image?.alt ?? ''} />
+            <Media image={images[index]} alt={item.image?.alt ?? ''} focus={storedFocus(item.image)} />
           {/if}
         </div>
       {/if}

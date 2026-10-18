@@ -28,7 +28,7 @@
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { pageImageSrcset, resolvePageImageUrl } from '../page-images';
+  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../page-images';
   import { OWN_BACKDROP, SIMPLE_SECTIONS } from './model/resolve';
   import type { ResolvedSection } from './model/types';
 
@@ -66,6 +66,9 @@
   const backdropSrcset = $derived(
     backdrop ? pageImageSrcset(background, mediaBaseUrl) : ''
   );
+  // Where the creator placed the picture's subject (Codex-61zsk.58): the band
+  // crops it to its height, so this keeps it in view.
+  const backdropFocus = $derived(backdrop ? storedFocus(background) : undefined);
 </script>
 
 <section
@@ -87,6 +90,9 @@
         src={backdrop}
         srcset={backdropSrcset || undefined}
         sizes={backdropSrcset ? '100vw' : undefined}
+        style:object-position={backdropFocus
+          ? `${backdropFocus.x}% ${backdropFocus.y}%`
+          : undefined}
         alt=""
         loading="lazy"
         decoding="async"

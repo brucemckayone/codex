@@ -98,6 +98,29 @@ export const heroDefinition: BlockDefinition<HeroProps> = {
       hint: 'Replaces the course image here. When the hero plays a clip, pick "The image only" below to show this instead.',
       control: 'image',
       decorative: true,
+      // Each layout's frame at 1440 and 390, in the Style that cuts it most.
+      focalLayouts: {
+        statement: [
+          { at: 'wide', ratio: '7 / 3' },
+          { at: 'phone', ratio: '4 / 3' },
+        ],
+        split: [
+          { at: 'wide', ratio: '4 / 5' },
+          { at: 'phone', ratio: '4 / 5' },
+        ],
+        cover: [
+          { at: 'wide', ratio: '15 / 8' },
+          { at: 'phone', ratio: '2 / 3' },
+        ],
+        centered: [
+          { at: 'wide', ratio: '16 / 7' },
+          { at: 'phone', ratio: '4 / 3' },
+        ],
+        poster: [
+          { at: 'wide', ratio: '5 / 4' },
+          { at: 'phone', ratio: '4 / 5' },
+        ],
+      },
     },
     {
       key: 'media',

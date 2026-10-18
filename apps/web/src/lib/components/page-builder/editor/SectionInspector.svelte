@@ -27,6 +27,7 @@
   import {
     type BlockField,
     DEFINITIONS,
+    type FocalCrop,
     type KitPage,
     type KitSection,
     OWN_BACKDROP,
@@ -40,11 +41,13 @@
   } from '$lib/page-builder/kit';
   import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
+  import { isImageRef } from '$lib/page-builder/page-images';
   import { pageGrounds } from '$lib/page-builder/render/brand-overrides';
   import type { JourneySalesContext } from '$lib/page-builder/render/types';
   import * as m from '$paraglide/messages';
   import FieldControl from './FieldControl.svelte';
   import { fieldsForLayout, sameValue } from './field-values';
+  import FocalPointField from './FocalPointField.svelte';
   import ImageField from './ImageField.svelte';
   import LayoutPicker from './LayoutPicker.svelte';
   import { sectionIcon } from './outline';
@@ -89,6 +92,17 @@
     decorative: true,
   };
 
+  /**
+   * A background covers its band, whose shape is its contents' height
+   * across the screen, so no one cut is every band's: these are the middle
+   * band of the ones measured, five section types in every Style at 1440
+   * and 390 (Codex-61zsk.58).
+   */
+  const BACKGROUND_CROPS: readonly FocalCrop[] = [
+    { at: 'wide', ratio: '7 / 5' },
+    { at: 'phone', ratio: '1 / 2' },
+  ];
+
   // Pinned for the life of this inspector, which Inspector re-creates for
   // every section (`{#key section.id}`). A write that arrives after the
   // creator has moved on — an image upload finishing, say — must land on the
@@ -101,6 +115,8 @@
     if (section.id === sectionId) return section.props[key];
     return pageBuilder.sections.find((s) => s.id === sectionId)?.props[key];
   }
+
+  const background = $derived(valueOf(BACKGROUND.key));
 
   const definition = $derived(DEFINITIONS[section.type]);
   const Glyph = $derived(sectionIcon(section.type));
@@ -316,6 +332,14 @@
         decorative
         labelledby="{id}-background"
       />
+      {#if isImageRef(background)}
+        <FocalPointField
+          image={background}
+          mediaBaseUrl={context.mediaBaseUrl}
+          crops={BACKGROUND_CROPS}
+          onChange={(next) => writeProp(BACKGROUND.key, next)}
+        />
+      {/if}
     </div>
   {/if}
 
