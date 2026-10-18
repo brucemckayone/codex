@@ -259,12 +259,176 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     // Split sums exactly to the charge amount.
     expect(payoutRows.reduce((s, r) => s + r.amountCents, 0)).toBe(5000);
 
-    // Redeliver the SAME invoice → the per-charge guard skips the fan-out.
+    // Redeliver the SAME invoice → every slice is already in the ledger.
     await service.handleCourseInvoicePaymentSucceeded(invoice, sub);
     const payoutRowsAfter = await db
       .select()
       .from(payouts)
       .where(eq(payouts.courseSubscriptionId, courseSubscriptionId as string));
     expect(payoutRowsAfter).toHaveLength(payoutRows.length);
+  });
+
+  /** A course sub row + the invoice that pays it. */
+  async function paidCourseInvoice(cId: string, pId: string) {
+    const stripeSubId = `sub_${randomUUID().slice(0, 8)}`;
+    const sub = courseSubStripeObject(stripeSubId, cId, pId);
+    await service.handleCourseSubscriptionCreated(sub);
+    const [row] = await db
+      .select({ id: courseSubscriptions.id })
+      .from(courseSubscriptions)
+      .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSubId));
+    if (!row) throw new Error('course sub not recorded');
+    const chargeId = `ch_${randomUUID().slice(0, 8)}`;
+    const invoice = createMockStripeInvoice({
+      amount_paid: 5000,
+      currency: 'gbp',
+      parent: {
+        subscription_details: {
+          subscription: stripeSubId,
+          metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
+        },
+      },
+      payments: {
+        data: [
+          { payment: { payment_intent: `pi_${chargeId}`, charge: chargeId } },
+        ],
+      },
+    }) as unknown as Stripe.Invoice;
+    const slices = () =>
+      db.select().from(payouts).where(eq(payouts.courseSubscriptionId, row.id));
+    return { sub, invoice, slices };
+  }
+
+  // Codex-2hxff.11: a per-charge SELECT pre-check used to skip the WHOLE
+  // fan-out when any row existed for the charge — so a delivery that died
+  // after writing the platform fee lost the creator and org slices for good.
+  it('a delivery that died after the platform fee: the redelivery adds the missing slices', async () => {
+    const { cId, pId } = await makeCourseWithPlan();
+    const { sub, invoice, slices } = await paidCourseInvoice(cId, pId);
+
+    // First delivery: the database drops while the creator slice is reserved.
+    const failing = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === 'insert') {
+          // biome-ignore lint/suspicious/noExplicitAny: Drizzle builder shape
+          return (table: any) => {
+            const builder = target.insert(table);
+            const realValues = builder.values.bind(builder);
+            // biome-ignore lint/suspicious/noExplicitAny: row payload
+            (builder as any).values = (rows: any) => {
+              const row = Array.isArray(rows) ? rows[0] : rows;
+              if (row?.payoutType === 'creator_payout') {
+                throw new Error('Connection terminated unexpectedly');
+              }
+              return realValues(rows);
+            };
+            return builder;
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const dying = new CourseSubscriptionService(
+      { db: failing, environment: 'test' },
+      createMockStripe()
+    );
+    await expect(
+      dying.handleCourseInvoicePaymentSucceeded(invoice, sub)
+    ).rejects.toThrow();
+    expect((await slices()).map((r) => r.payoutType)).toEqual(['platform_fee']);
+
+    // The redelivery adds the creator and org slices.
+    await service.handleCourseInvoicePaymentSucceeded(invoice, sub);
+    const rows = await slices();
+    expect(rows.map((r) => r.payoutType).sort()).toEqual([
+      'creator_payout',
+      'organization_fee',
+      'platform_fee',
+    ]);
+    expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(5000);
+  });
+
+  // Codex-2hxff.37 — owner decision 2026-10-18: an organisation with no owner
+  // at the invoice's time has its slice held as `no_owner` (it was logged and
+  // dropped).
+  it('an organisation with no owner: the org fee is held as no_owner', async () => {
+    const [ownerless] = await db
+      .insert(organizations)
+      .values({
+        name: 'Ownerless Course Org',
+        slug: createUniqueSlug('cs-no-owner'),
+      })
+      .returning({ id: organizations.id });
+    if (!ownerless) throw new Error('failed org');
+    const [course] = await db
+      .insert(courses)
+      .values({
+        organizationId: ownerless.id,
+        creatorId,
+        slug: createUniqueSlug('cs-no-owner-course'),
+        title: 'Ownerless Course',
+        status: 'published',
+        priceCents: null,
+      })
+      .returning({ id: courses.id });
+    if (!course) throw new Error('failed course');
+    const [ownerlessPlan] = await db
+      .insert(courseSubscriptionPlans)
+      .values({
+        courseId: course.id,
+        priceMonthly: 5000,
+        priceAnnual: 50000,
+        stripeProductId: `prod_${randomUUID().slice(0, 8)}`,
+        stripePriceMonthlyId: `price_m_${randomUUID().slice(0, 8)}`,
+        stripePriceAnnualId: `price_a_${randomUUID().slice(0, 8)}`,
+      })
+      .returning();
+    if (!ownerlessPlan) throw new Error('failed plan');
+    const stripeSubId = `sub_${randomUUID().slice(0, 8)}`;
+    const sub = createMockStripeSubscription({
+      id: stripeSubId,
+      customer: `cus_${randomUUID().slice(0, 8)}`,
+      metadata: {
+        type: COURSE_SUBSCRIPTION_METADATA_TYPE,
+        codex_user_id: subscriberId,
+        codex_course_id: course.id,
+        codex_plan_id: ownerlessPlan.id,
+        codex_organization_id: ownerless.id,
+      },
+    }) as unknown as Stripe.Subscription;
+    await service.handleCourseSubscriptionCreated(sub);
+    const [subRow] = await db
+      .select({ id: courseSubscriptions.id })
+      .from(courseSubscriptions)
+      .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSubId));
+    if (!subRow) throw new Error('course sub not recorded');
+    const chargeId = `ch_${randomUUID().slice(0, 8)}`;
+    const invoice = createMockStripeInvoice({
+      amount_paid: 5000,
+      currency: 'gbp',
+      parent: {
+        subscription_details: {
+          subscription: stripeSubId,
+          metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
+        },
+      },
+      payments: {
+        data: [
+          { payment: { payment_intent: `pi_${chargeId}`, charge: chargeId } },
+        ],
+      },
+    }) as unknown as Stripe.Invoice;
+
+    await service.handleCourseInvoicePaymentSucceeded(invoice, sub);
+
+    const rows = await db
+      .select()
+      .from(payouts)
+      .where(eq(payouts.courseSubscriptionId, subRow.id));
+    expect(rows.find((r) => r.payoutType === 'organization_fee')).toMatchObject(
+      { status: 'pending', reason: 'no_owner', userId: null }
+    );
+    expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(5000);
   });
 });

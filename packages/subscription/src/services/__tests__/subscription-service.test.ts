@@ -3559,17 +3559,15 @@ describe('SubscriptionService', () => {
       expect(stripe.transfers.create).not.toHaveBeenCalled();
     });
 
-    // Codex-8wfnv: explicit idempotency assertions for the renewal path.
-    // handleSubscriptionCreated has a uniqueness-constraint short-circuit
-    // (line 519). handleInvoicePaymentSucceeded has no such short-circuit
-    // — its replay safety lives downstream in `executeTransfers`, which
-    // passes a deterministic `idempotencyKey` to `stripe.transfers.create`
-    // (`${chargeId}_org_fee`, `${chargeId}_creator_pool_owner`,
-    // `${chargeId}_creator_<creatorId>` — see subscription-service.ts:2810,
-    // :2900, :2983). Stripe dedupes on idempotency key, so even if the
-    // handler is invoked twice for the same invoice, no double transfer
-    // can settle. Assert the keys are stable across replays.
-    it('replay safety: same invoice.payment_succeeded fired twice → revenue transfer dedupes via deterministic idempotency key (chargeId-derived)', async () => {
+    // Codex-8wfnv + Codex-2hxff.11: replay safety for the renewal path.
+    // handleInvoicePaymentSucceeded re-runs `executeTransfers` on every
+    // delivery. Each slice's ledger row is reserved by a per-charge unique key
+    // BEFORE its transfer, so the second delivery finds every slice and sends
+    // NOTHING — at any age. (Until Codex-2hxff.11 it re-sent every transfer
+    // and relied on Stripe's idempotency key, which Stripe forgets after
+    // ~24h.) The keys are still deterministic, as a second line of defence
+    // for two deliveries racing inside that window.
+    it('replay safety: same invoice.payment_succeeded fired twice → the second sends no transfer; keys stay chargeId-derived', async () => {
       const { org, tier1 } = await createFullOrg('invoice-replay-idempotent');
       const sub = takeFirst(
         await db
@@ -3582,11 +3580,13 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      // Pin chargeId so both invocations derive identical idempotency keys
-      // — exactly the replay shape we're asserting against.
-      const chargeId = 'ch_test_replay_fixed';
-      const paymentIntentId = 'pi_test_replay_fixed';
-      const invoiceId = 'in_test_replay_fixed';
+      // One chargeId for both deliveries — the replay shape — unique per run,
+      // so the first delivery can never meet a slice another test (or an
+      // interrupted run) left in the ledger and mistake itself for a replay.
+      const runId = crypto.randomUUID().slice(0, 12);
+      const chargeId = `ch_test_replay_${runId}`;
+      const paymentIntentId = `pi_test_replay_${runId}`;
+      const invoiceId = `in_test_replay_${runId}`;
       const mockInvoice = createMockStripeInvoice({
         id: invoiceId,
         amount_paid: 499,
@@ -3612,11 +3612,10 @@ describe('SubscriptionService', () => {
       const transfersMock = stripe.transfers.create as ReturnType<typeof vi.fn>;
       const callsAfterSecond = transfersMock.mock.calls.length;
 
-      // Replay must invoke transfers.create the SAME number of times each
-      // call (same code path) — but every invocation across both calls
-      // must carry an idempotency key Stripe will dedupe on.
+      // The first delivery pays; the replay finds every slice in the ledger
+      // and sends nothing more.
       expect(callsAfterFirst).toBeGreaterThan(0);
-      expect(callsAfterSecond).toBe(callsAfterFirst * 2);
+      expect(callsAfterSecond).toBe(callsAfterFirst);
 
       // Deterministic idempotency key contract: every transfers.create
       // call must pass `{ idempotencyKey }` as its 2nd argument, derived
@@ -3630,19 +3629,9 @@ describe('SubscriptionService', () => {
         expect(opts?.idempotencyKey).toMatch(new RegExp(`^${chargeId}_`));
       }
 
-      // Stronger: the SET of idempotency keys used on the second call
-      // must equal the SET used on the first call — i.e. every transfer
-      // attempted on replay carries an already-seen key, so Stripe
-      // dedupes and no double-spend can settle on the platform side.
-      const firstKeys = allOptions
-        .slice(0, callsAfterFirst)
-        .map((o) => o?.idempotencyKey)
-        .sort();
-      const secondKeys = allOptions
-        .slice(callsAfterFirst)
-        .map((o) => o?.idempotencyKey)
-        .sort();
-      expect(secondKeys).toEqual(firstKeys);
+      // Stronger: the replay attempted NO transfer at all — it did not even
+      // need Stripe's dedupe. The ledger already held every slice.
+      expect(allOptions.slice(callsAfterFirst)).toEqual([]);
 
       // DB state after second call must equal state after first call for
       // every business column (no double-extension of the period, no
@@ -3986,7 +3975,7 @@ describe('SubscriptionService', () => {
         create: createTransfer,
       };
 
-      const chargeId = 'ch_multiorg_creator';
+      const chargeId = `ch_multiorg_creator_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4045,7 +4034,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_split_5050';
+      const chargeId = `ch_split_5050_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4082,7 +4071,11 @@ describe('SubscriptionService', () => {
       expect(total).toBeGreaterThan(0);
     });
 
-    it('share-sum 10000 bps with 3-way odd split (3334/3333/3333): floor rounding leaves remainder unallocated, never over-pays', async () => {
+    // Owner decision 2026-10-13 (Codex-2hxff.12): the pennies the creators'
+    // floor()s leave behind go to the ORGANISATION and are recorded. Gross
+    // 1000, platform 100, post 900: creators 300 + 299 + 299 = 898, so the
+    // org slice is 2 — every penny of the sale is in the ledger.
+    it('share-sum 10000 bps with 3-way odd split (3334/3333/3333): the floor remainder goes to the org, never unrecorded or over-paid', async () => {
       const { org, tier1 } = await createFullOrg('split-3way');
       const c1 = await seedCreatorWithConnect(org.id);
       const c2 = await seedCreatorWithConnect(org.id);
@@ -4103,7 +4096,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_split_3way';
+      const chargeId = `ch_split_3way_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4129,11 +4122,84 @@ describe('SubscriptionService', () => {
       const a3 = byKey.get(`${chargeId}_creator_${c3}`) ?? 0;
 
       // c1's share (3334) is strictly larger, so c1 amount ≥ c2 amount = c3 amount.
-      expect(a1).toBeGreaterThanOrEqual(a2);
-      expect(a2).toBe(a3);
-      // floor() rounding leaves the remainder pence inside the platform —
-      // total transferred never exceeds the creator pool.
-      expect(a1 + a2 + a3).toBeGreaterThan(0);
+      expect([a1, a2, a3]).toEqual([300, 299, 299]);
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.stripeChargeId, chargeId));
+      expect(
+        rows.find((r) => r.payoutType === 'organization_fee')?.amountCents
+      ).toBe(2);
+      // Every penny of the 1000 is a ledger row.
+      expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(1000);
+    });
+
+    // Codex-2hxff.37 — owner decision 2026-10-18, "Hold it for the next
+    // owner": an org with no owner at the invoice's time (no ownership period,
+    // no active owner — R2 in docs/payments/release-checklist.md) still has
+    // its org fee AND its creator pool recorded, as pending `no_owner` rows
+    // with no payee. Until this both were logged and dropped.
+    it('an org with no owner: the org fee and the creator pool are held as no_owner, never dropped', async () => {
+      const ownerless = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({ slug: createUniqueSlug('no-owner') })
+          )
+          .returning()
+      );
+      const tier = takeFirst(
+        await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(ownerless.id, { name: 'No Owner' }))
+          .returning()
+      );
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, ownerless.id, tier.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      const chargeId = `ch_no_owner_${crypto.randomUUID().slice(0, 8)}`;
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_no_owner' } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+      const transfers = stripe.transfers.create as ReturnType<typeof vi.fn>;
+      transfers.mockClear();
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.stripeChargeId, chargeId));
+      for (const payoutType of [
+        'organization_fee',
+        'creator_payout_to_owner',
+      ] as const) {
+        expect(rows.find((r) => r.payoutType === payoutType)).toMatchObject({
+          status: 'pending',
+          reason: 'no_owner',
+          userId: null,
+        });
+      }
+      // Nothing is sent: there is nobody to send it to.
+      expect(transfers).not.toHaveBeenCalled();
+      // Every penny of the 1000 is a ledger row.
+      expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(1000);
     });
 
     it('share-sum UNDER 10000 bps (4000+4000=8000): creators get absolute shares of post-platform, org gets residual', async () => {
@@ -4164,7 +4230,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_undersum';
+      const chargeId = `ch_undersum_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4241,7 +4307,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_oversum';
+      const chargeId = `ch_oversum_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4300,7 +4366,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_zero';
+      const chargeId = `ch_zero_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4506,7 +4572,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_repro';
+      const chargeId = `ch_wp4_repro_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4580,7 +4646,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_multi_exact';
+      const chargeId = `ch_wp4_multi_exact_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4656,7 +4722,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_term_before';
+      const chargeId = `ch_wp4_term_before_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4710,7 +4776,7 @@ describe('SubscriptionService', () => {
       );
 
       const invoiceCreated = Math.floor(Date.now() / 1000); // "now" in seconds
-      const chargeId = 'ch_wp4_term_after';
+      const chargeId = `ch_wp4_term_after_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         created: invoiceCreated,
@@ -4754,7 +4820,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_future';
+      const chargeId = `ch_wp4_future_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4804,7 +4870,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_revtype';
+      const chargeId = `ch_wp4_revtype_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4856,7 +4922,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_ledger';
+      const chargeId = `ch_wp4_ledger_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4909,7 +4975,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_allzero';
+      const chargeId = `ch_wp4_allzero_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4991,7 +5057,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_ez3tl_orphan';
+      const chargeId = `ch_ez3tl_orphan_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -10399,7 +10465,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         }
       );
 
-      const chargeId = 'ch_e9v3b_idem_fixed';
+      const chargeId = `ch_e9v3b_idem_fixed_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {

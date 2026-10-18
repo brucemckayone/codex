@@ -34,13 +34,12 @@ import {
   CURRENCY,
   stripeEnvMetadata,
 } from '@codex/constants';
-import { getConstraintName, isUniqueViolation } from '@codex/database';
+import { isUniqueViolation } from '@codex/database';
 import {
   type CourseSubscription,
   courseSubscriptionPlans,
   courseSubscriptions,
   courses,
-  payouts,
   stripeConnectAccounts,
   users,
 } from '@codex/database/schema';
@@ -51,6 +50,9 @@ import {
   DEFAULT_PLATFORM_FEE_PERCENTAGE,
   type FeeConfigService,
   findActiveCreatorAgreementShare,
+  type LedgerDeps,
+  recordPlatformFee,
+  recordSlice,
   refreshCourseSubscriptionEntitlementExpiry,
   resolveOrganisationPayee,
   revokeCourseSubscriptionEntitlement,
@@ -64,7 +66,7 @@ import {
   type ServiceConfig,
 } from '@codex/service-errors';
 import type { CreateCourseSubscriptionCheckoutInput } from '@codex/validation';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadyCourseSubscribedError,
@@ -1159,32 +1161,13 @@ export class CourseSubscriptionService extends BaseService {
     }
     const { creatorId, organizationId } = course;
 
-    // Idempotency: `invoice.payment_succeeded` can redeliver. Only platform_fee
-    // has a per-charge unique index, so guard the WHOLE fan-out with a per-charge
-    // SELECT pre-check (mirrors executeTransfers) — if any payout row already
-    // exists for this (charge, course-sub), the fan-out ran; skip re-inserting
-    // the creator/org rows. The transfer idempotency keys are the second line of
-    // defence against double-paying if two redeliveries race past this check.
-    const [already] = await this.db
-      .select({ id: payouts.id })
-      .from(payouts)
-      .where(
-        and(
-          eq(payouts.stripeChargeId, stripeChargeId),
-          eq(payouts.courseSubscriptionId, sub.id)
-        )
-      )
-      .limit(1);
-    if (already) {
-      this.obs.info(
-        'Course-sub payouts already recorded for charge — skipping',
-        {
-          courseSubscriptionId: sub.id,
-          stripeChargeId,
-        }
-      );
-      return;
-    }
+    // Idempotency: `invoice.payment_succeeded` can redeliver. Every slice is
+    // reserved by a per-charge unique key before any transfer (recordSlice,
+    // Codex-2hxff.11), so a redelivery re-runs this whole fan-out safely: the
+    // slices already recorded are skipped and only a missing one is added.
+    // (A per-charge SELECT pre-check used to skip the fan-out if ANY row
+    // existed — so a delivery that died after the platform fee lost the
+    // creator and org slices for good.)
 
     const fees = this.feeConfig
       ? await this.feeConfig.getFeesForCreator(
@@ -1236,235 +1219,72 @@ export class CourseSubscriptionService extends BaseService {
       source: 'course_subscription',
     });
 
+    const ledger: LedgerDeps = {
+      db: this.db,
+      stripe: this.stripe,
+      obs: this.obs,
+      environment: this.environment,
+    };
+    const source = {
+      sourceType: 'subscription',
+      courseSubscriptionId: sub.id,
+    } as const;
     const transferGroup = `course_sub_${sub.id}`;
-    const now = new Date();
 
-    // 1. Platform fee — retained on platform balance (no transfer). Idempotent
-    // per charge via uq_payouts_platform_fee_per_charge.
-    if (split.platformFeeCents > 0) {
-      try {
-        await this.db
-          .insert(payouts)
-          .values({
-            userId: null,
-            organizationId,
-            courseSubscriptionId: sub.id,
-            amountCents: split.platformFeeCents,
-            payoutType: 'platform_fee',
-            status: 'paid',
-            sourceType: 'subscription',
-            stripeChargeId,
-            transferGroup,
-            resolvedAt: now,
-          })
-          .onConflictDoNothing({
-            target: payouts.stripeChargeId,
-            where: sql`${payouts.payoutType} = 'platform_fee'`,
-          });
-      } catch (err) {
-        this.obs.error('Failed to insert course-sub platform_fee payout', {
-          courseSubscriptionId: sub.id,
-          stripeChargeId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    // 1. Platform fee — retained on the platform balance (no transfer).
+    await recordPlatformFee(ledger, {
+      amountCents: split.platformFeeCents,
+      organizationId,
+      source,
+      stripeChargeId,
+      transferGroup,
+    });
 
-    // 2. Creator payout — secondary transfer to the course creator's account.
+    // 2. Creator payout — to the course creator's single account.
     if (split.creatorPayoutCents > 0) {
       const [creatorConnect] = await this.db
         .select()
         .from(stripeConnectAccounts)
         .where(eq(stripeConnectAccounts.userId, creatorId))
         .limit(1);
-      await this.executeCourseTransfer({
-        sub,
-        organizationId,
-        amountCents: split.creatorPayoutCents,
+      await recordSlice(ledger, {
         payoutType: 'creator_payout',
-        rowUserId: creatorId,
-        connect: creatorConnect,
+        amountCents: split.creatorPayoutCents,
+        organizationId,
+        source,
         stripeChargeId,
         transferGroup,
+        sendTransferGroup: false,
+        payee: { userId: creatorId, account: creatorConnect },
         idempotencyKey: `${stripeChargeId}_creator`,
-        now,
+        metadata: { course_subscription_id: sub.id },
       });
     }
 
-    // 3. Organization fee — secondary transfer to the org's Connect account.
+    // 3. Organization fee — to the owner when the invoice was created; pending
+    // in their name until they can be paid, or held as `no_owner` if the
+    // organisation had none (Codex-2hxff.37; it used to be logged and dropped).
     if (split.organizationFeeCents > 0) {
-      // The owner when the invoice was created, with or without a Connect
-      // account — without one the slice is recorded pending in their name.
       const orgPayee = await resolveOrganisationPayee(
         this.db,
         organizationId,
         invoiceCreatedAt,
         this.obs
       );
-      if (orgPayee) {
-        await this.executeCourseTransfer({
-          sub,
-          organizationId,
-          amountCents: split.organizationFeeCents,
-          payoutType: 'organization_fee',
-          rowUserId: orgPayee.userId,
-          connect: orgPayee.account,
-          stripeChargeId,
-          transferGroup,
-          idempotencyKey: `${stripeChargeId}_org_fee`,
-          now,
-        });
-      } else {
-        this.obs.error(
-          'Cannot record course-sub organization_fee payout: no org owner',
-          { courseSubscriptionId: sub.id, organizationId }
-        );
-      }
-    }
-  }
-
-  /**
-   * Execute one secondary transfer (creator or org) for a course sub + write its
-   * `payouts` ledger row. Per-row error isolation, NEVER throws — mirrors
-   * `PurchaseService.executePurchaseTransfer`. success → paid+transferId,
-   * connect-not-ready → pending, Stripe failure → failed.
-   */
-  private async executeCourseTransfer(params: {
-    sub: CourseSubscription;
-    organizationId: string;
-    amountCents: number;
-    payoutType: 'creator_payout' | 'organization_fee';
-    rowUserId: string;
-    connect: { stripeAccountId: string; chargesEnabled: boolean } | undefined;
-    stripeChargeId: string;
-    transferGroup: string;
-    idempotencyKey: string;
-    now: Date;
-  }): Promise<void> {
-    const {
-      sub,
-      organizationId,
-      amountCents,
-      payoutType,
-      rowUserId,
-      connect,
-      stripeChargeId,
-      transferGroup,
-      idempotencyKey,
-      now,
-    } = params;
-
-    if (!connect?.chargesEnabled) {
-      try {
-        await this.db.insert(payouts).values({
-          userId: rowUserId,
-          organizationId,
-          courseSubscriptionId: sub.id,
-          amountCents,
-          payoutType,
-          status: 'pending',
-          sourceType: 'subscription',
-          reason: 'connect_not_ready',
-          stripeChargeId,
-          transferGroup,
-        });
-      } catch (err) {
-        if (!isUniqueViolation(err)) {
-          this.obs.error(
-            `Failed to record pending ${payoutType} (course sub)`,
-            {
-              courseSubscriptionId: sub.id,
-              constraint: getConstraintName(err),
-              error: err instanceof Error ? err.message : String(err),
-            }
-          );
-        }
-      }
-      return;
-    }
-
-    try {
-      const transfer = await this.stripe.transfers.create(
-        {
-          amount: amountCents,
-          currency: CURRENCY.GBP,
-          destination: connect.stripeAccountId,
-          source_transaction: stripeChargeId,
-          metadata: {
-            course_subscription_id: sub.id,
-            type: payoutType,
-            stripe_charge_id: stripeChargeId,
-            ...stripeEnvMetadata(this.environment),
-          },
-        },
-        { idempotencyKey }
-      );
-      try {
-        await this.db.insert(payouts).values({
-          userId: rowUserId,
-          organizationId,
-          courseSubscriptionId: sub.id,
-          amountCents,
-          payoutType,
-          status: 'paid',
-          sourceType: 'subscription',
-          stripeTransferId: transfer.id,
-          stripeChargeId,
-          transferGroup,
-          resolvedAt: now,
-        });
-      } catch (insertErr) {
-        if (!isUniqueViolation(insertErr)) {
-          const errorId = crypto.randomUUID();
-          this.obs.error(
-            `${payoutType} transfer succeeded but course-sub ledger insert failed`,
-            {
-              errorId,
-              courseSubscriptionId: sub.id,
-              stripeTransferId: transfer.id,
-              idempotencyKey,
-              constraint: getConstraintName(insertErr),
-              error:
-                insertErr instanceof Error
-                  ? insertErr.message
-                  : String(insertErr),
-            }
-          );
-        }
-      }
-    } catch (transferErr) {
-      this.obs.error(`${payoutType} transfer failed (course sub)`, {
-        courseSubscriptionId: sub.id,
-        amountCents,
-        idempotencyKey,
-        destination: connect.stripeAccountId,
-        error:
-          transferErr instanceof Error
-            ? transferErr.message
-            : String(transferErr),
+      await recordSlice(ledger, {
+        payoutType: 'organization_fee',
+        amountCents: split.organizationFeeCents,
+        organizationId,
+        source,
+        stripeChargeId,
+        transferGroup,
+        sendTransferGroup: false,
+        payee: orgPayee
+          ? { userId: orgPayee.userId, account: orgPayee.account }
+          : null,
+        idempotencyKey: `${stripeChargeId}_org_fee`,
+        metadata: { course_subscription_id: sub.id },
       });
-      try {
-        await this.db.insert(payouts).values({
-          userId: rowUserId,
-          organizationId,
-          courseSubscriptionId: sub.id,
-          amountCents,
-          payoutType,
-          status: 'failed',
-          sourceType: 'subscription',
-          reason: 'transfer_failed',
-        });
-      } catch (insertErr) {
-        if (!isUniqueViolation(insertErr)) {
-          this.obs.error(`Failed to record failed ${payoutType} (course sub)`, {
-            courseSubscriptionId: sub.id,
-            error:
-              insertErr instanceof Error
-                ? insertErr.message
-                : String(insertErr),
-          });
-        }
-      }
     }
   }
 
