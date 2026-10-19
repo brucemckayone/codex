@@ -40,6 +40,7 @@ import {
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
+import { InternalServiceError } from '@codex/service-errors';
 import {
   createMockStripe,
   createTestConnectAccountInput,
@@ -363,8 +364,10 @@ describe('SubscriptionService refund clawback — characterisation (Codex-2hxff.
    */
   function failingPayoutUpdate(
     status: 'cancelled_by_refund' | 'reversed',
-    failOnAttempt: number
+    failOnAttempt: number | readonly number[]
   ): Database {
+    const failing =
+      typeof failOnAttempt === 'number' ? [failOnAttempt] : failOnAttempt;
     let attempts = 0;
     return new Proxy(db, {
       get(target, prop, receiver) {
@@ -377,7 +380,7 @@ describe('SubscriptionService refund clawback — characterisation (Codex-2hxff.
             builder.set = (values) => {
               if (table === payouts && values.status === status) {
                 attempts += 1;
-                if (attempts === failOnAttempt) throw new Error(DB_DOWN);
+                if (failing.includes(attempts)) throw new Error(DB_DOWN);
               }
               return realSet(values);
             };
@@ -427,10 +430,11 @@ describe('SubscriptionService refund clawback — characterisation (Codex-2hxff.
     // Spec (docs/payments/subscriptions.md#refunds): "Either way, the creator
     // and organisation slices are reversed in proportion, exactly as for
     // one-off purchases" — and for those (docs/payments/purchases.md#refunds):
-    // "every pending or failed slice becomes `cancelled_by_refund`". One row's
-    // failure aborts the loop here (the purchase copy isolates it). Flipped by
-    // Codex-2hxff.51.
-    it('CHARACTERISATION (defect): the error is not caught — the call rejects, rows after the failing one are never reached, nothing is logged', async () => {
+    // "every pending or failed slice becomes `cancelled_by_refund`"; an
+    // outage during a refund gets "500; Stripe retries; the handler is
+    // idempotent". Fixed by Codex-2hxff.51: one row's failure used to abort
+    // the loop, leaving the rows after it pending.
+    it('CHARACTERISATION: the other rows are still cancelled, the failure is logged with an errorId, and the call then rejects with it as the cause', async () => {
       const { tag, chargeId } = newCharge();
       const rows = await threePendingRows(chargeId);
       const service = makeService(
@@ -438,28 +442,77 @@ describe('SubscriptionService refund clawback — characterisation (Codex-2hxff.
       );
       const obs = spyObs(service);
 
-      await expect(
-        service.reverseSubscriptionPayoutsForCharge(chargeId, {
+      const failure = await service
+        .reverseSubscriptionPayoutsForCharge(chargeId, {
           refundAmountCents: 700,
           stripeRefundId: `re_cancel_${tag}`,
         })
-      ).rejects.toThrow(DB_DOWN);
+        .then(
+          () => undefined,
+          (error: unknown) => error
+        );
 
-      // The first row was cancelled, the second's cancel threw, the third
-      // was never reached.
-      const statuses = (await Promise.all(rows.map((r) => readRow(r.id))))
-        .map((r) => r.status)
-        .sort();
-      expect(statuses).toEqual(['cancelled_by_refund', 'pending', 'pending']);
-      expect(obs.error).not.toHaveBeenCalled();
+      // Rejects only after every row: the webhook's classifier judges it by
+      // its cause, a connection error, so Stripe redelivers.
+      expect(failure).toBeInstanceOf(InternalServiceError);
+      expect((failure as Error).cause).toEqual(
+        expect.objectContaining({ message: DB_DOWN })
+      );
+      const after = await Promise.all(rows.map((r) => readRow(r.id)));
+      expect(after.map((r) => r.status).sort()).toEqual([
+        'cancelled_by_refund',
+        'cancelled_by_refund',
+        'pending',
+      ]);
+      const stuck = after.find((r) => r.status === 'pending');
+      expect(
+        logged(obs.error, 'Failed to cancel payouts row for refund')
+      ).toEqual([
+        {
+          errorId: expect.stringMatching(UUID),
+          chargeId,
+          payoutId: stuck?.id,
+          error: DB_DOWN,
+        },
+      ]);
       expect(stripe.transfers.createReversal).not.toHaveBeenCalled();
+    });
+
+    it('CHARACTERISATION: when several rows fail, the cause is an AggregateError of every failure', async () => {
+      const { tag, chargeId } = newCharge();
+      const rows = await threePendingRows(chargeId);
+      const service = makeService(
+        failingPayoutUpdate('cancelled_by_refund', [1, 3])
+      );
+      spyObs(service);
+
+      const failure = await service
+        .reverseSubscriptionPayoutsForCharge(chargeId, {
+          refundAmountCents: 700,
+          stripeRefundId: `re_cancel_many_${tag}`,
+        })
+        .then(
+          () => undefined,
+          (error: unknown) => error
+        );
+
+      expect(failure).toBeInstanceOf(InternalServiceError);
+      const cause = (failure as Error).cause;
+      expect(cause).toBeInstanceOf(AggregateError);
+      expect((cause as AggregateError).errors).toHaveLength(2);
+      const after = await Promise.all(rows.map((r) => readRow(r.id)));
+      expect(after.map((r) => r.status).sort()).toEqual([
+        'cancelled_by_refund',
+        'pending',
+        'pending',
+      ]);
     });
   });
 
   // ── 2. redelivery after a failure ─────────────────────────────────────
 
   describe('2 · the same refund delivered again after a failure', () => {
-    it('CHARACTERISATION: a redelivery after a cancel failure cancels the rows left pending and skips the row already cancelled', async () => {
+    it('CHARACTERISATION: a redelivery after a cancel failure cancels the row left pending and skips the rows already cancelled', async () => {
       const { tag, chargeId } = newCharge();
       const rows = await threePendingRows(chargeId);
       const refund = {
@@ -470,12 +523,12 @@ describe('SubscriptionService refund clawback — characterisation (Codex-2hxff.
       spyObs(first);
       await expect(
         first.reverseSubscriptionPayoutsForCharge(chargeId, refund)
-      ).rejects.toThrow(DB_DOWN);
+      ).rejects.toBeInstanceOf(InternalServiceError);
       const afterFirst = await Promise.all(rows.map((r) => readRow(r.id)));
-      const alreadyCancelled = afterFirst.find(
+      const alreadyCancelled = afterFirst.filter(
         (r) => r.status === 'cancelled_by_refund'
       );
-      expect(alreadyCancelled).toBeDefined();
+      expect(alreadyCancelled).toHaveLength(2);
 
       const second = makeService();
       spyObs(second);
@@ -486,10 +539,10 @@ describe('SubscriptionService refund clawback — characterisation (Codex-2hxff.
         true
       );
       // Skipped, not re-written.
-      const again = afterSecond.find((r) => r.id === alreadyCancelled?.id);
-      expect(again?.updatedAt.getTime()).toBe(
-        alreadyCancelled?.updatedAt.getTime()
-      );
+      for (const cancelled of alreadyCancelled) {
+        const again = afterSecond.find((r) => r.id === cancelled.id);
+        expect(again?.updatedAt.getTime()).toBe(cancelled.updatedAt.getTime());
+      }
       expect(stripe.transfers.createReversal).not.toHaveBeenCalled();
     });
 

@@ -69,11 +69,14 @@ interface ClawbackProfile {
   /** Denominator of a partial refund. D1 → the Stripe charge amount, for every source. */
   denominator: (rows: readonly Payout[]) => number;
   /**
-   * A cancel that throws: logged and the row skipped (purchase), or rethrown
-   * so the call rejects with the rest unprocessed (subscription,
-   * Codex-2hxff.51).
+   * Whether a row whose cancel threw makes the call reject once every other
+   * row is done, so the webhook's 500 has Stripe redeliver (subscription).
+   * The purchase source cannot use a retry yet: it records the purchase
+   * refunded first, and a redelivery stops at that gate before reaching the
+   * row. D2 (one record per payout and refund) lets it retry, and deletes
+   * this field.
    */
-  cancelFailure: { logAs: string } | 'rethrow';
+  retriesIncompleteCancels: boolean;
   /** The source's id field on every log line. */
   logContext: Record<string, string>;
   messages: {
@@ -113,7 +116,7 @@ function profileFor(source: ClawbackSource): ClawbackProfile {
       return {
         where: eq(payouts.purchaseId, source.purchaseId),
         denominator: () => source.amountPaidCents,
-        cancelFailure: { logAs: 'Failed to cancel payouts row for refund' },
+        retriesIncompleteCancels: false,
         logContext: { purchaseId: source.purchaseId },
         messages: {
           flooredToZero: 'Reversal amount floored to zero, platform absorbs',
@@ -152,7 +155,7 @@ function profileFor(source: ClawbackSource): ClawbackProfile {
         // The charged amount, rebuilt as the sum of the recorded slices
         // (platform + org + creator), whatever their status.
         denominator: (rows) => rows.reduce((sum, r) => sum + r.amountCents, 0),
-        cancelFailure: 'rethrow',
+        retriesIncompleteCancels: true,
         logContext: { chargeId: source.chargeId },
         messages: {
           flooredToZero:
@@ -203,9 +206,13 @@ function profileFor(source: ClawbackSource): ClawbackProfile {
  * of each slice; the rounding stays on the platform balance. A share that
  * floors to zero is not reversed and the row stays paid.
  *
- * One row's failure never stops the others (except a subscription cancel
- * failure, see `ClawbackProfile.cancelFailure`). Rows already `reversed` or
- * `cancelled_by_refund` are skipped, so a redelivered webhook is a no-op.
+ * One row's failure never stops the others (Codex-2hxff.51). A cancel that
+ * failed is logged with an errorId; for a source that retries, the call then
+ * rejects with an `InternalServiceError` whose cause is the failure (an
+ * `AggregateError` when several rows failed), so the webhook classifies it
+ * as transient or permanent exactly as it would the failure itself. Rows
+ * already `reversed` or `cancelled_by_refund` are skipped, so a redelivered
+ * webhook retries only what is left.
  */
 export async function reverseCharge(
   deps: ClawbackDeps,
@@ -239,6 +246,8 @@ export async function reverseCharge(
       ? `_${refundAmountCents}`
       : '';
 
+  const failedCancels: unknown[] = [];
+
   for (const listed of rows) {
     let row: Payout = listed;
     if (row.status === 'reversed' || row.status === 'cancelled_by_refund') {
@@ -251,11 +260,10 @@ export async function reverseCharge(
       try {
         cancel = await cancelUnpaidPayoutForRefund(deps, row);
       } catch (cancelErr) {
-        if (profile.cancelFailure === 'rethrow') throw cancelErr;
-        // Logged, not thrown: the purchase is already recorded refunded, so
-        // a redelivery stops at the 'already processed' check and would
-        // never come back to this row.
-        deps.obs.error(profile.cancelFailure.logAs, {
+        // Isolated, so the rest of the charge is still clawed back. The row
+        // stays pending until a retry cancels it.
+        failedCancels.push(cancelErr);
+        deps.obs.error('Failed to cancel payouts row for refund', {
           errorId: crypto.randomUUID(),
           ...profile.logContext,
           payoutId: row.id,
@@ -360,6 +368,19 @@ export async function reverseCharge(
           updateErr instanceof Error ? updateErr.message : String(updateErr),
       });
     }
+  }
+
+  if (failedCancels.length > 0 && profile.retriesIncompleteCancels) {
+    throw new InternalServiceError(
+      'Refund clawback incomplete: a payout row could not be cancelled',
+      { failedRows: failedCancels.length },
+      {
+        cause:
+          failedCancels.length === 1
+            ? failedCancels[0]
+            : new AggregateError(failedCancels),
+      }
+    );
   }
 }
 

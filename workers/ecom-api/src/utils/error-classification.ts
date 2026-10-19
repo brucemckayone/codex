@@ -105,6 +105,14 @@ function isTransientAt(error: unknown, depth: number): boolean {
     return error.cause !== undefined && isTransientAt(error.cause, depth + 1);
   }
 
+  // Several failures reported together (the clawback's rows it could not
+  // cancel, Codex-2hxff.51) are worth a retry when any one of them is: the
+  // retry is idempotent, and a row left behind can be paid out on a refunded
+  // charge.
+  if (error instanceof AggregateError) {
+    return error.errors.some((inner) => isTransientAt(inner, depth + 1));
+  }
+
   if (error instanceof Error) {
     // Check for Stripe SDK error types
     const stripeType = (error as { type?: string }).type;

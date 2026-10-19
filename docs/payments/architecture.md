@@ -315,7 +315,7 @@ From [work §1], plus .50–.52. A bead that names two WPs needs both.
 | Codex-2hxff.48 | Failed payout rows retry forever | WP5 (decision D-P2) |
 | Codex-2hxff.49 | A replay re-splits with current fees | WP4 |
 | Codex-2hxff.50 | Course-subscription invoices record no payouts | **WP1, done** |
-| Codex-2hxff.51 | A subscription refund stops at the first failing row | WP3 |
+| Codex-2hxff.51 | A subscription refund stops at the first failing row | **WP3, done**: every row is attempted, then the call rejects so Stripe retries |
 | Codex-2hxff.52 | Course subscriptions half-wired into the subscription webhook | WP7 |
 
 Related beads outside the epic: Codex-in0g4 (WP3), -rtwpv and -itvh8 (WP4),

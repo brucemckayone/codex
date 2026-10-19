@@ -211,6 +211,35 @@ describe('isTransientError', () => {
     });
   });
 
+  // Codex-2hxff.51: the clawback finishes every row, then rejects with the
+  // rows it could not cancel as one InternalServiceError whose cause is the
+  // failure, or an AggregateError of them.
+  describe('several failures reported together', () => {
+    const outage = () => new Error('Connection terminated unexpectedly');
+    const bug = () => new TypeError('x is undefined');
+    const incomplete = (cause: unknown) =>
+      new InternalServiceError('Refund clawback incomplete', undefined, {
+        cause,
+      });
+
+    it('is transient when any one failure is, wherever it sits', () => {
+      expect(
+        isTransientError(incomplete(new AggregateError([bug(), outage()])))
+      ).toBe(true);
+    });
+
+    it('is permanent when every failure is', () => {
+      expect(
+        isTransientError(incomplete(new AggregateError([bug(), bug()])))
+      ).toBe(false);
+    });
+
+    it('a single failure is judged as itself', () => {
+      expect(isTransientError(incomplete(outage()))).toBe(true);
+      expect(isTransientError(incomplete(bug()))).toBe(false);
+    });
+  });
+
   describe('Postgres SQLSTATE codes', () => {
     const pg = (code: string) =>
       Object.assign(new Error('database error'), { code });
