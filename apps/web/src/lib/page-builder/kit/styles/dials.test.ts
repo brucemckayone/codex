@@ -209,7 +209,9 @@ describe('the type dial', () => {
         // Path's route stops on the section heading's line.
         file !== 'styles/style-path.css'
     );
-    expect(uses.length).toBeGreaterThanOrEqual(14);
+    // A floor, so the scan is seen to read the kit: 13 since the wall stopped
+    // restating Voice's featured quote size (Codex-61zsk.28).
+    expect(uses.length).toBeGreaterThanOrEqual(13);
     expect(free.map(({ file, line }) => `${file}: ${line}`)).toEqual([]);
   });
 });

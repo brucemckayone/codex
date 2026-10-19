@@ -1,3 +1,6 @@
+import { readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tick } from 'svelte';
 import { parse } from 'svelte/compiler';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +14,7 @@ import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
 import { NOTHING_FOLLOWS } from '../../motion/attributes';
+import { sheetRules } from '../testing';
 import { TESTIMONIALS_COPY } from './copy';
 import { TESTIMONIALS_EMPTY, testimonialsDefinition } from './definition';
 import { MARQUEE_MIN, marqueeCopies } from './marquee';
@@ -469,75 +473,97 @@ describe('TestimonialsBlock', () => {
 
   /**
    * Voice hangs a quote's opening mark outside its words by a share of the
-   * quote's own size (`text-indent`), and sets that size case by case. A card
-   * cannot read its child's font-size, so the wall and the strip restate each
-   * case to make the mark's room — on the voice, so the words and the name
-   * keep one edge whatever padding a Style gives the card. Every restated
-   * case is pinned to Voice's own here: a size or hang Voice changes fails
-   * this, rather than silently pushing the mark out over the card's edge.
+   * quote's own size (`text-indent`). It sets both on the voice itself — the
+   * size as `--lp-size-quote` (type, so a Type may set it, 03 X73), the share
+   * as `--_hang` — and the room they make as `--lp-voice-room`, which the wall
+   * and the strip pad the voice by: on the voice, so the words and the name
+   * keep one edge whatever padding a Style gives the card. Nothing restates a
+   * size. A copy is how the strip's room (keyed on Poster's Style) and its
+   * quote's size (keyed on Poster's Type) came apart on a page that borrows
+   * the Type (Codex-61zsk.28).
    */
   describe('the opening mark', () => {
-    /** Voice's quote size and hang per modifier of `.voice`, for one size. */
-    const quoteCases = (size: 'wall' | 'grid') => {
-      const cases = new Map<string, { size?: string; hang?: string }>();
-      const own = new RegExp(`^\\.voice\\[data-size='${size}'\\](.*) p$`);
-      for (const d of declarationsOf(VOICE_SOURCE)) {
-        for (const selector of d.selectors) {
-          const modifier =
-            selector === '.voice__quote p'
-              ? ''
-              : (selector.match(own)?.[1] ?? null);
-          if (modifier === null) continue;
-          const entry = cases.get(modifier) ?? {};
-          if (d.property === 'font-size') entry.size = d.value;
-          if (d.property === 'text-indent')
-            entry.hang = d.value.replace(/^-/, '').replace(/em$/, '');
-          cases.set(modifier, entry);
-        }
-      }
-      return cases;
-    };
+    const voiceCss = () => declarationsOf(VOICE_SOURCE);
+    /** A selector that reaches the quote's words rather than the voice. */
+    const onWords = (selector: string) => / p$/.test(selector);
 
-    /** The room a card makes per modifier of the `.voice` it holds. */
-    const roomCases = (source: string, card: string) => {
-      const cases = new Map<
-        string,
-        { size?: string; hang?: string; room?: string }
-      >();
-      const prefix = `${card} > :global(.voice`;
-      for (const d of declarationsOf(source)) {
-        for (const selector of d.selectors) {
-          if (!selector.startsWith(prefix) || !selector.endsWith(')')) continue;
-          const modifier = selector.slice(prefix.length, -1);
-          const entry = cases.get(modifier) ?? {};
-          if (d.property === '--_quote') entry.size = d.value;
-          if (d.property === '--_hang') entry.hang = d.value;
-          if (d.property === 'padding-inline-start') entry.room = d.value;
-          cases.set(modifier, entry);
-        }
+    it('makes the room on the voice, from the quote’s size and the share its mark hangs by', () => {
+      const room = voiceCss().filter((d) => d.property === '--lp-voice-room');
+      expect(room.map((d) => [d.selectors, d.value])).toEqual([
+        [['.voice'], 'calc(var(--lp-size-quote) * var(--_hang))'],
+      ]);
+    });
+
+    it('sets the words in the voice’s size, hung by its share', () => {
+      const words = voiceCss().filter((d) =>
+        d.selectors.includes('.voice__quote p')
+      );
+      const value = (property: string) =>
+        words.find((d) => d.property === property)?.value;
+      expect(value('font-size')).toBe('var(--lp-size-quote)');
+      expect(value('text-indent')).toBe('calc(var(--_hang) * -1em)');
+    });
+
+    it('sets every size and share on the voice, and none on its words', () => {
+      const css = voiceCss();
+      const sizing = css.filter((d) =>
+        ['--lp-size-quote', '--_hang'].includes(d.property)
+      );
+      // Calibrated: the lead's and the wall's cases are there to be read.
+      expect(sizing.length).toBeGreaterThan(6);
+      for (const d of sizing)
+        expect(d.selectors.filter(onWords), d.property).toEqual([]);
+      for (const d of css) {
+        // The words take their size from the voice alone…
+        if (d.property === 'font-size' && d.selectors.some(onWords))
+          expect(d.selectors, d.value).toEqual(['.voice__quote p']);
+        // …and hang by its share, or not at all where they are centred.
+        if (d.property === 'text-indent')
+          expect(
+            ['calc(var(--_hang) * -1em)', '0'],
+            d.selectors.join()
+          ).toContain(d.value);
       }
-      return cases;
-    };
+    });
 
     it.each([
-      ['wall', WALL_SOURCE, '.tm-wall__tile', 'wall'],
-      ['marquee', MARQUEE_SOURCE, '.tm-marquee__card', 'grid'],
-    ] as const)('%s: makes the room each quote size hangs its mark into', (_, source, card, size) => {
-      const voice = quoteCases(size);
-      const room = roomCases(source, card);
-      expect(voice.get('')).toEqual({
-        size: 'var(--lp-size-lead)',
-        hang: '0.4',
-      });
-      expect(room.get('')?.room).toBe('calc(var(--_quote) * var(--_hang))');
-      for (const [modifier, own] of voice) {
-        const made = room.get(modifier);
-        if (own.size) expect(made?.size, `.voice${modifier}`).toBe(own.size);
-        if (own.hang) expect(made?.hang, `.voice${modifier}`).toBe(own.hang);
-      }
-      // …and restates no case Voice does not have.
-      for (const modifier of room.keys())
-        expect(voice.has(modifier), `.voice${modifier}`).toBe(true);
+      ['wall', WALL_SOURCE, '.tm-wall__tile'],
+      ['marquee', MARQUEE_SOURCE, '.tm-marquee__card'],
+    ] as const)('%s: pads the voice by Voice’s own room, and restates no size', (_, source, card) => {
+      const onVoice = declarationsOf(source).filter((d) =>
+        d.selectors.some((s) => s.includes('.voice'))
+      );
+      expect(onVoice.map((d) => [d.selectors, d.property, d.value])).toEqual([
+        [
+          [`${card} > :global(.voice)`],
+          'padding-inline-start',
+          'var(--lp-voice-room)',
+        ],
+      ]);
+    });
+
+    it('leaves the room to Voice in every Style: no sheet pads a voice or sizes its words', () => {
+      const styles = join(
+        dirname(fileURLToPath(import.meta.url)),
+        '../../styles'
+      );
+      const sheets = readdirSync(styles).filter((f) => f.endsWith('.css'));
+      // Calibrated: Poster's sheet, which sets the strip's quotes, is read.
+      expect(sheets).toContain('style-poster.css');
+      const stray = sheets.flatMap((file) =>
+        sheetRules(join(styles, file))
+          .filter((rule) => /\.voice[:[\s.]|\.voice$/.test(rule.selector))
+          .flatMap((rule) =>
+            [...rule.decls.keys()]
+              .filter(
+                (property) =>
+                  /^padding(-inline(-start)?)?$/.test(property) ||
+                  (property === 'font-size' && / p$/.test(rule.selector))
+              )
+              .map((property) => `${file}: ${rule.selector} sets ${property}`)
+          )
+      );
+      expect(stray).toEqual([]);
     });
   });
 });

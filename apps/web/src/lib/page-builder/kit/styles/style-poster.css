@@ -424,19 +424,20 @@
 }
 
 /* ── the strip of praise: short quotes set like headlines ───────────────── */
+/* The size is the voice's own token, so the room the strip makes for the
+   hanging mark (Voice's `--lp-voice-room`) is a title's too, wherever this
+   Type is drawn: on a page that borrows it, as on Poster's own. */
+:is(.lp, #lp-style)[data-lp-type-facet='poster'] .tm-marquee .voice:not([data-length='long']) {
+  --lp-size-quote: var(--lp-size-title);
+}
+
 :is(.lp, #lp-style)[data-lp-type-facet='poster']
   .tm-marquee .voice:not([data-length='long']) .voice__quote p {
   font-family: var(--lp-font-display);
-  font-size: var(--lp-size-title);
   font-weight: var(--lp-weight-title);
   font-synthesis: none;
   line-height: var(--lp-leading-title);
   letter-spacing: var(--lp-tracking-title);
-}
-
-/* …so the room the strip makes for their hanging mark is a title's too. */
-:is(.lp, #lp-style)[data-lp-style='poster'] .tm-marquee__card > .voice:not([data-length='long']) {
-  padding-inline-start: calc(var(--lp-size-title) * 0.4);
 }
 
 /* ── story chapters: the step's number is the poster's big figure ───────── */

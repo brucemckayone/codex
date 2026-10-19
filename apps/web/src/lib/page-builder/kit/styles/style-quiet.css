@@ -233,12 +233,6 @@
   letter-spacing: -0.012em;
 }
 
-/* The statement is the one passage that reads along; the lines answering it
-   keep their soft ink, as they do without motion. */
-:is(.lp, #lp-style)[data-lp-style='quiet'] .text[data-layout='statement'] .text__body > p:not(:first-child) {
-  animation: none;
-}
-
 /* ── the ask, understated ────────────────────────────────────────────────── */
 /* A second button is a link in the page's ink, underlined in the accent;
    its target stays full height. */

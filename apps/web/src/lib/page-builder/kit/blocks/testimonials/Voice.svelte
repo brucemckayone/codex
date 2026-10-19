@@ -74,7 +74,15 @@
 </figure>
 
 <style>
+  /* The quote's size (`--lp-size-quote`) and the share of it its opening mark
+     hangs by (`--_hang`) are set on the voice, not on its words, so that what
+     holds a voice can make the mark's room from them: `--lp-voice-room`, which
+     the wall and the strip pad the voice by. The size is type, so a Type may
+     set it (03 X73) and the room follows. Nothing restates a size. */
   .voice {
+    --lp-size-quote: var(--lp-size-lead);
+    --_hang: 0.4;
+    --lp-voice-room: calc(var(--lp-size-quote) * var(--_hang));
     display: grid;
     align-content: start;
     gap: var(--space-4);
@@ -96,10 +104,10 @@
     max-inline-size: none;
     margin: 0;
     font-family: var(--lp-font-body);
-    font-size: var(--lp-size-lead);
+    font-size: var(--lp-size-quote);
     line-height: var(--lp-leading-lead);
     text-wrap: pretty;
-    text-indent: -0.4em;
+    text-indent: calc(var(--_hang) * -1em);
   }
 
   .voice__quote p::before {
@@ -110,23 +118,30 @@
     content: close-quote;
   }
 
+  .voice[data-size='grid'][data-length='long'],
+  .voice[data-size='quiet'] {
+    --lp-size-quote: var(--lp-size-body);
+  }
+
   .voice[data-size='grid'][data-length='long'] p,
   .voice[data-size='quiet'] p {
-    font-size: var(--lp-size-body);
     line-height: var(--lp-leading-body);
   }
 
   /* ── lead / monument: set like headings ────────────────────────────────── */
+  .voice:is([data-size='lead'], [data-size='monument']) {
+    --lp-size-quote: calc((var(--lp-size-heading) * var(--lp-drama-held, 1) + var(--lp-size-title)) / 2);
+    --_hang: 0.42;
+  }
+
   .voice:is([data-size='lead'], [data-size='monument']) p {
-    --_size: calc((var(--lp-size-heading) * var(--lp-drama-held, 1) + var(--lp-size-title)) / 2);
     font-family: var(--lp-font-display);
-    font-size: var(--_size);
     font-weight: var(--lp-weight-heading);
     font-synthesis: none;
     line-height: var(--lp-leading-heading);
     letter-spacing: var(--lp-tracking-heading);
     text-wrap: balance;
-    text-indent: -0.42em;
+    text-indent: calc(var(--_hang) * -1em);
   }
 
   .voice[data-size='lead'] p {
@@ -137,13 +152,19 @@
     max-inline-size: 26ch;
   }
 
+  .voice[data-size='monument'][data-length='short'] {
+    --lp-size-quote: calc(var(--lp-size-heading) * var(--lp-drama-held, 1));
+  }
+
   .voice[data-size='monument'][data-length='short'] p {
-    --_size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1));
     max-inline-size: 20ch;
   }
 
+  .voice:is([data-size='lead'], [data-size='monument'])[data-length='long'] {
+    --lp-size-quote: var(--lp-size-title);
+  }
+
   .voice:is([data-size='lead'], [data-size='monument'])[data-length='long'] p {
-    --_size: var(--lp-size-title);
     max-inline-size: 38ch;
     font-weight: var(--lp-weight-title);
     line-height: var(--lp-leading-title);
@@ -182,26 +203,36 @@
   }
 
   /* ── wall: set by its length, in a narrow tile ─────────────────────────── */
+  .voice[data-size='wall'][data-length='long'] {
+    --lp-size-quote: var(--lp-size-body);
+  }
+
   .voice[data-size='wall'][data-length='long'] p {
-    font-size: var(--lp-size-body);
     line-height: var(--lp-leading-body);
   }
 
   /* A short quote, and the featured one, take the display face: the few
      words that land hardest take the most room. */
+  .voice[data-size='wall']:is([data-length='short'], [data-featured]) {
+    --lp-size-quote: var(--lp-size-title);
+    --_hang: 0.42;
+  }
+
   .voice[data-size='wall']:is([data-length='short'], [data-featured]) p {
     font-family: var(--lp-font-display);
-    font-size: var(--lp-size-title);
     font-weight: var(--lp-weight-title);
     font-synthesis: none;
     line-height: var(--lp-leading-title);
     letter-spacing: var(--lp-tracking-title);
     text-wrap: balance;
-    text-indent: -0.42em;
+    text-indent: calc(var(--_hang) * -1em);
+  }
+
+  .voice[data-size='wall'][data-featured]:not([data-length='long']) {
+    --lp-size-quote: calc((var(--lp-size-heading) * var(--lp-drama-held, 1) + var(--lp-size-title)) / 2);
   }
 
   .voice[data-size='wall'][data-featured]:not([data-length='long']) p {
-    font-size: calc((var(--lp-size-heading) * var(--lp-drama-held, 1) + var(--lp-size-title)) / 2);
     font-weight: var(--lp-weight-heading);
     line-height: var(--lp-leading-heading);
     letter-spacing: var(--lp-tracking-heading);
