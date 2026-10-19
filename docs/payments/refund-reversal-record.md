@@ -1,6 +1,6 @@
 # Refund reversals: one record per slice per refund
 
-**Status: DRAFT for owner review, 2026-10-19.** It is the data design behind WP3's behaviour PRs ([architecture.md](architecture.md) §6, engineering calls D1–D5, D7 and D8 on Codex-2hxff.56). It closes the money half of Codex-2hxff.8, and Codex-in0g4.
+**Status: AGREED by the owner, 2026-10-19 (§7 Q1–Q3 decided).** It is the data design behind WP3's behaviour PRs ([architecture.md](architecture.md) §6, engineering calls D1–D5, D7 and D8 on Codex-2hxff.56). It closes the money half of Codex-2hxff.8, and Codex-in0g4.
 
 The *behaviour* is already decided in [purchases.md](purchases.md#refunds) and [subscriptions.md](subscriptions.md#refunds). This document only decides **how it is recorded**, plus the three questions at the end.
 
@@ -86,13 +86,10 @@ What stays the same:
 - **Deleted from `profileFor`:** `denominator` (D1), `where` (D8), `retriesIncompleteCancels` (D2), `reversalFailedHasErrorId` and `messages` (one log vocabulary), `reversalMetadata` (source fields read from the row), `onInsufficientFunds` (one debt path). The profile is gone.
 - **Characterisation tests flipped:** 2, 3, 5, 6, 8 (the key and zero-amount cases), and 11 (selection) in both files, each renamed from "(defect)" to the spec behaviour.
 
-## 7. Questions for the owner
+## 7. Owner decisions (2026-10-19, all as recommended)
 
-- **Q1. A refund still `pending` at Stripe.** It can be pending when the platform balance is short, and it can still fail.
-  - *Recommended:* claw back only once it has **succeeded**. That means handling `refund.updated`, a new event on the payment endpoint, which is a Stripe dashboard change.
-  - *Alternative:* claw back at once, as today.
-- **Q2. A refund that fails after we clawed back** (`refund.failed`; a bank can return the money up to 30 days later, and Stripe puts it back in the platform balance). The creator has repaid a refund the customer never received.
-  - *Recommended:* re-pay automatically, as a new pending payout row the drain pays.
-  - *Alternative:* a review row for ops.
-- **Q3. Access on a partial refund** (decision P-1, "Keep access"). It changes `processRefund` and the purchase status.
-  - *Recommended:* a **separate PR** after this one. Money and access are different modules (WP7), and each is easier to review alone.
+- **Q1: a refund still `pending` at Stripe is clawed back only once it has succeeded.**
+  - The payment webhook also handles `refund.updated`, a new event on the payment endpoint, which is a Stripe dashboard change.
+  - A refund that is already `succeeded` when `charge.refunded` arrives, which is most card refunds, is clawed back at once.
+- **Q2: a refund that fails after its clawback is re-paid automatically.** A new pending payout row for the clawed-back amount, which the drain pays like any other. The reversal record is marked so it is never re-reversed.
+- **Q3: access on a partial refund (P-1) ships in a separate PR, after this one.**
