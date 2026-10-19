@@ -376,6 +376,9 @@ export async function createServiceRegistry(
       kv,
       prefix: 'cache',
       waitUntil: cacheWaitUntil,
+      // A failed KV write or invalidation is otherwise silent, and a stale
+      // entry outlives it by up to its TTL (Codex-2hxff.57).
+      obs: _obs,
     });
     trackedCaches.push(cache);
     return cache;

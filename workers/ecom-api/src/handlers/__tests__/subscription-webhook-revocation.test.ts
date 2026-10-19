@@ -98,8 +98,8 @@ vi.mock('@codex/purchase', () => ({
   FeeConfigService: vi.fn(),
 }));
 
-// `createWebhookDbClient` must remain a real export — it forwards to the
-// (mocked) `createPerRequestDbClient`, so use importOriginal + spread.
+// `createWebhookServices` must stay real: it builds the registry on the
+// (mocked) database client, so use importOriginal + spread.
 vi.mock('@codex/worker-utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/worker-utils')>();
   return {

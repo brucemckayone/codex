@@ -312,25 +312,34 @@ export async function handleCheckoutCompleted(event, stripe, c) {
     return;  // Permanent error — don't throw (would cause Stripe retries)
   }
 
-  // 3. Per-request DB client (webhooks don't go through procedure())
-  const { db, cleanup } = createWebhookDbClient(c.env);
+  // 3. The registry's services (webhooks don't go through procedure()).
+  // Never build a service by hand: `{ db, environment }` alone silently drops
+  // fee config and emails (Codex-2hxff.7). The factory uses the webhook's own
+  // Stripe client and stays on the Neon driver (Codex-2hxff.54).
+  const { services, background, release } = await createWebhookServices(
+    c.env,
+    c.executionCtx,
+    { obs, stripe }
+  );
   try {
-    // Pass the SAME config the service registry does — feeConfig, mailer, webAppUrl.
-    // `{ db, environment }` alone silently drops fee config and emails (Codex-2hxff.7).
-    const service = new PurchaseService({ db, environment, feeConfig, mailer, webAppUrl }, stripe);
-    const purchase = await service.completePurchase(paymentIntentId, { ... });
+    const purchase = await services.purchase.completePurchase(paymentIntentId, { ... });
 
-    // 4. Fire-and-forget side effects
+    // 4. Side effects after the response. DB work goes through `background`,
+    // which holds the pool open until it settles; KV and email through
+    // `waitUntil`.
     if (c.env.CACHE_KV) {
-      const cache = new VersionedCache({ kv: c.env.CACHE_KV });
+      const cache = new VersionedCache({
+        kv: c.env.CACHE_KV,
+        waitUntil: (p) => c.executionCtx.waitUntil(p),
+        obs,
+      });
       c.executionCtx.waitUntil(
         cache.invalidate(CacheType.COLLECTION_USER_LIBRARY(meta.customerId)).catch(() => {})
       );
     }
     sendEmailToWorker(c.env, c.executionCtx, { ... });
-
   } finally {
-    await cleanup(); // today's pattern in all handlers; Codex-ev3k tracks waitUntil(cleanup())
+    release(); // closes the pool once `background` work settles; never awaited
   }
 }
 ```

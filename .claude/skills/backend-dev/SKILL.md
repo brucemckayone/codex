@@ -251,7 +251,7 @@ fuller context lives in the references. Run top-to-bottom against each changed f
 - [ ] Signature verified on raw body (`c.req.text()` before any JSON parse)
 - [ ] Different secrets per path (`/booking`, `/payment`, `/subscription`, `/connect`)
 - [ ] Metadata validated with Zod schema on receipt, not trusted as-is
-- [ ] `createPerRequestDbClient` + `c.executionCtx.waitUntil(cleanup())` — never `await cleanup()`
+- [ ] Services from `createWebhookServices(c.env, c.executionCtx, { obs, stripe })`, never built by hand; `release()` in `finally`; post-response DB work through `background()`, not plain `waitUntil` (Codex-2hxff.54)
 - [ ] Cache invalidation via `waitUntil(cache.invalidate(...).catch(() => {}))` — MUST have `.catch()`
 - [ ] Every `waitUntil(...)` call has `.catch(() => {})` — grep the file, not just the obvious sites
 - [ ] Errors classified via `isTransientError()` helper; permanent errors return 200 `{ received: true }`

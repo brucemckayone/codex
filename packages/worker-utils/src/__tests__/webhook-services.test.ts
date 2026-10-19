@@ -10,6 +10,8 @@
  * DATABASE-FREE: the DB client is constructed, never queried (same env shape
  * as db-background-wiring.test.ts).
  */
+import type { VersionedCache } from '@codex/cache';
+import type { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
 import type Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
@@ -48,6 +50,13 @@ function waitUntilOf(service: object): DeferFn {
   const hook = (service as { waitUntil?: DeferFn }).waitUntil;
   if (!hook) throw new Error('service was built without a waitUntil hook');
   return hook;
+}
+
+/** A service's private cache, without widening the production type. */
+function cacheOf(service: object): VersionedCache {
+  const cache = (service as { cache?: VersionedCache }).cache;
+  if (!cache) throw new Error('service was built without a cache');
+  return cache;
 }
 
 /** Read private constructor deps without widening the production types. */
@@ -116,6 +125,39 @@ describe('createWebhookServices', () => {
     const { release } = await createWebhookServices(bound, fakeExecutionCtx());
     release();
     expect(hyperdriveClient).not.toHaveBeenCalled();
+  });
+
+  it("logs a cache invalidation that fails, through the webhook's logger", async () => {
+    // Codex-2hxff.57: the registry's caches were built without `obs`, so an
+    // `account.updated` invalidation that failed left Studio's Connect status
+    // stale for up to its TTL with no log line.
+    const obs = {
+      error: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as ObservabilityClient & { error: ReturnType<typeof vi.fn> };
+    const kv = {
+      get: vi.fn(async () => null),
+      put: vi.fn(async () => {
+        throw new Error('KV unavailable');
+      }),
+      delete: vi.fn(async () => {}),
+    };
+    const { services, release } = await createWebhookServices(
+      testEnv({ CACHE_KV: kv }),
+      fakeExecutionCtx(),
+      { obs }
+    );
+    try {
+      await cacheOf(services.connect).invalidate('org_stale');
+      expect(obs.error).toHaveBeenCalledWith(
+        'Cache invalidation failed',
+        expect.objectContaining({ id: 'org_stale', error: 'KV unavailable' })
+      );
+    } finally {
+      release();
+    }
   });
 
   it('closes the pool only after the background work the services registered', async () => {

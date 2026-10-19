@@ -182,7 +182,10 @@ procedure({ policy: { auth: 'worker' }, ... })
 
 ## Exceptions (bypass procedure())
 
-Stripe webhooks and RunPod webhooks use raw Hono handlers + `waitUntil(cleanup())` because they need HMAC-SHA256 validation before any parsing. They manage their own DB lifecycle with `createWebhookDbClient(c.env)` + `waitUntil(cleanup())` (the RunPod webhook in media-api uses `createDbClient` directly).
+Stripe webhooks and RunPod webhooks use raw Hono handlers because they need HMAC-SHA256 validation before any parsing.
+
+- **Stripe webhooks and the payouts cron** get the registry's services from `createWebhookServices(env, executionCtx, { obs, stripe })` (`src/webhook-services.ts`, Codex-2hxff.54). It returns `{ services, background, release }`: the same graph routes get (fee config, mailers, `webAppUrl`, caches), built on the webhook's own Stripe client and the Neon driver. Call `release()` in `finally`. It closes the pool only after the work handed to `background()` settles. So DB work after the response goes through `background()`, never plain `waitUntil`.
+- **The RunPod webhook** (media-api) uses the stateless `createDbClient(c.env)` directly, which has no pool to close.
 
 ## Reference Files
 
