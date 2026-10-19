@@ -6,9 +6,10 @@
  * Redirects to login if not authenticated, PRESERVING the requested path so a
  * bookmarked deep link (a builder URL, say) survives the sign-in — see
  * {@link _safeStudioRedirect}.
- * Redirects to home if not a privileged member.
+ * Redirects to home if not a privileged member. A membership read that FAILS is
+ * a retryable 503, never that redirect: a failure is not an answer.
  */
-import { redirect } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import { getMyOrganizations } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
@@ -113,13 +114,22 @@ export const load: LayoutServerLoad = async ({
     // creation, which would otherwise bounce them to access_denied. We call the
     // RAW api client (NOT the cached remote getMyMembership query(), which would
     // dedupe repeat reads) so each retry attempt is a fresh DB read.
+    //
+    // A FAILED read is a 503, not `role: null` (Codex-61zsk.22). The endpoint
+    // admits non-members on purpose and answers them 200 with `role: null`, so
+    // a throw here is the backend failing, not the caller's answer. Read as
+    // `role: null`, it bounced a signed-in owner out of their own studio under
+    // load; a 503 leaves them on an error page they can retry.
     resolveMembershipWithRetry(() => api.org.getMyMembership(org.id)).catch(
       (err: unknown) => {
         logger.error('studio-layout:getMyMembership failed', {
           orgId: org.id,
           error: String(err),
         });
-        return { role: null, joinedAt: null, pendingOwnershipOffer: null };
+        error(
+          503,
+          'We could not check your access to this studio just now. Please try again.'
+        );
       }
     ),
     getMyOrganizations().catch((err: unknown) => {
