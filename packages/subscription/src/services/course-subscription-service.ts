@@ -75,6 +75,7 @@ import {
   CourseSubscriptionPlanNotFoundError,
   SubscriptionCheckoutError,
 } from '../errors';
+import { resolveInvoiceCharge } from './invoice-charge';
 import { schedulePriceChange } from './pending-price-change';
 import { resolveStatus } from './stripe-status-mapper';
 import type { TierPriceChangeMailer } from './subscription-service';
@@ -1038,7 +1039,7 @@ export class CourseSubscriptionService extends BaseService {
       return { userId: row.userId, organizationId: row.organizationId ?? '' };
     }
 
-    const chargeId = await this.resolveInvoiceCharge(stripeInvoice);
+    const chargeId = await resolveInvoiceCharge(this.stripe, stripeInvoice);
     if (!chargeId) {
       this.obs.warn(
         'Course subscription invoice has no charge — skipping payouts',
@@ -1297,27 +1298,5 @@ export class CourseSubscriptionService extends BaseService {
         metadata: { course_subscription_id: sub.id },
       });
     }
-  }
-
-  /**
-   * Resolve the source charge id for an invoice's transfers. Webhook payloads
-   * omit expanded `payments` by default, so fall back through expand →
-   * payment_intent → charges.list (mirrors SubscriptionService.resolveInvoiceCharge).
-   */
-  private async resolveInvoiceCharge(
-    invoice: Stripe.Invoice
-  ): Promise<string | null> {
-    const payment = invoice.payments?.data?.[0];
-    const paymentCharge = payment?.payment?.charge;
-    if (typeof paymentCharge === 'string') return paymentCharge;
-
-    if (invoice.id) {
-      const expanded = await this.stripe.invoices.retrieve(invoice.id, {
-        expand: ['payments'],
-      });
-      const expandedCharge = expanded.payments?.data?.[0]?.payment?.charge;
-      if (typeof expandedCharge === 'string') return expandedCharge;
-    }
-    return null;
   }
 }
