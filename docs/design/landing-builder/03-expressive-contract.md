@@ -3144,3 +3144,237 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       a second key inside `:where()` passing.
   - **No new request, no cache change.** The Types use the page's own faces, and the facet travels
     in the page document as the dials do.
+- **X74 · 2026-10-13 · 3c · The Type facet's menu: each pair proved, refitted or dropped
+  (Codex-61zsk.56, part two; BUILT. The owner's recommendation in the data design, verbatim: "keep a
+  pair if it passes and drop it if it doesn't, decided by the measurement". Four choices below were
+  decided without the owner, each marked.)** Part one (X73) built the mechanism with an empty
+  allow-list. This part measures every pair the data design proposed (4 Types on 6 bases, 20 swaps)
+  and lists the ones that hold: 15 of the 20 (Bold's page Poster's, Soft's and Quiet's; Clean's page
+  Bold's, Soft's and Quiet's; Soft's page Quiet's; Cinematic's page all four; Poster's page Bold's,
+  Soft's and Quiet's; Quiet's page Soft's; Path's and Studio's none, as the data design set: their
+  marks read the type's numbers).
+  - **Decided without the owner: a pair is held to its base's own page, not to a fixed line.** Each
+    pair is drawn twice in one page load, once in the borrowed Type and once with the root's Type
+    set back to the base's own, the control. At every headline length from 20 to 120 characters, in
+    four word families (plain, and a long word first, between and last), in brands 0 and 3, the pair
+    must end no further past a 1440 × 900 fold than the control, cut no word the control keeps
+    whole, lay nothing over the poster's picture that the control keeps clear, and at 390 run no
+    glyph past the column. Why: the controls miss too. X34 fitted each curve on two wordings, and
+    other wordings of the same length end up to 42px past the fold on a Style's own page (Clean's
+    split and poster, Soft's poster, Cinematic's split, Bold's centred by 1px). That is X34's to
+    fix,
+    filed as Codex-z9kl4; held to an absolute line, a pair would be cut for its base's miss.
+    Rejected: an absolute fold (it blames the Type for the base), and X34's two families only (they
+    hide what the sweep found).
+  - **What the sweep found, before any refit** (1440, brands 0 and 3, 404 headlines a case):
+    62 of the 100 pair-layouts held at full size. The other 38 drew worse than their control, from
+    13 times (Poster's Type on Quiet's cover) to 373 times (Poster's Type on Quiet's statement; a
+    headline can both end past the fold and cut a word): a long word such as "Transformation" or
+    "Nourishment" cut where the statement's measure is narrow, or a long headline ending past the
+    fold on the split.
+  - **Decided without the owner: the refit is one factor per pair and layout.** `--lp-type-fit`
+    multiplies the hero's display size wherever it is drawn (`Heading.svelte`'s display size,
+    HeroPoster's, and the hero's entrance wrapper, below), and nothing declares it on a page's own
+    Type, so
+    own pages draw as before. Each pair's factor is the largest at which it holds against its
+    control, found by bisection over every headline that misses at full size and then read over
+    all of them, the least of the two brands, with 1% to spare as X34 kept: 36 factors, from 0.86 to
+    0.98 (Bold's sheet, on Clean's page statement 0.93, split 0.88, cover 0.97, centred 0.91 and
+    poster 0.93; on Cinematic's page statement 0.94, split 0.97 and centred 0.95; on Poster's page
+    statement 0.98, split 0.97, centred 0.95 and poster 0.98. Poster's sheet, on Bold's page
+    statement 0.92, split 0.92, cover 0.88 and centred 0.86; on Cinematic's page statement 0.88,
+    split 0.91, cover 0.96, centred 0.91 and poster 0.95. Soft's sheet, on Bold's page cover 0.89;
+    on Clean's page split 0.98 and cover 0.88; on Cinematic's page cover 0.96; on Poster's page
+    cover 0.94; on Quiet's page split 0.93, cover 0.88 and poster 0.92. Quiet's sheet, on Bold's
+    page cover 0.92 and centred 0.97; on Clean's page split 0.98, cover 0.92 and centred 0.96; on
+    Soft's page cover 0.97 and poster 0.97). They sit in
+    the Type's sheet, keyed `.lp[data-lp-type-facet='<type>']:where([data-lp-style='<base>'])`, so
+    a factor weighs exactly what the Type's own rules weigh, inside `@container (min-width: 56rem)`
+    (narrower, the hero is fitted to its column by its widest word, below). Rejected: refitting
+    X34's C and p per
+    pair (two numbers for each of up to 110 curves, five times X34's method, for a shape the
+    factor already follows); one refit per Type at its worst base (the data design's H3 sketch: it
+    shrinks every base for the narrowest); one factor per pair (its worst layout would shrink the
+    other four).
+  - **Decided without the owner: the factor holds with the hero's eyebrow too.** Read again with an
+    eyebrow ("Six weeks, online": one line, as the field's hint, "a few words", has it), 39 of the
+    85 offered pair-layouts drew worse than their control on 52 of 170 cases, each a headline ending
+    2 to 37px past the fold. Without an eyebrow a pair may end anywhere short of the fold where its
+    control does, and the factors were fitted to that room; the eyebrow's line takes it, so the pair
+    crosses while its control, with room to spare, does not. Each of the 39 was searched again
+    with the eyebrow, and its factor is the least of the two, so it holds either way. Rejected:
+    holding a pair to the page without an eyebrow only (it is one field away for every creator); a
+    second factor for a hero with one (`:has(> .hero__eyebrow)`: twice the rules for a difference
+    of at most 7 points, where X34 sizes a Style's own hero the same either way). A two-line eyebrow
+    is not measured, as it is not for a Style's own hero.
+  - **Decided without the owner: a pair whose hero needs less than 0.85 goes.** Five pairs are not
+    offered: Poster's Type on Clean's page (split 0.82), Bold's Type on Soft's page (split 0.84),
+    Poster's Type on Soft's page (statement 0.71), Bold's Type on Quiet's page (statement 0.81 and
+    split 0.84) and Poster's Type on Quiet's page (statement 0.74 and split 0.80). The floor was
+    fixed when the search had read 11 cases, before any pair fell under it, so it is not drawn where
+    the results fall. Why: a Type borrowed for its headline should draw its headline, and past 15%
+    smaller the hero no longer reads at that Type's size. Rejected: no floor (Poster's Type at 0.71
+    of itself on Soft's statement is no longer Poster's headline), and a floor set after the data.
+  - **Bold's lift cut a mark over a capital, on Bold's own page (H2).** The data design asked
+    whether Poster's leading (0.88) under Bold's lift cuts what Bold's (0.9) does not. Measured
+    (`type-lift.spec.ts`): every clipped headline on each base, in each Type it may take, in four
+    faces (brands 0 and 3, Anton and Unbounded), at 1440 and 390, set to descenders, ascenders and
+    accents over capitals, pictured through its clip and through one too wide to cut. Poster's Type
+    cut exactly what Bold's own did: in Anton, the marks of É, Å and Ö, which reach 0.38em past the
+    line box, where the clip stopped at 0.3em, on 17 headlines a page, and on the hero for as long
+    as the page is open (it keeps its last frame). So the fault was Bold's: its lift's last frame
+    now
+    opens a whole em over the first line; the first frame and the travel are unchanged, so the lift
+    still starts from nothing and its line still stands still. After it: Bold's 32 reads clean, each
+    seeing its planted cut.
+    - The instrument: no clip at all is drawn on another compositing path, which moves pixels where
+      nothing was cut, so the whole is drawn through a clip too wide to cut; a smooth scroll moved
+      the page between two shots, so it scrolls instantly; a region is shot twice and must match;
+      and on every page a planted cut into the first headline's own box must be seen.
+  - **Poster's wipe cut its hero's marks and commas, on Poster's own page.** It keeps its last
+    frame too, `inset(-0.5em -0.25em)`, but on a wrapper set in the body's em (about 8.5px), while
+    the hero's marks reach 0.39em of the headline above its box and its commas 0.10em below: 28
+    cuts in 18 of Poster's 32 reads, under every Type, Poster's own included, with Bold's lift
+    already fixed and Bold's 32 reads clean. **Decided without the owner:** every
+    hero's entrance wrapper (`.hero__enter-h`, HeroBlock) now takes the headline's display size, as
+    Bold's alone did, so any entrance's clip is measured in the headline's em; the wrapper holds
+    nothing but the headline, whose own size is set in the same terms, so nothing else moves.
+    Rejected: widening Poster's wipe in the body's em (a number that would have to track every
+    Type's display size). After it, all 64 reads are clean (Bold's and Poster's bases, every Type,
+    four faces, 1440 and 390), each seeing its planted cut.
+  - **A hero's long word ran off a phone's screen, on Bold's and Poster's own pages.** Read at 390,
+    every pair borrowing Bold's or Poster's Type drew worse than its control on the 36 headlines
+    with "Transformation" in them, in every layout but the statement, and so did Bold's own page.
+    Every heading is drawn no larger than its widest run fits its room (X66, X71) but the hero's,
+    which its layouts size (X34, X60): only where it is wide. At a phone's display floor, Bold's
+    52px and Poster's 44px drew the word 410 and 455px wide against a 355px column. The split's,
+    cover's, centred and poster's copy is a grid item whose minimum is its longest word, so the
+    word ran off the screen, and the statement's, held to its column, split it mid-word.
+    **Decided without the owner:** the hero's headline is weighed as every heading is, and held
+    where it is wide (`--lp-heading-hold`, HeroBlock, the only hold the kit has), so its wide size
+    is the layouts' exactly and below 56rem it is fitted: "Transformation…" at 390 is drawn at
+    42.4px in Bold's Type and 32.8px in Poster's, Quiet's 1px overhang goes, Cinematic's comes
+    down 0.8%, and Clean's and Soft's are as they were. A headline whose words fit is drawn as
+    before. Rejected: a factor per pair on a phone too (it shrinks every headline for one long
+    word, and leaves Bold's and Poster's own pages cut); dropping the pairs that read worse at 390
+    (it blames a borrowed Type for a fault its own page has); and weighing the hero at every
+    width (the wide sizes are X34's, measured to cut no word, and a weight reckons a word wider
+    than it draws: X60's poster shrank 6.4% of headlines that fitted). The verify now sets each
+    headline's weight as `Heading.svelte` does and reads a word split on a phone too, but in a Type
+    that hyphenates there by design (Poster's, X62).
+  - **Louder** (X62) with a Type axis: read in full on Cinematic's page under the four Types it may
+    take. Its 26 faults were 18 on the story's scroll, a room the layout over-reckoned, and 8 of the
+    instrument's (a heading's line read as a whole pixel); both are fixed in X75. The other Styles
+    were not read again under every Type: X75's audit reads every heading's room against its line,
+    in every layout, Style and width, and that is what a heading's fit depends on in any Type. The
+    hero, which the audit leaves out, is the type-fit sweep's, above.
+  - **Ink:** a CI test draws each of the four Types on every seeded page's root and reads every
+    colour the page's own Type does, equal (`brand-fidelity.spec.ts`). Contrast cannot move: the
+    kit grades a heading as text at every size (`schemes.css`).
+  - **Own pages draw as before:** every element's computed style (and its `::before` and `::after`)
+    and every kit token on the root
+    and each section, on every Style's own pages (the full gallery page and five layout pages, the
+    hero again at its medium and long fits; 8 Styles, light and dark, 1440 and 390), at dev's source
+    and at this branch's: 336 cases and 149,370 paths. 310 differ, on three elements, and none
+    moves:
+    the hero headline's wrapper now takes the headline's size in the four Styles where it did not
+    (294 paths; under Poster on a phone 16.35px to 44px, its box and the headline's unchanged to a
+    tenth of a pixel; only the em an entrance's clip is measured in moves), and the closing ask's
+    compact layout is a wrapping row (X75; 16 paths, every box unchanged). The probe sees a borrowed
+    Type: on Bold's page under Poster's, 719 of 1,207 paths change.
+  - **Tests:** In CI: `type-facet.test.ts` holds each factor to a pair the list offers, in that
+    Type's
+    sheet, keyed with its base inside `:where()`, at or over the floor and under 1, inside the wide
+    container only, on a hero layout's words, once per pair and layout; `facets.test.ts` pins the
+    menu itself (a change to it is a change to what creators are offered) and that no Style is
+    offered its own Type, nor Path and Studio any; `PageRenderer.svelte.test.ts` and
+    `upgrade.test.ts` draw and carry an offered pair and drop one off the list;
+    `brand-fidelity.spec.ts` gains "every Type draws the page's own ink"; `HeroBlock.svelte.test.ts`
+    holds each hero layout's headline weighed by its own widest run; and `heading-fit.test.ts`
+    holds no head but the hero's headline, and that only at 56rem and wider. Opt-in, for the next
+    change to a Type or a base: `type-fit.spec.ts` (`TYPE_FIT=1`, and `TYPE_FIT_SEARCH=1` to
+    measure factors again), `type-lift.spec.ts` (`TYPE_LIFT=1`) and louder-fit's Type axis
+    (`LOUDER_FIT_TYPES=offered`); each instrument that sets a headline's words sets its weight
+    with them, as `Heading.svelte` does. Calibrated: 8 plants on the guards and the pin, each
+    failing its own test; 3 on the phone fix (the hero unweighed again, failing all five layouts;
+    the hold dropped, and the hold at every width, each failing the hold test); a colour in a
+    Type's sheet failing the ink test; a factor taken back to full size failing the verify; and
+    the lift's planted cut, seen on every page it reads.
+- **X75 · 2026-10-18 · 3c follow-up · Every heading is fitted to the line its layout gives it, and
+  the sweeps can see a layout that does not (Codex-61zsk.69; BUILT, decided without the owner;
+  amends X66, X71).** X71 named a card's room in the layouts the louder sweep read. The sweep reads
+  a section in every Style only on its four extra pages, so a layout drawn only where some Style's
+  own sample draws it was read in that Style alone. Borrowing a larger Type (X74) found one: the
+  story's scroll fitted its titles to the section's column, 699px at 768, in a words column of
+  340px, and Unbounded under Bold's Type drew "Transformation" 363px wide, under the picture beside
+  it. Cinematic's own titles are small enough to hide it; any Style with the scroll and a wide face
+  showed it on dev.
+  - **The audit.** A read that needs no words: every heading but the hero's, in every layout of
+    every type (page k draws every type at its k-th layout), in 8 Styles at five widths, with the
+    gallery's pictures and without, the room the fit divides by (`--_column`) against the line the
+    heading is drawn on. Each heading is read twice: set to a long run of short words, a box that
+    shrinks to its words fills its room; set to one word longer than any room, a box that grows
+    from its words (the offer's band, X70) wraps its row and takes its room. A line is short only if
+    it is short in both. A flex item's line is its row's (its box grows with its longest word); a
+    heading capped in its own `ch` (a band's 18ch) is a count of characters, not a room; and a
+    length the fit reads is probed in the face the fit reads it in (below).
+  - **What it found:** five layouts over-reckoned the room. The story's scroll (699 for a 340px line
+    at 768, 721 for 646 at 1440); the story's strip (328 for 240 to 256 at 360); the FAQ's columns
+    (699 for 334 at 768, 1312 for 634 at 1440, and Soft's tiles on a phone); the offer's cards and
+    its
+    focus card (1312 for 360 to 408, and for 633, at 1440); and the closing ask's compact layout
+    (699
+    for 332 at 768, 1312 for 918 at 1440). Only the scroll ran a corpus word past its line. The
+    other
+    four were latent for its words, each drawing inside its line at its own size, but a longer real
+    name, or a longer word in a wider face, would run past the card.
+  - **The rooms, each named as X71's are**, from the token that draws the layout's tracks, so the
+    two
+    cannot drift:
+    - the story's scroll, wide: half the column less the step's own gap, which places the words (a
+      subgrid's gap stands in for its parents', so Cinematic's wider scene gaps do not move it);
+    - the story's strip: a card is the strip's item, which the story now names itself (Clean re-sets
+      it);
+    - the FAQ's columns: `--_n` across, which now draws the tracks; Soft's tiles are inset by their
+      padding and border;
+    - the offer's cards: `--_n` across, which now draws the tracks, a lone card held to the lead's
+      measure, and the focus layout's card its 7/12; a card is inset by its padding and border,
+      Bold's open cards by neither.
+  - **Decided without the owner: the compact ask wraps instead of naming a room.** Its offer is as
+    wide as its own words, and grows with a Type's price size, so no rule can subtract it. As the
+    offer's band does (X70), the words now grow from nothing beside the offer: their narrowest is
+    the title's widest word at the size the fit draws it in the column, and the row wraps before
+    that
+    word could reach the offer. In the usual case it draws the same (every box unchanged to a tenth
+    of a pixel). Rejected: a fixed width for the offer, which would wrap a borrowed Type's price;
+    and a cautious room, which X71 forbids (a name that fits must not be drawn smaller).
+  - **Not a fault, and why: a head names its measure as its heading's room.** Six blocks draw their
+    head at the measure (`max-inline-size: var(--lp-measure)`, 62ch in the body's face) and name the
+    same measure as the heading's room. A custom property is resolved where it is used, so it might
+    seem the heading reads the `ch` in its own, far wider face; but the room is read in `font-size`,
+    where a font-relative unit is the parent's face, the head box's. The heading's room is the box's
+    own 62ch, on its line to the pixel (720.9px at 1440). A probe that resolves the room in a
+    child's
+    `inline-size` reads it in the heading's face (4,094px) and must not be trusted; the audit reads
+    it in the parent's.
+  - **The louder sweep's line.** It read a heading's line with `clientWidth`, a whole pixel, so a
+    box
+    that shrinks to its one word (a centred band's, a statement's) read that word as over: 8 of the
+    26 faults in Cinematic's first read under Bold's and Poster's Type (the other 18 were the
+    story's
+    scroll, above). It now reads the content
+    box's used width, unrounded and untransformed. And it read a flex item's line from its own box,
+    which grows with its longest word, so it could never see a word wider than a card's row: it now
+    reads the row. Calibrated: with the offer card's room taken out and its name lifted to the
+    heading's size, 458 faults read from the row and 35 from the box (all in Unbounded, where a word
+    outran even the widest the box could grow to).
+  - **After:** 400 pages, every heading's room within half a pixel of its line, 0 faults. The
+    scroll's title under Bold's Type in Unbounded at 768 is 32.3px (it was 37.4px) and ends 27px
+    inside its line; the four latent layouts draw the corpus at the sizes they did.
+  - **Tests:** `e2e/page-kit/heading-room.spec.ts` (opt-in, local: `HEADING_ROOM=1`, about two
+    hours),
+    the audit: run it on any change to a layout's columns, a card's padding or a strip's items.
+    Calibrated: with four rooms taken out (the scroll's, the compact layout's wrap, the FAQ's and
+    the
+    offer's), a read of the two pages that draw three of them, at 768, reports 14 faults, all on
+    exactly those three.
