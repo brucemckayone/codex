@@ -2896,12 +2896,12 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       name while the name's longest word leaves it room, and under the name when it does not, as it
       already did on a phone. Beside the name it now stands on the name's first baseline. As built
       it stood at the top of its row: the padding meant to centre it on the marker was never valid
-      (`--space-0` is a unitless 0, and `max()` of a number and a length is dropped; the names'
-      own padding has the same fault, filed as Codex-61zsk.67). So across 30 stops beside their
-      names, at 600 to 1440, the count is now 5 to 14px lower, on the line it labels. Path's map reach
-      is the map's own `--_reach` too, and its margin is drawn from it. The sweep's own map page
-      found these: 72 pairs, all at 768 in Bold and Poster in Unbounded, with the name's line at
-      223px of a 699px column.
+      (`--space-0` was a unitless 0 until X81, and `max()` of a number and a length is dropped; the
+      names' own padding has the same fault, filed as Codex-61zsk.67). So across 30 stops beside
+      their names, at 600 to 1440, the count is now 5 to 14px lower, on the line it labels. Path's
+      map reach is the map's own `--_reach` too, and its margin is drawn from it. The sweep's own
+      map page found these: 72 pairs, all at 768 in Bold and Poster in Unbounded, with the name's
+      line at 223px of a 699px column.
     - A lone card's measure is in the body's `ch`, which no title can read, so its room is the
       column. A title in a card that names no room (the questions' columns, the offer cards) and a
       section heading drawn at title size are fitted to the column and to the room their head

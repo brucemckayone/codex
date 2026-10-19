@@ -115,9 +115,10 @@
 {/if}
 
 <style>
-  /* `--_clear` must be a LENGTH: `--space-0` is a unitless 0, and
-     `calc(0 + 12px)` is a type error that voids the whole `max()` and drops
-     the bar to its static position at the foot of the page. */
+  /* `--_clear` must be a LENGTH: a unitless 0 (as `--space-0` was until
+     Codex-61zsk.67) makes `calc(0 + 12px)` a type error that voids the whole
+     `max()` and drops the bar to its static position at the foot of the page.
+     `token-math.test.ts` holds every sheet to it. */
   .lp-sticky {
     --_clear: var(--lp-nav-clearance, var(--space-16));
     position: fixed;

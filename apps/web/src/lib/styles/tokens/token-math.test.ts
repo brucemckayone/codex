@@ -3,8 +3,10 @@
  * A token that can be a bare `0` or a keyword must not meet CSS math it cannot
  * take part in (Codex-3kqqp, Codex-61zsk.67).
  *
- * A unitless `0` is a <number>, not a <length>. `min()`, `max()` and `clamp()`
- * need one type across their arguments, so `max(var(--space-0), 1lh)` with
+ * A unitless `0` is a <number>, not a <length>. `min()`, `max()`, `clamp()` and
+ * the other functions that compare their arguments need one type across them,
+ * and a sum (`+`, `-`) needs one type across its terms, so
+ * `max(var(--space-0), 1lh)` or `calc(var(--space-0) + 1px)` with
  * `--space-0: 0` is invalid at computed-value time: the WHOLE declaration falls
  * to its initial value, and nothing errors or warns, because the sheet still
  * parses. A keyword (`none`, `auto`, …) is never a value of any math function.
@@ -13,12 +15,14 @@
  * whose `max(var(--space-0), …)` padding never centred them on their markers.
  *
  * So, across every stylesheet and component `<style>` in the app, read with
- * svelte's own CSS parser, comments stripped:
- *   - a token declared anywhere as a bare `0` is not an argument of `min()`,
- *     `max()` or `clamp()` beside a length (a literal one, or a token that is
- *     one). Inside `calc()` it may multiply or divide, so `calc()` is left out;
- *   - a token declared anywhere as a keyword is not inside any math function.
- * Inline `style` attributes are not read.
+ * svelte's own CSS parser, comments stripped (from values too):
+ *   - a token that can be a bare `0` is not a whole argument of a comparing
+ *     function beside a length, nor a term of a sum beside a length. It may
+ *     multiply or divide, so a product is left alone;
+ *   - a token that can be a keyword is not inside any math function.
+ * A token "can be" `0` or a keyword when any declaration of it is one, or is
+ * a `var()` of such a token, or falls back to one. A length is a dimension, or
+ * a token that is one. Inline `style` attributes are not read.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
@@ -50,10 +54,35 @@ const KEYWORDS = new Set([
   'max-content',
   'fit-content',
 ]);
-const TYPED = new Set(['min', 'max', 'clamp']);
-const MATH = new Set([...TYPED, 'calc']);
+/** The functions that compare their arguments, so need one type across them. */
+const COMPARING = new Set([
+  'min',
+  'max',
+  'clamp',
+  'round',
+  'mod',
+  'rem',
+  'hypot',
+  'atan2',
+]);
+const MATH = new Set([
+  ...COMPARING,
+  'calc',
+  'abs',
+  'sign',
+  'pow',
+  'sqrt',
+  'exp',
+  'log',
+  'sin',
+  'cos',
+  'tan',
+  'asin',
+  'acos',
+  'atan',
+]);
 const DIMENSION =
-  /\d(?:px|r?em|r?lh|%|vw|vh|vmin|vmax|[sdl]vh|[sdl]vw|ch|ex|cq[iwhb]|cqmin|cqmax|pt|cm|mm|in)\b|\d%/;
+  /\d(?:px|r?em|r?lh|r?ex|r?ch|r?cap|r?ic|[sdl]?v(?:w|h|i|b|min|max)|cq(?:w|h|i|b|min|max)|pt|pc|cm|mm|q|in)\b|\d%/i;
 
 const uncomment = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, '');
 
@@ -68,7 +97,12 @@ function declarationsOf(
       node.property &&
       node.value !== undefined
     )
-      into.push({ file, property: node.property, value: node.value.trim() });
+      // svelte's parser keeps a comment inside a value, so strip it here too.
+      into.push({
+        file,
+        property: node.property,
+        value: uncomment(node.value).trim(),
+      });
     declarationsOf(node.block?.children ?? node.children ?? [], file, into);
   }
   return into;
@@ -94,22 +128,78 @@ function appDeclarations(): Declaration[] {
   });
 }
 
-/** Each token's declared values, and which tokens are lengths (a dimension, or a length token, in any value). */
+/** Split `text` at its top-level occurrences of `at`, parentheses balanced. */
+function splitTop(text: string, at: RegExp): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')') depth--;
+    else if (depth === 0) {
+      const hit = text.slice(i).match(at);
+      if (hit?.index === 0) {
+        parts.push(text.slice(start, i));
+        i += hit[0].length - 1;
+        start = i + 1;
+      }
+    }
+  }
+  parts.push(text.slice(start));
+  return parts.map((part) => part.trim());
+}
+
+/** `var(--name)` or `var(--name, fallback)` as the WHOLE of `text`, or null. */
+function asVar(text: string): { name: string; fallback: string | null } | null {
+  const t = text.trim();
+  const head = t.match(/^var\(\s*(--[\w-]+)\s*/i);
+  if (!head) return null;
+  // Its own closing parenthesis must be the last character.
+  let depth = 0;
+  for (let i = 3; i < t.length; i++) {
+    if (t[i] === '(') depth++;
+    else if (t[i] === ')' && --depth === 0 && i !== t.length - 1) return null;
+  }
+  const inner = t.slice(head[0].length, -1).trim();
+  return {
+    name: head[1],
+    fallback: inner.startsWith(',') ? inner.slice(1).trim() : null,
+  };
+}
+
+/**
+ * Which tokens are lengths, and which can be a bare 0 or a keyword where a
+ * file reads them.
+ *
+ * A declaration in a `.css` sheet counts everywhere; one in a component's
+ * `<style>` counts only in that component, as it reaches only that
+ * component's elements. Without that, two components' private `--_track`s
+ * (a tracking number in one, a column width in another) read as one token.
+ * So a zero a parent component sets, read in a child's math, is not seen.
+ */
 function tokensOf(declarations: readonly Declaration[]) {
-  const values = new Map<string, string[]>();
-  for (const { property, value } of declarations)
-    if (property.startsWith('--'))
-      values.set(property, [...(values.get(property) ?? []), value]);
+  const byName = new Map<string, Declaration[]>();
+  for (const declaration of declarations)
+    if (declaration.property.startsWith('--'))
+      byName.set(declaration.property, [
+        ...(byName.get(declaration.property) ?? []),
+        declaration,
+      ]);
+  const visible = (name: string, file: string) =>
+    (byName.get(name) ?? []).filter(
+      (d) => d.file === file || d.file.endsWith('.css')
+    );
+
   const lengths = new Set<string>();
   for (let grew = true; grew; ) {
     grew = false;
-    for (const [name, list] of values) {
+    for (const [name, list] of byName) {
       if (lengths.has(name)) continue;
-      const refs = list.flatMap((v) =>
-        [...v.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1])
+      const refs = list.flatMap((d) =>
+        [...d.value.matchAll(/var\(\s*(--[\w-]+)/gi)].map((m) => m[1])
       );
       if (
-        list.some((v) => DIMENSION.test(v)) ||
+        list.some((d) => DIMENSION.test(d.value)) ||
         refs.some((ref) => lengths.has(ref))
       ) {
         lengths.add(name);
@@ -117,15 +207,34 @@ function tokensOf(declarations: readonly Declaration[]) {
       }
     }
   }
-  const zero = new Set(
-    [...values].filter(([, list]) => list.includes('0')).map(([name]) => name)
-  );
-  const keyword = new Set(
-    [...values]
-      .filter(([, list]) => list.some((v) => KEYWORDS.has(v)))
-      .map(([name]) => name)
-  );
-  return { lengths, zero, keyword };
+
+  /** Whether `name` can be what `literal` accepts where `file` reads it: directly, through an alias, or a fallback. */
+  const can = (literal: (v: string) => boolean) => {
+    const value = (text: string, file: string, seen: Set<string>): boolean => {
+      if (literal(text.trim())) return true;
+      const v = asVar(text);
+      return (
+        !!v &&
+        (token(v.name, file, seen) ||
+          (v.fallback !== null && value(v.fallback, file, seen)))
+      );
+    };
+    const token = (
+      name: string,
+      file: string,
+      seen = new Set<string>()
+    ): boolean => {
+      if (seen.has(name)) return false;
+      seen.add(name);
+      return visible(name, file).some((d) => value(d.value, file, seen));
+    };
+    return token;
+  };
+  return {
+    lengths,
+    zero: can((v) => v === '0'),
+    keyword: can((v) => KEYWORDS.has(v.toLowerCase())),
+  };
 }
 
 interface Call {
@@ -138,39 +247,55 @@ interface Call {
  * The tokens a value reads inside math it cannot take part in. Walks the value
  * once, keeping the stack of open functions and each one's arguments.
  */
-function misuses(value: string, tokens: ReturnType<typeof tokensOf>): string[] {
+function misuses(
+  value: string,
+  tokens: ReturnType<typeof tokensOf>,
+  file: string
+): string[] {
   const found: string[] = [];
   const stack: Call[] = [];
+  const zeroToken = (text: string) => {
+    const v = asVar(text);
+    return v && tokens.zero(v.name, file) ? v.name : null;
+  };
   const isLength = (text: string) =>
     DIMENSION.test(text) ||
-    [...text.matchAll(/var\(\s*(--[\w-]+)/g)].some(
-      (m) => tokens.lengths.has(m[1]) && !tokens.zero.has(m[1])
+    [...text.matchAll(/var\(\s*(--[\w-]+)/gi)].some(
+      (m) => tokens.lengths.has(m[1]) && !tokens.zero(m[1], file)
     );
   const close = (call: Call) => {
-    if (!TYPED.has(call.name)) return;
-    // A bare-zero token as a whole argument, beside an argument that is a length.
-    const bare = call.args.map(
-      (arg) => arg.trim().match(/^var\(\s*(--[\w-]+)\s*\)$/)?.[1]
-    );
-    bare.forEach((name, index) => {
-      if (
-        name &&
-        tokens.zero.has(name) &&
-        call.args.some((other, j) => j !== index && isLength(other))
-      )
-        found.push(`${name} in ${call.name}()`);
-    });
+    if (!MATH.has(call.name)) return;
+    // A zero token as a whole argument of a comparing function, beside a length.
+    if (COMPARING.has(call.name))
+      call.args.forEach((arg, index) => {
+        const name = zeroToken(arg);
+        if (
+          name &&
+          call.args.some((other, j) => j !== index && isLength(other))
+        )
+          found.push(`${name} in ${call.name}()`);
+      });
+    // A zero token as a term of a sum, beside a length term.
+    for (const arg of call.args) {
+      const terms = splitTop(arg, /^\s[+-]\s/);
+      if (terms.length < 2) continue;
+      terms.forEach((term, index) => {
+        const name = zeroToken(term);
+        if (name && terms.some((other, j) => j !== index && isLength(other)))
+          found.push(`${name} in a sum in ${call.name}()`);
+      });
+    }
   };
   for (let i = 0; i < value.length; i++) {
     const rest = value.slice(i);
-    const open = rest.match(/^([a-z-]+)\(/i);
+    const open = rest.match(/^([a-z][a-z0-9-]*)\(/i);
     if (open) {
       const name = open[1].toLowerCase();
       if (name === 'var') {
-        const token = rest.match(/^var\(\s*(--[\w-]+)/)?.[1];
+        const token = rest.match(/^var\(\s*(--[\w-]+)/i)?.[1];
         if (
           token &&
-          tokens.keyword.has(token) &&
+          tokens.keyword(token, file) &&
           stack.some((call) => MATH.has(call.name))
         )
           found.push(
@@ -203,38 +328,109 @@ function misuses(value: string, tokens: ReturnType<typeof tokensOf>): string[] {
 
 const tokensFrom = (sheet: string) =>
   tokensOf(
-    declarationsOf(parseCss(sheet).children as unknown as CssNode[], 'fixture')
+    declarationsOf(
+      parseCss(sheet).children as unknown as CssNode[],
+      'fixture.css'
+    )
   );
 
 describe('the probe, on the two shapes that shipped and on what is fine', () => {
+  const F = 'fixture.css';
   const tokens = tokensFrom(`
-    :root { --space-0: 0; --space-2: 0.5rem; --border-width: 1px; --edge: 0; --_n: 0; --shadow: none; }
+    :root { --space-0: 0; --space-2: 0.5rem; --border-width: 1px; --edge: 0; --_n: 0; --shadow: none; --kz: auto; }
     .other { --edge: 2px; }
+    .alias { --alias: var(--space-0); --lp: 0; --_clear: var(--lp, var(--space-2)); --_safe: var(--space-2, 1px); }
   `);
-  it('sees a zero token beside a length in max(), min() and clamp(), however the length is written', () => {
+  it('sees a zero token beside a length in a comparing function, however the length is written', () => {
     expect(
-      misuses('max(var(--space-0), calc((var(--_marker) - 1lh) / 2))', tokens)
+      misuses(
+        'max(var(--space-0), calc((var(--_marker) - 1lh) / 2))',
+        tokens,
+        F
+      )
     ).toEqual(['--space-0 in max()']);
     expect(
-      misuses('max(var(--edge), var(--border-width)) solid red', tokens)
+      misuses('max(var(--edge), var(--border-width)) solid red', tokens, F)
     ).toEqual(['--edge in max()']);
     expect(
-      misuses('clamp(var(--space-0), 2vw, var(--space-2))', tokens)
+      misuses('clamp(var(--space-0), 2vw, var(--space-2))', tokens, F)
     ).toEqual(['--space-0 in clamp()']);
-  });
-  it('sees a keyword token inside any math', () => {
-    expect(misuses('calc(var(--shadow) + 1px)', tokens)).toEqual([
-      '--shadow (a keyword) in calc()',
+    expect(misuses('MAX(var(--space-0), 1PX)', tokens, F)).toEqual([
+      '--space-0 in max()',
+    ]);
+    expect(misuses('max(var(--space-0), 1vi)', tokens, F)).toEqual([
+      '--space-0 in max()',
+    ]);
+    expect(misuses('round(var(--space-0), 1px)', tokens, F)).toEqual([
+      '--space-0 in round()',
     ]);
   });
-  it('leaves alone a zero that multiplies, numbers beside numbers, and tokens outside math', () => {
-    expect(misuses('calc(var(--_n) * 1px)', tokens)).toEqual([]);
-    expect(misuses('max(var(--_n), 1)', tokens)).toEqual([]);
-    expect(misuses('var(--space-0)', tokens)).toEqual([]);
-    expect(misuses('var(--shadow)', tokens)).toEqual([]);
-    expect(misuses('max(0px, calc((var(--_dot) - 1lh) / 2))', tokens)).toEqual(
+  it('sees it with a fallback, through an alias, and through an alias’s fallback', () => {
+    expect(misuses('max(var(--space-0, 0px), 1px)', tokens, F)).toEqual([
+      '--space-0 in max()',
+    ]);
+    expect(misuses('max(var(--alias), 1px)', tokens, F)).toEqual([
+      '--alias in max()',
+    ]);
+    expect(
+      misuses('max(calc(var(--_clear) + var(--space-2)), 1px)', tokens, F)
+    ).toEqual(['--_clear in a sum in calc()']);
+  });
+  it('sees a zero token as a term of a sum beside a length', () => {
+    expect(misuses('calc(var(--space-0) + 1px)', tokens, F)).toEqual([
+      '--space-0 in a sum in calc()',
+    ]);
+    expect(
+      misuses('max(calc(var(--space-0) + var(--space-2)), 1px)', tokens, F)
+    ).toEqual(['--space-0 in a sum in calc()']);
+  });
+  it('sees a keyword token inside any math', () => {
+    expect(misuses('calc(var(--shadow) + 1px)', tokens, F)).toEqual([
+      '--shadow (a keyword) in calc()',
+    ]);
+    expect(misuses('round(var(--kz), 1px)', tokens, F)).toEqual([
+      '--kz (a keyword) in round()',
+    ]);
+  });
+  it('reads a component’s values with their comments taken out', () => {
+    const svelte = tokensOf(
+      declarationsOf(
+        (parse('<style>.a { --cz: 0 /* a note */; }</style>', { modern: true })
+          .css?.children ?? []) as unknown as CssNode[],
+        'fixture.svelte'
+      )
+    );
+    expect(svelte.zero('--cz', 'fixture.svelte')).toBe(true);
+  });
+  it('counts a component’s own declaration only in that component, and a sheet’s everywhere', () => {
+    const scoped = tokensOf([
+      { file: 'A.svelte', property: '--_t', value: '0' },
+      { file: 'B.svelte', property: '--_t', value: 'calc(1px * 2)' },
+      { file: 'tokens.css', property: '--z', value: '0' },
+    ]);
+    expect(misuses('calc(var(--_t) + 1px)', scoped, 'A.svelte')).toEqual([
+      '--_t in a sum in calc()',
+    ]);
+    expect(misuses('calc(var(--_t) + 1px)', scoped, 'B.svelte')).toEqual([]);
+    expect(misuses('max(var(--z), 1px)', scoped, 'B.svelte')).toEqual([
+      '--z in max()',
+    ]);
+  });
+  it('leaves alone a zero that multiplies, numbers beside numbers, lengths beside lengths, and tokens outside math', () => {
+    expect(misuses('calc(var(--_n) * 1px)', tokens, F)).toEqual([]);
+    expect(misuses('max(var(--_n), 1)', tokens, F)).toEqual([]);
+    expect(misuses('calc(var(--space-2) + var(--_safe))', tokens, F)).toEqual(
       []
     );
+    expect(misuses('calc(100% - var(--space-2))', tokens, F)).toEqual([]);
+    expect(misuses('calc(var(--a, 1px) + var(--b, 2px))', tokens, F)).toEqual(
+      []
+    );
+    expect(misuses('var(--space-0)', tokens, F)).toEqual([]);
+    expect(misuses('var(--shadow)', tokens, F)).toEqual([]);
+    expect(
+      misuses('max(0px, calc((var(--_dot) - 1lh) / 2))', tokens, F)
+    ).toEqual([]);
   });
 });
 
@@ -252,7 +448,7 @@ describe('the app’s stylesheets', () => {
     ).toBe(true);
     const tokens = tokensOf(declarations);
     const found = declarations.flatMap(({ file, property, value }) =>
-      misuses(value, tokens).map(
+      misuses(value, tokens, file).map(
         (what) => `${file}: ${property}: ${value}: ${what}`
       )
     );
