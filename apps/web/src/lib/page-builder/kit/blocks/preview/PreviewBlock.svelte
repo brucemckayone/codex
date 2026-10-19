@@ -17,7 +17,8 @@
   public page never leaves its words above nothing (Codex-61zsk.37). The page
   folds the section before its bands resolve, by the same rule (`filmToShow`),
   so the bands either side never meet as one (Codex-61zsk.57); the block's
-  own marker below is the fold for a block drawn on its own. Where
+  own marker below folds it only when it is mounted outside the page, as in
+  its own tests. Where
   the page is looked at (the canvas, a still thumbnail) the
   section keeps its frame, the kit's plate in it, and on the canvas a prompt
   for the clip. The button row appears only when the creator writes one.

@@ -35,10 +35,11 @@ afterEach(() => {
 async function render(
   options: { edit?: PageEdit | null; still?: boolean } = {}
 ) {
-  // The film sections come last: the public page folds them before its bands
-  // resolve, so a section after one could take another colour there than on
-  // the canvas, as after every fold (03 X64). That difference is the fold's
-  // purpose; this compares the rest.
+  // The film sections come last, and the page sets no dials: the public page
+  // folds them before its bands resolve, so a banded section beside one (after
+  // it, or before it under the vivid colour dial, which reads the next band)
+  // can take another colour there than on the canvas. That difference is the
+  // fold's purpose; this compares the rest.
   const page = samplePage('bold', ['instructor', 'stats', 'video', 'preview']);
   // No intro, reel, portrait, curriculum or numbers of the creator's own:
   // every block's empty state at once.

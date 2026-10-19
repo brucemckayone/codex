@@ -3603,8 +3603,10 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     come, and a Preview section when the preview film is, with the empty Pictures and Headings
     and the dead Buttons (X64), so no band rule counts it. A Button that jumps to it folds too, as
     for any section that is gone. The canvas and stills keep every section, as for every fold:
-    there it asks for its film. So a section after a folded one can take another colour on a
-    visitor's page than on the canvas, as after every fold.
+    there it asks for its film. So, unlike X64's folds (each a simple section, which never moves
+    a band), this one can recolour an ordinary band: a section after a folded one, or before it
+    under the vivid colour dial, which reads the next band, can take another colour on a
+    visitor's page than on the canvas and stills, while the film is missing.
   - **The rule, once.** Whether a film is coming is one function, `filmToShow`
     (`kit/model/films.ts`): here, `true`; known not to come, `false` (the awaited view says none
     is attached, or the stream settled without it, or failed); on its way, `undefined`. The

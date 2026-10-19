@@ -23,8 +23,9 @@
   was written for that destination, so it is hidden rather than sent to the
   checkout under the wrong words. `foldForVisitors` drops it before the bands
   resolve, a film found missing once the stream settles included (the page
-  reads the same rule, `filmToShow`); a Button drawn on its own hides itself
-  here. The canvas keeps it and says why visitors will not see it.
+  reads the same rule, `filmToShow`); a Button mounted outside the page, as
+  in its own tests, hides itself here. The canvas keeps it and says why
+  visitors will not see it.
 -->
 <script lang="ts">
   import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
@@ -84,7 +85,7 @@
 </script>
 
 {#if !shown}
-  <!-- Nowhere to go, found once the stream settled: no band either. -->
+  <!-- Nowhere to go, outside the page (on it, the page has folded it): no band either. -->
   <span class="button-none" hidden></span>
 {:else}
   <div class="button" data-layout={section.layout} data-action={kind}>
