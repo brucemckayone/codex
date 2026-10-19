@@ -7,6 +7,13 @@
  * an extraction that changes no behaviour.
  */
 
+// Reverse a refunded charge's payout slices, for every source (Codex-2hxff.56)
+export {
+  type ClawbackDeps,
+  type ClawbackRefund,
+  type ClawbackSource,
+  reverseCharge,
+} from './clawback';
 // The charge an invoice payment settled on: the key every invoice payout
 // uses (Codex-2hxff.50)
 export { resolveInvoiceCharge } from './invoice-charge';

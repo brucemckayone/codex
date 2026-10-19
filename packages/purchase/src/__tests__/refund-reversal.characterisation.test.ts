@@ -1,15 +1,17 @@
 /**
- * CHARACTERISATION — the purchase refund clawback as it behaves TODAY
- * (`PurchaseService.processRefund` → `reversePayoutsForPurchase`).
+ * CHARACTERISATION — the purchase refund clawback
+ * (`PurchaseService.processRefund` → @codex/payments `reverseCharge`, purchase
+ * source).
  *
- * WP3 of Codex-2hxff.56 extracts ONE clawback engine (`reverseCharge`, into a
- * new @codex/payments package) to replace this method and its divergent copy,
- * `SubscriptionService.reverseSubscriptionPayoutsForCharge` (pinned in
+ * Written against the purchase copy, `reversePayoutsForPurchase`, before WP3
+ * of Codex-2hxff.56 extracted ONE clawback engine to replace it and its
+ * divergent subscription copy (pinned in
  * packages/subscription/src/services/__tests__/subscription-refund-reversal.characterisation.test.ts).
- * These tests pin every observable behaviour of the purchase copy — the Stripe
- * calls (amount, metadata, idempotency key), the ledger rows it leaves, the
- * refund_reviews rows it writes and the logs it emits — so the extraction can
- * be proven to change NOTHING.
+ * These tests pin every observable behaviour — the Stripe calls (amount,
+ * metadata, idempotency key), the ledger rows it leaves, the refund_reviews
+ * rows it writes and the logs it emits — and passed unchanged across the
+ * extraction (WP3b-2, Codex-2hxff.56.3), which is the proof it changed
+ * NOTHING.
  *
  * They pin CURRENT behaviour, defects included. A test named
  * "CHARACTERISATION (defect)" asserts something the spec says is wrong; its

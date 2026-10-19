@@ -10091,8 +10091,8 @@ describe('SubscriptionService', () => {
   });
 
   // ─── reverseSubscriptionPayoutsForCharge (Codex-13v21) ────────────────
-  // Subscription-invoice refund clawback — the mirror of the purchase-side
-  // reversePayoutsForPurchase. Reverses creator/org transfers for a refunded
+  // Subscription-invoice refund clawback — the subscription source of the
+  // shared engine (@codex/payments reverseCharge). Reverses creator/org transfers for a refunded
   // subscription charge and flips the ledger rows; scoped to
   // sourceType='subscription' so it can NEVER touch one-time-purchase rows
   // (which processRefund already handles) — no double-clawback.
@@ -10883,7 +10883,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
     });
 
     // Codex-92ej7 / DQ-9: cancelled_by_refund must satisfy the CHECK so
-    // production reversePayoutsForPurchase can write it on connect_not_ready
+    // the clawback engine (reverseCharge) can write it on connect_not_ready
     // rows after a refund.
     it("check_payouts_status: status='cancelled_by_refund' is accepted (DQ-9)", async () => {
       const base = await baseValues('e9v3b-cancelled-refund');

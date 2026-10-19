@@ -2656,10 +2656,10 @@ describe('PurchaseService Integration', () => {
 
     // REGRESSION (PR #203 deep-review F-1, DQ-7) — partial refunds must
     // proportionally reverse the creator + org transfers, not the full
-    // slices. Current production code in `reversePayoutsForPurchase`
-    // (purchase-service.ts:1289-1297) passes `amount: row.amountCents`
-    // regardless of the partial-refund ratio, so a £5 partial refund on
-    // a £20 charge fully zeroes the creator's £15.30 slice and the org's
+    // slices. The refund clawback (then `reversePayoutsForPurchase` in
+    // purchase-service.ts, now @codex/payments `reverseCharge`) passed
+    // `amount: row.amountCents` regardless of the partial-refund ratio, so a
+    // £5 partial refund on a £20 charge fully zeroes the creator's £15.30 slice and the org's
     // £2.70 slice — net £13 of unaccounted loss. See
     // docs/pr-203-review/design-questions.md DQ-7.
     //
@@ -2941,9 +2941,10 @@ describe('PurchaseService Integration', () => {
     // purchase completes with Connect-not-ready, the creator_payout +
     // organization_fee rows land as `status='pending'` with no
     // `stripeTransferId` (no Stripe call was made). If the buyer then refunds
-    // before Connect onboarding completes, `reversePayoutsForPurchase`
-    // (purchase-service.ts:1278-1331) marks ALL non-already-reversed rows as
-    // 'reversed' — including the pending ones that never had a transfer.
+    // before Connect onboarding completes, the clawback (then
+    // `reversePayoutsForPurchase` in purchase-service.ts) marked ALL
+    // non-already-reversed rows as 'reversed' — including the pending ones
+    // that never had a transfer.
     //
     // The sweep cron filters by `status='pending'`, so once these rows
     // become 'reversed' the sweep stops seeing them. If Connect onboarding
@@ -5550,7 +5551,7 @@ describe('PurchaseService Integration', () => {
     });
 
     // P4 — bi-party refund reverses the creator_payout + platform_fee rows.
-    // reversePayoutsForPurchase is data-driven (reads whatever rows exist), so
+    // The clawback (reverseCharge) is data-driven (reads whatever rows exist), so
     // with only 2 bi-party rows it reverses exactly those and never expects an
     // org row.
     it('refund reverses both bi-party rows (creator_payout transfer + platform_fee)', async () => {

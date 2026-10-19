@@ -34,19 +34,16 @@ import {
   contentAccess,
   courses,
   entitlements,
-  payouts,
   purchases,
-  refundReviews,
   stripeConnectAccounts,
   users,
 } from '@codex/database/schema';
 import {
-  cancelUnpaidPayoutForRefund,
   type LedgerDeps,
-  type RefundCancelOutcome,
   recordPlatformFee,
   recordSlice,
   resolveOrganisationPayee,
+  reverseCharge,
 } from '@codex/payments';
 import {
   BaseService,
@@ -1920,19 +1917,27 @@ export class PurchaseService extends BaseService {
           );
       });
 
-      // Step: reverse payouts ledger rows + the org-fee transfer (Codex-h69cg).
-      // Out-of-transaction because it talks to Stripe; per-row error isolation
-      // so one bad reversal can never block the refund acknowledgement (Stripe
-      // would retry the webhook, but the refund itself has already been
-      // recorded on the purchases row above).
+      // Step: claw back the payout slices (Codex-h69cg) through the shared
+      // engine (@codex/payments clawback, Codex-2hxff.56). Out-of-transaction
+      // because it talks to Stripe; per-row error isolation so one bad
+      // reversal can never block the refund acknowledgement (the refund is
+      // already recorded on the purchases row above).
       //
       // Codex-d9t5r / DQ-7: refundAmountCents drives proportional reversal;
       // stripeRefundId keys the Stripe idempotency suffix so two separate
       // refund events of equal pence value don't collide.
-      await this.reversePayoutsForPurchase(purchase, {
-        refundAmountCents: refundDetails?.refundAmountCents ?? null,
-        stripeRefundId: refundDetails?.stripeRefundId ?? null,
-      });
+      await reverseCharge(
+        { ...this.ledger(), obs: this.obs },
+        {
+          sourceType: 'purchase',
+          purchaseId: purchase.id,
+          amountPaidCents: purchase.amountPaidCents,
+        },
+        {
+          refundAmountCents: refundDetails?.refundAmountCents ?? null,
+          stripeRefundId: refundDetails?.stripeRefundId ?? null,
+        }
+      );
 
       this.obs.info('Refund processed', {
         purchaseId: purchase.id,
@@ -1948,267 +1953,6 @@ export class PurchaseService extends BaseService {
       return { userId: purchase.customerId };
     } catch (error) {
       this.handleError(error, 'processRefund');
-    }
-  }
-
-  /**
-   * Reverse the payouts ledger rows + secondary transfers for a refunded
-   * purchase (Option B platform-charge model — Codex-h69cg).
-   *
-   * - `platform_fee`: no transfer existed; the platform retained the slice
-   *   on its balance. Marking the row `status='reversed'` is sufficient —
-   *   the refund itself returns money from the platform balance.
-   * - `creator_payout` AND `organization_fee`: each had a secondary
-   *   `transfers.create` call against the source charge. Both must be
-   *   reversed via `transfers.createReversal` with a deterministic
-   *   idempotency key so webhook replays are safe. Stripe does NOT
-   *   auto-reverse these for us — they're separate transfers.
-   *
-   * Codex-d9t5r / DQ-7: when `refundAmountCents` is set and less than
-   * the purchase's `amountPaidCents`, each transfer is reversed
-   * proportionally — `floor(row.amountCents * refundAmountCents / amountPaidCents)`.
-   * Integer math: residual rounding stays on the platform balance.
-   * Idempotency suffix `_${refundAmountCents}` prevents the second
-   * partial refund from replaying the first's reversal amount.
-   *
-   * Insufficient-funds sentinel: if Stripe rejects the reversal with
-   * `insufficient_funds` (creator already withdrew their slice),
-   * the payouts row stays `status='paid'` and a `refund_reviews` row
-   * captures the clawback obligation for ops to resolve.
-   *
-   * A pending or failed row is cancelled, then checked in Stripe for a
-   * transfer that went out anyway, which is reversed like a paid row's
-   * (`cancelUnpaidPayoutForRefund`, Codex-2hxff.11).
-   *
-   * Idempotent: rows already at `status='reversed'` or
-   * `'cancelled_by_refund'` are no-ops.
-   */
-  private async reversePayoutsForPurchase(
-    purchase: Purchase,
-    refund: { refundAmountCents: number | null; stripeRefundId: string | null }
-  ): Promise<void> {
-    const rows = await this.db
-      .select()
-      .from(payouts)
-      .where(eq(payouts.purchaseId, purchase.id));
-
-    if (rows.length === 0) return;
-
-    const { refundAmountCents, stripeRefundId } = refund;
-    const isPartial =
-      refundAmountCents !== null &&
-      refundAmountCents > 0 &&
-      refundAmountCents < purchase.amountPaidCents;
-    // Capture the partial ratio's numerator once so we can narrow without
-    // re-asserting `refundAmountCents !== null` inside the per-row closure.
-    const partialRatioNumerator = isPartial ? refundAmountCents : null;
-    const reversalAmount = (rowAmountCents: number): number =>
-      partialRatioNumerator !== null
-        ? Math.floor(
-            (rowAmountCents * partialRatioNumerator) / purchase.amountPaidCents
-          )
-        : rowAmountCents;
-    // Prefer the Stripe refund ID for the idempotency suffix — it is the
-    // unique-per-refund identifier, so two distinct refund events of equal
-    // pence value get distinct keys. Fall back to the cents value for
-    // legacy paths that don't propagate the ID.
-    const idempotencySuffix = stripeRefundId
-      ? `_${stripeRefundId}`
-      : refundAmountCents !== null
-        ? `_${refundAmountCents}`
-        : '';
-
-    for (const listed of rows) {
-      let row: typeof payouts.$inferSelect = listed;
-      if (row.status === 'reversed' || row.status === 'cancelled_by_refund') {
-        continue;
-      }
-
-      // A row never marked paid is cancelled FIRST — so nothing can settle
-      // it afterwards — then Stripe is asked whether its transfer went out
-      // anyway: in flight when the refund arrived, or made but never
-      // recorded (Codex-2hxff.11). Such a transfer is reversed below like a
-      // paid row's.
-      let transferId = row.stripeTransferId;
-      if (row.status === 'pending' || row.status === 'failed') {
-        let cancel: RefundCancelOutcome;
-        try {
-          cancel = await cancelUnpaidPayoutForRefund(this.ledger(), row);
-        } catch (cancelErr) {
-          // Logged, not thrown: the purchase is already recorded refunded, so
-          // a redelivery stops at the 'already processed' check and would
-          // never come back to this row.
-          this.obs.error('Failed to cancel payouts row for refund', {
-            errorId: crypto.randomUUID(),
-            purchaseId: purchase.id,
-            payoutId: row.id,
-            error:
-              cancelErr instanceof Error
-                ? cancelErr.message
-                : String(cancelErr),
-          });
-          continue;
-        }
-        if (cancel.kind === 'changed') {
-          // Paid since it was read: reverse it as paid. Anything else was
-          // handled by a concurrent delivery of this refund.
-          if (cancel.row?.status !== 'paid') continue;
-          row = cancel.row;
-          transferId = row.stripeTransferId;
-        } else if (cancel.transferId === undefined) {
-          continue;
-        } else {
-          transferId = cancel.transferId;
-        }
-      }
-
-      // Reverse the Stripe transfer when one exists. Under Option B both
-      // `creator_payout` AND `organization_fee` rows carry a
-      // `stripeTransferId` — each had a separate `transfers.create` against
-      // the source charge. `platform_fee` never carries one.
-      //
-      // Codex-d9t5r: skip the status flip in two cases — the Stripe
-      // reversal failed with insufficient_funds (refund_reviews captures
-      // the clawback obligation) or the partial-refund ratio floored the
-      // slice to zero (platform absorbs the sub-penny). In both cases the
-      // ledger stays truthful: status='paid' because the original transfer
-      // really did succeed.
-      let skipStatusFlip = false;
-      if (transferId) {
-        const amount = reversalAmount(row.amountCents);
-        if (amount === 0) {
-          skipStatusFlip = true;
-          this.obs.info('Reversal amount floored to zero, platform absorbs', {
-            purchaseId: purchase.id,
-            payoutId: row.id,
-            rowAmountCents: row.amountCents,
-            refundAmountCents,
-          });
-        } else {
-          try {
-            await this.stripe.transfers.createReversal(
-              transferId,
-              {
-                amount,
-                metadata: {
-                  purchase_id: purchase.id,
-                  payout_id: row.id,
-                  type: 'refund_reversal',
-                  ...stripeEnvMetadata(this.environment),
-                },
-              },
-              {
-                idempotencyKey: `${transferId}_reversal${idempotencySuffix}`,
-              }
-            );
-          } catch (reverseErr) {
-            const code = (reverseErr as { code?: string } | null)?.code;
-            this.obs.error('Failed to reverse Stripe transfer for refund', {
-              purchaseId: purchase.id,
-              payoutId: row.id,
-              stripeTransferId: transferId,
-              attemptedReversalCents: amount,
-              code: code ?? null,
-              error:
-                reverseErr instanceof Error
-                  ? reverseErr.message
-                  : String(reverseErr),
-            });
-            if (code === 'insufficient_funds' && row.userId) {
-              await this.recordRefundReview({
-                purchaseId: purchase.id,
-                payoutId: row.id,
-                creatorUserId: row.userId,
-                attemptedReversalCents: amount,
-                errorCode: code,
-                errorMessage:
-                  reverseErr instanceof Error ? reverseErr.message : null,
-              });
-              skipStatusFlip = true;
-            }
-            // Continue — per-row error isolation.
-          }
-        }
-      }
-
-      if (skipStatusFlip) continue;
-
-      // Codex-92ej7 / DQ-9: a pending/failed row whose transfer never
-      // happened was cancelled above ('cancelled_by_refund') and never gets
-      // here. Every row that does moved money — a paid creator/org transfer,
-      // the platform's retained fee, or a cancelled row whose transfer had
-      // gone out — and becomes 'reversed', with its transfer recorded.
-      const nextStatus = 'reversed' as const;
-
-      try {
-        await this.db
-          .update(payouts)
-          .set({
-            status: nextStatus,
-            stripeTransferId: transferId,
-            resolvedAt: row.resolvedAt ?? new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(payouts.id, row.id));
-      } catch (updateErr) {
-        this.obs.error('Failed to update payouts row after refund', {
-          purchaseId: purchase.id,
-          payoutId: row.id,
-          nextStatus,
-          error:
-            updateErr instanceof Error ? updateErr.message : String(updateErr),
-        });
-      }
-    }
-  }
-
-  /**
-   * Codex-d9t5r / DQ-7 sentinel: record an ops-resolution row when a
-   * Stripe reversal fails with `insufficient_funds`. The payouts row
-   * stays `status='paid'` because the original transfer succeeded —
-   * this row tracks the clawback obligation separately so ops can
-   * decide between creator-absorbed / platform-absorbed / manual.
-   */
-  private async recordRefundReview(input: {
-    purchaseId: string;
-    payoutId: string;
-    creatorUserId: string;
-    attemptedReversalCents: number;
-    errorCode: string;
-    errorMessage: string | null;
-  }): Promise<void> {
-    try {
-      await this.db
-        .insert(refundReviews)
-        .values({
-          purchaseId: input.purchaseId,
-          payoutId: input.payoutId,
-          creatorUserId: input.creatorUserId,
-          attemptedReversalCents: input.attemptedReversalCents,
-          errorCode: input.errorCode,
-          errorMessage: input.errorMessage,
-        })
-        // Webhook replay safety: targets the partial unique index
-        // `uq_refund_reviews_open_per_payout` so the second delivery
-        // collapses while resolved history rows remain insertable.
-        .onConflictDoNothing({
-          target: refundReviews.payoutId,
-          where: sql`${refundReviews.resolvedAt} IS NULL`,
-        });
-      this.obs.warn('Refund review queued for ops resolution', {
-        purchaseId: input.purchaseId,
-        payoutId: input.payoutId,
-        creatorUserId: input.creatorUserId,
-        attemptedReversalCents: input.attemptedReversalCents,
-        errorCode: input.errorCode,
-      });
-    } catch (insertErr) {
-      this.obs.error('Failed to write refund_reviews row', {
-        purchaseId: input.purchaseId,
-        payoutId: input.payoutId,
-        error:
-          insertErr instanceof Error ? insertErr.message : String(insertErr),
-      });
     }
   }
 
