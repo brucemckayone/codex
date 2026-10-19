@@ -1,8 +1,8 @@
 /**
- * The guide's initials, for the medallion that holds a missing portrait's
- * place: the first letter of the first word of the name and of the last, in
- * capitals — "Maya Linden" is "ML", "Maya" is "M". Empty when the name has no
- * letter at all; there is then no medallion.
+ * A person's initials, for the circle that holds a missing photo's place (the
+ * guide's medallion, a quote's face): the first letter of the first word of
+ * the name and of the last, in capitals — "Maya Linden" is "ML", "Maya" is
+ * "M". Empty when the name has no letter at all; there is then no circle.
  */
 const LETTER = /\p{L}/u;
 

@@ -1,17 +1,25 @@
+import { type ImageRef, isImageRef } from '../../../page-images';
 import {
   bodyField,
   eyebrowField,
   headingField,
   layout,
 } from '../../model/fields';
-import { compact, readItems, readText } from '../../model/read';
+import { SECTION_LAYOUTS } from '../../model/ids';
+import { compact, firstItem, readItems, readText } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
 import { optionalCtaFields } from '../video/definition';
+import { unwrapQuote, voices } from './voices';
+
+/** The layouts that draw the first quote larger than the rest. */
+const LEADING_LAYOUTS: readonly string[] = ['featured', 'quote', 'wall'];
 
 export interface TestimonialItem {
   quote: string;
   name?: string;
   detail?: string;
+  /** Their face beside their name (Codex-61zsk.58); initials stand in for the rest. */
+  photo?: ImageRef;
 }
 
 /**
@@ -91,6 +99,23 @@ export const testimonialsDefinition: BlockDefinition<TestimonialsProps> = {
           control: 'text',
           maxLength: 80,
         },
+        {
+          key: 'photo',
+          label: 'Their photo',
+          hint: 'Optional, and only if they are happy for you to use it. A small round photo beside their name; once one quote has a photo, the others show their initials.',
+          control: 'image',
+          decorative: true,
+          // A circle beside the name, in every layout and Style.
+          focalLayouts: Object.fromEntries(
+            SECTION_LAYOUTS.testimonials.map((id) => [
+              id,
+              [
+                { at: 'wide', ratio: '1 / 1' },
+                { at: 'phone', ratio: '1 / 1' },
+              ],
+            ])
+          ),
+        },
       ],
     },
     ...optionalCtaFields,
@@ -127,10 +152,20 @@ export const testimonialsDefinition: BlockDefinition<TestimonialsProps> = {
                 quote,
                 name: readText(entry, 'name', 80),
                 detail: readText(entry, 'detail', 80),
+                photo: isImageRef(entry.photo) ? entry.photo : undefined,
               })
             : null;
         },
         9
       ),
     }),
+  // The course's own testimonials come first, so a quote added here leads
+  // only when the course has none.
+  leadingItem: (raw, layout, context) =>
+    LEADING_LAYOUTS.includes(layout) &&
+    voices(context.testimonials).length === 0
+      ? firstItem(raw, 'items', (entry) =>
+          Boolean(unwrapQuote(readText(entry, 'quote', 500) ?? ''))
+        )
+      : null,
 };

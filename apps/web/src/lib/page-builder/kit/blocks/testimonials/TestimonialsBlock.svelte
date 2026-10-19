@@ -13,8 +13,10 @@
     wall     — every quote on one masonry wall, the first featured
                (TestimonialsWall)
 
-  No star ratings, no invented avatars. No quotes at all: the public page
-  keeps only the words; the canvas asks for some.
+  No star ratings, no invented avatars: a face is the creator's own photo of
+  the person, and once one quote has one, the others show their initials
+  (Voice). No quotes at all: the public page keeps only the words; the canvas
+  asks for some.
 -->
 <script lang="ts">
   import { hasHead } from '../../model/read';
@@ -44,12 +46,14 @@
   const featured = $derived(featuredScheme(page.style, section.scheme));
   const asks = $derived(Boolean(content.ctaLabel || content.note));
   const headed = $derived(hasHead(content));
+  const faces = $derived(all.some((entry) => entry.photo));
+  const base = $derived(context.mediaBaseUrl);
 </script>
 
 {#snippet list(entries: Testimonial[], size: 'grid' | 'quiet', centred: boolean)}
   <ul class="tm-list" data-count={entries.length}>
     {#each entries as entry (entry.key)}
-      <li><Voice voice={entry} {size} {centred} /></li>
+      <li><Voice voice={entry} {size} {centred} {faces} mediaBaseUrl={base} /></li>
     {/each}
   </ul>
 {/snippet}
@@ -80,18 +84,18 @@
   {:else if layout === 'quote'}
     <div class="tm-monument">
       <span class="lp-atmos tm-monument__glow" aria-hidden="true"></span>
-      <Voice voice={all[0]} size="monument" centred />
+      <Voice voice={all[0]} size="monument" centred {faces} mediaBaseUrl={base} />
     </div>
     {#if all.length > 1}{@render list(all.slice(1), 'quiet', true)}{/if}
   {:else if layout === 'featured'}
     <div class="tm-lead" data-lp-scheme={featured}>
-      <Voice voice={all[0]} size="lead" />
+      <Voice voice={all[0]} size="lead" {faces} mediaBaseUrl={base} />
     </div>
     {#if all.length > 1}{@render list(all.slice(1), 'quiet', false)}{/if}
   {:else if layout === 'marquee'}
-    <TestimonialsMarquee voices={all} />
+    <TestimonialsMarquee voices={all} {faces} mediaBaseUrl={base} />
   {:else if layout === 'wall'}
-    <TestimonialsWall voices={all} {featured} />
+    <TestimonialsWall voices={all} {featured} {faces} mediaBaseUrl={base} />
   {:else}
     {@render list(all, 'grid', false)}
   {/if}

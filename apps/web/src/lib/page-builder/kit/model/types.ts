@@ -106,7 +106,8 @@ export interface BlockField {
    * `media` = one of the journey's sell-media slots · `image` = the creator's
    * own uploaded image, stored as an `ImageRef` (contract A3/A5) · `choice` =
    * a few `options` side by side, the first the default, stored as the absent
-   * key (Codex-61zsk.58).
+   * key (Codex-61zsk.58) · `mark` = one of the kit's marks (`model/marks.ts`)
+   * or none, picked from its icons (Codex-61zsk.58).
    */
   control:
     | 'text'
@@ -115,6 +116,7 @@ export interface BlockField {
     | 'toggle'
     | 'select'
     | 'choice'
+    | 'mark'
     | 'list'
     | 'items'
     | 'media'
@@ -196,4 +198,15 @@ export interface BlockDefinition<P = Record<string, unknown>> {
   sample: P;
   /** Tolerant reader: unknown keys dropped, wrong types → absent. */
   coerce: (raw: Record<string, unknown>) => P;
+  /**
+   * The index in the stored `items` of the entry this layout draws larger
+   * than the rest (the first quote's panel, the mixed tiles' lead), or `null`
+   * where none leads. The editor tags its row "Leads"; nothing is stored
+   * (Codex-61zsk.58).
+   */
+  leadingItem?: (
+    raw: Record<string, unknown>,
+    layout: string,
+    context: JourneySalesContext
+  ) => number | null;
 }

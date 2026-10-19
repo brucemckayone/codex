@@ -216,6 +216,9 @@
         : field
     )
   );
+  // The entry this layout draws larger than the rest, its row tagged "Leads"
+  // (Codex-61zsk.58); the definition knows, nothing is stored.
+  const leading = $derived(definition.leadingItem?.(section.props, layout, context) ?? null);
 
   function writeProp(key: string, value: unknown): void {
     // Deleted by the time a slow write arrived: there is nothing to write to.
@@ -372,6 +375,7 @@
             mediaBaseUrl={context.mediaBaseUrl}
             {layout}
             {sectionId}
+            leading={field.key === 'items' ? leading : null}
           />
         {/each}
       </div>

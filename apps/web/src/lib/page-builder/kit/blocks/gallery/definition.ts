@@ -5,7 +5,7 @@ import {
   headingField,
   layout,
 } from '../../model/fields';
-import { compact, readItems, readText } from '../../model/read';
+import { compact, firstItem, readItems, readText } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
 
 export interface GalleryItem {
@@ -103,4 +103,9 @@ export const galleryDefinition: BlockDefinition<GalleryProps> = {
         MAX_GALLERY_ITEMS
       ),
     }),
+  // The mosaic's first picture is its largest.
+  leadingItem: (raw, layout) =>
+    layout === 'mosaic'
+      ? firstItem(raw, 'items', (entry) => isImageRef(entry.image))
+      : null,
 };

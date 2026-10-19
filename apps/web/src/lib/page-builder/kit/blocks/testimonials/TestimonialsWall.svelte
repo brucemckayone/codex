@@ -17,9 +17,12 @@
     voices: readonly Testimonial[];
     /** The featured tile's scheme: the Style's filled card for this section. */
     featured: ColourSchemeId;
+    /** The section draws faces (Voice). */
+    faces?: boolean;
+    mediaBaseUrl?: string | null;
   }
 
-  const { voices, featured }: Props = $props();
+  const { voices, featured, faces = false, mediaBaseUrl = null }: Props = $props();
 </script>
 
 <ul class="tm-wall" data-count={voices.length}>
@@ -29,7 +32,7 @@
       data-featured={index === 0 ? '' : undefined}
       data-lp-scheme={index === 0 ? featured : undefined}
     >
-      <Voice {voice} size="wall" featured={index === 0} />
+      <Voice {voice} size="wall" featured={index === 0} {faces} {mediaBaseUrl} />
     </li>
   {/each}
 </ul>

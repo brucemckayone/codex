@@ -13,6 +13,7 @@
 <script lang="ts">
   import type { ColourSchemeId } from '../../model/ids';
   import Heading from '../../primitives/Heading.svelte';
+  import Mark from '../../primitives/Mark.svelte';
   import Media from '../../primitives/Media.svelte';
   import { storedFocus } from '../../../page-images';
   import { bentoTiles } from './bento';
@@ -53,6 +54,7 @@
         </div>
       {/if}
       <div class="benefits-bento__words">
+        {#if item.mark}<span class="benefits-bento__mark"><Mark mark={item.mark} /></span>{/if}
         <Heading {level} size="title" text={item.title} type="benefits" />
         {#if item.detail}<p class="benefits-bento__detail">{item.detail}</p>{/if}
       </div>
@@ -131,6 +133,20 @@
   .benefits-bento__words {
     display: grid;
     gap: var(--space-2);
+  }
+
+  /* An item's mark above its name, its stroke in the mark ink, as in the
+     grid (BenefitsBlock). */
+  .benefits-bento__mark {
+    display: inline-flex;
+    justify-self: start;
+    margin-block-end: var(--space-1);
+    font-size: var(--space-7);
+    line-height: 1;
+  }
+
+  .benefits-bento__mark :global(svg) {
+    stroke: var(--lp-mark-ink);
   }
 
   /* The lead speaks a size up, in a heading's size, weight, leading and

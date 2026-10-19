@@ -8,12 +8,16 @@
   only for `image` fields, which preview the stored image against it. An
   `image` field with `focalLayouts` offers its focal point under it (03 X64),
   live in those layouts; an `action` field is a Button's destination. A
-  `choice` presses one of its options, the first being the absent key.
+  `choice` presses one of its options, the first being the absent key. A
+  `mark` presses one of the kit's marks; pressing the chosen one again takes
+  it away (Codex-61zsk.58).
 -->
 <script lang="ts">
   import Select from '$lib/components/ui/Select/Select.svelte';
   import Switch from '$lib/components/ui/Switch/Switch.svelte';
   import type { BlockField } from '$lib/page-builder/kit';
+  import { MARKS, type MarkId } from '$lib/page-builder/kit/model/marks';
+  import Mark from '$lib/page-builder/kit/primitives/Mark.svelte';
   import { isImageRef } from '$lib/page-builder/page-images';
   import { safeHref } from '$lib/page-builder/render/safe-href';
   import * as m from '$paraglide/messages';
@@ -33,6 +37,8 @@
     layout?: string;
     /** The section this field belongs to (a Button never targets itself). */
     sectionId?: string;
+    /** `items` only: the entry the layout draws larger, tagged "Leads". */
+    leading?: number | null;
   }
 
   const {
@@ -42,6 +48,7 @@
     mediaBaseUrl = null,
     layout,
     sectionId = '',
+    leading = null,
   }: Props = $props();
 
   const id = $props.id();
@@ -75,12 +82,22 @@
   function choose(next: string): void {
     onChange(next === options[0]?.value ? undefined : next);
   }
+
+  // A mark the kit cannot draw reads as none, as the block reads it.
+  const isMark = (option: string): option is MarkId => (MARKS as readonly string[]).includes(option);
+  const marks = $derived(
+    options.filter((option): option is { value: MarkId; label: string } => isMark(option.value))
+  );
+
+  function mark(next: string): void {
+    onChange(next === value ? undefined : next);
+  }
 </script>
 
 {#if field.control === 'list'}
   <ListField {field} {value} {onChange} />
 {:else if field.control === 'items'}
-  <ItemsField {field} {value} {onChange} {mediaBaseUrl} {layout} />
+  <ItemsField {field} {value} {onChange} {mediaBaseUrl} {layout} {leading} />
 {:else if field.control === 'media'}
   <MediaField {field} />
 {:else if field.control === 'image'}
@@ -130,6 +147,29 @@
           onclick={() => choose(option.value)}
         >
           {option.label}
+        </button>
+      {/each}
+    </div>
+    {#if field.hint}<p class="field__hint" id="{id}-hint">{field.hint}</p>{/if}
+  </div>
+{:else if field.control === 'mark'}
+  <div class="field">
+    <span class="field__label" id="{id}-label">{field.label}</span>
+    <div
+      class="field__marks"
+      role="group"
+      aria-labelledby="{id}-label"
+      aria-describedby={field.hint ? `${id}-hint` : undefined}
+    >
+      {#each marks as option (option.value)}
+        <button
+          type="button"
+          class="field__mark"
+          aria-label={option.label}
+          aria-pressed={value === option.value}
+          onclick={() => mark(option.value)}
+        >
+          <Mark mark={option.value} size="1.25rem" />
         </button>
       {/each}
     </div>
@@ -251,6 +291,42 @@
   }
 
   .field__choice:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-text);
+    outline-offset: var(--focus-offset);
+  }
+
+  /* The marks: as many tap-sized cells as fit, the chosen one raised. */
+  .field__marks {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--tap-target-min), 1fr));
+    gap: var(--space-0-5);
+    padding: var(--space-0-5);
+    border-radius: var(--radius-md);
+    background: color-mix(in oklab, var(--color-text) 6%, transparent);
+  }
+
+  .field__mark {
+    display: grid;
+    place-items: center;
+    min-block-size: var(--tap-target-min);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+  }
+
+  .field__mark:hover {
+    color: var(--color-text);
+  }
+
+  .field__mark[aria-pressed='true'] {
+    background: var(--color-surface);
+    color: var(--color-text);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .field__mark:focus-visible {
     outline: var(--border-width-thick) solid var(--color-text);
     outline-offset: var(--focus-offset);
   }

@@ -37,7 +37,7 @@
   import Credentials from './Credentials.svelte';
   import { INSTRUCTOR_PROMPT, instructorDefinition } from './definition';
   import GuideQuote from './GuideQuote.svelte';
-  import { initials } from './initials';
+  import { initials } from '../../model/initials';
   import Signoff from './Signoff.svelte';
 
   const { props, section, context, edit }: BlockProps = $props();
