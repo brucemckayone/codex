@@ -397,7 +397,8 @@
 <style>
   .kit-preview {
     /* The studio has no mobile bottom nav for the floating bar to clear.
-       A length, not `--space-0` (a unitless 0 is invalid inside `calc()` sums). */
+       A length: a unitless 0 is invalid inside `calc()` sums
+       (`token-math.test.ts`). */
     --lp-nav-clearance: 0px;
     min-block-size: 100vh;
   }
