@@ -43,6 +43,13 @@ function fakeExecutionCtx() {
   } as unknown as ExecutionContext & { waitUntil: ReturnType<typeof vi.fn> };
 }
 
+/** A service's private deferral hook, without widening the production type. */
+function waitUntilOf(service: object): DeferFn {
+  const hook = (service as { waitUntil?: DeferFn }).waitUntil;
+  if (!hook) throw new Error('service was built without a waitUntil hook');
+  return hook;
+}
+
 /** Read private constructor deps without widening the production types. */
 function depsOf(service: object) {
   return service as {
@@ -117,7 +124,7 @@ describe('createWebhookServices', () => {
 
     // A service defers DB work (an email's recipient lookup) through its own
     // hook, as in production.
-    const defer = (services.organization as { waitUntil: DeferFn }).waitUntil;
+    const defer = waitUntilOf(services.organization);
     let finishTask: () => void = () => {};
     defer(
       new Promise<void>((resolve) => {
