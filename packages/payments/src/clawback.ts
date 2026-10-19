@@ -78,10 +78,33 @@ export type ClawbackSource =
   | { sourceType: 'subscription' };
 
 /**
- * The charge's refunds to claw back (succeeded or failed), oldest first. Read
- * from Stripe, not the event: `charge.amount_refunded` is cumulative, and
- * `charge.refunds` is no longer sent (API 2022-11-15), so an event cannot say
- * which refund is new.
+ * Every refund of a charge, whatever its status, as Stripe lists it (every
+ * page). Read from Stripe, not the event: `charge.amount_refunded` is
+ * cumulative, and `charge.refunds` is no longer sent (API 2022-11-15), so an
+ * event cannot say which refund is new.
+ */
+export async function listChargeRefunds(
+  stripe: Stripe,
+  chargeId: string
+): Promise<Stripe.Refund[]> {
+  const refunds: Stripe.Refund[] = [];
+  let startingAfter: string | undefined;
+  for (;;) {
+    const page = await stripe.refunds.list({
+      charge: chargeId,
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    refunds.push(...page.data);
+    const last = page.data.at(-1);
+    if (!page.has_more || !last) break;
+    startingAfter = last.id;
+  }
+  return refunds;
+}
+
+/**
+ * The charge's refunds to claw back (succeeded or failed), oldest first.
  *
  * A failed refund stays in the list, so a refund that fails after its
  * clawback began keeps its place in the order: the shares of the refunds after
@@ -91,30 +114,14 @@ export async function listClawableRefunds(
   stripe: Stripe,
   chargeId: string
 ): Promise<ClawbackRefund[]> {
-  const refunds: ClawbackRefund[] = [];
-  let startingAfter: string | undefined;
-  for (;;) {
-    const page = await stripe.refunds.list({
-      charge: chargeId,
-      limit: 100,
-      ...(startingAfter ? { starting_after: startingAfter } : {}),
-    });
-    for (const refund of page.data) {
-      if (isClawable(refund.status) && refund.amount > 0) {
-        refunds.push({
-          id: refund.id,
-          amountCents: refund.amount,
-          createdAt: refund.created,
-        });
-      }
-    }
-    const last = page.data.at(-1);
-    if (!page.has_more || !last) break;
-    startingAfter = last.id;
-  }
-  return refunds.sort(
-    (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)
-  );
+  return (await listChargeRefunds(stripe, chargeId))
+    .filter((refund) => isClawable(refund.status) && refund.amount > 0)
+    .map((refund) => ({
+      id: refund.id,
+      amountCents: refund.amount,
+      createdAt: refund.created,
+    }))
+    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 
 /** Settled at Stripe, whichever way: see `ClawbackRefund`. */

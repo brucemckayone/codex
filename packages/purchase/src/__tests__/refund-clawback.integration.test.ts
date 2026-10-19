@@ -18,6 +18,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   content,
+  contentAccess,
   organizations,
   type Payout,
   type Purchase,
@@ -224,6 +225,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       data: refunds.map((r, i) => ({
         status: 'succeeded',
         created: i + 1,
+        currency: 'gbp',
         ...r,
       })),
       has_more: false,
@@ -268,7 +270,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
 
     const result = await refundEvent(seeded, `re_part_${seeded.tag}`, 300);
 
-    expect(result).toEqual({ userId: buyerId });
+    expect(result).toEqual({ userId: buyerId, accessEnded: false });
     expect(stripe.refunds.list).toHaveBeenCalledWith(
       expect.objectContaining({ charge: seeded.charge.id })
     );
@@ -277,30 +279,75 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
     for (const row of [platform, org, creator]) {
       expect((await readRow(row.id)).status).toBe('paid');
     }
-    expect((await readPurchase(seeded.purchase.id)).status).toBe('refunded');
+    // A partial refund keeps the purchase, and access, as they were (P-1).
+    expect(await readPurchase(seeded.purchase.id)).toMatchObject({
+      status: 'completed',
+      refundAmountCents: 300,
+      refundedAt: null,
+    });
   });
 
-  it('an already-refunded purchase still runs its clawback: a later partial refund of the charge is clawed back (the record, not the purchase, is the gate)', async () => {
+  it('a partial refund keeps access (P-1); the refund that completes the charge ends it, and each refund is clawed back', async () => {
     const seeded = await seedPurchase(1000);
     const { creator } = await paidSplit(seeded);
+    const contentId = seeded.purchase.contentId;
+    if (!contentId) throw new Error('the seeded purchase is for content');
+    await db.insert(contentAccess).values({
+      userId: buyerId,
+      contentId,
+      organizationId: orgId,
+      accessType: 'purchased',
+    });
+    const access = async () =>
+      takeFirst(
+        await db
+          .select()
+          .from(contentAccess)
+          .where(eq(contentAccess.contentId, contentId))
+      );
     const re1 = `re_first_${seeded.tag}`;
     const re2 = `re_second_${seeded.tag}`;
-    stripeRefunds([{ id: re1, amount: 300 }]);
-    await refundEvent(seeded, re1, 300);
-    const recorded = await readPurchase(seeded.purchase.id);
 
+    stripeRefunds([{ id: re1, amount: 300 }]);
+    const first = await refundEvent(seeded, re1, 300);
+    expect(first?.accessEnded).toBe(false);
+    expect((await access()).deletedAt).toBeNull();
+    expect((await readPurchase(seeded.purchase.id)).status).toBe('completed');
+
+    // refundAmountCents is the charge's cumulative amount refunded.
     stripeRefunds([
       { id: re1, amount: 300 },
       { id: re2, amount: 700 },
     ]);
-    await refundEvent(seeded, re2, 1000);
-
+    const second = await refundEvent(seeded, re2, 1000);
+    expect(second?.accessEnded).toBe(true);
+    expect((await access()).deletedAt).not.toBeNull();
+    expect(await readPurchase(seeded.purchase.id)).toMatchObject({
+      status: 'refunded',
+      refundAmountCents: 1000,
+      stripeRefundId: re2,
+    });
     expect(reversedAmount(creator.stripeTransferId)).toBe(765);
     expect((await readRow(creator.id)).status).toBe('reversed');
-    // The purchase row itself is not rewritten by the redelivery.
+  });
+
+  it('an already-refunded purchase still runs its clawback: a refund pending at charge.refunded is clawed back once it succeeds (the record, not the purchase, is the gate)', async () => {
+    const seeded = await seedPurchase(1000);
+    const { creator } = await paidSplit(seeded);
+    const refundId = `re_later_${seeded.tag}`;
+    stripeRefunds([{ id: refundId, amount: 1000, status: 'pending' }]);
+    await refundEvent(seeded, refundId, 1000);
+    const recorded = await readPurchase(seeded.purchase.id);
+    expect(recorded.status).toBe('refunded');
+    expect(reversedAmount(creator.stripeTransferId)).toBe(0);
+
+    stripeRefunds([{ id: refundId, amount: 1000, status: 'succeeded' }]);
+    await refundEvent(seeded, refundId, 1000);
+
+    expect(reversedAmount(creator.stripeTransferId)).toBe(765);
+    // The purchase row itself is not rewritten by the second run.
     const after = await readPurchase(seeded.purchase.id);
     expect(after.refundedAt?.getTime()).toBe(recorded.refundedAt?.getTime());
-    expect(after.stripeRefundId).toBe(re1);
   });
 
   it('a step that must be retried makes processRefund reject AFTER the purchase is recorded refunded; the redelivery completes it', async () => {
@@ -347,7 +394,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
 
     await expect(
       refundEvent(seeded, `re_refused_${seeded.tag}`, 1000)
-    ).resolves.toEqual({ userId: buyerId });
+    ).resolves.toEqual({ userId: buyerId, accessEnded: true });
   });
 
   it("a debt's refund_reviews row carries the purchase id and the reversal it is for", async () => {
@@ -547,5 +594,62 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
 
     expect((await readRefund(refundId))[0]?.purchaseId).toBeNull();
     expect(await readRefund(unknownId)).toHaveLength(0);
+  });
+
+  it('recordChargeRefunds records every refund of the charge, whatever its status, and returns them newest first', async () => {
+    const seeded = await seedPurchase(1000);
+    const ids = ['a', 'b', 'c'].map((x) => `re_list_${x}_${seeded.tag}`);
+    createdRefundIds.push(...ids);
+    stripeRefunds([
+      { id: ids[0] as string, amount: 100, status: 'succeeded', created: 10 },
+      { id: ids[1] as string, amount: 200, status: 'pending', created: 20 },
+      { id: ids[2] as string, amount: 300, status: 'canceled', created: 30 },
+    ]);
+
+    const listed = await makeService().recordChargeRefunds({
+      id: seeded.charge.id,
+      paymentIntentId: seeded.paymentIntentId,
+    });
+
+    expect(listed.map((r) => r.id)).toEqual([...ids].reverse());
+    const rows = await db
+      .select()
+      .from(refunds)
+      .where(inArray(refunds.stripeRefundId, ids));
+    expect(
+      rows.map((r) => [r.stripeRefundId, r.status, r.purchaseId]).sort()
+    ).toEqual([
+      [ids[0], 'succeeded', seeded.purchase.id],
+      [ids[1], 'pending', seeded.purchase.id],
+      [ids[2], 'canceled', seeded.purchase.id],
+    ]);
+  });
+
+  it('claimRefundEmails claims each pending or succeeded refund once, oldest first; never a failed, canceled or waiting one', async () => {
+    const chargeId = `ch_mail_${uid()}`;
+    const service = makeService();
+    const statuses = [
+      'succeeded',
+      'pending',
+      'failed',
+      'canceled',
+      'requires_action',
+    ];
+    const ids = statuses.map((status) => `re_mail_${status}_${uid()}`);
+    createdRefundIds.push(...ids);
+    for (const [i, status] of statuses.entries()) {
+      await service.recordRefund({
+        ...refundFor(null, ids[i] as string, status),
+        stripeChargeId: chargeId,
+        amountCents: 100 * (i + 1),
+        stripeCreatedAt: new Date(Date.UTC(2026, 9, 19, 10, i)),
+      });
+    }
+
+    expect(await service.claimRefundEmails(chargeId)).toEqual([
+      { stripeRefundId: ids[0], amountCents: 100 },
+      { stripeRefundId: ids[1], amountCents: 200 },
+    ]);
+    expect(await service.claimRefundEmails(chargeId)).toEqual([]);
   });
 });

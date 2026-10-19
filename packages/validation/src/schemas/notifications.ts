@@ -251,9 +251,12 @@ export const subscriptionTierPriceChangeDataSchema = z.object({
 export const refundProcessedDataSchema = z.object({
   userName: z.string(),
   contentTitle: z.string(),
+  /** This refund's amount: a charge refunded in parts sends one email each. */
   refundAmount: z.string(),
   originalAmount: z.string(),
   refundDate: z.string(),
+  /** Whether a purchase's buyer keeps access (P-1); empty for a subscription. */
+  accessNote: z.string().optional(),
 });
 
 // ============================================

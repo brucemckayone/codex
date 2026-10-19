@@ -199,16 +199,22 @@ check the buyer's access.
   drain pays its amount less its reductions);
 - the platform absorbs its own fee's share of the refund and the rounding.
 
-The access half is still a **gap**: `Codex-2hxff.8` (today any refund removes
-access).
+The purchase stays `completed`, with the amount refunded so far; the refund
+that completes the charge makes it `refunded` and ends access. Whether a refund
+is full is read from the charge's cumulative `amount_refunded`.
 
 **Reversals.** Each reversal uses the key
 `${transferId}_reversal_${refundId}_${attempt}`. The attempt advances only
 after Stripe refuses a request, because Stripe replays a stored error for its
 key for 24 hours. After an outcome Stripe did not confirm, the same key is
-retried, which is what prevents a double reversal. The purchase records each
-refund's id and reason — **gap**: `Codex-2hxff.8` (it records the first
-refund's only).
+retried, which is what prevents a double reversal.
+
+**The record.** Each refund is a `refunds` row (one per Stripe refund, any
+source) with its amount, reason and Stripe status, which only moves forward
+(owner decision 2026-10-19, "One refunds table"). `charge.refunded` lists the
+charge's refunds from Stripe and records them all; `refund.updated` and
+`refund.failed` record each change. The purchase keeps the amount refunded so
+far and the newest refund's id and reason.
 
 - If the payee's Connect balance is too low (`insufficient_funds` or
   `balance_insufficient`), a `refund_reviews` row is written recording the
@@ -219,7 +225,7 @@ refund's only).
   ([payout timing](connect-and-payouts.md#payout-timing)), a refund normally finds
   the money still in the payee's Stripe balance; debts mostly come from disputes,
   which can arrive later. Refund reviews need an operations screen — **gap**:
-  `Codex-2hxff.8` (no reader today).
+  `Codex-2hxff.28` (no reader today).
 - Any other reversal failure is retried, and nothing is marked done until it
   succeeds. A database or Stripe outage makes the webhook return 500, so Stripe
   redelivers. A request Stripe refused is retried by the hourly cron with the
@@ -230,8 +236,15 @@ Stripe does not return its processing fee on a refund; the platform bears it.
 
 A refund that arrives before the purchase it belongs to is recorded (courses as
 well as content) and applied when the purchase completes — **gap**:
-`Codex-2hxff.8` (course refunds are dropped). The refund email is sent once,
-with the right details — **gap**: `Codex-2hxff.8`.
+`Codex-2hxff.8` (course refunds are dropped).
+
+**The refund email.** Each refund is emailed to the buyer once, with that
+refund's amount (owner decision 2026-10-19, "One per refund"). The refund's row
+is marked emailed (`notified_at`) before the email is sent, so a redelivered
+event sends nothing, and an email that then fails to send is not retried. For a
+purchase it says whether the buyer keeps access; for a subscription's charge it
+says neither. A failed or canceled refund is never emailed, and one waiting on
+the customer is emailed once it succeeds.
 
 ## Disputes
 

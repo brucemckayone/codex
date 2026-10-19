@@ -2955,8 +2955,19 @@ describe('PurchaseService Integration', () => {
         ['platform_fee', 'retained_fee', 50, 'done'],
       ]);
 
-      // A second, £15 refund completes the charge. The purchase is already
-      // refunded, and the clawback still runs: it reverses the rest of each
+      // The partial refund left the purchase completed, so the buyer keeps
+      // access (owner decision P-1).
+      const purchaseStatus = async () =>
+        (
+          await db
+            .select({ status: schema.purchases.status })
+            .from(schema.purchases)
+            .where(eq(schema.purchases.id, purchase.id))
+        )[0]?.status;
+      expect(await purchaseStatus()).toBe('completed');
+
+      // A second, £15 refund completes the charge (£20 refunded so far): the
+      // purchase becomes refunded, and the clawback reverses the rest of each
       // slice. Until Codex-2hxff.8 the first partial was the last.
       vi.mocked(stubStripe.refunds.list).mockResolvedValue(
         refundList(
@@ -2967,8 +2978,9 @@ describe('PurchaseService Integration', () => {
       await partialService.processRefund(paymentIntentId, {
         charge,
         stripeRefundId: 're_partial_002',
-        refundAmountCents: 1500,
+        refundAmountCents: 2000,
       });
+      expect(await purchaseStatus()).toBe('refunded');
 
       expect(reversalCalls).toHaveLength(4);
       expect(amountsByTransfer(reversalCalls.slice(2))).toEqual({

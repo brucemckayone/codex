@@ -2,7 +2,8 @@
  * Payment Webhook Handlers
  *
  * Processes Stripe payment lifecycle events:
- * - charge.refunded → update purchase status, revoke content access
+ * - charge.refunded → record each refund; a full refund ends access, a
+ *   partial one keeps it (P-1); email each refund once
  * - refund.updated, refund.failed → record the refund's status; claw back a
  *   refund that was pending at charge.refunded; a failed one is support's
  * - charge.dispute.created → mark purchase disputed, revoke access (Codex-sxu5a)
@@ -115,30 +116,43 @@ function revokeAccess(
 }
 
 /**
- * Fire-and-forget `refund-processed` email to the payer. The branch runs
- * regardless of the service result — we always acknowledge a refund to the
- * payer; whether the DB side found a matching purchase row is a separate
- * concern (and the service logs that case).
+ * Email the payer about each refund of the charge not yet emailed, once per
+ * refund, with that refund's amount (owner decision 2026-10-19, "One per
+ * refund"). `claimRefundEmails` marks them first, so a redelivery sends
+ * nothing. For a purchase, the email says whether the buyer keeps access
+ * (P-1); a subscription charge's says neither.
  */
-function sendRefundEmail(
+async function sendRefundEmails(
   c: Context<StripeWebhookEnv>,
-  charge: Stripe.Charge
-): void {
+  service: PurchaseService,
+  charge: Stripe.Charge,
+  purchase: { accessEnded: boolean } | undefined
+): Promise<void> {
   const to = charge.billing_details?.email || charge.receipt_email;
   if (!to) return;
 
-  sendEmailToWorker(c.env, c.executionCtx, {
-    to,
-    templateName: 'refund-processed',
-    category: 'transactional',
-    data: {
-      userName: charge.billing_details?.name || 'there',
-      contentTitle: charge.metadata?.contentTitle || 'Content',
-      refundAmount: `£${(charge.amount_refunded / 100).toFixed(2)}`,
-      originalAmount: `£${(charge.amount / 100).toFixed(2)}`,
-      refundDate: new Date().toLocaleDateString('en-GB'),
-    },
-  });
+  const claimed = await service.claimRefundEmails(charge.id);
+  const contentTitle = charge.metadata?.contentTitle || 'Content';
+  const accessNote = !purchase
+    ? ''
+    : purchase.accessEnded
+      ? `Your access to ${contentTitle} has ended.`
+      : `You keep access to ${contentTitle}.`;
+  for (const refund of claimed) {
+    sendEmailToWorker(c.env, c.executionCtx, {
+      to,
+      templateName: 'refund-processed',
+      category: 'transactional',
+      data: {
+        userName: charge.billing_details?.name || 'there',
+        contentTitle,
+        refundAmount: `£${(refund.amountCents / 100).toFixed(2)}`,
+        originalAmount: `£${(charge.amount / 100).toFixed(2)}`,
+        refundDate: new Date().toLocaleDateString('en-GB'),
+        accessNote,
+      },
+    });
+  }
 }
 
 function extractPaymentIntentId(
@@ -157,7 +171,14 @@ async function handleChargeRefunded(
   const obs = c.get('obs');
   const charge = event.data.object as Stripe.Charge;
   const paymentIntentId = extractPaymentIntentId(charge.payment_intent);
-  const latestRefund = charge.refunds?.data?.[0];
+
+  // Every refund of the charge, recorded first (owner decision 2026-10-19,
+  // "One refunds table"). The event names none: charge.refunds is no longer
+  // sent (API 2022-11-15).
+  const [latestRefund] = await service.recordChargeRefunds({
+    id: charge.id,
+    paymentIntentId: paymentIntentId ?? null,
+  });
 
   // The charge's amount is every source's clawback denominator (D1); each
   // refund's share is read from Stripe (Codex-2hxff.8).
@@ -176,6 +197,8 @@ async function handleChargeRefunded(
     return;
   }
 
+  // A partial refund keeps access (P-1): processRefund decides from the
+  // charge's cumulative amount refunded.
   const refundResult = await service.processRefund(paymentIntentId, {
     charge: clawbackCharge,
     stripeRefundId: latestRefund?.id,
@@ -187,6 +210,7 @@ async function handleChargeRefunded(
     paymentIntentId,
     amountRefunded: charge.amount_refunded,
     stripeRefundId: latestRefund?.id,
+    accessEnded: refundResult?.accessEnded ?? null,
   });
 
   // Library cache bump is always safe once we have a userId. Revocation
@@ -201,13 +225,13 @@ async function handleChargeRefunded(
     revokeAccess(c, result.userId, result.orgId);
   }
 
-  sendRefundEmail(c, charge);
+  await sendRefundEmails(c, service, charge, refundResult);
 }
 
 /**
  * A refund's status changed (`refund.updated`, `refund.failed`). Each change is
- * recorded in `refunds`. The refund's email was sent by `charge.refunded`, so
- * none is sent here.
+ * recorded in `refunds`. A refund is emailed once, usually at
+ * `charge.refunded`; one not emailed by then is emailed once it succeeds.
  *
  * - `succeeded`: a refund still pending when `charge.refunded` arrived is
  *   clawed back now (owner decision Q1, 2026-10-19).
@@ -288,14 +312,19 @@ async function handleRefundUpdated(
 
   const clawbackCharge = { id: charge.id, amountCents: charge.amount };
   await subscriptionService.reverseSubscriptionPayoutsForCharge(clawbackCharge);
-  if (paymentIntentId) {
-    // An already-refunded purchase runs only its clawback.
-    await service.processRefund(paymentIntentId, {
-      charge: clawbackCharge,
-      stripeRefundId: refund.id,
-      refundAmountCents: charge.amount_refunded,
-      refundReason: refund.reason ?? undefined,
-    });
+  const purchase = paymentIntentId
+    ? // An already-refunded purchase runs only its clawback.
+      await service.processRefund(paymentIntentId, {
+        charge: clawbackCharge,
+        stripeRefundId: refund.id,
+        refundAmountCents: charge.amount_refunded,
+        refundReason: refund.reason ?? undefined,
+      })
+    : undefined;
+  // Usually emailed at charge.refunded already; one that was waiting on the
+  // customer then is emailed now. A failed refund is never emailed.
+  if (refund.status === 'succeeded') {
+    await sendRefundEmails(c, service, charge, purchase);
   }
 }
 

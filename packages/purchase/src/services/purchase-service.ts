@@ -43,6 +43,7 @@ import {
 import {
   type ClawbackCharge,
   type LedgerDeps,
+  listChargeRefunds,
   listClawableRefunds,
   recordPlatformFee,
   recordSlice,
@@ -78,8 +79,10 @@ import {
   desc,
   eq,
   gte,
+  inArray,
   isNotNull,
   isNull,
+  lt,
   lte,
   or,
   type SQL,
@@ -1426,6 +1429,9 @@ export class PurchaseService extends BaseService {
     if (
       purchase.status !== PURCHASE_STATUS.COMPLETED ||
       purchase.refundedAt ||
+      // A partial refund keeps the purchase completed (P-1), so its amount,
+      // not its status, says it was refunded.
+      (purchase.refundAmountCents ?? 0) > 0 ||
       purchase.disputedAt
     ) {
       // Said out loud: if the first delivery lost a slice, a PARTIAL refund
@@ -1434,6 +1440,7 @@ export class PurchaseService extends BaseService {
         purchaseId: purchase.id,
         status: purchase.status,
         refundedAt: purchase.refundedAt?.toISOString() ?? null,
+        refundAmountCents: purchase.refundAmountCents,
         disputedAt: purchase.disputedAt?.toISOString() ?? null,
       });
       return;
@@ -1849,29 +1856,39 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Process a refund from a charge.refunded webhook event.
+   * Process a refund of a purchase's charge (`charge.refunded`; and
+   * `refund.updated`, which re-runs the clawback).
    *
    * Flow:
    * 1. Ensure the purchase row exists (self-heal ordering race #4, Codex-aa08z)
-   * 2. Update purchase status to 'refunded'
-   * 3. Revoke content access (soft delete)
-   * 4. Claw back each refund's share of the payout slices
+   * 2. Record the refund on the purchase:
+   *    - a FULL refund (the charge refunded in full) makes it `refunded` and
+   *      ends access: content access soft-deleted, its entitlement revoked;
+   *    - a PARTIAL refund keeps access (owner decision P-1, "Keep access"):
+   *      the purchase stays `completed`, with the amount refunded so far.
+   *    Each refund itself is a `refunds` row (`recordChargeRefunds`).
+   * 3. Claw back each refund's share of the payout slices
    *
-   * Idempotent. An already-refunded purchase skips steps 2-3 but still runs
-   * step 4: what each refund did is recorded per slice (payout_reversals), so
-   * a redelivery does only what is left, and a later partial refund of the
-   * same charge is clawed back too (Codex-2hxff.8).
+   * Idempotent. An already-refunded purchase skips step 2 but still runs
+   * step 3: what each refund did is recorded per slice (payout_reversals), so
+   * a redelivery does only what is left (Codex-2hxff.8).
    */
   async processRefund(
     paymentIntentId: string,
     refundDetails: {
       /** The refunded charge: its id and amount, the clawback's denominator. */
       charge: ClawbackCharge;
+      /** The newest refund of the charge. */
       stripeRefundId?: string;
+      /**
+       * How much of the charge is refunded so far: Stripe's cumulative
+       * `charge.amount_refunded`. At least the charge's amount is a full
+       * refund. Absent, the refund is taken to be full.
+       */
       refundAmountCents?: number;
       refundReason?: string;
     }
-  ): Promise<{ userId: string } | undefined> {
+  ): Promise<{ userId: string; accessEnded: boolean } | undefined> {
     try {
       // Self-heal ordering race #4 (Codex-aa08z): if charge.refunded beat
       // checkout.session.completed, the row won't exist yet — rebuild it from
@@ -1893,59 +1910,84 @@ export class PurchaseService extends BaseService {
         });
         // The purchase is recorded; the clawback is not gated by it.
         await this.clawBackRefunds(purchase.id, refundDetails.charge);
-        return { userId: purchase.customerId };
+        return { userId: purchase.customerId, accessEnded: true };
       }
 
-      // Atomically update purchase status AND revoke content access
-      await this.db.transaction(async (tx) => {
-        // Update purchase status to refunded with tracking fields
-        await tx
+      const refundedCents =
+        refundDetails.refundAmountCents ?? refundDetails.charge.amountCents;
+      const isFull = refundedCents >= refundDetails.charge.amountCents;
+      const refundFields = {
+        updatedAt: new Date(),
+        refundAmountCents: refundedCents,
+        stripeRefundId: refundDetails.stripeRefundId ?? null,
+        refundReason: refundDetails.refundReason ?? null,
+      };
+
+      if (!isFull) {
+        // P-1: the buyer keeps access. The amount only grows, so a stale
+        // redelivery never lowers it.
+        await this.db
           .update(purchases)
-          .set({
-            status: PURCHASE_STATUS.REFUNDED,
-            updatedAt: new Date(),
-            refundedAt: new Date(),
-            refundAmountCents: refundDetails?.refundAmountCents ?? null,
-            stripeRefundId: refundDetails?.stripeRefundId ?? null,
-            refundReason: refundDetails?.refundReason ?? null,
-          })
-          .where(eq(purchases.id, purchase.id));
-
-        // Revoke content access (soft delete) — content purchases only. Course
-        // purchases grant no contentAccess row (they use entitlements).
-        if (purchase.contentId) {
-          await tx
-            .update(contentAccess)
-            .set({ deletedAt: new Date() })
-            .where(
-              and(
-                eq(contentAccess.userId, purchase.customerId),
-                eq(contentAccess.contentId, purchase.contentId),
-                isNull(contentAccess.deletedAt)
-              )
-            );
-        }
-
-        // Codex-2pryk WP-6: revoke the entitlement this purchase granted
-        // (content_purchase OR course_purchase — both carry sourceRef=purchase.id).
-        // Without this a refund would leave a LIVE grant the resolver still
-        // honours (access-integrity bug). Keyed on sourceRef so one statement
-        // covers either target. Idempotent (no-op if already revoked / absent).
-        await tx
-          .update(entitlements)
-          .set({ revokedAt: new Date() })
+          .set(refundFields)
           .where(
             and(
-              eq(entitlements.sourceRef, purchase.id),
-              isNull(entitlements.revokedAt)
+              eq(purchases.id, purchase.id),
+              eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+              or(
+                isNull(purchases.refundAmountCents),
+                lt(purchases.refundAmountCents, refundedCents)
+              )
             )
           );
-      });
+      } else {
+        // Atomically update purchase status AND revoke content access
+        await this.db.transaction(async (tx) => {
+          // Update purchase status to refunded with tracking fields
+          await tx
+            .update(purchases)
+            .set({
+              ...refundFields,
+              status: PURCHASE_STATUS.REFUNDED,
+              refundedAt: new Date(),
+            })
+            .where(eq(purchases.id, purchase.id));
+
+          // Revoke content access (soft delete) — content purchases only. Course
+          // purchases grant no contentAccess row (they use entitlements).
+          if (purchase.contentId) {
+            await tx
+              .update(contentAccess)
+              .set({ deletedAt: new Date() })
+              .where(
+                and(
+                  eq(contentAccess.userId, purchase.customerId),
+                  eq(contentAccess.contentId, purchase.contentId),
+                  isNull(contentAccess.deletedAt)
+                )
+              );
+          }
+
+          // Codex-2pryk WP-6: revoke the entitlement this purchase granted
+          // (content_purchase OR course_purchase — both carry sourceRef=purchase.id).
+          // Without this a refund would leave a LIVE grant the resolver still
+          // honours (access-integrity bug). Keyed on sourceRef so one statement
+          // covers either target. Idempotent (no-op if already revoked / absent).
+          await tx
+            .update(entitlements)
+            .set({ revokedAt: new Date() })
+            .where(
+              and(
+                eq(entitlements.sourceRef, purchase.id),
+                isNull(entitlements.revokedAt)
+              )
+            );
+        });
+      }
 
       // Step: claw back the payout slices (Codex-h69cg), out of the
       // transaction because it talks to Stripe. The purchase is already
-      // recorded refunded above; a clawback step that must be retried rejects
-      // after every other step, and the webhook's 500 has Stripe redeliver.
+      // recorded above; a clawback step that must be retried rejects after
+      // every other step, and the webhook's 500 has Stripe redeliver.
       await this.clawBackRefunds(purchase.id, refundDetails.charge);
 
       this.obs.info('Refund processed', {
@@ -1953,13 +1995,15 @@ export class PurchaseService extends BaseService {
         contentId: purchase.contentId,
         customerId: purchase.customerId,
         paymentIntentId,
+        refundedCents,
+        accessEnded: isFull,
       });
 
       // Return the purchaser's userId so the webhook route can bump
       // COLLECTION_USER_LIBRARY — refunded content disappears from the
       // user's library on their next fetch. No orgId: one-time purchases
       // are content-scoped, not org-scoped, so only the library cache bumps.
-      return { userId: purchase.customerId };
+      return { userId: purchase.customerId, accessEnded: isFull };
     } catch (error) {
       this.handleError(error, 'processRefund');
     }
@@ -2048,6 +2092,77 @@ export class PurchaseService extends BaseService {
       return written.length > 0;
     } catch (error) {
       this.handleError(error, 'recordRefund');
+    }
+  }
+
+  /**
+   * Record every refund of a charge, as Stripe lists them, in `refunds`
+   * (`charge.refunded`; owner decision 2026-10-19, "One refunds table"). The
+   * event names no refund: `charge.refunds` is no longer sent. Returns them
+   * newest first, so the caller can name the newest on the purchase.
+   */
+  async recordChargeRefunds(charge: {
+    id: string;
+    paymentIntentId: string | null;
+  }): Promise<Stripe.Refund[]> {
+    try {
+      const listed = await listChargeRefunds(this.stripe, charge.id);
+      for (const refund of listed) {
+        await this.recordRefund({
+          stripeRefundId: refund.id,
+          stripeChargeId: charge.id,
+          paymentIntentId: charge.paymentIntentId,
+          amountCents: refund.amount,
+          currency: refund.currency,
+          status: refund.status,
+          reason: refund.reason ?? null,
+          failureReason: refund.failure_reason ?? null,
+          stripeCreatedAt: new Date(refund.created * 1000),
+        });
+      }
+      return [...listed].sort(
+        (a, b) => b.created - a.created || b.id.localeCompare(a.id)
+      );
+    } catch (error) {
+      this.handleError(error, 'recordChargeRefunds');
+    }
+  }
+
+  /**
+   * Claim the charge's refunds not yet emailed to the buyer, oldest first, so
+   * each refund is emailed once (owner decision 2026-10-19, "One per refund").
+   * The claim sets `notified_at` before the email is sent, so a redelivery
+   * finds nothing; an email that then fails to send is not retried. A refund
+   * that failed or was canceled is never emailed, nor one still waiting on the
+   * customer (`requires_action`).
+   */
+  async claimRefundEmails(
+    chargeId: string
+  ): Promise<Array<{ stripeRefundId: string; amountCents: number }>> {
+    try {
+      const claimed = await this.db
+        .update(refunds)
+        .set({ notifiedAt: new Date() })
+        .where(
+          and(
+            eq(refunds.stripeChargeId, chargeId),
+            isNull(refunds.notifiedAt),
+            inArray(refunds.status, ['pending', 'succeeded'])
+          )
+        )
+        .returning();
+      return claimed
+        .sort(
+          (a, b) =>
+            a.stripeCreatedAt.getTime() - b.stripeCreatedAt.getTime() ||
+            a.stripeRefundId.localeCompare(b.stripeRefundId)
+        )
+        .map((row) => ({
+          stripeRefundId: row.stripeRefundId,
+          amountCents: row.amountCents,
+        }));
+    } catch (error) {
+      this.handleError(error, 'claimRefundEmails');
     }
   }
 
@@ -2557,7 +2672,8 @@ export class PurchaseService extends BaseService {
           // Net to org: their share on completed rows only. Refunded rows
           // already returned the customer's money so they zero out for net.
           netCents: sql<number>`COALESCE(SUM(${purchases.creatorPayoutCents} + ${purchases.organizationFeeCents}) FILTER (WHERE ${purchases.status} = 'completed'), 0)::int`,
-          refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}) FILTER (WHERE ${purchases.status} = 'refunded'), 0)::int`,
+          // Partial refunds too: they leave the purchase completed (P-1).
+          refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}), 0)::int`,
           count: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'completed')::int`,
         })
         .from(purchases)

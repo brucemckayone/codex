@@ -149,7 +149,8 @@ export interface SaleListItem {
  *   collected by Stripe before refunds)
  * - `netCents` is the org's share — sum of `creatorPayoutCents` +
  *   `organizationFeeCents` on completed rows
- * - `refundedCents` is the sum of `refundAmountCents` on refunded rows
+ * - `refundedCents` is the sum of `refundAmountCents`: refunded rows, and
+ *   completed rows a partial refund left completed (P-1)
  * - `count` is the number of completed sales rows in the window
  */
 export interface SalesStats {

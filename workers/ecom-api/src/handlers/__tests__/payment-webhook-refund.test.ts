@@ -180,6 +180,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   let mockProcessRefund: ReturnType<typeof vi.fn>;
   let mockReverseSubscription: ReturnType<typeof vi.fn>;
   let mockRecordRefund: ReturnType<typeof vi.fn>;
+  let mockRecordChargeRefunds: ReturnType<typeof vi.fn>;
+  let mockClaimRefundEmails: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -193,6 +195,18 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     mockProcessRefund = vi.fn().mockResolvedValue(undefined);
     mockReverseSubscription = vi.fn().mockResolvedValue(undefined);
     mockRecordRefund = vi.fn().mockResolvedValue(true);
+    // The charge's refunds as Stripe lists them, newest first, and the ones
+    // not emailed yet (Codex-2hxff.8: one email per refund).
+    mockRecordChargeRefunds = vi
+      .fn()
+      .mockResolvedValue([
+        { id: 're_test_refund', reason: 'requested_by_customer', created: 1 },
+      ]);
+    mockClaimRefundEmails = vi
+      .fn()
+      .mockResolvedValue([
+        { stripeRefundId: 're_test_refund', amountCents: 1999 },
+      ]);
     mockRelease = vi.fn();
     mockStripe = {} as Stripe;
 
@@ -203,6 +217,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
           processRefund: mockProcessRefund,
           processDispute: vi.fn().mockResolvedValue(undefined),
           recordRefund: mockRecordRefund,
+          recordChargeRefunds: mockRecordChargeRefunds,
+          claimRefundEmails: mockClaimRefundEmails,
         },
         // charge.refunded reverses subscription payouts first (Codex-13v21).
         subscription: {
@@ -314,8 +330,14 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     expect(sendEmailToWorker).toHaveBeenCalledTimes(1);
   });
 
-  it('idempotent: same refund event fired twice → service + cache monotonic (no revocation without orgId)', async () => {
+  it('idempotent: same refund event fired twice → service + cache monotonic, the refund emailed once (no revocation without orgId)', async () => {
     mockProcessRefund.mockResolvedValue({ userId: 'user_idem' });
+    // The first delivery claims the refund's email; the redelivery finds none.
+    mockClaimRefundEmails
+      .mockResolvedValueOnce([
+        { stripeRefundId: 're_test_refund', amountCents: 1999 },
+      ])
+      .mockResolvedValueOnce([]);
 
     const bundle = buildContext();
     const event = createRefundEvent();
@@ -327,7 +349,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     expect(mockProcessRefund).toHaveBeenCalledTimes(2);
     expect(invalidateForUser).toHaveBeenCalledTimes(2);
     expect(mockRevoke).not.toHaveBeenCalled();
-    expect(sendEmailToWorker).toHaveBeenCalledTimes(2);
+    expect(mockClaimRefundEmails).toHaveBeenCalledTimes(2);
+    expect(sendEmailToWorker).toHaveBeenCalledTimes(1);
   });
 
   it('fire-and-forget: AccessRevocation.revoke rejection does NOT surface, handler resolves', async () => {
@@ -381,16 +404,23 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   it('refund metadata round-trip: stripeRefundId + amount_refunded + reason → processRefund', async () => {
     mockProcessRefund.mockResolvedValueOnce({ userId: 'u' });
     const bundle = buildContext();
+    // The newest refund Stripe lists names the purchase's refund; the event
+    // names none (charge.refunds is no longer sent).
+    mockRecordChargeRefunds.mockResolvedValueOnce([
+      { id: 're_meta', reason: 'fraudulent', created: 2 },
+      { id: 're_older', reason: 'duplicate', created: 1 },
+    ]);
     const event = createRefundEvent({
       payment_intent: 'pi_meta',
       amount_refunded: 500,
-      refunds: {
-        data: [{ id: 're_meta', reason: 'fraudulent' }],
-      },
     });
 
     await handlePaymentWebhook(event, mockStripe, bundle.context);
 
+    expect(mockRecordChargeRefunds).toHaveBeenCalledWith({
+      id: 'ch_test_refund',
+      paymentIntentId: 'pi_meta',
+    });
     // The charge (id + amount) is the clawback's denominator for both
     // sources (Codex-2hxff.8, D1).
     const charge = { id: 'ch_test_refund', amountCents: 1999 };
@@ -403,10 +433,73 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     });
   });
 
+  // ── one email per refund, saying whether access is kept (Codex-2hxff.8)
+
+  function emails() {
+    return (sendEmailToWorker as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => call[2]?.data as Record<string, string>
+    );
+  }
+
+  it("a partial refund's email has that refund's amount and says the buyer keeps access (P-1)", async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+    });
+    mockClaimRefundEmails.mockResolvedValueOnce([
+      { stripeRefundId: 're_part', amountCents: 500 },
+    ]);
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createRefundEvent({ amount_refunded: 500 }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(mockClaimRefundEmails).toHaveBeenCalledWith('ch_test_refund');
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        refundAmount: '£5.00',
+        originalAmount: '£19.99',
+        accessNote: 'You keep access to Test Content.',
+      }),
+    ]);
+  });
+
+  it('two refunds not yet emailed get one email each, and the one that ends access says so', async () => {
+    mockProcessRefund.mockResolvedValueOnce({ userId: 'u', accessEnded: true });
+    mockClaimRefundEmails.mockResolvedValueOnce([
+      { stripeRefundId: 're_a', amountCents: 999 },
+      { stripeRefundId: 're_b', amountCents: 1000 },
+    ]);
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails().map((data) => data.refundAmount)).toEqual([
+      '£9.99',
+      '£10.00',
+    ]);
+    expect(emails()[1]?.accessNote).toBe(
+      'Your access to Test Content has ended.'
+    );
+  });
+
+  it("a subscription charge's refund email says nothing about access", async () => {
+    // No purchase: processRefund finds none for the PaymentIntent.
+    mockProcessRefund.mockResolvedValueOnce(undefined);
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([expect.objectContaining({ accessNote: '' })]);
+  });
+
   // ── refund.updated / refund.failed (Codex-2hxff.8) ───────────────────
   // A refund still pending when charge.refunded arrived is clawed back once it
-  // has succeeded or failed (owner decisions 2026-10-19). The refund was
-  // recorded and its email sent already.
+  // has succeeded or failed (owner decisions 2026-10-19). Its email was
+  // usually sent then; one that was not is sent once it succeeds.
 
   function refundUpdatedEvent(refund: Record<string, unknown>): Stripe.Event {
     return {
@@ -442,7 +535,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     };
   }
 
-  it('refund.updated succeeded: recorded, claws back both sources on the retrieved charge, sends no email', async () => {
+  it('refund.updated succeeded: recorded, claws back both sources on the retrieved charge; no address, no email', async () => {
     const bundle = buildContext();
     const { stripe, retrieve } = stripeWithCharge();
 
@@ -465,6 +558,32 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     });
     expect(sendEmailToWorker).not.toHaveBeenCalled();
     expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  it('refund.updated succeeded for a refund not emailed at charge.refunded: it is emailed now, once', async () => {
+    mockClaimRefundEmails.mockResolvedValueOnce([
+      { stripeRefundId: 're_pending_then_paid', amountCents: 1000 },
+    ]);
+    const bundle = buildContext();
+    const retrieve = vi.fn().mockResolvedValue({
+      id: 'ch_updated',
+      amount: 3000,
+      amount_refunded: 1000,
+      payment_intent: 'pi_updated',
+      metadata: { contentTitle: 'Test Content' },
+      billing_details: { email: 'buyer@example.com', name: 'Buyer' },
+    });
+
+    await handlePaymentWebhook(
+      refundUpdatedEvent({}),
+      { charges: { retrieve } } as unknown as Stripe,
+      bundle.context
+    );
+
+    expect(mockClaimRefundEmails).toHaveBeenCalledWith('ch_updated');
+    expect(emails()).toEqual([
+      expect.objectContaining({ refundAmount: '£10.00' }),
+    ]);
   });
 
   it('refund.updated still pending: its status is recorded and nothing is clawed back', async () => {
@@ -595,6 +714,9 @@ describe('handlePaymentWebhook — charge.refunded', () => {
 
   it('passes £-formatted refundAmount to the refund-processed email template', async () => {
     mockProcessRefund.mockResolvedValueOnce({ userId: 'u' });
+    mockClaimRefundEmails.mockResolvedValueOnce([
+      { stripeRefundId: 're_test_refund', amountCents: 2500 },
+    ]);
     const bundle = buildContext();
     const event = createRefundEvent({
       amount: 2500,
