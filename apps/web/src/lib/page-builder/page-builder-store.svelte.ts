@@ -34,11 +34,17 @@ import { DEFINITIONS } from './kit/model/catalog';
 import {
   isColourSchemeId,
   isLayoutOf,
+  isPageDialStep,
   isSectionSpacingId,
   isSectionTypeId,
+  type PageDialId,
+  type PageDialStep,
   type PageStyleId,
   type SectionTypeId,
+  TYPE_FACET_BASES,
+  type TypeFacet,
 } from './kit/model/ids';
+import { resolveStyle } from './kit/model/resolve';
 import type { SectionStyle } from './kit/model/types';
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -563,7 +569,81 @@ function setPageStyle(style: PageStyleId): void {
   if (!state.pending) return;
   if (state.pending.design?.style === style) return;
   snapshot();
-  state.pending.design = { ...state.pending.design, style };
+  const design: SectionDesign = { ...state.pending.design, style };
+  // A Type the new Style may not take comes off in the same step, so one
+  // undo brings back both (Codex-61zsk.59); `upgradePage` would drop it on
+  // read anyway, and the dirty check would then see a change nobody made.
+  const type = design.facets?.type;
+  if (type && !TYPE_FACET_BASES[style].includes(type))
+    withoutFacet(design, 'type');
+  state.pending.design = design;
+}
+
+/**
+ * One page dial (03 X61, X62; Codex-61zsk.59). `undefined` is the Style's
+ * own, so the reset deletes the key, and an emptied bag is deleted rather
+ * than kept as `{}`: the dirty check compares JSON with a load, which never
+ * holds an empty bag (`upgradePage`), so `{}` would read as an unsaved edit.
+ */
+function setPageDial<D extends PageDialId>(
+  dial: D,
+  step: PageDialStep<D> | undefined
+): void {
+  if (!state.pending) return;
+  if (step !== undefined && !isPageDialStep(dial, step)) return;
+  const current = state.pending.design?.dials ?? {};
+  if (current[dial] === step) return;
+  snapshot();
+  const dials: Record<string, string> = { ...current };
+  if (step === undefined) delete dials[dial];
+  else dials[dial] = step;
+  const design: SectionDesign = { ...state.pending.design };
+  if (Object.keys(dials).length > 0)
+    design.dials = dials as SectionDesign['dials'];
+  else delete design.dials;
+  state.pending.design = design;
+}
+
+/**
+ * The page's Type facet (03 X73, X74; Codex-61zsk.59): another Style's
+ * headlines, only from the page Style's proven menu. `undefined` is the
+ * Style's own and deletes the key, the empty bag with it.
+ */
+function setTypeFacet(type: TypeFacet | undefined): void {
+  if (!state.pending) return;
+  const style = resolveStyle(state.pending.design);
+  if (type !== undefined && !TYPE_FACET_BASES[style].includes(type)) return;
+  if (state.pending.design?.facets?.type === type) return;
+  snapshot();
+  const design: SectionDesign = { ...state.pending.design };
+  if (type === undefined) withoutFacet(design, 'type');
+  else design.facets = { ...design.facets, type };
+  state.pending.design = design;
+}
+
+/** "Use the Style's own for all of these": every dial and facet off, as one step. */
+function resetPageLook(): void {
+  const design = state.pending?.design;
+  if (
+    !state.pending ||
+    !design ||
+    (design.dials === undefined && design.facets === undefined)
+  )
+    return;
+  snapshot();
+  const next: SectionDesign = { ...design };
+  delete next.dials;
+  delete next.facets;
+  state.pending.design = next;
+}
+
+/** Remove one facet from `design`, and the bag once it is empty. */
+function withoutFacet(design: SectionDesign, facet: 'type'): void {
+  if (!design.facets) return;
+  const facets = { ...design.facets };
+  delete facets[facet];
+  if (Object.keys(facets).length > 0) design.facets = facets;
+  else delete design.facets;
 }
 
 /**
@@ -921,6 +1001,9 @@ export const pageBuilder = {
   duplicateSection,
   // Page-kit v2 (WP-7a) — additive; see the section header above.
   setPageStyle,
+  setPageDial,
+  setTypeFacet,
+  resetPageLook,
   setSectionLayout,
   setSectionStyle,
   addKitSection,

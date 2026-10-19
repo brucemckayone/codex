@@ -191,7 +191,8 @@ export function isSectionSpacingId(value: unknown): value is SectionSpacingId {
   );
 }
 
-function isPageDialStep<D extends PageDialId>(
+/** A step the dial has; the Style's own is no step, the absent key. */
+export function isPageDialStep<D extends PageDialId>(
   dial: D,
   value: unknown
 ): value is PageDialStep<D> {

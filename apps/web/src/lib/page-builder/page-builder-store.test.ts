@@ -304,6 +304,101 @@ describe('pageBuilder — page-kit v2 actions (WP-7a)', () => {
     });
   });
 
+  describe('setPageDial (Codex-61zsk.59)', () => {
+    it('sets a dial, and the Style’s own deletes it, the empty bag with it', () => {
+      pageBuilder.setPageDial('colour', 'muted');
+      expect(pageBuilder.pending?.design?.dials).toEqual({ colour: 'muted' });
+      pageBuilder.setPageDial('spacing', 'spacious');
+      expect(pageBuilder.pending?.design?.dials).toEqual({
+        colour: 'muted',
+        spacing: 'spacious',
+      });
+      pageBuilder.setPageDial('colour', undefined);
+      expect(pageBuilder.pending?.design?.dials).toEqual({
+        spacing: 'spacious',
+      });
+      pageBuilder.setPageDial('spacing', undefined);
+      expect(pageBuilder.pending?.design).not.toHaveProperty('dials');
+      // Back where it started: nothing to save.
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('refuses a step the dial does not have', () => {
+      pageBuilder.setPageDial('colour', 'rounder' as never);
+      expect(pageBuilder.pending?.design).not.toHaveProperty('dials');
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is a no-op at the step it is on — no undo step, not dirty', () => {
+      pageBuilder.setPageDial('motion', undefined);
+      expect(pageBuilder.canUndo).toBe(false);
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is undoable as one discrete step', () => {
+      pageBuilder.setPageDial('drama', 'louder');
+      pageBuilder.setPageDial('drama', 'calmer');
+      pageBuilder.undo();
+      expect(pageBuilder.pending?.design?.dials).toEqual({ drama: 'louder' });
+    });
+  });
+
+  describe('setTypeFacet (Codex-61zsk.59)', () => {
+    it('takes a Type from the page Style’s menu, and the Style’s own deletes it', () => {
+      pageBuilder.setTypeFacet('quiet');
+      expect(pageBuilder.pending?.design?.facets).toEqual({ type: 'quiet' });
+      pageBuilder.setTypeFacet(undefined);
+      expect(pageBuilder.pending?.design).not.toHaveProperty('facets');
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('refuses a Type the page’s Style may not take', () => {
+      // Clean's menu is Bold, Soft and Quiet; Poster is off it, and so is its own.
+      pageBuilder.setTypeFacet('poster');
+      pageBuilder.setTypeFacet('clean' as never);
+      expect(pageBuilder.pending?.design).not.toHaveProperty('facets');
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('comes off with a Style that may not take it, in the same undo step', () => {
+      pageBuilder.setTypeFacet('bold');
+      pageBuilder.setPageStyle('path');
+      expect(pageBuilder.pending?.design?.style).toBe('path');
+      expect(pageBuilder.pending?.design).not.toHaveProperty('facets');
+      pageBuilder.undo();
+      expect(pageBuilder.pending?.design?.style).toBe('clean');
+      expect(pageBuilder.pending?.design?.facets).toEqual({ type: 'bold' });
+    });
+
+    it('stays with a Style that may take it', () => {
+      pageBuilder.setTypeFacet('quiet');
+      pageBuilder.setPageStyle('bold');
+      expect(pageBuilder.pending?.design?.facets).toEqual({ type: 'quiet' });
+    });
+  });
+
+  describe('resetPageLook (Codex-61zsk.59)', () => {
+    it('takes every dial and the Type off in one undo step', () => {
+      pageBuilder.setPageDial('corners', 'rounder');
+      pageBuilder.setTypeFacet('soft');
+      pageBuilder.resetPageLook();
+      expect(pageBuilder.pending?.design).not.toHaveProperty('dials');
+      expect(pageBuilder.pending?.design).not.toHaveProperty('facets');
+      expect(pageBuilder.pending?.design?.style).toBe('clean');
+      pageBuilder.undo();
+      expect(pageBuilder.pending?.design?.dials).toEqual({
+        corners: 'rounder',
+      });
+      expect(pageBuilder.pending?.design?.facets).toEqual({ type: 'soft' });
+    });
+
+    it('is a no-op on a page with nothing adjusted', () => {
+      pageBuilder.resetPageLook();
+      expect(pageBuilder.canUndo).toBe(false);
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+  });
+
   describe('setSectionLayout', () => {
     it('sets a valid layout for the section’s type', () => {
       pageBuilder.setSectionLayout('sec-benefits', 'checklist');

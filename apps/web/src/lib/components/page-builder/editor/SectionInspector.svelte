@@ -36,6 +36,7 @@
     resolveScheme,
     resolveSections,
     resolveSpacing,
+    spacingSource,
     resolveStyle,
     SIMPLE_SECTIONS,
   } from '$lib/page-builder/kit';
@@ -353,6 +354,7 @@
     <SpacingControl
       value={spacing}
       chosen={section.design?.spacing !== undefined}
+      fromPage={spacingSource(section.design, layout, page.design.dials?.spacing) === 'page'}
       onChoose={(next) => pageBuilder.setSectionStyle(section.id, { spacing: next })}
       onReset={() => pageBuilder.setSectionStyle(section.id, { spacing: undefined })}
     />

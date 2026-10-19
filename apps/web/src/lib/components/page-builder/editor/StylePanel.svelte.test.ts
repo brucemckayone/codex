@@ -93,11 +93,12 @@ function renderStyle(): void {
   flushSync();
 }
 
-// `HTMLElement | Document`, not `ParentNode`: this project's ambient Workers
-// types declare their own `ParentNode` (HTMLRewriter's), which a DOM node is not.
+// `Element | Document`, not `ParentNode`: this project's ambient Workers types
+// declare their own `ParentNode` (HTMLRewriter's), which a DOM node is not.
+// `Element`, not `HTMLElement`, so one `el()` can scope another.
 function el<T extends Element = HTMLElement>(
   selector: string,
-  root: HTMLElement | Document = document
+  root: Element | Document = document
 ): T {
   const found = root.querySelector<T>(selector);
   if (!found) throw new Error(`nothing matches ${selector}`);
@@ -358,14 +359,190 @@ describe('StylePanel — the fonts a Style suggests', () => {
   });
 });
 
+describe('StylePanel — Adjust the Style (Codex-61zsk.59)', () => {
+  const dial = (dialId: string, step = '') =>
+    el<HTMLButtonElement>(
+      `.dial__step[data-dial="${dialId}"][data-step="${step}"]`
+    );
+  const noteOf = (button: HTMLElement) =>
+    document
+      .getElementById(button.getAttribute('aria-describedby') ?? '')
+      ?.textContent?.replace(/\s+/g, ' ')
+      .trim() ?? '';
+  const status = () => el('[role="status"]').textContent?.trim();
+  const settle = async () => {
+    flushSync();
+    await tick();
+    flushSync();
+  };
+
+  it('names each dial’s own step after the Style, and pressing it takes the dial off', () => {
+    open();
+    renderStyle();
+    expect(el('.dials__title').textContent).toBe('Adjust Bold');
+    for (const id of ['colour', 'corners', 'spacing', 'motion']) {
+      expect(dial(id).textContent?.trim()).toBe('Bold’s, the Style’s own');
+      expect(dial(id).getAttribute('aria-pressed')).toBe('true');
+    }
+    dial('colour', 'muted').click();
+    flushSync();
+    expect(pageBuilder.pending?.design?.dials).toEqual({ colour: 'muted' });
+    expect(dial('colour', 'muted').getAttribute('aria-pressed')).toBe('true');
+    expect(noteOf(dial('colour', 'muted'))).toContain(
+      'Every coloured band takes a soft tint of your brand.'
+    );
+    dial('colour').click();
+    flushSync();
+    expect(pageBuilder.pending?.design).not.toHaveProperty('dials');
+  });
+
+  it('says where a step changes nothing in this Style, from the kit', () => {
+    open(null, 'bold');
+    renderStyle();
+    expect(dial('colour', 'vivid').hasAttribute('data-noop')).toBe(true);
+    expect(dial('colour', 'muted').hasAttribute('data-noop')).toBe(false);
+    // The note is every step's, so the reason names its step: under the
+    // Style's own, "this changes nothing" would read as the own step.
+    const why = (dialId: string) =>
+      document
+        .getElementById(dial(dialId).getAttribute('aria-describedby') ?? '')
+        ?.querySelector('b')?.textContent ?? null;
+    expect(why('colour')).toBe(
+      '“More colour” changes nothing in Bold: Bold has no soft tints.'
+    );
+    expect(noteOf(dial('colour', 'vivid'))).toContain(why('colour'));
+    expect(why('corners')).toBeNull();
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+    open(null, 'quiet');
+    renderStyle();
+    expect(dial('colour', 'muted').hasAttribute('data-noop')).toBe(true);
+    expect(dial('colour', 'vivid').hasAttribute('data-noop')).toBe(true);
+    // Both steps for one reason: one sentence, said once.
+    expect(why('colour')).toBe(
+      'Neither step changes anything in Quiet: Quiet draws no colour bands.'
+    );
+    expect(dial('corners', 'rounder').hasAttribute('data-noop')).toBe(false);
+  });
+
+  it('names the corners step that is the Style’s own', () => {
+    open(null, 'soft');
+    renderStyle();
+    const note = document.getElementById(
+      dial('corners').getAttribute('aria-describedby') ?? ''
+    );
+    expect(note?.querySelector('b')?.textContent).toBe(
+      '“Rounder” changes nothing in Soft: these are Soft’s own corners.'
+    );
+  });
+
+  it.each([
+    ['bold', ['', 'poster', 'soft', 'quiet']],
+    ['clean', ['', 'bold', 'soft', 'quiet']],
+    ['soft', ['', 'quiet']],
+  ] as const)('%s: offers its own headlines and only the proven swaps', (style, offered) => {
+    open(null, style);
+    renderStyle();
+    const facets = [...document.querySelectorAll<HTMLButtonElement>('.facet')];
+    expect(facets.map((facet) => facet.dataset.facet)).toEqual(offered);
+    // Each a real page root in its Type, its own named as the page names it.
+    for (const facet of facets)
+      expect(el('.lp', facet).dataset.lpTypeFacet).toBe(
+        facet.dataset.facet || style
+      );
+  });
+
+  it('says why a Style keeps its own headlines, and offers none', () => {
+    open(null, 'path');
+    renderStyle();
+    expect(document.querySelectorAll('.facet')).toHaveLength(0);
+    expect(el('[data-dial-group="headlines"]').textContent).toContain(
+      'Path keeps its own headlines'
+    );
+  });
+
+  it('takes a swap off with a Style that may not take it, and says so', async () => {
+    open(null, 'bold');
+    renderStyle();
+    el<HTMLButtonElement>('.facet[data-facet="poster"]').click();
+    flushSync();
+    expect(pageBuilder.pending?.design?.facets).toEqual({ type: 'poster' });
+    el<HTMLButtonElement>('.style-card[data-style="clean"]').click();
+    await settle();
+    expect(pageBuilder.pending?.design?.style).toBe('clean');
+    expect(pageBuilder.pending?.design).not.toHaveProperty('facets');
+    expect(status()).toBe(
+      'Clean keeps its own headlines, so Poster’s headlines came off this page. Undo puts them back.'
+    );
+  });
+
+  it('shows each Style card with the page’s dials, and its Type where that Style may take it', () => {
+    open(null, 'bold');
+    renderStyle();
+    dial('corners', 'rounder').click();
+    el<HTMLButtonElement>('.facet[data-facet="quiet"]').click();
+    flushSync();
+    const root = (style: string) =>
+      el('.lp', el(`.style-card[data-style="${style}"]`));
+    expect(root('clean').dataset.lpCorners).toBe('rounder');
+    expect(root('clean').dataset.lpTypeFacet).toBe('quiet');
+    // Path takes no swap, and Quiet's Type is its own: each draws its own.
+    expect(root('path').dataset.lpTypeFacet).toBe('path');
+    expect(root('quiet').dataset.lpTypeFacet).toBe('quiet');
+  });
+
+  it('offers to put everything back only once something is adjusted, as one step', async () => {
+    open();
+    renderStyle();
+    expect(document.querySelector('.dials__reset')).toBeNull();
+    dial('spacing', 'spacious').click();
+    el<HTMLButtonElement>('.facet[data-facet="soft"]').click();
+    flushSync();
+    el<HTMLButtonElement>('.dials__reset').click();
+    await settle();
+    expect(pageBuilder.pending?.design).not.toHaveProperty('dials');
+    expect(pageBuilder.pending?.design).not.toHaveProperty('facets');
+    expect(status()).toBe('Back to Bold’s own.');
+    expect(document.activeElement).toBe(dial('colour'));
+    expect(document.querySelector('.dials__reset')).toBeNull();
+  });
+
+  it('points motion to the preview, where it plays', () => {
+    open();
+    const onPreview = vi.fn();
+    app = mount(StylePanel, {
+      target: document.body,
+      props: {
+        get page() {
+          const pending = pageBuilder.pending;
+          return upgradePage({
+            design: pending?.design,
+            sections: pending?.sections,
+          });
+        },
+        context: sampleContext(),
+        onPreview,
+      },
+    });
+    flushSync();
+    el<HTMLButtonElement>('.dial__preview').click();
+    expect(onPreview).toHaveBeenCalledOnce();
+  });
+});
+
 describe('SectionGallery', () => {
-  function renderGallery(counts: Record<string, number>) {
+  function renderGallery(
+    counts: Record<string, number>,
+    design?: Record<string, unknown>
+  ) {
     const onChoose = vi.fn();
     app = mount(SectionGallery, {
       target: document.body,
       props: {
         open: true,
         style: 'clean',
+        ...(design ? { design: { style: 'clean', ...design } } : {}),
         afterLabel: 'Hero',
         counts,
         onChoose,
@@ -374,6 +551,16 @@ describe('SectionGallery', () => {
     flushSync();
     return onChoose;
   }
+
+  it('previews a new section with the page’s dials and Type, as it will land (Codex-61zsk.59)', () => {
+    renderGallery(
+      {},
+      { dials: { corners: 'rounder' }, facets: { type: 'quiet' } }
+    );
+    const faq = el('.lp', el('.gallery__item[data-type="faq"]'));
+    expect(faq.dataset.lpCorners).toBe('rounder');
+    expect(faq.dataset.lpTypeFacet).toBe('quiet');
+  });
 
   it('groups every type, each a real render of its sample in the page’s Style', () => {
     renderGallery({});
