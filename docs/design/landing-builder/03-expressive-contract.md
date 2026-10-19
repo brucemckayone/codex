@@ -3678,3 +3678,47 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     precondition (the film has a frame) keeps a pass from being vacuous. A review of the branch
     found the stuck save and six comments still describing the fallback; all are fixed.
   - **No new request, no cache change.** The sell preview does one lookup fewer.
+- **X81 · 2026-10-19 · 3c follow-up · `--space-0` is a length, so the course timeline's and
+  map's names sit on their markers' middles (Codex-61zsk.67, a bug, with Codex-3kqqp's guard;
+  decided without the owner, with the reasons.)** `--space-0: 0` was a `<number>`. Three rules
+  centre a name on its marker with `max(var(--space-0), calc((marker - 1lh) / 2))`: the
+  timeline's names and the practices beside them, and the map's names. `max()` needs one type
+  across its arguments, so each declaration was invalid at computed-value time, the padding fell
+  to 0, and the names sat at the top of their rows, above the middles their comments promise.
+  Nothing errored: the sheet still parses.
+  - **The fix is the token.** `--space-0: 0px` fixes every use at once; its one other use,
+    FilterBar's `gap`, draws the same. Rejected: writing `0px` at the three rules, which leaves
+    the token ready to void the next `max()`.
+  - **The guard (Codex-3kqqp).** `token-math.test.ts` reads every stylesheet and component
+    `<style>` with svelte's CSS parser, comments stripped from values too, and fails on a token
+    that can be a bare `0` as a whole argument of a comparing function (`min`, `max`, `clamp`,
+    `round`, `mod`, `rem`, `hypot`, `atan2`) beside a length, or as a term of a `+`/`-` sum
+    beside a length; and on a token that can be a keyword inside any math function. "Can be"
+    follows aliases and `var()` fallbacks; a length is a dimension (any case, any unit) or a
+    token that is one; a product is left alone, where a zero may multiply. A sheet's declaration
+    counts everywhere and a component's only in that component, as that is all it reaches;
+    without that, two components' private `--_track`s read as one token. The test checks itself
+    on both shapes that shipped (this one, and the journey cards'
+    `max(var(--jp-edge-width), var(--border-width))` border), on each way a review of the branch
+    found the first version could miss one (a sum, an alias, a fallback, a comment in a value,
+    `round()`, an upper-case unit, `vi`), and on what is valid. With `--space-0` put back to `0`
+    it names these three rules and nothing else in the app. A spacing token is also held to a
+    length on its own. Decided without the owner: a zero a parent component sets and a child's
+    math reads is not seen, rather than every component's privates colliding by name.
+  - **A visible change.** The names move down onto their markers' middles. X71 measured the
+    map's practice count with this padding at 0 and filed this bug; the count stands on the name's
+    first baseline (`align-items: first baseline`), so it moves down with the name and stays on
+    the line it labels. X71's room for a name is a width, which this does not change.
+  - **In the browser** (the gallery's timeline and map, Bold, Clean, Path and Quiet, 1440 and 360,
+    light and dark: 32 reads of 4 stages each, on the tree without the fix and with it). Without
+    it, every name the rule covers read `padding-block-start: 0px` (the probe's calibration) and
+    sat above its marker's middle: the timeline's names by 3.9 to 11.5px, the practices beside
+    them at 1440 by 10 to 20px, the map's names at 1440 by 6.5 to 8.5px. With it, the padding is
+    (marker − 1lh) / 2 and every one is within 1px of the middle (the practices within 0.7px).
+    The map's count moved down with its name, on the line it labels. Unchanged in both, by their
+    own rules: the map at 360, where the name and count stack and centre on the marker together,
+    and the timeline's practices at 360, which sit under the name.
+  - **Tests** (CI): `token-math.test.ts` (the probe on the shipped shapes and the valid ones; the
+    app's sheets clean; every spacing token a length). Calibrated: before the fix it fails on
+    exactly the three rules, and the browser probe without the fix reads `0px`.
+  - **No new request, no cache change.**
