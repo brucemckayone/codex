@@ -675,3 +675,110 @@ describe('the controls inside a section', () => {
     );
   });
 });
+
+describe('faces, marks and the row that leads (Codex-61zsk.58)', () => {
+  const image = { key: KEY, w: 1600, h: 1067 };
+  const section = (
+    id: string,
+    type: PageSection['type'],
+    props: Record<string, unknown>,
+    variant: string
+  ): PageSection => ({ id, type, enabled: true, props, variant });
+  const openRow = (index = 0) => {
+    document.body
+      .querySelectorAll<HTMLButtonElement>('.item__toggle')
+      [index]?.click();
+    flushSync();
+  };
+  const markButton = (label: string) =>
+    [...document.body.querySelectorAll<HTMLButtonElement>('.field__mark')].find(
+      (candidate) => candidate.getAttribute('aria-label') === label
+    );
+  const rows = () =>
+    [...document.body.querySelectorAll<HTMLButtonElement>('.item__toggle')].map(
+      (toggle) => toggle.textContent?.replace(/\s+/g, ' ').trim()
+    );
+
+  it('picks a benefit’s mark from its row, and takes it away when it is chosen again', () => {
+    render(
+      [
+        hero('h'),
+        section('b', 'benefits', { items: [{ title: 'Calm' }] }, 'checklist'),
+      ],
+      'b'
+    );
+    openRow();
+    expect(document.body.querySelectorAll('.field__mark')).toHaveLength(12);
+    markButton('Heart')?.click();
+    flushSync();
+    expect(
+      (stored('b')?.props.items as Record<string, unknown>[])[0].mark
+    ).toBe('heart');
+    expect(markButton('Heart')?.getAttribute('aria-pressed')).toBe('true');
+    markButton('Moon')?.click();
+    flushSync();
+    expect(
+      (stored('b')?.props.items as Record<string, unknown>[])[0].mark
+    ).toBe('moon');
+    markButton('Moon')?.click();
+    flushSync();
+    expect(
+      (stored('b')?.props.items as Record<string, unknown>[])[0]
+    ).not.toHaveProperty('mark');
+  });
+
+  it.each([
+    [
+      'benefits',
+      'bento',
+      { items: [{ title: 'Calm' }, { title: 'Clear' }] },
+      true,
+    ],
+    [
+      'benefits',
+      'grid',
+      { items: [{ title: 'Calm' }, { title: 'Clear' }] },
+      false,
+    ],
+    ['gallery', 'mosaic', { items: [{ image }, { image }] }, true],
+    ['gallery', 'grid', { items: [{ image }, { image }] }, false],
+  ] as const)('%s %s: the row the layout draws larger is tagged “Leads”', (type, layout, props, leads) => {
+    render([hero('h'), section('s', type, { ...props }, layout)], 's');
+    const [first, second] = rows();
+    expect(first?.includes('Leads'), first).toBe(leads);
+    expect(second?.includes('Leads'), second).toBe(false);
+    if (leads) expect(first).toContain(', leads in this layout');
+  });
+
+  it('tags none of the creator’s quotes while the course’s own come first', () => {
+    render(
+      [
+        hero('h'),
+        section(
+          't',
+          'testimonials',
+          { items: [{ quote: 'Quiet at last.' }] },
+          'featured'
+        ),
+      ],
+      't'
+    );
+    expect(rows()[0]).not.toContain('Leads');
+  });
+
+  it('steers a quote’s photo as the round face it is drawn in', () => {
+    const items = [{ quote: 'Quiet at last.', name: 'Tom W.', photo: image }];
+    render(
+      [hero('h'), section('t', 'testimonials', { items }, 'grid')],
+      't',
+      'bold',
+      'https://cdn.test'
+    );
+    openRow();
+    const crops = [
+      ...document.body.querySelectorAll<HTMLElement>('.focus__crop'),
+    ];
+    expect(crops).toHaveLength(2);
+    expect(document.body.querySelector('.focus__pad')).not.toBeNull();
+  });
+});

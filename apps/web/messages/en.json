@@ -1867,6 +1867,8 @@
   "studio_page_editor_url_incomplete": "Start with https:// for another website, or # for a section on this page, like #pricing.",
   "studio_page_editor_row_label": "{field}, item {position}",
   "studio_page_editor_row_add": "Add another",
+  "studio_page_editor_row_leads": "Leads",
+  "studio_page_editor_row_leads_label": ", leads in this layout",
   "studio_page_editor_row_move": "Move {item}",
   "studio_page_editor_row_remove": "Remove {item}",
   "studio_page_editor_row_hint": "Drag to reorder, or press the up and down arrow keys.",

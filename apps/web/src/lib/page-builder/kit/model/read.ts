@@ -75,6 +75,28 @@ export function readOneOf<T extends string>(
     : undefined;
 }
 
+/**
+ * The index in the stored `key` array of the first entry `keep` accepts, read
+ * as `readItems` reads them (a non-object is skipped), or `null` for none: the
+ * entry a layout draws first, for the editor to tag (`leadingItem`).
+ */
+export function firstItem(
+  raw: Raw,
+  key: string,
+  keep: (entry: Raw) => boolean
+): number | null {
+  const value = raw[key];
+  if (!Array.isArray(value)) return null;
+  const index = value.findIndex(
+    (entry) =>
+      entry !== null &&
+      typeof entry === 'object' &&
+      !Array.isArray(entry) &&
+      keep(entry as Raw)
+  );
+  return index === -1 ? null : index;
+}
+
 /** Drops `undefined` values so a coerced object carries only authored keys. */
 export function compact<T extends object>(value: T): T {
   const out: Record<string, unknown> = {};

@@ -18,7 +18,7 @@
   import type { JourneySalesContext, SellPreview } from '../../../render/types';
   import type { BlockEdit } from '../../model/types';
   import { editAttrs } from '../../primitives/edit';
-  import { initials } from './initials';
+  import { initials } from '../../model/initials';
   import Signature from './Signature.svelte';
 
   interface Props {

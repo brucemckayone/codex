@@ -1,8 +1,8 @@
 /**
  * Every picture a creator uploads is steered by its focal point wherever the
  * kit draws it (Codex-61zsk.58): the hero's own image, Text's, a benefit's, a
- * story moment's, a gallery picture, the closing ask's background and any
- * section's background. A picture with no point draws as it did before focal
+ * story moment's, a gallery picture, a quote's face, the closing ask's
+ * background and any section's background. A picture with no point draws as it did before focal
  * points, with no `object-position` at all. And every image field says where
  * its layouts cut it, so a new one cannot ship without a focal point.
  */
@@ -77,6 +77,19 @@ const PLACES: {
       ...sample('gallery'),
       items: [{ image }, { image }, { image }],
     }),
+  },
+  // A quote's face, in every layout (Voice).
+  {
+    type: 'testimonials',
+    layouts: SECTION_LAYOUTS.testimonials,
+    props: (image) => {
+      const props = sample('testimonials');
+      const entries = (props.items as Props[] | undefined) ?? [];
+      return {
+        ...props,
+        items: entries.map((entry) => ({ ...entry, photo: image })),
+      };
+    },
   },
   {
     type: 'cta',
@@ -161,6 +174,7 @@ describe('every image field says where its layouts cut it', () => {
       'hero.image',
       'picture.image',
       'story.image',
+      'testimonials.photo',
       'text.image',
     ]);
   });

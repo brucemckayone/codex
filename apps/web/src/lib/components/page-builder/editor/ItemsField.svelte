@@ -5,7 +5,8 @@
   testimonials, questions). Each entry is a collapsible row named by its own
   first line of text, holding one control per `itemFields` entry; entries
   are added, removed and reordered in place, and a new one opens ready to
-  type into.
+  type into. The entry the layout draws larger than the rest (`leading`) is
+  tagged "Leads" (Codex-61zsk.58).
 -->
 <script lang="ts">
   import { tick } from 'svelte';
@@ -24,9 +25,11 @@
     mediaBaseUrl?: string | null;
     /** The section's resolved layout, for an entry's picture's focal point. */
     layout?: string;
+    /** The entry this layout draws larger than the rest, or `null`. */
+    leading?: number | null;
   }
 
-  const { field, value, onChange, mediaBaseUrl = null, layout }: Props = $props();
+  const { field, value, onChange, mediaBaseUrl = null, layout, leading = null }: Props = $props();
 
   const id = $props.id();
   const entries = $derived(readEntries(value));
@@ -106,6 +109,10 @@
           onclick={() => (open = expanded ? null : index)}
         >
           <span class="item__title">{titleOf(index)}</span>
+          {#if index === leading}
+            <span class="item__lead" aria-hidden="true">{m.studio_page_editor_row_leads()}</span>
+            <span class="sr-only">{m.studio_page_editor_row_leads_label()}</span>
+          {/if}
           <ChevronDownIcon size={16} />
         </button>
         <div class="item__fields" id="{id}-item-{index}" hidden={!expanded}>
@@ -179,6 +186,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .item__lead {
+    flex: none;
+    padding: 0 var(--space-1-5);
+    border-radius: var(--radius-full);
+    background: color-mix(in oklab, var(--color-text) 8%, transparent);
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    line-height: var(--leading-normal);
   }
 
   .item__toggle :global(svg) {

@@ -26,6 +26,9 @@
     ?set=<type>.<key>:<value>,... (a section control on every section of that
       type, `set=text.imageAt:after,faq.openFirst:true`; each block's own
       reading still applies, so an unknown one draws nothing new)
+    ?faces=1 (each testimonials section's first written quote gets a photo,
+      so the course's own show their initials)   ?marks=1 (each benefit
+      takes the kit's marks in turn)
     ?edit=1 (inline-edit attributes on)   ?chrome=0 (hide the studio chrome)
 -->
 <script lang="ts">
@@ -44,6 +47,7 @@
     isSectionTypeId,
     isTypeFacet,
     type KitPage,
+    type KitSection,
     PAGE_STYLE_IDS,
     PageRenderer,
     readPageDials,
@@ -55,6 +59,7 @@
     sampleContext,
     samplePage,
   } from '$lib/page-builder/kit';
+  import { MARKS } from '$lib/page-builder/kit/model/marks';
   import { type SamplePicture, withSamplePictures } from '$lib/page-builder/kit/model/sample';
 
   /** The local dev-cdn (`workers/dev-cdn`) that serves the seeded sample
@@ -189,6 +194,19 @@
     return byType;
   });
 
+  /** `?faces=1`, `?marks=1`: the items' own controls, drawn on the sample (Codex-61zsk.58). */
+  const faces = $derived(param('faces') === '1');
+  const marks = $derived(param('marks') === '1');
+
+  /** Each entry of a section's `items`, changed by `edit`. */
+  function eachItem(
+    section: KitSection,
+    edit: (entry: Record<string, unknown>, index: number) => Record<string, unknown>
+  ): KitSection {
+    const items = Array.isArray(section.props.items) ? section.props.items : [];
+    return { ...section, props: { ...section.props, items: items.map(edit) } };
+  }
+
   /** `?dials=colour:muted,corners:rounder`: unknown dials and steps are dropped. */
   const dials = $derived(
     readPageDials(Object.fromEntries(param('dials').split(',').map((pair) => pair.split(':'))))
@@ -223,7 +241,25 @@
           }),
         }
       : pictured;
-    const sample = dials ? { ...controlled, design: { ...controlled.design, dials } } : controlled;
+    const itemised =
+      faces || marks
+        ? {
+            ...controlled,
+            sections: controlled.sections.map((section) =>
+              faces && section.type === 'testimonials'
+                ? eachItem(section, (entry, index) =>
+                    index === 0 ? { ...entry, photo: pictures[0].image } : entry
+                  )
+                : marks && section.type === 'benefits'
+                  ? eachItem(section, (entry, index) => ({
+                      ...entry,
+                      mark: MARKS[index % MARKS.length],
+                    }))
+                  : section
+            ),
+          }
+        : controlled;
+    const sample = dials ? { ...itemised, design: { ...itemised.design, dials } } : itemised;
     if (!only) return sample;
     const layout = param('layout');
     const scheme = param('scheme');

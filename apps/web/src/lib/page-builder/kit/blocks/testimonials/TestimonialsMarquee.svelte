@@ -24,9 +24,12 @@
 
   interface Props {
     voices: readonly Testimonial[];
+    /** The section draws faces (Voice). */
+    faces?: boolean;
+    mediaBaseUrl?: string | null;
   }
 
-  const { voices }: Props = $props();
+  const { voices, faces = false, mediaBaseUrl = null }: Props = $props();
 
   let paused = $state(false);
   const copies = $derived(marqueeCopies(voices.length));
@@ -35,7 +38,7 @@
 {#snippet cards(copy: boolean)}
   <ul class="tm-marquee__lane" data-copy={copy ? '' : undefined} aria-hidden={copy ? 'true' : undefined} inert={copy}>
     {#each voices as voice (voice.key)}
-      <li class="tm-marquee__card"><Voice {voice} /></li>
+      <li class="tm-marquee__card"><Voice {voice} {faces} {mediaBaseUrl} /></li>
     {/each}
   </ul>
 {/snippet}

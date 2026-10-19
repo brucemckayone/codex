@@ -14955,6 +14955,22 @@ export const studio_page_editor_row_add = () => `Add another`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_leads = () => `Leads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_leads_label = () => `, leads in this layout`
+
+
+/**
  * @param {{ item: NonNullable<unknown> }} params
  * @returns {string}
  */

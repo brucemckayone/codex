@@ -12,7 +12,9 @@
   A join button appears only when the creator gives it words (`ctaLabel` or
   `note`). A grid or bento tile may carry the creator's image (contract A5);
   in the grid, once one does, every tile holds the same frame, so a mixed row
-  still reads as a set.
+  still reads as a set. An item's mark (Codex-61zsk.58) sits above its name,
+  in the mark ink (03 §5: a drawn mark, never the text grade); in the
+  checklist it takes the tick's place, in the tick's own box and ink.
 -->
 <script lang="ts">
   import { hasHead } from '../../model/read';
@@ -24,6 +26,7 @@
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
+  import Mark from '../../primitives/Mark.svelte';
   import Media from '../../primitives/Media.svelte';
   import Text from '../../primitives/Text.svelte';
   import BenefitsBento from './BenefitsBento.svelte';
@@ -101,6 +104,7 @@
       <ul class="benefits-rows">
         {#each items as item, index (index)}
           <li>
+            {#if item.mark}<span class="benefits__mark"><Mark mark={item.mark} /></span>{/if}
             <p class="benefits-rows__name">{item.title}</p>
             {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
           </li>
@@ -117,7 +121,9 @@
       <ul class="benefits-checks">
         {#each items as item, index (index)}
           <li>
-            <span class="benefits-checks__mark" aria-hidden="true"><CheckIcon size="1em" /></span>
+            <span class="benefits-checks__mark" aria-hidden="true">
+              {#if item.mark}<Mark mark={item.mark} />{:else}<CheckIcon size="1em" />{/if}
+            </span>
             <div>
               <p class="benefits-checks__name">{item.title}</p>
               {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
@@ -144,6 +150,7 @@
                 focus={storedFocus(item.image)}
               />
             {/if}
+            {#if item.mark}<span class="benefits__mark"><Mark mark={item.mark} /></span>{/if}
             <Heading level={itemLevel} size="title" text={item.title} type="benefits" />
             {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
           </li>
@@ -192,6 +199,20 @@
     font-size: var(--lp-size-body);
     line-height: var(--lp-leading-body);
     text-wrap: pretty;
+  }
+
+  /* An item's mark, above its name: larger than the tick, smaller than a
+     picture, so it marks the item without becoming one. The mark ink paints
+     its stroke (03 §5: graphic grade, never the colour of text). */
+  .benefits__mark {
+    display: inline-flex;
+    justify-self: start;
+    font-size: var(--space-7);
+    line-height: 1;
+  }
+
+  .benefits__mark :global(svg) {
+    stroke: var(--lp-mark-ink);
   }
 
   /* global.css caps every `p` at 65ch; the prompt spans its region. */

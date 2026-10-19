@@ -541,3 +541,85 @@ describe('TestimonialsBlock', () => {
     });
   });
 });
+
+describe('a face for each quote (Codex-61zsk.58)', () => {
+  const CDN = 'https://cdn.example';
+  const PHOTO = { key: 'landing-pages/page-1/images/tom' };
+  const context = () => sampleContext({ mediaBaseUrl: CDN });
+  /** Each byline's face, in reading order: the photo's file, its letters, or none. */
+  const faces = () =>
+    read('.voice__by').map((by) => {
+      const face = by.querySelector('.voice__face');
+      if (!face) return null;
+      return (
+        face.querySelector('img')?.getAttribute('src') ??
+        face.textContent?.trim()
+      );
+    });
+
+  it('draws no face while no quote has a photo, so a saved page reads as before', async () => {
+    for (const layout of SECTION_LAYOUTS.testimonials) {
+      await render({ items: [OWN] }, { layout, context: context() });
+      expect(document.querySelector('.voice__face'), layout).toBeNull();
+      expect(
+        document.querySelector('.voice__by[data-face]'),
+        layout
+      ).toBeNull();
+      if (app) unmount(app);
+      app = null;
+    }
+  });
+
+  it.each(
+    SECTION_LAYOUTS.testimonials
+  )('%s: once one quote has a photo, every other named quote shows its initials', async (layout) => {
+    await render(
+      { items: [{ ...OWN, photo: PHOTO }, { quote: 'Quiet at last.' }] },
+      { layout, context: context() }
+    );
+    // The course's three first, then the creator's two; the nameless one has no circle.
+    expect(faces()).toEqual(['HR', 'DP', 'SO', `${CDN}/${PHOTO.key}/sm.webp`]);
+    // The face is decoration beside the name, which is what reads.
+    for (const img of document.querySelectorAll('.voice__face img'))
+      expect(img.getAttribute('alt')).toBe('');
+  });
+
+  it('reads a photo only as a picture the kit can draw, so a stray value is no face', () => {
+    const content = testimonialsDefinition.coerce({
+      items: [
+        {
+          quote: 'One',
+          photo: { key: 'landing-pages/p/images/a', alt: 'Tom' },
+        },
+        { quote: 'Two', photo: 'tom.jpg' },
+        { quote: 'Three', photo: { alt: 'no key' } },
+      ],
+    });
+    expect(content.items?.map((item) => item.photo)).toEqual([
+      { key: 'landing-pages/p/images/a', alt: 'Tom' },
+      undefined,
+      undefined,
+    ]);
+  });
+});
+
+describe('the quote that leads (Codex-61zsk.58)', () => {
+  const lead = testimonialsDefinition.leadingItem;
+  const none = { ...sampleContext(), testimonials: [] };
+  const items = {
+    items: [{ quote: '' }, { quote: '“Second, the first written”' }, OWN],
+  };
+
+  it('is the first written quote, in the layouts that draw it larger, when the course has none', () => {
+    expect(lead).toBeDefined();
+    for (const layout of SECTION_LAYOUTS.testimonials)
+      expect(lead?.(items, layout, none), layout).toBe(
+        ['featured', 'quote', 'wall'].includes(layout) ? 1 : null
+      );
+  });
+
+  it("is none of the creator's while the course's own quotes come first", () => {
+    for (const layout of SECTION_LAYOUTS.testimonials)
+      expect(lead?.(items, layout, sampleContext()), layout).toBeNull();
+  });
+});

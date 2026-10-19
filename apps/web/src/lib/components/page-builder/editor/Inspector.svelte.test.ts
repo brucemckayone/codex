@@ -430,7 +430,8 @@ describe('Inspector — section', () => {
           '.item__fields .field__label, .item__fields .image__label'
         ),
       ].map((label) => label.textContent?.trim());
-    expect(labels()).toEqual(['Item', 'One line about it']);
+    // A mark is offered in every layout; the picture only where it is drawn.
+    expect(labels()).toEqual(['Item', 'One line about it', 'Mark']);
 
     pageBuilder.setSectionLayout('b', 'grid');
     flushSync();
