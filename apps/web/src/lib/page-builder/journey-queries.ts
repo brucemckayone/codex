@@ -314,9 +314,11 @@ export interface JourneyCardView {
  * Every id is a `media_items` ref; neither uploaded still is (`media_items` is
  * CHECK-constrained to video/audio, so a still image cannot live there) — both
  * arrive already resolved to a CDN URL. `heroMediaId` / `signatureMediaId` are
- * contract amendment A27 (Codex-wqxv4); each resolves publicly to the picked
+ * contract amendment A27 (Codex-wqxv4). The hero resolves publicly to the picked
  * item's thumbnail, the same way the guide portrait does — which is exactly why
  * A32 had to add a real uploaded hero BESIDE `heroMediaId` rather than reuse it.
+ * `signatureMediaId` is stored but never resolved: only an uploaded mark is a
+ * signature (Codex-61zsk.47).
  */
 export interface JourneySellMedia {
   courseId: string;

@@ -7,9 +7,11 @@
   `face` (split, centred; 03 X57): a round portrait beside the name instead
   of the mark, the byline of a guide who has just told their story. The photo
   is the portrait the block already shows; with none, the guide's initials,
-  as the block's medallion. The mark gives way because what the stream calls
-  a signature is, without an uploaded one, a frame of a FILM: drawn as ink it
-  was a smudged landscape thumbnail above the name. The quote keeps the mark.
+  as the block's medallion, as the reference plan asked. The mark gave way
+  first because what the stream called a signature was, without an uploaded
+  one, a frame of a FILM: drawn as ink it was a smudged landscape thumbnail
+  above the name. Since Codex-61zsk.47 the signature is the uploaded mark or
+  nothing. The quote keeps the mark.
 
   Both are decorative: the name is what reads. While the stream is out the
   face's circle holds its place, so the name never moves when it lands.

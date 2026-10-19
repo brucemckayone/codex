@@ -12751,22 +12751,6 @@ export const studio_builder_media_slot_guide_video_hint = () => `A talking-head 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_slot_signature = () => `Signature film`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_slot_signature_hint = () => `A film of the guide’s mark. With no signature image uploaded above, its still frame stands in as the signature. Video only — an audio item has no frame.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_media_cover = () => `Cover`
 
 
@@ -12895,7 +12879,7 @@ export const studio_builder_media_signature_image = () => `Signature image`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_signature_image_hint = () => `The mark the guide’s letter signs off with — a scan or photo of ink, painted small. Unset → the signature film’s frame stands in, and with neither the letter signs off with the typeset name alone. Use a PNG on transparency; a JPEG carries none, so it arrives as ink on a white rectangle.`
+export const studio_builder_media_signature_image_hint = () => `The mark the guide’s letter signs off with — a scan or photo of ink, painted small. Unset → the letter signs off with the typeset name alone. Use a PNG on transparency; a JPEG carries none, so it arrives as ink on a white rectangle.`
 
 
 /**
@@ -12935,7 +12919,7 @@ export const studio_builder_media_toast_signature_image_upload_failed = () => `S
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_toast_signature_image_removed = () => `Signature removed — the letter falls back to the signature film, if there is one`
+export const studio_builder_media_toast_signature_image_removed = () => `Signature removed — the letter signs off with the typeset name`
 
 
 /**

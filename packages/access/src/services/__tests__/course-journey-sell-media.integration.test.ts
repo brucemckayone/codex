@@ -27,10 +27,12 @@
  *   7. An inactive (invited/removed) membership does NOT grant attachment — the
  *      guard checks `status = 'active'`, not mere row existence.
  *   8. The A27 slots (`heroMediaId` / `signatureMediaId`, Codex-wqxv4) round-trip,
- *      are covered by the SAME org guard, and — the part that actually matters —
- *      are PROJECTED onto the public sell-preview payload. A15's finding was that
- *      two slots persisted and nothing public read them, so a new slot is not
- *      done until the served payload carries it.
+ *      are covered by the SAME org guard, and the hero — the part that actually
+ *      matters — is PROJECTED onto the public sell-preview payload. A15's finding
+ *      was that two slots persisted and nothing public read them, so a new slot
+ *      is not done until the served payload carries it. The signature film is
+ *      the exception, on purpose: it is stored but never projected, as only an
+ *      uploaded mark is a signature (Codex-61zsk.47).
  *
  * Falsifiability: every assertion re-reads the persisted row, so dropping the
  * org guard, the merge, the null-clear, or the URL resolution fails the test.
@@ -648,7 +650,7 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
         .where(eq(courses.id, courseId));
     });
 
-    it('resolves the hero and signature to CDN thumbnail URLs', async () => {
+    it('resolves the hero to its CDN thumbnail URL, and never a signature film’s frame as the signature', async () => {
       await svc.updateJourneySellMedia(
         orgAId,
         pageId,
@@ -676,9 +678,11 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
       // thumbnail. Compared against the seeded key so a projection that returned
       // some other media's thumbnail would fail.
       expect(preview?.heroImageUrl).toBe(`${CDN}/${heroMedia?.thumbnailKey}`);
-      expect(preview?.signatureUrl).toBe(
-        `${CDN}/${signatureMedia?.thumbnailKey}`
-      );
+      // The signature is the uploaded mark alone (Codex-61zsk.47). The film is
+      // stored, and has a frame that could stand in, but a frame is a photo,
+      // and the sign-off drew it where a mark belongs. With no upload, none.
+      expect(signatureMedia?.thumbnailKey).toBeTruthy();
+      expect(preview?.signatureUrl).toBeNull();
 
       // ...AND `toClip` for the same item, which is what `Codex-uj4jc` added. The
       // manifest used to be discarded here: the hero was handed only a poster URL,

@@ -174,8 +174,7 @@ function resolveCourseHeroUrl(
  *
  * Returns null when there is no uploaded signature OR no configured base, so a
  * client never receives a raw R2 key and never a half-formed URL. Null is a
- * legitimate state — the chain then falls to `signatureMediaId`'s poster frame,
- * and then to the letter signing off with its typeset name alone.
+ * legitimate state: the letter then signs off with its typeset name alone.
  */
 function resolveCourseSignatureUrl(
   signatureImageKey: string | null | undefined,
@@ -762,17 +761,17 @@ export class CourseJourneyService extends BaseService {
           introVideoMediaId: courses.introVideoMediaId,
           previewVideoMediaId: courses.previewVideoMediaId,
           guideVideoMediaId: courses.guideVideoMediaId,
-          // A27: the hero still + the guide's signature. Real columns (unlike the
-          // portrait below), so they select and write like the three videos.
+          // A27: the hero still. A real column (unlike the portrait below), so
+          // it selects and writes like the three videos.
           heroMediaId: courses.heroMediaId,
-          signatureMediaId: courses.signatureMediaId,
           // A32 (Codex-490z7): the UPLOADED hero still. An R2 key, not a media
           // ref — see the column comment for why `media_items` cannot hold one.
           heroImageKey: courses.heroImageKey,
-          // The UPLOADED signature mark (Codex-wqxv4's named-slot half). An R2
-          // key for the same reason, and here the reason bites hardest: nobody
-          // films a signature, so the media ref could only ever hold a frame of a
-          // film OF one.
+          // The UPLOADED signature mark (Codex-wqxv4's named-slot half), the
+          // signature's only source (Codex-61zsk.47). `signatureMediaId` is not
+          // read: `media_items` holds video and audio, so it could only ever
+          // give a frame of a film, which the sign-off drew as a photo where a
+          // mark belongs. The column stays, and keeps what a creator picked.
           signatureImageKey: courses.signatureImageKey,
           // The portrait ref lives INSIDE the `guide` jsonb bag, not in a column
           // of its own — `updateJourneySellMedia` read-then-merges it there.
@@ -798,7 +797,6 @@ export class CourseJourneyService extends BaseService {
         courseRow.guideVideoMediaId,
         guidePortraitMediaId,
         courseRow.heroMediaId,
-        courseRow.signatureMediaId,
       ].filter((id): id is string => id !== null);
 
       const previewByMediaId = new Map<
@@ -886,24 +884,15 @@ export class CourseJourneyService extends BaseService {
         // was thrown away here, so a creator's hero video could only ever appear
         // as its own poster frame (Codex-uj4jc).
         heroClip: toClip(courseRow.heroMediaId),
-        // The guide's signature, down the SAME ordered chain as the hero above
-        // and for a sharper version of the same reason (Codex-wqxv4's named-slot
-        // half):
-        //
-        //   signatureImageKey (an uploaded PNG/JPEG/WebP) ?? signatureMediaId's
-        //   poster frame ?? nothing (the letter signs with its typeset name)
-        //
-        // A27 gave `guide.letter` a signature SLOT and no way to fill it with a
-        // signature: `media_items` is video/audio-only, so `toStill` could only
-        // ever return a frame of a FILM of a mark. Uploaded therefore does not
-        // merely outrank derived here — it is the only link that can hold the
-        // thing the composition is named after. The media ref stays as the second
-        // link so a journey that already picked one keeps rendering it.
-        signatureUrl:
-          resolveCourseSignatureUrl(
-            courseRow.signatureImageKey,
-            r2PublicUrlBase
-          ) ?? toStill(courseRow.signatureMediaId),
+        // The guide's signature: the uploaded mark (a PNG/JPEG/WebP) or nothing,
+        // and the letter signs with its typeset name (Codex-61zsk.47). Unlike
+        // the hero, no film's frame stands in: `media_items` is video/audio-only,
+        // so `signatureMediaId` could only give a frame of a FILM, and the
+        // sign-off drew that photo where a mark belongs (03 X57).
+        signatureUrl: resolveCourseSignatureUrl(
+          courseRow.signatureImageKey,
+          r2PublicUrlBase
+        ),
       };
     } catch (error) {
       this.handleError(error, 'getCourseSellPreview');

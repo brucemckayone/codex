@@ -17,13 +17,13 @@
       section's synthetic gradient — so clearing the upload degrades rather than
       blanks, which is why the toast says so.
     • the still SIGNATURE (Codex-wqxv4's named-slot half) — an UPLOADED mark, to
-      `courses.signature_image_key`. Same shape as the hero image and the same
-      cause, only sharper: the "Signature film" slot below (`signatureMediaId`) is
-      a `media_items` ref, so the only signature A27 could express was a frame of
-      a FILM of a signature — and nobody films a signature. `guide.letter` has
-      described signing off with the guide's mark since it shipped and rendered
-      typeset text alone. The chain is uploaded ?? the film's frame ?? the typeset
-      name, so clearing the upload degrades rather than unsigns.
+      `courses.signature_image_key`, and the signature's only source
+      (Codex-61zsk.47): uploaded ?? the typeset name, so clearing the upload
+      degrades rather than unsigns. A27's "Signature film" slot
+      (`signatureMediaId`) is retired (`RETIRED_MEDIA_SLOTS`): it was a
+      `media_items` ref, so the only signature it could express was a frame of a
+      FILM of a signature — nobody films a signature — and the sign-off drew that
+      photo where a mark belongs. The column stays and keeps what was picked.
     • the three sell VIDEOS + the guide PORTRAIT — `courses.introVideoMediaId`,
       `previewVideoMediaId`, `guideVideoMediaId` and `guide.portraitMediaId`. All
       four were READ-ONLY codebase-wide before this, so the `introVideo`, `reel`
@@ -46,18 +46,18 @@
   and the creator needs the resolved URL back to see what they picked). The media
   slots are pending until Save, like page copy.
 
-  EACH UPLOAD IS PAIRED WITH THE LIBRARY SLOT IT OUTRANKS, in the copy rather than
-  the layout: "Hero image" above / "Hero film" below, "Signature image" above /
-  "Signature film" below. Two controls that both read as "the signature" would be
-  worse than one, so each hint names the other and says which wins.
+  THE HERO UPLOAD IS PAIRED WITH THE LIBRARY SLOT IT OUTRANKS, in the copy rather
+  than the layout: "Hero image" above / "Hero film" below. Two controls that both
+  read as "the hero" would be worse than one, so each hint names the other and
+  says which wins. The signature has one control.
 -->
 <script lang="ts">
   import { MAX_IMAGE_SIZE_BYTES } from '@codex/validation';
   import * as m from '$paraglide/messages';
   import MediaPicker from '$lib/components/studio/MediaPicker.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
-  import type { JourneySellMediaSlot } from '$lib/page-builder/sell-media-store.svelte';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
+  import { PAGE_MEDIA_SLOTS } from './page-media-slots';
   import {
     uploadJourneyCoverForm,
     uploadJourneyHeroImageForm,
@@ -66,52 +66,8 @@
 
   const MAX_COVER_MB = Math.round(MAX_IMAGE_SIZE_BYTES / 1024 / 1024);
 
-  /**
-   * The slots, in the order they appear down the sales page — so the panel reads
-   * as a walk through the page rather than an arbitrary list. Hero first, because
-   * it is the first thing a visitor sees.
-   *
-   * Kept in step with `JourneySellMediaSlot`: a slot the store knows and this
-   * panel does not is only reachable from a section inspector, which is the
-   * two-sources-of-truth problem the store exists to prevent.
-   */
-  const SLOTS: readonly {
-    slot: JourneySellMediaSlot;
-    /** Lazy so the label resolves through Paraglide at render, not at module load. */
-    label: () => string;
-    hint: () => string;
-  }[] = [
-    {
-      slot: 'heroMediaId',
-      label: () => m.studio_builder_media_slot_hero(),
-      hint: () => m.studio_builder_media_slot_hero_hint(),
-    },
-    {
-      slot: 'introVideoMediaId',
-      label: () => m.studio_builder_media_slot_intro(),
-      hint: () => m.studio_builder_media_slot_intro_hint(),
-    },
-    {
-      slot: 'previewVideoMediaId',
-      label: () => m.studio_builder_media_slot_reel(),
-      hint: () => m.studio_builder_media_slot_reel_hint(),
-    },
-    {
-      slot: 'guidePortraitMediaId',
-      label: () => m.studio_builder_media_slot_guide_portrait(),
-      hint: () => m.studio_builder_media_slot_guide_portrait_hint(),
-    },
-    {
-      slot: 'guideVideoMediaId',
-      label: () => m.studio_builder_media_slot_guide_video(),
-      hint: () => m.studio_builder_media_slot_guide_video_hint(),
-    },
-    {
-      slot: 'signatureMediaId',
-      label: () => m.studio_builder_media_slot_signature(),
-      hint: () => m.studio_builder_media_slot_signature_hint(),
-    },
-  ];
+  /** The library slots, in page order (`page-media-slots.ts`). */
+  const SLOTS = PAGE_MEDIA_SLOTS;
 
   let fileInput = $state<HTMLInputElement | null>(null);
   /** Own ref — three independent upload forms, so three independent file inputs. */
