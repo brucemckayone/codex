@@ -457,22 +457,29 @@ export function continuingSections(
   return continuing;
 }
 
-/** What a visitor's page knows of its films, for {@link foldForVisitors}. */
+/**
+ * What a visitor's page knows of its films, for {@link foldForVisitors}:
+ * each `false` when that film is known not to come (`filmToShow`).
+ */
 export interface FoldOptions {
-  /** `false` when the page certainly has no preview film (`filmsAttached.reel`). */
+  /** The introduction film, which a Video section shows. */
+  readonly introFilm?: boolean;
+  /** The preview film, which a Preview section and a preview Button play. */
   readonly previewFilm?: boolean;
 }
 
 /**
  * The sections a VISITOR's page draws: an empty Picture (no picture) or
  * Heading (no title) is folded here, before the bands are resolved, so the
- * band rules never count a section nobody can see (03 X64). So is a Button
- * whose action has nowhere to go: a section that is gone or hidden, a
- * preview film the page does not have, or a link it cannot trust. Its label
- * was written for that destination, so it is hidden rather than sent to the
- * checkout under the wrong words. The canvas and still thumbnails keep every
- * section: there an empty one draws its prompt, and a dead Button its
- * warning.
+ * band rules never count a section nobody can see (03 X64). So is a Video or
+ * Preview section whose film is known not to come (Codex-61zsk.57): hidden
+ * only by its block, it still took a band, and the bands either side could
+ * meet in one colour. So is a Button whose action has nowhere to go: a
+ * section that is gone, hidden or folded, a preview film the page does not
+ * have, or a link it cannot trust. Its label was written for that
+ * destination, so it is hidden rather than sent to the checkout under the
+ * wrong words. The canvas and still thumbnails keep every section: there an
+ * empty one draws its prompt, and a dead Button its warning.
  */
 export function foldForVisitors(
   page: KitPage,
@@ -483,6 +490,8 @@ export function foldForVisitors(
     if (section.type === 'picture') return isImageRef(props.image);
     if (section.type === 'heading')
       return readText(props, 'heading') !== undefined;
+    if (section.type === 'video') return options.introFilm !== false;
+    if (section.type === 'preview') return options.previewFilm !== false;
     return true;
   });
   const drawn = new Set(

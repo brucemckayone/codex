@@ -61,7 +61,9 @@
     pageGrounds,
   } from '../render/brand-overrides';
   import type { JourneySalesContext } from '../render/types';
+  import { settled } from './blocks/hero/settled.svelte';
   import { priceWithCadence } from './model/copy';
+  import { filmToShow } from './model/films';
   import { brandFontsHref } from './model/fonts';
   import { readPageDials, readPageFacets, type TypeFacet } from './model/ids';
   import { pricingView } from './model/offer';
@@ -161,13 +163,18 @@
   });
   const grounds = $derived(resolveGroundBands(orgGrounds, pageGrounds(brandOverrides)));
   // A visitor's page folds what nobody would see (03 X64): an empty Picture
-  // or Heading, a Button with nowhere to go. It happens before the bands
-  // resolve, so no band rule counts it. The canvas and stills keep them all.
+  // or Heading, a Button with nowhere to go, a film section with no film
+  // (Codex-61zsk.57). It happens before the bands resolve, so no band rule
+  // counts it. The canvas and stills keep them all. The films follow the
+  // stream, by the blocks' own rule (`filmToShow`): a section folds once its
+  // film is known not to come, and a film that arrives anyway brings it back.
+  const films = $derived(edit || still ? undefined : settled(context.sellPreview));
   const drawn = $derived(
     edit || still
       ? page
       : foldForVisitors(page, {
-          previewFilm: context.course.filmsAttached?.reel === false ? false : undefined,
+          introFilm: filmToShow(context.course.filmsAttached?.intro, films, 'intro'),
+          previewFilm: filmToShow(context.course.filmsAttached?.reel, films, 'reel'),
         })
   );
   const sections = $derived(resolveSections(drawn, { orgShader, grounds }));
