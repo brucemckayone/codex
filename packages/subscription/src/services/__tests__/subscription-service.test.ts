@@ -26,7 +26,8 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import { claimPayoutAttempt, type FeeConfigService } from '@codex/purchase';
+import { claimPayoutAttempt } from '@codex/payments';
+import type { FeeConfigService } from '@codex/purchase';
 import { UnsupportedCurrencyError } from '@codex/service-errors';
 import {
   createMockStripe,

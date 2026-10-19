@@ -53,7 +53,7 @@ import {
   renewPayoutAttempt,
   settlePayoutPaid,
   settleTransfer,
-} from '../utils/payout-ledger';
+} from '../payout-ledger';
 
 describe('payouts ledger', () => {
   let db: Database;

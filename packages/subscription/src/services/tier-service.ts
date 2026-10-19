@@ -30,7 +30,7 @@ import {
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
-import { resolveOrganisationPayee } from '@codex/purchase';
+import { resolveOrganisationPayee } from '@codex/payments';
 import {
   BaseService,
   InternalServiceError,

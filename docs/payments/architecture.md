@@ -210,6 +210,9 @@ in `@codex/purchase` or below it. That is why the ledger is in
   `@codex/payments` depends on it (§7 D2).
 - Moving the ledger is one PR of import changes. It is cheaper now than after
   four more modules have been added beside it.
+- **Done (WP3a, Codex-2hxff.56.1):** `@codex/payments` exists, and
+  `payoutLedger` and `resolveOrganisationPayee` have moved into it unchanged.
+  `invoiceCharge` follows once WP1 has merged.
 
 The rejected alternative was to keep everything in
 `@codex/purchase/src/domain/`. That avoids a package for now, but leaves

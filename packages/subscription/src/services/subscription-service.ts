@@ -50,12 +50,8 @@ import {
   users,
 } from '@codex/database/schema';
 import {
-  applyMinPlatformFeeFloor,
   cancelUnpaidPayoutForRefund,
   claimPayoutAttempts,
-  type FeeConfig,
-  type FeeConfigService,
-  type FeeContext,
   findTransfersForPayouts,
   isDrainablePayout,
   type LedgerDeps,
@@ -67,6 +63,12 @@ import {
   resolveOrganisationPayee,
   settlePayoutPaid,
   settleTransfer,
+} from '@codex/payments';
+import {
+  applyMinPlatformFeeFloor,
+  type FeeConfig,
+  type FeeConfigService,
+  type FeeContext,
   withStaleCustomerRecovery,
 } from '@codex/purchase';
 import {
