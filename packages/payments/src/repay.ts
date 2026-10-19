@@ -34,18 +34,33 @@ export interface DisputeRepayResult {
 }
 
 /**
+ * A debt settled one of these ways was paid by the payee, so a won dispute
+ * pays it back like a reversal. `platform_absorbed` was not: nothing to pay.
+ */
+const PAYEE_PAID_RESOLUTIONS: ReadonlySet<string> = new Set([
+  'manually_reversed',
+  'creator_absorbed',
+]);
+
+type Tx = Parameters<Parameters<ClawbackDeps['db']['transaction']>[0]>[0];
+
+/**
  * Settle a WON dispute's clawback, idempotently:
  *
  * - a `done` transfer reversal gets one pending re-pay row;
+ * - a step that had not finished is checked with Stripe first, because its
+ *   outcome may never have been recorded (a timeout, or a crash after Stripe
+ *   answered): a reversal found for it is recorded `done` and paid back, and
+ *   only a step that never reached Stripe is `cancelled`;
+ * - a debt is `cancelled` and its open `refund_reviews` row closed as
+ *   `dispute_won`; one the payee already settled is paid back instead;
  * - the platform fee's share (`retained_fee`) is cancelled, and a fee slice
- *   that share had marked `reversed` is paid again: the money is back;
- * - a step that had not run is `cancelled`;
- * - a debt (the payee could not cover it) is `cancelled`, and its
- *   `refund_reviews` row is closed as `dispute_won`.
+ *   that share had marked `reversed` is paid again: the money is back.
  *
- * Rejects with a `ServiceUnavailableError` (a retry) while another delivery
- * holds one of the dispute's steps: once it finishes, the step is `done` and
- * a redelivery re-pays it.
+ * The dispute's status is `won` before this runs, so no clawback can claim one
+ * of its steps any more (`reverseCharge`). Rejects with a
+ * `ServiceUnavailableError` (a retry) while a delivery that claimed a step
+ * before the win still holds it: once it finishes, a redelivery pays it back.
  */
 export async function repayDispute(
   deps: ClawbackDeps,
@@ -69,24 +84,36 @@ export async function repayDispute(
   };
   let busy = 0;
   for (const { record, slice } of steps) {
-    if (record.status === 'done' && record.kind === 'retained_fee') {
-      await cancelRecord(deps, record, ['done']);
-      await restoreFeeSlice(deps, slice.id);
+    if (record.kind === 'retained_fee') {
+      if (record.status === 'cancelled') continue;
+      await cancelFeeShare(deps, record, slice.id);
       continue;
     }
     if (record.status === 'done') {
-      if (record.repaidByPayoutId) continue;
-      if (await writeRepay(deps, record, slice)) result.repaid++;
-      continue;
-    }
-    if (record.status === 'debt') {
-      if (await cancelRecord(deps, record, ['debt'])) {
-        result.debtsClosed += await closeDebt(deps, record.id);
+      if (!record.repaidByPayoutId && (await writeRepay(deps, record, slice))) {
+        result.repaid++;
       }
       continue;
     }
+    if (record.status === 'debt') {
+      const settled = await settleDebt(deps, record, slice);
+      if (settled === 'repaid') result.repaid++;
+      if (settled === 'closed') result.debtsClosed++;
+      continue;
+    }
     if (record.status === 'pending' || record.status === 'failed') {
-      if (await cancelRecord(deps, record, ['pending', 'failed'], true)) {
+      if (isLeased(record)) {
+        busy++;
+        continue;
+      }
+      const landed =
+        record.kind === 'transfer_reversal' && slice.stripeTransferId
+          ? await findLandedReversal(deps, slice.stripeTransferId, record.id)
+          : undefined;
+      if (landed) {
+        await recordLanded(deps, record, landed);
+        if (await writeRepay(deps, record, slice)) result.repaid++;
+      } else if (await cancelUnfinished(deps, record)) {
         result.cancelled++;
       } else {
         busy++;
@@ -105,6 +132,67 @@ export async function repayDispute(
     ...result,
   });
   return result;
+}
+
+function leaseStart(now: Date): Date {
+  return new Date(now.getTime() - PAYOUT_ATTEMPT_LEASE_MINUTES * 60_000);
+}
+
+function isLeased(record: PayoutReversal): boolean {
+  return (
+    record.attemptedAt !== null && record.attemptedAt >= leaseStart(new Date())
+  );
+}
+
+/**
+ * The reversal Stripe made for this step, if any: every reversal the engine
+ * makes names its step in `payout_reversal_id`.
+ */
+async function findLandedReversal(
+  deps: ClawbackDeps,
+  transferId: string,
+  payoutReversalId: string
+): Promise<{ id: string } | undefined> {
+  let startingAfter: string | undefined;
+  for (;;) {
+    const page = await deps.stripe.transfers.listReversals(transferId, {
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    const found = page.data.find(
+      (reversal) => reversal.metadata?.payout_reversal_id === payoutReversalId
+    );
+    if (found) return { id: found.id };
+    const last = page.data.at(-1);
+    if (!page.has_more || !last) return undefined;
+    startingAfter = last.id;
+  }
+}
+
+async function recordLanded(
+  deps: ClawbackDeps,
+  record: PayoutReversal,
+  landed: { id: string }
+): Promise<void> {
+  await deps.db
+    .update(payoutReversals)
+    .set({
+      status: 'done',
+      stripeReversalId: landed.id,
+      lastErrorCode: null,
+      attemptedAt: null,
+      resolvedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(payoutReversals.id, record.id),
+        inArray(payoutReversals.status, ['pending', 'failed'])
+      )
+    );
+  deps.obs.warn(
+    'A won dispute found a reversal the clawback never recorded; paying it back',
+    { payoutReversalId: record.id, stripeReversalId: landed.id }
+  );
 }
 
 /**
@@ -160,76 +248,111 @@ async function writeRepay(
   }
 }
 
-/**
- * Cancel a step, from one of `from`. `unleased`: only if no delivery holds it,
- * the condition its own claim uses.
- */
-async function cancelRecord(
+/** Cancel a step that never reached Stripe, if no delivery holds it. */
+async function cancelUnfinished(
   deps: ClawbackDeps,
-  record: PayoutReversal,
-  from: Array<PayoutReversal['status']>,
-  unleased = false
+  record: PayoutReversal
 ): Promise<boolean> {
   const now = new Date();
-  const leaseStart = new Date(
-    now.getTime() - PAYOUT_ATTEMPT_LEASE_MINUTES * 60_000
-  );
   const [cancelled] = await deps.db
     .update(payoutReversals)
     .set({ status: 'cancelled', attemptedAt: null, resolvedAt: now })
     .where(
       and(
         eq(payoutReversals.id, record.id),
-        inArray(payoutReversals.status, from),
-        unleased
-          ? or(
-              isNull(payoutReversals.attemptedAt),
-              lt(payoutReversals.attemptedAt, leaseStart)
-            )
-          : undefined
+        inArray(payoutReversals.status, ['pending', 'failed']),
+        or(
+          isNull(payoutReversals.attemptedAt),
+          lt(payoutReversals.attemptedAt, leaseStart(now))
+        )
       )
     )
     .returning();
   return cancelled !== undefined;
 }
 
-/** Close the dispute's debt for this reversal. Returns how many it closed. */
-async function closeDebt(
+/**
+ * A debt step. Settled by the payee (they paid it back, or support reversed
+ * it by hand): paid back like a reversal. Otherwise cancelled, with its open
+ * review closed as `dispute_won`, in one transaction, so a crash between the
+ * two cannot leave a review open for a step a redelivery will now skip.
+ */
+async function settleDebt(
   deps: ClawbackDeps,
-  payoutReversalId: string
-): Promise<number> {
-  const closed = await deps.db
-    .update(refundReviews)
-    .set({ resolution: 'dispute_won', resolvedAt: new Date() })
-    .where(
-      and(
-        eq(refundReviews.payoutReversalId, payoutReversalId),
-        isNull(refundReviews.resolvedAt)
+  record: PayoutReversal,
+  slice: Payout
+): Promise<'repaid' | 'closed' | 'none'> {
+  const [review] = await deps.db
+    .select()
+    .from(refundReviews)
+    .where(eq(refundReviews.payoutReversalId, record.id))
+    .limit(1);
+  if (
+    review?.resolvedAt &&
+    review.resolution &&
+    PAYEE_PAID_RESOLUTIONS.has(review.resolution)
+  ) {
+    if (record.repaidByPayoutId) return 'none';
+    return (await writeRepay(deps, record, slice)) ? 'repaid' : 'none';
+  }
+
+  return deps.db.transaction(async (tx) => {
+    if (!(await cancelIn(tx, record, ['debt']))) return 'none' as const;
+    const closed = await tx
+      .update(refundReviews)
+      .set({ resolution: 'dispute_won', resolvedAt: new Date() })
+      .where(
+        and(
+          eq(refundReviews.payoutReversalId, record.id),
+          isNull(refundReviews.resolvedAt)
+        )
       )
-    )
-    .returning();
-  return closed.length;
+      .returning();
+    return closed.length > 0 ? ('closed' as const) : ('none' as const);
+  });
 }
 
 /**
- * A platform fee slice the dispute's share had marked `reversed` is `paid`
- * again once that share is cancelled and the rest no longer covers it.
+ * The platform fee's share: cancelled, and a fee slice that share had marked
+ * `reversed` paid again once the rest no longer covers it. One transaction.
  */
-async function restoreFeeSlice(
+async function cancelFeeShare(
   deps: ClawbackDeps,
+  record: PayoutReversal,
   payoutId: string
 ): Promise<void> {
-  // A parameter, not NOW(): Hyperdrive caches by the query's text.
-  const now = new Date();
-  await deps.db
-    .update(payouts)
-    .set({ status: 'paid', updatedAt: now })
+  await deps.db.transaction(async (tx) => {
+    await cancelIn(tx, record, ['pending', 'failed', 'done']);
+    // A parameter, not NOW(): Hyperdrive caches by the query's text.
+    const now = new Date();
+    await tx
+      .update(payouts)
+      .set({ status: 'paid', updatedAt: now })
+      .where(
+        and(
+          eq(payouts.id, payoutId),
+          eq(payouts.status, 'reversed'),
+          eq(payouts.payoutType, 'platform_fee'),
+          sql`${payouts.amountCents} > (SELECT COALESCE(SUM(${payoutReversals.amountCents}), 0) FROM ${payoutReversals} WHERE ${payoutReversals.payoutId} = ${payoutId} AND ${payoutReversals.status} = 'done')`
+        )
+      );
+  });
+}
+
+async function cancelIn(
+  tx: Tx,
+  record: PayoutReversal,
+  from: Array<PayoutReversal['status']>
+): Promise<boolean> {
+  const [cancelled] = await tx
+    .update(payoutReversals)
+    .set({ status: 'cancelled', attemptedAt: null, resolvedAt: new Date() })
     .where(
       and(
-        eq(payouts.id, payoutId),
-        eq(payouts.status, 'reversed'),
-        eq(payouts.payoutType, 'platform_fee'),
-        sql`${payouts.amountCents} > (SELECT COALESCE(SUM(${payoutReversals.amountCents}), 0) FROM ${payoutReversals} WHERE ${payoutReversals.payoutId} = ${payoutId} AND ${payoutReversals.status} = 'done')`
+        eq(payoutReversals.id, record.id),
+        inArray(payoutReversals.status, from)
       )
-    );
+    )
+    .returning();
+  return cancelled !== undefined;
 }

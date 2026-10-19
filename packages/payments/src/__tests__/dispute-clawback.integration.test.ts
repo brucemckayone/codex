@@ -513,4 +513,118 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
     );
     expect((await records(creator.id))[0]?.status).toBe('pending');
   });
+
+  // ── review fixes (2026-10-19) ─────────────────────────────────────────
+
+  it('lost keeps holding until the loss is applied: a drain cannot pay a held slice the bank has taken back', async () => {
+    const charge = newCharge(1000);
+    const held = await slice(charge, {
+      payoutType: 'creator_payout',
+      amountCents: 765,
+      status: 'pending',
+    });
+    const disputeId = await dispute(charge, 'lost');
+
+    expect(await drainable(held.id)).toBe(false);
+    await db
+      .update(disputes)
+      .set({ outcomeAppliedAt: new Date() })
+      .where(eq(disputes.stripeDisputeId, disputeId));
+    expect(await drainable(held.id)).toBe(true);
+  });
+
+  it('won: a step whose outcome was never recorded is checked with Stripe, and a reversal that landed is recorded and paid back', async () => {
+    const charge = newCharge(1000);
+    const creator = await slice(charge, {
+      payoutType: 'creator_payout',
+      amountCents: 765,
+    });
+    const disputeId = await dispute(charge, 'won');
+    const [record] = await db
+      .insert(payoutReversals)
+      .values({
+        payoutId: creator.id,
+        causeType: 'dispute',
+        causeId: disputeId,
+        amountCents: 765,
+        kind: 'transfer_reversal',
+        // A timeout after Stripe applied it: left failed, same attempt.
+        status: 'failed',
+        lastErrorCode: 'unknown',
+      })
+      .returning();
+    const landed = await stripe.transfers.createReversal(
+      creator.stripeTransferId ?? '',
+      { amount: 765, metadata: { payout_reversal_id: record?.id ?? '' } }
+    );
+
+    const result = await repayDispute(deps, { disputeId });
+
+    expect(result).toEqual({ repaid: 1, cancelled: 0, debtsClosed: 0 });
+    expect((await records(creator.id))[0]).toMatchObject({
+      status: 'done',
+      stripeReversalId: landed.id,
+    });
+    expect((await records(creator.id))[0]?.repaidByPayoutId).not.toBeNull();
+  });
+
+  it.each([
+    ['manually_reversed', 1],
+    ['creator_absorbed', 1],
+    ['platform_absorbed', 0],
+  ])('won: a debt the support desk settled as %s is paid back only if the payee paid it', async (resolution, repaid) => {
+    const charge = newCharge(1000);
+    const creator = await slice(charge, {
+      payoutType: 'creator_payout',
+      amountCents: 765,
+    });
+    const disputeId = await dispute(charge, 'needs_response');
+    vi.mocked(stripe.transfers.createReversal).mockRejectedValue(
+      Object.assign(new Error('low'), {
+        code: 'insufficient_funds',
+        statusCode: 402,
+      })
+    );
+    await run(charge);
+    const [debt] = await records(creator.id);
+    await db
+      .update(refundReviews)
+      .set({ resolution, resolvedAt: new Date() })
+      .where(eq(refundReviews.payoutReversalId, debt?.id ?? ''));
+    await setDisputeStatus(disputeId, 'won');
+
+    const result = await repayDispute(deps, { disputeId });
+
+    expect(result.repaid).toBe(repaid);
+    expect(result.debtsClosed).toBe(0);
+  });
+
+  it('a dispute won mid-run: a step not yet claimed is not sent to Stripe, and is cancelled', async () => {
+    const charge = newCharge(1000);
+    await slice(charge, { payoutType: 'organization_fee', amountCents: 135 });
+    await slice(charge, { payoutType: 'creator_payout', amountCents: 765 });
+    const disputeId = await dispute(charge, 'needs_response');
+    // The first reversal "takes long enough" for the win to be recorded.
+    const real = vi
+      .mocked(stripe.transfers.createReversal)
+      .getMockImplementation();
+    vi.mocked(stripe.transfers.createReversal).mockImplementationOnce((async (
+      ...args: unknown[]
+    ) => {
+      await setDisputeStatus(disputeId, 'won');
+      return (real as (...a: unknown[]) => unknown)(...args);
+    }) as never);
+
+    await run(charge);
+
+    expect(stripe.transfers.createReversal).toHaveBeenCalledTimes(1);
+    const steps = await db
+      .select()
+      .from(payoutReversals)
+      .where(eq(payoutReversals.causeId, disputeId));
+    expect(steps.map((step) => step.status).sort()).toEqual([
+      'cancelled',
+      'done',
+    ]);
+  });
 });

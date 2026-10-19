@@ -497,6 +497,10 @@ async function handleDispute(
         recorded.amountCents
       );
       invalidateLibrary(c, ended?.userId);
+      // Written when it opened, unless it opened already lost: again here.
+      if (ended?.userId && ended.orgId) {
+        revokeAccess(c, ended.userId, ended.orgId);
+      }
     }
     // The clawback now cancels or reduces the held slices like a refund.
     await clawBack();

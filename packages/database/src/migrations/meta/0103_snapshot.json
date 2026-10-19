@@ -1,5 +1,5 @@
 {
-  "id": "14e88f0b-c972-4677-b6f1-3764f3dc9746",
+  "id": "8d622b3a-a420-4ea1-bb0c-a43584181905",
   "prevId": "f11f5705-5907-4448-a85f-68def484f642",
   "version": "7",
   "dialect": "postgresql",
@@ -2670,6 +2670,163 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.disputes": {
+      "name": "disputes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "stripe_dispute_id": {
+          "name": "stripe_dispute_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stripe_charge_id": {
+          "name": "stripe_charge_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "purchase_id": {
+          "name": "purchase_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "varchar(3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_created_at": {
+          "name": "stripe_created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "outcome_applied_at": {
+          "name": "outcome_applied_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "uq_disputes_stripe_dispute_id": {
+          "name": "uq_disputes_stripe_dispute_id",
+          "columns": [
+            {
+              "expression": "stripe_dispute_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_disputes_purchase": {
+          "name": "idx_disputes_purchase",
+          "columns": [
+            {
+              "expression": "purchase_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_disputes_charge": {
+          "name": "idx_disputes_charge",
+          "columns": [
+            {
+              "expression": "stripe_charge_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "disputes_purchase_id_purchases_id_fk": {
+          "name": "disputes_purchase_id_purchases_id_fk",
+          "tableFrom": "disputes",
+          "tableTo": "purchases",
+          "columnsFrom": [
+            "purchase_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "check_disputes_amount_positive": {
+          "name": "check_disputes_amount_positive",
+          "value": "\"disputes\".\"amount_cents\" > 0"
+        },
+        "check_disputes_status": {
+          "name": "check_disputes_status",
+          "value": "\"disputes\".\"status\" IN ('warning_needs_response', 'warning_under_review', 'warning_closed', 'needs_response', 'under_review', 'won', 'lost', 'prevented')"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.agreement_proposals": {
       "name": "agreement_proposals",
       "schema": "",
@@ -4137,164 +4294,6 @@
         "check_revenue_split_equals_total": {
           "name": "check_revenue_split_equals_total",
           "value": "\"purchases\".\"amount_paid_cents\" = \"purchases\".\"platform_fee_cents\" + \"purchases\".\"organization_fee_cents\" + \"purchases\".\"creator_payout_cents\""
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.disputes": {
-      "name": "disputes",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "stripe_dispute_id": {
-          "name": "stripe_dispute_id",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "stripe_charge_id": {
-          "name": "stripe_charge_id",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "purchase_id": {
-          "name": "purchase_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "amount_cents": {
-          "name": "amount_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "currency": {
-          "name": "currency",
-          "type": "varchar(3)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_created_at": {
-          "name": "stripe_created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "outcome_applied_at": {
-          "name": "outcome_applied_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "uq_disputes_stripe_dispute_id": {
-          "name": "uq_disputes_stripe_dispute_id",
-          "columns": [
-            {
-              "expression": "stripe_dispute_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_disputes_purchase": {
-          "name": "idx_disputes_purchase",
-          "columns": [
-            {
-              "expression": "purchase_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_disputes_open_charge": {
-          "name": "idx_disputes_open_charge",
-          "columns": [
-            {
-              "expression": "stripe_charge_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"disputes\".\"status\" NOT IN ('won', 'lost', 'warning_closed', 'prevented')",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "disputes_purchase_id_purchases_id_fk": {
-          "name": "disputes_purchase_id_purchases_id_fk",
-          "tableFrom": "disputes",
-          "tableTo": "purchases",
-          "columnsFrom": [
-            "purchase_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "check_disputes_amount_positive": {
-          "name": "check_disputes_amount_positive",
-          "value": "\"disputes\".\"amount_cents\" > 0"
-        },
-        "check_disputes_status": {
-          "name": "check_disputes_status",
-          "value": "\"disputes\".\"status\" IN ('warning_needs_response', 'warning_under_review', 'warning_closed', 'needs_response', 'under_review', 'won', 'lost', 'prevented')"
         }
       },
       "isRLSEnabled": false

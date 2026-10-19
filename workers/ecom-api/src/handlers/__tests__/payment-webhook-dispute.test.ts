@@ -352,6 +352,10 @@ describe('handlePaymentWebhook — disputes', () => {
   });
 
   it('lost: the purchase is refunded, both sources clawed back (held slices cancelled), THEN the outcome marked', async () => {
+    purchase.processLostDispute?.mockResolvedValueOnce({
+      userId: 'user_lost',
+      orgId: 'org_lost',
+    });
     const bundle = buildContext();
 
     await handlePaymentWebhook(
@@ -377,6 +381,8 @@ describe('handlePaymentWebhook — disputes', () => {
     ).toBeGreaterThan(
       purchase.clawBackPurchaseCharge?.mock.invocationCallOrder[0] ?? Infinity
     );
+    // A dispute that opened already lost never paused access: block it now.
+    expect(mockRevoke).toHaveBeenCalledWith('user_lost', 'org_lost', 'refund');
   });
 
   it('an outcome already applied stops at the record: a redelivered won or lost does nothing more', async () => {

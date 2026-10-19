@@ -174,11 +174,13 @@ const DRAINABLE: Array<'pending' | 'failed'> = ['pending', 'failed'];
  *
  * A row is also HELD while its sale has an open dispute or inquiry, by charge
  * or, for a row recorded before charge ids, by purchase (owner decisions P-2
- * and Q1, Codex-2hxff.9). A won or closed dispute releases it; a lost one
- * cancels it (`cancelled_by_dispute`).
+ * and Q1, Codex-2hxff.9). A won or closed dispute releases it. A lost one
+ * keeps holding it until the loss is applied (`outcome_applied_at`), which
+ * cancels it (`cancelled_by_dispute`) or reduces it: released any earlier, a
+ * drain could pay a slice the buyer's bank has already taken back.
  */
 export function isDrainablePayout(): SQL {
-  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE ${notInArray(disputes.status, [...DISPUTE_CLOSED_STATUSES])} AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})))`;
+  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE (${notInArray(disputes.status, [...DISPUTE_CLOSED_STATUSES])} OR (${disputes.status} = 'lost' AND ${disputes.outcomeAppliedAt} IS NULL)) AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})))`;
 }
 
 /**

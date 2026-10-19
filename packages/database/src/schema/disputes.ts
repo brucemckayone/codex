@@ -26,7 +26,8 @@ import { purchases } from './ecommerce';
  *
  * `status` mirrors Stripe's and moves forward only: `won`, `lost`,
  * `warning_closed` and `prevented` are final. `outcome_applied_at` is set once
- * a final status has been acted on, so a redelivery stops there.
+ * a final status has been acted on, so a redelivery stops there. A `lost`
+ * dispute keeps holding until then: its held slices are cancelled, not paid.
  */
 export const disputes = pgTable(
   'disputes',
@@ -62,12 +63,10 @@ export const disputes = pgTable(
   (table) => [
     uniqueIndex('uq_disputes_stripe_dispute_id').on(table.stripeDisputeId),
     index('idx_disputes_purchase').on(table.purchaseId),
-    // The drain's hold: open disputes, by charge.
-    index('idx_disputes_open_charge')
-      .on(table.stripeChargeId)
-      .where(
-        sql`${table.status} NOT IN ('won', 'lost', 'warning_closed', 'prevented')`
-      ),
+    // The drain's hold and the clawback read a charge's disputes. Not partial:
+    // the hold's predicate (open, or lost and not yet applied) is not one a
+    // partial index could imply, and the table stays small.
+    index('idx_disputes_charge').on(table.stripeChargeId),
     check('check_disputes_amount_positive', sql`${table.amountCents} > 0`),
     check(
       'check_disputes_status',

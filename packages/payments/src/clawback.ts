@@ -425,8 +425,17 @@ async function clawBackShare(
     return {};
   }
 
-  const claimed = await claimRecord(deps, record.id);
+  // A dispute's step is claimed only while the dispute is still clawed back
+  // (open or lost): once it is won, its re-pay owns every step, and a step
+  // this delivery read before the win must not reach Stripe after it.
+  const guard =
+    cause.type === 'dispute' ? disputeStillClawed(cause.id) : undefined;
+  const claimed = await claimRecord(deps, record.id, guard);
   if (!claimed) {
+    if (cause.type === 'dispute' && !(await isStillClawed(deps, cause.id))) {
+      await cancelOrphanedStep(deps, record.id);
+      return {};
+    }
     // Another delivery is working on it. Not done yet, so ask for a retry.
     return {
       failure: new ServiceUnavailableError(
@@ -1027,10 +1036,64 @@ async function holdRepaidSlice(
   );
 }
 
-/** Take the step's lease, so one delivery works on it at a time. */
-async function claimRecord(
+/** The dispute is still a clawback cause: open, or lost. */
+function disputeStillClawed(disputeId: string): SQL {
+  return sql`EXISTS (SELECT 1 FROM ${disputes} WHERE ${disputes.stripeDisputeId} = ${disputeId} AND ${inArray(disputes.status, CHARGEBACK_CLAWED_STATUSES)})`;
+}
+
+async function isStillClawed(
+  deps: ClawbackDeps,
+  disputeId: string
+): Promise<boolean> {
+  const [row] = await deps.db
+    .select({ id: disputes.id })
+    .from(disputes)
+    .where(
+      and(
+        eq(disputes.stripeDisputeId, disputeId),
+        inArray(disputes.status, CHARGEBACK_CLAWED_STATUSES)
+      )
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
+ * A step of a dispute won since this delivery read it: it never ran, so it is
+ * cancelled here. The won dispute's re-pay may already have looked, and would
+ * not see it.
+ */
+async function cancelOrphanedStep(
   deps: ClawbackDeps,
   recordId: string
+): Promise<void> {
+  const now = new Date();
+  const leaseStart = new Date(
+    now.getTime() - PAYOUT_ATTEMPT_LEASE_MINUTES * 60_000
+  );
+  await deps.db
+    .update(payoutReversals)
+    .set({ status: 'cancelled', attemptedAt: null, resolvedAt: now })
+    .where(
+      and(
+        eq(payoutReversals.id, recordId),
+        inArray(payoutReversals.status, ['pending', 'failed']),
+        or(
+          isNull(payoutReversals.attemptedAt),
+          lt(payoutReversals.attemptedAt, leaseStart)
+        )
+      )
+    );
+}
+
+/**
+ * Take the step's lease, so one delivery works on it at a time. `guard`, when
+ * given, must also hold at the moment of the claim.
+ */
+async function claimRecord(
+  deps: ClawbackDeps,
+  recordId: string,
+  guard?: SQL
 ): Promise<PayoutReversal | undefined> {
   const now = new Date();
   const leaseStart = new Date(
@@ -1046,7 +1109,8 @@ async function claimRecord(
         or(
           isNull(payoutReversals.attemptedAt),
           lt(payoutReversals.attemptedAt, leaseStart)
-        )
+        ),
+        guard
       )
     )
     .returning();

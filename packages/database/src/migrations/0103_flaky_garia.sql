@@ -23,7 +23,7 @@ ALTER TABLE "payout_reversals" ADD COLUMN "repaid_by_payout_id" uuid;--> stateme
 ALTER TABLE "disputes" ADD CONSTRAINT "disputes_purchase_id_purchases_id_fk" FOREIGN KEY ("purchase_id") REFERENCES "public"."purchases"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_disputes_stripe_dispute_id" ON "disputes" USING btree ("stripe_dispute_id");--> statement-breakpoint
 CREATE INDEX "idx_disputes_purchase" ON "disputes" USING btree ("purchase_id");--> statement-breakpoint
-CREATE INDEX "idx_disputes_open_charge" ON "disputes" USING btree ("stripe_charge_id") WHERE "disputes"."status" NOT IN ('won', 'lost', 'warning_closed', 'prevented');--> statement-breakpoint
+CREATE INDEX "idx_disputes_charge" ON "disputes" USING btree ("stripe_charge_id");--> statement-breakpoint
 ALTER TABLE "payout_reversals" ADD CONSTRAINT "payout_reversals_repaid_by_payout_id_payouts_id_fk" FOREIGN KEY ("repaid_by_payout_id") REFERENCES "public"."payouts"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_payout_reversals_repaid_by" ON "payout_reversals" USING btree ("repaid_by_payout_id") WHERE "payout_reversals"."repaid_by_payout_id" IS NOT NULL;--> statement-breakpoint
 ALTER TABLE "payout_reversals" ADD CONSTRAINT "check_payout_reversals_status" CHECK ("payout_reversals"."status" IN ('pending', 'done', 'failed', 'debt', 'cancelled'));--> statement-breakpoint
