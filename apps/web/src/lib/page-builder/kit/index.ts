@@ -36,6 +36,7 @@ export {
   resolveSpacing,
   resolveStyle,
   SIMPLE_SECTIONS,
+  spacingSource,
 } from './model/resolve';
 export {
   SAMPLE_COURSE,

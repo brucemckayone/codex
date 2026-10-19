@@ -3504,3 +3504,90 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     `aria-hidden`, which `IconBase` already sets) planted as an exposed mark, which fails.
   - **No new request, no cache change.** A face is the page's own upload at its smallest stored
     size; a mark is an icon the bundle already carries.
+- **X78 · 2026-10-19 · 3c · The editor for the page's dials and its headlines from another Style
+  (Codex-61zsk.59, D4; BUILT. The owner approved the mock and its data design,
+  `phase3-sources/editor-3c/`, on 2026-10-13: "all your recommendations are just perfect".
+  Three choices below were decided without the owner, each marked.)** X61 and X62 gave a page five
+  dials and X73 and X74 a menu of headline Types, and until now the gallery's `?dials=` was the
+  only way to set them.
+  - **Where.** The Style tab, between the Styles and the page's brand, as one group, "Adjust
+    Bold": each dial is "the Style, one step either way", so the Style and its dials read as one
+    decision in two steps. Each dial is three buttons; the middle one is named after the Style
+    ("Bold's") and is the dial's reset: pressing it deletes the dial from the page. Colour,
+    corners, spacing, then Headlines (the Type's swatches, then the size dial), then motion, whose
+    canvas holds still while editing, so its note points to Preview. "Use Bold's own for all of
+    these" shows only while something is adjusted, takes everything off in one undo step, and
+    says so. The Page tab's inspector gains one line, what the page adjusts ("Adjusted: Less
+    colour · Rounder corners · Quiet's headlines.", or "Not adjusted: Bold's own throughout."),
+    and no controls of its own: there is one place to change a dial.
+  - **The store.** `setPageDial`, `setTypeFacet` and `resetPageLook` beside `setPageStyle`. A step
+    already set, an unknown step and an off-menu Type are no-ops (no undo step, not dirty). The
+    Style's own deletes the key, and an emptied bag is deleted, never kept as `{}`: the dirty check
+    compares JSON with a load, which never holds an empty bag, so `{}` would read as an edit nobody
+    made. A Style change that the page's Type cannot follow takes the Type off in the same step,
+    so one undo brings both back, and the panel says so ("Clean keeps its own headlines, so
+    Poster's headlines came off this page. Undo puts them back."). Saving is unchanged: the whole
+    `design` bag is written, so a reset (an absent key) persists.
+  - **Steps that change nothing say so, from the kit.** `dialNoEffect` (`kit/model/dial-effect.ts`)
+    computes colour from each Style's own sample page, every type in its order, resolved with the
+    step and without it: exactly X61's list (more colour in Bold and Poster, which have no soft
+    tints; less colour in Cinematic, which has no coloured bands to bring down; both in Quiet,
+    which draws no bands). Corners is a short table, as CSS is not resolved in a unit test:
+    `rounder` is Soft's own recipe, and `brand` is Path's own corners.
+  - **Decided without the owner: each reason names its step, and one reason is said once.** A
+    dial's three steps share one note, so the mock's "In Bold this changes nothing: Bold has no
+    soft tints.", shown while the Style's own step is pressed, read as that step doing nothing;
+    and in Quiet, where both colour steps have one reason, the mock said it twice (found in the
+    browser). Now: "“More colour” changes nothing in Bold: Bold has no soft tints.", and "Neither
+    step changes anything in Quiet: Quiet draws no colour bands." Rejected: a note per step, read
+    only for that step, which would hide from sight what a step does until it is pressed.
+  - **Decided without the owner: Path's "Your brand's" changes nothing only for a rounded brand.**
+    The data design said `brand` is a no-op for Clean and Path, marked UNVERIFIED for chips. Read
+    against the sheets: Clean draws its chips at the brand's radius, where the dial draws pills, so
+    it changes Clean's chips and is not listed; Path's chips are pills wherever the brand is
+    rounded at all (`--lp-radius-pill-if-rounded`), so there it changes nothing, but a square
+    brand's chips are square on Path and the dial makes them pills. The panel reads the brand's
+    radius (the brand editor's pending one while it is open) and says "changes nothing" only where
+    it is true. Rejected: the mock's unconditional note, which a square brand would see change.
+  - **The headlines.** Only the proven swaps for the page's Style (`TYPE_FACET_BASES`), two to a
+    row, each a real `.lp` root drawing the page's own headline in that Type's tokens; the Style's
+    own swatch names its own Type on its root, as `PageRenderer` always does, since every Type's
+    rules are keyed on it. Path and Studio say why they take none ("its marks are measured against
+    them"). Each Style card shows the page as it would be in that Style, its dials included and its
+    Type where that Style may take it; the section gallery previews a new section the same way.
+  - **Decided without the owner: the spacing note says where the size comes from.** The data
+    design found "{size} is the default for this layout" wrong once the page's spacing dial is set.
+    `spacingSource` (beside `resolveSpacing`, in its order: the section's own, a compact layout,
+    the page's dial, the default) lets the inspector say "Large, from the page." exactly where the
+    dial gave it; a compact layout still outranks the dial and says so. Rejected: restating the
+    order in the inspector, which could drift from the resolver.
+  - **Keyboard and screen readers.** Every control is a labelled group of toggle buttons
+    (`aria-pressed`), the pattern the Style cards, layouts, colours and spacing already use: Tab
+    moves, Space or Enter presses. The middle step reads "Bold's, the Style's own"; each step is
+    described by its dial's note, a no-op's reason included; a reset or a dropped Type is a polite
+    status; the reset leaves focus on the colour dial's own step.
+  - **In the browser** (the real builder on studio-alpha's test page, Bold, 1440; every save
+    refused in the browser, both of autosave's attempts counted, and the page's stored row the
+    same before and after): Bold's own steps pressed, "More colour" quieter with its reason;
+    less colour, rounder corners and Poster's headlines on the canvas at once (`data-lp-corners`
+    `rounder`, `data-lp-type-facet` `poster`), the size dial's own step renamed "Poster's"; a
+    change to Path took Poster's headlines off and said so ("Path keeps its own headlines, so
+    Poster's headlines came off this page. Undo puts them back."), with Path's reason under
+    Headlines and "Your brand's" quieter for this rounded brand; Quiet's colour steps one reason,
+    said once; the reset said "Back to Quiet's own." and left focus on the colour dial's own
+    step. The first run found the note's unnamed, repeated reason (above).
+  - **Tests** (CI): `page-builder-store.test.ts` (each writer writes and deletes, deletes the empty
+    bag, refuses an unknown step and an off-menu Type, is a no-op at its step, is one undo step;
+    a Style change takes an unfollowable Type off in the same step and keeps one it can take; the
+    reset takes both off as one step), `dial-effect.test.ts` (the computed colour no-ops are X61's
+    list; the corners table, Path's for a rounded brand only; spacing, size and motion always
+    change), `StylePanel.svelte.test.ts` (the own step named and pressed; a step written and taken
+    off; each no-op reason naming its step, Quiet's two said once; each Style's menu, its own Type
+    named on its root; Path's reason; a Type dropped by a Style change and the status; the cards
+    with the page's dials and Type; the reset, its status and focus; Preview; the gallery's
+    previews) and `Inspector.svelte.test.ts` (the page's summary line; "from the page" only where
+    the dial applies). Calibrated: 14 plants, and 2 for the note's reasons, each failing its own
+    tests, every file restored.
+  - **No new request, no cache change.** The dials and the facet travel in `design`, saved as
+    every edit is; the studio is client-rendered, and the panel is mounted only while the Style
+    tab is open.

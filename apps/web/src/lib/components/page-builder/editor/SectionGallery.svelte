@@ -15,6 +15,7 @@
     DEFINITIONS,
     GROUP_ORDER,
     type KitPage,
+    type PageDesign,
     type PageStyleId,
     SECTION_TYPE_IDS,
     type SectionTypeId,
@@ -26,6 +27,8 @@
   interface Props {
     open: boolean;
     style: PageStyleId;
+    /** The page's dials and Type, so a new section previews as it will land (Codex-61zsk.59). */
+    design?: PageDesign;
     brandOverrides?: BrandTokenOverrides | null;
     theme?: 'light' | 'dark';
     /** The section the new one goes after; null for the top of the page. */
@@ -40,6 +43,7 @@
   let {
     open = $bindable(),
     style,
+    design,
     brandOverrides = null,
     theme,
     afterLabel,
@@ -61,7 +65,11 @@
 
   function samplePageOf(type: SectionTypeId): KitPage {
     return {
-      design: { style },
+      design: {
+        style,
+        ...(design?.dials ? { dials: design.dials } : {}),
+        ...(design?.facets ? { facets: design.facets } : {}),
+      },
       sections: [
         { id: `gallery-${type}`, type, enabled: true, props: { ...DEFINITIONS[type].sample } },
       ],

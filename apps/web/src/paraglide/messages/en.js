@@ -14883,6 +14883,14 @@ export const studio_page_editor_spacing_default = (params) => `${params.size} is
 
 
 /**
+ * @param {{ size: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_spacing_from_page = (params) => `${params.size}, from the page.`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -15032,6 +15040,590 @@ export const studio_page_editor_gallery_add = (params) => `Add ${params.section}
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_style_in_use = () => `In use`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dials_title = (params) => `Adjust ${params.style}`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dials_body = (params) => `Each one moves a step either side of ${params.style}’s own. ${params.style}’s is where a page starts, and where each one goes back to.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_own = (params) => `${params.style}’s`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_own_hidden = () => `, the Style’s own`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_own_size_hidden = () => `, their own size`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour = () => `Colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_muted = () => `Less colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_vivid = () => `More colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_muted_note = () => `Every coloured band takes a soft tint of your brand.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_vivid_note = () => `Every soft tint takes your brand colour, unless it would touch another band.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_own_note = (params) => `${params.style}’s own bands.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_after = () => `A colour you chose for a section stays as you chose it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners = () => `Corners`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners_brand = () => `Your brand’s`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners_rounder = () => `Rounder`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners_brand_note = () => `Cards, pictures and buttons take your organisation’s own corners.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners_rounder_note = () => `Softer cards and pictures, and pill buttons if your brand is rounded at all.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners_own_note = (params) => `${params.style}’s own corners.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing = () => `Spacing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_compact = () => `Small`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_spacious = () => `Large`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_compact_note = () => `Every section without spacing of its own sits closer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_spacious_note = () => `Every section without spacing of its own gets more room.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_own_note = (params) => `${params.style}’s own rhythm.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_after = () => `A section you gave its own spacing keeps it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_headlines = () => `Headlines`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_headlines_style = () => `Style`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_headlines_size = () => `Size`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_drama_calmer = () => `Calmer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_drama_louder = () => `Louder`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_drama_calmer_note = () => `Every headline a step smaller.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_drama_louder_note = () => `Section headings a step larger, as far as each one’s longest word fits. The opening headline is already as large as it fits.`
+
+
+/**
+ * @param {{ voice: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_drama_own_note = (params) => `${params.voice}’s own sizes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion = () => `Motion`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_still = () => `Still`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_gentle = () => `Gentle`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_still_note = () => `Nothing moves.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_gentle_note = () => `Things appear as visitors reach them. Nothing follows the scroll.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_own_note = (params) => `${params.style}’s own motion, all of it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_after = () => `Visitors who ask their device for less motion always get Still.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_canvas = () => `The canvas holds still while you edit.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_shows = () => `shows the motion.`
+
+
+/**
+ * @param {{ step: NonNullable<unknown>, style: NonNullable<unknown>, why: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_one = (params) => `“${params.step}” changes nothing in ${params.style}: ${params.why}`
+
+
+/**
+ * @param {{ style: NonNullable<unknown>, why: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_both = (params) => `Neither step changes anything in ${params.style}: ${params.why}`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_no_tints = (params) => `${params.style} has no soft tints.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_no_coloured_bands = (params) => `${params.style} has no coloured bands to bring down.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_no_bands = (params) => `${params.style} draws no colour bands.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_own_rounder = (params) => `these are ${params.style}’s own corners.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_own_brand = (params) => `${params.style} already draws your brand’s own corners.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_own = (params) => `${params.style}’s own`
+
+
+/**
+ * @param {{ voice: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_voice = (params) => `${params.voice}’s`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_own_hidden = () => `, the Style’s default`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_bold = () => `The largest and tightest.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_poster = () => `Capitals, tight and crowding.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_soft = () => `Easy, open leading.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_quiet = () => `Light, with room to breathe.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_none = (params) => `${params.style} keeps its own headlines: its marks are measured against them.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown>, voice: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_dropped = (params) => `${params.style} keeps its own headlines, so ${params.voice}’s headlines came off this page. Undo puts them back.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dials_reset = (params) => `Use ${params.style}’s own for all of these`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dials_reset_done = (params) => `Back to ${params.style}’s own.`
+
+
+/**
+ * @param {{ list: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_page_adjusted = (params) => `Adjusted: ${params.list}.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_page_not_adjusted = (params) => `Not adjusted: ${params.style}’s own throughout.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_colour_muted = () => `Less colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_colour_vivid = () => `More colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_corners_brand = () => `Your brand’s corners`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_corners_rounder = () => `Rounder corners`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_spacing_compact = () => `Small spacing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_spacing_spacious = () => `Large spacing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_drama_calmer = () => `Calmer headlines`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_drama_louder = () => `Louder headlines`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_motion_still = () => `Still`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_motion_gentle = () => `Gentle motion`
+
+
+/**
+ * @param {{ voice: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_facet = (params) => `${params.voice}’s headlines`
 
 
 /**

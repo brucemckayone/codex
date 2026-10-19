@@ -355,6 +355,7 @@
               context={session.context}
               brandOverrides={pageBuilder.pending?.brandOverrides ?? null}
               {theme}
+              onPreview={() => void session.preview()}
             />
           {/if}
         </Tabs.Content>
@@ -480,6 +481,7 @@
   <SectionGallery
     bind:open={pickerOpen}
     style={pageStyle}
+    design={session.page?.design}
     brandOverrides={pageBuilder.pending?.brandOverrides ?? null}
     {theme}
     afterLabel={pickerAfterLabel}

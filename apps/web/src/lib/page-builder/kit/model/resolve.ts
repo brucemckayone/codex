@@ -160,6 +160,21 @@ export function resolveSpacing(
   return dial ?? DEFAULT_SECTION_SPACING;
 }
 
+/**
+ * Which of `resolveSpacing`'s sources gave a section its spacing: its own,
+ * its compact layout, the page's spacing dial, or the kit's default. The
+ * inspector says so beside the control (Codex-61zsk.59), in the same order.
+ */
+export function spacingSource(
+  design: SectionStyle | null | undefined,
+  layout?: string,
+  dial?: PageDialStep<'spacing'>
+): 'section' | 'layout' | 'page' | 'default' {
+  if (isSectionSpacingId(design?.spacing)) return 'section';
+  if (layout === 'compact') return 'layout';
+  return dial ? 'page' : 'default';
+}
+
 /** The sections a page actually renders: enabled, and of a known type. */
 export function renderableSections(page: KitPage): KitSection[] {
   return page.sections.filter(

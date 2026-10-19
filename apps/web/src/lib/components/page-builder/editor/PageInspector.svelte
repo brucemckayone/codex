@@ -2,12 +2,28 @@
   @component PageInspector
 
   The inspector with no section selected: the page as a whole — the Style it
-  is in (with the way to change it), how many sections it has, and the one
+  is in (with the way to change it) and what of it the page adjusts (its
+  dials and headlines, Codex-61zsk.59: one line, no controls, since the Style
+  tab is the one place to change them), how many sections it has, and the one
   thing a creator needs to know to go further: click a section to edit it.
 -->
 <script lang="ts">
-  import { type KitPage, resolveStyle, STYLES } from '$lib/page-builder/kit';
+  import { type KitPage, PAGE_DIALS, type PageDialId, resolveStyle, STYLES } from '$lib/page-builder/kit';
   import * as m from '$paraglide/messages';
+
+  /** Each dial step's name in the page's summary, in the dials' order. */
+  const ADJUSTED: Record<string, () => string> = {
+    'colour:muted': m.studio_page_editor_adjusted_colour_muted,
+    'colour:vivid': m.studio_page_editor_adjusted_colour_vivid,
+    'corners:brand': m.studio_page_editor_adjusted_corners_brand,
+    'corners:rounder': m.studio_page_editor_adjusted_corners_rounder,
+    'spacing:compact': m.studio_page_editor_adjusted_spacing_compact,
+    'spacing:spacious': m.studio_page_editor_adjusted_spacing_spacious,
+    'drama:calmer': m.studio_page_editor_adjusted_drama_calmer,
+    'drama:louder': m.studio_page_editor_adjusted_drama_louder,
+    'motion:still': m.studio_page_editor_adjusted_motion_still,
+    'motion:gentle': m.studio_page_editor_adjusted_motion_gentle,
+  };
 
   interface Props {
     page: KitPage;
@@ -19,6 +35,17 @@
   const style = $derived(STYLES[resolveStyle(page.design)]);
   const total = $derived(page.sections.length);
   const hiddenCount = $derived(page.sections.filter((s) => s.enabled === false).length);
+  const adjusted = $derived.by(() => {
+    const dials: Partial<Record<PageDialId, string>> = page.design.dials ?? {};
+    const parts = (Object.keys(PAGE_DIALS) as PageDialId[])
+      .map((dial) => ADJUSTED[`${dial}:${dials[dial]}`]?.())
+      .filter((part): part is string => Boolean(part));
+    const type = page.design.facets?.type;
+    if (type) parts.push(m.studio_page_editor_adjusted_facet({ voice: STYLES[type].label }));
+    return parts.length > 0
+      ? m.studio_page_editor_page_adjusted({ list: parts.join(' · ') })
+      : m.studio_page_editor_page_not_adjusted({ style: style.label });
+  });
 </script>
 
 <div class="page-inspector">
@@ -30,6 +57,7 @@
     </p>
     <p class="page-inspector__style">{style.label}</p>
     <p class="page-inspector__text">{style.description}</p>
+    <p class="page-inspector__text" data-adjusted>{adjusted}</p>
     <button type="button" class="page-inspector__button" onclick={onChangeStyle}>
       {m.studio_page_editor_change_style()}
     </button>
