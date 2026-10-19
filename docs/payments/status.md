@@ -57,7 +57,6 @@ fixed by PR 2 below. The production checks to run around these releases
 | `Codex-2hxff.32` | P1 | Every one-off content and course price is at least £1.00 (tiers and course plans already are) | [purchases](purchases.md#what-can-be-bought) |
 | `Codex-2hxff.33` | P2 | A fee increase applies 30 days after an email; a decrease at once | [fees-and-splits](fees-and-splits.md#fee-configuration) |
 | `Codex-2hxff.34` | P3 | Creators are reminded monthly about money waiting for them | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
-| `Codex-2hxff.50` | P1 | Course-subscription invoices record their payouts (the charge is found through the invoice's PaymentIntent) | [connect-and-payouts](connect-and-payouts.md#the-payouts-ledger) |
 | `Codex-2hxff.51` | P2 | A subscription refund claws back every slice even when one row fails | [subscriptions](subscriptions.md#refunds) |
 | `Codex-2hxff.52` | P2 | Pausing, resuming, a failed payment and a trial ending work for course subscriptions as for tiers | [subscriptions](subscriptions.md#lifecycle-and-access) |
 

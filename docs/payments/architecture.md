@@ -230,7 +230,7 @@ The rejected alternative was to keep everything in
 | WP | Kind | What | Unblocks / absorbs |
 |---|---|---|---|
 | **WP0** | decision | **Done 2026-10-19.** The owner decided §7 D1–D4, all as recommended. | everything |
-| **WP1** | fix | **Codex-2hxff.50**: one `invoiceCharge` resolver used by both subscription kinds; a fixture with only `payment_intent`. Check the sandbox first; plan a replay for missed charges. | P1 money bug; small |
+| **WP1** | fix | **Done 2026-10-19 (PR for Codex-2hxff.50).** One `invoiceCharge` resolver (`@codex/subscription` `services/invoice-charge.ts`) used by both subscription kinds; fixtures send Stripe's real `payment_intent`-only shape. Sandbox checked: no course subscription exists, so there are no missed charges to replay. | P1 money bug; small |
 | **WP2** | extraction | **Composition root** (C1): one factory for webhooks and crons, sharing the registry's graph; money deps required. | .7 (wiring half), .13 (mailers), .43, CFG-06 |
 | **WP3** | extraction → behaviour | **Clawback engine** (C4): one `reverseCharge` over the ledger for every source, replacing both copies; `refund_reviews` for every source (Codex-in0g4's schema); the refund use case out of the worker. Absorbs .51. | .8 → .10 (refund half) → .9 → .30; .28 after WP6 |
 | **WP4** | extraction → behaviour | **Split and resolvers at one `at`** (C2 + C3): `splitCalculator`, `feeResolver(at)`, `agreementResolver(at)` in `@codex/agreements`; one `RecordSale`/`RecordInvoice` path for all four sale kinds. | .7 (floor everywhere), .19, .17, .18, .49, .33, Codex-rtwpv, -itvh8 |
@@ -304,7 +304,7 @@ From [work §1], plus .50–.52. A bead that names two WPs needs both.
 | Codex-2hxff.47 | A transfer to a replaced Connect account isn't found | WP5 |
 | Codex-2hxff.48 | Failed payout rows retry forever | WP5 (decision D-P2) |
 | Codex-2hxff.49 | A replay re-splits with current fees | WP4 |
-| Codex-2hxff.50 | Course-subscription invoices record no payouts | **WP1** |
+| Codex-2hxff.50 | Course-subscription invoices record no payouts | **WP1, done** |
 | Codex-2hxff.51 | A subscription refund stops at the first failing row | WP3 |
 | Codex-2hxff.52 | Course subscriptions half-wired into the subscription webhook | WP7 |
 
