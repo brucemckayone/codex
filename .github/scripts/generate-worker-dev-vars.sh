@@ -5,8 +5,11 @@
 # Called by CI workflow when running individual worker tests
 #
 # Required environment variables:
-#   DATABASE_URL - Neon database connection string
-#   DB_METHOD - Database connection method (NEON_BRANCH)
+#   DATABASE_URL - Database connection string
+#   DB_METHOD - Database connection method (LOCAL_PROXY in testing.yml since
+#     Codex-75m0t.2; NEON_BRANCH in the manual e2e-* workflows)
+#   DATABASE_URL_LOCAL_PROXY - Required when DB_METHOD=LOCAL_PROXY; written
+#     only when set
 #   BETTER_AUTH_SECRET - Auth secret (optional, has default)
 #   STRIPE_SECRET_KEY - Stripe API key (for ecom-api, organization-api, content-api)
 #   STRIPE_WEBHOOK_SECRET_BOOKING - Stripe webhook secret
@@ -53,6 +56,16 @@ BETTER_AUTH_URL=http://localhost:42069
 AUTH_TRUST_HOST=true
 WORKER_SHARED_SECRET=${WORKER_SHARED_SECRET:-test-worker-shared-secret}
 EOF
+
+# LOCAL_PROXY reads ONLY this key (packages/database/src/config/env.config.ts),
+# and of the workers only media-api's wrangler.jsonc env.test defines it — so
+# without this line every other worker suite throws "DATABASE_URL_LOCAL_PROXY
+# environment variable is required". Written only when set: `.dev.vars.test`
+# overrides env.test key by key, so a bare `KEY=` would REPLACE media-api's
+# env.test value with an empty string (see the media-api case below).
+if [ -n "${DATABASE_URL_LOCAL_PROXY:-}" ]; then
+  echo "DATABASE_URL_LOCAL_PROXY=${DATABASE_URL_LOCAL_PROXY}" >> "${VARS_FILE}"
+fi
 
 # Add worker-specific variables
 case "${WORKER}" in
