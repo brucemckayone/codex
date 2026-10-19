@@ -393,6 +393,33 @@ describe('foldForVisitors: the visitor’s page draws no empty promise', () => {
     expect(ids(preview, { previewFilm: false })).toEqual([]);
   });
 
+  it('folds a Video or Preview section only when its own film is known not to come (Codex-61zsk.57)', () => {
+    const films = studio([
+      section({ id: 'v', type: 'video' }),
+      section({ id: 'r', type: 'preview' }),
+    ]);
+    expect(ids(films)).toEqual(['v', 'r']);
+    expect(ids(films, { introFilm: true, previewFilm: true })).toEqual([
+      'v',
+      'r',
+    ]);
+    expect(ids(films, { introFilm: false })).toEqual(['r']);
+    expect(ids(films, { previewFilm: false })).toEqual(['v']);
+  });
+
+  it('hides a Button that jumps to a folded film section', () => {
+    const page = studio([
+      section({ id: 'v', type: 'video' }),
+      section({
+        id: 'u',
+        type: 'button',
+        props: { action: { kind: 'section', target: 'v' } },
+      }),
+    ]);
+    expect(ids(page)).toEqual(['v', 'u']);
+    expect(ids(page, { introFilm: false })).toEqual([]);
+  });
+
   it('hides a Button whose stored action cannot be read', () => {
     for (const action of [
       { kind: 'script' },

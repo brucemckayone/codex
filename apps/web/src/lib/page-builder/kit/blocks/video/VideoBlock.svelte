@@ -14,12 +14,17 @@
   sends the section whole, the screen holding its ratio (its HTML is the
   final state, 03 §10), and only a film that fails to resolve leaves it to
   fold once the stream settles: the public page never leaves its words above
-  nothing (Codex-61zsk.37). Where the page is looked at (the canvas, a
+  nothing (Codex-61zsk.37). The page folds the section before its bands
+  resolve, by the same rule (`filmToShow`), so the bands either side never
+  meet as one (Codex-61zsk.57); the block's own marker below folds it only
+  when it is mounted outside the page, as in its own tests. Where the page is
+  looked at (the canvas, a
   still thumbnail) the section keeps its screen, the kit's plate in it, and
   on the canvas a prompt for the film. The button row appears only when the
   creator writes one.
 -->
 <script lang="ts">
+  import { filmToShow } from '../../model/films';
   import { hasHead } from '../../model/read';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -49,11 +54,12 @@
   const preview = $derived(settled(context.sellPreview));
   const pending = $derived(preview === undefined);
   const clip = $derived(preview?.intro ?? null);
-  // No film to show: settled with none, or none can come, which the awaited
-  // view knows before the stream settles (Codex-61zsk.40). A film that
-  // arrives anyway still shows.
-  const noneComing = $derived(context.course.filmsAttached?.intro === false);
-  const filmless = $derived(!clip && (!pending || noneComing));
+  // No film to show (`filmToShow`, which the page's fold reads too): settled
+  // with none, or none can come, which the awaited view knows before the
+  // stream settles (Codex-61zsk.40). A film that arrives anyway still shows.
+  const filmless = $derived(
+    filmToShow(context.course.filmsAttached?.intro, preview, 'intro') === false
+  );
   const shown = $derived(!filmless || page.still || !!edit);
   // A section with no film is the creator's alone: the canvas's own.
   const creatorOnly = $derived(filmless ? '' : undefined);

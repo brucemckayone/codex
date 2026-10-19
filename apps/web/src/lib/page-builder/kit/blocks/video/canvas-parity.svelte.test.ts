@@ -2,9 +2,10 @@
  * The canvas draws the public page (contract §6) — for the media blocks, apart
  * from what only a creator needs and a visitor must never see: an empty-media
  * prompt, and (Codex-61zsk.37) a film section with no film, which the public
- * page does not draw at all. Each such element is marked `data-lp-edit-only`;
- * this mirrors `PageRenderer.svelte.test.ts`'s identity check with them
- * removed.
+ * page does not draw at all: it folds the section before its bands resolve
+ * (Codex-61zsk.57). Each empty-media element is marked `data-lp-edit-only`;
+ * this mirrors `PageRenderer.svelte.test.ts`'s identity check with them, and
+ * the folded sections, removed.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -34,7 +35,12 @@ afterEach(() => {
 async function render(
   options: { edit?: PageEdit | null; still?: boolean } = {}
 ) {
-  const page = samplePage('bold', ['video', 'preview', 'instructor', 'stats']);
+  // The film sections come last, and the page sets no dials: the public page
+  // folds them before its bands resolve, so a banded section beside one (after
+  // it, or before it under the vivid colour dial, which reads the next band)
+  // can take another colour there than on the canvas. That difference is the
+  // fold's purpose; this compares the rest.
+  const page = samplePage('bold', ['instructor', 'stats', 'video', 'preview']);
   // No intro, reel, portrait, curriculum or numbers of the creator's own:
   // every block's empty state at once.
   const stats = page.sections.find((section) => section.type === 'stats');
@@ -58,10 +64,14 @@ async function render(
 const band = (root: HTMLElement, type: string) =>
   root.querySelector(`.lp-section[data-lp-type="${type}"]`);
 
+/** The film sections a visitor's page folds when their films are not coming. */
+const FOLDED = ['video', 'preview'];
+
 function withoutEditing(root: HTMLElement, dropCanvasOnly: boolean): string {
   const copy = root.cloneNode(true) as HTMLElement;
   if (dropCanvasOnly) {
     for (const el of copy.querySelectorAll('[data-lp-edit-only]')) el.remove();
+    for (const type of FOLDED) band(copy, type)?.remove();
   }
   for (const el of copy.querySelectorAll('[contenteditable]')) {
     for (const attr of [
@@ -132,6 +142,7 @@ describe('media blocks on the canvas', () => {
   it('draw the public markup, apart from what only a creator sees', async () => {
     const publicRoot = await render();
     expect(publicRoot.querySelector('[data-lp-edit-only]')).toBeNull();
+    for (const type of FOLDED) expect(band(publicRoot, type), type).toBeNull();
     const publicHtml = withoutEditing(publicRoot, false);
     unmount(app);
 
@@ -146,11 +157,9 @@ describe('media blocks on the canvas', () => {
     expect(withoutEditing(canvas, true)).toBe(publicHtml);
   });
 
-  it('with no clip, a film section draws nothing on the public page and its shape in a still thumbnail', async () => {
+  it('with no clip, a film section draws no band on the public page and its shape in a still thumbnail', async () => {
     const publicRoot = await render();
-    for (const type of ['video', 'preview']) {
-      expect(band(publicRoot, type)?.textContent?.trim(), type).toBe('');
-    }
+    for (const type of FOLDED) expect(band(publicRoot, type), type).toBeNull();
     unmount(app);
 
     const thumbnail = await render({ still: true });

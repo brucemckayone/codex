@@ -3591,3 +3591,52 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   - **No new request, no cache change.** The dials and the facet travel in `design`, saved as
     every edit is; the studio is client-rendered, and the panel is mounted only while the Style
     tab is open.
+- **X79 · 2026-10-19 · 3c follow-up · A film section with no film folds before the bands resolve
+  (Codex-61zsk.57, a bug; decided without the owner, with the reasons and what was rejected.)**
+  A Video or Preview section whose film was not coming hid itself in CSS (`.video-none`,
+  `.preview-none`, Codex-61zsk.37), but `resolveSections` still counted it as a band, so the
+  sections either side could take one colour and meet as one slab. Counted across every Style,
+  with a film section between each pair of banded sections after a hero: 151 of 1,800 shapes for
+  Video and 156 of 1,800 for Preview put two bands of one colour together on a visitor's page.
+  Folded first, none does.
+  - **The fold.** `foldForVisitors` drops a Video section when the intro film is known not to
+    come, and a Preview section when the preview film is, with the empty Pictures and Headings
+    and the dead Buttons (X64), so no band rule counts it. A Button that jumps to it folds too, as
+    for any section that is gone. The canvas and stills keep every section, as for every fold:
+    there it asks for its film. So, unlike X64's folds (each a simple section, which never moves
+    a band), this one can recolour an ordinary band: a section after a folded one, or before it
+    under the vivid colour dial, which reads the next band, can take another colour on a
+    visitor's page than on the canvas and stills, while the film is missing.
+  - **The rule, once.** Whether a film is coming is one function, `filmToShow`
+    (`kit/model/films.ts`): here, `true`; known not to come, `false` (the awaited view says none
+    is attached, or the stream settled without it, or failed); on its way, `undefined`. The
+    Video and Preview blocks, a preview Button and the page all read it, so the band rules and
+    a block that hides itself cannot disagree. A block drawn on its own still hides itself.
+  - **Decided without the owner: the fold follows the stream.** The page reads the settled stream
+    (`settled()`, as the blocks do) and folds again when it settles: from the first paint when no
+    film is attached, once the stream settles when an attached film does not come, and back for a
+    film that arrives anyway. On the server nothing has settled, so the first paint folds only
+    what the awaited view knows, and hydration matches it. Rejected: folding once, from
+    `filmsAttached` alone, which would hide a film the creator has just attached while the
+    awaited view still says none (Codex-61zsk.40 keeps that film showing on purpose); and keeping
+    the section in the page but skipping it in the band rules, which would leave a Button that
+    jumps to it pointing at nothing.
+  - **Decided without the owner: a preview Button takes the same rule.** It was dead whenever the
+    awaited view said no film, even when the film then arrived; it now plays a film that arrives
+    anyway, as the Preview section shows it.
+  - **In the browser:** not run. The change is which sections the renderer draws and the colour
+    each band resolves to, both asserted on the real `PageRenderer` in the component tests; the
+    colours themselves are the schemes' own, unchanged.
+  - **Tests** (CI): `films.test.ts` (here, attached or not; none once the stream settles or fails;
+    none from the first paint when none is attached; on its way while pending; each film its
+    own), `simple-sections.test.ts` (Video and Preview fold only for their own film; a Button to
+    a folded section folds), `PageRenderer.svelte.test.ts` (on Clean, Benefits and Testimonials
+    no longer meet as two soft tints, and the canvas keeps the Video; folded from the first paint
+    and back for a film that arrives anyway; held while an attached film is on its way and folded
+    when the stream brings none; Preview the same; the pages meant to draw every section now bring
+    their films), `ButtonBlock.svelte.test.ts` (folded once the stream settles without a film;
+    plays one that arrives anyway) and `canvas-parity.svelte.test.ts` (no band at all for a film
+    section with no film; the canvas, those sections set aside, is the public page). Calibrated: 8
+    plants, the original bug first (Testimonials back to a soft tint beside Benefits), each
+    failing its own tests, every file restored.
+  - **No new request, no cache change.** The page reads the stream the blocks already read.

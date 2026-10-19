@@ -6,6 +6,7 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import type { SellPreview } from '../render/types';
 import { priceWithCadence } from './model/copy';
 import {
   PAGE_STYLE_IDS,
@@ -29,6 +30,16 @@ import type { PageEdit } from './page-context';
 
 let app: ReturnType<typeof mount> | null = null;
 
+/**
+ * The page's films. A visitor's page folds a Video or Preview section whose
+ * film is not coming (Codex-61zsk.57), so a page meant to draw every section
+ * brings both.
+ */
+const FILMS = {
+  intro: { playlistUrl: 'https://cdn.example/intro.m3u8' },
+  reel: { playlistUrl: 'https://cdn.example/reel.m3u8' },
+};
+
 afterEach(() => {
   if (app) unmount(app);
   app = null;
@@ -42,7 +53,7 @@ async function render(props: Record<string, unknown> = {}) {
       page: samplePage('bold'),
       context: sampleContext({
         offer: 'tiers',
-        media: { heroImageUrl: '/hero.jpg' },
+        media: { heroImageUrl: '/hero.jpg', ...FILMS },
       }),
       ...props,
     },
@@ -128,7 +139,7 @@ function everySection(style: (typeof PAGE_STYLE_IDS)[number]): KitPage {
 const pictureContext = () =>
   sampleContext({
     offer: 'tiers',
-    media: { heroImageUrl: '/hero.jpg' },
+    media: { heroImageUrl: '/hero.jpg', ...FILMS },
     mediaBaseUrl: PICTURE_CDN,
   });
 
@@ -185,6 +196,114 @@ describe('PageRenderer', () => {
     ]);
     unmount(app);
     expect(types(await render({ page, still: true }))).toHaveLength(4);
+  });
+
+  describe('a film section with no film (Codex-61zsk.57)', () => {
+    // Clean draws Benefits and Testimonials as soft tints; the Video between
+    // them is what kept them apart.
+    const page = () =>
+      samplePage('clean', ['hero', 'benefits', 'video', 'testimonials']);
+    /** What a visitor sees: a section its block folds away is not displayed. */
+    const seen = (root: HTMLElement) =>
+      [...root.querySelectorAll('.lp-section')]
+        .filter(
+          (s) => !s.querySelector(':scope > .lp-inner > [class$="-none"]')
+        )
+        .map(
+          (s) =>
+            `${s.getAttribute('data-lp-type')}:${s.getAttribute('data-lp-scheme')}`
+        );
+    const settling = (attached: boolean) => {
+      let settle: (value: SellPreview | null) => void = () => {};
+      const context = {
+        ...sampleContext({
+          offer: 'tiers',
+          course: {
+            filmsAttached: { hero: false, intro: attached, reel: false },
+          },
+        }),
+        sellPreview: new Promise<SellPreview | null>((resolve) => {
+          settle = resolve;
+        }),
+      };
+      return { context, settle: (value: SellPreview | null) => settle(value) };
+    };
+    const settled = async () => {
+      await tick();
+      await Promise.resolve();
+      flushSync();
+    };
+
+    it('folds before the bands resolve, so the bands either side never meet in one colour', async () => {
+      const root = await render({
+        page: page(),
+        context: sampleContext({ offer: 'tiers' }),
+      });
+      expect(seen(root).slice(1)).toEqual([
+        'benefits:soft',
+        'testimonials:base',
+      ]);
+      expect(root.querySelector('#video')).toBeNull();
+      unmount(app);
+      // The canvas keeps it, asking for the film.
+      const canvas = await render({
+        page: page(),
+        context: sampleContext({ offer: 'tiers' }),
+        edit: { commit: () => {} },
+      });
+      expect(canvas.querySelector('#video')).not.toBeNull();
+    });
+
+    it('folds from the first paint when none is attached, and comes back for a film that arrives anyway', async () => {
+      const { context, settle } = settling(false);
+      const root = await render({ page: page(), context });
+      expect(root.querySelector('#video')).toBeNull();
+      const none = await sampleContext().sellPreview;
+      settle({ ...(none as SellPreview), intro: FILMS.intro });
+      await settled();
+      expect(root.querySelector('#video .lp-media')).not.toBeNull();
+      expect(seen(root).map((s) => s.split(':')[0])).toEqual([
+        'hero',
+        'benefits',
+        'video',
+        'testimonials',
+      ]);
+    });
+
+    it('holds its place while an attached film is on its way, and folds if the stream brings none', async () => {
+      const { context, settle } = settling(true);
+      const root = await render({ page: page(), context });
+      expect(
+        root.querySelector('#video .lp-media[data-pending]')
+      ).not.toBeNull();
+      settle(await sampleContext().sellPreview);
+      await settled();
+      expect(root.querySelector('#video')).toBeNull();
+      expect(seen(root).slice(1)).toEqual([
+        'benefits:soft',
+        'testimonials:base',
+      ]);
+    });
+
+    it('folds a Preview section whose clip is not coming, the same way', async () => {
+      const preview = samplePage('clean', [
+        'hero',
+        'benefits',
+        'preview',
+        'testimonials',
+      ]);
+      const root = await render({
+        page: preview,
+        context: sampleContext({ offer: 'tiers' }),
+      });
+      expect(root.querySelector('#preview')).toBeNull();
+      unmount(app);
+      const withClip = await render({
+        page: preview,
+        context: sampleContext({ offer: 'tiers', media: { reel: FILMS.reel } }),
+      });
+      expect(withClip.querySelector('#preview .lp-media')).not.toBeNull();
+    });
   });
 
   // Every Style, because each defaults different layouts (Clean/Soft reach
@@ -540,7 +659,8 @@ describe('PageRenderer', () => {
       };
     }
 
-    const context = () => sampleContext({ offer: 'tiers', mediaBaseUrl: CDN });
+    const context = () =>
+      sampleContext({ offer: 'tiers', media: FILMS, mediaBaseUrl: CDN });
 
     it('flags a live page that has a Moving background section, in the look its Style asks for, blurred when it names none', async () => {
       // Bold asks for the hazy look (03 X59).

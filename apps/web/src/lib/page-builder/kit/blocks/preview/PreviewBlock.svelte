@@ -14,12 +14,17 @@
   folds the band from the first paint. With one, it sends the section whole,
   the frame holding its space (its HTML is the final state, 03 §10), and only
   a clip that fails to resolve leaves it to fold once the stream settles: the
-  public page never leaves its words above nothing (Codex-61zsk.37). Where
+  public page never leaves its words above nothing (Codex-61zsk.37). The page
+  folds the section before its bands resolve, by the same rule (`filmToShow`),
+  so the bands either side never meet as one (Codex-61zsk.57); the block's
+  own marker below folds it only when it is mounted outside the page, as in
+  its own tests. Where
   the page is looked at (the canvas, a still thumbnail) the
   section keeps its frame, the kit's plate in it, and on the canvas a prompt
   for the clip. The button row appears only when the creator writes one.
 -->
 <script lang="ts">
+  import { filmToShow } from '../../model/films';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -49,11 +54,12 @@
   const preview = $derived(settled(context.sellPreview));
   const pending = $derived(preview === undefined);
   const clip = $derived(preview?.reel ?? null);
-  // No clip to show: settled with none, or none can come, which the awaited
-  // view knows before the stream settles (Codex-61zsk.40). A clip that
-  // arrives anyway still shows.
-  const noneComing = $derived(context.course.filmsAttached?.reel === false);
-  const clipless = $derived(!clip && (!pending || noneComing));
+  // No clip to show (`filmToShow`, which the page's fold reads too): settled
+  // with none, or none can come, which the awaited view knows before the
+  // stream settles (Codex-61zsk.40). A clip that arrives anyway still shows.
+  const clipless = $derived(
+    filmToShow(context.course.filmsAttached?.reel, preview, 'reel') === false
+  );
   const shown = $derived(!clipless || page.still || !!edit);
   // A section with no clip is the creator's alone: the canvas's own.
   const creatorOnly = $derived(clipless ? '' : undefined);

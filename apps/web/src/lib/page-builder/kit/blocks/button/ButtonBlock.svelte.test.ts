@@ -196,11 +196,10 @@ describe('ButtonBlock: preview', () => {
     await render({ props: { action: { kind: 'preview' } }, attached: false });
     expect(button()).toBeNull();
     unmount(app);
-    // Known only once the stream settles: the band folds then, with
-    // nothing drawn in it (`.lp-section:has(.button-none)` is not displayed).
+    // Known only once the stream settles: the page folds it then, before
+    // the bands resolve again (Codex-61zsk.57).
     await render({ props: { action: { kind: 'preview' } } });
-    expect(button()?.querySelector('.lp-inner > .button-none')).not.toBeNull();
-    expect(button()?.querySelector('.lp-button')).toBeNull();
+    expect(button()).toBeNull();
     unmount(app);
     await render({
       props: { action: { kind: 'preview' } },
@@ -208,6 +207,16 @@ describe('ButtonBlock: preview', () => {
       edit: editing,
     });
     expect(button()?.textContent).toContain(BUTTON_COPY.noPreview);
+  });
+
+  it('a film that arrives although none was attached: the Button plays it, as its section shows it', async () => {
+    await render({
+      props: { action: { kind: 'preview' } },
+      reel: FILM,
+      attached: false,
+    });
+    expect(button()?.querySelector('button.lp-button')).not.toBeNull();
+    expect(button()?.querySelector('.button-none')).toBeNull();
   });
 });
 

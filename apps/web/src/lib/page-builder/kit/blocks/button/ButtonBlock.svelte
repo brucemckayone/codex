@@ -22,12 +22,15 @@
   does not have): the live page does not draw the Button at all. Its label
   was written for that destination, so it is hidden rather than sent to the
   checkout under the wrong words. `foldForVisitors` drops it before the bands
-  resolve; a film found missing only once the stream settles hides it here.
-  The canvas keeps it and says why visitors will not see it.
+  resolve, a film found missing once the stream settles included (the page
+  reads the same rule, `filmToShow`); a Button mounted outside the page, as
+  in its own tests, hides itself here. The canvas keeps it and says why
+  visitors will not see it.
 -->
 <script lang="ts">
   import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
   import { actionKind } from '../../model/button-action';
+  import { filmToShow } from '../../model/films';
   import { pricingView } from '../../model/offer';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -58,13 +61,13 @@
   );
 
   // preview: the film once the stream settles (`undefined` until then and on
-  // the server, `null` when the read failed); none at all when the awaited
-  // view already knows there is no film.
+  // the server, `null` when the read failed); none when it is known not to
+  // come, by the rule the page's fold reads (`filmToShow`).
   const preview = $derived(kind === 'preview' ? settled(context.sellPreview) : undefined);
   const film = $derived(preview?.reel ?? null);
   const noFilm = $derived(
     kind === 'preview' &&
-      (context.course.filmsAttached?.reel === false || (preview !== undefined && !film))
+      filmToShow(context.course.filmsAttached?.reel, preview, 'reel') === false
   );
   let playing = $state(false);
 
@@ -82,7 +85,7 @@
 </script>
 
 {#if !shown}
-  <!-- Nowhere to go, found once the stream settled: no band either. -->
+  <!-- Nowhere to go, outside the page (on it, the page has folded it): no band either. -->
   <span class="button-none" hidden></span>
 {:else}
   <div class="button" data-layout={section.layout} data-action={kind}>
