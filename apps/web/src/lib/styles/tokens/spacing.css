@@ -3,7 +3,9 @@
   /* Base Unit (multiplied by density scale) */
   --space-unit: calc(0.25rem * var(--brand-density-scale, 1));
 
-  --space-0: 0;
+  /* A length, never a bare 0: a <number> in min()/max()/clamp() beside a
+     length voids the whole declaration (Codex-61zsk.67, token-math.test.ts). */
+  --space-0: 0px;
   --space-0-5: calc(var(--space-unit) * 0.5); /* 2px * density */
   --space-1: var(--space-unit);         /* 4px * density */
   --space-1-5: calc(var(--space-unit) * 1.5); /* 6px * density */
