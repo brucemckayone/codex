@@ -57,9 +57,11 @@
   const tag = $derived(`h${level}`);
   const attrs = $derived(editAttrs(type, field, edit));
   /* Every heading is weighed, and drawn no larger than its widest run fits
-     its room (below, 03 X66, X71), but the hero's headline: its own layouts
-     size it (X60), and with no weight it is drawn at the size they give it. */
-  const run = $derived(size === 'display' && type === 'hero' ? undefined : widestRun(text));
+     its room (below, 03 X66, X71). The hero's headline too: where it is wide
+     its layouts size it (X34, X60) and HeroBlock holds it there, but on a
+     phone nothing did, and Bold's and Poster's display drew a long word past
+     the column (03 X74). */
+  const run = $derived(widestRun(text));
 </script>
 
 <svelte:element
@@ -112,12 +114,15 @@
   /* `--lp-display-scale` is a layout's hook (a split hero draws the display
      size smaller): a separate property, because re-declaring
      `--lp-size-display` in terms of itself would be a cycle.
+     `--lp-type-fit` is a borrowed Type's (03 X74): the factor that fits its
+     hero to another Style's column, measured per pair and layout, and unset
+     on a page's own Type.
      A display statement is fitted as a section heading is (below, 03 X71):
      its room is the section's column, or the one its layout names, and it is
      never drawn smaller than a title. A fixed size cut words: Bold's problem
      statement draws "Transformation:" wider than a phone's column. */
   .lp-heading[data-size='display'] {
-    --_own: calc(var(--lp-size-display) * var(--lp-display-scale, 1));
+    --_own: calc(var(--lp-size-display) * var(--lp-display-scale, 1) * var(--lp-type-fit, 1));
     --_column: min(
       var(--lp-column, 100cqi),
       var(--lp-heading-column, var(--lp-column, 100cqi))

@@ -15,7 +15,8 @@
  *
  * TYPE is how the words are set: their sizes, weights, case, tracking,
  * leading and hyphenation, a line's measure in `ch`, the hero's fit
- * (`--lp-display-scale`) and the heading fit's face and run (Heading.svelte).
+ * (`--lp-display-scale`, and a borrowed Type's factor, `--lp-type-fit`, X74)
+ * and the heading fit's face and run (Heading.svelte).
  * Spacing stays the Style's, and so do a centred line's balance
  * (`text-wrap`), a title's lift (a layout's hook, Heading.svelte), a button
  * drawn as a link (`text-decoration`) and a light behind a title
@@ -26,7 +27,12 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { type CssRule, componentRules, sheetRules } from '../blocks/testing';
-import { PAGE_STYLE_IDS, TYPE_FACETS } from '../model/ids';
+import {
+  PAGE_STYLE_IDS,
+  type PageStyleId,
+  TYPE_FACET_BASES,
+  TYPE_FACETS,
+} from '../model/ids';
 
 const STYLES = dirname(fileURLToPath(import.meta.url));
 const KIT = dirname(STYLES);
@@ -34,7 +40,7 @@ const KIT = dirname(STYLES);
 const TYPE_PROPERTY =
   /^(font|font-[a-z-]+|letter-spacing|line-height|text-transform|hyphens|hyphenate-[a-z-]+)$/;
 const TYPE_TOKEN =
-  /^--lp-(size|leading|tracking|weight|case|font)-|^--lp-(display-scale|heading-face|heading-run)$|^--lp-button-(size|weight|tracking)$|^--lp-measure|^--_figure$/;
+  /^--lp-(size|leading|tracking|weight|case|font)-|^--lp-(display-scale|type-fit|heading-face|heading-run)$|^--lp-button-(size|weight|tracking)$|^--lp-measure|^--_figure$/;
 
 /** A type declaration, as the header files it. */
 function isType(property: string, value: string): boolean {
@@ -53,12 +59,6 @@ const DEVICES: Record<
   string,
   { style: string; selector: RegExp; reason: string }
 > = {
-  H1: {
-    style: 'bold',
-    selector: /\.hero__enter-h$/,
-    reason:
-      'the lift’s clip is measured in the headline’s em: Bold’s Motion, read from the Type’s size',
-  },
   H9: {
     style: 'bold',
     selector: /\.timeline__marker$/,
@@ -186,5 +186,59 @@ describe('one owner per token (03 X73)', () => {
     expect(
       [...declared('type-facet')].filter((token) => styles.has(token))
     ).toEqual([]);
+  });
+});
+
+/**
+ * A borrowed Type's fit (03 X74): a factor on its hero, measured per pair and
+ * layout (`type-fit.spec.ts`), declared in the Type's sheet and keyed on the
+ * Type with its base inside `:where()`, so it weighs what the Type's own rules
+ * weigh and never reaches a page's own Type. A pair whose hero would need a
+ * factor under the floor is not offered.
+ */
+const FIT_FLOOR = 0.85;
+const BASE_KEY = /:where\(\[data-lp-style='(\w+)'\]\)/;
+const HERO_COPY =
+  /\.lp-section\[data-lp-type='hero'\] \.hero-(statement|split__copy|cover__copy|centered|poster):has\(> \.hero__headline\)$/;
+
+describe('a borrowed Type’s fit (03 X74)', () => {
+  const fits = RULES.filter((r) => r.decls.has('--lp-type-fit'));
+  const baseOf = (rule: Keyed) =>
+    rule.selector.match(BASE_KEY)?.[1] as PageStyleId | undefined;
+
+  it('reads the factors it guards', () => {
+    expect(fits.length).toBeGreaterThan(0);
+  });
+
+  it('fits only a pair the allow-list offers, in the Type’s sheet', () => {
+    for (const rule of fits) {
+      const base = baseOf(rule);
+      expect(rule.types, where(rule)).toHaveLength(1);
+      expect(base, where(rule)).toBeDefined();
+      expect(base, where(rule)).not.toBe(rule.types[0]);
+      expect(TYPE_FACET_BASES[base as PageStyleId], where(rule)).toContain(
+        rule.types[0]
+      );
+      expect(rule.file, where(rule)).toBe(`styles/style-${rule.types[0]}.css`);
+    }
+  });
+
+  it('only draws a hero smaller, where it is wide, on its words', () => {
+    for (const rule of fits) {
+      const fit = Number(rule.decls.get('--lp-type-fit'));
+      expect(fit >= FIT_FLOOR && fit < 1, `${where(rule)}: ${fit}`).toBe(true);
+      expect(rule.within, where(rule)).toEqual([
+        '@container (min-width: 56rem)',
+      ]);
+      expect(rule.selector, where(rule)).toMatch(HERO_COPY);
+    }
+  });
+
+  it('fits each pair and layout once', () => {
+    const keys = fits.map(
+      (r) =>
+        `${r.types[0]} on ${baseOf(r)}: ${r.selector.match(HERO_COPY)?.[1]}`
+    );
+    expect(keys.length).toBe(new Set(keys).size);
   });
 });

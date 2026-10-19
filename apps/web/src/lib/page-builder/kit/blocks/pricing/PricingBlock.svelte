@@ -223,35 +223,45 @@
   }
 
   /* ── cards ─────────────────────────────────────────────────────────────── */
+  /* A card's width (`--_track`), which its name's room is read from
+     (03 X71): its share of the cards, `--_n` across, which draws the tracks
+     too. A lone card is held to the lead's measure, in the body's `ch`,
+     which a title's room reads as its box does (in `font-size` a `ch` is
+     the parent's face). */
   .pricing__cards {
+    --_n: 1;
+    --_track: calc((var(--lp-column) - (var(--_n) - 1) * var(--lp-gap)) / var(--_n));
     display: grid;
+    grid-template-columns: repeat(var(--_n), minmax(0, 1fr));
     gap: var(--lp-gap);
     align-items: stretch;
   }
 
   .pricing__cards[data-count='1'] {
+    --_track: min(var(--lp-column), var(--lp-measure-lead) + var(--space-16));
     max-inline-size: calc(var(--lp-measure-lead) + var(--space-16));
   }
 
   @container (min-width: 44rem) {
     .pricing__cards:not([data-count='1']) {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      --_n: 2;
     }
   }
 
   @container (min-width: 66rem) {
     .pricing__cards[data-count='3'],
     .pricing__cards[data-count='5'] {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      --_n: 3;
     }
 
     .pricing__cards[data-count='4'] {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      --_n: 4;
     }
   }
 
   /* ── focus ─────────────────────────────────────────────────────────────── */
   .pricing__focus {
+    --_track: var(--lp-column);
     display: grid;
     gap: var(--space-6);
   }
@@ -262,6 +272,10 @@
       grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
       align-items: start;
       column-gap: calc(var(--lp-gap) * 1.5);
+    }
+
+    .pricing[data-layout='focus'] > .pricing__focus {
+      --_track: calc((var(--lp-column) - var(--lp-gap) * 1.5) * 7 / 12);
     }
 
     .pricing[data-layout='focus'] > .pricing__head {

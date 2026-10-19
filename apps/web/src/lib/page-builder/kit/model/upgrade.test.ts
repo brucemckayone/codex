@@ -1094,8 +1094,8 @@ describe("upgradePage · the page's dials (03 X61)", () => {
 
 describe("upgradePage · the page's Type (03 X73)", () => {
   // A Type the page's Style may not take reads as the Style's own and leaves
-  // no key, so the editor's next save drops it. The allow-list is empty until
-  // each pair is proven (`readPageFacets` is tested with a list in facets.test.ts).
+  // no key, so the editor's next save drops it. Path takes no Type (03 X74);
+  // `readPageFacets` is tested with a list of its own in facets.test.ts.
   it('drops a Type the Style may not take, an unknown one, and a bag that is not one', () => {
     for (const facets of [
       { type: 'poster' },
@@ -1105,20 +1105,37 @@ describe("upgradePage · the page's Type (03 X73)", () => {
       {},
     ])
       expect(
-        upgradePage({ design: { style: 'bold', facets }, sections: [] }).design
-      ).toEqual({ style: 'bold' });
+        upgradePage({ design: { style: 'path', facets }, sections: [] }).design
+      ).toEqual({ style: 'path' });
   });
 
   it('keeps the dials beside a Type it drops', () => {
     expect(
       upgradePage({
         design: {
-          style: 'soft',
+          style: 'path',
           dials: { drama: 'louder' },
           facets: { type: 'bold' },
         },
         sections: [],
       }).design
-    ).toEqual({ style: 'soft', dials: { drama: 'louder' } });
+    ).toEqual({ style: 'path', dials: { drama: 'louder' } });
+  });
+
+  it('carries a Type its Style may take, beside the dials', () => {
+    expect(
+      upgradePage({
+        design: {
+          style: 'bold',
+          dials: { drama: 'louder' },
+          facets: { type: 'poster' },
+        },
+        sections: [],
+      }).design
+    ).toEqual({
+      style: 'bold',
+      dials: { drama: 'louder' },
+      facets: { type: 'poster' },
+    });
   });
 });

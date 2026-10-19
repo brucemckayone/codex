@@ -20,6 +20,8 @@
       Style, offered or not, so a pair is proven before the allow-list
       offers it)
     ?img=1..6 (the hero's photo; every picture field takes the next ones)
+    ?eyebrow=<text> (the hero's eyebrow, which the sample leaves empty: a
+      chip on Soft and Poster, so their tallest hero)
     ?edit=1 (inline-edit attributes on)   ?chrome=0 (hide the studio chrome)
 -->
 <script lang="ts">
@@ -175,8 +177,19 @@
     return isTypeFacet(type) ? type : undefined;
   });
 
+  /** `?eyebrow=Six weeks, online`: cut to the field's 60 characters. */
+  const eyebrow = $derived(param('eyebrow').slice(0, 60));
+
   const kitPage: KitPage = $derived.by(() => {
-    const plain = only ? samplePage(style, only) : samplePage(style);
+    const drawn = only ? samplePage(style, only) : samplePage(style);
+    const plain = eyebrow
+      ? {
+          ...drawn,
+          sections: drawn.sections.map((section) =>
+            section.type === 'hero' ? { ...section, props: { ...section.props, eyebrow } } : section
+          ),
+        }
+      : drawn;
     const pictured = withMedia ? withSamplePictures(plain, pictures) : plain;
     const sample = dials ? { ...pictured, design: { ...pictured.design, dials } } : pictured;
     if (!only) return sample;

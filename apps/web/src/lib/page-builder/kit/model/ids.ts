@@ -84,21 +84,25 @@ export type TypeFacet = (typeof TYPE_FACETS)[number];
 export type PageFacets = { type?: TypeFacet };
 
 /**
- * The Types each Style may take: the allow-list (03 X73). A pair is listed
- * only once it is proven (its hero fit, the louder sweep), so a pair not
- * listed is never offered and never drawn. Empty until the proofs land.
+ * The Types each Style may take: the allow-list (03 X73), as measured (X74).
+ * A pair is listed only once it is proven (its hero fit, its entrance's clip,
+ * the louder sweep), so a pair not listed is never offered and never drawn.
+ * Off it, as their heroes would need a factor under 0.85 (with the hero's
+ * eyebrow or without it): Poster's Type on Clean's page and on Soft's, Bold's
+ * on Soft's, and Bold's and Poster's on Quiet's. Path and Studio take none,
+ * their marks reading their own Type's numbers.
  */
 export const TYPE_FACET_BASES: Readonly<
   Record<PageStyleId, readonly TypeFacet[]>
 > = {
-  bold: [],
-  clean: [],
-  soft: [],
-  cinematic: [],
+  bold: ['poster', 'soft', 'quiet'],
+  clean: ['bold', 'soft', 'quiet'],
+  soft: ['quiet'],
+  cinematic: ['bold', 'poster', 'soft', 'quiet'],
   path: [],
-  poster: [],
+  poster: ['bold', 'soft', 'quiet'],
   studio: [],
-  quiet: [],
+  quiet: ['soft'],
 };
 
 /**

@@ -7,7 +7,11 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import { priceWithCadence } from './model/copy';
-import { PAGE_STYLE_IDS, type SectionTypeId } from './model/ids';
+import {
+  PAGE_STYLE_IDS,
+  type PageStyleId,
+  type SectionTypeId,
+} from './model/ids';
 import { pricingView } from './model/offer';
 import { SIMPLE_SECTIONS } from './model/resolve';
 import { sampleContext, samplePage } from './model/sample';
@@ -467,7 +471,7 @@ describe('PageRenderer', () => {
   // that names none must still name its own: an unset root would draw no
   // Style's type at all.
   describe("the page's Type (03 X73)", () => {
-    const typed = (style: 'bold' | 'soft', facets: unknown): KitPage => {
+    const typed = (style: PageStyleId, facets: unknown): KitPage => {
       const page = samplePage(style);
       return { ...page, design: { ...page.design, facets: facets as never } };
     };
@@ -479,15 +483,23 @@ describe('PageRenderer', () => {
       expect(root.dataset.lpTypeFacet).toBe(style);
     });
 
-    // The allow-list is empty until each pair is proven, so every pair is
-    // one the Style may not take, and the page draws its own.
+    // Path takes no Type (its route reads its own numbers, 03 X74), so a
+    // Type on Path's page is always one its Style may not take.
     it.each([
-      ['a Type the Style may not take yet', { type: 'poster' }],
+      ['a Type the Style may not take', { type: 'poster' }],
       ['a Type that is no Type', { type: 'path' }],
       ['a bag that is not one', 'poster'],
     ])('draws its own Type for %s', async (_, facets) => {
-      const root = await render({ page: typed('bold', facets) });
-      expect(root.dataset.lpTypeFacet).toBe('bold');
+      const root = await render({ page: typed('path', facets) });
+      expect(root.dataset.lpTypeFacet).toBe('path');
+    });
+
+    it('draws a Type its Style may take, keeping its own Style', async () => {
+      const root = await render({ page: typed('bold', { type: 'poster' }) });
+      expect([root.dataset.lpStyle, root.dataset.lpTypeFacet]).toEqual([
+        'bold',
+        'poster',
+      ]);
     });
 
     it('draws the gallery’s proof Type whatever the list says', async () => {

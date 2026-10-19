@@ -113,10 +113,14 @@
 /* Risen from behind a line just under its own last baseline. The clip's foot
    and the travel move by the same amount (100% + 0.3em between them at
    every frame), so the line stands still while the words rise through it
-   and the first line surfaces first. The overhang is 0.3em of the HEADLINE
-   (its wrapper takes the display size below): at leading under 1 the
+   and the first line surfaces first. The overhang is in the HEADLINE's em
+   (its wrapper takes the display size, HeroBlock): at leading under 1 the
    glyphs stand past their line box, and a clip in the body's em would keep
-   the descenders cut after the lift ends. */
+   the descenders cut after the lift ends. The hero keeps its last frame, so
+   its clip stays as long as the page is open: 0.3em under the last line, and
+   a whole em over the first, where a mark over a capital stands (Anton's
+   É, Å and Ö reach 0.38em past the line box at this leading; 03 X74). The
+   top opens only as the words rise, so the first frame still shows nothing. */
 @keyframes lp-bold-lift {
   from {
     translate: 0 calc(100% + 0.6em);
@@ -125,12 +129,8 @@
 
   to {
     translate: 0 0;
-    clip-path: inset(-0.3em -0.15em);
+    clip-path: inset(-1em -0.15em -0.3em);
   }
-}
-
-:is(.lp, #lp-style)[data-lp-style='bold'] .hero__enter-h {
-  font-size: calc(var(--lp-size-display) * var(--lp-display-scale, 1));
 }
 
 /* ── a long promise steps down ───────────────────────────────────────────── */
@@ -226,6 +226,78 @@
       .hero-centered:has(> .hero__headline) {
       --lp-display-scale: calc(0.84 * min(1, pow(57 / var(--lp-heading-chars, 120), 0.55)));
     }
+  }
+}
+
+/* ── on another Style's page (03 X74) ─────────────────────────────────────── */
+/* Bold's hero was fitted to Bold's own column and spacing (above). On a page
+   that borrows the Type the line is the page's, so each pair and layout that
+   needs it draws the hero smaller by a factor: the largest at which it ends
+   no further past a 1440 × 900 fold, and cuts no word, that the page's own
+   Type does, at every length from 20 to 120 in four word families and two
+   faces, with the hero's eyebrow and without it, with 1% to spare
+   (`type-fit.spec.ts`). A pair that holds at full size has none, and a page's
+   own Type never has one. The page's Style sits inside `:where()`, so each
+   weighs what the Type's own rules weigh. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
+    --lp-type-fit: 0.93;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.88;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-cover__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.97;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    --lp-type-fit: 0.91;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-poster:has(> .hero__headline) {
+    --lp-type-fit: 0.93;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
+    --lp-type-fit: 0.94;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.97;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    --lp-type-fit: 0.95;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
+    --lp-type-fit: 0.98;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.97;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    --lp-type-fit: 0.95;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-poster:has(> .hero__headline) {
+    --lp-type-fit: 0.98;
   }
 }
 

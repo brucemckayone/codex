@@ -1,8 +1,8 @@
 /**
  * The Type facet's reader (03 X73): a page's Type is drawn only where its
  * Style may take it, so a pair not on the allow-list, or taken off it later,
- * reads as the Style's own. The list is empty until each pair is proven, so
- * these tests read through one of their own.
+ * reads as the Style's own. These tests read through a list of their own,
+ * and pin the real one, the measured menu (03 X74).
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -12,9 +12,16 @@ import {
   type TypeFacet,
 } from './ids';
 
+/** A list of the tests' own, whatever the real one offers. */
 const LIST: Readonly<Record<PageStyleId, readonly TypeFacet[]>> = {
-  ...TYPE_FACET_BASES,
+  bold: [],
   clean: ['poster', 'soft'],
+  soft: [],
+  cinematic: [],
+  path: [],
+  poster: [],
+  studio: [],
+  quiet: [],
 };
 
 describe('readPageFacets', () => {
@@ -50,8 +57,30 @@ describe('readPageFacets', () => {
     });
   });
 
-  it('reads the real list by default, which offers nothing until a pair is proven', () => {
-    expect(Object.values(TYPE_FACET_BASES).flat()).toEqual([]);
-    expect(readPageFacets({ type: 'poster' }, 'clean')).toBeUndefined();
+  it('reads the real list by default: the menu, as measured (03 X74)', () => {
+    // A change here is a change to what creators are offered: re-run
+    // type-fit.spec.ts, type-lift.spec.ts and louder-fit.spec.ts's Type axis.
+    expect(TYPE_FACET_BASES).toEqual({
+      bold: ['poster', 'soft', 'quiet'],
+      clean: ['bold', 'soft', 'quiet'],
+      soft: ['quiet'],
+      cinematic: ['bold', 'poster', 'soft', 'quiet'],
+      path: [],
+      poster: ['bold', 'soft', 'quiet'],
+      studio: [],
+      quiet: ['soft'],
+    });
+    for (const [style, types] of Object.entries(TYPE_FACET_BASES))
+      for (const type of types)
+        expect(readPageFacets({ type }, style as PageStyleId)).toEqual({
+          type,
+        });
+  });
+
+  it('offers no Style its own Type, and Path and Studio none', () => {
+    for (const [style, types] of Object.entries(TYPE_FACET_BASES))
+      expect(types, style).not.toContain(style);
+    expect(TYPE_FACET_BASES.path).toEqual([]);
+    expect(TYPE_FACET_BASES.studio).toEqual([]);
   });
 });
