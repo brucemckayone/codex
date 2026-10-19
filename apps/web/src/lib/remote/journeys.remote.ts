@@ -1212,8 +1212,8 @@ export const deleteJourneyHeroImage = command(
  * `signatureMediaId` points at a table CHECK-constrained to ('video','audio'), so
  * the "signature" a creator could pick there was a VIDEO's poster frame — which is
  * not a thing anyone signs a letter with. This writes
- * `courses.signatureImageKey`, the first link in A32's chain, so the two coexist
- * and clearing the upload degrades to the ref rather than to nothing.
+ * `courses.signatureImageKey`, the signature's only source since Codex-61zsk.47
+ * (the ref is retired: kept, never read for the sign-off).
  *
  * The field is named `image` to match the worker's `files` key, as the hero does.
  */
@@ -1261,9 +1261,8 @@ export const uploadJourneySignatureImageForm = form(
 /**
  * Clear the course's uploaded signature.
  *
- * NOT the same as "the guide has no signature": clearing drops back to A32's next
- * link, the signature media ref's poster still, and only then to whatever the
- * composition draws without one.
+ * The guide then signs off with the typeset name: the upload is the signature's
+ * only source (Codex-61zsk.47), so nothing stands in.
  */
 export const deleteJourneySignatureImage = command(
   journeyPageIdSchema,

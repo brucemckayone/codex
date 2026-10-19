@@ -597,8 +597,9 @@ export const updateJourneySellMediaBodySchema = z
     guidePortraitMediaId: uuidSchema.nullable().default(null),
     // A27 (Codex-wqxv4): the hero still and the guide's signature. Same
     // total-write, `.nullable().default(null)` treatment as the four above, so an
-    // omitted slot CLEARS. Both are `media_items` refs — the still resolved is
-    // the picked item's thumbnail, since `media_items` is video/audio only.
+    // omitted slot CLEARS. Both are `media_items` refs. The hero's still is the
+    // picked item's thumbnail; the signature's is never read, as that slot is
+    // retired (Codex-61zsk.47), but it is still sent back, so it is kept.
     heroMediaId: uuidSchema.nullable().default(null),
     signatureMediaId: uuidSchema.nullable().default(null),
   })

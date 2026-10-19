@@ -1717,9 +1717,8 @@ export function createServerApi(
         }),
 
       /**
-       * Clear the course's signature. The guide then falls back down A32's chain
-       * — the signature media ref's poster still, then whatever the composition
-       * draws without one — so clearing this is not the same as having none.
+       * Clear the course's signature. The guide then signs off with the typeset
+       * name: the upload is the signature's only source (Codex-61zsk.47).
        */
       deleteJourneySignatureImage: (organizationId: string, pageId: string) =>
         request<void>(

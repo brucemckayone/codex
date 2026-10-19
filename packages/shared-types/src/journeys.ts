@@ -1111,7 +1111,11 @@ export interface JourneySellMedia {
    * `media` design axis had nothing to act on in the page's loudest section.
    */
   heroMediaId: string | null;
-  /** The guide's SIGNATURE mark (`courses.signatureMediaId`, A27) — `guide.letter`'s sign-off. */
+  /**
+   * The retired "Signature film" (`courses.signatureMediaId`, A27): loaded and
+   * saved so nothing picked is lost, never read for the sign-off
+   * (Codex-61zsk.47). The signature is `signatureImageUrl`'s upload.
+   */
   signatureMediaId: string | null;
   /** Cover CDN URL (`md.webp`), or null when no cover is uploaded. */
   coverImageUrl: string | null;
@@ -1144,7 +1148,7 @@ export interface JourneySellMedia {
    * The UPLOAD ONLY, for the identical reason as {@link heroImageUrl}: the
    * panel's Replace / Remove act on the uploaded file, so a value that could also
    * be a video's poster frame would offer a Remove that removes nothing.
-   * `CourseSellPreview.signatureUrl` owns the chain.
+   * Publicly the signature is this upload too (`CourseSellPreview.signatureUrl`).
    *
    * OPTIONAL-additive, same deployment-skew reason as the two above.
    */
@@ -1289,18 +1293,12 @@ export interface CourseSellPreview {
    * The guide's SIGNATURE mark — a public CDN URL, or null when there is none,
    * which leaves `guide.letter` signed with the typeset name alone.
    *
-   * Resolved down an ORDERED chain, uploaded first, exactly as {@link
-   * heroImageUrl} is (Codex-wqxv4's named-slot half):
-   *
-   *   signatureImageKey (an uploaded PNG/JPEG/WebP, `md.webp`)
-   *     ?? signatureMediaId's poster frame (a video's `thumbnailKey`, A27)
-   *       ?? nothing
-   *
-   * The uploaded link had to exist for this field to be usable at all, not merely
-   * to be better: `media_items` is CHECK-constrained to ('video','audio'), so the
-   * only signature A27 could express was a frame of a FILM of a signature. The
-   * media ref stays as the second link rather than being replaced, so a journey
-   * that already picked one does not lose its mark.
+   * The UPLOADED mark only (`signatureImageKey`, a PNG/JPEG/WebP, `md.webp`;
+   * Codex-61zsk.47). `media_items` is CHECK-constrained to ('video','audio'), so
+   * the only signature A27's `signatureMediaId` could express was a frame of a
+   * FILM of a signature, and the sign-off drew that photo where a mark belongs.
+   * It used to stand in when nothing was uploaded; it no longer does, and the
+   * column keeps what was picked, unread.
    */
   signatureUrl?: string | null;
 }

@@ -236,11 +236,11 @@ export const courses = pgTable(
     // there at all. That is why A27 shipped `signatureMediaId` and the letter
     // still rendered only typeset text.
     //
-    // The same ORDERED chain as the hero, resolved by `getCourseSellPreview`:
-    //   signatureImageKey (this) ?? signatureMediaId's poster frame ?? nothing
-    //     (the letter signs off with the typeset name alone).
-    // Uploaded outranks derived, for the reason A32 gives: an explicit choice
-    // beats a by-product.
+    // The signature's ONLY source, resolved by `getCourseSellPreview`: this,
+    // or nothing, and the letter signs off with the typeset name alone. Unlike
+    // the hero there is no second link: `signatureMediaId`'s poster frame used
+    // to stand in, and the sign-off drew that photo where a mark belongs, so
+    // it was retired (Codex-61zsk.47). That column stays, unread.
     //
     // `ImageProcessingService.processCourseSignature` writes {sm,md,lg}.webp
     // under this base key and the letter serves `md` — a signature is a small
@@ -274,7 +274,9 @@ export const courses = pgTable(
     heroMediaId: uuid('hero_media_id').references(() => mediaItems.id, {
       onDelete: 'set null',
     }),
-    // The guide's signature mark — `guide.letter`'s sign-off.
+    // The "Signature film" — RETIRED (Codex-61zsk.47): kept, so nothing a
+    // creator picked is lost, but never read for the sign-off, and no picker
+    // offers it. `signatureImageKey` above is the signature's only source.
     signatureMediaId: uuid('signature_media_id').references(
       () => mediaItems.id,
       { onDelete: 'set null' }
