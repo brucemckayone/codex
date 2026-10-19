@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFINITIONS,
   PageRenderer,
+  type SampleOfferState,
   SECTION_TYPE_IDS,
   sampleContext,
 } from '$lib/page-builder/kit';
@@ -127,7 +128,8 @@ function render(
   sections: PageSection[],
   selectedId: string,
   style: string = 'bold',
-  mediaBaseUrl: string | null = null
+  mediaBaseUrl: string | null = null,
+  offer: SampleOfferState = 'buy'
 ) {
   pageBuilder.open(PAGE_ID, {
     pageType: 'course',
@@ -154,7 +156,7 @@ function render(
       get selectedId() {
         return pageBuilder.selectedSectionId;
       },
-      context: sampleContext({ mediaBaseUrl }),
+      context: sampleContext({ mediaBaseUrl, offer }),
       onDuplicate: vi.fn(),
       onToggle: vi.fn(),
       onDelete: vi.fn(),
@@ -515,6 +517,72 @@ describe('the inspector for a simple section', () => {
       href: 'https://example.com/b',
     });
     expect(input?.hasAttribute('aria-invalid')).toBe(false);
+  });
+});
+
+// ── The pricing section's options, picked from the offer (Codex-61zsk.14) ──
+
+/**
+ * A pricing section describes each option by its id, and the id was a text
+ * box: a creator could not know `tier:<uuid>`, so what they wrote matched no
+ * option and showed nothing. It is picked from the page's live ways in.
+ */
+describe('the pricing section’s options', () => {
+  function pricing(offers: Record<string, unknown>[]): PageSection {
+    return {
+      id: 'sec-price',
+      type: 'pricing',
+      enabled: true,
+      props: { offers },
+    };
+  }
+
+  /** The first option's fields, its row opened. */
+  function firstOption(): HTMLElement | null {
+    document.body.querySelector<HTMLButtonElement>('.item__toggle')?.click();
+    flushSync();
+    return document.body.querySelector('.item__fields');
+  }
+
+  it('picks one of the page’s ways in, named by its name and price', () => {
+    render(
+      [pricing([{ id: 'tier:studio', name: 'Studio' }])],
+      'sec-price',
+      'bold',
+      null,
+      'tiers'
+    );
+
+    const trigger = firstOption()?.querySelector('.select-trigger');
+    expect(trigger?.textContent?.trim()).toBe(
+      'Studio membership · £15 per month'
+    );
+  });
+
+  it('says where to set one up when the page has no way in', () => {
+    render(
+      [pricing([{ name: 'Studio' }])],
+      'sec-price',
+      'bold',
+      null,
+      'unavailable'
+    );
+
+    const fields = firstOption();
+    expect(fields?.querySelector('.select-trigger')).toBeNull();
+    expect(fields?.textContent).toContain(
+      'Set up a way in on your Offer tab first'
+    );
+  });
+
+  it('keeps an option the offer no longer has, and says so', () => {
+    render(
+      [pricing([{ id: 'subscription-monthly', name: 'Monthly' }])],
+      'sec-price'
+    );
+
+    const trigger = firstOption()?.querySelector('.select-trigger');
+    expect(trigger?.textContent?.trim()).toBe('No longer one of your options');
   });
 });
 

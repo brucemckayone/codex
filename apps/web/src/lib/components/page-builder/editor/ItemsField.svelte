@@ -12,6 +12,7 @@
   import { tick } from 'svelte';
   import { ChevronDownIcon } from '$lib/components/ui/Icon';
   import type { BlockField } from '$lib/page-builder/kit';
+  import type { OfferPath } from '$lib/page-builder/offer-paths';
   import * as m from '$paraglide/messages';
   import FieldControl from './FieldControl.svelte';
   import { entryTitle, moveItem, readEntries } from './field-values';
@@ -27,9 +28,19 @@
     layout?: string;
     /** The entry this layout draws larger than the rest, or `null`. */
     leading?: number | null;
+    /** Passed through to an entry's `offer` field: the page's live ways in. */
+    offerPaths?: readonly OfferPath[];
   }
 
-  const { field, value, onChange, mediaBaseUrl = null, layout, leading = null }: Props = $props();
+  const {
+    field,
+    value,
+    onChange,
+    mediaBaseUrl = null,
+    layout,
+    leading = null,
+    offerPaths = [],
+  }: Props = $props();
 
   const id = $props.id();
   const entries = $derived(readEntries(value));
@@ -124,6 +135,7 @@
                 onChange={(next) => setKey(index, itemField.key, next)}
                 {mediaBaseUrl}
                 {layout}
+                {offerPaths}
               />
             {/each}
           {/if}

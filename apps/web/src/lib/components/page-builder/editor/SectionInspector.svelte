@@ -40,6 +40,7 @@
     resolveStyle,
     SIMPLE_SECTIONS,
   } from '$lib/page-builder/kit';
+  import { deriveOfferPaths } from '$lib/page-builder/offer-paths';
   import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { isImageRef } from '$lib/page-builder/page-images';
@@ -220,6 +221,10 @@
   // The entry this layout draws larger than the rest, its row tagged "Leads"
   // (Codex-61zsk.58); the definition knows, nothing is stored.
   const leading = $derived(definition.leadingItem?.(section.props, layout, context) ?? null);
+  // The page's live ways in, for an `offer` field (Codex-61zsk.14): the very
+  // derivation the pricing block draws from, so the field offers exactly the
+  // options the page shows.
+  const offerPaths = $derived(deriveOfferPaths(context.offer, context.course));
 
   function writeProp(key: string, value: unknown): void {
     // Deleted by the time a slow write arrived: there is nothing to write to.
@@ -378,6 +383,7 @@
             {layout}
             {sectionId}
             leading={field.key === 'items' ? leading : null}
+            {offerPaths}
           />
         {/each}
       </div>

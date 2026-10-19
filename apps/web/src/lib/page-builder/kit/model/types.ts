@@ -122,7 +122,10 @@ export interface BlockField {
     | 'media'
     | 'image'
     /** A Button's action (03 X64): where it goes, from the proven set. */
-    | 'action';
+    | 'action'
+    /** One of the page's live ways in (`deriveOfferPaths`), stored as its
+     *  id: an option a creator describes is one the offer has (Codex-61zsk.14). */
+    | 'offer';
   inline?: boolean;
   placeholder?: string;
   maxLength?: number;

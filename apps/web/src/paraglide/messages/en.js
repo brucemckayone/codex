@@ -15975,6 +15975,30 @@ export const studio_page_editor_button_section_none = () => `There is no other s
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_pick = () => `Choose an option`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_none = () => `Set up a way in on your Offer tab first: its options appear here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_gone = () => `No longer one of your options`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_button_link_label = () => `Web address`
 
 
