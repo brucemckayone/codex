@@ -141,6 +141,11 @@ export const orphanedImageFiles = pgTable(
       table.orphanedAt
     ),
 
+    // For a page save: which dropped keys an upload minted
+    // (OrphanedFileService.mintedPageImageObjects, Codex-61zsk.17). Rows are
+    // never deleted, so without it the lookup scans every upload ever made.
+    index('idx_orphaned_files_r2_key').on(table.r2Key),
+
     // CHECK constraints
     check(
       'check_image_type',

@@ -216,6 +216,34 @@ export class OrphanedFileService extends BaseService {
   }
 
   /**
+   * Which of these page-image objects an upload minted (Codex-61zsk.17).
+   *
+   * A save nominates the objects behind each key it drops, and a key is only
+   * text in `sections`: a manager can write any string of the minted shape
+   * and drop it, and every nomination lands in the one queue all tenants'
+   * cleanup shares. An upload records its objects here as it stores them
+   * (`ImageProcessingService`), and a row is never removed, only marked, so
+   * an object with a `page_image` row of any status is one an upload made.
+   * Only those are worth a nomination; a fabricated key has none.
+   *
+   * @param r2Keys - Object keys (`pageImageObjectKeys`), not base keys
+   * @returns The subset of `r2Keys` with a `page_image` row
+   */
+  async mintedPageImageObjects(r2Keys: string[]): Promise<Set<string>> {
+    if (r2Keys.length === 0) return new Set();
+    const rows = await this.db
+      .selectDistinct({ r2Key: schema.orphanedImageFiles.r2Key })
+      .from(schema.orphanedImageFiles)
+      .where(
+        and(
+          eq(schema.orphanedImageFiles.imageType, 'page_image'),
+          inArray(schema.orphanedImageFiles.r2Key, r2Keys)
+        )
+      );
+    return new Set(rows.map((row) => row.r2Key));
+  }
+
+  /**
    * Mark an orphan as successfully deleted
    */
   async markDeleted(id: string): Promise<void> {

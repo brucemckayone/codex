@@ -2156,9 +2156,9 @@ export class CourseJourneyService extends BaseService {
     // BACK would be actively wrong — it would queue a key the (unchanged)
     // old sections still hold.
     //
-    // Recording never throws (`recordOrphansOrLog` swallows and logs), so the
-    // outer try here is defensive insurance around the scan itself, not
-    // around the record call.
+    // Recording never throws (`recordOrphansOrLog` swallows and logs). The
+    // scan and the lookup of what an upload minted can, and the outer try
+    // catches them: the save stands, and nothing is queued.
     try {
       const removedKeys = droppedPageImageKeys(oldSections, record.sections);
 
@@ -2181,9 +2181,25 @@ export class CourseJourneyService extends BaseService {
       const r2Keys = nominated.flatMap(pageImageObjectKeys);
 
       if (this.orphanedFileService) {
+        // Only objects an upload minted (Codex-61zsk.17). A key is text a
+        // manager can write, and this queue is every tenant's: a fabricated
+        // key queued here would delay every other org's cleanup. An upload
+        // records its objects as it stores them, so a key with no row was
+        // never uploaded; it is skipped, and the skip is logged so a page
+        // that writes them is seen.
+        const minted =
+          await this.orphanedFileService.mintedPageImageObjects(r2Keys);
+        const mintedKeys = r2Keys.filter((r2Key) => minted.has(r2Key));
+        if (mintedKeys.length < r2Keys.length) {
+          this.obs.warn('Page image nominations skipped: no upload made them', {
+            context: 'landing-page-image',
+            pageId: record.id,
+            skipped: r2Keys.length - mintedKeys.length,
+          });
+        }
         await recordOrphansOrLog(
           this.orphanedFileService,
-          r2Keys.map((r2Key) => ({
+          mintedKeys.map((r2Key) => ({
             r2Key,
             imageType: 'page_image' as const,
             entityId: record.id,

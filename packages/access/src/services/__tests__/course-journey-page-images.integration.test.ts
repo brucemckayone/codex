@@ -103,9 +103,35 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
     return { pageId, slug, title };
   }
 
-  /** Every pending `page_image` orphan row queued for this page, newest first. */
+  /** The rows uploads wrote, which a save's nominations are told apart from. */
+  const uploadRows = new Set<string>();
+
+  /**
+   * Record `keys` as uploaded to `pageId`, as the upload path does: it
+   * records every object it stores (`ImageProcessingService`). A save only
+   * nominates what an upload minted (Codex-61zsk.17). Returns the rows' ids.
+   */
+  async function uploaded(pageId: string, keys: string[]): Promise<string[]> {
+    const ids = await new OrphanedFileService({
+      db,
+      environment: 'test',
+    }).recordOrphanedFiles(
+      keys.flatMap((key) =>
+        pageImageObjectKeys(key).map((r2Key) => ({
+          r2Key,
+          imageType: 'page_image' as const,
+          entityId: pageId,
+          entityType: 'landing_page' as const,
+        }))
+      )
+    );
+    for (const id of ids) uploadRows.add(id);
+    return ids;
+  }
+
+  /** Every `page_image` row a SAVE queued for this page (uploads' rows left out). */
   async function pendingOrphansFor(pageId: string) {
-    return db
+    const rows = await db
       .select()
       .from(orphanedImageFiles)
       .where(
@@ -114,6 +140,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
           eq(orphanedImageFiles.originalEntityId, pageId)
         )
       );
+    return rows.filter((row) => !uploadRows.has(row.id));
   }
 
   it('queues a removed page-image key once a save drops its last reference', async () => {
@@ -123,6 +150,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
       orgId
     );
     const key = `landing-pages/${pageId}/images/${randomUUID()}`;
+    await uploaded(pageId, [key]);
 
     // Save 1: the key is referenced from an arbitrary block prop.
     await serviceWithOrphanTracking.saveJourneyPage(orgId, {
@@ -329,6 +357,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
     // A duplicate renders its source's keys verbatim (duplicateJourneyPage
     // copies `sections`), so the key is under the SOURCE page's prefix.
     const key = `landing-pages/${source.pageId}/images/${randomUUID()}`;
+    await uploaded(source.pageId, [key]);
 
     await saveImages(orgId, copy, [key]);
     await saveImages(orgId, copy, []);
@@ -350,6 +379,27 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
     expect(await pendingOrphansFor(page.pageId)).toEqual([]);
   });
 
+  // Codex-61zsk.17: a key is text a manager can write, and the queue is every
+  // tenant's, so a key of the minted shape that no upload made must queue
+  // nothing. The real one's upload row has been swept already (`retained`):
+  // a row of any status is an upload's, so it is still nominated.
+  it('nominates only what an upload minted: a fabricated key of the minted shape queues nothing', async () => {
+    const orgId = await makeOrg('PageImgMinted');
+    const page = await makePage(serviceWithOrphanTracking, orgId);
+    const real = `landing-pages/${page.pageId}/images/${randomUUID()}`;
+    const fabricated = `landing-pages/${page.pageId}/images/${randomUUID()}`;
+    const sweeps = new OrphanedFileService({ db, environment: 'test' });
+    for (const id of await uploaded(page.pageId, [real]))
+      await sweeps.markRetained(id, 'still referenced');
+
+    await saveImages(orgId, page, [real, fabricated]);
+    await saveImages(orgId, page, []);
+
+    expect(
+      (await pendingOrphansFor(page.pageId)).map((row) => row.r2Key).sort()
+    ).toEqual(pageImageObjectKeys(real).sort());
+  });
+
   it('nominates at most 100 images from one save', async () => {
     const orgId = await makeOrg('PageImgCap');
     const page = await makePage(serviceWithOrphanTracking, orgId);
@@ -357,6 +407,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
       { length: 101 },
       () => `landing-pages/${page.pageId}/images/${randomUUID()}`
     );
+    await uploaded(page.pageId, keys);
 
     await saveImages(orgId, page, keys);
     await saveImages(orgId, page, []);
