@@ -3641,3 +3641,40 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     plants, the original bug first (Testimonials back to a soft tint beside Benefits), each
     failing its own tests, every file restored.
   - **No new request, no cache change.** The page reads the stream the blocks already read.
+- **X80 · 2026-10-19 · 3c follow-up · The guide's signature is the uploaded mark only; the
+  Signature film slot is retired (Codex-61zsk.47; DECIDED BY THE OWNER on 2026-10-14, options
+  (b) and (c), reconfirmed the same day.)** X57 found that `CourseSellPreview.signatureUrl` was
+  a chain, the uploaded signature image or else the Signature film's poster frame, and since
+  `media_items` holds video and audio the second link was always a frame of a film: the
+  sign-off drew a photo where a mark belongs. X57 moved the split and centred sign-offs to a
+  face; the quote layout still drew whatever `signatureUrl` was.
+  - **Upload-only.** `getCourseSellPreview` gives the uploaded mark (`courses.signature_image_key`,
+    `md.webp`) or nothing, and the letter signs off with the typeset name. The film is no longer
+    looked up for it.
+  - **The slot is retired, nothing deleted.** The Media panel no longer offers "Signature film".
+    The column stays and the store still loads and saves it, so what a creator picked is kept;
+    no migration. The panel's slots move to `page-media-slots.ts`, which names the retired one
+    beside the offered ones, so the panel's rule that every slot the store knows has a surface
+    now reads "offered or retired", and a test holds it.
+  - **Decided without the owner: a stored Signature film is not re-checked on save.** The builder
+    sends back whatever the retired slot holds, and the save checks every id it sends: a film the
+    creator has since deleted (media is soft-deleted, so the column keeps pointing at it) would
+    then fail every media save, with nothing left to clear it. `updateJourneySellMedia` checks the
+    slot only when its value changes, so a new id, a foreign one included, is still refused.
+    Rejected: freezing the column (never written again), which changes the slot's tested contract
+    more than the fault needs.
+  - **The words.** The signature image's hint and its removal toast now say the letter signs off
+    with the typeset name ("Signature removed — the letter signs off with the typeset name"). The
+    retired slot's label and hint are gone. Decided without the owner: the image's hint is
+    rewritten too, because it also promised that the film's frame would stand in.
+  - **In the browser:** not run. The panel's slot list and two messages change; the public
+    signature changes only where a creator picked a film and uploaded no mark.
+  - **Tests** (CI): `page-media-slots.test.ts` (every store slot offered or retired, never both;
+    the Signature film retired; the panel's order), and the access integration test (a film in
+    the slot, with a frame that could stand in, gives no signature; a stored film deleted since
+    does not block a save, and a new deleted one is still refused). Calibrated: 2 plants on the
+    slot list (the film offered again; retired nowhere), each failing its test. The access tests
+    are DB-backed and run in CI only, so their plants were not run locally; the first's
+    precondition (the film has a frame) keeps a pass from being vacuous. A review of the branch
+    found the stuck save and six comments still describing the fallback; all are fixed.
+  - **No new request, no cache change.** The sell preview does one lookup fewer.
