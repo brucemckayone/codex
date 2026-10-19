@@ -2850,7 +2850,11 @@ export class CourseJourneyService extends BaseService {
       guidePortraitMediaId: string | null;
       /** A27 (Codex-wqxv4) — the hero still. */
       heroMediaId: string | null;
-      /** A27 (Codex-wqxv4) — the guide's signature mark. */
+      /**
+       * A27 (Codex-wqxv4) — the retired "Signature film" (Codex-61zsk.47):
+       * written as sent, but never read for the sign-off; the stored value is
+       * not re-checked (see below).
+       */
       signatureMediaId: string | null;
     },
     /**
@@ -2878,6 +2882,28 @@ export class CourseJourneyService extends BaseService {
         pageId
       );
 
+      // The retired "Signature film" (Codex-61zsk.47): no surface offers it, so
+      // the builder sends back whatever is stored. A stored film that has since
+      // been deleted would fail the check below on every save, and the creator
+      // could no longer clear it. So the stored value is kept without being
+      // checked again; a new one is checked like any other.
+      const [stored] = await this.db
+        .select({ signatureMediaId: courses.signatureMediaId })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.id, courseId),
+            eq(courses.organizationId, organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        .limit(1);
+      const signatureToCheck =
+        input.signatureMediaId !== null &&
+        input.signatureMediaId === stored?.signatureMediaId
+          ? null
+          : input.signatureMediaId;
+
       // Validate the ids BEFORE opening the transaction — a rejected write must
       // leave no trace, and a ForbiddenError here is cheaper than a rollback.
       //
@@ -2893,12 +2919,12 @@ export class CourseJourneyService extends BaseService {
           input.guideVideoMediaId,
           input.guidePortraitMediaId,
           input.heroMediaId,
-          input.signatureMediaId,
+          signatureToCheck,
         ],
         [
           { label: 'Hero image', mediaId: input.heroMediaId },
           { label: 'Guide portrait', mediaId: input.guidePortraitMediaId },
-          { label: 'Guide signature', mediaId: input.signatureMediaId },
+          { label: 'Guide signature', mediaId: signatureToCheck },
         ]
       );
 
@@ -3121,10 +3147,10 @@ export class CourseJourneyService extends BaseService {
    * accumulating orphans, and no client is ever handed a raw key so the
    * unreferenced variants are unreachable in the meantime.
    *
-   * Clearing does NOT necessarily leave the letter unsigned — it drops to the
-   * next link, `signatureMediaId`'s poster frame, and only then to the typeset
-   * name alone. That is why this is a separate column rather than a replacement
-   * for the media ref.
+   * Clearing leaves the letter signed with the typeset name alone: the upload is
+   * the signature's only source (Codex-61zsk.47). `signatureMediaId`'s poster
+   * frame used to stand in, which is why this is a separate column rather than
+   * a replacement for the media ref.
    *
    * @returns the persisted key (null when cleared).
    */

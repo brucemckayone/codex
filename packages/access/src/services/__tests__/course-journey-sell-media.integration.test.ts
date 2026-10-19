@@ -474,6 +474,43 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
     ).rejects.toThrow(ForbiddenError);
   });
 
+  // Codex-61zsk.47: no surface offers the retired Signature film, so the
+  // builder sends back whatever is stored. A film deleted since must not block
+  // every later save, as nothing could clear it; a NEW id is still checked.
+  it('keeps a stored Signature film that has since been deleted, and still checks a new one', async () => {
+    const film = await seedMedia(creatorId, 'signature-later-deleted');
+    await svc.updateJourneySellMedia(
+      orgAId,
+      pageId,
+      mediaBag({ signatureMediaId: film })
+    );
+    await db
+      .update(mediaItems)
+      .set({ deletedAt: new Date() })
+      .where(eq(mediaItems.id, film));
+
+    const returned = await svc.updateJourneySellMedia(
+      orgAId,
+      pageId,
+      mediaBag({ introVideoMediaId: introId, signatureMediaId: film })
+    );
+    expect(returned.introVideoMediaId).toBe(introId);
+    expect(returned.signatureMediaId).toBe(film);
+    expect((await readCourse(courseId))?.signatureMediaId).toBe(film);
+
+    await expect(
+      svc.updateJourneySellMedia(
+        orgAId,
+        pageId,
+        mediaBag({ signatureMediaId: deletedMediaId })
+      )
+    ).rejects.toThrow(ForbiddenError);
+    expect((await readCourse(courseId))?.signatureMediaId).toBe(film);
+
+    await svc.updateJourneySellMedia(orgAId, pageId, mediaBag());
+    expect((await readCourse(courseId))?.signatureMediaId).toBeNull();
+  });
+
   it('rejects a media id that does not exist at all', async () => {
     await expect(
       svc.updateJourneySellMedia(

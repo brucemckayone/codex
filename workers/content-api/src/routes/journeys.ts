@@ -1433,9 +1433,9 @@ app.post(
  *
  * Clear the course's uploaded signature.
  *
- * As with the hero, this does NOT leave the slot blank: it drops back to A32's
- * next link (`courses.signatureMediaId`'s poster still) and then to whatever the
- * guide composition draws without one. That degradation is why the uploaded image
+ * Unlike the hero, nothing stands in: the upload is the signature's only source
+ * (Codex-61zsk.47), so the guide signs off with the typeset name. The
+ * `courses.signatureMediaId` poster still used to, which is why the uploaded image
  * is its own column rather than a replacement for the media ref.
  *
  * Clears the DB key only; the R2 variants are left in place. The key is

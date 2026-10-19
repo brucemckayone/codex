@@ -1802,7 +1802,8 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     Signature film, and `Signature.svelte` drew that photo through its ink filter. The quote layout
     keeps the mark. Whether a film's frame should ever stand in as a signature changes a studio
     slot, so it is the owner's call (Codex-61zsk.47: keep, make the signature upload-only, or retire
-    the slot; the recommendation is the last two).
+    the slot; the recommendation is the last two). The owner chose the last two on 2026-10-14;
+    built in X80.
   - **Found on the way:** `org-brand.css` paints every `[class*='__title']` and `[class*='-title']`
     with the org's heading colour. A practice named `practice__title` turned Of Blood & Bones'
     practice names its heading green, which only a real org brand shows. Renamed, and

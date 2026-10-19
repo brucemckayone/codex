@@ -33,8 +33,9 @@
   `media` control). Both surfaces read and write the ONE `sellMedia` store, so the
   panel and the inspectors can never disagree about what is pending.
 
-  THE THREE STILL SLOTS OFFER VIDEO ONLY, via `sellMedia.optionsFor(slot)`. An
-  audio item has no frame by construction — the transcoder writes
+  THE STILL SLOTS (hero, portrait) OFFER VIDEO ONLY, via
+  `sellMedia.optionsFor(slot)`. An audio item has no frame by construction — the
+  transcoder writes
   `thumbnailKey: null` for anything that is not a video — so picking one for a
   still used to save cleanly, show no error, and leave the section drawing its
   fallback. The store owns the accept-list so the per-section inspector cannot
@@ -507,7 +508,7 @@
       <div class="panel__field" role="group" aria-labelledby={slotLabelId}>
         <span class="panel__label" id={slotLabelId}>{entry.label()}</span>
         <!--
-          `optionsFor`, not `options`: the three STILL slots offer video only.
+          `optionsFor`, not `options`: the STILL slots offer video only.
           An audio item has `thumbnailKey: null` by construction, so offering one
           here let a creator pick something that could only ever resolve to
           nothing — saved clean, no error, section unchanged. The accept-list
