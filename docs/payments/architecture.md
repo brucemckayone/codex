@@ -211,8 +211,8 @@ in `@codex/purchase` or below it. That is why the ledger is in
 - Moving the ledger is one PR of import changes. It is cheaper now than after
   four more modules have been added beside it.
 - **Done (WP3a, Codex-2hxff.56.1):** `@codex/payments` exists, and
-  `payoutLedger` and `resolveOrganisationPayee` have moved into it unchanged.
-  `invoiceCharge` follows once WP1 has merged.
+  `payoutLedger`, `resolveOrganisationPayee` and `invoiceCharge` have moved
+  into it unchanged.
 
 The rejected alternative was to keep everything in
 `@codex/purchase/src/domain/`. That avoids a package for now, but leaves
@@ -233,7 +233,7 @@ The rejected alternative was to keep everything in
 | WP | Kind | What | Unblocks / absorbs |
 |---|---|---|---|
 | **WP0** | decision | **Done 2026-10-19.** The owner decided §7 D1–D4, all as recommended. | everything |
-| **WP1** | fix | **Done 2026-10-19 (PR for Codex-2hxff.50).** One `invoiceCharge` resolver (`@codex/subscription` `services/invoice-charge.ts`) used by both subscription kinds; fixtures send Stripe's real `payment_intent`-only shape. Sandbox checked: no course subscription exists, so there are no missed charges to replay. | P1 money bug; small |
+| **WP1** | fix | **Done 2026-10-19 (PR for Codex-2hxff.50).** One `invoiceCharge` resolver (now `@codex/payments` `invoice-charge.ts`, WP3a) used by both subscription kinds; fixtures send Stripe's real `payment_intent`-only shape. Sandbox checked: no course subscription exists, so there are no missed charges to replay. | P1 money bug; small |
 | **WP2** | extraction → behaviour | **Composition root** (C1), split 2026-10-19. **WP2a, done (Codex-2hxff.54):** `createWebhookServices` in `@codex/worker-utils` builds the registry's graph for every webhook and the cron. Not a pure extraction: configured fees and the money mailers now reach those paths (agreed in .7/.13; with empty fee config the split is unchanged). Webhooks stay on Neon, not Hyperdrive (Codex-tae55). **WP2b (Codex-2hxff.55):** money deps required at the type level. | .7 (wiring half), .13 (mailers), .43, CFG-06 |
 | **WP3** | extraction → behaviour | **Clawback engine** (C4): one `reverseCharge` over the ledger for every source, replacing both copies; `refund_reviews` for every source (Codex-in0g4's schema); the refund use case out of the worker. Absorbs .51. | .8 → .10 (refund half) → .9 → .30; .28 after WP6 |
 | **WP4** | extraction → behaviour | **Split and resolvers at one `at`** (C2 + C3): `splitCalculator`, `feeResolver(at)`, `agreementResolver(at)` in `@codex/agreements`; one `RecordSale`/`RecordInvoice` path for all four sale kinds. | .7 (floor everywhere), .19, .17, .18, .49, .33, Codex-rtwpv, -itvh8 |

@@ -60,6 +60,7 @@ import {
   recordPlatformFee,
   recordSlice,
   renewPayoutAttempt,
+  resolveInvoiceCharge,
   resolveOrganisationPayee,
   settlePayoutPaid,
   settleTransfer,
@@ -103,7 +104,6 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../errors';
-import { resolveInvoiceCharge } from './invoice-charge';
 import {
   CLEAR_PENDING_PRICE_METADATA,
   schedulePriceChange,

@@ -8,6 +8,7 @@ The payment domain modules every payment path calls. It sits **below** `@codex/p
 
 - **The payouts ledger** (`payout-ledger.ts`, Codex-2hxff.11/.12/.37): `recordSlice`, `recordPlatformFee`, `settleTransfer`, `claimPayoutAttempt(s)`, `renewPayoutAttempt`, `settlePayoutPaid`, `markPayoutFailed`, `findTransfersForPayouts`, `isDrainablePayout`, `cancelUnpaidPayoutForRefund`, `type LedgerDeps`. One row per slice per charge, reserved **before** any transfer. The unique indexes `uq_payouts_*_per_charge` make a replay a no-op.
 - **`resolveOrganisationPayee`** (`resolve-organisation-payee.ts`, Codex-2hxff.2): who is paid the organisation's part of a sale, at the sale's own time.
+- **`resolveInvoiceCharge`** (`invoice-charge.ts`, Codex-2hxff.50): the charge a paid invoice settled on, through inline → `expand: ['payments']` → `paymentIntents.retrieve().latest_charge` → `charges.list`. Every invoice payout is keyed on it. A card-paid invoice names only its PaymentIntent, so never read `payment.charge` alone.
 
 ## Rules
 
@@ -18,4 +19,4 @@ The payment domain modules every payment path calls. It sits **below** `@codex/p
 
 ## Tests
 
-Integration tests against the real schema, because the guarantees are unique indexes and CHECKs a mocked db would not enforce. They run sequentially (`vitest.config.payments.ts`) because payout rows are shared across files.
+Integration tests against the real schema, because the guarantees are unique indexes and CHECKs a mocked db would not enforce. They run sequentially (`vitest.config.payments.ts`) because payout rows are shared across files. `invoice-charge.test.ts` is the exception: the resolver only reads Stripe, so it runs on `createMockStripe()` with no database.

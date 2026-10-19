@@ -7,6 +7,9 @@
  * an extraction that changes no behaviour.
  */
 
+// The charge an invoice payment settled on: the key every invoice payout
+// uses (Codex-2hxff.50)
+export { resolveInvoiceCharge } from './invoice-charge';
 // The payouts ledger's write path: one row per slice per charge, reserved
 // before any transfer (Codex-2hxff.11, .12, .37)
 export {

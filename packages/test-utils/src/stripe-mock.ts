@@ -257,8 +257,8 @@ export function createMockStripe(): Stripe {
     },
 
     // invoices.retrieve and charges.list back the Stripe 2024+ fallback
-    // chain in SubscriptionService.resolveInvoiceCharge — see
-    // subscription-service.ts. Default returns an empty payments array so
+    // chain in resolveInvoiceCharge — see
+    // packages/payments/src/invoice-charge.ts. Default returns an empty payments array so
     // tests that don't override see the "no charge resolvable" branch.
     invoices: {
       retrieve: vi.fn().mockImplementation(async (_id: string) => ({

@@ -47,6 +47,7 @@ import {
   type LedgerDeps,
   recordPlatformFee,
   recordSlice,
+  resolveInvoiceCharge,
   resolveOrganisationPayee,
 } from '@codex/payments';
 import {
@@ -77,7 +78,6 @@ import {
   CourseSubscriptionPlanNotFoundError,
   SubscriptionCheckoutError,
 } from '../errors';
-import { resolveInvoiceCharge } from './invoice-charge';
 import { schedulePriceChange } from './pending-price-change';
 import { resolveStatus } from './stripe-status-mapper';
 import type { TierPriceChangeMailer } from './subscription-service';
