@@ -56,7 +56,10 @@
  *
  * The faces: the gallery's brand 0 (Archivo Black, the widest measured), and
  * in Bold's and Poster's Type, which draw the largest, Anton and Unbounded,
- * the narrowest and the widest the brand editor offers.
+ * the narrowest and the widest the brand editor offers. Each is swapped in as
+ * a brand's face (`--brand-font-heading`), so `faces.css` gives it its own fit
+ * factor, and a swap that does not draw the face in its full stack is a fault
+ * (Codex-61zsk.68).
  *
  * `LOUDER_FIT_TYPES=offered` also draws each Style in each Type it may take
  * (03 X73, X74), and `LOUDER_FIT_TYPES=all` in every Type, offered or not,
@@ -109,10 +112,6 @@ function typesOf(style: string): string[] {
 const DRAWN = STYLES.flatMap((style) =>
   typesOf(style).map((type) => ({ style, type, drawn: type || style }))
 );
-/** Bold's and Poster's Type are also read in the swapped faces. */
-const LOOKS =
-  DRAWN.length +
-  2 * DRAWN.filter((d) => d.drawn === 'bold' || d.drawn === 'poster').length;
 const WIDTHS = [360, 390, 768, 1024, 1440];
 /**
  * The sample page draws each section in its Style's own layout, so it reads a
@@ -132,11 +131,24 @@ const PAGES = [
     !process.env.LOUDER_FIT_PAGES ||
     process.env.LOUDER_FIT_PAGES.split(',').includes(String(place))
 );
+/** `LOUDER_FIT_FACES=Anton` (or `own`, the brand's own face) narrows the sweep likewise. */
 const FACES: { brand: string; face?: string }[] = [
   { brand: '0' },
   { brand: '0', face: 'Anton' },
   { brand: '0', face: 'Unbounded' },
-];
+].filter(
+  ({ face }) =>
+    !process.env.LOUDER_FIT_FACES ||
+    process.env.LOUDER_FIT_FACES.split(',').includes(face ?? 'own')
+);
+/**
+ * Every look the run reads: each Style's own face, and Bold's and Poster's Type
+ * in each swapped face, as many as `LOUDER_FIT_FACES` leaves.
+ */
+const LOOKS =
+  (FACES.some((f) => !f.face) ? DRAWN.length : 0) +
+  FACES.filter((f) => f.face).length *
+    DRAWN.filter((d) => d.drawn === 'bold' || d.drawn === 'poster').length;
 /** Each face, on each page. */
 const LOADS = FACES.flatMap((face) =>
   PAGES.map((extra) => ({ ...face, extra }))
@@ -266,11 +278,34 @@ test('a heading fits its widest word at its own size and at louder', async ({
               link.onload = done;
               setTimeout(done, 8000);
             });
+            // The brand's face only: the brand's own rule composes the stack
+            // from it, as a real brand's is, so `faces.css` finds the face's
+            // fit factor. Setting `--font-heading` to the bare family matched
+            // no face there, and Anton was weighed as wide as Unbounded
+            // (Codex-61zsk.68).
             const root = document.querySelector('.lp') as HTMLElement;
             root.style.setProperty('--brand-font-heading', `'${family}'`);
-            root.style.setProperty('--font-heading', `'${family}'`);
             await document.fonts.load(`700 100px "${family}"`, 'ABC');
           }, face);
+        // The swap took: the page draws the face in its full stack.
+        if (face) {
+          const display = await page.evaluate(() =>
+            getComputedStyle(
+              document.querySelector('.lp .lp-section .lp-heading') ??
+                document.body
+            )
+              .getPropertyValue('--lp-font-display')
+              .trim()
+          );
+          if (!display.startsWith(`'${face}', `)) {
+            faults.push(
+              `${width} ${named} ${face}${extra ? ` (${extra})` : ''}: the face did not take: --lp-font-display is ${display}`
+            );
+            console.log(`FAULT ${faults[faults.length - 1]}`);
+            logged = faults.length;
+            continue;
+          }
+        }
         await page.evaluate(() => document.fonts.ready);
         const read = await page.evaluate(
           async ({ list, weights }) => {
