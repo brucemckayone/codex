@@ -176,8 +176,8 @@ the course creator's `subscription` agreement if they have one.
 Rounding down on subscription invoices can leave a penny or two over (the last
 row above). Owner decision 2026-10-13, "The organisation": the remainder is
 added to the organisation slice and recorded with it, so every penny of the
-invoice is in the ledger — **gap**: `Codex-2hxff.12` (today the pennies stay on
-the platform's balance with no ledger row).
+invoice is in the ledger: the organisation's slice is the post-platform pool
+minus what the creators take.
 
 ---
 

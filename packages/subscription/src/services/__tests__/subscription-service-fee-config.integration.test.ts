@@ -75,10 +75,17 @@ function makeFeeConfigStub(
 // The partial unique index uq_payouts_stripe_transfer_id rejects rows
 // sharing a stripeTransferId, so mocks that resolve many transfers in
 // one test must hand out distinct IDs per call.
+/**
+ * Transfer ids are unique per RUN: `uq_payouts_stripe_transfer_id` spans the
+ * whole table and these rows outlive the run unless deleted, so a fixed id
+ * made every second consecutive run fail its own updates.
+ */
+const RUN = crypto.randomUUID().slice(0, 8);
+
 function makeUniqueTransferIdMock(prefix: string) {
   let idx = 0;
   return () =>
-    Promise.resolve({ id: `${prefix}_${idx++}` }) as ReturnType<
+    Promise.resolve({ id: `${prefix}_${RUN}_${idx++}` }) as ReturnType<
       Stripe['transfers']['create']
     >;
 }
@@ -106,7 +113,12 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     stripe = createMockStripe();
   });
 
+  // The hourly sweep is global: rows left here would feed it, and their
+  // transfer ids would block the next run's updates.
   afterAll(async () => {
+    await db
+      .delete(payoutsTable)
+      .where(inArray(payoutsTable.userId, [creatorId, payoutUserId]));
     await teardownTestDatabase();
   });
 
@@ -265,7 +277,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     const transferSpy = vi.mocked(stripe.transfers.create);
     transferSpy.mockClear();
     transferSpy.mockResolvedValue({
-      id: 'tr_fc_clear',
+      id: `tr_fc_clear_${RUN}`,
     } as Stripe.Response<Stripe.Transfer>);
 
     // First pass — skipped.
@@ -287,7 +299,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
         .limit(1)
     );
     expect(reread.resolvedAt).not.toBeNull();
-    expect(reread.stripeTransferId).toBe('tr_fc_clear');
+    expect(reread.stripeTransferId).toBe(`tr_fc_clear_${RUN}`);
   });
 
   // Codex-iivne: pre-fix this test pinned per-row floor gating: small=50
@@ -538,7 +550,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     const transferSpy = vi.mocked(stripe.transfers.create);
     transferSpy.mockClear();
     transferSpy.mockResolvedValue({
-      id: 'tr_fc_nofee',
+      id: `tr_fc_nofee_${RUN}`,
     } as Stripe.Response<Stripe.Transfer>);
 
     const result = await service.resolvePendingPayouts(org.id, stripeAccountId);

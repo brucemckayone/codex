@@ -136,6 +136,54 @@ describe('resolveOrganisationPayee', () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 
+  // No period covers the sale: nobody owned the organisation then. The money
+  // goes to the NEXT owner — never a former one, who no longer owns it — or,
+  // if there is none yet, is held (`no_owner`) for the owner support assigns
+  // (owner decision 2026-10-18, Codex-2hxff.37).
+  describe('a sale while the organisation had no owner', () => {
+    async function makeVacatedOrg(label: string) {
+      const [former, later] = await seedTestUsers(db, 2);
+      if (!former || !later) throw new Error('seed failed');
+      const org = await makeOrg(label);
+      await db.insert(organizationOwnershipPeriods).values(
+        createTestOwnershipPeriodInput(org.id, former, {
+          startedAt: LONG_AGO,
+          endedAt: TRANSFER_AT,
+        })
+      );
+      return { org, former, later };
+    }
+
+    it('the owner left and nobody has been assigned: held, never the former owner', async () => {
+      const { org, former } = await makeVacatedOrg('owner-left');
+      const warn = vi.fn();
+
+      const payee = await resolveOrganisationPayee(db, org.id, AFTER_TRANSFER, {
+        warn,
+      });
+
+      expect(payee).toBeUndefined();
+      expect(payee?.userId).not.toBe(former);
+      expect(warn).toHaveBeenCalledOnce();
+    });
+
+    it('a later owner has been assigned since: the sale is theirs', async () => {
+      const { org, later } = await makeVacatedOrg('gap-then-owner');
+      await db.insert(organizationOwnershipPeriods).values(
+        createTestOwnershipPeriodInput(org.id, later, {
+          startedAt: new Date('2024-07-01T00:00:00Z'),
+          source: 'support',
+        })
+      );
+
+      const payee = await resolveOrganisationPayee(db, org.id, AFTER_TRANSFER, {
+        warn: vi.fn(),
+      });
+
+      expect(payee?.userId).toBe(later);
+    });
+  });
+
   it('ignores the retired primary-connect pin', async () => {
     const { org, next } = await makeTransferredOrg('pin-ignored');
     const [stranger] = await seedTestUsers(db, 1);

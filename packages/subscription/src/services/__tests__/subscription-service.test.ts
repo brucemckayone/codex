@@ -26,7 +26,7 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import type { FeeConfigService } from '@codex/purchase';
+import { claimPayoutAttempt, type FeeConfigService } from '@codex/purchase';
 import { UnsupportedCurrencyError } from '@codex/service-errors';
 import {
   createMockStripe,
@@ -3559,17 +3559,15 @@ describe('SubscriptionService', () => {
       expect(stripe.transfers.create).not.toHaveBeenCalled();
     });
 
-    // Codex-8wfnv: explicit idempotency assertions for the renewal path.
-    // handleSubscriptionCreated has a uniqueness-constraint short-circuit
-    // (line 519). handleInvoicePaymentSucceeded has no such short-circuit
-    // — its replay safety lives downstream in `executeTransfers`, which
-    // passes a deterministic `idempotencyKey` to `stripe.transfers.create`
-    // (`${chargeId}_org_fee`, `${chargeId}_creator_pool_owner`,
-    // `${chargeId}_creator_<creatorId>` — see subscription-service.ts:2810,
-    // :2900, :2983). Stripe dedupes on idempotency key, so even if the
-    // handler is invoked twice for the same invoice, no double transfer
-    // can settle. Assert the keys are stable across replays.
-    it('replay safety: same invoice.payment_succeeded fired twice → revenue transfer dedupes via deterministic idempotency key (chargeId-derived)', async () => {
+    // Codex-8wfnv + Codex-2hxff.11: replay safety for the renewal path.
+    // handleInvoicePaymentSucceeded re-runs `executeTransfers` on every
+    // delivery. Each slice's ledger row is reserved by a per-charge unique key
+    // BEFORE its transfer, so the second delivery finds every slice and sends
+    // NOTHING — at any age. (Until Codex-2hxff.11 it re-sent every transfer
+    // and relied on Stripe's idempotency key, which Stripe forgets after
+    // ~24h.) The keys are still deterministic, as a second line of defence
+    // for two deliveries racing inside that window.
+    it('replay safety: same invoice.payment_succeeded fired twice → the second sends no transfer; keys stay chargeId-derived', async () => {
       const { org, tier1 } = await createFullOrg('invoice-replay-idempotent');
       const sub = takeFirst(
         await db
@@ -3582,11 +3580,13 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      // Pin chargeId so both invocations derive identical idempotency keys
-      // — exactly the replay shape we're asserting against.
-      const chargeId = 'ch_test_replay_fixed';
-      const paymentIntentId = 'pi_test_replay_fixed';
-      const invoiceId = 'in_test_replay_fixed';
+      // One chargeId for both deliveries — the replay shape — unique per run,
+      // so the first delivery can never meet a slice another test (or an
+      // interrupted run) left in the ledger and mistake itself for a replay.
+      const runId = crypto.randomUUID().slice(0, 12);
+      const chargeId = `ch_test_replay_${runId}`;
+      const paymentIntentId = `pi_test_replay_${runId}`;
+      const invoiceId = `in_test_replay_${runId}`;
       const mockInvoice = createMockStripeInvoice({
         id: invoiceId,
         amount_paid: 499,
@@ -3612,11 +3612,10 @@ describe('SubscriptionService', () => {
       const transfersMock = stripe.transfers.create as ReturnType<typeof vi.fn>;
       const callsAfterSecond = transfersMock.mock.calls.length;
 
-      // Replay must invoke transfers.create the SAME number of times each
-      // call (same code path) — but every invocation across both calls
-      // must carry an idempotency key Stripe will dedupe on.
+      // The first delivery pays; the replay finds every slice in the ledger
+      // and sends nothing more.
       expect(callsAfterFirst).toBeGreaterThan(0);
-      expect(callsAfterSecond).toBe(callsAfterFirst * 2);
+      expect(callsAfterSecond).toBe(callsAfterFirst);
 
       // Deterministic idempotency key contract: every transfers.create
       // call must pass `{ idempotencyKey }` as its 2nd argument, derived
@@ -3630,19 +3629,9 @@ describe('SubscriptionService', () => {
         expect(opts?.idempotencyKey).toMatch(new RegExp(`^${chargeId}_`));
       }
 
-      // Stronger: the SET of idempotency keys used on the second call
-      // must equal the SET used on the first call — i.e. every transfer
-      // attempted on replay carries an already-seen key, so Stripe
-      // dedupes and no double-spend can settle on the platform side.
-      const firstKeys = allOptions
-        .slice(0, callsAfterFirst)
-        .map((o) => o?.idempotencyKey)
-        .sort();
-      const secondKeys = allOptions
-        .slice(callsAfterFirst)
-        .map((o) => o?.idempotencyKey)
-        .sort();
-      expect(secondKeys).toEqual(firstKeys);
+      // Stronger: the replay attempted NO transfer at all — it did not even
+      // need Stripe's dedupe. The ledger already held every slice.
+      expect(allOptions.slice(callsAfterFirst)).toEqual([]);
 
       // DB state after second call must equal state after first call for
       // every business column (no double-extension of the period, no
@@ -3986,7 +3975,7 @@ describe('SubscriptionService', () => {
         create: createTransfer,
       };
 
-      const chargeId = 'ch_multiorg_creator';
+      const chargeId = `ch_multiorg_creator_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4045,7 +4034,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_split_5050';
+      const chargeId = `ch_split_5050_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4082,7 +4071,64 @@ describe('SubscriptionService', () => {
       expect(total).toBeGreaterThan(0);
     });
 
-    it('share-sum 10000 bps with 3-way odd split (3334/3333/3333): floor rounding leaves remainder unallocated, never over-pays', async () => {
+    // Codex-2hxff.12: a creator has one slice per charge. Two agreements
+    // matching the invoice for the same creator (corrupted data: one
+    // terminated after the invoice, one active since before it) used to take
+    // BOTH shares off the org's slice while the second slice hit the unique
+    // index and was skipped — that share went nowhere. Now the first counts,
+    // the second is flagged, and the org slice keeps the rest.
+    it('a creator matching two agreements is paid one share; the other stays with the org', async () => {
+      const { org, tier1 } = await createFullOrg('split-dup-creator');
+      const dup = await seedCreatorWithConnect(org.id);
+      const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      await seedAgreement(org.id, dup, 5000, { effectiveFrom: dayAgo });
+      await seedAgreement(org.id, dup, 5000, {
+        // (creator, org, effective_from, type) is unique.
+        effectiveFrom: new Date(dayAgo.getTime() - 24 * 60 * 60 * 1000),
+        status: 'terminated',
+        terminatedAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      });
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      const chargeId = `ch_split_dup_${crypto.randomUUID().slice(0, 8)}`;
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: 'pi_dup' } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      const rows = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.stripeChargeId, chargeId));
+      const creatorRows = rows.filter((r) => r.payoutType === 'creator_payout');
+      const orgRow = rows.find((r) => r.payoutType === 'organization_fee');
+      // Post-platform 900: one 50% share to the creator, the rest to the org.
+      expect(creatorRows.map((r) => r.amountCents)).toEqual([450]);
+      expect(orgRow?.amountCents).toBe(450);
+      // Every penny of the sale is in the ledger.
+      expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(1000);
+    });
+
+    // Owner decision 2026-10-13 (Codex-2hxff.12): the pennies the creators'
+    // floor()s leave behind go to the ORGANISATION and are recorded. Gross
+    // 1000, platform 100, post 900: creators 300 + 299 + 299 = 898, so the
+    // org slice is 2 — every penny of the sale is in the ledger.
+    it('share-sum 10000 bps with 3-way odd split (3334/3333/3333): the floor remainder goes to the org, never unrecorded or over-paid', async () => {
       const { org, tier1 } = await createFullOrg('split-3way');
       const c1 = await seedCreatorWithConnect(org.id);
       const c2 = await seedCreatorWithConnect(org.id);
@@ -4103,7 +4149,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_split_3way';
+      const chargeId = `ch_split_3way_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4129,11 +4175,84 @@ describe('SubscriptionService', () => {
       const a3 = byKey.get(`${chargeId}_creator_${c3}`) ?? 0;
 
       // c1's share (3334) is strictly larger, so c1 amount ≥ c2 amount = c3 amount.
-      expect(a1).toBeGreaterThanOrEqual(a2);
-      expect(a2).toBe(a3);
-      // floor() rounding leaves the remainder pence inside the platform —
-      // total transferred never exceeds the creator pool.
-      expect(a1 + a2 + a3).toBeGreaterThan(0);
+      expect([a1, a2, a3]).toEqual([300, 299, 299]);
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.stripeChargeId, chargeId));
+      expect(
+        rows.find((r) => r.payoutType === 'organization_fee')?.amountCents
+      ).toBe(2);
+      // Every penny of the 1000 is a ledger row.
+      expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(1000);
+    });
+
+    // Codex-2hxff.37 — owner decision 2026-10-18, "Hold it for the next
+    // owner": an org with no owner at the invoice's time (no ownership period,
+    // no active owner — R2 in docs/payments/release-checklist.md) still has
+    // its org fee AND its creator pool recorded, as pending `no_owner` rows
+    // with no payee. Until this both were logged and dropped.
+    it('an org with no owner: the org fee and the creator pool are held as no_owner, never dropped', async () => {
+      const ownerless = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({ slug: createUniqueSlug('no-owner') })
+          )
+          .returning()
+      );
+      const tier = takeFirst(
+        await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(ownerless.id, { name: 'No Owner' }))
+          .returning()
+      );
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, ownerless.id, tier.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      const chargeId = `ch_no_owner_${crypto.randomUUID().slice(0, 8)}`;
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_no_owner' } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+      const transfers = stripe.transfers.create as ReturnType<typeof vi.fn>;
+      transfers.mockClear();
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.stripeChargeId, chargeId));
+      for (const payoutType of [
+        'organization_fee',
+        'creator_payout_to_owner',
+      ] as const) {
+        expect(rows.find((r) => r.payoutType === payoutType)).toMatchObject({
+          status: 'pending',
+          reason: 'no_owner',
+          userId: null,
+        });
+      }
+      // Nothing is sent: there is nobody to send it to.
+      expect(transfers).not.toHaveBeenCalled();
+      // Every penny of the 1000 is a ledger row.
+      expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(1000);
     });
 
     it('share-sum UNDER 10000 bps (4000+4000=8000): creators get absolute shares of post-platform, org gets residual', async () => {
@@ -4164,7 +4283,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_undersum';
+      const chargeId = `ch_undersum_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4241,7 +4360,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_oversum';
+      const chargeId = `ch_oversum_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4300,7 +4419,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_zero';
+      const chargeId = `ch_zero_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4506,7 +4625,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_repro';
+      const chargeId = `ch_wp4_repro_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4580,7 +4699,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_multi_exact';
+      const chargeId = `ch_wp4_multi_exact_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4656,7 +4775,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_term_before';
+      const chargeId = `ch_wp4_term_before_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4710,7 +4829,7 @@ describe('SubscriptionService', () => {
       );
 
       const invoiceCreated = Math.floor(Date.now() / 1000); // "now" in seconds
-      const chargeId = 'ch_wp4_term_after';
+      const chargeId = `ch_wp4_term_after_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         created: invoiceCreated,
@@ -4754,7 +4873,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_future';
+      const chargeId = `ch_wp4_future_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4804,7 +4923,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_revtype';
+      const chargeId = `ch_wp4_revtype_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4856,7 +4975,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_ledger';
+      const chargeId = `ch_wp4_ledger_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4909,7 +5028,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_wp4_allzero';
+      const chargeId = `ch_wp4_allzero_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -4991,7 +5110,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const chargeId = 'ch_ez3tl_orphan';
+      const chargeId = `ch_ez3tl_orphan_${crypto.randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -7883,8 +8002,8 @@ describe('SubscriptionService', () => {
       for (const row of payoutRows) {
         const match = transferSpy.mock.calls.find(
           ([params]) =>
-            (params as { metadata?: { pending_payout_id?: string } }).metadata
-              ?.pending_payout_id === row.id
+            (params as { metadata?: { payout_id?: string } }).metadata
+              ?.payout_id === row.id
         );
         expect(match, `no transfer for payout ${row.id}`).toBeDefined();
         const [params] = match as unknown as [Record<string, unknown>];
@@ -7893,7 +8012,7 @@ describe('SubscriptionService', () => {
           currency: 'gbp',
           destination: stripeAccountId,
           metadata: {
-            pending_payout_id: row.id,
+            payout_id: row.id,
             subscription_id: row.subscriptionId,
             type: 'pending_payout_resolution',
           },
@@ -7964,8 +8083,8 @@ describe('SubscriptionService', () => {
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
       transferSpy.mockImplementation((params) => {
-        const metadata = params.metadata as { pending_payout_id?: string };
-        if (metadata?.pending_payout_id === failingPayoutId) {
+        const metadata = params.metadata as { payout_id?: string };
+        if (metadata?.payout_id === failingPayoutId) {
           return Promise.reject(new Error('Stripe transfer rejected (test)'));
         }
         return Promise.resolve({
@@ -8113,14 +8232,16 @@ describe('SubscriptionService', () => {
       expect(transferSpy).toHaveBeenCalledTimes(2);
 
       // Every transfers.create call MUST pass `{ idempotencyKey }` as its
-      // 2nd argument, deterministically derived from the row id. Stripe
-      // dedupes on the key, so a re-attempt after a crash-before-commit
-      // returns the original Transfer instead of creating a second one.
+      // 2nd argument, derived from the row id AND the attempt number
+      // (Codex-2hxff.11): Stripe replays the FIRST result for a key for
+      // ~24h, errors included, so one stable key would block a retry for a
+      // day. A crash-before-commit is caught by the drain's Stripe lookup
+      // (see the replay test below), not by key reuse.
       for (const row of payoutRows) {
         const match = transferSpy.mock.calls.find(
           ([params]) =>
-            (params as { metadata?: { pending_payout_id?: string } }).metadata
-              ?.pending_payout_id === row.id
+            (params as { metadata?: { payout_id?: string } }).metadata
+              ?.payout_id === row.id
         );
         expect(match, `no transfer for payout ${row.id}`).toBeDefined();
         const [, options] = match as [
@@ -8128,11 +8249,16 @@ describe('SubscriptionService', () => {
           { idempotencyKey?: string } | undefined,
         ];
         expect(options).toBeDefined();
-        expect(options?.idempotencyKey).toBe(`payout_${row.id}`);
+        expect(options?.idempotencyKey).toBe(`payout_${row.id}_1`);
       }
     });
 
-    it('replay safety: clearing resolvedAt and re-running yields the SAME idempotencyKey per row (Stripe-side dedupe contract)', async () => {
+    // Codex-2hxff.11 (SUB-02) — the bead's VERIFY: "simulate the
+    // post-transfer update failing → a re-drain after key expiry finds the
+    // existing transfer and does not transfer again". The drain used to rely
+    // on re-sending the SAME key, which Stripe forgets after ~24h: past that,
+    // a second real transfer.
+    it('replay safety: a row whose paid-update never committed is settled from Stripe on the next drain — never transferred twice', async () => {
       const { org, sub, stripeAccountId } =
         await seedConnectAndSubscription('90ocz-idem-replay');
 
@@ -8179,43 +8305,49 @@ describe('SubscriptionService', () => {
         .sort();
       expect(firstKeys.every((k) => typeof k === 'string')).toBe(true);
 
-      // Simulate the worst-case replay: DB UPDATE never committed
-      // (e.g. worker crashed between Stripe success and DB write), so
-      // the rows revert to unresolved and the next account.updated
-      // webhook triggers a second pass. Defence-in-depth requires the
-      // 2nd pass to pass the SAME idempotency key per row — Stripe then
-      // returns the original Transfer instead of creating a new one.
-      const { inArray } = await import('drizzle-orm');
+      const { eq, inArray } = await import('drizzle-orm');
+      const ids = payoutRows.map((r) => r.id);
+      const paidWith = new Map(
+        (
+          await db
+            .select()
+            .from(payoutsTable)
+            .where(inArray(payoutsTable.id, ids))
+        ).map((r) => [r.id, r.stripeTransferId])
+      );
+
+      // The worst case: the money moved but the paid-update never committed
+      // (the worker died between Stripe's success and the DB write), so the
+      // rows read as unresolved — and the attempt lease has long expired.
       await db
         .update(payoutsTable)
-        .set({ status: 'pending', resolvedAt: null, stripeTransferId: null })
-        .where(
-          inArray(
-            payoutsTable.id,
-            payoutRows.map((r) => r.id)
-          )
-        );
+        .set({
+          status: 'pending',
+          resolvedAt: null,
+          stripeTransferId: null,
+          lastRetryAt: new Date(Date.now() - 60 * 60 * 1000),
+        })
+        .where(inArray(payoutsTable.id, ids));
 
       transferSpy.mockClear();
       const second = await service.resolvePendingPayouts(
         org.id,
         stripeAccountId
       );
-      expect(second).toEqual({ resolved: 2, failed: 0 });
-      const secondKeys = transferSpy.mock.calls
-        .map(
-          (call) =>
-            (call[1] as { idempotencyKey?: string } | undefined)?.idempotencyKey
-        )
-        .sort();
 
-      // SET equality — every key in the replay matches a key from the
-      // first pass. This is the Stripe-side dedupe contract.
-      expect(secondKeys).toEqual(firstKeys);
-      // And each key matches the row-id shape (no off-by-one between
-      // row.id and the key suffix).
-      for (const row of payoutRows) {
-        expect(secondKeys).toContain(`payout_${row.id}`);
+      // Both rows are settled from the transfers Stripe already made...
+      expect(second).toEqual({ resolved: 2, failed: 0 });
+      // ...and nothing is sent again.
+      expect(transferSpy).not.toHaveBeenCalled();
+      for (const id of ids) {
+        const [row] = await db
+          .select()
+          .from(payoutsTable)
+          .where(eq(payoutsTable.id, id));
+        expect(row).toMatchObject({
+          status: 'paid',
+          stripeTransferId: paidWith.get(id),
+        });
       }
     });
 
@@ -8270,7 +8402,7 @@ describe('SubscriptionService', () => {
         unknown,
         { idempotencyKey?: string } | undefined,
       ];
-      expect(options?.idempotencyKey).toBe(`payout_${row.id}`);
+      expect(options?.idempotencyKey).toBe(`payout_${row.id}_1`);
 
       // DB row stamped resolved with the (replayed) transfer id.
       const { eq } = await import('drizzle-orm');
@@ -9070,6 +9202,112 @@ describe('SubscriptionService', () => {
       expect(transferSpy).not.toHaveBeenCalled();
     });
 
+    // Codex-2hxff.37: the ownership hand-over moves an org's held no_owner
+    // slices to the new owner in its own transaction. A slice written while
+    // that transaction was committing is invisible to its UPDATE, and nothing
+    // else would ever move it; the sweep gives it to the owner it missed.
+    it('sweepUnresolvedPayouts re-homes a held slice the ownership hand-over missed', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM payouts`);
+      const org = takeFirst(
+        await db
+          .insert(schema.organizations)
+          .values({ name: 'Rehome Org', slug: createUniqueSlug('rehome') })
+          .returning()
+      );
+      const longAgo = new Date(Date.now() - 60 * 60 * 1000);
+      // Support assigned an owner an hour ago…
+      await db.insert(schema.organizationOwnershipPeriods).values({
+        organizationId: org.id,
+        userId: creatorId,
+        startedAt: longAgo,
+        source: 'support',
+      });
+      // …and this slice, held for no owner, landed just after.
+      const held = takeFirst(
+        await db
+          .insert(payoutsTable)
+          .values({
+            userId: null,
+            organizationId: org.id,
+            sourceType: 'subscription',
+            amountCents: 135,
+            currency: 'gbp',
+            status: 'pending',
+            reason: 'no_owner',
+            payoutType: 'organization_fee',
+            stripeChargeId: `ch_rehome_${crypto.randomUUID().slice(0, 12)}`,
+            attemptedAt: longAgo,
+          })
+          .returning()
+      );
+      stubAccountsRetrieve(true);
+
+      try {
+        await service.sweepUnresolvedPayouts(15);
+
+        const after = takeFirst(
+          await db
+            .select()
+            .from(payoutsTable)
+            .where(eq(payoutsTable.id, held.id))
+        );
+        expect(after).toMatchObject({
+          userId: creatorId,
+          reason: 'connect_not_ready',
+          status: 'pending',
+        });
+      } finally {
+        await db.delete(payoutsTable).where(eq(payoutsTable.id, held.id));
+      }
+    });
+
+    it('sweepUnresolvedPayouts leaves a held slice alone while the organisation still has no owner', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM payouts`);
+      const org = takeFirst(
+        await db
+          .insert(schema.organizations)
+          .values({
+            name: 'Still Ownerless',
+            slug: createUniqueSlug('ownerless-sweep'),
+          })
+          .returning()
+      );
+      const held = takeFirst(
+        await db
+          .insert(payoutsTable)
+          .values({
+            userId: null,
+            organizationId: org.id,
+            sourceType: 'subscription',
+            amountCents: 135,
+            currency: 'gbp',
+            status: 'pending',
+            reason: 'no_owner',
+            payoutType: 'organization_fee',
+            stripeChargeId: `ch_ownerless_${crypto.randomUUID().slice(0, 12)}`,
+            attemptedAt: new Date(Date.now() - 60 * 60 * 1000),
+          })
+          .returning()
+      );
+      stubAccountsRetrieve(true);
+
+      try {
+        await service.sweepUnresolvedPayouts(15);
+
+        const after = takeFirst(
+          await db
+            .select()
+            .from(payoutsTable)
+            .where(eq(payoutsTable.id, held.id))
+        );
+        expect(after).toMatchObject({ userId: null, reason: 'no_owner' });
+      } finally {
+        await db.delete(payoutsTable).where(eq(payoutsTable.id, held.id));
+      }
+    });
+
     it('regression: org-scoped (tri-party) drain still resolves correctly', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
       await db.execute(rawSql`DELETE FROM payouts`);
@@ -9610,7 +9848,7 @@ describe('SubscriptionService', () => {
         currency: 'gbp',
         destination: stripeAccountId,
         metadata: expect.objectContaining({
-          pending_payout_id: payout.id,
+          payout_id: payout.id,
           type: 'pending_payout_resolution',
         }),
       });
@@ -9825,7 +10063,7 @@ describe('SubscriptionService', () => {
           amount: row.amountCents,
           destination: row.stripeAccountId,
           metadata: expect.objectContaining({
-            pending_payout_id: row.payoutId,
+            payout_id: row.payoutId,
             type: 'pending_payout_resolution',
           }),
         });
@@ -10032,6 +10270,89 @@ describe('SubscriptionService', () => {
         .where(eq(payoutsTable.stripeChargeId, chargeId));
       expect(rows).toHaveLength(1);
       expect(rows[0]?.status).toBe('cancelled_by_refund');
+    });
+
+    // Codex-2hxff.11: a pending row is not proof that nothing moved. Its
+    // transfer may have landed with the row never marked paid (a drain's
+    // update failed, or it was in flight when the refund came), and Stripe
+    // does not reverse transfers when a charge is refunded.
+    it('a PENDING row whose transfer went out anyway: the refund reverses it', async () => {
+      const chargeId = `ch_landed_${crypto.randomUUID().slice(0, 12)}`;
+      const { org, tier1 } = await createFullOrg(
+        `sub-landed-${Math.random().toString(36).slice(2, 8)}`
+      );
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      const [existing] = await db
+        .select()
+        .from(stripeConnectAccounts)
+        .where(eq(stripeConnectAccounts.userId, otherCreatorId));
+      const account =
+        existing?.stripeAccountId ??
+        takeFirst(
+          await db
+            .insert(stripeConnectAccounts)
+            .values({
+              userId: otherCreatorId,
+              stripeAccountId: `acct_landed_${crypto.randomUUID().slice(0, 12)}`,
+              status: 'active',
+              chargesEnabled: true,
+              payoutsEnabled: true,
+            })
+            .returning()
+        ).stripeAccountId;
+      const row = takeFirst(
+        await db
+          .insert(payoutsTable)
+          .values({
+            userId: otherCreatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 135,
+            payoutType: 'organization_fee',
+            status: 'pending',
+            reason: null,
+            stripeChargeId: chargeId,
+            transferGroup: `sub_${sub.id}`,
+            sourceType: 'subscription',
+            lastRetryAt: new Date(),
+          })
+          .returning()
+      );
+      const landed = await stripe.transfers.create({
+        amount: 135,
+        currency: 'gbp',
+        destination: account,
+        metadata: { payout_id: row.id },
+      });
+      const createReversal = stubCreateReversal();
+
+      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
+        refundAmountCents: null,
+        stripeRefundId: 're_landed',
+      });
+
+      expect(createReversal).toHaveBeenCalledTimes(1);
+      expect(createReversal).toHaveBeenCalledWith(
+        landed.id,
+        expect.objectContaining({ amount: 135 }),
+        { idempotencyKey: `${landed.id}_reversal_re_landed` }
+      );
+      const after = takeFirst(
+        await db.select().from(payoutsTable).where(eq(payoutsTable.id, row.id))
+      );
+      expect(after).toMatchObject({
+        status: 'reversed',
+        stripeTransferId: landed.id,
+      });
     });
 
     it('reverses proportionally on a partial refund', async () => {
@@ -10399,7 +10720,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         }
       );
 
-      const chargeId = 'ch_e9v3b_idem_fixed';
+      const chargeId = `ch_e9v3b_idem_fixed_${crypto.randomUUID().slice(0, 8)}`;
       const mockInvoice = createMockStripeInvoice({
         amount_paid: 1000,
         parent: {
@@ -10762,7 +11083,106 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       expect(after.resolvedAt).not.toBeNull();
     });
 
-    it("sweepUnresolvedPayouts only touches status='pending' rows — paid and failed rows are left untouched", async () => {
+    // Codex-2hxff.11: a drain claims its whole group, then sends row by row.
+    // If the group outlives the 10-minute lease, another drain can claim a
+    // row and send it under the next attempt's key; the first must then not
+    // send its own.
+    it('a drain that lost a row to another drain sends nothing for it', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedDrainScenario('drain-lease-lost');
+      const pending = takeFirst(
+        await db
+          .insert(payoutsTable)
+          .values({
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 1750,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
+          })
+          .returning()
+      );
+      // Between this drain's claim and its send, the lease runs out and a
+      // second drain claims the row.
+      vi.mocked(stripe.transfers.list).mockImplementationOnce((async () => {
+        await claimPayoutAttempt(
+          db,
+          pending.id,
+          new Date(Date.now() + 11 * 60_000)
+        );
+        return { object: 'list', data: [], has_more: false };
+      }) as never);
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 0, failed: 0 });
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
+      const after = takeFirst(
+        await db
+          .select()
+          .from(payoutsTable)
+          .where(eq(payoutsTable.id, pending.id))
+      );
+      // Still pending, held by the second drain's attempt.
+      expect(after).toMatchObject({ status: 'pending', retryCount: 2 });
+    });
+
+    it('a refund that cancels the row while the drain transfer is in flight: the transfer is reversed', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedDrainScenario('drain-refund-race');
+      const pending = takeFirst(
+        await db
+          .insert(payoutsTable)
+          .values({
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 1750,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
+          })
+          .returning()
+      );
+      vi.mocked(stripe.transfers.create).mockImplementationOnce(async () => {
+        await db
+          .update(payoutsTable)
+          .set({ status: 'cancelled_by_refund', resolvedAt: new Date() })
+          .where(eq(payoutsTable.id, pending.id));
+        return { id: 'tr_drain_late', amount: 1750 } as never;
+      });
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 0, failed: 0 });
+      expect(stripe.transfers.createReversal).toHaveBeenCalledWith(
+        'tr_drain_late',
+        expect.anything(),
+        { idempotencyKey: 'tr_drain_late_reversal_surplus' }
+      );
+      const after = takeFirst(
+        await db
+          .select()
+          .from(payoutsTable)
+          .where(eq(payoutsTable.id, pending.id))
+      );
+      expect(after.status).toBe('cancelled_by_refund');
+    });
+
+    // Codex-2hxff.11 (PAY-07): this test used to pin "failed rows are left
+    // untouched" — which stranded every failed transfer's money for good.
+    // A failed row keeps its charge id and the sweep retries it.
+    it('sweepUnresolvedPayouts retries pending AND failed rows — a paid row is left untouched', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
       await db.execute(rawSql`DELETE FROM payouts`);
 
@@ -10772,10 +11192,12 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
 
       const longAgo = new Date(Date.now() - 60 * 60 * 1000);
 
-      // Seed three rows: one paid (terminal-success), one failed
-      // (terminal-failure), one pending (sweep target). The sweep
-      // should only touch the pending row.
-      const [paid, failed, pending] = (await db
+      // Seed four rows: one paid (terminal-success), one failed by an
+      // attempt this ledger made (still payable), one pending, and one failed
+      // by an old write path (no attempt on record — its transfer may have
+      // landed, so it is a person's to reconcile). The sweep pays the failed
+      // and pending rows and leaves the other two alone.
+      const [paid, failed, pending, legacyFailed] = (await db
         .insert(payoutsTable)
         .values([
           {
@@ -10801,6 +11223,8 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
             status: 'failed',
             reason: 'transfer_failed',
             attemptedAt: longAgo,
+            // The attempt that failed, an hour ago: its lease is over.
+            lastRetryAt: longAgo,
           },
           {
             userId: creatorId,
@@ -10813,8 +11237,20 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
             reason: 'connect_not_ready',
             attemptedAt: longAgo,
           },
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 400,
+            currency: 'gbp',
+            payoutType: 'creator_payout',
+            status: 'failed',
+            reason: 'transfer_failed',
+            attemptedAt: longAgo,
+          },
         ])
         .returning()) as [
+        typeof payoutsTable.$inferSelect,
         typeof payoutsTable.$inferSelect,
         typeof payoutsTable.$inferSelect,
         typeof payoutsTable.$inferSelect,
@@ -10824,7 +11260,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
 
       const result = await service.sweepUnresolvedPayouts(15);
 
-      // Only one group scanned (the pending row), and it resolved.
+      // One (org, user) group holds both the failed and the pending row.
       expect(result.groupsScanned).toBe(1);
       expect(result.groupsResolved).toBe(1);
       expect(result.errors).toBe(0);
@@ -10839,17 +11275,17 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       expect(paidAfter.stripeTransferId).toBe('tr_terminal_paid');
       expect(paidAfter.resolvedAt?.getTime()).toBe(paid.resolvedAt?.getTime());
 
-      // Failed row: status stays 'failed' (sweep does NOT retry
-      // terminal-failure rows).
+      // Failed row: retried and paid.
       const failedAfter = takeFirst(
         await db
           .select()
           .from(payoutsTable)
           .where(eq(payoutsTable.id, failed.id))
       );
-      expect(failedAfter.status).toBe('failed');
-      expect(failedAfter.stripeTransferId).toBeNull();
-      expect(failedAfter.resolvedAt).toBeNull();
+      expect(failedAfter.status).toBe('paid');
+      expect(failedAfter.reason).toBeNull();
+      expect(failedAfter.stripeTransferId).toMatch(/^tr_/);
+      expect(failedAfter.resolvedAt).not.toBeNull();
 
       // Pending row: transitioned to paid via the sweep.
       const pendingAfter = takeFirst(
@@ -10861,6 +11297,24 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       expect(pendingAfter.status).toBe('paid');
       expect(pendingAfter.stripeTransferId).toMatch(/^tr_/);
       expect(pendingAfter.resolvedAt).not.toBeNull();
+
+      // The old write path's failed row: untouched, and nothing sent for it.
+      const legacyAfter = takeFirst(
+        await db
+          .select()
+          .from(payoutsTable)
+          .where(eq(payoutsTable.id, legacyFailed.id))
+      );
+      expect(legacyAfter).toMatchObject({ status: 'failed', retryCount: 0 });
+      expect(
+        vi
+          .mocked(stripe.transfers.create)
+          .mock.calls.some(
+            ([params]) =>
+              (params as { metadata?: { payout_id?: string } }).metadata
+                ?.payout_id === legacyFailed.id
+          )
+      ).toBe(false);
 
       // Silence unused-var (stripeAccountId only needed for setup).
       void stripeAccountId;
@@ -11159,9 +11613,10 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
       expect(err).toBeInstanceOf(UnsupportedCurrencyError);
       expect(err?.received).toBe('eur');
       expect(err?.supported).toEqual(['gbp']);
+      // No internal subscription id: the guard now runs before the row is
+      // even looked up, so nothing is read or written first (Codex-2hxff.6).
       expect(err?.context).toMatchObject({
         invoiceId: 'in_test_eur_reject',
-        subscriptionId: sub.id,
         stripeSubscriptionId: sub.stripeSubscriptionId,
       });
       expect(transferSpy).not.toHaveBeenCalled();
@@ -11187,6 +11642,49 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
 
       await service.handleInvoicePaymentSucceeded(mockInvoice);
       expect(transferSpy).toHaveBeenCalled();
+    });
+
+    // Codex-2hxff.6 (SUB-17): the guard ran AFTER the period/amount UPDATE
+    // (and after the self-heal that can INSERT a row), so a rejected invoice
+    // still rewrote the row — with a split no transfer or ledger row matched.
+    it('a non-GBP invoice writes nothing: the row keeps its period and amount, Stripe is not asked', async () => {
+      const { org, tier1 } = await seedOrg('yv18n-nowrite');
+      const sub = await seedActiveSubscription(org.id, tier1.id);
+      const before = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, sub.id))
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        id: 'in_test_usd_nowrite',
+        amount_paid: before.amountCents + 1234,
+        currency: 'usd',
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+      const retrieveSpy = vi.mocked(stripe.subscriptions.retrieve);
+      retrieveSpy.mockClear();
+
+      const err = await service
+        .handleInvoicePaymentSucceeded(mockInvoice)
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(UnsupportedCurrencyError);
+      const after = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, sub.id))
+      );
+      expect(after.amountCents).toBe(before.amountCents);
+      expect(after.currentPeriodEnd.getTime()).toBe(
+        before.currentPeriodEnd.getTime()
+      );
+      expect(after.updatedAt.getTime()).toBe(before.updatedAt.getTime());
+      expect(retrieveSpy).not.toHaveBeenCalled();
     });
   });
 

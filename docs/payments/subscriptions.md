@@ -56,8 +56,7 @@ Before a Checkout Session is created:
 - the tier (or plan) must be active and belong to the organisation;
 - the buyer must not already have a live subscription to that organisation (or
   course): `active`, `past_due` or `cancelling`;
-- the organisation owner's payouts must be set up — for course plans too —
-  **gap**: `Codex-2hxff.12` (course checkout skips the check).
+- the organisation owner's payouts must be set up — for course plans too.
 
 The session uses `mode: 'subscription'`, the buyer's single Stripe Customer and
 the tier's Price for the chosen interval. Metadata on the session and on
@@ -122,8 +121,9 @@ driven by `checkout.session.completed`, and payment by `invoice.payment_succeede
 ### Renewals
 
 On `invoice.payment_succeeded` the charge is found from the invoice, the
-currency is checked to be GBP **before** anything is written — **gap**:
-`Codex-2hxff.6` (today it is checked after the update) — and the invoice is
+currency is checked to be GBP **before** anything is written — a non-GBP
+invoice is rejected (and acknowledged, as a permanent error) with the row
+untouched — and the invoice is
 split and paid out exactly like a sale ([fees-and-splits.md](fees-and-splits.md#organisation-subscription-invoice)).
 
 ### Cancelling, reactivating, resuming

@@ -75,13 +75,27 @@ signing secret.
 | 400 | No `stripe-signature` header |
 | 401 | The signature does not match the endpoint's secret |
 | 501 | The secret or Stripe key is not configured |
-| **500** | A **transient** failure: database connection or timeout, Stripe 5xx, rate limit or network error. Stripe retries (for up to 3 days in live mode). |
+| **500** | A **transient** failure: database connection or timeout, Stripe 5xx, rate limit, network error, or a Stripe authentication or permission error (a key or account misconfiguration — redelivery succeeds once it is fixed). Stripe retries (for up to 3 days in live mode). |
 | 200 `{ received: true }` | Processed, skipped (wrong mode, another environment, unknown type), or failed **permanently** (bad data, unknown object) |
 
-Errors wrapped as `ServiceError` by a service must still be classified by their
-cause, so a database outage inside a service returns 500 — **gap**:
-`Codex-2hxff.6`. There is no event-id table; safety on redelivery comes from
-unique keys (payment intent, ledger rows) and deterministic idempotency keys.
+Errors wrapped as `ServiceError` by a service are classified by their cause,
+so a database outage inside a service returns 500. A service never lets a raw
+error out: `handleError` wraps it as `InternalServiceError` and keeps the
+original on the standard `cause` (never serialised into a response), and
+`isTransientError` (`workers/ecom-api/src/utils/error-classification.ts`)
+follows the cause chain. A `ServiceError` thrown on purpose (not found,
+validation, conflict) has no cause and stays permanent; so does an unrecognised
+bug, so a broken handler cannot start a retry storm. Retryable Postgres states
+(class `08`, `40001`, `40P01`, `53300`, `57P01`–`57P03`, `57014`) count as
+transient by their SQLSTATE, whatever their message says — and any other
+SQLSTATE is permanent, whatever its message says (a constraint named after a
+timeout must not retry for three days). Drizzle's query error is judged by the
+driver error it wraps, never by its message: that is the SQL and its bound
+values, user data. The log line names the innermost error and its code, never
+the query.
+
+There is no event-id table; safety on redelivery comes from unique keys
+(payment intent, ledger rows) and deterministic idempotency keys.
 
 ## Secrets and configuration (ecom-api)
 

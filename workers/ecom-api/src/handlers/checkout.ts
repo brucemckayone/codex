@@ -28,6 +28,7 @@ import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
+import { isTransientError } from '../utils/error-classification';
 
 /**
  * Retrieve the charge id + Stripe-collected application fee for a PaymentIntent.
@@ -53,6 +54,11 @@ async function resolvePaymentIntentCharge(
           : (paymentIntent.latest_charge?.id ?? null),
     };
   } catch (piError) {
+    // The charge id is what every payout slice is paid from. A temporary
+    // failure is rethrown so the webhook answers 500 and Stripe retries —
+    // carrying on without it completed the sale with no slices at all
+    // (Codex-2hxff.11, PAY-08).
+    if (isTransientError(piError)) throw piError;
     obs?.warn('Could not retrieve PaymentIntent for fee reconciliation', {
       paymentIntentId,
       error: piError instanceof Error ? piError.message : String(piError),
@@ -184,9 +190,11 @@ export async function handleCheckoutCompleted(
         ? paymentIntent.latest_charge
         : (paymentIntent.latest_charge?.id ?? null);
   } catch (piError) {
-    // Non-fatal — reconciliation is best-effort. Missing chargeId here means
-    // the payouts pipeline degrades to a no-op for this purchase; the purchase
-    // + access grant still complete via the transaction below.
+    // A temporary failure is rethrown so Stripe retries: without the charge
+    // id no payout slice can be recorded (Codex-2hxff.11, PAY-08). A
+    // permanent one leaves it missing — the purchase + access grant still
+    // complete, and completePurchase logs the unpaid slices as an error.
+    if (isTransientError(piError)) throw piError;
     obs?.warn('Could not retrieve PaymentIntent for fee reconciliation', {
       paymentIntentId,
       error: piError instanceof Error ? piError.message : String(piError),

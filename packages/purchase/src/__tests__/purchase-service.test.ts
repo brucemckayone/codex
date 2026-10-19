@@ -19,8 +19,12 @@
 import { ContentService, MediaItemService } from '@codex/content';
 import * as schema from '@codex/database/schema';
 import { organizations } from '@codex/database/schema';
-import { StripeNotConfiguredError } from '@codex/service-errors';
 import {
+  InternalServiceError,
+  StripeNotConfiguredError,
+} from '@codex/service-errors';
+import {
+  createMockStripe,
   createTestConnectAccountInput,
   createTestMembershipInput,
   createUniqueSlug,
@@ -31,7 +35,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -1255,7 +1259,7 @@ describe('PurchaseService Integration', () => {
       expect(rows.length).toBeLessThanOrEqual(3);
     });
 
-    it('writes a pending org_fee row with reason connect_not_ready when Connect is offline', async () => {
+    it('writes a pending org_fee row with reason connect_restricted when Connect is offline', async () => {
       // Seed a SECOND organization owned by otherUserId so we can configure
       // a Connect account with chargesEnabled=false without interfering with
       // the shared org used by other tests.
@@ -1365,20 +1369,24 @@ describe('PurchaseService Integration', () => {
 
       // Option B (Codex-h69cg): both creator_payout AND organization_fee
       // require a secondary transfer. With the same Connect account (org owner
-      // == creator here) disabled, BOTH end up pending+connect_not_ready.
+      // == creator here) disabled, BOTH end up pending. The account EXISTS but
+      // cannot take charges, so the reason is connect_restricted — the label
+      // Studio's payouts page shows as "Connect account restricted"
+      // (connect_not_ready means no account at all; Codex-2hxff.11 made
+      // purchases distinguish them, as subscriptions already did).
       // platform_fee stays paid (no transfer call). 3 rows total.
       expect(rows).toHaveLength(3);
 
       const orgFeeRow = rows.find((r) => r.payoutType === 'organization_fee');
       expect(orgFeeRow).toBeDefined();
       expect(orgFeeRow?.status).toBe('pending');
-      expect(orgFeeRow?.reason).toBe('connect_not_ready');
+      expect(orgFeeRow?.reason).toBe('connect_restricted');
       expect(orgFeeRow?.sourceType).toBe('purchase');
 
       const creatorRow = rows.find((r) => r.payoutType === 'creator_payout');
       expect(creatorRow).toBeDefined();
       expect(creatorRow?.status).toBe('pending');
-      expect(creatorRow?.reason).toBe('connect_not_ready');
+      expect(creatorRow?.reason).toBe('connect_restricted');
       expect(creatorRow?.sourceType).toBe('purchase');
 
       const platformRow = rows.find((r) => r.payoutType === 'platform_fee');
@@ -1996,6 +2004,126 @@ describe('PurchaseService Integration', () => {
       expect(orgFeeCall, 'org_fee transfer must fire').toBeDefined();
       expect(orgFeeCall?.destination).toBe(OWNER_STRIPE_ACCT);
     });
+
+    // Codex-2hxff.37 — owner decision 2026-10-18, "Hold it for the next
+    // owner": an organisation with no owner at the sale's time (no ownership
+    // period, no active owner — R2 in docs/payments/release-checklist.md)
+    // still has its slice recorded, as a pending `no_owner` row with no payee.
+    // Until this it was logged and left unrecorded on the platform balance.
+    it('an organisation with no owner: its slice is held as no_owner, never dropped (Codex-2hxff.37)', async () => {
+      const ownerless = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'Ownerless Org',
+            slug: createUniqueSlug('ownerless'),
+          })
+          .returning()
+      );
+      const media = await mediaService.create(
+        {
+          title: 'Ownerless Sale',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/ownerless/master.m3u8',
+          thumbnailKey: 'thumbnails/ownerless.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const content = await contentService.create(
+        {
+          organizationId: ownerless.id,
+          title: 'Ownerless Sale',
+          slug: createUniqueSlug('ownerless-sale'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          priceCents: 10000,
+          tags: [],
+        },
+        userId
+      );
+      await seedReadyConnect(userId);
+      await contentService.publish(content.id, userId);
+      const stripe = createMockStripe();
+      const fees = {
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1500,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: fees as any },
+        stripe
+      );
+
+      const paymentIntentId = `pi_ownerless_${crypto.randomUUID().slice(0, 12)}`;
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: ownerless.id,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: `ch_ownerless_${crypto.randomUUID().slice(0, 12)}`,
+      });
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      expect(
+        rows.find((r) => r.payoutType === 'organization_fee')
+      ).toMatchObject({
+        status: 'pending',
+        reason: 'no_owner',
+        userId: null,
+        amountCents: 1350, // 15% of post-platform 9000
+      });
+      // Nothing is sent for it: there is nobody to send it to.
+      const orgTransfers = vi
+        .mocked(stripe.transfers.create)
+        .mock.calls.filter(
+          ([params]) =>
+            (params as { metadata?: { type?: string } }).metadata?.type ===
+            'organization_fee'
+        );
+      expect(orgTransfers).toHaveLength(0);
+
+      // A refund cancels it like any unpaid slice. The database must admit
+      // a CANCELLED row with no payee: refused, the row would stay pending,
+      // and the next owner would be paid for a refunded sale.
+      await service.processRefund(paymentIntentId, {
+        stripeRefundId: `re_ownerless_${crypto.randomUUID().slice(0, 12)}`,
+        refundAmountCents: 10000,
+      });
+      const [held] = await db
+        .select()
+        .from(schema.payouts)
+        .where(
+          and(
+            eq(schema.payouts.purchaseId, purchase.id),
+            eq(schema.payouts.payoutType, 'organization_fee')
+          )
+        );
+      expect(held).toMatchObject({
+        status: 'cancelled_by_refund',
+        userId: null,
+        reason: 'no_owner',
+      });
+      await db
+        .delete(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+    });
   });
 
   // ─── WP-4 content-purchase agreement integration (Codex-rzfjw) ─────────
@@ -2456,7 +2584,10 @@ describe('PurchaseService Integration', () => {
       const stubStripe = {
         ...mockStripe,
         transfers: {
-          create: vi.fn(),
+          // A real transfer always has an id: the ledger records it.
+          create: vi.fn().mockImplementation(async () => ({
+            id: `tr_idem_${crypto.randomUUID()}`,
+          })),
           createReversal: reversal,
         },
       } as unknown as Stripe;
@@ -2510,14 +2641,17 @@ describe('PurchaseService Integration', () => {
         stripeChargeId: chargeId,
       });
 
-      // First refund
+      // First refund — reverses the creator's transfer (org_fee = 0, so it is
+      // the only one). Until Codex-2hxff.11 this stub's transfer had no id, the
+      // slice was recorded as a failed transfer, and the test read "nothing to
+      // reverse" as the idempotency it meant to check.
       await service.processRefund(paymentIntentId);
+      const afterFirst = reversal.mock.calls.length;
       // Second refund — short-circuits via the "already refunded" guard.
       await service.processRefund(paymentIntentId);
 
-      // No reversal API call should have fired at all (org_fee = 0 so no
-      // transfer existed; both refund calls were content-status-only).
-      expect(reversal).not.toHaveBeenCalled();
+      // The second refund reverses nothing more.
+      expect(reversal.mock.calls.length).toBe(afterFirst);
     });
 
     // REGRESSION (PR #203 deep-review F-1, DQ-7) — partial refunds must
@@ -2963,6 +3097,163 @@ describe('PurchaseService Integration', () => {
       expect(afterByType.get('organization_fee')?.status).toBe(
         'cancelled_by_refund'
       );
+    });
+
+    // Codex-2hxff.11: a pending row is not proof that no money moved. Its
+    // transfer can have gone out — a drain sent it and then failed to mark
+    // it paid, or it was in flight when the refund arrived — and Stripe does
+    // not reverse transfers when a charge is refunded. The refund cancels the
+    // row first, then asks Stripe, and reverses what it finds.
+    it('refund reverses a transfer that went out for a row still pending', async () => {
+      const stubFeeConfig = {
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1500,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const landedOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'Landed Transfer Org',
+            slug: createUniqueSlug('landed-refund'),
+          })
+          .returning()
+      );
+      await setTestOrganisationPayee(db, landedOrg.id, userId);
+      const creatorAccount = `acct_landed_${crypto.randomUUID().slice(0, 12)}`;
+      await db.insert(schema.stripeConnectAccounts).values({
+        userId,
+        organizationId: landedOrg.id,
+        stripeAccountId: creatorAccount,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+      });
+
+      // What Stripe holds: the transfers made to an account, newest first.
+      const landed: Array<{
+        id: string;
+        destination: string;
+        created: number;
+        metadata: Record<string, string>;
+      }> = [];
+      const reversals: Array<{ id: string; amount: number | undefined }> = [];
+      const stubStripe = {
+        ...mockStripe,
+        transfers: {
+          create: vi.fn(),
+          list: vi.fn(async (params: { destination: string }) => ({
+            data: landed.filter((t) => t.destination === params.destination),
+            has_more: false,
+          })),
+          createReversal: vi.fn(async (id: string, p: { amount?: number }) => {
+            reversals.push({ id, amount: p.amount });
+            return { id: `trr_${id}` };
+          }),
+        },
+        refunds: { create: vi.fn() },
+      } as unknown as Stripe;
+      const landedService = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const media = await mediaService.create(
+        {
+          title: 'Landed Refund Content',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/landed-refund/master.m3u8',
+          thumbnailKey: 'thumbnails/landed-refund.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const content = await contentService.create(
+        {
+          organizationId: landedOrg.id,
+          title: 'Landed Refund Content',
+          slug: createUniqueSlug('landed-refund'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          priceCents: 1000,
+          tags: [],
+        },
+        userId
+      );
+      await contentService.publish(content.id, userId);
+      // Offline at sale time, so both slices are recorded pending.
+      await db
+        .update(schema.stripeConnectAccounts)
+        .set({ chargesEnabled: false, payoutsEnabled: false })
+        .where(eq(schema.stripeConnectAccounts.userId, userId));
+
+      const run = crypto.randomUUID().slice(0, 12);
+      const paymentIntentId = `pi_landed_${run}`;
+      const purchase = await landedService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: landedOrg.id,
+        amountPaidCents: 1000,
+        currency: 'gbp',
+        stripeChargeId: `ch_landed_${run}`,
+      });
+      const before = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      const creatorRow = before.find((r) => r.payoutType === 'creator_payout');
+      const orgRow = before.find((r) => r.payoutType === 'organization_fee');
+      expect(creatorRow?.status).toBe('pending');
+      expect(orgRow?.status).toBe('pending');
+      if (!creatorRow || !orgRow) throw new Error('slices missing');
+
+      // A drain sent the creator's slice; the row was never marked paid.
+      const landedId = `tr_landed_${run}`;
+      landed.push({
+        id: landedId,
+        destination: creatorAccount,
+        created: Math.floor(Date.now() / 1000),
+        metadata: { payout_id: creatorRow.id },
+      });
+
+      await landedService.processRefund(paymentIntentId, {
+        stripeRefundId: `re_landed_${run}`,
+        refundAmountCents: 1000,
+      });
+
+      // Reversed in full, once — and only the transfer that existed.
+      expect(reversals).toEqual([
+        { id: landedId, amount: creatorRow.amountCents },
+      ]);
+      const after = new Map(
+        (
+          await db
+            .select()
+            .from(schema.payouts)
+            .where(eq(schema.payouts.purchaseId, purchase.id))
+        ).map((r) => [r.id, r])
+      );
+      expect(after.get(creatorRow.id)).toMatchObject({
+        status: 'reversed',
+        stripeTransferId: landedId,
+      });
+      // The org's slice never had a transfer: cancelled, nothing reversed.
+      expect(after.get(orgRow.id)).toMatchObject({
+        status: 'cancelled_by_refund',
+        stripeTransferId: null,
+      });
     });
   });
 
@@ -5016,15 +5307,14 @@ describe('PurchaseService Integration', () => {
       ).toBe(10000);
     });
 
-    // P1b (Codex-69t7c WP5 hardening b) — money-moved / ledger-silent guard:
-    // on the orgless path the creator transfer fires (REAL money moves to the
-    // Connect account) but the creator_payout ledger insert fails on a NON-
-    // unique DB error (e.g. a 23514 CHECK violation). That failure MUST be
-    // SURFACED via obs.error with a correlatable errorId — NOT swallowed — so
-    // the out-of-sync ledger is loud and reconcilable. (A 23505 dup is the
-    // only error that may be silently swallowed, since it means the row
-    // already exists.)
-    it('orgless path: transfer succeeds but ledger insert fails (non-unique) → error SURFACED with errorId, not swallowed', async () => {
+    // P1b (Codex-69t7c WP5 hardening b, reshaped by Codex-2hxff.11) —
+    // money-moved / ledger-silent guard. The row is now reserved BEFORE the
+    // transfer, so "transfer made, no row" cannot happen; its counterpart is
+    // "transfer made, row not marked paid". That MUST be surfaced via obs.error
+    // with a correlatable errorId, and the row must stay pending WITH its
+    // charge id, so the next drain finds the transfer in Stripe and settles
+    // the row instead of paying again.
+    it('orgless path: transfer succeeds but the row cannot be marked paid → error SURFACED with errorId; row left for the drain to settle', async () => {
       const stubFeeConfig = {
         getFeesPlatform: vi.fn().mockResolvedValue({
           platformFeePercent: 1000,
@@ -5033,7 +5323,7 @@ describe('PurchaseService Integration', () => {
           minTransferCents: 0,
         }),
       };
-      const creatorTransferId = `tr_orgless_ledgerfail_${Date.now()}`;
+      const creatorTransferId = `tr_orgless_settlefail_${Date.now()}`;
       const createTransfer = vi
         .fn()
         .mockResolvedValue({ id: creatorTransferId });
@@ -5050,48 +5340,32 @@ describe('PurchaseService Integration', () => {
 
       const { content, chargeId, paymentIntentId } =
         await setupOrglessPaidContent({
-          title: 'Orgless Ledger Insert Fail',
+          title: 'Orgless Settle Fail',
           priceCents: 10000,
           creatorUserId: userId,
         });
 
-      // Synthetic NON-unique Postgres error (23514 = check_violation). The
-      // hardening branch keys off `!isUniqueViolation(err)` (23505), so this
-      // exercises the surfaced-error path.
-      class FakeCheckViolation extends Error {
-        code = '23514';
-        constraint = 'check_payouts_paid_invariant';
-        constructor() {
-          super('simulated non-unique ledger insert failure');
-        }
-      }
-
-      // Intercept the service's DB so ONLY the creator_payout `paid` insert
-      // rejects. Every other insert (purchase, contentAccess, platform_fee,
-      // the pending fallbacks) delegates to the real builder unchanged.
-      // `db.insert` lives on the Drizzle client's prototype (not an own
-      // property), so vi.spyOn can't target it — wrap the whole client in a
-      // Proxy that intercepts `insert` and restores it after the test.
+      // Intercept the service's DB so ONLY the update that marks a payout
+      // paid rejects. `db.update` lives on the Drizzle client's prototype, so
+      // wrap the whole client in a Proxy and restore it after the test.
       // biome-ignore lint/suspicious/noExplicitAny: test interception of Drizzle client
       const serviceAny = service as any;
       const realDb = serviceAny.db;
       const dbProxy = new Proxy(realDb, {
         get(target, prop, receiver) {
-          if (prop === 'insert') {
+          if (prop === 'update') {
             // biome-ignore lint/suspicious/noExplicitAny: Drizzle builder shape
             return (table: any) => {
-              const builder = target.insert(table);
-              const realValues = builder.values.bind(builder);
+              const builder = target.update(table);
+              const realSet = builder.set.bind(builder);
               // biome-ignore lint/suspicious/noExplicitAny: row payload
-              builder.values = (rows: any) => {
-                const row = Array.isArray(rows) ? rows[0] : rows;
-                if (
-                  row?.payoutType === 'creator_payout' &&
-                  row?.status === 'paid'
-                ) {
-                  return Promise.reject(new FakeCheckViolation());
+              builder.set = (values: any) => {
+                if (values?.status === 'paid') {
+                  const fail = () =>
+                    Promise.reject(new Error('simulated settle failure'));
+                  return { where: () => ({ returning: fail }) };
                 }
-                return realValues(rows);
+                return realSet(values);
               };
               return builder;
             };
@@ -5105,8 +5379,7 @@ describe('PurchaseService Integration', () => {
       // biome-ignore lint/suspicious/noExplicitAny: spy protected obs.error
       const errorSpy = vi.spyOn((service as any).obs, 'error');
 
-      // completePurchase MUST NOT throw — per-row isolation keeps the purchase
-      // itself successful; the ledger failure is logged, not propagated.
+      // completePurchase MUST NOT throw — the purchase and access grant stand.
       const purchase = await service.completePurchase(paymentIntentId, {
         customerId: otherUserId,
         contentId: content.id,
@@ -5124,32 +5397,44 @@ describe('PurchaseService Integration', () => {
         expect.objectContaining({ idempotencyKey: `${chargeId}_creator` })
       );
 
-      // The failure was SURFACED via obs.error with the money-moved message
-      // AND a correlatable errorId + the Connect destination + idempotencyKey.
       const surfaced = errorSpy.mock.calls.find(([msg]) =>
-        String(msg).includes(
-          'creator_payout transfer succeeded but payouts ledger insert failed'
-        )
+        String(msg).includes('Transfer made but its payout row was not settled')
       );
       expect(
         surfaced,
-        'ledger-insert failure after a successful transfer must be logged at error level'
+        'a settle failure after a successful transfer must be logged at error level'
       ).toBeDefined();
       const surfacedMeta = surfaced![1] as Record<string, unknown>;
       expect(typeof surfacedMeta.errorId).toBe('string');
       expect((surfacedMeta.errorId as string).length).toBeGreaterThan(0);
       expect(surfacedMeta.stripeTransferId).toBe(creatorTransferId);
-      expect(surfacedMeta.idempotencyKey).toBe(`${chargeId}_creator`);
-      expect(surfacedMeta.destination).toBeDefined();
 
       serviceAny.db = realDb;
       errorSpy.mockRestore();
+
+      // The row is left pending with its charge id — reconcilable by a drain.
+      const [creatorRow] = await db
+        .select()
+        .from(schema.payouts)
+        .where(
+          and(
+            eq(schema.payouts.purchaseId, purchase.id),
+            eq(schema.payouts.payoutType, 'creator_payout')
+          )
+        );
+      expect(creatorRow).toMatchObject({
+        status: 'pending',
+        reason: null,
+        stripeChargeId: chargeId,
+      });
+      expect(surfacedMeta.payoutId).toBe(creatorRow?.id);
     });
 
     // P2 — orgless purchase BEFORE the creator finishes Connect onboarding:
-    // creator_payout degrades to pending+connect_not_ready, platform_fee still
-    // paid, NO transfer call. Mirrors the tri-party connect_not_ready path.
-    it('degrades creator_payout to pending+connect_not_ready when the creator Connect is offline', async () => {
+    // creator_payout degrades to pending (connect_restricted: the account
+    // exists but cannot take charges), platform_fee still paid, NO transfer
+    // call. Mirrors the tri-party path.
+    it('degrades creator_payout to pending+connect_restricted when the creator Connect is offline', async () => {
       const stubFeeConfig = {
         getFeesPlatform: vi.fn().mockResolvedValue({
           platformFeePercent: 1000,
@@ -5202,7 +5487,7 @@ describe('PurchaseService Integration', () => {
 
       const creatorRow = rows.find((r) => r.payoutType === 'creator_payout');
       expect(creatorRow?.status).toBe('pending');
-      expect(creatorRow?.reason).toBe('connect_not_ready');
+      expect(creatorRow?.reason).toBe('connect_restricted');
       expect(creatorRow?.organizationId).toBeNull();
       expect(creatorRow?.userId).toBe(otherUserId);
 
@@ -5636,6 +5921,188 @@ describe('PurchaseService Integration', () => {
       expect(orgFeeRow).toBeDefined();
       expect(orgFeeRow?.amountCents).toBe(900); // 10% of post-platform 9000
       expect(orgFeeRow?.organizationId).toBe(mixedOrg.id);
+    });
+
+    // ─── A replayed webhook re-records the slices (Codex-2hxff.11) ──────
+    // Until this, a redelivery of a completed purchase skipped the ledger
+    // entirely: a slice the first delivery never wrote was never paid.
+    describe('a replayed webhook (Codex-2hxff.11)', () => {
+      const platformFees = {
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+
+      function serviceWith(stripe: Stripe) {
+        return new PurchaseService(
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          { db, environment: 'test', feeConfig: platformFees as any },
+          stripe
+        );
+      }
+
+      /** Make the service's post-commit creator-slice INSERT fail once. */
+      function dropTheCreatorSlice(service: PurchaseService) {
+        // biome-ignore lint/suspicious/noExplicitAny: test interception of Drizzle client
+        const serviceAny = service as any;
+        const realDb = serviceAny.db;
+        serviceAny.db = new Proxy(realDb, {
+          get(target, prop, receiver) {
+            if (prop === 'insert') {
+              // biome-ignore lint/suspicious/noExplicitAny: Drizzle builder shape
+              return (table: any) => {
+                const builder = target.insert(table);
+                const realValues = builder.values.bind(builder);
+                // biome-ignore lint/suspicious/noExplicitAny: row payload
+                builder.values = (rows: any) => {
+                  const row = Array.isArray(rows) ? rows[0] : rows;
+                  if (row?.payoutType === 'creator_payout') {
+                    throw new Error('Connection terminated unexpectedly');
+                  }
+                  return realValues(rows);
+                };
+                return builder;
+              };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+        return () => {
+          serviceAny.db = realDb;
+        };
+      }
+
+      async function slicesOf(purchaseId: string) {
+        return db
+          .select()
+          .from(schema.payouts)
+          .where(eq(schema.payouts.purchaseId, purchaseId));
+      }
+
+      it('adds the slice the first delivery lost — and pays it once', async () => {
+        const stripe = createMockStripe();
+        const service = serviceWith(stripe);
+        const { content, chargeId, paymentIntentId } =
+          await setupOrglessPaidContent({
+            title: 'Replay Repairs Lost Slice',
+            priceCents: 10000,
+            creatorUserId: userId,
+          });
+        const metadata = {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId: null,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          stripeChargeId: chargeId,
+        };
+
+        // First delivery: the purchase commits, then the database drops
+        // while the creator's slice is being reserved.
+        const restore = dropTheCreatorSlice(service);
+        const first = await service
+          .completePurchase(paymentIntentId, metadata)
+          .catch((e: unknown) => e);
+        restore();
+        // Thrown with its cause, so the webhook answers 500 and Stripe
+        // retries (Codex-2hxff.6) — not logged and acknowledged as before.
+        expect(first).toBeInstanceOf(InternalServiceError);
+        expect(((first as Error).cause as Error).message).toBe(
+          'Connection terminated unexpectedly'
+        );
+        expect(stripe.transfers.create).not.toHaveBeenCalled();
+
+        // The redelivery finds the purchase and adds the missing slice.
+        const purchase = await service.completePurchase(
+          paymentIntentId,
+          metadata
+        );
+        const rows = await slicesOf(purchase.id);
+        expect(rows.map((r) => r.payoutType).sort()).toEqual([
+          'creator_payout',
+          'platform_fee',
+        ]);
+        expect(
+          rows.find((r) => r.payoutType === 'creator_payout')
+        ).toMatchObject({ status: 'paid', amountCents: 9000 });
+        expect(stripe.transfers.create).toHaveBeenCalledTimes(1);
+      });
+
+      it('a second delivery of a completed purchase transfers nothing more', async () => {
+        const stripe = createMockStripe();
+        const service = serviceWith(stripe);
+        const { content, chargeId, paymentIntentId } =
+          await setupOrglessPaidContent({
+            title: 'Replay Pays Once',
+            priceCents: 10000,
+            creatorUserId: userId,
+          });
+        const metadata = {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId: null,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          stripeChargeId: chargeId,
+        };
+
+        const purchase = await service.completePurchase(
+          paymentIntentId,
+          metadata
+        );
+        // Past Stripe's idempotency window a fresh client would transfer
+        // again for the same key — only the ledger can stop it.
+        const later = serviceWith(createMockStripe());
+        await later.completePurchase(paymentIntentId, metadata);
+
+        expect(stripe.transfers.create).toHaveBeenCalledTimes(1);
+        // biome-ignore lint/suspicious/noExplicitAny: the later client's spy
+        expect((later as any).stripe.transfers.create).not.toHaveBeenCalled();
+        expect(await slicesOf(purchase.id)).toHaveLength(2);
+      });
+
+      it('a purchase refunded since is not re-recorded — that would pay out money the buyer got back', async () => {
+        const stripe = createMockStripe();
+        const service = serviceWith(stripe);
+        const { content, chargeId, paymentIntentId } =
+          await setupOrglessPaidContent({
+            title: 'Replay After Refund',
+            priceCents: 10000,
+            creatorUserId: userId,
+          });
+        const metadata = {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId: null,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          stripeChargeId: chargeId,
+        };
+        const restore = dropTheCreatorSlice(service);
+        await service
+          .completePurchase(paymentIntentId, metadata)
+          .catch(() => {});
+        restore();
+        await service.processRefund(paymentIntentId, {
+          refundAmountCents: 10000,
+        });
+
+        const purchase = await service.completePurchase(
+          paymentIntentId,
+          metadata
+        );
+
+        expect(
+          (await slicesOf(purchase.id)).find(
+            (r) => r.payoutType === 'creator_payout'
+          )
+        ).toBeUndefined();
+        expect(stripe.transfers.create).not.toHaveBeenCalled();
+      });
     });
   });
 

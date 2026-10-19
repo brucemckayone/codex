@@ -94,17 +94,17 @@ can each pay only one connected account, so neither can split a sale three ways.
 3. **No £0 offers.** A price of £0 is refused when it is written.
 4. **Every penny is accounted for.** Each sale stores its split, and every
    slice that is owed to someone has a row in the payouts ledger — paid, or
-   pending until it can be paid. Nothing is dropped with only a log line —
-   **gap**: `Codex-2hxff.12` (splits that write no ledger row).
+   pending until it can be paid. Nothing is dropped with only a log line.
 5. **Financial records are permanent.** Purchases, subscriptions, payouts and
    refund reviews are never hard-deleted or cascade-deleted — **gap**:
    `Codex-2hxff.23` (user deletion cascades).
 6. **Money-moving Stripe calls are idempotent.** Each uses a deterministic
-   idempotency key built from the charge and the slice, so a retried webhook
-   can never pay twice — **gap**: `Codex-2hxff.11` (ledger double-pay).
+   idempotency key built from the charge and the slice, and the slice's ledger
+   row is reserved before the transfer, so a retried webhook can never pay
+   twice.
 7. **Webhooks are retried on transient failure.** A database or Stripe outage
    returns 500 so Stripe retries; only a permanent problem is acknowledged
-   with 200 — **gap**: `Codex-2hxff.6` (transient failures acked 200).
+   with 200.
 8. **One of each per person.** One Stripe Customer per user per environment;
    one Stripe Connect account per user.
 9. **Each environment ignores the other's events.** Production and local

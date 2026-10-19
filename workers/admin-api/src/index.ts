@@ -721,6 +721,7 @@ app.post(
         organizationId: orgId,
         newOwnerUserId: change.ownerUserId,
         previousOwnerUserId: change.previousOwnerUserId,
+        heldPayoutsReleased: change.heldPayoutsReleased,
         actorUserId: ctx.user.id,
         reason: ctx.input.body.reason,
       });

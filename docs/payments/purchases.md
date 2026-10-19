@@ -74,8 +74,12 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
      [operations](operations.md#environments-and-stripe-accounts));
    - `payment_status` is not `paid` — **gap**: `Codex-2hxff.14`.
 3. The charge id is read from the PaymentIntent (`latest_charge`). If that
-   lookup fails, the webhook returns 500 so Stripe retries; a purchase is never
-   completed without its charge id — **gap**: `Codex-2hxff.11`.
+   lookup fails **temporarily** — an outage, or a Stripe key or permission
+   misconfiguration — the webhook returns 500 so Stripe retries
+   rather than complete the purchase without it. If it fails permanently (the
+   PaymentIntent cannot be read at all), the purchase still completes — the
+   buyer has paid — and the unpaid slices are logged as an error for support,
+   since no slice can be paid without its charge.
 4. In one database transaction:
    - a `purchases` row is inserted with status `completed` and the split
      snapshot (platform, organisation and creator amounts that must sum to the
@@ -84,23 +88,29 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
    - an entitlement is written — `content_purchase`, or `course_purchase` plus
      course enrolment — for organisation **and** orgless sales — **gap**:
      `Codex-2hxff.21` (orgless sales get none).
-5. After the transaction, for a new purchase only, the split is paid out (see
-   [the payouts ledger](connect-and-payouts.md#the-payouts-ledger)):
+5. After the transaction the split is paid out (see
+   [the payouts ledger](connect-and-payouts.md#the-payouts-ledger)). A
+   redelivered event re-records the purchase's slices from its stored split:
+   the ledger skips those already recorded, so only a missing one is added —
+   and none for a purchase refunded or disputed since:
    - a `platform_fee` row, recorded as paid;
    - the creator slice — a transfer to the creator's Connect account with key
      `${chargeId}_creator`;
    - the organisation slice — a transfer to the organisation owner's Connect
      account with key `${chargeId}_org_fee`;
    - a payee who is not payable yet gets a **pending** row instead, drained
-     later. A transfer that fails gets a **failed** row that keeps its charge
-     id and is retried — **gap**: `Codex-2hxff.11`.
+     later; an organisation with no owner gets a pending `no_owner` row for
+     its next owner. A transfer that fails gets a **failed** row that keeps its
+     charge id and is retried.
 6. Then, without holding up the response: the buyer's library version is
    bumped, a receipt email is sent once per purchase (not once per webhook
    delivery) — **gap**: `Codex-2hxff.8` — and a creator whose slice went
    pending is emailed to finish payouts setup — **gap**: `Codex-2hxff.7`.
 
 **Errors.** A transient failure (database connection, Stripe outage) returns
-500 and Stripe retries — **gap**: `Codex-2hxff.6`. If a buyer is charged twice
+500 and Stripe retries. A failure writing the slices after the purchase has
+committed is logged as exactly that, with an errorId; a transient one returns
+500 and the redelivery re-records the missing slices. If a buyer is charged twice
 for an item they already own, the second payment is refunded automatically —
 **gap**: `Codex-2hxff.14`.
 
@@ -154,7 +164,14 @@ refunds).
   ([access.md](access.md#streaming-revocation)) — **gap**: `Codex-2hxff.8`
   (no block written for one-off refunds);
 - every paid creator and organisation slice is reversed in full;
-- every pending slice becomes `cancelled_by_refund`.
+- every pending or failed slice becomes `cancelled_by_refund` — first, so
+  nothing can mark it paid afterwards. Its transfer may have gone out anyway
+  (in flight when the refund came, or made but never recorded), so Stripe is
+  then asked; a transfer found is reversed in full and the slice becomes
+  `reversed`. A transfer that lands after the cancel is reversed by whoever
+  sent it ([the ledger](connect-and-payouts.md#the-payouts-ledger)).
+- an organisation slice held for no owner is cancelled the same way, and is
+  never handed to the next owner.
 
 **A partial refund** (owner decision P-1, "Keep access"):
 

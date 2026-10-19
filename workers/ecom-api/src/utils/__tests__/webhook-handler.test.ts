@@ -10,6 +10,7 @@
  * - Successful handling → 200 with { received: true }
  */
 
+import { BaseService, NotFoundError } from '@codex/service-errors';
 import { createMockHonoContext, type MockHonoContext } from '@codex/test-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
@@ -214,6 +215,118 @@ describe('createWebhookHandler', () => {
       await handler(context);
 
       expect(inner).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Codex-2hxff.6: every webhook calls a service, and every service routes an
+  // unknown error through BaseService.handleError, which wraps it as an
+  // InternalServiceError — a ServiceError. The tests above throw raw errors
+  // from the handler, so they never saw that wrap: in production a database
+  // outage inside completePurchase was acknowledged 200 and Stripe never
+  // retried, leaving a buyer charged with no purchase.
+  describe('errors wrapped by a real service (Codex-2hxff.6)', () => {
+    /** A real BaseService: its catch is the one every service uses. */
+    class LedgerService extends BaseService {
+      constructor(private readonly query: () => Promise<unknown>) {
+        super({ db: {} as never, environment: 'test' });
+      }
+      async record(): Promise<unknown> {
+        try {
+          return await this.query();
+        } catch (error) {
+          this.handleError(error, 'record');
+        }
+      }
+    }
+
+    const viaService = (error: unknown) =>
+      createWebhookHandler('Test', async () => {
+        await new LedgerService(() => Promise.reject(error)).record();
+      });
+
+    it('a database connection lost inside a service → 500, so Stripe retries', async () => {
+      const handler = viaService(
+        new Error('Connection terminated unexpectedly')
+      );
+      const { context, mock } = createContext();
+
+      const response = await handler(context);
+
+      expect(response.status).toBe(500);
+      // The log names the cause, not just "An unexpected error occurred".
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        expect.stringContaining('transient error'),
+        expect.objectContaining({
+          cause: expect.objectContaining({
+            message: 'Connection terminated unexpectedly',
+          }),
+        })
+      );
+    });
+
+    it('logs the driver error under a drizzle query error — never its SQL or bound values', async () => {
+      // drizzle 0.44 wraps the driver's error: its message is the query and
+      // every bound value, so it must never reach the log.
+      const pgError = Object.assign(
+        new Error('duplicate key value violates unique constraint'),
+        { code: '23505' }
+      );
+      const drizzleError = Object.assign(
+        new Error(
+          'Failed query: insert into "payouts" values ($1)\nparams: buyer@example.com'
+        ),
+        { name: 'DrizzleQueryError', cause: pgError }
+      );
+      const { context, mock } = createContext();
+
+      await viaService(drizzleError)(context);
+
+      const [, fields] = mock._obs.warn.mock.calls.at(-1) ?? [];
+      expect(fields).toMatchObject({
+        cause: {
+          name: 'Error',
+          message: 'duplicate key value violates unique constraint',
+          code: '23505',
+        },
+      });
+      expect(JSON.stringify(fields)).not.toContain('buyer@example.com');
+      expect(JSON.stringify(fields)).not.toContain('Failed query');
+    });
+
+    it('a Postgres serialization failure (SQLSTATE 40001) inside a service → 500', async () => {
+      const pgError = Object.assign(
+        new Error('could not serialize access due to concurrent update'),
+        { code: '40001' }
+      );
+      const response = await viaService(pgError)(createContext().context);
+
+      expect(response.status).toBe(500);
+    });
+
+    it('a Stripe 503 inside a service → 500', async () => {
+      const stripeError = Object.assign(new Error('Service unavailable'), {
+        type: 'StripeAPIError',
+        statusCode: 503,
+      });
+      const response = await viaService(stripeError)(createContext().context);
+
+      expect(response.status).toBe(500);
+    });
+
+    it('a NotFoundError from a service → 200 (permanent: a retry finds nothing new)', async () => {
+      const response = await viaService(
+        new NotFoundError('Purchase not found')
+      )(createContext().context);
+
+      expect(response.status).toBe(200);
+    });
+
+    it('an unrecognised bug inside a service → 200 (permanent, never a retry storm)', async () => {
+      const response = await viaService(
+        new TypeError("Cannot read properties of undefined (reading 'id')")
+      )(createContext().context);
+
+      expect(response.status).toBe(200);
     });
   });
 });

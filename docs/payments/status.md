@@ -28,13 +28,10 @@ payee, so its org slice is logged and never recorded.
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
-| `Codex-2hxff.6` | P0 | Transient webhook failures return 500 so Stripe retries | [operations](operations.md#webhook-error-policy) |
 | `Codex-2hxff.7` | P1 | Every sale path uses fee configuration, including the minimum platform fee | [fees-and-splits](fees-and-splits.md#fee-configuration) |
 | `Codex-2hxff.8` | P1 | Partial refunds keep access and claw back each increment; failed reversals are retried | [purchases](purchases.md#refunds) |
 | `Codex-2hxff.9` | P1 | Disputes pause access, reverse slices, hold pending money, and restore on a win | [purchases](purchases.md#disputes) |
 | `Codex-2hxff.10` | P2 | Access continues while a failed renewal is retried; a full refund cancels the subscription | [subscriptions](subscriptions.md#failed-payments) |
-| `Codex-2hxff.11` | P1 | One ledger row per slice; no double transfers; failed rows retried | [connect-and-payouts](connect-and-payouts.md#the-payouts-ledger) |
-| `Codex-2hxff.12` | P1 | Every slice gets a ledger row, even when its payee cannot be paid yet | [connect-and-payouts](connect-and-payouts.md#the-payouts-ledger) |
 | `Codex-2hxff.13` | P2 | Pending money is released as soon as the payee becomes payable | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
 | `Codex-2hxff.14` | P1 | Checkout only for content a purchase can unlock; no double purchases | [purchases](purchases.md#checkout) |
 | `Codex-2hxff.15` | P1 | Our subscription row always follows Stripe; duplicates are cancelled and refunded | [subscriptions](subscriptions.md#lifecycle-and-access) |
@@ -58,6 +55,23 @@ payee, so its org slice is logged and never recorded.
 | `Codex-2hxff.34` | P3 | Creators are reminded monthly about money waiting for them | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
+
+`Codex-2hxff.6`, `.11`, `.12` and `.37` (label `payments-fix-pr-2`) are fixed in
+payments fix PR 2 and so are not listed above: webhooks answer 500 for a
+transient failure inside a service; every slice of every sale is one ledger row,
+reserved before its transfer, so nothing is paid twice or dropped; failed
+transfers are retried; an organisation's money while it has no owner is held for
+the next owner (owner decision 2026-10-18, "Hold it for the next owner", and
+"All four in one PR"); a refund freezes an unpaid slice and reverses any
+transfer that went out for it anyway. Its migration `0099` adds unique
+indexes, so production must hold no duplicate slices first: `db:migrate`
+checks this before applying anything and stops if it finds any — see the
+release checklist (R5). Failed rows written before PR 2 are not retried; they
+are reconciled by hand (R6).
+
+Follow-ups from its review: `Codex-2hxff.47` (a transfer to a replaced Connect
+account is not found), `Codex-2hxff.48` (failed rows retry forever) and
+`Codex-2hxff.49` (a replay re-splits with the current fees).
 
 Related open beads outside the epic: `Codex-in0g4` (refund reviews for subscriptions), `Codex-rtwpv` (fee writes not
 atomic), `Codex-sing6` (tier-change epic), `Codex-1ilxl` (account-wide seed

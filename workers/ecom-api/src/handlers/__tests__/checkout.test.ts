@@ -33,6 +33,14 @@ vi.mock('@codex/purchase', () => ({
 }));
 
 vi.mock('@codex/validation', () => ({
+  courseCheckoutSessionMetadataSchema: {
+    parse: vi.fn((data) => ({
+      kind: 'course',
+      customerId: data.customerId,
+      courseId: data.courseId,
+      organizationId: data.organizationId || null,
+    })),
+  },
   checkoutSessionMetadataSchema: {
     parse: vi.fn((data) => {
       if (!data?.customerId || !data?.contentId) {
@@ -116,7 +124,10 @@ describe('handleCheckoutCompleted', () => {
         expect(config.db).toBeDefined();
         expect(config.environment).toBeDefined();
         expect(stripeClient).toBeDefined();
-        return { completePurchase: mockCompletePurchase };
+        return {
+          completePurchase: mockCompletePurchase,
+          completeCoursePurchase: mockCompletePurchase,
+        };
       }
     );
   });
@@ -727,6 +738,77 @@ describe('handleCheckoutCompleted', () => {
       // Current behavior: processes anyway
       // If we want to reject unpaid, add validation in handler
       expect(mockCompletePurchase).toHaveBeenCalled();
+    });
+  });
+
+  // Codex-2hxff.11 (PAY-08): the charge id from the PaymentIntent is what
+  // every payout slice is paid from. A TEMPORARY lookup failure used to be
+  // logged and skipped, so the sale completed with no slices at all; it now
+  // rejects, and createWebhookHandler answers 500 so Stripe retries.
+  describe('the PaymentIntent lookup fails', () => {
+    const outage = () =>
+      Object.assign(new Error('Connection to Stripe failed'), {
+        type: 'StripeConnectionError',
+      });
+    const missing = () =>
+      Object.assign(new Error('No such payment_intent'), {
+        type: 'StripeInvalidRequestError',
+        statusCode: 404,
+      });
+    const stripeWhoseLookup = (error: Error) =>
+      ({
+        paymentIntents: { retrieve: vi.fn().mockRejectedValue(error) },
+      }) as unknown as Stripe;
+
+    it('temporarily (content) → rejects; the purchase is NOT completed without its charge', async () => {
+      const event = createMockStripeCheckoutEvent({
+        metadata: { customerId: 'user_123', contentId: 'content_456' },
+      }) as unknown as Stripe.Event;
+
+      await expect(
+        handleCheckoutCompleted(
+          event,
+          stripeWhoseLookup(outage()),
+          createContext().context
+        )
+      ).rejects.toThrow('Connection to Stripe failed');
+      expect(mockCompletePurchase).not.toHaveBeenCalled();
+    });
+
+    it('temporarily (course) → rejects; the purchase is NOT completed without its charge', async () => {
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          kind: 'course',
+          customerId: 'user_123',
+          courseId: 'course_456',
+        },
+      }) as unknown as Stripe.Event;
+
+      await expect(
+        handleCheckoutCompleted(
+          event,
+          stripeWhoseLookup(outage()),
+          createContext().context
+        )
+      ).rejects.toThrow('Connection to Stripe failed');
+      expect(mockCompletePurchase).not.toHaveBeenCalled();
+    });
+
+    it('permanently → the purchase still completes (the buyer paid), with no charge id', async () => {
+      const event = createMockStripeCheckoutEvent({
+        metadata: { customerId: 'user_123', contentId: 'content_456' },
+      }) as unknown as Stripe.Event;
+
+      await handleCheckoutCompleted(
+        event,
+        stripeWhoseLookup(missing()),
+        createContext().context
+      );
+
+      expect(mockCompletePurchase).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ stripeChargeId: null })
+      );
     });
   });
 });
