@@ -15,11 +15,14 @@ import {
   courseSubscriptions,
   courses,
   disputes,
+  entitlements,
   organizations,
   payouts,
+  purchases,
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
+import { writeCourseSubscriptionEntitlement } from '@codex/purchase';
 import {
   createMockStripe,
   createTestOrganizationInput,
@@ -431,5 +434,97 @@ describe('SubscriptionService disputes (Codex-2hxff.9)', () => {
     expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
     expect(stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(await disputedAt(sub.id)).not.toBeNull();
+  });
+
+  // ── review fixes (2026-10-19) ─────────────────────────────────────────
+
+  it("a purchase's dispute pauses no subscription, even if its charge has a subscription payout row", async () => {
+    const sub = await tierSubscription();
+    const chargeId = await invoiceCharge({ subscriptionId: sub.id });
+    const [buyerId] = await seedTestUsers(db, 1);
+    const purchase = takeFirst(
+      await db
+        .insert(purchases)
+        .values({
+          customerId: buyerId ?? '',
+          courseId,
+          organizationId: orgId,
+          amountPaidCents: 1000,
+          platformFeeCents: 100,
+          organizationFeeCents: 135,
+          creatorPayoutCents: 765,
+          stripePaymentIntentId: `pi_sdisp_${uid()}`,
+          status: 'completed',
+          purchasedAt: new Date(),
+        })
+        .returning()
+    );
+    const input = await dispute(chargeId);
+    await db
+      .update(disputes)
+      .set({ purchaseId: purchase.id })
+      .where(eq(disputes.stripeDisputeId, input.stripeDisputeId));
+
+    expect(await service.pauseForDispute(input)).toBeUndefined();
+    expect(await disputedAt(sub.id)).toBeNull();
+    expect(
+      (await readDispute(input.stripeDisputeId)).subscriptionId
+    ).toBeNull();
+    // Unlinked first: the purchase row it references must outlive the test.
+    await db
+      .update(disputes)
+      .set({ purchaseId: null })
+      .where(eq(disputes.stripeDisputeId, input.stripeDisputeId));
+    await db.delete(purchases).where(eq(purchases.id, purchase.id));
+  });
+
+  it('won: a course subscription whose renewals were voided while paused gets its grant moved to the current period end', async () => {
+    const sub = await courseSubscription();
+    const renewedTo = new Date(Date.now() + 25 * 24 * 3600 * 1000);
+    // The grant still ends at the period before the dispute, now past.
+    await writeCourseSubscriptionEntitlement(db, {
+      userId: sub.userId,
+      organizationId: orgId,
+      courseId,
+      courseSubscriptionId: sub.id,
+      expiresAt: new Date(Date.now() - 24 * 3600 * 1000),
+    });
+    const input = await dispute(
+      await invoiceCharge({ courseSubscriptionId: sub.id })
+    );
+    await service.pauseForDispute(input);
+    // Stripe kept cycling: customer.subscription.updated moved the period on.
+    await db
+      .update(courseSubscriptions)
+      .set({ currentPeriodEnd: renewedTo })
+      .where(eq(courseSubscriptions.id, sub.id));
+    await setStatus(input.stripeDisputeId, 'won');
+
+    const result = await service.restoreAfterDispute(input);
+
+    expect(result?.restored).toBe(true);
+    const grant = takeFirst(
+      await db
+        .select()
+        .from(entitlements)
+        .where(eq(entitlements.sourceRef, sub.id))
+    );
+    expect(grant.expiresAt).toEqual(renewedTo);
+  });
+
+  it('won while another chargeback on the same subscription was lost: it stays paused (the subscription is being cancelled)', async () => {
+    const sub = await tierSubscription();
+    const lost = await dispute(await invoiceCharge({ subscriptionId: sub.id }));
+    const won = await dispute(await invoiceCharge({ subscriptionId: sub.id }));
+    await service.pauseForDispute(lost);
+    await service.pauseForDispute(won);
+    await setStatus(lost.stripeDisputeId, 'lost');
+    await setStatus(won.stripeDisputeId, 'won');
+
+    const result = await service.restoreAfterDispute(won);
+
+    expect(result?.restored).toBe(false);
+    expect(await disputedAt(sub.id)).not.toBeNull();
+    expect(stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 });

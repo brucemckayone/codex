@@ -391,8 +391,10 @@ async function handleRefundUpdated(
  * both sources), and acts on its subscription (docs/payments/
  * subscription-disputes.md): a chargeback pauses its access, then its billing;
  * a win restores both; a loss ends its access, then cancels it at Stripe.
- * Each Stripe call comes after the clawback, so a Stripe failure cannot stop
- * the money moving.
+ * Each Stripe call that changes the subscription comes after the clawback, so
+ * a Stripe failure cannot stop the money moving. (Finding the subscription can
+ * ask Stripe first, but only for a charge with no payout rows: nothing to
+ * claw back.)
  */
 async function handleDispute(
   event: Stripe.Event,

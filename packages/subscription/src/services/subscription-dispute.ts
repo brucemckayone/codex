@@ -12,8 +12,9 @@
  *
  * Tier and course subscriptions are handled alike. The money is not handled
  * here: the clawback acts on the invoice's charge. Each step is safe to run
- * again, and each Stripe call first asks Stripe whether the subscription is
- * still live, so a redelivery never fails on one that has ended.
+ * again, and each Stripe call that changes the subscription first asks
+ * Stripe whether it is still live, so a redelivery never fails on one that
+ * has ended.
  */
 
 import { DISPUTE_CHARGEBACK_OPEN_STATUSES } from '@codex/constants';
@@ -24,6 +25,7 @@ import {
   subscriptions,
 } from '@codex/database/schema';
 import type { LedgerDeps } from '@codex/payments';
+import { refreshCourseSubscriptionEntitlementExpiry } from '@codex/purchase';
 import { and, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
 
 type SubscriptionDisputeDeps = Pick<LedgerDeps, 'db' | 'stripe' | 'obs'>;
@@ -125,8 +127,9 @@ export async function pauseBilling(
 
 /**
  * A won dispute: access and billing restored, unless another chargeback on
- * the same subscription is still open. Undefined when there is nothing to
- * restore; `restored: false` while another chargeback keeps it paused.
+ * the same subscription is still open, or lost (the subscription is being
+ * cancelled). Undefined when there is nothing to restore; `restored: false`
+ * while another chargeback keeps it paused.
  */
 export async function restoreDisputedSubscription(
   deps: SubscriptionDisputeDeps,
@@ -136,10 +139,14 @@ export async function restoreDisputedSubscription(
 > {
   const subscription = await resolveDisputedSubscription(deps, input);
   if (!subscription) return undefined;
-  if (await hasOtherOpenChargeback(deps, subscription, input.stripeDisputeId)) {
+  if (
+    await hasOtherHoldingChargeback(deps, subscription, input.stripeDisputeId)
+  ) {
     return { subscription, restored: false };
   }
   await setDisputedAt(deps, subscription, null);
+  if (subscription.kind === 'course')
+    await refreshCourseGrant(deps, subscription);
   // Not tied to the column changing: a redelivery after a Stripe failure
   // finds the column already cleared and must still resume billing.
   const stripeId = subscription.stripeSubscriptionId;
@@ -278,7 +285,8 @@ async function setDisputedAt(
     );
 }
 
-async function hasOtherOpenChargeback(
+/** Another chargeback on the subscription keeps it paused: open, or lost. */
+async function hasOtherHoldingChargeback(
   deps: SubscriptionDisputeDeps,
   subscription: DisputedSubscription,
   stripeDisputeId: string
@@ -294,11 +302,37 @@ async function hasOtherOpenChargeback(
       and(
         link,
         ne(disputes.stripeDisputeId, stripeDisputeId),
-        inArray(disputes.status, [...DISPUTE_CHARGEBACK_OPEN_STATUSES])
+        inArray(disputes.status, [...DISPUTE_CHARGEBACK_OPEN_STATUSES, 'lost'])
       )
     )
     .limit(1);
   return other !== undefined;
+}
+
+/**
+ * A course subscription's grant expires at the period end it was last renewed
+ * to. While billing was paused, Stripe kept cycling and voided each renewal,
+ * so no paid renewal moved the grant on: it moves now to the period end Stripe
+ * reports (`customer.subscription.updated` keeps it), as a renewal would.
+ */
+async function refreshCourseGrant(
+  deps: SubscriptionDisputeDeps,
+  subscription: DisputedSubscription
+): Promise<void> {
+  const [row] = await deps.db
+    .select({
+      courseId: courseSubscriptions.courseId,
+      currentPeriodEnd: courseSubscriptions.currentPeriodEnd,
+    })
+    .from(courseSubscriptions)
+    .where(eq(courseSubscriptions.id, subscription.id))
+    .limit(1);
+  if (!row) return;
+  await refreshCourseSubscriptionEntitlementExpiry(deps.db, {
+    userId: subscription.userId,
+    courseId: row.courseId,
+    expiresAt: row.currentPeriodEnd,
+  });
 }
 
 /** Stripe still bills it: not cancelled, and not an expired first invoice. */

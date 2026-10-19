@@ -17,7 +17,7 @@ A chargeback on a subscription invoice moves the money, but the subscriber keeps
 
 - **Access is granted for `active` and `cancelling`.** That check is in five queries in `@codex/access`. A failed renewal blocks access by becoming `past_due`.
 - **Our status mirrors Stripe's on every subscription event** (`stripe-status-mapper.ts`). A pause written into `status` would be overwritten at the next renewal or update.
-- **The KV streaming block lasts 20 minutes.** It stops signed URLs that were already issued; it is not the pause.
+- **The KV streaming block cannot carry it either.** It lasts 20 minutes and is read only when a streaming URL is issued, where the database already refuses a paused subscription. A URL issued before the pause plays until it expires. Our own billing pause also fires `customer.subscription.updated`, whose `active` status clears the block.
 
 ## 4. What Stripe does (verified in Stripe's documentation, 2026-10-19)
 
@@ -46,7 +46,7 @@ A chargeback on a subscription invoice moves the money, but the subscriber keeps
 |---|---|
 | Inquiry | Nothing (Q1) |
 | Chargeback opened | `disputed_at` set; the streaming block written; library caches cleared. Billing paused: `pause_collection = { behavior: 'void' }` (Q-A) |
-| Won | `disputed_at` cleared and billing resumed (`pause_collection` unset), unless another chargeback on the same subscription is still open; the block cleared |
+| Won | `disputed_at` cleared and billing resumed (`pause_collection` unset), unless another chargeback on the same subscription is still open, or lost (it is being cancelled); the block cleared. A course subscription's grant moves to the current period end: renewals voided during the pause never moved it |
 | Lost | Cancelled at Stripe at once, with no proration: the bank has already returned the money. The existing `customer.subscription.deleted` handling then ends access and sends the cancellation email |
 
 A subscription that is already cancelled when the event arrives gets no Stripe call. Only its access marker changes.
@@ -68,3 +68,11 @@ A subscription that is already cancelled when the event arrives gets no Stripe c
 
 - **Q-A: billing is paused while a chargeback is open.** `pause_collection` with `void`: the subscription stays `active` and no renewal is charged while access is paused. A win resumes billing from the next renewal; a loss cancels the subscription. This replaces "no Stripe change" in dispute-record.md §5.
 - **Q-B: no new notice in this PR.** The subscriber sees locked content while the account page still says Active. A notice is filed, to be mocked up first: Codex-2hxff.60.
+
+## 8. Known limits (from review, 2026-10-19)
+
+These are accepted for now; each is rare. They are tracked in Codex-2hxff.59.
+
+- **A course grant inherited from an earlier subscription is not paused.** The check reads the grant's `source_ref`, but a grant that outlived its subscription (for example, if `customer.subscription.deleted` was lost) can be renewed by a new one without its `source_ref` changing. A dispute on the new subscription then leaves that grant live.
+- **A chargeback that ends `prevented` is treated as a closed inquiry.** Nothing is restored, re-paid or resumed, and `outcome_applied_at` stops any later event. Stripe's API lists `prevented` but does not say whether an open chargeback can reach it; we have not seen it happen.
+- **Streaming URLs already issued keep playing until they expire.** The HLS proxy checks only its token, not the revocation block (Codex-2hxff.61). This applies to every access cut, not only disputes.
