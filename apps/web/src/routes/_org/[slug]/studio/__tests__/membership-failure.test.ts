@@ -63,7 +63,7 @@ function runLoad() {
 }
 
 /** What the load threw, or `undefined` when it returned. */
-async function thrownBy(run: () => Promise<unknown>): Promise<unknown> {
+async function thrownBy(run: () => unknown): Promise<unknown> {
   try {
     await run();
     return undefined;
