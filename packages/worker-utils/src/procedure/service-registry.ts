@@ -240,13 +240,33 @@ export function selectHyperdrive(
   return env.HYPERDRIVE_UNCACHED;
 }
 
+/**
+ * What a caller outside `procedure()` may substitute in the registry it builds
+ * (`createWebhookServices`, Codex-2hxff.54). `procedure()` passes none.
+ */
+export interface ServiceRegistryOverrides {
+  /**
+   * The Stripe client every Stripe-backed service shares. A webhook passes the
+   * client it verified the event with, and its tests pass their mock.
+   */
+  stripe?: StripeClient;
+  /**
+   * Stay on the Neon driver even where Hyperdrive is bound. Webhooks and crons
+   * ran on Neon before they shared this registry, and only production binds
+   * Hyperdrive, so CI cannot exercise a webhook on it. Moving them is its own
+   * change, verified on its own.
+   */
+  skipHyperdrive?: boolean;
+}
+
 export async function createServiceRegistry(
   env: Bindings,
   _obs?: ObservabilityClient,
   organizationId?: string,
   executionCtx?: ExecutionContext,
   cachePreset?: CachePresetName,
-  background?: BackgroundTracker['background']
+  background?: BackgroundTracker['background'],
+  overrides?: ServiceRegistryOverrides
 ): Promise<ServiceRegistryResult> {
   // Track cleanup functions for per-request DB clients
   const cleanupFns: Array<() => Promise<void>> = [];
@@ -272,11 +292,9 @@ export async function createServiceRegistry(
   // path below stays lazy — which is also the rollback lever: delete the
   // binding from a wrangler config and the worker reverts to Neon with no
   // code change.
-  const hyperdriveOverride = selectHyperdrive(
-    env,
-    cachePreset,
-    _obs
-  )?.connectionString;
+  const hyperdriveOverride = overrides?.skipHyperdrive
+    ? undefined
+    : selectHyperdrive(env, cachePreset, _obs)?.connectionString;
   if (hyperdriveOverride) {
     _hyperdriveDb = await createHyperdriveDbClient(hyperdriveOverride);
     cleanupFns.push(_hyperdriveDb.cleanup);
@@ -443,9 +461,9 @@ export async function createServiceRegistry(
 
   function getStripeClient() {
     if (!_stripeClient) {
-      _stripeClient = createStripeClient(
-        requireStripeSecretKey(env, getEnvironment(), _obs)
-      );
+      _stripeClient =
+        overrides?.stripe ??
+        createStripeClient(requireStripeSecretKey(env, getEnvironment(), _obs));
     }
     return _stripeClient;
   }

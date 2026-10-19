@@ -6,8 +6,10 @@
  * Codex-esikl the invalidation responsibility moved into
  * `SubscriptionService` itself via an orchestrator hook inside each
  * `handle*` method — the service now owns the cache bump. The webhook
- * handler's role is to WIRE the service correctly (cache + waitUntil via
- * constructor) and dispatch the right `handle*` call per event type.
+ * path's role is to WIRE the service correctly (cache + waitUntil via
+ * constructor — since Codex-2hxff.54 the service registry does this, built
+ * for the webhook by `createWebhookServices`) and dispatch the right
+ * `handle*` call per event type.
  *
  * Assertions migrated:
  *   - Subscription events: the handler calls the right service method with
@@ -106,8 +108,11 @@ vi.mock('@codex/purchase', () => ({
   FeeConfigService: vi.fn(),
 }));
 
-// `createWebhookDbClient` must remain a real export — it forwards to the
-// (mocked) `createPerRequestDbClient`, so use importOriginal + spread.
+// `createWebhookServices` must remain a real export: this file runs the
+// composition root for real, so the wiring assertions below see what the
+// registry builds for the webhook path (the service classes above are mocks,
+// and its pool comes from the mocked `createPerRequestDbClient`). Use
+// importOriginal + spread.
 vi.mock('@codex/worker-utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/worker-utils')>();
   return {
@@ -313,8 +318,14 @@ describe('handleSubscriptionWebhook — cache invalidation', () => {
           cache: expect.anything(),
           waitUntil: expect.any(Function),
         }),
-        mockStripe
+        expect.anything()
       );
+      // The registry hands every service a lazy proxy over the webhook's own
+      // Stripe client (not the client itself), so check what it resolves to.
+      const stripeArg = (
+        SubscriptionService as unknown as ReturnType<typeof vi.fn>
+      ).mock.calls[0]?.[1] as Stripe | undefined;
+      expect(stripeArg?.subscriptions).toBe(mockStripe.subscriptions);
     });
 
     it('no CACHE_KV binding: service is constructed without cache (graceful degrade)', async () => {

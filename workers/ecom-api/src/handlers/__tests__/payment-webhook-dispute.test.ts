@@ -8,7 +8,8 @@
  *   3. on success: write `AccessRevocation.revoke(userId, orgId, 'refund')`
  *   4. do nothing when the purchase is unknown or CACHE_KV is absent
  *
- * Strategy: mock `@codex/purchase`, `@codex/subscription`
+ * Strategy: mock the webhook composition root (`createWebhookServices`, which
+ * hands over the PurchaseService), `@codex/subscription`
  * (`invalidateForUser`), and `@codex/access` (`AccessRevocation`). Assert
  * on the spies — the actual DB / KV semantics are covered by unit tests
  * (purchase-service.test.ts) and the access-revocation unit tests.
@@ -27,35 +28,25 @@
 
 import { STRIPE_EVENTS } from '@codex/constants';
 import { createMockHonoContext, type MockHonoContext } from '@codex/test-utils';
+import type { WebhookServices } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StripeWebhookEnv } from '../../types';
 
 // Mock modules before imports.
-vi.mock('@codex/database', () => ({
-  createPerRequestDbClient: vi.fn(),
-}));
-
 vi.mock('@codex/subscription', () => ({
   invalidateForUser: vi.fn(),
-  // handlePaymentWebhook constructs a SubscriptionService for all payment
-  // events (used by charge.refunded clawback, Codex-13v21).
-  SubscriptionService: vi.fn(() => ({
-    reverseSubscriptionPayoutsForCharge: vi.fn(),
-  })),
 }));
 
-vi.mock('@codex/purchase', () => ({
-  PurchaseService: vi.fn(),
-}));
-
-// `createWebhookDbClient` must remain a real export — it forwards to the
-// (mocked) `createPerRequestDbClient`, so use importOriginal + spread.
+// The handler gets its PurchaseService and SubscriptionService from the
+// webhook composition root (Codex-2hxff.54); mock that seam so each test
+// hands over its own stubs. Every other export stays real.
 vi.mock('@codex/worker-utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/worker-utils')>();
   return {
     ...actual,
+    createWebhookServices: vi.fn(),
     sendEmailToWorker: vi.fn(),
   };
 });
@@ -72,9 +63,8 @@ vi.mock('@codex/access', () => ({
 }));
 
 import { AccessRevocation } from '@codex/access';
-import { createPerRequestDbClient } from '@codex/database';
-import { PurchaseService } from '@codex/purchase';
 import { invalidateForUser } from '@codex/subscription';
+import { createWebhookServices } from '@codex/worker-utils';
 import { handlePaymentWebhook } from '../payment-webhook';
 
 type KVMock = {
@@ -162,7 +152,7 @@ function createDisputeEvent(
 
 describe('handlePaymentWebhook — charge.dispute.created', () => {
   let mockStripe: Stripe;
-  let mockCleanup: ReturnType<typeof vi.fn>;
+  let mockRelease: ReturnType<typeof vi.fn>;
   let mockProcessDispute: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -175,23 +165,27 @@ describe('handlePaymentWebhook — charge.dispute.created', () => {
     mockClear.mockResolvedValue(undefined);
 
     mockProcessDispute = vi.fn().mockResolvedValue(undefined);
-    mockCleanup = vi.fn();
+    mockRelease = vi.fn();
     mockStripe = {} as Stripe;
 
-    (createPerRequestDbClient as ReturnType<typeof vi.fn>).mockReturnValue({
-      db: { mock: 'database' },
-      cleanup: mockCleanup,
+    // The registry's services, as the composition root hands them over.
+    vi.mocked(createWebhookServices).mockResolvedValue({
+      services: {
+        purchase: {
+          processDispute: mockProcessDispute,
+          // processRefund is unused in these tests but included so the
+          // handler's other branches don't crash if a test accidentally
+          // fires a refund event.
+          processRefund: vi.fn().mockResolvedValue(undefined),
+        },
+        // The charge.refunded clawback (Codex-13v21) — same reasoning.
+        subscription: {
+          reverseSubscriptionPayoutsForCharge: vi.fn(),
+        },
+      } as unknown as WebhookServices['services'],
+      background: (promise) => promise,
+      release: mockRelease,
     });
-
-    (PurchaseService as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      () => ({
-        processDispute: mockProcessDispute,
-        // processRefund is unused in these tests but included so the
-        // handler's other branches don't crash if a test accidentally
-        // fires a refund event.
-        processRefund: vi.fn().mockResolvedValue(undefined),
-      })
-    );
   });
 
   it('positive: processDispute returns { userId, orgId } → service called, library cache bumped, revocation written with reason="refund"', async () => {

@@ -11,35 +11,36 @@
  *   transition (DB row chargesEnabled/payoutsEnabled flip false → true).
  * - Ricochet (active → restricted → active) fires resolvePendingPayouts
  *   on each first-transition-to-active hop.
+ * - The payout drain runs through the composition root's `background`, on
+ *   the shared pool — no second DB client (Codex-2hxff.54).
  * - account.application.deauthorized still routes correctly.
  */
 
 import { STRIPE_EVENTS } from '@codex/constants';
 import { createMockHonoContext, type MockHonoContext } from '@codex/test-utils';
+import type { WebhookServices } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StripeWebhookEnv } from '../../types';
 
 // Mock the module under test's dependencies BEFORE importing.
-vi.mock('@codex/subscription', () => ({
-  ConnectAccountService: vi.fn(),
-  SubscriptionService: vi.fn(),
-}));
-
+// The handler gets its services from `createWebhookServices`; mock that seam
+// so each test hands over its own stubs. `createWebhookDbClient` stays a spy
+// so the drain tests can prove no second DB client is opened.
 vi.mock('@codex/worker-utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/worker-utils')>();
   return {
     ...actual,
+    createWebhookServices: vi.fn(),
     createWebhookDbClient: vi.fn(),
   };
 });
 
 import {
-  ConnectAccountService,
-  SubscriptionService,
-} from '@codex/subscription';
-import { createWebhookDbClient } from '@codex/worker-utils';
+  createWebhookDbClient,
+  createWebhookServices,
+} from '@codex/worker-utils';
 import { handleConnectWebhook } from '../connect-webhook';
 
 type StripeConnectRow = {
@@ -53,10 +54,9 @@ function createContext(): {
   waitUntilSpy: ReturnType<typeof vi.fn>;
 } {
   const mock = createMockHonoContext<StripeWebhookEnv['Bindings']>({});
-  const waitUntilSpy = vi.fn(async (p: Promise<unknown>) => {
-    // Drain the promise so .finally(subCleanup) runs in-test.
-    await p;
-  });
+  // The handler only hands executionCtx to `createWebhookServices` (whose
+  // `release` is mocked), so any call here is the handler's own.
+  const waitUntilSpy = vi.fn();
   (mock as unknown as Record<string, unknown>).executionCtx = {
     waitUntil: waitUntilSpy,
     passThroughOnException: vi.fn(),
@@ -107,7 +107,8 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
   let mockHandleAccountDeauthorized: ReturnType<typeof vi.fn>;
   let mockGetAccountByStripeId: ReturnType<typeof vi.fn>;
   let mockResolvePendingPayouts: ReturnType<typeof vi.fn>;
-  let mockCleanup: ReturnType<typeof vi.fn>;
+  let mockBackground: ReturnType<typeof vi.fn>;
+  let mockRelease: ReturnType<typeof vi.fn>;
   let dbState: StripeConnectRow | null;
 
   beforeEach(() => {
@@ -129,29 +130,33 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     mockResolvePendingPayouts = vi
       .fn()
       .mockResolvedValue({ resolved: 0, totalCents: 0 });
-    mockCleanup = vi.fn().mockResolvedValue(undefined);
+    // Pass-through, like the real tracker: returns the task it registers.
+    mockBackground = vi.fn((promise: Promise<unknown>) => promise);
+    mockRelease = vi.fn();
 
     mockStripe = {} as Stripe;
 
-    (createWebhookDbClient as ReturnType<typeof vi.fn>).mockReturnValue({
-      db: { mock: 'db' },
-      cleanup: mockCleanup,
+    // The registry's services, as the composition root hands them over.
+    vi.mocked(createWebhookServices).mockResolvedValue({
+      services: {
+        connect: {
+          handleAccountUpdated: mockHandleAccountUpdated,
+          handleAccountDeauthorized: mockHandleAccountDeauthorized,
+          getAccountByStripeId: mockGetAccountByStripeId,
+        },
+        subscription: {
+          resolvePendingPayouts: mockResolvePendingPayouts,
+        },
+      } as unknown as WebhookServices['services'],
+      background: mockBackground as unknown as WebhookServices['background'],
+      release: mockRelease,
     });
-
-    (
-      ConnectAccountService as unknown as ReturnType<typeof vi.fn>
-    ).mockImplementation(() => ({
-      handleAccountUpdated: mockHandleAccountUpdated,
-      handleAccountDeauthorized: mockHandleAccountDeauthorized,
-      getAccountByStripeId: mockGetAccountByStripeId,
-    }));
-
-    (
-      SubscriptionService as unknown as ReturnType<typeof vi.fn>
-    ).mockImplementation(() => ({
-      resolvePendingPayouts: mockResolvePendingPayouts,
-    }));
   });
+
+  /** The drain the handler registered on `background`, settled. */
+  async function settleDrain(): Promise<void> {
+    await mockBackground.mock.results[0]?.value;
+  }
 
   // ─── transition detection from data.object ──────────────────────────────
 
@@ -375,6 +380,83 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     );
   });
 
+  // ─── payout drain (Codex-2hxff.54) ──────────────────────────────────────
+  //
+  // The drain used to open a second DB client and ride a bare
+  // `executionCtx.waitUntil`. It now runs on the registry's
+  // SubscriptionService, registered on `background`, so `release` holds the
+  // shared pool open until it settles.
+
+  it('drains pending payouts through background on the shared pool, logging the result', async () => {
+    dbState = { chargesEnabled: false, payoutsEnabled: false };
+    mockResolvePendingPayouts.mockResolvedValueOnce({
+      resolved: 2,
+      totalCents: 1500,
+    });
+    const event = createAccountUpdatedEvent({
+      chargesEnabled: true,
+      payoutsEnabled: true,
+    });
+    const { context, mock, waitUntilSpy } = createContext();
+
+    await handleConnectWebhook(event, mockStripe, context);
+
+    expect(mockBackground).toHaveBeenCalledOnce();
+    expect(mockResolvePendingPayouts).toHaveBeenCalledWith(
+      DEFAULT_TEST_ORG_UUID,
+      'acct_test_123'
+    );
+    // Registered BEFORE release, so release waits for it.
+    const registeredAt = mockBackground.mock.invocationCallOrder[0] ?? 0;
+    const releasedAt = mockRelease.mock.invocationCallOrder[0] ?? 0;
+    expect(registeredAt).toBeGreaterThan(0);
+    expect(releasedAt).toBeGreaterThan(registeredAt);
+    // One pool for the whole event: no second DB client, no bare waitUntil.
+    expect(createWebhookServices).toHaveBeenCalledOnce();
+    expect(createWebhookDbClient).not.toHaveBeenCalled();
+    expect(waitUntilSpy).not.toHaveBeenCalled();
+
+    await settleDrain();
+
+    expect(mock._obs.info).toHaveBeenCalledWith(
+      'Pending payouts resolved on account activation',
+      expect.objectContaining({
+        accountId: 'acct_test_123',
+        organizationId: DEFAULT_TEST_ORG_UUID,
+        resolved: 2,
+        totalCents: 1500,
+      })
+    );
+  });
+
+  it('logs a failed drain at error level without failing the webhook', async () => {
+    dbState = { chargesEnabled: false, payoutsEnabled: false };
+    mockResolvePendingPayouts.mockRejectedValueOnce(
+      new Error('Transfer create failed')
+    );
+    const event = createAccountUpdatedEvent({
+      chargesEnabled: true,
+      payoutsEnabled: true,
+    });
+    const { context, mock } = createContext();
+
+    await expect(
+      handleConnectWebhook(event, mockStripe, context)
+    ).resolves.toBeUndefined();
+    // The task handed to background swallows its own failure.
+    await expect(settleDrain()).resolves.toBeUndefined();
+
+    expect(mock._obs.error).toHaveBeenCalledWith(
+      'Failed to resolve pending payouts',
+      expect.objectContaining({
+        accountId: 'acct_test_123',
+        organizationId: DEFAULT_TEST_ORG_UUID,
+        error: 'Transfer create failed',
+      })
+    );
+    expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
   // ─── cleanup contract ───────────────────────────────────────────────────
 
   it('always runs cleanup in the finally block', async () => {
@@ -387,6 +469,21 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
 
     await handleConnectWebhook(event, mockStripe, context);
 
-    expect(mockCleanup).toHaveBeenCalled();
+    expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  it('runs cleanup when the service throws', async () => {
+    mockHandleAccountUpdated.mockRejectedValueOnce(new Error('DB error'));
+    const event = createAccountUpdatedEvent({
+      chargesEnabled: true,
+      payoutsEnabled: true,
+    });
+    const { context } = createContext();
+
+    await expect(
+      handleConnectWebhook(event, mockStripe, context)
+    ).rejects.toThrow('DB error');
+
+    expect(mockRelease).toHaveBeenCalledOnce();
   });
 });

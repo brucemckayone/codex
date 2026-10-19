@@ -19,12 +19,11 @@
 import { invalidateUserLibrary } from '@codex/cache';
 import { CURRENCY } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
-import { PurchaseService } from '@codex/purchase';
 import {
   checkoutSessionMetadataSchema,
   courseCheckoutSessionMetadataSchema,
 } from '@codex/validation';
-import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
+import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -201,19 +200,16 @@ export async function handleCheckoutCompleted(
     });
   }
 
-  // Create per-request db client for transaction support
-  // DATABASE_URL_LOCAL_PROXY is optional and set only in test environments
-  const { db, cleanup } = createWebhookDbClient(c.env);
+  // The registry's PurchaseService, as routes get it: configured fees, the
+  // creator-connect-needed mailer, the web-app URL (Codex-2hxff.54).
+  const { services, release } = await createWebhookServices(
+    c.env,
+    c.executionCtx,
+    { obs, stripe }
+  );
 
   try {
-    // Initialize purchase service with transaction-capable db
-    const purchaseService = new PurchaseService(
-      {
-        db,
-        environment: c.env.ENVIRONMENT || 'development',
-      },
-      stripe
-    );
+    const purchaseService = services.purchase;
 
     // Complete purchase (atomic transaction: purchase + content access)
     // organizationId already transformed to null by schema if empty/undefined
@@ -271,7 +267,7 @@ export async function handleCheckoutCompleted(
       });
     }
   } finally {
-    await cleanup();
+    release();
   }
 }
 
@@ -318,12 +314,13 @@ async function handleCourseCheckoutCompleted(
   const { stripeChargeId, stripeApplicationFeeCents } =
     await resolvePaymentIntentCharge(stripe, paymentIntentId, obs);
 
-  const { db, cleanup } = createWebhookDbClient(c.env);
+  const { services, release } = await createWebhookServices(
+    c.env,
+    c.executionCtx,
+    { obs, stripe }
+  );
   try {
-    const purchaseService = new PurchaseService(
-      { db, environment: c.env.ENVIRONMENT || 'development' },
-      stripe
-    );
+    const purchaseService = services.purchase;
 
     const purchase = await purchaseService.completeCoursePurchase(
       paymentIntentId,
@@ -376,6 +373,6 @@ async function handleCourseCheckoutCompleted(
       });
     }
   } finally {
-    await cleanup();
+    release();
   }
 }
