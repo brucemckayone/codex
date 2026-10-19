@@ -1074,6 +1074,134 @@ function schemeTokens(
   };
 }
 
+/**
+ * THE FALLBACK PATH's parameters (Codex-61zsk.16), as `schemes.css` spells
+ * them before its `@supports` block: an engine without pow() in relative
+ * colour draws only those declarations. Ink is an OKLCH LIGHTNESS STEP — L
+ * 0.16 on a colour above L 0.62, L 0.97 below it, a 0.001-wide ramp between,
+ * at a fifth of the colour's chroma — and a button's label the same step at
+ * L 0 / 1 and no chroma; the softer inks are OKLab mixes of the ink over the
+ * colour; the accent and marks keep 55% of the brand's OKLab, the rest black
+ * or white. §20 holds every line to the text.
+ */
+const FALLBACK = {
+  pivot: 0.62,
+  dark: 0.16,
+  light: 0.97,
+  chroma: 0.2,
+  soft: 0.72,
+  line: 0.16,
+  edge: 0.58,
+  keep: 0.55,
+} as const;
+
+/** `oklch(from X clamp(lo, (0.62 - l) * 1000, hi) <c * chroma> h)`. */
+const fallbackStep = (x: Rgb, lo: number, hi: number, chroma: number) =>
+  oklchFrom(
+    x,
+    (l) => clampTo(lo, (FALLBACK.pivot - l) * 1000, hi),
+    (_, c) => c * chroma
+  );
+/** `--lp-ink` / `--lp-panel-ink` on the fallback path. */
+const fallbackInk = (bg: Rgb) =>
+  fallbackStep(bg, FALLBACK.dark, FALLBACK.light, FALLBACK.chroma);
+/** `--lp-button-ink` on the fallback path: white or black, by lightness. */
+const fallbackLabel = (fill: Rgb) => fallbackStep(fill, 0, 1, 0);
+/** `--_acc-light` / `--_mark-light` (toward black) and `-dark` (white). */
+const fallbackToward = (x: Rgb, white: boolean) =>
+  oklchFrom(
+    x,
+    (l) => l * FALLBACK.keep + (white ? 1 - FALLBACK.keep : 0),
+    (_, c) => c * FALLBACK.keep
+  );
+
+/**
+ * What a section draws on the FALLBACK path, with `schemeTokens`' arguments.
+ * The surfaces (`bg`, `panel`) are the exact path's — the `@supports` block
+ * declares none of them (§20 holds it to that) — so they are read from it.
+ * The rest is the fallback's: the kit's inks the lightness step (above),
+ * every button the plain brand (`--_btn-*: var(--lp-brand)`) under the step
+ * label, a brand / accent band's accent, mark and button its ink; and on the
+ * org's surfaces (base / soft outside Cinematic's room) the org's own
+ * colours EXACTLY — its text, secondary text, heading, focus ring, its
+ * interactive colour as the button and the accent text, the marks' source as
+ * the marks — with the ghost line (`--lp-button-line`, which that rule does
+ * not set) mixed from the org's ink. Undecorated pages only, as the §3 / §4
+ * matrix runs them: a decorated page re-routes the ghost line (§6).
+ */
+function fallbackTokens(
+  mode: Mode,
+  scheme: Scheme,
+  g: Rgb,
+  brand: Rgb,
+  tint: Tint,
+  source: Rgb = brand,
+  page: Page | null = null
+): SchemeTokens {
+  if (page?.decorated)
+    throw new Error('the fallback model is for undecorated pages');
+  const { bg, panel } = schemeTokens(
+    mode,
+    scheme,
+    g,
+    brand,
+    tint,
+    source,
+    page
+  );
+  const own = scheme === 'base' || scheme === 'soft';
+  const kitInk = fallbackInk(bg);
+  let accent: Rgb;
+  let mark: Rgb;
+  let button: Rgb;
+  let buttonInk: Rgb;
+  if (own || scheme === 'contrast') {
+    // base / soft take the ground's side, contrast the other.
+    const white = (mode === 'light') !== own;
+    accent = fallbackToward(brand, white);
+    mark = fallbackToward(source, white);
+    button = brand;
+    buttonInk = fallbackLabel(button);
+  } else {
+    accent = kitInk;
+    mark = kitInk;
+    button = kitInk;
+    buttonInk = bg;
+  }
+  const kit: SchemeTokens = {
+    bg,
+    ink: kitInk,
+    // `color-mix(in oklab, var(--lp-ink) <share>, var(--lp-bg))`.
+    soft: mix(kitInk, bg, 1 - FALLBACK.soft),
+    edge: mix(kitInk, bg, 1 - FALLBACK.edge),
+    accent,
+    mark,
+    button,
+    buttonInk,
+    panel,
+    panelInk: fallbackInk(panel),
+    heading: kitInk,
+    title: kitInk,
+    focus: kitInk,
+  };
+  if (!page || !own) return kit;
+  const { org } = page;
+  return {
+    ...kit,
+    ink: org.ink,
+    soft: org.inkSoft,
+    edge: mix(org.ink, bg, 1 - FALLBACK.edge),
+    panelInk: org.ink,
+    heading: org.heading,
+    title: org.heading,
+    focus: org.focus,
+    accent: org.button,
+    mark: source,
+    button: org.button,
+    buttonInk: fallbackLabel(org.button),
+  };
+}
+
 /** A base / soft section's ground on an org's page. */
 const orgGround = (mode: Mode, org: Org) => ground(mode, org.ground);
 
@@ -4606,5 +4734,612 @@ describe('atmosphere headings — the org’s heading colour, floored over the v
     expect(
       between.split('{').length - between.split('}').length
     ).toBeGreaterThan(0);
+  });
+});
+
+// ── 20. the fallback path: engines without pow() in relative colour ─────────
+/*
+ * An engine without pow() in relative colour (Codex-61zsk.16) skips the
+ * `@supports` block and draws only the declarations before it: the same
+ * surfaces, with inks by an OKLCH lightness step, the accent and marks mixed
+ * toward black or white, every button the plain brand, and the org's own
+ * colours unmoved on its surfaces (`fallbackTokens`, §2). This section holds
+ * that model to the stylesheet's text, calibrates it by hand, and runs §3's
+ * named matrix and §4's sweep on it.
+ */
+const SUPPORTS_HEAD =
+  '@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {';
+const FALLBACK_TOKENS_HEAD = '.lp :is([data-lp-scheme], [data-lp-on-media]) {';
+
+/** The body of the first rule written `head`. */
+const ruleAfter = (head: string) => {
+  const at = CODE.indexOf(head);
+  return at < 0
+    ? ''
+    : (CODE.slice(at + head.length).match(/^([^}]*)\}/)?.[1] ?? '');
+};
+
+/** The exact path: the `@supports` block's whole body, braces matched. */
+function exactPath(): string {
+  const start = CODE.indexOf(SUPPORTS_HEAD);
+  if (start < 0) return '';
+  let depth = 0;
+  for (let i = start + SUPPORTS_HEAD.length - 1; i < CODE.length; i++) {
+    if (CODE[i] === '{') depth++;
+    if (CODE[i] === '}') depth--;
+    if (CODE[i] === '}' && depth === 0)
+      return CODE.slice(start + SUPPORTS_HEAD.length, i);
+  }
+  return '';
+}
+
+describe('schemes.css ↔ fallback model parity (engines without pow(), Codex-61zsk.16)', () => {
+  const step = (from: string) =>
+    `oklch(from var(${from}) clamp(${FALLBACK.dark}, (${FALLBACK.pivot} - l) * 1000, ${FALLBACK.light}) calc(c * ${FALLBACK.chroma}) h)`;
+  const share = (p: number) =>
+    `color-mix(in oklab, var(--lp-ink) ${Math.round(p * 100)}%, var(--lp-bg))`;
+  const label = (from: string) =>
+    `oklch(from var(${from}) clamp(0, (${FALLBACK.pivot} - l) * 1000, 1) 0 0)`;
+  const toward = (from: string, white: boolean) =>
+    `oklch(from var(${from}) calc(l * ${FALLBACK.keep}${white ? ` + ${Number((1 - FALLBACK.keep).toFixed(6))}` : ''}) calc(c * ${FALLBACK.keep}) h)`;
+
+  it('declares the fallback before the exact path, outside any @supports', () => {
+    const supports = CODE.indexOf(SUPPORTS_HEAD);
+    expect(supports).toBeGreaterThan(0);
+    expect(CODE.indexOf('@supports')).toBe(supports);
+    for (const head of [FALLBACK_TOKENS_HEAD, `${ORG_SURFACES} {`]) {
+      expect(CODE.indexOf(head), head).toBeGreaterThan(-1);
+      expect(CODE.indexOf(head), head).toBeLessThan(supports);
+    }
+  });
+
+  it('spells every fallback ink the model draws', () => {
+    const rule = ruleAfter(FALLBACK_TOKENS_HEAD);
+    for (const line of [
+      `--lp-ink: ${step('--lp-bg')};`,
+      `--lp-ink-soft: ${share(FALLBACK.soft)};`,
+      `--lp-line: ${share(FALLBACK.line)};`,
+      `--lp-button-line: ${share(FALLBACK.edge)};`,
+      `--lp-panel-ink: ${step('--lp-panel')};`,
+      `--lp-button-ink: ${label('--lp-button-bg')};`,
+      '--lp-focus: var(--lp-ink);',
+      '--lp-heading-ink: currentColor;',
+      '--lp-title-ink: currentColor;',
+    ])
+      expect(rule).toContain(line);
+    // The label is the platform's own fallback step (`org-brand.css`).
+    expect(ORG_BRAND).toContain(
+      `--color-on-interactive: ${label('--color-interactive')};`
+    );
+  });
+
+  it('mixes the accent and marks toward black or white, leaves every button the plain brand, and routes each by pole', () => {
+    for (const [name, from, white] of [
+      ['--_acc-light', '--lp-brand', false],
+      ['--_acc-dark', '--lp-brand', true],
+      ['--_mark-light', '--lp-accent-source', false],
+      ['--_mark-dark', '--lp-accent-source', true],
+    ] as const)
+      expect(POLE.light).toContain(`${name}: ${toward(from, white)};`);
+    expect(POLE.light).toContain('--_btn-light: var(--lp-brand);');
+    expect(POLE.light).toContain('--_btn-dark: var(--lp-brand);');
+    // base / soft take the ground's side (`-g`), contrast the other (`-i`).
+    for (const [pole, own, other] of [
+      ['light', 'light', 'dark'],
+      ['dark', 'dark', 'light'],
+    ] as const)
+      for (const [slot, from] of [
+        ['accent', 'acc'],
+        ['mark', 'mark'],
+        ['button', 'btn'],
+      ] as const) {
+        expect(POLE[pole]).toContain(`--_${slot}-g: var(--_${from}-${own});`);
+        expect(POLE[pole]).toContain(`--_${slot}-i: var(--_${from}-${other});`);
+      }
+    // A brand / accent band's accent, mark and button are its ink, on both
+    // paths, and its button's label is the band.
+    const fill = ruleAfter(
+      ".lp [data-lp-scheme='brand'], .lp [data-lp-scheme='accent'] {"
+    );
+    for (const line of [
+      '--lp-accent: var(--lp-ink);',
+      '--lp-mark-ink: var(--lp-ink);',
+      '--lp-button-bg: var(--lp-ink);',
+      '--lp-button-ink: var(--lp-bg);',
+    ])
+      expect(fill).toContain(line);
+  });
+
+  it('draws the org’s own colours, unmoved, on base and soft — leaving the label and the ghost line to the kit’s rule', () => {
+    const org = ruleAfter(`${ORG_SURFACES} {`);
+    for (const line of [
+      '--lp-ink: var(--_org-ink);',
+      '--lp-ink-soft: var(--_org-ink-soft);',
+      '--lp-panel-ink: var(--lp-ink);',
+      '--lp-heading-ink: var(--_org-heading);',
+      '--lp-title-ink: var(--_org-heading);',
+      '--lp-focus: var(--_org-focus);',
+      '--lp-accent: var(--_org-button);',
+      '--lp-mark-ink: var(--lp-accent-source);',
+      '--lp-button-bg: var(--_org-button);',
+    ])
+      expect(org).toContain(line);
+    expect(org).not.toContain('--lp-button-ink');
+    expect(org).not.toContain('--lp-button-line');
+  });
+
+  it('draws the exact path’s surfaces: the @supports block declares none of them', () => {
+    const declared = [...exactPath().matchAll(/(--[\w-]+):/g)].map(
+      (m) => m[1] ?? ''
+    );
+    // Calibration: the block is found, and it is the one that moves the inks.
+    expect(declared.length).toBeGreaterThan(100);
+    expect(declared).toContain('--lp-ink');
+    const SURFACES = new Set([
+      '--lp-bg',
+      '--lp-panel',
+      '--lp-ground',
+      '--lp-brand',
+      '--lp-brand-2',
+      '--lp-tint-soft',
+      '--lp-tint-panel',
+      '--lp-accent-source',
+      '--_ground-in',
+      '--_band-edge',
+      '--_band-side',
+      '--_soft-step',
+      '--_soft-ground',
+      '--_base-panel',
+      '--_soft-bg',
+      '--_contrast-bg',
+      '--_panel-g',
+      '--_panel-i',
+      '--_scrim',
+    ]);
+    expect(
+      declared.filter((n) => SURFACES.has(n) || n.startsWith('--_org-'))
+    ).toEqual([]);
+  });
+});
+
+describe('the fallback model — calibrated by hand at the step’s poles', () => {
+  const bytes = (rgb: Rgb) => clip(rgb).map((c) => Math.round(c * 255));
+
+  it('draws L 0.16 ink on white and L 0.97 on near black, at a fifth of the ground’s chroma', () => {
+    // oklch(0.16 0 0): linear 0.16³ = 0.004096, encoded 0.0518, byte 13.
+    const onWhite = fallbackInk([1, 1, 1]);
+    expect(toLab(onWhite)[0]).toBeCloseTo(0.16, 6);
+    expect(bytes(onWhite)).toEqual([13, 13, 13]);
+    // #111111 is L 0.178. oklch(0.97 0 0): 0.97³ = 0.9127, 0.9606, byte 245.
+    const onBlack = fallbackInk(hex('#111111'));
+    expect(toLab(onBlack)[0]).toBeCloseTo(0.97, 6);
+    expect(bytes(onBlack)).toEqual([245, 245, 245]);
+    // A coloured ground's ink keeps its hue, at a fifth of its chroma.
+    const navy = hex('#1B2A41');
+    const [, a, b] = toLab(navy);
+    const [, ia, ib] = toLab(fallbackInk(navy));
+    expect(Math.hypot(ia, ib)).toBeCloseTo(Math.hypot(a, b) * 0.2, 6);
+    expect(Math.atan2(ib, ia)).toBeCloseTo(Math.atan2(b, a), 4);
+  });
+
+  it('crosses between them on a 0.001-wide ramp at L 0.62, where the ink is mid-grey', () => {
+    // (0.62 − 0.6195) × 1000 = 0.5.
+    expect(toLab(fallbackInk(toRgb([0.6195, 0, 0])))[0]).toBeCloseTo(0.5, 5);
+    expect(toLab(fallbackInk(toRgb([0.619, 0, 0])))[0]).toBeCloseTo(0.97, 6);
+    expect(toLab(fallbackInk(toRgb([0.6205, 0, 0])))[0]).toBeCloseTo(0.16, 6);
+  });
+
+  it('decides by lightness, not luminance: a mid grey (L 0.600, Y 0.2159) takes light ink and a white label', () => {
+    const grey = hex('#808080');
+    expect(bytes(fallbackLabel(toRgb([0.61, 0, 0])))).toEqual([255, 255, 255]);
+    expect(bytes(fallbackLabel(toRgb([0.63, 0, 0])))).toEqual([0, 0, 0]);
+    expect(bytes(fallbackLabel(grey))).toEqual([255, 255, 255]);
+    // By hand: (1 + 0.05) / (0.2159 + 0.05) = 3.95, and the L 0.97 ink
+    // (Y 0.9127) gives 0.9627 / 0.2659 = 3.62 — both under 4.5.
+    expect(ratio(fallbackLabel(grey), grey)).toBeCloseTo(3.95, 2);
+    expect(ratio(fallbackInk(grey), grey)).toBeCloseTo(3.62, 2);
+  });
+
+  it('mixes the accent 45% toward black or white in OKLab — the color-mix the comment says it is', () => {
+    for (const brandHex of Object.values(BRANDS)) {
+      const brand = hex(brandHex);
+      for (const [white, pole] of [
+        [false, [0, 0, 0]],
+        [true, [1, 1, 1]],
+      ] as const) {
+        const mixed = mix(brand, pole, 0.45);
+        const drawn = fallbackToward(brand, white);
+        for (const i of [0, 1, 2] as const)
+          expect(drawn[i], brandHex).toBeCloseTo(mixed[i], 6);
+      }
+    }
+  });
+
+  it('draws the org’s own colours exactly on its surfaces, and its ghost line from its ink', () => {
+    const butter = hex('#FFF3B0');
+    const g = ground('light', hex('#fafafa'));
+    const org = platformOrg('light', butter, butter, butter);
+    const t = fallbackTokens('light', 'base', g, butter, DEFAULT_TINT, butter, {
+      org,
+      decorated: false,
+    });
+    for (const token of [
+      'accent',
+      'mark',
+      'button',
+      'heading',
+      'title',
+      'focus',
+    ] as const)
+      expect(bytes(t[token]), token).toEqual(bytes(butter));
+    expect(t.ink).toEqual(org.ink);
+    const line = mix(org.ink, g, 0.42);
+    for (const i of [0, 1, 2] as const)
+      expect(t.edge[i]).toBeCloseTo(line[i], 9);
+    // …which is a known miss: pale butter text on the platform's ground.
+    expect(ratio(t.accent, t.bg)).toBeLessThan(1.2);
+  });
+});
+
+/** One floor a case misses: its group, the case within it, the ratio. */
+interface Miss {
+  group: string;
+  item: string;
+  value: number;
+}
+/** `<token> <mode> <scheme>/<page>`: [misses, worst ratio, list hash]. */
+type MissTable = Record<string, readonly [number, number, string]>;
+
+/** FNV-1a (32-bit) of the sorted list: the exact list, in eight characters. */
+function fingerprint(list: readonly string[]): string {
+  const text = [...list].sort().join('\n');
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+function tabulate(misses: readonly Miss[]): MissTable {
+  const groups = new Map<string, Miss[]>();
+  for (const m of misses) {
+    const list = groups.get(m.group) ?? [];
+    list.push(m);
+    groups.set(m.group, list);
+  }
+  const out: Record<string, readonly [number, number, string]> = {};
+  for (const [group, list] of groups)
+    out[group] = [
+      list.length,
+      Number(Math.min(...list.map((m) => m.value)).toFixed(2)),
+      fingerprint(list.map((m) => m.item)),
+    ];
+  return out;
+}
+
+/** §3's named matrix on the fallback path: every floor every case misses. */
+function fallbackNamedMisses(): Miss[] {
+  const out: Miss[] = [];
+  for (const mode of ['light', 'dark'] as const)
+    for (const [groundName, groundHex] of Object.entries(GROUNDS[mode])) {
+      const g = ground(mode, hex(groundHex));
+      for (const [brandName, brandHex] of Object.entries(BRANDS)) {
+        const brand = hex(brandHex);
+        const org = orgFor(mode, groundName, groundHex, brand);
+        for (const page of pagesOn(mode, org))
+          for (const [styleName, tint] of Object.entries(STYLE_TINTS))
+            for (const scheme of SCHEMES) {
+              const r = ratios(
+                fallbackTokens(mode, scheme, g, brand, tint, brand, page)
+              );
+              for (const [token, floor] of Object.entries(FLOORS)) {
+                const value = r[token as keyof typeof r];
+                if (value < floor)
+                  out.push({
+                    group: `${token} ${mode} ${scheme}/${page ? 'org' : 'room'}`,
+                    item: `${groundName}/${brandName}/${styleName}`,
+                    value,
+                  });
+              }
+            }
+      }
+    }
+  return out;
+}
+
+/** §4's sweep of the sRGB cube on the fallback path. */
+function fallbackSweepMisses(): Miss[] {
+  const out: Miss[] = [];
+  const step = 17;
+  for (const mode of ['light', 'dark'] as const) {
+    const g = ground(mode, hex(mode === 'light' ? '#fafafa' : '#171717'));
+    for (let r = 0; r < 256; r += step)
+      for (let gr = 0; gr < 256; gr += step)
+        for (let b = 0; b < 256; b += step) {
+          const brand = [r / 255, gr / 255, b / 255] as const;
+          const org = platformOrg(mode, brand, brand, brand);
+          for (const page of pagesOn(mode, org))
+            for (const scheme of SCHEMES) {
+              const values = ratios(
+                fallbackTokens(
+                  mode,
+                  scheme,
+                  g,
+                  brand,
+                  DEFAULT_TINT,
+                  brand,
+                  page
+                )
+              );
+              for (const [token, floor] of Object.entries(FLOORS)) {
+                const value = values[token as keyof typeof values];
+                if (value < floor)
+                  out.push({
+                    group: `${token} ${mode} ${scheme}/${page ? 'org' : 'room'}`,
+                    item: toHex(brand),
+                    value,
+                  });
+              }
+            }
+        }
+  }
+  return out;
+}
+
+/**
+ * THE FALLBACK'S MEASURED KNOWN LIMIT (Codex-61zsk.16). Not a floor — every
+ * §5 floor stands — but what an engine without pow() in relative colour
+ * misses of them today, measured on §3's matrix and §4's sweep, so that any
+ * new miss, or any fix, fails here. Whether the fallback is worth fixing is
+ * the owner's call. By cause, the worst first:
+ *   - the org's own colours drawn unmoved on base / soft — accent text,
+ *     title, heading, mark, focus ring and button are the brand, as the org's
+ *     own site paints them: a pale brand on a light ground, a dark one on a
+ *     dark ground, to 1:1 (half the sweep's misses);
+ *   - every kit button the plain brand (contrast, Cinematic's room), to 1:1;
+ *   - on the matrix's two cross-pole grounds alone (`dark as light`, `cream
+ *     as dark`, which `groundBand` puts on their own pole), the org's inks,
+ *     derived from the background before the band moves it, to 1:1;
+ *   - the lightness step at L 0.62 on a luminous mid-tone — §5's green / teal
+ *     pivot error: a brand fill's ghost line 1.85:1, soft ink 2.16 and ink
+ *     2.92, and a button's label 2.95 (#119999 in the sweep);
+ *   - the accent and marks mixed 45% toward black or white on a kit band,
+ *     to 2.24:1 (a black brand in the room).
+ * Each entry is `<token> <mode> <scheme>/<page>`: [misses, worst ratio, the
+ * `fingerprint` of the sorted list of cases that miss — `<ground>/<brand>/
+ * <Style>` in the matrix, the brand's hex in the sweep], so each list is
+ * pinned exactly. A group the fallback holds is absent.
+ */
+const KNOWN_FALLBACK_MISSES: { named: MissTable; sweep: MissTable } = {
+  named: {
+    'ink light base/org': [56, 1.01, 'fdd07c0f'],
+    'ink light soft/org': [56, 1, 'fdd07c0f'],
+    'ink light brand/org': [80, 3.46, '00a75259'],
+    'ink light accent/org': [80, 3.46, '00a75259'],
+    'ink dark base/org': [56, 1.27, 'cb33d02f'],
+    'ink dark soft/org': [56, 1.15, 'cb33d02f'],
+    'ink dark brand/org': [80, 3.46, '30e764a9'],
+    'ink dark brand/room': [80, 3.46, '30e764a9'],
+    'ink dark accent/org': [80, 3.46, '30e764a9'],
+    'ink dark accent/room': [80, 3.46, '30e764a9'],
+    'soft light base/org': [56, 2.44, 'fdd07c0f'],
+    'soft light soft/org': [56, 2.41, 'fdd07c0f'],
+    'soft light brand/org': [112, 2.54, 'cb60b441'],
+    'soft light accent/org': [112, 2.54, 'cb60b441'],
+    'soft dark base/org': [56, 1.31, 'cb33d02f'],
+    'soft dark soft/org': [56, 1.3, 'cb33d02f'],
+    'soft dark brand/org': [112, 2.54, '474e7369'],
+    'soft dark brand/room': [112, 2.54, '474e7369'],
+    'soft dark accent/org': [112, 2.54, '474e7369'],
+    'soft dark accent/room': [112, 2.54, '474e7369'],
+    'accent light base/org': [164, 1, '22fb3c84'],
+    'accent light soft/org': [175, 1.01, '39103eb6'],
+    'accent light contrast/org': [32, 3.69, '7e773f9d'],
+    'accent light brand/org': [80, 3.46, '00a75259'],
+    'accent light accent/org': [80, 3.46, '00a75259'],
+    'accent dark base/org': [112, 1, '997da059'],
+    'accent dark base/room': [36, 3.36, 'fa9b0264'],
+    'accent dark soft/org': [134, 1.01, 'd1611df6'],
+    'accent dark soft/room': [42, 3.08, '6c2a69de'],
+    'accent dark contrast/org': [16, 4.26, '866ce231'],
+    'accent dark contrast/room': [16, 4.26, '866ce231'],
+    'accent dark brand/org': [80, 3.46, '30e764a9'],
+    'accent dark brand/room': [80, 3.46, '30e764a9'],
+    'accent dark accent/org': [80, 3.46, '30e764a9'],
+    'accent dark accent/room': [80, 3.46, '30e764a9'],
+    'mark light base/org': [96, 1, 'a545117d'],
+    'mark light soft/org': [104, 1.01, 'e1102ad0'],
+    'mark dark base/org': [48, 1, '0074e729'],
+    'mark dark soft/org': [48, 1.01, '0074e729'],
+    'button light base/org': [96, 1, 'a545117d'],
+    'button light soft/org': [104, 1.01, 'e1102ad0'],
+    'button light contrast/org': [48, 1.04, 'e414b649'],
+    'button dark base/org': [48, 1, '0074e729'],
+    'button dark base/room': [48, 1, '0074e729'],
+    'button dark soft/org': [48, 1.01, '0074e729'],
+    'button dark soft/room': [56, 1, '7e3dc231'],
+    'button dark contrast/org': [64, 1.01, '0d4e2c85'],
+    'button dark contrast/room': [64, 1.01, '0d4e2c85'],
+    'buttonInk light base/org': [48, 3.74, '80818891'],
+    'buttonInk light soft/org': [48, 3.74, '80818891'],
+    'buttonInk light contrast/org': [48, 3.74, '80818891'],
+    'buttonInk light brand/org': [80, 3.46, '00a75259'],
+    'buttonInk light accent/org': [80, 3.46, '00a75259'],
+    'buttonInk dark base/org': [48, 3.74, '8110e4e1'],
+    'buttonInk dark base/room': [48, 3.74, '8110e4e1'],
+    'buttonInk dark soft/org': [48, 3.74, '8110e4e1'],
+    'buttonInk dark soft/room': [48, 3.74, '8110e4e1'],
+    'buttonInk dark contrast/org': [48, 3.74, '8110e4e1'],
+    'buttonInk dark contrast/room': [48, 3.74, '8110e4e1'],
+    'buttonInk dark brand/org': [80, 3.46, '30e764a9'],
+    'buttonInk dark brand/room': [80, 3.46, '30e764a9'],
+    'buttonInk dark accent/org': [80, 3.46, '30e764a9'],
+    'buttonInk dark accent/room': [80, 3.46, '30e764a9'],
+    'edge light base/org': [56, 1, 'fdd07c0f'],
+    'edge light soft/org': [56, 1, 'fdd07c0f'],
+    'edge light brand/org': [96, 2.16, '9284376d'],
+    'edge light accent/org': [96, 2.16, '9284376d'],
+    'edge dark base/org': [56, 1.22, 'cb33d02f'],
+    'edge dark soft/org': [56, 1.12, 'cb33d02f'],
+    'edge dark brand/org': [96, 2.16, 'efb852f5'],
+    'edge dark brand/room': [96, 2.16, 'efb852f5'],
+    'edge dark accent/org': [96, 2.16, 'efb852f5'],
+    'edge dark accent/room': [96, 2.16, 'efb852f5'],
+    'panelInk light base/org': [56, 1, 'fdd07c0f'],
+    'panelInk light soft/org': [56, 1.01, 'fdd07c0f'],
+    'panelInk dark base/org': [56, 1.27, 'cb33d02f'],
+    'panelInk dark soft/org': [56, 1.27, 'cb33d02f'],
+    'heading light base/org': [96, 1, 'a545117d'],
+    'heading light soft/org': [104, 1.01, 'e1102ad0'],
+    'heading dark base/org': [48, 1, '0074e729'],
+    'heading dark soft/org': [48, 1.01, '0074e729'],
+    'title light base/org': [164, 1, '22fb3c84'],
+    'title light soft/org': [175, 1.01, '39103eb6'],
+    'title light brand/org': [80, 3.46, '00a75259'],
+    'title light accent/org': [80, 3.46, '00a75259'],
+    'title dark base/org': [112, 1, '997da059'],
+    'title dark soft/org': [134, 1.01, 'd1611df6'],
+    'title dark brand/org': [80, 3.46, '30e764a9'],
+    'title dark brand/room': [80, 3.46, '30e764a9'],
+    'title dark accent/org': [80, 3.46, '30e764a9'],
+    'title dark accent/room': [80, 3.46, '30e764a9'],
+    'focus light base/org': [96, 1, 'a545117d'],
+    'focus light soft/org': [104, 1.01, 'e1102ad0'],
+    'focus dark base/org': [48, 1, '0074e729'],
+    'focus dark soft/org': [48, 1.01, '0074e729'],
+  },
+  sweep: {
+    'ink light brand/org': [508, 2.92, '385447b1'],
+    'ink light accent/org': [508, 2.92, '385447b1'],
+    'ink dark brand/org': [508, 2.92, '385447b1'],
+    'ink dark brand/room': [508, 2.92, '385447b1'],
+    'ink dark accent/org': [508, 2.92, '385447b1'],
+    'ink dark accent/room': [508, 2.92, '385447b1'],
+    'soft light brand/org': [1662, 2.16, '261ff45f'],
+    'soft light accent/org': [1662, 2.16, '261ff45f'],
+    'soft dark brand/org': [1662, 2.16, '261ff45f'],
+    'soft dark brand/room': [1662, 2.16, '261ff45f'],
+    'soft dark accent/org': [1662, 2.16, '261ff45f'],
+    'soft dark accent/room': [1662, 2.16, '261ff45f'],
+    'accent light base/org': [2702, 1, '602a9b9b'],
+    'accent light soft/org': [2775, 1, '3a5c0f8c'],
+    'accent light contrast/org': [76, 2.43, '93a28abf'],
+    'accent light brand/org': [508, 2.92, '385447b1'],
+    'accent light accent/org': [508, 2.92, '385447b1'],
+    'accent dark base/org': [1714, 1, '7da72ced'],
+    'accent dark base/room': [84, 2.41, '4edd7211'],
+    'accent dark soft/org': [1895, 1, '807cc776'],
+    'accent dark soft/room': [151, 2.24, 'a06d5f64'],
+    'accent dark contrast/org': [17, 4.26, '40c878cc'],
+    'accent dark contrast/room': [17, 4.26, '40c878cc'],
+    'accent dark brand/org': [508, 2.92, '385447b1'],
+    'accent dark brand/room': [508, 2.92, '385447b1'],
+    'accent dark accent/org': [508, 2.92, '385447b1'],
+    'accent dark accent/room': [508, 2.92, '385447b1'],
+    'mark light base/org': [1892, 1, '15e25977'],
+    'mark light soft/org': [1970, 1, '8a0692b1'],
+    'mark light contrast/org': [2, 2.43, '4444e6a3'],
+    'mark light brand/org': [1, 2.92, 'a4fcf314'],
+    'mark light accent/org': [1, 2.92, 'a4fcf314'],
+    'mark dark base/org': [996, 1, '661b964d'],
+    'mark dark base/room': [2, 2.41, '4444e6a3'],
+    'mark dark soft/org': [1137, 1, '8b67eb1c'],
+    'mark dark soft/room': [5, 2.24, 'c2cfddbe'],
+    'mark dark brand/org': [1, 2.92, 'a4fcf314'],
+    'mark dark brand/room': [1, 2.92, 'a4fcf314'],
+    'mark dark accent/org': [1, 2.92, 'a4fcf314'],
+    'mark dark accent/room': [1, 2.92, 'a4fcf314'],
+    'button light base/org': [1892, 1, '15e25977'],
+    'button light soft/org': [1970, 1, '8a0692b1'],
+    'button light contrast/org': [978, 1, '78b816cf'],
+    'button light brand/org': [1, 2.92, 'a4fcf314'],
+    'button light accent/org': [1, 2.92, 'a4fcf314'],
+    'button dark base/org': [996, 1, '661b964d'],
+    'button dark base/room': [996, 1, '661b964d'],
+    'button dark soft/org': [1137, 1, '8b67eb1c'],
+    'button dark soft/room': [1161, 1, 'd9aefcec'],
+    'button dark contrast/org': [2055, 1, '15bc6b8e'],
+    'button dark contrast/room': [2055, 1, '15bc6b8e'],
+    'button dark brand/org': [1, 2.92, 'a4fcf314'],
+    'button dark brand/room': [1, 2.92, 'a4fcf314'],
+    'button dark accent/org': [1, 2.92, 'a4fcf314'],
+    'button dark accent/room': [1, 2.92, 'a4fcf314'],
+    'buttonInk light base/org': [316, 2.95, 'ce34a983'],
+    'buttonInk light soft/org': [316, 2.95, 'ce34a983'],
+    'buttonInk light contrast/org': [316, 2.95, 'ce34a983'],
+    'buttonInk light brand/org': [508, 2.92, '385447b1'],
+    'buttonInk light accent/org': [508, 2.92, '385447b1'],
+    'buttonInk dark base/org': [316, 2.95, 'ce34a983'],
+    'buttonInk dark base/room': [316, 2.95, 'ce34a983'],
+    'buttonInk dark soft/org': [316, 2.95, 'ce34a983'],
+    'buttonInk dark soft/room': [316, 2.95, 'ce34a983'],
+    'buttonInk dark contrast/org': [316, 2.95, 'ce34a983'],
+    'buttonInk dark contrast/room': [316, 2.95, 'ce34a983'],
+    'buttonInk dark brand/org': [508, 2.92, '385447b1'],
+    'buttonInk dark brand/room': [508, 2.92, '385447b1'],
+    'buttonInk dark accent/org': [508, 2.92, '385447b1'],
+    'buttonInk dark accent/room': [508, 2.92, '385447b1'],
+    'edge light brand/org': [920, 1.85, 'f0045155'],
+    'edge light accent/org': [920, 1.85, 'f0045155'],
+    'edge dark brand/org': [920, 1.85, 'f0045155'],
+    'edge dark brand/room': [920, 1.85, 'f0045155'],
+    'edge dark accent/org': [920, 1.85, 'f0045155'],
+    'edge dark accent/room': [920, 1.85, 'f0045155'],
+    'heading light base/org': [1892, 1, '15e25977'],
+    'heading light soft/org': [1970, 1, '8a0692b1'],
+    'heading light brand/org': [1, 2.92, 'a4fcf314'],
+    'heading light accent/org': [1, 2.92, 'a4fcf314'],
+    'heading dark base/org': [996, 1, '661b964d'],
+    'heading dark soft/org': [1137, 1, '8b67eb1c'],
+    'heading dark brand/org': [1, 2.92, 'a4fcf314'],
+    'heading dark brand/room': [1, 2.92, 'a4fcf314'],
+    'heading dark accent/org': [1, 2.92, 'a4fcf314'],
+    'heading dark accent/room': [1, 2.92, 'a4fcf314'],
+    'title light base/org': [2702, 1, '602a9b9b'],
+    'title light soft/org': [2775, 1, '3a5c0f8c'],
+    'title light brand/org': [508, 2.92, '385447b1'],
+    'title light accent/org': [508, 2.92, '385447b1'],
+    'title dark base/org': [1714, 1, '7da72ced'],
+    'title dark soft/org': [1895, 1, '807cc776'],
+    'title dark brand/org': [508, 2.92, '385447b1'],
+    'title dark brand/room': [508, 2.92, '385447b1'],
+    'title dark accent/org': [508, 2.92, '385447b1'],
+    'title dark accent/room': [508, 2.92, '385447b1'],
+    'focus light base/org': [1892, 1, '15e25977'],
+    'focus light soft/org': [1970, 1, '8a0692b1'],
+    'focus light brand/org': [1, 2.92, 'a4fcf314'],
+    'focus light accent/org': [1, 2.92, 'a4fcf314'],
+    'focus dark base/org': [996, 1, '661b964d'],
+    'focus dark soft/org': [1137, 1, '8b67eb1c'],
+    'focus dark brand/org': [1, 2.92, 'a4fcf314'],
+    'focus dark brand/room': [1, 2.92, 'a4fcf314'],
+    'focus dark accent/org': [1, 2.92, 'a4fcf314'],
+    'focus dark accent/room': [1, 2.92, 'a4fcf314'],
+  },
+};
+
+describe('the §5 floors on the fallback path — a measured known limit (Codex-61zsk.16)', () => {
+  it('pins a list exactly: the hash sees one case swapped for another, and not their order', () => {
+    expect(fingerprint(['a/x', 'b/y'])).toBe(fingerprint(['b/y', 'a/x']));
+    expect(fingerprint(['a/x', 'b/y'])).not.toBe(fingerprint(['a/x', 'b/z']));
+    expect(
+      tabulate([
+        { group: 'ink light base/org', item: 'b', value: 3.004 },
+        { group: 'ink light base/org', item: 'a', value: 2.5 },
+      ])
+    ).toEqual({ 'ink light base/org': [2, 2.5, fingerprint(['a', 'b'])] });
+  });
+
+  it('named brand matrix: misses exactly the known list, and nothing else', () => {
+    expect(tabulate(fallbackNamedMisses())).toEqual(
+      KNOWN_FALLBACK_MISSES.named
+    );
+  });
+
+  it('generated sweep of the sRGB cube: misses exactly the known list, and nothing else', () => {
+    expect(tabulate(fallbackSweepMisses())).toEqual(
+      KNOWN_FALLBACK_MISSES.sweep
+    );
   });
 });
