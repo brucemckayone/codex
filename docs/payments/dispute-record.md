@@ -35,8 +35,7 @@ It is shaped like `refunds`.
 | `stripe_dispute_id` | unique; `dp_…` |
 | `stripe_charge_id`, `purchase_id` (nullable) | as `refunds`; null for a subscription invoice |
 | `amount_cents`, `currency`, `reason` | the disputed amount |
-| `status` | Stripe's, forward only (`warning_*`, `needs_response`, `under_review`, `won`, `lost`) |
-| `funds_withdrawn_at`, `funds_reinstated_at` | when money moved, from the dispute's balance transactions |
+| `status` | Stripe's, forward only (`warning_*`, `needs_response`, `under_review`, `won`, `lost`, `prevented`). It also says whether money moved: a chargeback status means Stripe took it, an inquiry's means it did not |
 | `outcome_applied_at` | when won or lost handling finished. A redelivery finds it and stops |
 
 ### The reversal: `payout_reversals` with `cause_type = 'dispute'`
@@ -81,11 +80,13 @@ The dispute endpoint already takes `charge.dispute.created`, `.updated` and `.cl
 - A disputed invoice has no purchase row. The `disputes` row is keyed by its charge, and the subscription is found from the invoice's payout rows (`subscription_id`).
 - **Paused** means the subscription's access is paused for the dispute's life: the same streaming block as a failed renewal, with no Stripe change.
 - **Lost** cancels the subscription at Stripe (subscriptions.md).
+- The money (reversal, hold, re-pay, cancel) is the same for both sources and ships first. Pausing, restoring and cancelling the subscription ships in Codex-2hxff.9's second PR.
 
 ## 6. Migration
 
 - A new table `disputes`.
-- `payout_reversals.repaid_by_payout_id` (FK `payouts`, restrict, unique where not null).
+- `payout_reversals.repaid_by_payout_id` (FK `payouts`, restrict, unique where not null), and a `cancelled` status: a step whose dispute was won before it ran.
+- `refund_reviews.resolution` gains `dispute_won`: a debt the dispute caused, closed when it is won.
 - `payouts.status` gains `cancelled_by_dispute` (Q3).
 - No backfill: no dispute has ever moved money in this codebase.
 

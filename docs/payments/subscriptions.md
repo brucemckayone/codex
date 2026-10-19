@@ -238,7 +238,9 @@ A disputed subscription invoice follows the dispute rules for purchases
 ([purchases.md](purchases.md#disputes)): access is paused and the invoice's
 creator and organisation slices are reversed in proportion while it is open. If
 we win, both are restored. If we lose, the subscription is cancelled and access
-ends — **gap**: `Codex-2hxff.9`.
+ends. The money is handled as for purchases (the clawback acts on both
+sources); pausing, restoring and cancelling the subscription is a **gap**:
+`Codex-2hxff.9` (its second PR).
 
 ## Billing portal
 

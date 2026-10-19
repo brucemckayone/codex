@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import {
   content,
   contentAccess,
+  disputes,
   organizations,
   type Payout,
   type Purchase,
@@ -28,6 +29,7 @@ import {
   refundReviews,
   refunds,
 } from '@codex/database/schema';
+import { isDrainablePayout } from '@codex/payments';
 import { InternalServiceError } from '@codex/service-errors';
 import {
   createMockStripe,
@@ -39,7 +41,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -62,6 +64,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
   let orgId: string;
   const createdPayoutIds: string[] = [];
   const createdRefundIds: string[] = [];
+  const createdDisputeIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -85,13 +88,35 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
   // refund_reviews -> payout_reversals -> payouts are ON DELETE RESTRICT.
   afterAll(async () => {
     if (createdPayoutIds.length > 0) {
+      // A won dispute's re-pay rows are live pending payouts: delete them too.
+      const repays = await db
+        .select({ id: payoutReversals.repaidByPayoutId })
+        .from(payoutReversals)
+        .where(
+          and(
+            inArray(payoutReversals.payoutId, createdPayoutIds),
+            isNotNull(payoutReversals.repaidByPayoutId)
+          )
+        );
       await db
         .delete(refundReviews)
         .where(inArray(refundReviews.payoutId, createdPayoutIds));
       await db
         .delete(payoutReversals)
         .where(inArray(payoutReversals.payoutId, createdPayoutIds));
-      await db.delete(payouts).where(inArray(payouts.id, createdPayoutIds));
+      await db
+        .delete(payouts)
+        .where(
+          inArray(payouts.id, [
+            ...createdPayoutIds,
+            ...repays.flatMap((r) => (r.id ? [r.id] : [])),
+          ])
+        );
+    }
+    if (createdDisputeIds.length > 0) {
+      await db
+        .delete(disputes)
+        .where(inArray(disputes.stripeDisputeId, createdDisputeIds));
     }
     if (createdRefundIds.length > 0) {
       await db
@@ -651,5 +676,218 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       { stripeRefundId: ids[1], amountCents: 200 },
     ]);
     expect(await service.claimRefundEmails(chargeId)).toEqual([]);
+  });
+
+  // ── disputes (Codex-2hxff.9; docs/payments/dispute-record.md) ─────────
+
+  function disputeFor(
+    seeded: Seeded,
+    disputeId: string,
+    status: string,
+    amountCents = seeded.charge.amountCents
+  ) {
+    return {
+      stripeDisputeId: disputeId,
+      stripeChargeId: seeded.charge.id,
+      paymentIntentId: seeded.paymentIntentId,
+      amountCents,
+      currency: 'gbp',
+      status,
+      reason: 'fraudulent',
+      stripeCreatedAt: new Date('2026-10-19T12:00:00Z'),
+    };
+  }
+
+  async function grantAccess(seeded: Seeded) {
+    const contentId = seeded.purchase.contentId;
+    if (!contentId) throw new Error('the seeded purchase is for content');
+    await db.insert(contentAccess).values({
+      userId: buyerId,
+      contentId,
+      organizationId: orgId,
+      accessType: 'purchased',
+    });
+    return async () =>
+      takeFirst(
+        await db
+          .select()
+          .from(contentAccess)
+          .where(eq(contentAccess.contentId, contentId))
+      );
+  }
+
+  it('recordDispute records a dispute with its purchase and moves it forward only; a final status never changes', async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_fwd_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const service = makeService();
+    const record = (status: string, amount?: number) =>
+      service.recordDispute(disputeFor(seeded, disputeId, status, amount));
+
+    expect(await record('warning_needs_response')).toMatchObject({
+      status: 'warning_needs_response',
+      purchaseId: seeded.purchase.id,
+    });
+    // An inquiry may become a chargeback; a stale inquiry event then changes
+    // nothing.
+    expect((await record('needs_response'))?.status).toBe('needs_response');
+    expect((await record('warning_needs_response'))?.status).toBe(
+      'needs_response'
+    );
+    // Still open: the amount can be corrected.
+    expect((await record('needs_response', 800))?.amountCents).toBe(800);
+    expect((await record('won'))?.status).toBe('won');
+    expect((await record('lost'))?.status).toBe('won');
+    expect((await record('under_review'))?.status).toBe('won');
+    expect(
+      await service.recordDispute(
+        disputeFor(seeded, `dp_new_${seeded.tag}`, 'a_status_stripe_adds')
+      )
+    ).toBeUndefined();
+  });
+
+  it('an open dispute holds a purchase row recorded before charge ids, by its purchase', async () => {
+    const seeded = await seedPurchase(1000);
+    const legacy = takeFirst(
+      await db
+        .insert(payouts)
+        .values({
+          purchaseId: seeded.purchase.id,
+          organizationId: orgId,
+          userId: creatorA,
+          payoutType: 'creator_payout',
+          amountCents: 765,
+          status: 'pending',
+          sourceType: 'purchase',
+          stripeChargeId: null,
+          reason: 'connect_not_ready',
+        })
+        .returning()
+    );
+    createdPayoutIds.push(legacy.id);
+    const drainable = async () =>
+      (
+        await db
+          .select({ id: payouts.id })
+          .from(payouts)
+          .where(and(eq(payouts.id, legacy.id), isDrainablePayout()))
+      ).length === 1;
+    expect(await drainable()).toBe(true);
+
+    const disputeId = `dp_hold_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    await makeService().recordDispute(
+      disputeFor(seeded, disputeId, 'needs_response')
+    );
+
+    expect(await drainable()).toBe(false);
+  });
+
+  it("a chargeback claws back the purchase slices (clawBackPurchaseCharge); won pays them back, outside the purchase's scope from then on", async () => {
+    const seeded = await seedPurchase(1000);
+    const { creator } = await paidSplit(seeded);
+    const service = makeService();
+    const disputeId = `dp_claw_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    await service.recordDispute(
+      disputeFor(seeded, disputeId, 'needs_response', 500)
+    );
+
+    await service.clawBackPurchaseCharge(seeded.paymentIntentId, seeded.charge);
+    expect(reversedAmount(creator.stripeTransferId)).toBe(382);
+
+    await service.recordDispute(disputeFor(seeded, disputeId, 'won', 500));
+    await service.settleWonDispute(disputeId);
+    const [won] = await db
+      .select()
+      .from(disputes)
+      .where(eq(disputes.stripeDisputeId, disputeId));
+    expect(won?.outcomeAppliedAt).not.toBeNull();
+    // The creator's reversal: the fee's share is cancelled, not re-paid.
+    const [link] = await db
+      .select({ repaid: payoutReversals.repaidByPayoutId })
+      .from(payoutReversals)
+      .where(
+        and(
+          eq(payoutReversals.causeId, disputeId),
+          eq(payoutReversals.payoutId, creator.id)
+        )
+      );
+    const repay = takeFirst(
+      await db
+        .select()
+        .from(payouts)
+        .where(eq(payouts.id, link?.repaid ?? ''))
+    );
+    // The re-pay row carries the purchase id, as every purchase row does…
+    expect(repay).toMatchObject({
+      purchaseId: seeded.purchase.id,
+      amountCents: 382,
+      status: 'pending',
+      stripeChargeId: null,
+    });
+
+    // …but a later refund never claws it back as a slice of the charge.
+    vi.mocked(stripe.transfers.createReversal).mockClear();
+    stripeRefunds([{ id: `re_after_${seeded.tag}`, amount: 300 }]);
+    await refundEvent(seeded, `re_after_${seeded.tag}`, 300);
+    expect(
+      await db
+        .select()
+        .from(payoutReversals)
+        .where(eq(payoutReversals.payoutId, repay.id))
+    ).toHaveLength(0);
+    expect((await readRow(repay.id)).status).toBe('pending');
+  });
+
+  it('restoreDisputedPurchase: a won dispute restores the access a chargeback paused, and clears the mark', async () => {
+    const seeded = await seedPurchase(1000);
+    const access = await grantAccess(seeded);
+    const service = makeService();
+    await service.processDispute(seeded.paymentIntentId, {
+      stripeDisputeId: `dp_restore_${seeded.tag}`,
+    });
+    expect((await access()).deletedAt).not.toBeNull();
+
+    const scope = await service.restoreDisputedPurchase(seeded.paymentIntentId);
+
+    expect(scope).toEqual({ userId: buyerId, orgId });
+    expect((await access()).deletedAt).toBeNull();
+    expect((await readPurchase(seeded.purchase.id)).disputedAt).toBeNull();
+  });
+
+  it('restoreDisputedPurchase leaves a purchase refunded since without access', async () => {
+    const seeded = await seedPurchase(1000);
+    const access = await grantAccess(seeded);
+    const service = makeService();
+    await service.processDispute(seeded.paymentIntentId, {
+      stripeDisputeId: `dp_refunded_${seeded.tag}`,
+    });
+    await db
+      .update(purchases)
+      .set({ status: 'refunded' })
+      .where(eq(purchases.id, seeded.purchase.id));
+
+    await service.restoreDisputedPurchase(seeded.paymentIntentId);
+
+    expect((await access()).deletedAt).not.toBeNull();
+  });
+
+  it('processLostDispute: the purchase becomes refunded with the disputed amount added, capped at what was paid; access stays ended (owner decision Q3)', async () => {
+    const seeded = await seedPurchase(1000);
+    const access = await grantAccess(seeded);
+    // A partial refund first (P-1 kept it completed).
+    await db
+      .update(purchases)
+      .set({ refundAmountCents: 300 })
+      .where(eq(purchases.id, seeded.purchase.id));
+
+    await makeService().processLostDispute(seeded.paymentIntentId, 1000);
+
+    expect(await readPurchase(seeded.purchase.id)).toMatchObject({
+      status: 'refunded',
+      refundAmountCents: 1000,
+    });
+    expect((await access()).deletedAt).not.toBeNull();
   });
 });

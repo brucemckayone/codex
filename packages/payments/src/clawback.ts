@@ -1,23 +1,30 @@
 /**
- * The clawback engine: claw back each refund's share of a charge's payout
- * slices (the `clawback` module in docs/payments/architecture.md §4.3;
- * design in docs/payments/refund-reversal-record.md; Codex-2hxff.56, .8).
+ * The clawback engine: claw back each refund's and each chargeback's share of
+ * a charge's payout slices (the `clawback` module in
+ * docs/payments/architecture.md §4.3; designs in
+ * docs/payments/refund-reversal-record.md and dispute-record.md;
+ * Codex-2hxff.56, .8, .9).
  *
  * Stripe does NOT reverse a separate `transfers.create` when the charge it was
- * funded from is refunded, so without this the platform pays the whole refund
- * while creators and organisations keep their slices.
+ * funded from is refunded or charged back, so without this the platform pays
+ * the whole refund or chargeback while creators and organisations keep their
+ * slices.
  *
- * What each refund did to each slice is recorded in `payout_reversals`, one
- * row per (slice, refund). That row, not `payouts.status`, says whether a
- * refund is handled, so a second partial refund of a charge is clawed back
+ * What each cause did to each slice is recorded in `payout_reversals`, one
+ * row per (slice, cause). That row, not `payouts.status`, says whether a
+ * cause is handled, so a second partial refund of a charge is clawed back
  * too, and a failed step is retried rather than marked done. The `payouts`
  * row is never rewritten: its amount stays the slice's gross.
  *
  * The spec is __tests__/clawback.integration.test.ts.
  */
 
-import { stripeEnvMetadata } from '@codex/constants';
 import {
+  DISPUTE_CHARGEBACK_OPEN_STATUSES,
+  stripeEnvMetadata,
+} from '@codex/constants';
+import {
+  disputes,
   type Payout,
   type PayoutReversal,
   type PayoutReversalKind,
@@ -29,10 +36,20 @@ import {
   InternalServiceError,
   ServiceUnavailableError,
 } from '@codex/service-errors';
-import { and, eq, inArray, isNull, lt, or, type SQL, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
-  cancelUnpaidPayoutForRefund,
+  cancelUnpaidPayout,
   type LedgerDeps,
   PAYOUT_ATTEMPT_LEASE_MINUTES,
 } from './payout-ledger';
@@ -70,6 +87,66 @@ export interface ClawbackRefund {
   amountCents: number;
   /** Stripe's `created`, which orders a charge's refunds. */
   createdAt: number;
+}
+
+/**
+ * A chargeback the clawback acts on (`disputes`, Codex-2hxff.9): one that took
+ * money, still open or lost. A won one is paid back instead (`repayDispute`);
+ * an inquiry takes no money and only holds the drain.
+ */
+export interface ClawbackDispute {
+  id: string;
+  amountCents: number;
+  /** Stripe's `created`, in seconds like a refund's. */
+  createdAt: number;
+  /**
+   * While open, an unpaid slice is only held (the drain skips it). Lost, it
+   * takes the dispute's share like a refund: reduced, or cancelled
+   * (`cancelled_by_dispute`).
+   */
+  lost: boolean;
+}
+
+/** What a `payout_reversals` row is caused by. */
+type ClawbackCause =
+  | ({ type: 'refund' } & ClawbackRefund)
+  | ({ type: 'dispute' } & ClawbackDispute);
+
+/** A chargeback took money: open, or lost. A won one is paid back instead. */
+const CHARGEBACK_CLAWED_STATUSES = [
+  ...DISPUTE_CHARGEBACK_OPEN_STATUSES,
+  'lost',
+];
+
+/**
+ * The charge's chargebacks to claw back, oldest first: open or lost. Read from
+ * `disputes`, which the dispute webhook keeps.
+ */
+async function chargebacksFor(
+  db: LedgerDeps['db'],
+  chargeId: string
+): Promise<ClawbackDispute[]> {
+  const rows = await db
+    .select({
+      id: disputes.stripeDisputeId,
+      amountCents: disputes.amountCents,
+      createdAt: disputes.stripeCreatedAt,
+      status: disputes.status,
+    })
+    .from(disputes)
+    .where(
+      and(
+        eq(disputes.stripeChargeId, chargeId),
+        inArray(disputes.status, CHARGEBACK_CLAWED_STATUSES)
+      )
+    )
+    .orderBy(asc(disputes.stripeCreatedAt), asc(disputes.stripeDisputeId));
+  return rows.map((row) => ({
+    id: row.id,
+    amountCents: row.amountCents,
+    createdAt: Math.floor(row.createdAt.getTime() / 1000),
+    lost: row.status === 'lost',
+  }));
 }
 
 /** Whose slices of the charge are clawed back. */
@@ -155,16 +232,20 @@ export function refundShare(
  * Which rows are the source's. A purchase's rows by its id, which covers the
  * rows recorded before charge ids were (D8); a subscription's by charge id. A
  * one-time purchase's rows on the same charge carry sourceType='purchase', so
- * running both sources on every refund never claws a slice back twice.
+ * running both sources on every refund never claws a slice back twice. A
+ * re-pay row is never one of them.
  */
 function sourceScope(source: ClawbackSource, chargeId: string): SQL {
-  const where =
+  const where = and(
     source.sourceType === 'purchase'
       ? eq(payouts.purchaseId, source.purchaseId)
       : and(
           eq(payouts.stripeChargeId, chargeId),
           eq(payouts.sourceType, 'subscription')
-        );
+        ),
+    // A re-pay row (a won dispute, paid back) is not a slice of the charge.
+    sql`NOT EXISTS (SELECT 1 FROM ${payoutReversals} WHERE ${payoutReversals.repaidByPayoutId} = ${payouts.id})`
+  );
   // `and()` is typed `SQL | undefined`, and an undefined where-clause selects
   // every payout row.
   if (!where)
@@ -172,36 +253,62 @@ function sourceScope(source: ClawbackSource, chargeId: string): SQL {
   return where;
 }
 
-/** What a refund does to a slice in its current state; null if nothing is left. */
-function kindFor(row: Payout, isFinal: boolean): PayoutReversalKind | null {
+/**
+ * What a cause does to a slice in its current state; null if nothing is left,
+ * or nothing is to be done yet.
+ */
+function kindFor(
+  row: Payout,
+  isFinal: boolean,
+  cause: ClawbackCause
+): PayoutReversalKind | null {
   if (row.status === 'paid') {
     return row.payoutType === 'platform_fee'
       ? 'retained_fee'
       : 'transfer_reversal';
   }
   if (row.status === 'pending' || row.status === 'failed') {
+    // An open chargeback holds an unpaid slice rather than reducing it: the
+    // drain skips it until the dispute closes (owner decision P-2).
+    if (cause.type === 'dispute' && !cause.lost) return null;
     return isFinal ? 'cancellation' : 'pending_reduction';
   }
-  // `reversed` or `cancelled_by_refund`: nothing left to claw back. That is
-  // also what keeps a refund handled before payout_reversals existed from
-  // being reversed again by a later refund of the charge.
+  // `reversed`, `cancelled_by_refund` or `cancelled_by_dispute`: nothing left
+  // to claw back. That is also what keeps a refund handled before
+  // payout_reversals existed from being reversed again by a later refund.
   return null;
 }
 
 interface StepContext {
   deps: ClawbackDeps;
   charge: ClawbackCharge;
-  refund: ClawbackRefund;
+  cause: ClawbackCause;
+}
+
+/** The cause's id under its own name, for logs. */
+function causeFields(cause: ClawbackCause): Record<string, string> {
+  return cause.type === 'refund'
+    ? { refundId: cause.id }
+    : { disputeId: cause.id };
+}
+
+/** "Refund" or "Dispute", for messages. */
+function causeLabel(cause: ClawbackCause): string {
+  return cause.type === 'refund' ? 'Refund' : 'Dispute';
 }
 
 /** What a step left undone, for the caller's retry signal. */
 type StepResult = { failure?: unknown };
 
 /**
- * Claw back every refund's share of the source's slices of a charge.
+ * Claw back every refund's and every chargeback's share of the source's slices
+ * of a charge. Refunds come first, then chargebacks (read from `disputes`), on
+ * one cumulative share: a dispute on a partly refunded charge takes only what
+ * the refunds left.
  *
- * Idempotent: a step already `done` or `debt` is skipped, so a redelivery does
- * only what is left. A step another delivery is working on counts as not done.
+ * Idempotent: a step already `done`, `debt` or `cancelled` is skipped, so a
+ * redelivery does only what is left. A step another delivery is working on
+ * counts as not done.
  *
  * Rejects once every step has been tried if any is not done and a retry can
  * fix it: an `InternalServiceError` whose cause is the failure (an
@@ -235,34 +342,39 @@ export async function reverseCharge(
 
   const refunds =
     typeof input.refunds === 'function' ? await input.refunds() : input.refunds;
-  if (refunds.length === 0) return;
+  const chargebacks = await chargebacksFor(deps.db, charge.id);
+  if (refunds.length === 0 && chargebacks.length === 0) return;
   if (!(charge.amountCents > 0)) {
     throw new InternalServiceError('Clawback needs the charge amount', {
       chargeId: charge.id,
     });
   }
 
+  const causes: ClawbackCause[] = [
+    ...refunds.map((refund) => ({ type: 'refund' as const, ...refund })),
+    ...chargebacks.map((dispute) => ({ type: 'dispute' as const, ...dispute })),
+  ];
   const failures: unknown[] = [];
-  let refundedBefore = 0;
-  for (const refund of refunds) {
-    const refundedAfter = refundedBefore + refund.amountCents;
-    const isFinal = refundedAfter >= charge.amountCents;
+  let takenBefore = 0;
+  for (const cause of causes) {
+    const takenAfter = takenBefore + cause.amountCents;
+    const isFinal = takenAfter >= charge.amountCents;
     for (const { id } of listed) {
       const result = await clawBackShare(
-        { deps, charge, refund },
+        { deps, charge, cause },
         id,
-        refundedBefore,
-        refundedAfter,
+        takenBefore,
+        takenAfter,
         isFinal
       );
       if (result.failure !== undefined) failures.push(result.failure);
     }
-    refundedBefore = refundedAfter;
+    takenBefore = takenAfter;
   }
 
   if (failures.length > 0) {
     throw new InternalServiceError(
-      'Refund clawback incomplete: a step must be retried',
+      'Clawback incomplete: a step must be retried',
       { failedSteps: failures.length },
       {
         cause:
@@ -279,8 +391,8 @@ async function clawBackShare(
   refundedAfter: number,
   isFinal: boolean
 ): Promise<StepResult> {
-  const { deps, charge, refund } = ctx;
-  // Read fresh: an earlier refund of this charge may have changed the row.
+  const { deps, charge, cause } = ctx;
+  // Read fresh: an earlier cause on this charge may have changed the row.
   const row = await readPayout(deps, payoutId);
   if (!row) return {};
 
@@ -291,17 +403,25 @@ async function clawBackShare(
     refundedAfter
   );
   if (share <= 0) {
-    deps.obs.info('Refund share floored to zero, platform absorbs', {
-      chargeId: charge.id,
-      refundId: refund.id,
-      payoutId: row.id,
-      rowAmountCents: row.amountCents,
-    });
+    deps.obs.info(
+      `${causeLabel(cause)} share floored to zero, platform absorbs`,
+      {
+        chargeId: charge.id,
+        ...causeFields(cause),
+        payoutId: row.id,
+        rowAmountCents: row.amountCents,
+      }
+    );
     return {};
   }
 
-  const record = await ensureRecord(deps, row, refund, share, isFinal);
-  if (!record || record.status === 'done' || record.status === 'debt') {
+  const record = await ensureRecord(ctx, row, share, isFinal);
+  if (
+    !record ||
+    record.status === 'done' ||
+    record.status === 'debt' ||
+    record.status === 'cancelled'
+  ) {
     return {};
   }
 
@@ -310,7 +430,7 @@ async function clawBackShare(
     // Another delivery is working on it. Not done yet, so ask for a retry.
     return {
       failure: new ServiceUnavailableError(
-        'Another delivery is clawing back this refund',
+        `Another delivery is clawing back this ${cause.type}`,
         { payoutReversalId: record.id }
       ),
     };
@@ -419,7 +539,7 @@ async function reduceUnpaidSlice(
     await markFailed(deps, record, 'payout_in_flight', false);
     return {
       failure: new ServiceUnavailableError(
-        'A payout for this refund is being paid; retry once it settles',
+        `A payout for this ${ctx.cause.type} is being paid; retry once it settles`,
         { payoutId: row.id }
       ),
     };
@@ -430,17 +550,21 @@ async function reduceUnpaidSlice(
 }
 
 /**
- * The refund that completes a charge's refund cancels an unpaid slice, FIRST,
- * so nothing can pay it afterwards; a transfer Stripe made for it anyway is
- * reversed in full (`cancelUnpaidPayoutForRefund`, Codex-2hxff.11).
+ * The refund (or lost chargeback) that completes a charge's refund cancels an
+ * unpaid slice, FIRST, so nothing can pay it afterwards; a transfer Stripe made
+ * for it anyway is reversed in full (`cancelUnpaidPayout`, Codex-2hxff.11).
  */
 async function cancelUnpaidSlice(
   ctx: StepContext,
   row: Payout,
   record: PayoutReversal
 ): Promise<StepResult> {
-  const { deps } = ctx;
-  const outcome = await cancelUnpaidPayoutForRefund(deps, row);
+  const { deps, cause } = ctx;
+  const outcome = await cancelUnpaidPayout(
+    deps,
+    row,
+    cause.type === 'dispute' ? 'cancelled_by_dispute' : 'cancelled_by_refund'
+  );
 
   if (outcome.kind === 'cancelled') {
     if (outcome.transferId === undefined) {
@@ -467,8 +591,8 @@ async function cancelUnpaidSlice(
 }
 
 /**
- * Reverse a transfer for a refund. `amountCents` undefined reverses what is
- * left of it: a transfer that went out for a cancelled slice.
+ * Reverse a transfer for a refund or a chargeback. `amountCents` undefined
+ * reverses what is left of it: a transfer that went out for a cancelled slice.
  *
  * The key carries the attempt: Stripe replays a stored error for a key for
  * 24h, so after a definitive error the next attempt needs a new key; after an
@@ -481,7 +605,7 @@ async function reverseTransfer(
   transferId: string,
   amountCents: number | undefined
 ): Promise<StepResult> {
-  const { deps, charge, refund } = ctx;
+  const { deps, charge, cause } = ctx;
   let reversal: Stripe.TransferReversal;
   try {
     reversal = await deps.stripe.transfers.createReversal(
@@ -491,15 +615,16 @@ async function reverseTransfer(
         metadata: {
           ...sourceMetadata(row),
           charge_id: charge.id,
-          refund_id: refund.id,
+          ...(cause.type === 'refund'
+            ? { refund_id: cause.id, type: 'refund_reversal' }
+            : { dispute_id: cause.id, type: 'dispute_reversal' }),
           payout_id: row.id,
           payout_reversal_id: record.id,
-          type: 'refund_reversal',
           ...stripeEnvMetadata(deps.environment),
         },
       },
       {
-        idempotencyKey: `${transferId}_reversal_${refund.id}_${record.attempt}`,
+        idempotencyKey: `${transferId}_reversal_${cause.id}_${record.attempt}`,
       }
     );
   } catch (error) {
@@ -547,7 +672,7 @@ async function recordDebt(
   record: PayoutReversal,
   error: unknown
 ): Promise<void> {
-  const { deps, charge, refund } = ctx;
+  const { deps, charge, cause } = ctx;
   const code = errorCodeOf(error);
   const message = error instanceof Error ? error.message : null;
   if (row.userId) {
@@ -573,7 +698,7 @@ async function recordDebt(
     deps.obs.error('A clawback debt has no payee to record it against', {
       errorId: crypto.randomUUID(),
       chargeId: charge.id,
-      refundId: refund.id,
+      ...causeFields(cause),
       payoutId: row.id,
       payoutReversalId: record.id,
       amountCents: record.amountCents,
@@ -589,10 +714,10 @@ async function recordDebt(
     })
     .where(eq(payoutReversals.id, record.id));
   deps.obs.warn(
-    'Refund clawback debt recorded: the payee balance could not cover it',
+    `${causeLabel(cause)} clawback debt recorded: the payee balance could not cover it`,
     {
       chargeId: charge.id,
-      refundId: refund.id,
+      ...causeFields(cause),
       payoutId: row.id,
       payoutReversalId: record.id,
       creatorUserId: row.userId,
@@ -609,7 +734,8 @@ export const MAX_CLAWBACK_ATTEMPTS = 5;
  * Retry the clawback of every charge with a step left `failed` (the hourly
  * cron, after Stripe's redeliveries). A step Stripe refused does not make the
  * webhook retry, so this is its only retry; it runs with the next attempt's
- * key. The charge and its refunds are read fresh from Stripe.
+ * key. The charge and its refunds are read fresh from Stripe, and its
+ * chargebacks from `disputes`.
  *
  * Each charge is isolated: one that fails again is logged and the rest run.
  * An outage keeps a step's attempt (its key), so it is retried every run until
@@ -632,7 +758,6 @@ export async function retryFailedClawbacks(
     .where(
       and(
         eq(payoutReversals.status, 'failed'),
-        eq(payoutReversals.causeType, 'refund'),
         lt(payoutReversals.attempt, MAX_CLAWBACK_ATTEMPTS),
         lt(payoutReversals.updatedAt, before)
       )
@@ -755,46 +880,151 @@ async function readPayout(
   return row;
 }
 
-/** The step's record: inserted once, then read back (a redelivery finds it). */
+/**
+ * The step's record: inserted once, then read back (a redelivery finds it).
+ *
+ * A slice that a won dispute paid back (`repaid_by_payout_id`) is no longer
+ * what the cumulative share describes: its re-pay row carries part of it. A
+ * cause new to such a slice is recorded as a debt for a person
+ * (`slice_repaid`), not run (docs/payments/dispute-record.md §3).
+ */
 async function ensureRecord(
-  deps: ClawbackDeps,
+  ctx: StepContext,
   row: Payout,
-  refund: ClawbackRefund,
   share: number,
   isFinal: boolean
 ): Promise<PayoutReversal | undefined> {
-  const kind = kindFor(row, isFinal);
-  if (kind) {
-    await deps.db
-      .insert(payoutReversals)
-      .values({
-        payoutId: row.id,
-        causeType: 'refund',
-        causeId: refund.id,
-        amountCents: share,
-        kind,
-        status: 'pending',
-      })
-      .onConflictDoNothing({
-        target: [
-          payoutReversals.payoutId,
-          payoutReversals.causeType,
-          payoutReversals.causeId,
-        ],
-      });
+  const { deps, cause } = ctx;
+  const existing = await findRecord(deps, row.id, cause);
+  if (existing) return existing;
+
+  if (await wasRepaid(deps, row.id)) {
+    await holdRepaidSlice(
+      ctx,
+      row,
+      share,
+      kindFor(row, isFinal, cause) ?? 'transfer_reversal'
+    );
+    return findRecord(deps, row.id, cause);
   }
+
+  const kind = kindFor(row, isFinal, cause);
+  if (!kind) return undefined;
+  await deps.db
+    .insert(payoutReversals)
+    .values({
+      payoutId: row.id,
+      causeType: cause.type,
+      causeId: cause.id,
+      amountCents: share,
+      kind,
+      status: 'pending',
+    })
+    .onConflictDoNothing({
+      target: [
+        payoutReversals.payoutId,
+        payoutReversals.causeType,
+        payoutReversals.causeId,
+      ],
+    });
+  return findRecord(deps, row.id, cause);
+}
+
+async function findRecord(
+  deps: ClawbackDeps,
+  payoutId: string,
+  cause: ClawbackCause
+): Promise<PayoutReversal | undefined> {
   const [record] = await deps.db
     .select()
     .from(payoutReversals)
     .where(
       and(
-        eq(payoutReversals.payoutId, row.id),
-        eq(payoutReversals.causeType, 'refund'),
-        eq(payoutReversals.causeId, refund.id)
+        eq(payoutReversals.payoutId, payoutId),
+        eq(payoutReversals.causeType, cause.type),
+        eq(payoutReversals.causeId, cause.id)
       )
     )
     .limit(1);
   return record;
+}
+
+async function wasRepaid(
+  deps: ClawbackDeps,
+  payoutId: string
+): Promise<boolean> {
+  const [repaid] = await deps.db
+    .select({ id: payoutReversals.id })
+    .from(payoutReversals)
+    .where(
+      and(
+        eq(payoutReversals.payoutId, payoutId),
+        sql`${payoutReversals.repaidByPayoutId} IS NOT NULL`
+      )
+    )
+    .limit(1);
+  return repaid !== undefined;
+}
+
+/** A debt for a person: the share of a cause new to a re-paid slice. */
+async function holdRepaidSlice(
+  ctx: StepContext,
+  row: Payout,
+  share: number,
+  kind: PayoutReversalKind
+): Promise<void> {
+  const { deps, charge, cause } = ctx;
+  const now = new Date();
+  const [record] = await deps.db
+    .insert(payoutReversals)
+    .values({
+      payoutId: row.id,
+      causeType: cause.type,
+      causeId: cause.id,
+      amountCents: share,
+      kind,
+      status: 'debt',
+      lastErrorCode: 'slice_repaid',
+      resolvedAt: now,
+    })
+    .onConflictDoNothing({
+      target: [
+        payoutReversals.payoutId,
+        payoutReversals.causeType,
+        payoutReversals.causeId,
+      ],
+    })
+    .returning();
+  if (!record) return;
+  if (row.userId) {
+    await deps.db
+      .insert(refundReviews)
+      .values({
+        payoutReversalId: record.id,
+        payoutId: row.id,
+        purchaseId: row.purchaseId,
+        creatorUserId: row.userId,
+        attemptedReversalCents: share,
+        errorCode: 'slice_repaid',
+        errorMessage:
+          'A won dispute paid this slice back; its share of a later refund or dispute needs a person',
+      })
+      .onConflictDoNothing({
+        target: refundReviews.payoutReversalId,
+        where: sql`${refundReviews.payoutReversalId} IS NOT NULL`,
+      });
+  }
+  deps.obs.error(
+    'A cause reached a slice a won dispute paid back; recorded for a person',
+    {
+      errorId: crypto.randomUUID(),
+      chargeId: charge.id,
+      ...causeFields(cause),
+      payoutId: row.id,
+      payoutReversalId: record.id,
+      amountCents: share,
+    }
+  );
 }
 
 /** Take the step's lease, so one delivery works on it at a time. */
@@ -916,10 +1146,10 @@ function logStepFailure(
   record: PayoutReversal,
   error: unknown
 ): void {
-  ctx.deps.obs.error('Refund clawback step failed', {
+  ctx.deps.obs.error(`${causeLabel(ctx.cause)} clawback step failed`, {
     errorId: crypto.randomUUID(),
     chargeId: ctx.charge.id,
-    refundId: ctx.refund.id,
+    ...causeFields(ctx.cause),
     payoutId: row.id,
     payoutReversalId: record.id,
     kind: record.kind,

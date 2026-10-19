@@ -1,29 +1,22 @@
 /**
- * Payment webhook — `charge.dispute.created` handler integration tests
- * (Codex-sxu5a).
+ * Payment webhook — the dispute lifecycle (`charge.dispute.*`; Codex-sxu5a,
+ * Codex-2hxff.9; design in docs/payments/dispute-record.md).
  *
- * The handler sits alongside `charge.refunded` and mirrors its contract:
- *   1. call `PurchaseService.processDispute(paymentIntentId, …)`
- *   2. on success: bump COLLECTION_USER_LIBRARY via `invalidateForUser`
- *   3. on success: write `AccessRevocation.revoke(userId, orgId, 'refund')`
- *   4. do nothing when the purchase is unknown or CACHE_KV is absent
+ * Every event records the dispute (forward only), then acts on the status the
+ * RECORD has, not the event's, because Stripe delivers out of order:
  *
- * Strategy: mock the webhook composition root (`createWebhookServices`, which
- * hands over the PurchaseService), `@codex/subscription`
- * (`invalidateForUser`), and `@codex/access` (`AccessRevocation`). Assert
- * on the spies — the actual DB / KV semantics are covered by unit tests
- * (purchase-service.test.ts) and the access-revocation unit tests.
+ * | Recorded status            | Access                         | Money                                    |
+ * | -------------------------- | ------------------------------ | ---------------------------------------- |
+ * | inquiry (`warning_*`)      | kept                           | nothing; the open record holds payouts   |
+ * | chargeback open            | paused (processDispute)        | both sources clawed back                 |
+ * | won                        | restored                       | settleWonDispute (paid back)             |
+ * | lost                       | purchase refunded              | both sources clawed back, then outcome   |
+ * | inquiry closed             | —                              | outcome marked                           |
  *
- * Coverage matrix (per feedback_security_deep_test — positive + negative + idempotent):
- *
- * | Scenario                                                   | processDispute | invalidateForUser | AccessRevocation.revoke |
- * | ---------------------------------------------------------- | :------------: | :---------------: | :---------------------: |
- * | positive: known purchase → scope returned                  |      yes       |        yes        |           yes           |
- * | negative: unknown charge (processDispute returns void)     |      yes       |        no         |           no            |
- * | negative: no CACHE_KV binding → service still runs, no KV  |      yes       |        no         |           no            |
- * | negative: missing payment_intent on dispute → no service   |      no        |        no         |           no            |
- * | idempotent: fire the same event twice → monotonic behaviour|   yes x 2      |       yes x 2     |         yes x 2         |
- * | fire-and-forget: KV revoke rejection does NOT surface      |      yes       |        yes        |           yes           |
+ * Strategy: mock the webhook composition root (`createWebhookServices`),
+ * `@codex/subscription` (`invalidateForUser`) and `@codex/access`
+ * (`AccessRevocation`), and assert on the spies. The services' own behaviour is
+ * covered by their integration suites.
  */
 
 import { STRIPE_EVENTS } from '@codex/constants';
@@ -150,10 +143,14 @@ function createDisputeEvent(
   } as unknown as Stripe.Event;
 }
 
-describe('handlePaymentWebhook — charge.dispute.created', () => {
+describe('handlePaymentWebhook — disputes', () => {
   let mockStripe: Stripe;
+  let mockRetrieve: ReturnType<typeof vi.fn>;
   let mockRelease: ReturnType<typeof vi.fn>;
-  let mockProcessDispute: ReturnType<typeof vi.fn>;
+  let purchase: Record<string, ReturnType<typeof vi.fn>>;
+  let mockReverseSubscription: ReturnType<typeof vi.fn>;
+
+  const charge = { id: 'ch_test', amountCents: 1999 };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -164,23 +161,38 @@ describe('handlePaymentWebhook — charge.dispute.created', () => {
     mockClear.mockReset();
     mockClear.mockResolvedValue(undefined);
 
-    mockProcessDispute = vi.fn().mockResolvedValue(undefined);
     mockRelease = vi.fn();
-    mockStripe = {} as Stripe;
+    mockRetrieve = vi.fn().mockResolvedValue({
+      id: 'ch_test',
+      amount: 1999,
+      payment_intent: 'pi_test_dispute',
+      metadata: {},
+    });
+    mockStripe = { charges: { retrieve: mockRetrieve } } as unknown as Stripe;
+    mockReverseSubscription = vi.fn().mockResolvedValue(undefined);
+    purchase = {
+      // The record echoes the event's status unless a test says otherwise.
+      recordDispute: vi.fn().mockImplementation(async (d) => ({
+        stripeDisputeId: d.stripeDisputeId,
+        status: d.status,
+        amountCents: d.amountCents,
+        outcomeAppliedAt: null,
+      })),
+      processDispute: vi.fn().mockResolvedValue(undefined),
+      clawBackPurchaseCharge: vi.fn().mockResolvedValue(undefined),
+      restoreDisputedPurchase: vi.fn().mockResolvedValue(undefined),
+      processLostDispute: vi.fn().mockResolvedValue(undefined),
+      settleWonDispute: vi.fn().mockResolvedValue(undefined),
+      markDisputeOutcomeApplied: vi.fn().mockResolvedValue(undefined),
+      processRefund: vi.fn().mockResolvedValue(undefined),
+    };
 
     // The registry's services, as the composition root hands them over.
     vi.mocked(createWebhookServices).mockResolvedValue({
       services: {
-        purchase: {
-          processDispute: mockProcessDispute,
-          // processRefund is unused in these tests but included so the
-          // handler's other branches don't crash if a test accidentally
-          // fires a refund event.
-          processRefund: vi.fn().mockResolvedValue(undefined),
-        },
-        // The charge.refunded clawback (Codex-13v21) — same reasoning.
+        purchase,
         subscription: {
-          reverseSubscriptionPayoutsForCharge: vi.fn(),
+          reverseSubscriptionPayoutsForCharge: mockReverseSubscription,
         },
       } as unknown as WebhookServices['services'],
       background: (promise) => promise,
@@ -188,165 +200,317 @@ describe('handlePaymentWebhook — charge.dispute.created', () => {
     });
   });
 
-  it('positive: processDispute returns { userId, orgId } → service called, library cache bumped, revocation written with reason="refund"', async () => {
-    mockProcessDispute.mockResolvedValueOnce({
+  function recordedAs(status: string, extra: Record<string, unknown> = {}) {
+    purchase.recordDispute?.mockResolvedValueOnce({
+      stripeDisputeId: 'dp_test_dispute',
+      status,
+      amountCents: 1999,
+      outcomeAppliedAt: null,
+      ...extra,
+    });
+  }
+
+  it('records the dispute from the event and its charge', async () => {
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createDisputeEvent({ created: 1_790_000_000 }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(mockRetrieve).toHaveBeenCalledWith('ch_test');
+    expect(purchase.recordDispute).toHaveBeenCalledWith({
+      stripeDisputeId: 'dp_test_dispute',
+      stripeChargeId: 'ch_test',
+      paymentIntentId: 'pi_test_dispute',
+      amountCents: 1999,
+      currency: 'gbp',
+      status: 'needs_response',
+      reason: 'fraudulent',
+      stripeCreatedAt: new Date(1_790_000_000 * 1000),
+    });
+    expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  it('a chargeback opens: access paused (library bumped, revocation written) and both sources clawed back', async () => {
+    purchase.processDispute?.mockResolvedValueOnce({
       userId: 'user_disp',
       orgId: 'org_disp',
     });
-
     const bundle = buildContext();
-    const event = createDisputeEvent();
 
-    await handlePaymentWebhook(event, mockStripe, bundle.context);
+    await handlePaymentWebhook(
+      createDisputeEvent(),
+      mockStripe,
+      bundle.context
+    );
     await drainWaitUntil(bundle);
 
-    // Service called with PI + metadata
-    expect(mockProcessDispute).toHaveBeenCalledTimes(1);
-    expect(mockProcessDispute).toHaveBeenCalledWith('pi_test_dispute', {
+    expect(purchase.processDispute).toHaveBeenCalledWith('pi_test_dispute', {
       stripeDisputeId: 'dp_test_dispute',
       disputeReason: 'fraudulent',
     });
-
-    // Library cache bumped via the shared helper
-    expect(invalidateForUser).toHaveBeenCalledTimes(1);
     expect(invalidateForUser).toHaveBeenCalledWith(
-      expect.anything(), // VersionedCache instance
-      expect.any(Function), // bound waitUntil
-      expect.objectContaining({
-        userId: 'user_disp',
-        reason: 'refund',
-      }),
+      expect.anything(),
+      expect.any(Function),
+      expect.objectContaining({ userId: 'user_disp', reason: 'refund' }),
       expect.anything()
     );
-
-    // Revocation written — reason='refund' (disputes are observability-
-    // classified as the same access-reducing event as refunds).
-    expect(AccessRevocation).toHaveBeenCalledTimes(1);
-    expect(mockRevoke).toHaveBeenCalledTimes(1);
     expect(mockRevoke).toHaveBeenCalledWith('user_disp', 'org_disp', 'refund');
+    expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
+    expect(purchase.clawBackPurchaseCharge).toHaveBeenCalledWith(
+      'pi_test_dispute',
+      charge
+    );
+    expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
   });
 
-  it('negative: processDispute returns void (unknown charge) → no cache bump, no revocation, no crash', async () => {
-    mockProcessDispute.mockResolvedValueOnce(undefined);
+  it('the RECORDED status is acted on: a stale "opened" event after the dispute was won takes the won path', async () => {
+    recordedAs('won');
     const bundle = buildContext();
-    const event = createDisputeEvent({ payment_intent: 'pi_unknown' });
 
-    await expect(
-      handlePaymentWebhook(event, mockStripe, bundle.context)
-    ).resolves.not.toThrow();
+    await handlePaymentWebhook(
+      createDisputeEvent(),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.processDispute).not.toHaveBeenCalled();
+    expect(purchase.restoreDisputedPurchase).toHaveBeenCalledWith(
+      'pi_test_dispute'
+    );
+    expect(purchase.settleWonDispute).toHaveBeenCalledWith('dp_test_dispute');
+  });
+
+  it('an inquiry is recorded and nothing else happens: access kept, nothing clawed back (owner decision Q1)', async () => {
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createDisputeEvent({ status: 'warning_needs_response' }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.recordDispute).toHaveBeenCalledOnce();
+    expect(purchase.processDispute).not.toHaveBeenCalled();
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
+    expect(purchase.clawBackPurchaseCharge).not.toHaveBeenCalled();
+    expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+    expect(mockRevoke).not.toHaveBeenCalled();
+  });
+
+  it('an inquiry that closes is marked applied; its record releases the held payouts', async () => {
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      {
+        ...createDisputeEvent({ status: 'warning_closed' }),
+        type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+      } as Stripe.Event,
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
+      'dp_test_dispute'
+    );
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
+  });
+
+  it('won: access restored, the clawback paid back, nothing clawed again', async () => {
+    purchase.restoreDisputedPurchase?.mockResolvedValueOnce({
+      userId: 'user_won',
+      orgId: 'org_won',
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      {
+        ...createDisputeEvent({ status: 'won' }),
+        type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+      } as Stripe.Event,
+      mockStripe,
+      bundle.context
+    );
     await drainWaitUntil(bundle);
 
-    expect(mockProcessDispute).toHaveBeenCalledTimes(1);
-    expect(invalidateForUser).not.toHaveBeenCalled();
-    expect(AccessRevocation).not.toHaveBeenCalled();
+    expect(purchase.restoreDisputedPurchase).toHaveBeenCalledWith(
+      'pi_test_dispute'
+    );
+    expect(invalidateForUser).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      expect.objectContaining({ userId: 'user_won' }),
+      expect.anything()
+    );
+    expect(purchase.settleWonDispute).toHaveBeenCalledWith('dp_test_dispute');
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
     expect(mockRevoke).not.toHaveBeenCalled();
+    // The streaming block the chargeback wrote is lifted.
+    expect(mockClear).toHaveBeenCalledWith('user_won', 'org_won');
   });
 
-  it('negative: missing payment_intent on the dispute object → processDispute NOT called, no crash', async () => {
+  it('lost: the purchase is refunded, both sources clawed back (held slices cancelled), THEN the outcome marked', async () => {
     const bundle = buildContext();
-    // Stripe Dispute objects are usually tied to a charge, which is tied to
-    // a PaymentIntent. In the rare case the PI link is missing we short-
-    // circuit before touching the service or KV.
-    const event = createDisputeEvent({ payment_intent: null });
 
-    await expect(
-      handlePaymentWebhook(event, mockStripe, bundle.context)
-    ).resolves.not.toThrow();
+    await handlePaymentWebhook(
+      {
+        ...createDisputeEvent({ status: 'lost' }),
+        type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+      } as Stripe.Event,
+      mockStripe,
+      bundle.context
+    );
 
-    expect(mockProcessDispute).not.toHaveBeenCalled();
-    expect(invalidateForUser).not.toHaveBeenCalled();
-    expect(mockRevoke).not.toHaveBeenCalled();
+    expect(purchase.processLostDispute).toHaveBeenCalledWith(
+      'pi_test_dispute',
+      1999
+    );
+    expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
+    expect(purchase.clawBackPurchaseCharge).toHaveBeenCalledWith(
+      'pi_test_dispute',
+      charge
+    );
+    expect(
+      purchase.markDisputeOutcomeApplied?.mock.invocationCallOrder[0]
+    ).toBeGreaterThan(
+      purchase.clawBackPurchaseCharge?.mock.invocationCallOrder[0] ?? Infinity
+    );
   });
 
-  it('negative: no CACHE_KV binding → service still runs, but no cache / revocation side-effects', async () => {
-    mockProcessDispute.mockResolvedValueOnce({
+  it('an outcome already applied stops at the record: a redelivered won or lost does nothing more', async () => {
+    recordedAs('lost', { outcomeAppliedAt: new Date() });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createDisputeEvent({ status: 'lost' }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.processLostDispute).not.toHaveBeenCalled();
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
+    expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+  });
+
+  it("a subscription invoice's chargeback (no purchase for the PaymentIntent) still claws back the subscription's slices", async () => {
+    purchase.processDispute?.mockResolvedValueOnce(undefined);
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createDisputeEvent(),
+      mockStripe,
+      bundle.context
+    );
+    await drainWaitUntil(bundle);
+
+    expect(invalidateForUser).not.toHaveBeenCalled();
+    expect(mockRevoke).not.toHaveBeenCalled();
+    expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
+  });
+
+  it('no PaymentIntent on the charge or the dispute: no purchase step, the subscription source still runs', async () => {
+    mockRetrieve.mockResolvedValueOnce({
+      id: 'ch_test',
+      amount: 1999,
+      payment_intent: null,
+      metadata: {},
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createDisputeEvent({ payment_intent: null }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.processDispute).not.toHaveBeenCalled();
+    expect(purchase.clawBackPurchaseCharge).not.toHaveBeenCalled();
+    expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
+  });
+
+  it("another environment's charge is ignored and not recorded", async () => {
+    mockRetrieve.mockResolvedValueOnce({
+      id: 'ch_test',
+      amount: 1999,
+      payment_intent: 'pi_test_dispute',
+      metadata: { codex_env: 'development' },
+    });
+    const bundle = buildContext({ ENVIRONMENT: 'production' });
+
+    await handlePaymentWebhook(
+      createDisputeEvent(),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.recordDispute).not.toHaveBeenCalled();
+    expect(purchase.processDispute).not.toHaveBeenCalled();
+  });
+
+  it('a status the record does not know is recorded as nothing, and nothing happens', async () => {
+    purchase.recordDispute?.mockResolvedValueOnce(undefined);
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createDisputeEvent(),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.processDispute).not.toHaveBeenCalled();
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    STRIPE_EVENTS.CHARGE_DISPUTE_CREATED,
+    STRIPE_EVENTS.CHARGE_DISPUTE_UPDATED,
+    STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+    STRIPE_EVENTS.CHARGE_DISPUTE_FUNDS_WITHDRAWN,
+    STRIPE_EVENTS.CHARGE_DISPUTE_FUNDS_REINSTATED,
+  ])('%s is handled: the dispute is recorded', async (type) => {
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      { ...createDisputeEvent(), type } as Stripe.Event,
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.recordDispute).toHaveBeenCalledOnce();
+  });
+
+  it('no CACHE_KV binding: the services still run, with no cache or revocation side-effects', async () => {
+    purchase.processDispute?.mockResolvedValueOnce({
       userId: 'user_nokv',
       orgId: 'org_nokv',
     });
     const bundle = buildContext({ CACHE_KV: undefined });
-    const event = createDisputeEvent();
 
-    await expect(
-      handlePaymentWebhook(event, mockStripe, bundle.context)
-    ).resolves.not.toThrow();
+    await handlePaymentWebhook(
+      createDisputeEvent(),
+      mockStripe,
+      bundle.context
+    );
 
-    expect(mockProcessDispute).toHaveBeenCalledTimes(1);
-    // Without KV we intentionally skip BOTH the library cache bump and the
-    // AccessRevocation write (both require CACHE_KV to be bound).
+    expect(purchase.processDispute).toHaveBeenCalledOnce();
     expect(invalidateForUser).not.toHaveBeenCalled();
     expect(AccessRevocation).not.toHaveBeenCalled();
-    expect(mockRevoke).not.toHaveBeenCalled();
   });
 
-  it('idempotent: same dispute event fired twice → service called twice, cache bumped twice, revocation written twice (all monotonic)', async () => {
-    // Stripe retries webhooks on transient failures and we cannot assume a
-    // deduplication layer. Every side-effect in this handler must be safe
-    // to re-run — see feedback_security_deep_test.
-    mockProcessDispute.mockResolvedValue({
-      userId: 'user_idem_disp',
-      orgId: 'org_idem_disp',
-    });
-
-    const bundle = buildContext();
-    const event = createDisputeEvent();
-
-    await handlePaymentWebhook(event, mockStripe, bundle.context);
-    await handlePaymentWebhook(event, mockStripe, bundle.context);
-    await drainWaitUntil(bundle);
-
-    expect(mockProcessDispute).toHaveBeenCalledTimes(2);
-    expect(invalidateForUser).toHaveBeenCalledTimes(2);
-    expect(mockRevoke).toHaveBeenCalledTimes(2);
-    // Both writes use the same (userId, orgId, reason) — KV overwrite is
-    // semantically a no-op with a refreshed TTL (see REVOCATION_TTL_SECONDS).
-    expect(mockRevoke).toHaveBeenNthCalledWith(
-      1,
-      'user_idem_disp',
-      'org_idem_disp',
-      'refund'
-    );
-    expect(mockRevoke).toHaveBeenNthCalledWith(
-      2,
-      'user_idem_disp',
-      'org_idem_disp',
-      'refund'
-    );
-  });
-
-  it('fire-and-forget: AccessRevocation.revoke rejection does NOT surface, handler resolves', async () => {
-    mockProcessDispute.mockResolvedValueOnce({
+  it('fire-and-forget: an AccessRevocation.revoke rejection does NOT surface', async () => {
+    purchase.processDispute?.mockResolvedValueOnce({
       userId: 'user_fire',
       orgId: 'org_fire',
     });
     mockRevoke.mockRejectedValueOnce(new Error('KV unreachable'));
-
     const bundle = buildContext();
-    const event = createDisputeEvent();
 
     await expect(
-      handlePaymentWebhook(event, mockStripe, bundle.context)
+      handlePaymentWebhook(createDisputeEvent(), mockStripe, bundle.context)
     ).resolves.not.toThrow();
     await expect(drainWaitUntil(bundle)).resolves.not.toThrow();
-
     expect(mockRevoke).toHaveBeenCalledTimes(1);
-  });
-
-  it('passes dispute.reason through to processDispute (metadata round-trip)', async () => {
-    mockProcessDispute.mockResolvedValueOnce({
-      userId: 'u',
-      orgId: 'o',
-    });
-    const bundle = buildContext();
-    const event = createDisputeEvent({
-      id: 'dp_reason_check',
-      reason: 'product_not_received',
-    });
-
-    await handlePaymentWebhook(event, mockStripe, bundle.context);
-
-    expect(mockProcessDispute).toHaveBeenCalledWith('pi_test_dispute', {
-      stripeDisputeId: 'dp_reason_check',
-      disputeReason: 'product_not_received',
-    });
   });
 });

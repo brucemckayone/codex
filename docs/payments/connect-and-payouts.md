@@ -286,8 +286,9 @@ organisation and source. A group below the minimum transfer waits. Each row is
 claimed for one attempt; a transfer Stripe already made for it is found by its
 `payout_id` and settles it; the rest are transferred with key
 `payout_${payoutId}_${attempt}` and marked `paid`, or `failed` to be retried
-next time. One group's failure never stops the next. Rows held for an open dispute are skipped — **gap**:
-`Codex-2hxff.9`. The payee is emailed (`payout-released`) — **gap**:
+next time. One group's failure never stops the next. Rows held for an open
+dispute or inquiry are skipped (`isDrainablePayout`;
+[disputes](purchases.md#disputes)). The payee is emailed (`payout-released`) — **gap**:
 `Codex-2hxff.13`.
 
 **The sweep.** An ecom-api cron at `0 * * * *`, in production only. It picks

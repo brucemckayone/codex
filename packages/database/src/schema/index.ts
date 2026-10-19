@@ -10,6 +10,7 @@ export * from './content';
 export * from './course-commerce';
 export * from './course-progress';
 export * from './creator-onboarding';
+export * from './disputes';
 export * from './ecommerce';
 export * from './entitlements';
 export * from './fee-config';

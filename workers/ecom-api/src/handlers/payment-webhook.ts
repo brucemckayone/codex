@@ -6,7 +6,9 @@
  *   partial one keeps it (P-1); email each refund once
  * - refund.updated, refund.failed → record the refund's status; claw back a
  *   refund that was pending at charge.refunded; a failed one is support's
- * - charge.dispute.created → mark purchase disputed, revoke access (Codex-sxu5a)
+ * - charge.dispute.* → record the dispute; a chargeback pauses access and
+ *   claws back paid slices, won pays them back, lost refunds the purchase
+ *   (Codex-sxu5a, Codex-2hxff.9)
  *
  * Cache invalidation uses the shared `invalidateForUser` helper from
  * `@codex/subscription` so a refund/dispute bumps COLLECTION_USER_LIBRARY
@@ -22,7 +24,12 @@
 
 import { AccessRevocation } from '@codex/access';
 import { VersionedCache } from '@codex/cache';
-import { isForeignStripeEnvironment, STRIPE_EVENTS } from '@codex/constants';
+import {
+  DISPUTE_CHARGEBACK_OPEN_STATUSES,
+  DISPUTE_CLOSED_STATUSES,
+  isForeignStripeEnvironment,
+  STRIPE_EVENTS,
+} from '@codex/constants';
 import type { PurchaseService } from '@codex/purchase';
 import {
   invalidateForUser,
@@ -108,6 +115,42 @@ function revokeAccess(
     );
   } catch (error) {
     obs?.warn('payment-webhook: waitUntil threw synchronously', {
+      userId,
+      orgId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Fire-and-forget clear of the per-user, per-org KV revocation key, once a won
+ * dispute has restored the access the chargeback paused (Codex-2hxff.9). The
+ * stream endpoint still checks access before signing, so over-clearing never
+ * grants anything; it only lets the restored access stream again before the
+ * key's TTL. Mirror of `clearAccess` in `subscription-webhook.ts`.
+ */
+function clearRevocation(
+  c: Context<StripeWebhookEnv>,
+  userId: string,
+  orgId: string
+): void {
+  if (!c.env.CACHE_KV) return;
+
+  const obs = c.get('obs');
+  const revocation = new AccessRevocation(c.env.CACHE_KV, obs);
+
+  try {
+    c.executionCtx.waitUntil(
+      revocation.clear(userId, orgId).catch((error) => {
+        obs?.warn('payment-webhook: AccessRevocation.clear failed', {
+          userId,
+          orgId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+    );
+  } catch (error) {
+    obs?.warn('payment-webhook: waitUntil threw synchronously (clear)', {
       userId,
       orgId,
       error: error instanceof Error ? error.message : String(error),
@@ -328,62 +371,157 @@ async function handleRefundUpdated(
   }
 }
 
-async function handleChargeDisputeCreated(
+/**
+ * A dispute's status changed (`charge.dispute.created`, `.updated`, `.closed`,
+ * `.funds_withdrawn`, `.funds_reinstated`; Codex-2hxff.9, design in
+ * docs/payments/dispute-record.md). Each event records the dispute, forward
+ * only, then acts on the status the record now has, not the event's: Stripe
+ * does not deliver events in order. Owner decisions P-2 and Q1–Q3.
+ *
+ * - **Inquiry** (`warning_*`): no money taken. The open record holds the
+ *   sale's unpaid payouts; the buyer keeps access.
+ * - **Chargeback open**: the purchase is marked disputed and its access
+ *   paused; paid slices are reversed by the dispute's share, unpaid ones held.
+ * - **Won**: access restored; what was reversed is paid back by new pending
+ *   payouts; held slices released.
+ * - **Lost**: the purchase becomes refunded; reversals stand; held slices are
+ *   cancelled (`cancelled_by_dispute`).
+ *
+ * A subscription invoice's dispute moves the same money (the clawback acts on
+ * both sources); pausing and ending its subscription access is Codex-2hxff.9's
+ * second PR.
+ */
+async function handleDispute(
   event: Stripe.Event,
+  stripe: Stripe,
   service: PurchaseService,
+  subscriptionService: SubscriptionService,
   c: Context<StripeWebhookEnv>
 ): Promise<void> {
-  // charge.dispute.created — the user has filed a chargeback. For access
-  // purposes we treat this identically to a refund: revoke content access,
-  // mark the purchase `disputedAt`, invalidate the library cache, and
-  // write an AccessRevocation KV entry so any in-flight presigned R2 URLs
-  // expire within the TTL window.
-  //
-  // `status` on the purchase is NOT mutated (still 'completed' — the
-  // actual refund, if the dispute is lost, fires a separate
-  // `charge.refunded` event that will move the status). The
-  // `check_purchase_status` DB CHECK constraint only allows
-  // ('pending', 'completed', 'refunded', 'failed') so we cannot add a new
-  // 'disputed' status without breaking existing data; the `disputedAt`
-  // column is the authoritative signal instead.
   const obs = c.get('obs');
   const dispute = event.data.object as Stripe.Dispute;
-  const paymentIntentId = extractPaymentIntentId(dispute.payment_intent);
+  const chargeId =
+    typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
+  if (!chargeId) {
+    obs?.warn('Dispute event names no charge', { disputeId: dispute.id });
+    return;
+  }
 
-  if (!paymentIntentId) {
-    obs?.warn('Dispute event missing payment_intent', {
+  // A dispute carries no codex_env tag; its charge does. Production and local
+  // development share one Stripe sandbox (Codex-2hxff.5).
+  const charge = await stripe.charges.retrieve(chargeId);
+  const environment = c.env.ENVIRONMENT || 'development';
+  if (isForeignStripeEnvironment(charge.metadata, environment)) {
+    obs?.info(`${event.type} ignored: another environment's charge`, {
       disputeId: dispute.id,
+      chargeId,
+      objectEnvironment: charge.metadata?.codex_env,
+      environment,
+    });
+    return;
+  }
+  const paymentIntentId =
+    extractPaymentIntentId(charge.payment_intent) ??
+    extractPaymentIntentId(dispute.payment_intent);
+
+  const recorded = await service.recordDispute({
+    stripeDisputeId: dispute.id,
+    stripeChargeId: charge.id,
+    paymentIntentId: paymentIntentId ?? null,
+    amountCents: dispute.amount,
+    currency: dispute.currency,
+    status: dispute.status,
+    reason: dispute.reason ?? null,
+    stripeCreatedAt: new Date(dispute.created * 1000),
+  });
+  if (!recorded || recorded.outcomeAppliedAt) return;
+
+  const status = recorded.status;
+  const clawbackCharge = { id: charge.id, amountCents: charge.amount };
+  const clawBack = async () => {
+    await subscriptionService.reverseSubscriptionPayoutsForCharge(
+      clawbackCharge
+    );
+    if (paymentIntentId) {
+      await service.clawBackPurchaseCharge(paymentIntentId, clawbackCharge);
+    }
+  };
+
+  if (isOneOf(status, DISPUTE_CHARGEBACK_OPEN_STATUSES)) {
+    if (paymentIntentId) {
+      // Org-scoped purchases revoke access within their org; orgless
+      // creator-direct purchases (`purchases.organizationId` nullable,
+      // Codex-69t7c) have no org, so the guard below skips org-scoped
+      // revocation. Revocation reason reuses 'refund' because the
+      // AccessRevocation reason enum is observability-only and disputes are
+      // the same access-reducing class.
+      const paused = await service.processDispute(paymentIntentId, {
+        stripeDisputeId: dispute.id,
+        disputeReason: dispute.reason ?? undefined,
+      });
+      invalidateLibrary(c, paused?.userId);
+      if (paused?.userId && paused.orgId) {
+        revokeAccess(c, paused.userId, paused.orgId);
+      }
+    }
+    await clawBack();
+    obs?.info('Chargeback opened: access paused, paid slices clawed back', {
+      disputeId: dispute.id,
+      chargeId,
+      status,
+      amountCents: recorded.amountCents,
     });
     return;
   }
 
-  const disputeResult = await service.processDispute(paymentIntentId, {
-    stripeDisputeId: dispute.id,
-    disputeReason: dispute.reason ?? undefined,
-  });
-  obs?.info('Charge dispute processed', {
-    disputeId: dispute.id,
-    paymentIntentId,
-    reason: dispute.reason,
-    amount: dispute.amount,
-  });
-
-  // Org-scoped purchases revoke access within their org; orgless
-  // creator-direct purchases (`purchases.organizationId` nullable, Codex-69t7c)
-  // have no org, so `orgId` may be null — the guard below skips org-scoped
-  // revocation in that case. Revocation reason reuses 'refund' because the
-  // AccessRevocation reason enum is observability-only and disputes are the
-  // same access-reducing class.
-  invalidateLibrary(c, disputeResult?.userId);
-  if (disputeResult?.userId && disputeResult.orgId) {
-    revokeAccess(c, disputeResult.userId, disputeResult.orgId);
+  if (status === 'won') {
+    if (paymentIntentId) {
+      const restored = await service.restoreDisputedPurchase(paymentIntentId);
+      invalidateLibrary(c, restored?.userId);
+      if (restored?.userId && restored.orgId) {
+        clearRevocation(c, restored.userId, restored.orgId);
+      }
+    }
+    await service.settleWonDispute(dispute.id);
+    obs?.info('Dispute won: access restored, the clawback paid back', {
+      disputeId: dispute.id,
+      chargeId,
+    });
+    return;
   }
 
-  // Admin notification email is intentionally NOT sent from this handler —
-  // deferred to a follow-up task for a dedicated `dispute-opened` template
-  // with the right operational fields (dispute.evidence_due_by,
-  // dispute.amount, recommended next-steps) rather than reusing the refund
-  // template.
+  if (status === 'lost') {
+    if (paymentIntentId) {
+      const ended = await service.processLostDispute(
+        paymentIntentId,
+        recorded.amountCents
+      );
+      invalidateLibrary(c, ended?.userId);
+    }
+    // The clawback now cancels or reduces the held slices like a refund.
+    await clawBack();
+    await service.markDisputeOutcomeApplied(dispute.id);
+    obs?.info('Dispute lost: purchase refunded, held slices cancelled', {
+      disputeId: dispute.id,
+      chargeId,
+    });
+    return;
+  }
+
+  // An inquiry, open or closed: no money moved. Its record holds or releases
+  // the sale's unpaid payouts.
+  if (isOneOf(status, DISPUTE_CLOSED_STATUSES)) {
+    await service.markDisputeOutcomeApplied(dispute.id);
+  }
+  obs?.info('Dispute inquiry recorded', {
+    disputeId: dispute.id,
+    chargeId,
+    status,
+  });
+}
+
+function isOneOf(status: string, statuses: readonly string[]): boolean {
+  return statuses.includes(status);
 }
 
 export async function handlePaymentWebhook(
@@ -421,7 +559,11 @@ export async function handlePaymentWebhook(
         break;
 
       case STRIPE_EVENTS.CHARGE_DISPUTE_CREATED:
-        await handleChargeDisputeCreated(event, service, c);
+      case STRIPE_EVENTS.CHARGE_DISPUTE_UPDATED:
+      case STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED:
+      case STRIPE_EVENTS.CHARGE_DISPUTE_FUNDS_WITHDRAWN:
+      case STRIPE_EVENTS.CHARGE_DISPUTE_FUNDS_REINSTATED:
+        await handleDispute(event, stripe, service, subscriptionService, c);
         break;
 
       default:

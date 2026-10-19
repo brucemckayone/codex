@@ -89,7 +89,7 @@ export const refundReviews = pgTable(
     ),
     check(
       'check_refund_reviews_resolution',
-      sql`${table.resolution} IS NULL OR ${table.resolution} IN ('creator_absorbed', 'platform_absorbed', 'manually_reversed')`
+      sql`${table.resolution} IS NULL OR ${table.resolution} IN ('creator_absorbed', 'platform_absorbed', 'manually_reversed', 'dispute_won')`
     ),
     check(
       'check_refund_reviews_resolved_pair',
@@ -122,4 +122,6 @@ export type NewRefundReview = typeof refundReviews.$inferInsert;
 export type RefundReviewResolution =
   | 'creator_absorbed'
   | 'platform_absorbed'
-  | 'manually_reversed';
+  | 'manually_reversed'
+  // A dispute's debt, closed because the dispute was won (Codex-2hxff.9).
+  | 'dispute_won';

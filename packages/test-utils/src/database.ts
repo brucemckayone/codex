@@ -217,6 +217,8 @@ export async function cleanupDatabase(db: Database): Promise<void> {
   await db.delete(schema.refundReviews);
   // refunds references purchases with onDelete: 'restrict' (Codex-2hxff.8).
   await db.delete(schema.refunds);
+  // disputes references purchases with onDelete: 'restrict' (Codex-2hxff.9).
+  await db.delete(schema.disputes);
   // payout_reversals references payouts with onDelete: 'restrict' (Codex-2hxff.8).
   await db.delete(schema.payoutReversals);
   await db.delete(schema.payouts);
@@ -261,6 +263,8 @@ export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   await db.delete(schema.refundReviews);
   // refunds references purchases with onDelete: 'restrict' (Codex-2hxff.8).
   await db.delete(schema.refunds);
+  // disputes references purchases with onDelete: 'restrict' (Codex-2hxff.9).
+  await db.delete(schema.disputes);
   // payout_reversals references payouts with onDelete: 'restrict' (Codex-2hxff.8).
   await db.delete(schema.payoutReversals);
   await db.delete(schema.payouts);

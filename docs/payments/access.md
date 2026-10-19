@@ -84,7 +84,7 @@ whatever happens to access in the meantime. Two layers close that gap:
 | A subscription ends, is paused, or Stripe gives up retrying | A subscription becomes active again or is resumed |
 | A purchase or subscription payment is fully refunded — **gap**: `Codex-2hxff.8` (not for one-off purchases today) | A payment succeeds after a failure |
 | A dispute opens | A subscription is reactivated or resumed through our routes |
-| | A dispute is won — **gap**: `Codex-2hxff.9` |
+| | A dispute is won (a purchase's; a subscription's — **gap**: `Codex-2hxff.9`) |
 
 The block is **not** written when a subscriber cancels at period end (they have
 paid for the period) or when a renewal payment fails and Stripe is retrying it —

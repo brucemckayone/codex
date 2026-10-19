@@ -42,7 +42,7 @@ import {
   vi,
 } from 'vitest';
 import {
-  cancelUnpaidPayoutForRefund,
+  cancelUnpaidPayout,
   claimPayoutAttempt,
   claimPayoutAttempts,
   findTransfersForPayouts,
@@ -585,7 +585,11 @@ describe('payouts ledger', () => {
         metadata: { payout_id: row.id },
       });
 
-      const outcome = await cancelUnpaidPayoutForRefund(deps, row);
+      const outcome = await cancelUnpaidPayout(
+        deps,
+        row,
+        'cancelled_by_refund'
+      );
 
       expect(outcome).toEqual({ kind: 'cancelled', transferId: landed.id });
       const [after] = await rowsFor(row.stripeChargeId ?? '');
@@ -597,7 +601,9 @@ describe('payouts ledger', () => {
     it('cancels a row that never had a transfer, and reports none', async () => {
       const row = await pendingRow();
 
-      expect(await cancelUnpaidPayoutForRefund(deps, row)).toEqual({
+      expect(
+        await cancelUnpaidPayout(deps, row, 'cancelled_by_refund')
+      ).toEqual({
         kind: 'cancelled',
         transferId: undefined,
       });
@@ -607,7 +613,11 @@ describe('payouts ledger', () => {
       const row = await pendingRow();
       await settlePayoutPaid(db, row.id, `tr_${crypto.randomUUID()}`);
 
-      const outcome = await cancelUnpaidPayoutForRefund(deps, row);
+      const outcome = await cancelUnpaidPayout(
+        deps,
+        row,
+        'cancelled_by_refund'
+      );
 
       expect(outcome.kind).toBe('changed');
       expect(outcome.kind === 'changed' && outcome.row?.status).toBe('paid');
@@ -619,7 +629,9 @@ describe('payouts ledger', () => {
       const [row] = await rowsFor(input.stripeChargeId);
       if (!row) throw new Error('row missing');
 
-      expect(await cancelUnpaidPayoutForRefund(deps, row)).toEqual({
+      expect(
+        await cancelUnpaidPayout(deps, row, 'cancelled_by_refund')
+      ).toEqual({
         kind: 'cancelled',
         transferId: undefined,
       });
@@ -674,7 +686,7 @@ describe('payouts ledger', () => {
 
     it('a surplus reversal that fails is logged for a person to reverse', async () => {
       const row = await pendingRow();
-      await cancelUnpaidPayoutForRefund(deps, row);
+      await cancelUnpaidPayout(deps, row, 'cancelled_by_refund');
       vi.mocked(stripe.transfers.createReversal).mockRejectedValueOnce(
         new Error('Stripe is down')
       );

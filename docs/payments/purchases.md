@@ -276,9 +276,27 @@ handling never relies on one.
 The same rules apply to course purchases and to disputed subscription invoices
 ([subscriptions.md](subscriptions.md#disputes)).
 
-— **gap**: `Codex-2hxff.9` (disputes: today only `created` is handled, no
-transfer is reversed, a won dispute never restores access, and held slices
-still pay out).
+**How it is recorded** ([design](dispute-record.md)). Each dispute is a
+`disputes` row, one per Stripe dispute, whose status moves forward only; every
+dispute event records it, then acts on the status the record has.
+
+- **A chargeback** is a clawback cause on the charge, with the same records,
+  keys, retries and debts as a refund, and its own Stripe key
+  `${transferId}_reversal_${disputeId}_${attempt}`. A dispute on a partly
+  refunded charge takes only what the refunds left.
+- **The hold.** The drain skips a slice whose sale has an open dispute or an
+  open inquiry (owner decision Q1: an inquiry takes no money, so the buyer
+  keeps access and only the payouts wait).
+- **Won.** Each reversed slice is paid back by a new pending payout row that
+  the next sweep pays (Q2), linked to its reversal so it is paid once. The
+  access the chargeback paused is restored and its streaming block lifted.
+- **Lost.** The purchase becomes `refunded` and held slices
+  `cancelled_by_dispute` (Q3).
+
+A slice a won dispute paid back is no longer what the share rule describes, so
+a later refund of it is recorded for a person (`slice_repaid`), not reversed.
+The dispute endpoint needs `charge.dispute.funds_withdrawn` and
+`.funds_reinstated` too, an owner change in Stripe.
 
 ## Failure handling at a glance
 

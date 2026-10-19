@@ -31,8 +31,12 @@ import { payouts } from './payouts';
  *   (`cancelled_by_refund`).
  *
  * `status`: `pending` (recorded, not yet acted on), `done`, `failed` (retried
- * by redelivery, then the hourly cron), or `debt` (the payee's balance could
- * not cover it; a `refund_reviews` row records the debt).
+ * by redelivery, then the hourly cron), `debt` (the payee's balance could not
+ * cover it; a `refund_reviews` row records the debt), or `cancelled` (its
+ * cause was undone before the step ran: a dispute won, Codex-2hxff.9).
+ *
+ * `repaid_by_payout_id`: a `done` reversal paid back to the payee by a new
+ * pending `payouts` row (a won dispute; docs/payments/dispute-record.md §3).
  */
 export const payoutReversals = pgTable(
   'payout_reversals',
@@ -60,6 +64,10 @@ export const payoutReversals = pgTable(
     /** When the current attempt was claimed: the lease a retry takes. */
     attemptedAt: timestamp('attempted_at', { withTimezone: true }),
     lastErrorCode: varchar('last_error_code', { length: 64 }),
+    /** The new pending payout that paid this reversal back, once it is. */
+    repaidByPayoutId: uuid('repaid_by_payout_id').references(() => payouts.id, {
+      onDelete: 'restrict',
+    }),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -87,6 +95,10 @@ export const payoutReversals = pgTable(
       .where(sql`${table.status} = 'failed'`),
     // The drain sums a pending row's reductions.
     index('idx_payout_reversals_payout').on(table.payoutId),
+    // One re-pay per reversal; the clawback's row scope excludes re-pay rows.
+    uniqueIndex('uq_payout_reversals_repaid_by')
+      .on(table.repaidByPayoutId)
+      .where(sql`${table.repaidByPayoutId} IS NOT NULL`),
 
     check(
       'check_payout_reversals_amount_positive',
@@ -102,7 +114,7 @@ export const payoutReversals = pgTable(
     ),
     check(
       'check_payout_reversals_status',
-      sql`${table.status} IN ('pending', 'done', 'failed', 'debt')`
+      sql`${table.status} IN ('pending', 'done', 'failed', 'debt', 'cancelled')`
     ),
     check(
       'check_payout_reversals_attempt_non_negative',
@@ -128,4 +140,9 @@ export type PayoutReversalKind =
   | 'pending_reduction'
   | 'retained_fee'
   | 'cancellation';
-export type PayoutReversalStatus = 'pending' | 'done' | 'failed' | 'debt';
+export type PayoutReversalStatus =
+  | 'pending'
+  | 'done'
+  | 'failed'
+  | 'debt'
+  | 'cancelled';

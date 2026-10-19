@@ -52,7 +52,7 @@ signing secret.
 |---|---|---|---|---|
 | `/webhooks/stripe/booking` | `checkout.session.completed` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `handleCheckoutCompleted` (payment mode only) | `we_1UQ7HY7wyGmo4sh6BYwlrb80` |
 | `/webhooks/stripe/payment` | `charge.refunded`, `refund.updated`, `refund.failed` | `STRIPE_WEBHOOK_SECRET_PAYMENT` | `handlePaymentWebhook` | `we_1UQ7HZ7wyGmo4sh6x477bv6C` |
-| `/webhooks/stripe/dispute` | `charge.dispute.created`, `.updated`, `.closed`, `radar.early_fraud_warning.created` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | `handlePaymentWebhook` | `we_1UQ7Ha7wyGmo4sh6CuTHPE8O` |
+| `/webhooks/stripe/dispute` | `charge.dispute.created`, `.updated`, `.closed`, `.funds_withdrawn`, `.funds_reinstated`, `radar.early_fraud_warning.created` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | `handlePaymentWebhook` | `we_1UQ7Ha7wyGmo4sh6CuTHPE8O` |
 | `/webhooks/stripe/subscription` | `checkout.session.completed`, `customer.subscription.updated`, `.deleted`, `.paused`, `.resumed`, `.trial_will_end`, `invoice.payment_succeeded`, `invoice.payment_failed`, `product.updated`, `price.created`, `price.updated` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` (subscription mode only) | `we_1UQ75i7wyGmo4sh6e12nck3K` |
 | `/webhooks/stripe/connect` | `account.updated`, `account.application.deauthorized` — **connected-accounts** endpoint | `STRIPE_WEBHOOK_SECRET_CONNECT` | `handleConnectWebhook` | `we_1UQ71a7wyGmo4sh6qjaGNKFW` |
 

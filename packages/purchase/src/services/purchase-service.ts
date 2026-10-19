@@ -33,6 +33,8 @@ import {
   content,
   contentAccess,
   courses,
+  type Dispute,
+  disputes,
   entitlements,
   purchases,
   type RefundStatus,
@@ -47,6 +49,7 @@ import {
   listClawableRefunds,
   recordPlatformFee,
   recordSlice,
+  repayDispute,
   resolveOrganisationPayee,
   reverseCharge,
 } from '@codex/payments';
@@ -130,6 +133,31 @@ const REFUND_STATUSES: ReadonlySet<string> = new Set<RefundStatus>([
 /** A status the `refunds` table admits (its CHECK). */
 function isRefundStatus(status: string | null): status is RefundStatus {
   return status !== null && REFUND_STATUSES.has(status);
+}
+
+/**
+ * How far along a dispute is: an inquiry, then a chargeback, then final. A
+ * dispute's row only moves to a higher rank (`recordDispute`).
+ */
+const DISPUTE_STATUS_RANK: ReadonlyMap<string, number> = new Map([
+  ['warning_needs_response', 0],
+  ['warning_under_review', 1],
+  ['needs_response', 2],
+  ['under_review', 3],
+  ['won', 4],
+  ['lost', 4],
+  ['warning_closed', 4],
+  ['prevented', 4],
+]);
+const FINAL_DISPUTE_RANK = 4;
+
+/** `DISPUTE_STATUS_RANK` in SQL, for the upsert's guard. */
+function disputeRank(status: SQL): SQL {
+  // The ranks are literals: a bound THEN parameter would be typed text.
+  const cases = [...DISPUTE_STATUS_RANK].map(
+    ([name, rank]) => sql`WHEN ${name} THEN ${sql.raw(String(rank))}`
+  );
+  return sql`(CASE ${status} ${sql.join(cases, sql` `)} END)`;
 }
 
 import type { PaginatedListResponse } from '@codex/shared-types';
@@ -2280,6 +2308,257 @@ export class PurchaseService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'processDispute');
+    }
+  }
+
+  /**
+   * Record a dispute as Stripe reports it (`disputes`; Codex-2hxff.9, design
+   * in docs/payments/dispute-record.md). One row per Stripe dispute, for any
+   * source; `purchaseId` is set when the charge is a purchase's. An open row
+   * holds the charge's unpaid payouts (`isDrainablePayout`).
+   *
+   * Forward only, because Stripe does not deliver events in order: an inquiry
+   * may become a chargeback, and a final status (`won`, `lost`,
+   * `warning_closed`, `prevented`) never changes. Returns the row as it now
+   * stands, which is what the caller acts on, not the event's snapshot. A
+   * status Stripe adds later is logged and not written.
+   */
+  async recordDispute(dispute: {
+    stripeDisputeId: string;
+    stripeChargeId: string;
+    paymentIntentId: string | null;
+    amountCents: number;
+    currency: string;
+    status: string;
+    reason: string | null;
+    stripeCreatedAt: Date;
+  }): Promise<Dispute | undefined> {
+    try {
+      const { status } = dispute;
+      if (!DISPUTE_STATUS_RANK.has(status)) {
+        this.obs.warn('Dispute has a status the disputes table does not know', {
+          disputeId: dispute.stripeDisputeId,
+          status,
+        });
+        return undefined;
+      }
+      const [purchase] = dispute.paymentIntentId
+        ? await this.db
+            .select({ id: purchases.id })
+            .from(purchases)
+            .where(eq(purchases.stripePaymentIntentId, dispute.paymentIntentId))
+            .limit(1)
+        : [];
+      await this.db
+        .insert(disputes)
+        .values({
+          stripeDisputeId: dispute.stripeDisputeId,
+          stripeChargeId: dispute.stripeChargeId,
+          purchaseId: purchase?.id ?? null,
+          amountCents: dispute.amountCents,
+          currency: dispute.currency,
+          status,
+          reason: dispute.reason,
+          stripeCreatedAt: dispute.stripeCreatedAt,
+        })
+        .onConflictDoUpdate({
+          target: disputes.stripeDisputeId,
+          set: { status, amountCents: dispute.amountCents },
+          // Forward only; the amount may still be corrected until it closes.
+          setWhere: sql`${disputeRank(sql`${disputes.status}`)} < ${disputeRank(sql`excluded.status`)} OR (${disputeRank(sql`${disputes.status}`)} < ${sql.raw(String(FINAL_DISPUTE_RANK))} AND ${disputes.status} = excluded.status AND ${disputes.amountCents} <> excluded.amount_cents)`,
+        });
+      const [current] = await this.db
+        .select()
+        .from(disputes)
+        .where(eq(disputes.stripeDisputeId, dispute.stripeDisputeId))
+        .limit(1);
+      return current;
+    } catch (error) {
+      this.handleError(error, 'recordDispute');
+    }
+  }
+
+  /**
+   * Claw back this purchase's slices for every cause on the charge: its
+   * refunds, and the chargebacks recorded in `disputes` (the dispute webhook).
+   * No purchase for the PaymentIntent (a subscription's charge): nothing.
+   */
+  async clawBackPurchaseCharge(
+    paymentIntentId: string,
+    charge: ClawbackCharge
+  ): Promise<void> {
+    try {
+      const [purchase] = await this.db
+        .select({ id: purchases.id })
+        .from(purchases)
+        .where(eq(purchases.stripePaymentIntentId, paymentIntentId))
+        .limit(1);
+      if (!purchase) return;
+      await this.clawBackRefunds(purchase.id, charge);
+    } catch (error) {
+      this.handleError(error, 'clawBackPurchaseCharge');
+    }
+  }
+
+  /**
+   * A WON dispute restores the buyer's access (owner decision P-2): the
+   * disputed mark is cleared, and the content access and entitlement it
+   * revoked are restored. A purchase refunded since keeps its access ended.
+   * Idempotent. Returns the buyer, for the library cache.
+   */
+  async restoreDisputedPurchase(
+    paymentIntentId: string
+  ): Promise<{ userId: string; orgId: string | null } | undefined> {
+    try {
+      const purchase = await this.db.query.purchases.findFirst({
+        where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+      });
+      if (!purchase) return undefined;
+      const scope = {
+        userId: purchase.customerId,
+        orgId: purchase.organizationId,
+      };
+      if (!purchase.disputedAt) return scope;
+
+      await this.db.transaction(async (tx) => {
+        await tx
+          .update(purchases)
+          .set({ disputedAt: null, updatedAt: new Date() })
+          .where(eq(purchases.id, purchase.id));
+        if (purchase.status !== PURCHASE_STATUS.COMPLETED) return;
+        if (purchase.contentId) {
+          await tx
+            .update(contentAccess)
+            .set({ deletedAt: null })
+            .where(
+              and(
+                eq(contentAccess.userId, purchase.customerId),
+                eq(contentAccess.contentId, purchase.contentId),
+                isNotNull(contentAccess.deletedAt)
+              )
+            );
+        }
+        await tx
+          .update(entitlements)
+          .set({ revokedAt: null })
+          .where(
+            and(
+              eq(entitlements.sourceRef, purchase.id),
+              isNotNull(entitlements.revokedAt)
+            )
+          );
+      });
+      this.obs.info('Won dispute restored access', {
+        purchaseId: purchase.id,
+        paymentIntentId,
+      });
+      return scope;
+    } catch (error) {
+      this.handleError(error, 'restoreDisputedPurchase');
+    }
+  }
+
+  /**
+   * A LOST dispute: the buyer keeps the money, so the purchase becomes
+   * `refunded` and its access stays ended (owner decision Q3). The amount
+   * refunded so far gains the disputed amount, capped at what was paid.
+   * Idempotent. Returns the buyer, for the library cache.
+   */
+  async processLostDispute(
+    paymentIntentId: string,
+    disputedCents: number
+  ): Promise<{ userId: string; orgId: string | null } | undefined> {
+    try {
+      const purchase = await this.db.query.purchases.findFirst({
+        where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+      });
+      if (!purchase) return undefined;
+      const scope = {
+        userId: purchase.customerId,
+        orgId: purchase.organizationId,
+      };
+      if (purchase.status === PURCHASE_STATUS.REFUNDED) return scope;
+
+      const now = new Date();
+      await this.db.transaction(async (tx) => {
+        await tx
+          .update(purchases)
+          .set({
+            status: PURCHASE_STATUS.REFUNDED,
+            refundedAt: now,
+            refundAmountCents: Math.min(
+              purchase.amountPaidCents,
+              (purchase.refundAmountCents ?? 0) + disputedCents
+            ),
+            updatedAt: now,
+          })
+          .where(eq(purchases.id, purchase.id));
+        // Revoked when the dispute opened; again here, in case it never was.
+        if (purchase.contentId) {
+          await tx
+            .update(contentAccess)
+            .set({ deletedAt: now })
+            .where(
+              and(
+                eq(contentAccess.userId, purchase.customerId),
+                eq(contentAccess.contentId, purchase.contentId),
+                isNull(contentAccess.deletedAt)
+              )
+            );
+        }
+        await tx
+          .update(entitlements)
+          .set({ revokedAt: now })
+          .where(
+            and(
+              eq(entitlements.sourceRef, purchase.id),
+              isNull(entitlements.revokedAt)
+            )
+          );
+      });
+      this.obs.info('Lost dispute recorded the purchase as refunded', {
+        purchaseId: purchase.id,
+        paymentIntentId,
+        disputedCents,
+      });
+      return scope;
+    } catch (error) {
+      this.handleError(error, 'processLostDispute');
+    }
+  }
+
+  /**
+   * A WON dispute's money (owner decision Q2): what it clawed back from every
+   * source's slices is paid back by new pending payout rows the next sweep
+   * pays (@codex/payments `repayDispute`). The held slices are released by
+   * the dispute closing. Then the outcome is marked applied.
+   */
+  async settleWonDispute(stripeDisputeId: string): Promise<void> {
+    try {
+      await repayDispute(
+        { ...this.ledger(), obs: this.obs },
+        { disputeId: stripeDisputeId }
+      );
+      await this.markDisputeOutcomeApplied(stripeDisputeId);
+    } catch (error) {
+      this.handleError(error, 'settleWonDispute');
+    }
+  }
+
+  /** A final status has been acted on: a redelivery stops at the record. */
+  async markDisputeOutcomeApplied(stripeDisputeId: string): Promise<void> {
+    try {
+      await this.db
+        .update(disputes)
+        .set({ outcomeAppliedAt: new Date() })
+        .where(
+          and(
+            eq(disputes.stripeDisputeId, stripeDisputeId),
+            isNull(disputes.outcomeAppliedAt)
+          )
+        );
+    } catch (error) {
+      this.handleError(error, 'markDisputeOutcomeApplied');
     }
   }
 
