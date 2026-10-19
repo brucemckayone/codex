@@ -6,7 +6,7 @@ specification rests on, and what is still undecided.
 Last reviewed: 2026-10-19.
 
 How the remaining work should be organised in the code, and in what order, is
-in [architecture.md](architecture.md) (draft for owner review).
+in [architecture.md](architecture.md) (agreed by the owner 2026-10-19).
 
 ---
 

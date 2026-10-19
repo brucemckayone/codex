@@ -1,7 +1,8 @@
 # Payments architecture: domains, seams and the order of work
 
-**Status: DRAFT for owner review, 2026-10-19.** Nothing here is agreed until the
-owner signs it off (§7 lists what needs deciding). It describes how the payments
+**Status: architecture AGREED by the owner, 2026-10-19.** D1–D4 (§7) were
+decided as recommended. The product decisions D-P1–D-P7 are still open; each
+blocks only its own WP. It describes how the payments
 code should be organised so the remaining work in `Codex-2hxff` lands once, in
 one place, instead of once per payment path.
 
@@ -199,7 +200,7 @@ own the transaction, and run the after-commit steps.
 in `@codex/purchase` or below it. That is why the ledger is in
 `@codex/purchase/src/utils` today.
 
-**Recommendation, needing a decision (§7 D1):**
+**Decided 2026-10-19 (§7 D1, D2):**
 - Create **`@codex/payments`** below both packages and move the domain modules
   there as each is extracted. Start with `payoutLedger`, `clawback`,
   `splitCalculator`, `feeResolver`, `payeeResolver` and `invoiceCharge`.
@@ -210,9 +211,9 @@ in `@codex/purchase` or below it. That is why the ledger is in
 - Moving the ledger is one PR of import changes. It is cheaper now than after
   four more modules have been added beside it.
 
-The alternative is to keep everything in `@codex/purchase/src/domain/`. That
-avoids a package for now, but leaves "purchase" as the home of
-subscription-wide rules.
+The rejected alternative was to keep everything in
+`@codex/purchase/src/domain/`. That avoids a package for now, but leaves
+"purchase" as the home of subscription-wide rules.
 
 ---
 
@@ -228,7 +229,7 @@ subscription-wide rules.
 
 | WP | Kind | What | Unblocks / absorbs |
 |---|---|---|---|
-| **WP0** | decision | Owner reviews this document; decides §7 D1–D4. | everything |
+| **WP0** | decision | **Done 2026-10-19.** The owner decided §7 D1–D4, all as recommended. | everything |
 | **WP1** | fix | **Codex-2hxff.50**: one `invoiceCharge` resolver used by both subscription kinds; a fixture with only `payment_intent`. Check the sandbox first; plan a replay for missed charges. | P1 money bug; small |
 | **WP2** | extraction | **Composition root** (C1): one factory for webhooks and crons, sharing the registry's graph; money deps required. | .7 (wiring half), .13 (mailers), .43, CFG-06 |
 | **WP3** | extraction → behaviour | **Clawback engine** (C4): one `reverseCharge` over the ledger for every source, replacing both copies; `refund_reviews` for every source (Codex-in0g4's schema); the refund use case out of the worker. Absorbs .51. | .8 → .10 (refund half) → .9 → .30; .28 after WP6 |
@@ -292,7 +293,7 @@ From [work §1], plus .50–.52. A bead that names two WPs needs both.
 | Codex-2hxff.34 | Monthly reminder about waiting money | WP10 (after .13) |
 | Codex-2hxff.36 | Drop the retired Connect pin column | independent (ownership) |
 | Codex-2hxff.38 | Demote/remove racing an ownership accept | independent (ownership) |
-| Codex-2hxff.39 | Ownership-period fallback pays the first owner | **superseded by #592** (§8) |
+| Codex-2hxff.39 | Ownership-period fallback pays the first owner | **closed 2026-10-19**: superseded by #592 (§8) |
 | Codex-2hxff.40 | Course price-change email quotes the old list price | WP10 |
 | Codex-2hxff.41 | Secrets script can blank the portal configuration id | independent (config) |
 | Codex-2hxff.42 | A failed offer-banner read denies a real owner | independent (ownership) |
@@ -316,14 +317,17 @@ Related beads outside the epic: Codex-in0g4 (WP3), -rtwpv and -itvh8 (WP4),
 
 ## 7. Decisions needed
 
-**Architecture (for WP0):**
+**Architecture (WP0): decided by the owner, 2026-10-19, all as recommended.**
 
-| # | Question | Recommendation |
+| # | Question | Decision |
 |---|---|---|
-| D1 | A new `@codex/payments` package for the domain modules, or `@codex/purchase/src/domain/`? | New package (§4.4). |
-| D2 | Where does the payout-time agreement resolver live? | `@codex/agreements`, with the payments package depending on it. |
-| D3 | Should the split columns on `subscriptions` (overwritten every invoice and by `changeTier`) become reporting-only, with the ledger as the per-charge record? | Yes. Stop reading them for money; the ledger already has one row per slice per charge. |
-| D4 | Do use cases live in the packages or in the worker? | In the packages (`@codex/payments` or the owning package), so they are testable without Hono and callable from any worker. |
+| D1 | A new `@codex/payments` package for the domain modules, or `@codex/purchase/src/domain/`? | **New `@codex/payments` package** (§4.4). |
+| D2 | Where does the payout-time agreement resolver live? | **`@codex/agreements`**, with the payments package depending on it. |
+| D3 | Should the split columns on `subscriptions` (overwritten every invoice and by `changeTier`) become reporting-only, with the ledger as the per-charge record? | **Yes.** Stop reading them for money; the ledger already has one row per slice per charge. |
+| D4 | Do use cases live in the packages or in the worker? | **In the packages** (`@codex/payments` or the owning package), so they are testable without Hono and callable from any worker. |
+
+Also decided 2026-10-19: the stop-gap guard for Codex-2hxff.51 does **not**
+ship separately; WP3's clawback engine retires that code.
 
 **Product, already open [work §3]:**
 
@@ -339,18 +343,22 @@ Related beads outside the epic: Codex-in0g4 (WP3), -rtwpv and -itvh8 (WP4),
 
 ---
 
-## 8. Housekeeping found by the survey (not actioned)
+## 8. Housekeeping found by the survey
 
-These need the owner's OK; the survey changed nothing.
-
-- **Probably closable:**
+- **Closed 2026-10-19**, each re-verified on `origin/dev` f070a62b first (the
+  evidence is in each bead's close reason):
   - **.39:** #592 replaced the fallback it describes with the next-owner rule.
   - **Codex-1ilxl:** PR #549 is on dev and main.
-  - **Codex-ev3k:** all its tasks are closed.
-- **Probably superseded:**
-  - **Codex-xymq6, Codex-r8932:** migration 0099's unique indexes.
-  - **Codex-p6sy6:** `procedure()` now enforces the default rate limit.
-- **Stale descriptions:**
+  - **Codex-ev3k:** all five of its tasks are closed.
+  - **Codex-xymq6:** `pending_payouts` is retired; per-charge dedupe lives on
+    `payouts` (migration 0099's unique indexes).
+  - **Codex-r8932:** the course-subscription writer goes through
+    `recordSlice`/`recordPlatformFee`, `onConflictDoNothing` on those indexes.
+  - **Codex-p6sy6:** `procedure()` enforces the default `api` limit, and
+    ecom-api has the `RATE_LIMIT_API` binding in every environment.
+- **Found while verifying:** Codex-75qf3 (P4). A stale comment in
+  `workers/ecom-api/wrangler.jsonc` contradicts the bindings declared below it.
+- **Stale descriptions (not yet actioned):**
   - **.32's title:** tiers and course plans already enforce £1.
   - **.16 and Codex-sing6:** still assume subscription schedules.
   - **Codex-2f3wk:** names functions #592 removed.
