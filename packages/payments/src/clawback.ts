@@ -433,7 +433,9 @@ async function clawBackShare(
   const claimed = await claimRecord(deps, record.id, guard);
   if (!claimed) {
     if (cause.type === 'dispute' && !(await isStillClawed(deps, cause.id))) {
-      await cancelOrphanedStep(deps, record.id);
+      // A step never claimed is cancelled. One claimed before may have
+      // reached Stripe: the won dispute's re-pay asks Stripe and settles it.
+      await cancelUnclaimedStep(deps, record.id);
       return {};
     }
     // Another delivery is working on it. Not done yet, so ask for a retry.
@@ -753,7 +755,12 @@ export const MAX_CLAWBACK_ATTEMPTS = 5;
 export async function retryFailedClawbacks(
   deps: ClawbackDeps,
   options: { olderThanMinutes?: number; limit?: number } = {}
-): Promise<{ charges: number; retried: number; stillFailing: number }> {
+): Promise<{
+  charges: number;
+  retried: number;
+  stillFailing: number;
+  lostDisputesApplied: number;
+}> {
   const { olderThanMinutes = 15, limit = 50 } = options;
   const before = new Date(Date.now() - olderThanMinutes * 60_000);
   const targets = await deps.db
@@ -812,7 +819,47 @@ export async function retryFailedClawbacks(
       );
     }
   }
-  return { charges: targets.length, retried, stillFailing };
+  const lostDisputesApplied = await applyFinishedLostDisputes(deps);
+  return {
+    charges: targets.length,
+    retried,
+    stillFailing,
+    lostDisputesApplied,
+  };
+}
+
+/**
+ * Mark a lost dispute applied once its clawback has finished, which lifts its
+ * hold (`isDrainablePayout`). The webhook marks it after its own clawback run,
+ * but a step that failed there can only finish here: a permanent failure is
+ * answered 200, so Stripe never redelivers, and the hold would stay for good.
+ *
+ * Only a dispute with steps, none of them still `pending` or `failed`. One
+ * with no steps never reached its clawback; the dispute sweep re-runs it
+ * (Codex-2hxff.58).
+ */
+async function applyFinishedLostDisputes(deps: ClawbackDeps): Promise<number> {
+  // A parameter, not NOW(): Hyperdrive caches by the query's text.
+  const now = new Date();
+  const applied = await deps.db
+    .update(disputes)
+    .set({ outcomeAppliedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(disputes.status, 'lost'),
+        isNull(disputes.outcomeAppliedAt),
+        sql`EXISTS (SELECT 1 FROM ${payoutReversals} WHERE ${payoutReversals.causeType} = 'dispute' AND ${payoutReversals.causeId} = ${disputes.stripeDisputeId})`,
+        sql`NOT EXISTS (SELECT 1 FROM ${payoutReversals} WHERE ${payoutReversals.causeType} = 'dispute' AND ${payoutReversals.causeId} = ${disputes.stripeDisputeId} AND ${payoutReversals.status} IN ('pending', 'failed'))`
+      )
+    )
+    .returning();
+  if (applied.length > 0) {
+    deps.obs.warn(
+      'A lost dispute finished its clawback in the retry; its hold is lifted',
+      { disputeIds: applied.map((row) => row.stripeDisputeId) }
+    );
+  }
+  return applied.length;
 }
 
 /**
@@ -844,7 +891,7 @@ export async function pendingReductionsFor(
 }
 
 /** Mark a paid slice `reversed` once its reversals add up to its gross. */
-async function settleIfFullyReversed(
+export async function settleIfFullyReversed(
   deps: ClawbackDeps,
   payoutId: string
 ): Promise<void> {
@@ -1059,29 +1106,24 @@ async function isStillClawed(
 }
 
 /**
- * A step of a dispute won since this delivery read it: it never ran, so it is
- * cancelled here. The won dispute's re-pay may already have looked, and would
- * not see it.
+ * A step of a dispute won since this delivery read it, cancelled here only if
+ * it was never claimed: `pending` with no `attempted_at`, so it never reached
+ * Stripe. The won dispute's re-pay may already have looked, and would not see
+ * it. A step claimed before (`failed`, or a lease that ran out) may have
+ * landed; the re-pay checks it with Stripe instead.
  */
-async function cancelOrphanedStep(
+async function cancelUnclaimedStep(
   deps: ClawbackDeps,
   recordId: string
 ): Promise<void> {
-  const now = new Date();
-  const leaseStart = new Date(
-    now.getTime() - PAYOUT_ATTEMPT_LEASE_MINUTES * 60_000
-  );
   await deps.db
     .update(payoutReversals)
-    .set({ status: 'cancelled', attemptedAt: null, resolvedAt: now })
+    .set({ status: 'cancelled', resolvedAt: new Date() })
     .where(
       and(
         eq(payoutReversals.id, recordId),
-        inArray(payoutReversals.status, ['pending', 'failed']),
-        or(
-          isNull(payoutReversals.attemptedAt),
-          lt(payoutReversals.attemptedAt, leaseStart)
-        )
+        eq(payoutReversals.status, 'pending'),
+        isNull(payoutReversals.attemptedAt)
       )
     );
 }

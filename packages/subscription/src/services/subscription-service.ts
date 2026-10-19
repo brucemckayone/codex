@@ -4341,9 +4341,12 @@ export class SubscriptionService extends BaseService {
    * The hourly retry of clawback steps left `failed`, for every source: a
    * step Stripe refused does not make the webhook retry (Codex-2hxff.8).
    */
-  async retryFailedClawbacks(
-    olderThanMinutes = 15
-  ): Promise<{ charges: number; retried: number; stillFailing: number }> {
+  async retryFailedClawbacks(olderThanMinutes = 15): Promise<{
+    charges: number;
+    retried: number;
+    stillFailing: number;
+    lostDisputesApplied: number;
+  }> {
     return retryFailedClawbacks(
       { ...this.ledger(), obs: this.obs },
       { olderThanMinutes }

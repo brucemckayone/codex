@@ -119,9 +119,17 @@ export const refundReviewsRelations = relations(refundReviews, ({ one }) => ({
 
 export type RefundReview = typeof refundReviews.$inferSelect;
 export type NewRefundReview = typeof refundReviews.$inferInsert;
+/**
+ * How a debt was settled. A won dispute reads these: a debt the payee paid
+ * (`creator_absorbed`, `manually_reversed`) is paid back to them; one the
+ * platform wrote off is not (packages/payments/src/repay.ts).
+ */
 export type RefundReviewResolution =
+  // The payee bore it: recovered from them, such as from a later payout.
   | 'creator_absorbed'
+  // The platform wrote it off; the payee paid nothing.
   | 'platform_absorbed'
+  // Support reversed the transfer by hand, so the payee paid it.
   | 'manually_reversed'
   // A dispute's debt, closed because the dispute was won (Codex-2hxff.9).
   | 'dispute_won';

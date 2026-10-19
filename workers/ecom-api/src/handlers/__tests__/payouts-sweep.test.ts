@@ -79,7 +79,12 @@ describe('ecom-api payouts-sweep handler', () => {
   beforeEach(() => {
     clawbackRetry = vi
       .spyOn(SubscriptionService.prototype, 'retryFailedClawbacks')
-      .mockResolvedValue({ charges: 0, retried: 0, stillFailing: 0 });
+      .mockResolvedValue({
+        charges: 0,
+        retried: 0,
+        stillFailing: 0,
+        lostDisputesApplied: 0,
+      });
   });
   afterEach(() => {
     clawbackRetry.mockRestore();
@@ -375,6 +380,7 @@ describe('ecom-api payouts-sweep handler', () => {
       charges: 2,
       retried: 1,
       stillFailing: 1,
+      lostDisputesApplied: 0,
     });
     const { obs } = makeObs();
 

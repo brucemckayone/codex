@@ -38,6 +38,7 @@ import {
   type ClawbackCharge,
   type ClawbackDeps,
   type ClawbackRefund,
+  retryFailedClawbacks,
   reverseCharge,
 } from '../clawback';
 import { isDrainablePayout } from '../payout-ledger';
@@ -561,18 +562,19 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
     const result = await repayDispute(deps, { disputeId });
 
     expect(result).toEqual({ repaid: 1, cancelled: 0, debtsClosed: 0 });
-    expect((await records(creator.id))[0]).toMatchObject({
-      status: 'done',
-      stripeReversalId: landed.id,
-    });
-    expect((await records(creator.id))[0]?.repaidByPayoutId).not.toBeNull();
+    const [step] = await records(creator.id);
+    expect(step).toMatchObject({ status: 'done', stripeReversalId: landed.id });
+    // Reversed whole, so the slice is `reversed`, as after any reversal.
+    expect((await readRow(creator.id)).status).toBe('reversed');
+    const repay = await readRow(step?.repaidByPayoutId ?? '');
+    expect(repay).toMatchObject({ amountCents: 765, status: 'pending' });
   });
 
   it.each([
-    ['manually_reversed', 1],
-    ['creator_absorbed', 1],
-    ['platform_absorbed', 0],
-  ])('won: a debt the support desk settled as %s is paid back only if the payee paid it', async (resolution, repaid) => {
+    ['manually_reversed', 1, 'debt'],
+    ['creator_absorbed', 1, 'debt'],
+    ['platform_absorbed', 0, 'cancelled'],
+  ])('won: a debt the support desk settled as %s is paid back only if the payee paid it', async (resolution, repaid, stepStatus) => {
     const charge = newCharge(1000);
     const creator = await slice(charge, {
       payoutType: 'creator_payout',
@@ -597,6 +599,9 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
 
     expect(result.repaid).toBe(repaid);
     expect(result.debtsClosed).toBe(0);
+    const [step] = await records(creator.id);
+    expect(step?.status).toBe(stepStatus);
+    expect(step?.repaidByPayoutId !== null).toBe(repaid === 1);
   });
 
   it('a dispute won mid-run: a step not yet claimed is not sent to Stripe, and is cancelled', async () => {
@@ -626,5 +631,135 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
       'cancelled',
       'done',
     ]);
+  });
+
+  it('a dispute won mid-run: a step claimed before, whose reversal landed, is left for the re-pay, which records it and pays it back', async () => {
+    const charge = newCharge(1000);
+    const creator = await slice(charge, {
+      payoutType: 'creator_payout',
+      amountCents: 765,
+    });
+    const disputeId = await dispute(charge, 'needs_response', 900);
+    // The dispute's share after a 100p refund: 765 - floor(765 x 100/1000).
+    const [record] = await db
+      .insert(payoutReversals)
+      .values({
+        payoutId: creator.id,
+        causeType: 'dispute',
+        causeId: disputeId,
+        amountCents: 689,
+        kind: 'transfer_reversal',
+        // Timed out after Stripe applied it: failed, its lease released.
+        status: 'failed',
+        lastErrorCode: 'unknown',
+      })
+      .returning();
+    const landed = await stripe.transfers.createReversal(
+      creator.stripeTransferId ?? '',
+      { amount: 689, metadata: { payout_reversal_id: record?.id ?? '' } }
+    );
+    vi.mocked(stripe.transfers.createReversal).mockClear();
+    // Refunds run first: the win is recorded while the refund's reversal is
+    // at Stripe, so the dispute's step is reached after it.
+    const real = vi
+      .mocked(stripe.transfers.createReversal)
+      .getMockImplementation();
+    vi.mocked(stripe.transfers.createReversal).mockImplementationOnce((async (
+      ...args: unknown[]
+    ) => {
+      await setDisputeStatus(disputeId, 'won');
+      return (real as (...a: unknown[]) => unknown)(...args);
+    }) as never);
+
+    await run(charge, [{ id: `re_${uid()}`, amountCents: 100, createdAt: 1 }]);
+
+    expect(stripe.transfers.createReversal).toHaveBeenCalledTimes(1);
+    const stepOf = async () =>
+      takeFirst(
+        await db
+          .select()
+          .from(payoutReversals)
+          .where(eq(payoutReversals.id, record?.id ?? ''))
+      );
+    expect((await stepOf()).status).toBe('failed');
+
+    const result = await repayDispute(deps, { disputeId });
+
+    expect(result.repaid).toBe(1);
+    const step = await stepOf();
+    expect(step).toMatchObject({ status: 'done', stripeReversalId: landed.id });
+    expect(await readRow(step.repaidByPayoutId ?? '')).toMatchObject({
+      amountCents: 689,
+    });
+  });
+
+  it('the retry cron lifts the hold of a lost dispute whose clawback has finished, and only that one', async () => {
+    const finishedCharge = newCharge(1000);
+    const finishedSlice = await slice(finishedCharge, {
+      payoutType: 'creator_payout',
+      amountCents: 765,
+    });
+    const finished = await dispute(finishedCharge, 'lost');
+    await db.insert(payoutReversals).values({
+      payoutId: finishedSlice.id,
+      causeType: 'dispute',
+      causeId: finished,
+      amountCents: 765,
+      kind: 'transfer_reversal',
+      status: 'done',
+      stripeReversalId: `trr_${uid()}`,
+      resolvedAt: new Date(),
+    });
+    const failingCharge = newCharge(1000);
+    const failingSlice = await slice(failingCharge, {
+      payoutType: 'creator_payout',
+      amountCents: 765,
+    });
+    const failing = await dispute(failingCharge, 'lost');
+    await db.insert(payoutReversals).values({
+      payoutId: failingSlice.id,
+      causeType: 'dispute',
+      causeId: failing,
+      amountCents: 765,
+      kind: 'transfer_reversal',
+      status: 'failed',
+      lastErrorCode: 'unknown',
+    });
+    // No steps: its clawback never ran, so nothing says it finished.
+    const untouched = await dispute(newCharge(1000), 'lost');
+
+    const result = await retryFailedClawbacks(deps, { olderThanMinutes: 15 });
+
+    expect(result.lostDisputesApplied).toBeGreaterThanOrEqual(1);
+    const applied = async (id: string) =>
+      takeFirst(
+        await db.select().from(disputes).where(eq(disputes.stripeDisputeId, id))
+      ).outcomeAppliedAt !== null;
+    expect(await applied(finished)).toBe(true);
+    expect(await applied(failing)).toBe(false);
+    expect(await applied(untouched)).toBe(false);
+  });
+
+  it('won: a fee step a clawback still holds is not cancelled under it; the re-pay asks for a retry', async () => {
+    const charge = newCharge(1000);
+    const fee = await slice(charge, {
+      payoutType: 'platform_fee',
+      amountCents: 100,
+    });
+    const disputeId = await dispute(charge, 'won');
+    await db.insert(payoutReversals).values({
+      payoutId: fee.id,
+      causeType: 'dispute',
+      causeId: disputeId,
+      amountCents: 100,
+      kind: 'retained_fee',
+      status: 'pending',
+      attemptedAt: new Date(),
+    });
+
+    await expect(repayDispute(deps, { disputeId })).rejects.toBeInstanceOf(
+      ServiceUnavailableError
+    );
+    expect((await records(fee.id))[0]?.status).toBe('pending');
   });
 });
