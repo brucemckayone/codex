@@ -18,7 +18,6 @@
 import { randomUUID } from 'node:crypto';
 import {
   content,
-  failedRefunds,
   organizations,
   type Payout,
   type Purchase,
@@ -26,6 +25,7 @@ import {
   payouts,
   purchases,
   refundReviews,
+  refunds,
 } from '@codex/database/schema';
 import { InternalServiceError } from '@codex/service-errors';
 import {
@@ -60,7 +60,7 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
   let creatorA: string;
   let orgId: string;
   const createdPayoutIds: string[] = [];
-  const createdFailedRefundIds: string[] = [];
+  const createdRefundIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -92,10 +92,10 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
         .where(inArray(payoutReversals.payoutId, createdPayoutIds));
       await db.delete(payouts).where(inArray(payouts.id, createdPayoutIds));
     }
-    if (createdFailedRefundIds.length > 0) {
+    if (createdRefundIds.length > 0) {
       await db
-        .delete(failedRefunds)
-        .where(inArray(failedRefunds.stripeRefundId, createdFailedRefundIds));
+        .delete(refunds)
+        .where(inArray(refunds.stripeRefundId, createdRefundIds));
     }
     await teardownTestDatabase();
   });
@@ -455,54 +455,97 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
     expect((await readRow(creator.id)).status).toBe('reversed');
   });
 
-  it("recordFailedRefund records a failed refund once, with the charge's purchase; a redelivery records nothing", async () => {
-    const seeded = await seedPurchase(1000);
-    const refundId = `re_rec_${seeded.tag}`;
-    createdFailedRefundIds.push(refundId);
-    const failed = {
+  // ── the refunds record (owner decision 2026-10-19, "One refunds table") ──
+
+  function refundFor(
+    seeded: Pick<Seeded, 'charge' | 'paymentIntentId'> | null,
+    refundId: string,
+    status: string | null,
+    failureReason: string | null = null
+  ) {
+    return {
       stripeRefundId: refundId,
-      stripeChargeId: seeded.charge.id,
-      paymentIntentId: seeded.paymentIntentId,
+      stripeChargeId: seeded?.charge.id ?? `ch_sub_${uid()}`,
+      paymentIntentId: seeded?.paymentIntentId ?? `pi_not_a_purchase_${uid()}`,
       amountCents: 400,
       currency: 'gbp',
-      failureReason: 'expired_or_canceled_card',
+      status,
+      reason: 'requested_by_customer',
+      failureReason,
+      stripeCreatedAt: new Date('2026-10-19T10:00:00Z'),
     };
+  }
 
-    expect(await makeService().recordFailedRefund(failed)).toBe(true);
-    expect(await makeService().recordFailedRefund(failed)).toBe(false);
-
-    const rows = await db
+  async function readRefund(refundId: string) {
+    return db
       .select()
-      .from(failedRefunds)
-      .where(eq(failedRefunds.stripeRefundId, refundId));
+      .from(refunds)
+      .where(eq(refunds.stripeRefundId, refundId));
+  }
+
+  it("recordRefund records a refund once, with the charge's purchase; a redelivery writes nothing", async () => {
+    const seeded = await seedPurchase(1000);
+    const refundId = `re_rec_${seeded.tag}`;
+    createdRefundIds.push(refundId);
+
+    expect(
+      await makeService().recordRefund(
+        refundFor(seeded, refundId, 'failed', 'expired_or_canceled_card')
+      )
+    ).toBe(true);
+    expect(
+      await makeService().recordRefund(
+        refundFor(seeded, refundId, 'failed', 'expired_or_canceled_card')
+      )
+    ).toBe(false);
+
+    const rows = await readRefund(refundId);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       purchaseId: seeded.purchase.id,
       stripeChargeId: seeded.charge.id,
       amountCents: 400,
+      status: 'failed',
+      reason: 'requested_by_customer',
       failureReason: 'expired_or_canceled_card',
+      notifiedAt: null,
       resolution: null,
       resolvedAt: null,
     });
   });
 
-  it("recordFailedRefund records a subscription charge's failed refund with no purchase", async () => {
+  it('recordRefund moves a refund forward only: a stale event never undoes a later status', async () => {
+    const seeded = await seedPurchase(1000);
+    const refundId = `re_fwd_${seeded.tag}`;
+    createdRefundIds.push(refundId);
+    const service = makeService();
+    const step = async (status: string) =>
+      service.recordRefund(refundFor(seeded, refundId, status));
+    const status = async () => (await readRefund(refundId))[0]?.status;
+
+    expect(await step('pending')).toBe(true);
+    expect(await step('succeeded')).toBe(true);
+    expect(await step('pending')).toBe(false);
+    expect(await status()).toBe('succeeded');
+    // A succeeded refund can still fail, up to 30 days later.
+    expect(await step('failed')).toBe(true);
+    expect(await step('succeeded')).toBe(false);
+    expect(await status()).toBe('failed');
+  });
+
+  it("recordRefund records a subscription charge's refund with no purchase, and skips a status it does not know", async () => {
     const refundId = `re_sub_${uid()}`;
-    createdFailedRefundIds.push(refundId);
+    const unknownId = `re_new_${uid()}`;
+    createdRefundIds.push(refundId, unknownId);
 
-    await makeService().recordFailedRefund({
-      stripeRefundId: refundId,
-      stripeChargeId: `ch_sub_${uid()}`,
-      paymentIntentId: `pi_not_a_purchase_${uid()}`,
-      amountCents: 500,
-      currency: 'gbp',
-      failureReason: null,
-    });
+    await makeService().recordRefund(refundFor(null, refundId, 'succeeded'));
+    expect(
+      await makeService().recordRefund(
+        refundFor(null, unknownId, 'a_status_stripe_adds_later')
+      )
+    ).toBe(false);
 
-    const [row] = await db
-      .select()
-      .from(failedRefunds)
-      .where(eq(failedRefunds.stripeRefundId, refundId));
-    expect(row?.purchaseId).toBeNull();
+    expect((await readRefund(refundId))[0]?.purchaseId).toBeNull();
+    expect(await readRefund(unknownId)).toHaveLength(0);
   });
 });

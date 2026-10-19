@@ -1,6 +1,6 @@
 # Refund reversals: one record per slice per refund
 
-**Status: AGREED by the owner, 2026-10-19 (§7 Q1–Q3 decided).** It is the data design behind WP3's behaviour PRs ([architecture.md](architecture.md) §6, engineering calls D1–D5, D7 and D8 on Codex-2hxff.56). It closes the money half of Codex-2hxff.8, and Codex-in0g4.
+**Status: AGREED by the owner, 2026-10-19 (§7 Q1–Q5 decided; Q2 amended the same day).** It is the data design behind WP3's behaviour PRs ([architecture.md](architecture.md) §6, engineering calls D1–D5, D7 and D8 on Codex-2hxff.56). It closes the money half of Codex-2hxff.8, and Codex-in0g4.
 
 The *behaviour* is already decided in [purchases.md](purchases.md#refunds) and [subscriptions.md](subscriptions.md#refunds). This document only decides **how it is recorded**, plus the three questions at the end.
 
@@ -96,6 +96,8 @@ What stays the same:
 - **Q2 (amended the same day): a refund that fails is held for support, not re-paid automatically.**
   - First answer: re-pay automatically. Amended once Stripe's documentation was checked: a refund can fail after it succeeded, up to 30 days later. Stripe returns the money to the platform balance, but the customer must still be refunded some other way, so an automatic re-pay would pay creators a share that then has to be clawed back by hand.
   - So the clawback stands. A failed refund is clawed back like a succeeded one, including one that failed straight from `pending`. It also stays in the charge's refund order, so the shares of later refunds do not move, and a step of its clawback still to be retried is retried rather than left `failed` for ever.
-  - The failure is recorded in `failed_refunds`, one row per Stripe refund. Support either refunds the customer elsewhere (`refunded_elsewhere`) or re-pays the creators (`creators_repaid`). That action and its screen ship with the admin refunds screen, `Codex-2hxff.28`, whose mockup and data design come first.
+  - Every refund is recorded in `refunds`, one row per Stripe refund for any source, with Stripe's status (decision below). Support's queue is the failed rows not yet resolved. Support either refunds the customer elsewhere (`refunded_elsewhere`) or re-pays the creators (`creators_repaid`). That action and its screen ship with the admin refunds screen, `Codex-2hxff.28`, whose mockup and data design come first.
   - The payment endpoint takes `refund.updated` and `refund.failed`, handled alike. A `canceled` refund paid nothing out and is never clawed back.
 - **Q3: access on a partial refund (P-1) ships in a separate PR, after this one.**
+- **Q4 (decided the same day): one `refunds` table** for every Stripe refund, any source. It holds the refund's status, amount, reason and failure reason; when its email was sent (`notified_at`); and support's resolution of a failed one. It replaces a failed-refunds-only table, so a purchase's refunds, the email gate and support's queue are one record. A stale event never moves a row backwards: `failed` and `canceled` are final, and `succeeded` does not return to pending. This PR writes it from `refund.updated` and `refund.failed`; the P-1 PR also writes it from `charge.refunded`.
+- **Q5 (decided the same day): one refund email per refund,** with that refund's amount, sent once. A redelivered event sends nothing. Ships with P-1.

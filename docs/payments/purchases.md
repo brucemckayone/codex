@@ -164,9 +164,10 @@ decision 2026-10-19).
 refund can fail even after it succeeded, up to 30 days later. Stripe returns
 the money to the platform balance, but the customer must still be refunded
 some other way. So the clawback stands, and the failure is recorded in
-`failed_refunds` and logged with an `errorId`. Support then either refunds the
-customer elsewhere or re-pays the creators — **gap**: `Codex-2hxff.28` (the
-screen and the re-pay action; until then a person does it by hand). A
+`refunds` (support's queue is its failed rows) and logged with an `errorId`.
+Support then either refunds the customer elsewhere or re-pays the creators —
+**gap**: `Codex-2hxff.28` (the screen and the re-pay action; until then a
+person does it by hand). A
 `canceled` refund paid nothing out and is never clawed back, but the purchase
 `charge.refunded` recorded stays refunded, so it is logged for a person to
 check the buyer's access.

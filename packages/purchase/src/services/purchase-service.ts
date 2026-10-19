@@ -34,8 +34,9 @@ import {
   contentAccess,
   courses,
   entitlements,
-  failedRefunds,
   purchases,
+  type RefundStatus,
+  refunds,
   stripeConnectAccounts,
   users,
 } from '@codex/database/schema';
@@ -113,6 +114,19 @@ function isStripeError(error: unknown): error is Error & { type: string } {
     typeof error.type === 'string' &&
     error.type.startsWith('Stripe')
   );
+}
+
+const REFUND_STATUSES: ReadonlySet<string> = new Set<RefundStatus>([
+  'pending',
+  'requires_action',
+  'succeeded',
+  'failed',
+  'canceled',
+]);
+
+/** A status the `refunds` table admits (its CHECK). */
+function isRefundStatus(status: string | null): status is RefundStatus {
+  return status !== null && REFUND_STATUSES.has(status);
 }
 
 import type { PaginatedListResponse } from '@codex/shared-types';
@@ -1972,25 +1986,38 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Record a refund Stripe could not pay out, for support (`failed_refunds`;
-   * owner decision 2026-10-19, "Hold it for support"). The clawback is left
-   * standing, because the customer must still be refunded some other way:
-   * support refunds them elsewhere, or re-pays the creators (Codex-2hxff.28).
+   * Record a refund as Stripe reports it (`refunds`; owner decisions
+   * 2026-10-19). One row per Stripe refund, for any source; `purchaseId` is
+   * set when the charge is a purchase's. A failed row is support's to settle,
+   * and the clawback is left standing (see the table).
    *
-   * Any source's refund is recorded; `purchaseId` is set when the charge is a
-   * purchase's. Idempotent on the refund id, and true only when this call
-   * recorded it, so a redelivered event does not raise the alert again.
+   * A stale event never moves a row backwards: `failed` and `canceled` are
+   * final, and `succeeded` does not return to pending. Returns true when this
+   * call wrote the refund's status (a new row, or a newer status), so a
+   * redelivered event does not raise an alert again. A status Stripe has
+   * added since is logged and not written.
    */
-  async recordFailedRefund(refund: {
+  async recordRefund(refund: {
     stripeRefundId: string;
     stripeChargeId: string;
     /** The charge's PaymentIntent, which finds the purchase if it is one. */
     paymentIntentId: string | null;
     amountCents: number;
     currency: string;
+    status: string | null;
+    reason: string | null;
     failureReason: string | null;
+    stripeCreatedAt: Date;
   }): Promise<boolean> {
     try {
+      const { status } = refund;
+      if (!isRefundStatus(status)) {
+        this.obs.warn('Refund has a status the refunds table does not know', {
+          refundId: refund.stripeRefundId,
+          status,
+        });
+        return false;
+      }
       const [purchase] = refund.paymentIntentId
         ? await this.db
             .select({ id: purchases.id })
@@ -1998,21 +2025,29 @@ export class PurchaseService extends BaseService {
             .where(eq(purchases.stripePaymentIntentId, refund.paymentIntentId))
             .limit(1)
         : [];
-      const recorded = await this.db
-        .insert(failedRefunds)
+      const written = await this.db
+        .insert(refunds)
         .values({
           stripeRefundId: refund.stripeRefundId,
           stripeChargeId: refund.stripeChargeId,
           purchaseId: purchase?.id ?? null,
           amountCents: refund.amountCents,
           currency: refund.currency,
+          status,
+          reason: refund.reason,
           failureReason: refund.failureReason,
+          stripeCreatedAt: refund.stripeCreatedAt,
         })
-        .onConflictDoNothing({ target: failedRefunds.stripeRefundId })
+        .onConflictDoUpdate({
+          target: refunds.stripeRefundId,
+          set: { status, failureReason: refund.failureReason },
+          // Forward only: Stripe does not deliver events in order.
+          setWhere: sql`${refunds.status} <> excluded.status AND ${refunds.status} NOT IN ('failed', 'canceled') AND NOT (${refunds.status} = 'succeeded' AND excluded.status IN ('pending', 'requires_action'))`,
+        })
         .returning();
-      return recorded.length > 0;
+      return written.length > 0;
     } catch (error) {
-      this.handleError(error, 'recordFailedRefund');
+      this.handleError(error, 'recordRefund');
     }
   }
 

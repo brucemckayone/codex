@@ -1,5 +1,5 @@
 {
-  "id": "02980cff-ac15-4119-b136-cf1a686940c7",
+  "id": "c0aec673-d6f6-4309-98c7-f1043fab77f5",
   "prevId": "2e10590e-95df-47a8-93f8-1f2c0d4de318",
   "version": "7",
   "dialect": "postgresql",
@@ -4437,159 +4437,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.failed_refunds": {
-      "name": "failed_refunds",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "stripe_refund_id": {
-          "name": "stripe_refund_id",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "stripe_charge_id": {
-          "name": "stripe_charge_id",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "purchase_id": {
-          "name": "purchase_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "amount_cents": {
-          "name": "amount_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "currency": {
-          "name": "currency",
-          "type": "varchar(3)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "failure_reason": {
-          "name": "failure_reason",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolution": {
-          "name": "resolution",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolved_at": {
-          "name": "resolved_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolved_by_user_id": {
-          "name": "resolved_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "uq_failed_refunds_stripe_refund_id": {
-          "name": "uq_failed_refunds_stripe_refund_id",
-          "columns": [
-            {
-              "expression": "stripe_refund_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_failed_refunds_open": {
-          "name": "idx_failed_refunds_open",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"failed_refunds\".\"resolved_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "failed_refunds_purchase_id_purchases_id_fk": {
-          "name": "failed_refunds_purchase_id_purchases_id_fk",
-          "tableFrom": "failed_refunds",
-          "tableTo": "purchases",
-          "columnsFrom": [
-            "purchase_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "failed_refunds_resolved_by_user_id_users_id_fk": {
-          "name": "failed_refunds_resolved_by_user_id_users_id_fk",
-          "tableFrom": "failed_refunds",
-          "tableTo": "users",
-          "columnsFrom": [
-            "resolved_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "check_failed_refunds_amount_positive": {
-          "name": "check_failed_refunds_amount_positive",
-          "value": "\"failed_refunds\".\"amount_cents\" > 0"
-        },
-        "check_failed_refunds_resolution": {
-          "name": "check_failed_refunds_resolution",
-          "value": "\"failed_refunds\".\"resolution\" IS NULL OR \"failed_refunds\".\"resolution\" IN ('refunded_elsewhere', 'creators_repaid')"
-        },
-        "check_failed_refunds_resolved_pair": {
-          "name": "check_failed_refunds_resolved_pair",
-          "value": "(\"failed_refunds\".\"resolved_at\" IS NULL AND \"failed_refunds\".\"resolution\" IS NULL) OR (\"failed_refunds\".\"resolved_at\" IS NOT NULL AND \"failed_refunds\".\"resolution\" IS NOT NULL)"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.fee_config_audit_log": {
       "name": "fee_config_audit_log",
       "schema": "",
@@ -8339,6 +8186,209 @@
         "check_refund_reviews_resolved_pair": {
           "name": "check_refund_reviews_resolved_pair",
           "value": "(\"refund_reviews\".\"resolved_at\" IS NULL AND \"refund_reviews\".\"resolution\" IS NULL) OR (\"refund_reviews\".\"resolved_at\" IS NOT NULL AND \"refund_reviews\".\"resolution\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.refunds": {
+      "name": "refunds",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "stripe_refund_id": {
+          "name": "stripe_refund_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stripe_charge_id": {
+          "name": "stripe_charge_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "purchase_id": {
+          "name": "purchase_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "varchar(3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure_reason": {
+          "name": "failure_reason",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stripe_created_at": {
+          "name": "stripe_created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "notified_at": {
+          "name": "notified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolution": {
+          "name": "resolution",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by_user_id": {
+          "name": "resolved_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "uq_refunds_stripe_refund_id": {
+          "name": "uq_refunds_stripe_refund_id",
+          "columns": [
+            {
+              "expression": "stripe_refund_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_refunds_purchase": {
+          "name": "idx_refunds_purchase",
+          "columns": [
+            {
+              "expression": "purchase_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_refunds_failed_open": {
+          "name": "idx_refunds_failed_open",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"refunds\".\"status\" = 'failed' AND \"refunds\".\"resolved_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "refunds_purchase_id_purchases_id_fk": {
+          "name": "refunds_purchase_id_purchases_id_fk",
+          "tableFrom": "refunds",
+          "tableTo": "purchases",
+          "columnsFrom": [
+            "purchase_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "refunds_resolved_by_user_id_users_id_fk": {
+          "name": "refunds_resolved_by_user_id_users_id_fk",
+          "tableFrom": "refunds",
+          "tableTo": "users",
+          "columnsFrom": [
+            "resolved_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "check_refunds_amount_positive": {
+          "name": "check_refunds_amount_positive",
+          "value": "\"refunds\".\"amount_cents\" > 0"
+        },
+        "check_refunds_status": {
+          "name": "check_refunds_status",
+          "value": "\"refunds\".\"status\" IN ('pending', 'requires_action', 'succeeded', 'failed', 'canceled')"
+        },
+        "check_refunds_resolution": {
+          "name": "check_refunds_resolution",
+          "value": "\"refunds\".\"resolution\" IS NULL OR (\"refunds\".\"status\" = 'failed' AND \"refunds\".\"resolution\" IN ('refunded_elsewhere', 'creators_repaid'))"
+        },
+        "check_refunds_resolved_pair": {
+          "name": "check_refunds_resolved_pair",
+          "value": "(\"refunds\".\"resolved_at\" IS NULL AND \"refunds\".\"resolution\" IS NULL) OR (\"refunds\".\"resolved_at\" IS NOT NULL AND \"refunds\".\"resolution\" IS NOT NULL)"
         }
       },
       "isRLSEnabled": false

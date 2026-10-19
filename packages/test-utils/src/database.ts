@@ -215,8 +215,8 @@ export async function cleanupDatabase(db: Database): Promise<void> {
   // must go before either. Was previously missed in cleanup and caused FK
   // failures whenever a prior subscription test left rows behind.
   await db.delete(schema.refundReviews);
-  // failed_refunds references purchases with onDelete: 'restrict' (Codex-2hxff.8).
-  await db.delete(schema.failedRefunds);
+  // refunds references purchases with onDelete: 'restrict' (Codex-2hxff.8).
+  await db.delete(schema.refunds);
   // payout_reversals references payouts with onDelete: 'restrict' (Codex-2hxff.8).
   await db.delete(schema.payoutReversals);
   await db.delete(schema.payouts);
@@ -259,8 +259,8 @@ export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   // Delete in order that respects foreign key constraints
   await db.delete(schema.videoPlayback);
   await db.delete(schema.refundReviews);
-  // failed_refunds references purchases with onDelete: 'restrict' (Codex-2hxff.8).
-  await db.delete(schema.failedRefunds);
+  // refunds references purchases with onDelete: 'restrict' (Codex-2hxff.8).
+  await db.delete(schema.refunds);
   // payout_reversals references payouts with onDelete: 'restrict' (Codex-2hxff.8).
   await db.delete(schema.payoutReversals);
   await db.delete(schema.payouts);

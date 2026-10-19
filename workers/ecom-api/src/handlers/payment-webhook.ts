@@ -3,8 +3,8 @@
  *
  * Processes Stripe payment lifecycle events:
  * - charge.refunded → update purchase status, revoke content access
- * - refund.updated, refund.failed → claw back a refund that was pending at
- *   charge.refunded; record a failed refund for support
+ * - refund.updated, refund.failed → record the refund's status; claw back a
+ *   refund that was pending at charge.refunded; a failed one is support's
  * - charge.dispute.created → mark purchase disputed, revoke access (Codex-sxu5a)
  *
  * Cache invalidation uses the shared `invalidateForUser` helper from
@@ -205,15 +205,16 @@ async function handleChargeRefunded(
 }
 
 /**
- * A refund's status changed (`refund.updated`, `refund.failed`). The refund
- * was recorded and its email sent by `charge.refunded`, so no email is sent.
+ * A refund's status changed (`refund.updated`, `refund.failed`). Each change is
+ * recorded in `refunds`. The refund's email was sent by `charge.refunded`, so
+ * none is sent here.
  *
  * - `succeeded`: a refund still pending when `charge.refunded` arrived is
  *   clawed back now (owner decision Q1, 2026-10-19).
  * - `failed`, possibly after it succeeded: Stripe returns the money, but the
  *   customer must still be refunded some other way, so the clawback stands
- *   (one that failed straight from pending is clawed back now). The failure is
- *   recorded for support, who refund the customer elsewhere or re-pay the
+ *   (one that failed straight from pending is clawed back now). The row is
+ *   support's to settle: they refund the customer elsewhere or re-pay the
  *   creators (owner decision 2026-10-19, "Hold it for support").
  * - `canceled`: nothing was paid out and nothing is clawed back.
  */
@@ -233,16 +234,6 @@ async function handleRefundUpdated(
     return;
   }
 
-  if (refund.status === 'canceled') {
-    // charge.refunded handled it when it was created, as for any refund.
-    obs?.error(
-      "A refund was canceled after charge.refunded handled it; check the buyer's access by hand",
-      { errorId: crypto.randomUUID(), refundId: refund.id, chargeId }
-    );
-    return;
-  }
-  if (refund.status !== 'succeeded' && refund.status !== 'failed') return;
-
   // A refund carries no codex_env tag; its charge does. Production and local
   // development share one Stripe sandbox (Codex-2hxff.5).
   const charge = await stripe.charges.retrieve(chargeId);
@@ -258,29 +249,42 @@ async function handleRefundUpdated(
   }
   const paymentIntentId = extractPaymentIntentId(charge.payment_intent);
 
-  if (refund.status === 'failed') {
-    // First, so support sees it while a clawback step is still retrying.
-    const recorded = await service.recordFailedRefund({
-      stripeRefundId: refund.id,
-      stripeChargeId: charge.id,
-      paymentIntentId: paymentIntentId ?? null,
-      amountCents: refund.amount,
-      currency: refund.currency,
-      failureReason: refund.failure_reason ?? null,
-    });
-    if (recorded) {
+  // First, so support sees a failure while a clawback step is still retrying.
+  const changed = await service.recordRefund({
+    stripeRefundId: refund.id,
+    stripeChargeId: charge.id,
+    paymentIntentId: paymentIntentId ?? null,
+    amountCents: refund.amount,
+    currency: refund.currency,
+    status: refund.status,
+    reason: refund.reason ?? null,
+    failureReason: refund.failure_reason ?? null,
+    stripeCreatedAt: new Date(refund.created * 1000),
+  });
+
+  if (refund.status === 'canceled') {
+    if (changed) {
+      // charge.refunded handled it when it was created, as for any refund.
       obs?.error(
-        'A refund failed at Stripe: support must refund the customer another way, or re-pay the creators',
-        {
-          errorId: crypto.randomUUID(),
-          refundId: refund.id,
-          chargeId,
-          amountCents: refund.amount,
-          failureReason: refund.failure_reason ?? null,
-        }
+        "A refund was canceled after charge.refunded handled it; check the buyer's access by hand",
+        { errorId: crypto.randomUUID(), refundId: refund.id, chargeId }
       );
     }
+    return;
   }
+  if (refund.status === 'failed' && changed) {
+    obs?.error(
+      'A refund failed at Stripe: support must refund the customer another way, or re-pay the creators',
+      {
+        errorId: crypto.randomUUID(),
+        refundId: refund.id,
+        chargeId,
+        amountCents: refund.amount,
+        failureReason: refund.failure_reason ?? null,
+      }
+    );
+  }
+  if (refund.status !== 'succeeded' && refund.status !== 'failed') return;
 
   const clawbackCharge = { id: charge.id, amountCents: charge.amount };
   await subscriptionService.reverseSubscriptionPayoutsForCharge(clawbackCharge);

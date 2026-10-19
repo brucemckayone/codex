@@ -61,7 +61,7 @@ export interface ClawbackCharge {
  *   (owner decision Q1, 2026-10-19).
  * - A failed refund is clawed back too. Stripe returns its money to the
  *   platform, but the customer must still be refunded some other way, so the
- *   clawback stands and support settles the failure (`failed_refunds`; owner
+ *   clawback stands and support settles the failure (`refunds`; owner
  *   decision 2026-10-19, "Hold it for support").
  * - A canceled refund paid nothing out and is never clawed back.
  */
