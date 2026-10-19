@@ -152,13 +152,24 @@ after the purchase (owner decision 2026-10-13, "14 days"). The customer-facing
 refund policy is being drafted for legal review — `Codex-2hxff.31`.
 
 Stripe sends `charge.refunded` to `/webhooks/stripe/payment`. The clawback
-reads the charge's **succeeded** refunds from Stripe, not the event's
-cumulative `amount_refunded`. It records what each refund did to each slice,
-one `payout_reversals` row per slice per refund
+reads the charge's **settled** refunds (succeeded or failed) from Stripe, not
+the event's cumulative `amount_refunded`. It records what each refund did to
+each slice, one `payout_reversals` row per slice per refund
 ([design](refund-reversal-record.md)), so a second partial refund claws back
 its own share and a redelivery does only what is left. A refund still pending
-at Stripe is clawed back once `refund.updated` reports it succeeded (owner
+at Stripe is clawed back once `refund.updated` reports it settled (owner
 decision 2026-10-19).
+
+**A refund that fails** (owner decision 2026-10-19, "Hold it for support"). A
+refund can fail even after it succeeded, up to 30 days later. Stripe returns
+the money to the platform balance, but the customer must still be refunded
+some other way. So the clawback stands, and the failure is recorded in
+`failed_refunds` and logged with an `errorId`. Support then either refunds the
+customer elsewhere or re-pays the creators — **gap**: `Codex-2hxff.28` (the
+screen and the re-pay action; until then a person does it by hand). A
+`canceled` refund paid nothing out and is never clawed back, but the purchase
+`charge.refunded` recorded stays refunded, so it is logged for a person to
+check the buyer's access.
 
 **A full refund** (the whole charge refunded):
 

@@ -12,6 +12,7 @@ export * from './course-progress';
 export * from './creator-onboarding';
 export * from './ecommerce';
 export * from './entitlements';
+export * from './failed-refunds';
 export * from './fee-config';
 export * from './followers';
 export * from './journeys';

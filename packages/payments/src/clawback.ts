@@ -13,8 +13,7 @@
  * too, and a failed step is retried rather than marked done. The `payouts`
  * row is never rewritten: its amount stays the slice's gross.
  *
- * Pinned by refund-reversal.characterisation.test.ts (@codex/purchase) and
- * subscription-refund-reversal.characterisation.test.ts (@codex/subscription).
+ * The spec is __tests__/clawback.integration.test.ts.
  */
 
 import { stripeEnvMetadata } from '@codex/constants';
@@ -56,8 +55,15 @@ export interface ClawbackCharge {
 }
 
 /**
- * A refund that has SUCCEEDED at Stripe. One still pending is clawed back once
- * `refund.updated` reports it succeeded (owner decision Q1, 2026-10-19).
+ * A refund the clawback acts on: one that has SUCCEEDED or FAILED at Stripe.
+ *
+ * - One still pending is clawed back once `refund.updated` reports it settled
+ *   (owner decision Q1, 2026-10-19).
+ * - A failed refund is clawed back too. Stripe returns its money to the
+ *   platform, but the customer must still be refunded some other way, so the
+ *   clawback stands and support settles the failure (`failed_refunds`; owner
+ *   decision 2026-10-19, "Hold it for support").
+ * - A canceled refund paid nothing out and is never clawed back.
  */
 export interface ClawbackRefund {
   id: string;
@@ -72,11 +78,16 @@ export type ClawbackSource =
   | { sourceType: 'subscription' };
 
 /**
- * The charge's succeeded refunds, oldest first. Read from Stripe, not the
- * event: `charge.amount_refunded` is cumulative, and `charge.refunds` is no
- * longer sent (API 2022-11-15), so an event cannot say which refund is new.
+ * The charge's refunds to claw back (succeeded or failed), oldest first. Read
+ * from Stripe, not the event: `charge.amount_refunded` is cumulative, and
+ * `charge.refunds` is no longer sent (API 2022-11-15), so an event cannot say
+ * which refund is new.
+ *
+ * A failed refund stays in the list, so a refund that fails after its
+ * clawback began keeps its place in the order: the shares of the refunds after
+ * it do not move, and a step of its clawback still to be retried is retried.
  */
-export async function listSucceededRefunds(
+export async function listClawableRefunds(
   stripe: Stripe,
   chargeId: string
 ): Promise<ClawbackRefund[]> {
@@ -89,7 +100,7 @@ export async function listSucceededRefunds(
       ...(startingAfter ? { starting_after: startingAfter } : {}),
     });
     for (const refund of page.data) {
-      if (refund.status === 'succeeded' && refund.amount > 0) {
+      if (isClawable(refund.status) && refund.amount > 0) {
         refunds.push({
           id: refund.id,
           amountCents: refund.amount,
@@ -104,6 +115,11 @@ export async function listSucceededRefunds(
   return refunds.sort(
     (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)
   );
+}
+
+/** Settled at Stripe, whichever way: see `ClawbackRefund`. */
+function isClawable(status: string | null): boolean {
+  return status === 'succeeded' || status === 'failed';
 }
 
 /**
@@ -175,7 +191,7 @@ interface StepContext {
 type StepResult = { failure?: unknown };
 
 /**
- * Claw back every succeeded refund's share of the source's slices of a charge.
+ * Claw back every refund's share of the source's slices of a charge.
  *
  * Idempotent: a step already `done` or `debt` is skipped, so a redelivery does
  * only what is left. A step another delivery is working on counts as not done.
@@ -194,7 +210,7 @@ export async function reverseCharge(
     charge: ClawbackCharge;
     source: ClawbackSource;
     /**
-     * The charge's succeeded refunds, or how to read them. A loader is only
+     * The charge's refunds to claw back, or how to read them. A loader is only
      * called when the source has slices on the charge: every refund runs
      * both sources, and most charges belong to one.
      */
@@ -586,7 +602,7 @@ export const MAX_CLAWBACK_ATTEMPTS = 5;
  * Retry the clawback of every charge with a step left `failed` (the hourly
  * cron, after Stripe's redeliveries). A step Stripe refused does not make the
  * webhook retry, so this is its only retry; it runs with the next attempt's
- * key. The charge and its succeeded refunds are read fresh from Stripe.
+ * key. The charge and its refunds are read fresh from Stripe.
  *
  * Each charge is isolated: one that fails again is logged and the rest run.
  * An outage keeps a step's attempt (its key), so it is retried every run until
@@ -640,7 +656,7 @@ export async function retryFailedClawbacks(
       await reverseCharge(deps, {
         charge: { id: charge.id, amountCents: charge.amount },
         source,
-        refunds: () => listSucceededRefunds(deps.stripe, charge.id),
+        refunds: () => listClawableRefunds(deps.stripe, charge.id),
       });
       retried++;
     } catch (error) {

@@ -93,5 +93,9 @@ What stays the same:
 - **Q1: a refund still `pending` at Stripe is clawed back only once it has succeeded.**
   - The payment webhook also handles `refund.updated`, a new event on the payment endpoint, which is a Stripe dashboard change.
   - A refund that is already `succeeded` when `charge.refunded` arrives, which is most card refunds, is clawed back at once.
-- **Q2: a refund that fails after its clawback is re-paid automatically.** A new pending payout row for the clawed-back amount, which the drain pays like any other. The reversal record is marked so it is never re-reversed.
+- **Q2 (amended the same day): a refund that fails is held for support, not re-paid automatically.**
+  - First answer: re-pay automatically. Amended once Stripe's documentation was checked: a refund can fail after it succeeded, up to 30 days later. Stripe returns the money to the platform balance, but the customer must still be refunded some other way, so an automatic re-pay would pay creators a share that then has to be clawed back by hand.
+  - So the clawback stands. A failed refund is clawed back like a succeeded one, including one that failed straight from `pending`. It also stays in the charge's refund order, so the shares of later refunds do not move, and a step of its clawback still to be retried is retried rather than left `failed` for ever.
+  - The failure is recorded in `failed_refunds`, one row per Stripe refund. Support either refunds the customer elsewhere (`refunded_elsewhere`) or re-pays the creators (`creators_repaid`). That action and its screen ship with the admin refunds screen, `Codex-2hxff.28`, whose mockup and data design come first.
+  - The payment endpoint takes `refund.updated` and `refund.failed`, handled alike. A `canceled` refund paid nothing out and is never clawed back.
 - **Q3: access on a partial refund (P-1) ships in a separate PR, after this one.**

@@ -284,7 +284,7 @@ export function createMockStripe(): Stripe {
     },
 
     // The clawback reads a charge's refunds from Stripe, not from the event
-    // (listSucceededRefunds, Codex-2hxff.8). Default: none, so a test that
+    // (listClawableRefunds, Codex-2hxff.8). Default: none, so a test that
     // does not set them claws back nothing.
     refunds: {
       list: vi.fn().mockImplementation(async () => ({

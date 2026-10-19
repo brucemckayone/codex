@@ -53,8 +53,8 @@ const EVENT_ROUTES: Array<{
   },
   {
     // charge.*, refund.* and payment_intent.* → payment handler. refund.updated
-    // claws back a refund that was still pending at charge.refunded
-    // (Codex-2hxff.8).
+    // and refund.failed claw back a refund that settled after charge.refunded,
+    // and record a failed one for support (Codex-2hxff.8).
     match: (type) =>
       type.startsWith('charge.') ||
       type.startsWith('refund.') ||

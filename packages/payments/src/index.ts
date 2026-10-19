@@ -14,7 +14,7 @@ export {
   type ClawbackDeps,
   type ClawbackRefund,
   type ClawbackSource,
-  listSucceededRefunds,
+  listClawableRefunds,
   MAX_CLAWBACK_ATTEMPTS,
   pendingReductionsFor,
   refundShare,

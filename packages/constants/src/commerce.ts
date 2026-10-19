@@ -17,8 +17,12 @@ export const STRIPE_EVENTS = {
   // Refunds
   CHARGE_REFUNDED: 'charge.refunded',
   // A refund's status changed. A refund still pending when charge.refunded
-  // arrived is clawed back once this reports it succeeded (Codex-2hxff.8).
+  // arrived is clawed back once this reports it succeeded or failed
+  // (Codex-2hxff.8).
   REFUND_UPDATED: 'refund.updated',
+  // A refund failed, possibly after it succeeded. Handled with refund.updated:
+  // the clawback stands and the failure is recorded for support.
+  REFUND_FAILED: 'refund.failed',
   // Disputes (treated as refunds for access purposes — purchase.disputedAt
   // is set and contentAccess is soft-deleted via processDispute)
   CHARGE_DISPUTE_CREATED: 'charge.dispute.created',

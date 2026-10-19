@@ -34,6 +34,7 @@ import {
   contentAccess,
   courses,
   entitlements,
+  failedRefunds,
   purchases,
   stripeConnectAccounts,
   users,
@@ -41,7 +42,7 @@ import {
 import {
   type ClawbackCharge,
   type LedgerDeps,
-  listSucceededRefunds,
+  listClawableRefunds,
   recordPlatformFee,
   recordSlice,
   resolveOrganisationPayee,
@@ -1840,7 +1841,7 @@ export class PurchaseService extends BaseService {
    * 1. Ensure the purchase row exists (self-heal ordering race #4, Codex-aa08z)
    * 2. Update purchase status to 'refunded'
    * 3. Revoke content access (soft delete)
-   * 4. Claw back each succeeded refund's share of the payout slices
+   * 4. Claw back each refund's share of the payout slices
    *
    * Idempotent. An already-refunded purchase skips steps 2-3 but still runs
    * step 4: what each refund did is recorded per slice (payout_reversals), so
@@ -1951,10 +1952,10 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Claw back each succeeded refund of the charge from this purchase's
-   * payout slices (@codex/payments `reverseCharge`, Codex-2hxff.56, .8).
-   * Only succeeded refunds are clawed back; one still pending is clawed back
-   * when `refund.updated` re-runs processRefund (owner decision Q1).
+   * Claw back each refund of the charge from this purchase's payout slices
+   * (@codex/payments `reverseCharge`, Codex-2hxff.56, .8). Only a refund that
+   * succeeded or failed is clawed back; one still pending is clawed back when
+   * `refund.updated` re-runs processRefund (owner decision Q1).
    */
   private async clawBackRefunds(
     purchaseId: string,
@@ -1965,9 +1966,54 @@ export class PurchaseService extends BaseService {
       {
         charge,
         source: { sourceType: 'purchase', purchaseId },
-        refunds: () => listSucceededRefunds(this.stripe, charge.id),
+        refunds: () => listClawableRefunds(this.stripe, charge.id),
       }
     );
+  }
+
+  /**
+   * Record a refund Stripe could not pay out, for support (`failed_refunds`;
+   * owner decision 2026-10-19, "Hold it for support"). The clawback is left
+   * standing, because the customer must still be refunded some other way:
+   * support refunds them elsewhere, or re-pays the creators (Codex-2hxff.28).
+   *
+   * Any source's refund is recorded; `purchaseId` is set when the charge is a
+   * purchase's. Idempotent on the refund id, and true only when this call
+   * recorded it, so a redelivered event does not raise the alert again.
+   */
+  async recordFailedRefund(refund: {
+    stripeRefundId: string;
+    stripeChargeId: string;
+    /** The charge's PaymentIntent, which finds the purchase if it is one. */
+    paymentIntentId: string | null;
+    amountCents: number;
+    currency: string;
+    failureReason: string | null;
+  }): Promise<boolean> {
+    try {
+      const [purchase] = refund.paymentIntentId
+        ? await this.db
+            .select({ id: purchases.id })
+            .from(purchases)
+            .where(eq(purchases.stripePaymentIntentId, refund.paymentIntentId))
+            .limit(1)
+        : [];
+      const recorded = await this.db
+        .insert(failedRefunds)
+        .values({
+          stripeRefundId: refund.stripeRefundId,
+          stripeChargeId: refund.stripeChargeId,
+          purchaseId: purchase?.id ?? null,
+          amountCents: refund.amountCents,
+          currency: refund.currency,
+          failureReason: refund.failureReason,
+        })
+        .onConflictDoNothing({ target: failedRefunds.stripeRefundId })
+        .returning();
+      return recorded.length > 0;
+    } catch (error) {
+      this.handleError(error, 'recordFailedRefund');
+    }
   }
 
   /**

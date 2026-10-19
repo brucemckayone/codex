@@ -44,7 +44,7 @@ import {
   type ClawbackCharge,
   type ClawbackDeps,
   type ClawbackRefund,
-  listSucceededRefunds,
+  listClawableRefunds,
   MAX_CLAWBACK_ATTEMPTS,
   pendingReductionsFor,
   refundShare,
@@ -751,6 +751,32 @@ describe('reverseCharge (the clawback engine)', () => {
       expect((await readRow(creator.id)).status).toBe('reversed');
     });
 
+    it('a refund that failed at Stripe is still clawed back: its step is retried, not stranded', async () => {
+      // Owner decision 2026-10-19, "Hold it for support": the customer must
+      // still be refunded another way, so the clawback stands. Were the
+      // failed refund left out, its step would stay `failed` and the cron
+      // would pick its charge first every run without ever completing it.
+      const charge = newCharge(1000);
+      const { creator, re } = await failedStep(charge, 0, 60);
+      vi.mocked(stripe.charges.retrieve).mockResolvedValue({
+        id: charge.id,
+        amount: 1000,
+      } as never);
+      vi.mocked(stripe.refunds.list).mockResolvedValue({
+        object: 'list',
+        data: [
+          { id: re.id, amount: 1000, status: 'failed', created: re.createdAt },
+        ],
+        has_more: false,
+      } as never);
+
+      await retryFailedClawbacks(deps, { olderThanMinutes: 15 });
+
+      const [record] = await records(creator.id);
+      expect(record?.status).toBe('done');
+      expect((await readRow(creator.id)).status).toBe('reversed');
+    });
+
     it('leaves a fresh failure and one that has used every attempt', async () => {
       const fresh = await failedStep(newCharge(1000), 1, 1);
       const spent = await failedStep(
@@ -771,14 +797,15 @@ describe('reverseCharge (the clawback engine)', () => {
 
   // ── reading refunds ───────────────────────────────────────────────────
 
-  describe('listSucceededRefunds', () => {
-    it('returns only succeeded refunds with an amount, oldest first, across pages', async () => {
+  describe('listClawableRefunds', () => {
+    it('returns succeeded and failed refunds with an amount, oldest first, across pages', async () => {
       vi.mocked(stripe.refunds.list)
         .mockResolvedValueOnce({
           object: 'list',
           data: [
             { id: 're_3', amount: 300, status: 'succeeded', created: 30 },
             { id: 're_p', amount: 200, status: 'pending', created: 25 },
+            { id: 're_c', amount: 70, status: 'canceled', created: 20 },
           ],
           has_more: true,
         } as never)
@@ -786,16 +813,19 @@ describe('reverseCharge (the clawback engine)', () => {
           object: 'list',
           data: [
             { id: 're_1', amount: 100, status: 'succeeded', created: 10 },
+            { id: 're_a', amount: 60, status: 'requires_action', created: 8 },
+            // Failed after it was issued: the clawback stands (owner decision
+            // 2026-10-19, "Hold it for support").
             { id: 're_f', amount: 50, status: 'failed', created: 5 },
           ],
           has_more: false,
         } as never);
 
-      const refunds = await listSucceededRefunds(stripe, 'ch_list');
+      const refunds = await listClawableRefunds(stripe, 'ch_list');
 
-      expect(refunds.map((r) => r.id)).toEqual(['re_1', 're_3']);
+      expect(refunds.map((r) => r.id)).toEqual(['re_f', 're_1', 're_3']);
       expect(stripe.refunds.list).toHaveBeenLastCalledWith(
-        expect.objectContaining({ charge: 'ch_list', starting_after: 're_p' })
+        expect.objectContaining({ charge: 'ch_list', starting_after: 're_c' })
       );
     });
   });

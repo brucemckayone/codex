@@ -179,6 +179,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   let mockRelease: ReturnType<typeof vi.fn>;
   let mockProcessRefund: ReturnType<typeof vi.fn>;
   let mockReverseSubscription: ReturnType<typeof vi.fn>;
+  let mockRecordFailedRefund: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -191,6 +192,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
 
     mockProcessRefund = vi.fn().mockResolvedValue(undefined);
     mockReverseSubscription = vi.fn().mockResolvedValue(undefined);
+    mockRecordFailedRefund = vi.fn().mockResolvedValue(true);
     mockRelease = vi.fn();
     mockStripe = {} as Stripe;
 
@@ -200,6 +202,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
         purchase: {
           processRefund: mockProcessRefund,
           processDispute: vi.fn().mockResolvedValue(undefined),
+          recordFailedRefund: mockRecordFailedRefund,
         },
         // charge.refunded reverses subscription payouts first (Codex-13v21).
         subscription: {
@@ -400,9 +403,10 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     });
   });
 
-  // ── refund.updated (Codex-2hxff.8, owner decision Q1) ────────────────
-  // A refund still pending when charge.refunded arrived is clawed back once
-  // it has succeeded. The refund was recorded and its email sent already.
+  // ── refund.updated / refund.failed (Codex-2hxff.8) ───────────────────
+  // A refund still pending when charge.refunded arrived is clawed back once it
+  // has succeeded or failed (owner decisions 2026-10-19). The refund was
+  // recorded and its email sent already.
 
   function refundUpdatedEvent(refund: Record<string, unknown>): Stripe.Event {
     return {
@@ -469,38 +473,104 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     expect(mockProcessRefund).not.toHaveBeenCalled();
   });
 
-  it('refund.updated failed: no clawback runs, and the re-payment a person must make is logged with an errorId', async () => {
+  it('refund.updated failed: recorded for support, alerted once, and the clawback stands', async () => {
+    // Owner decision 2026-10-19, "Hold it for support": Stripe returns the
+    // money, but the customer must still be refunded another way.
     const bundle = buildContext();
     const { stripe } = stripeWithCharge();
 
     await handlePaymentWebhook(
       refundUpdatedEvent({
         status: 'failed',
-        failure_reason: 'lost_or_stolen_card',
+        amount: 1000,
+        currency: 'gbp',
+        failure_reason: 'expired_or_canceled_card',
       }),
       stripe,
       bundle.context
     );
 
-    expect(mockReverseSubscription).not.toHaveBeenCalled();
-    expect(mockProcessRefund).not.toHaveBeenCalled();
+    expect(mockRecordFailedRefund).toHaveBeenCalledWith({
+      stripeRefundId: 're_pending_then_paid',
+      stripeChargeId: 'ch_updated',
+      paymentIntentId: 'pi_updated',
+      amountCents: 1000,
+      currency: 'gbp',
+      failureReason: 'expired_or_canceled_card',
+    });
     expect(bundle.mock._obs.error).toHaveBeenCalledWith(
-      expect.stringContaining('must be re-paid by hand'),
+      expect.stringContaining('support must refund the customer another way'),
       expect.objectContaining({
+        errorId: expect.any(String),
         refundId: 're_pending_then_paid',
-        chargeId: 'ch_updated',
-        status: 'failed',
-        failureReason: 'lost_or_stolen_card',
+        failureReason: 'expired_or_canceled_card',
       })
+    );
+    const charge = { id: 'ch_updated', amountCents: 3000 };
+    expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
+    expect(mockProcessRefund).toHaveBeenCalledWith(
+      'pi_updated',
+      expect.objectContaining({
+        charge,
+        stripeRefundId: 're_pending_then_paid',
+      })
+    );
+    // Recorded before the clawback, so support sees it while a step retries.
+    expect(mockRecordFailedRefund.mock.invocationCallOrder[0]).toBeLessThan(
+      mockReverseSubscription.mock.invocationCallOrder[0] ?? 0
     );
   });
 
-  it("refund.updated on another environment's charge is ignored: the refund has no tag, so the charge's is read", async () => {
+  it('refund.failed is handled the same way, and a redelivery raises no second alert', async () => {
+    const bundle = buildContext();
+    const { stripe } = stripeWithCharge();
+    mockRecordFailedRefund.mockResolvedValue(false);
+
+    await handlePaymentWebhook(
+      {
+        ...refundUpdatedEvent({ status: 'failed', amount: 1000 }),
+        type: STRIPE_EVENTS.REFUND_FAILED,
+      } as Stripe.Event,
+      stripe,
+      bundle.context
+    );
+
+    expect(mockRecordFailedRefund).toHaveBeenCalledOnce();
+    expect(bundle.mock._obs.error).not.toHaveBeenCalled();
+    expect(mockReverseSubscription).toHaveBeenCalledOnce();
+  });
+
+  it("refund.updated canceled: nothing is clawed back or recorded, and the buyer's access is flagged for a person", async () => {
+    const bundle = buildContext();
+    const { stripe, retrieve } = stripeWithCharge();
+
+    await handlePaymentWebhook(
+      refundUpdatedEvent({ status: 'canceled' }),
+      stripe,
+      bundle.context
+    );
+
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(mockRecordFailedRefund).not.toHaveBeenCalled();
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
+    expect(mockProcessRefund).not.toHaveBeenCalled();
+    expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+      expect.stringContaining("check the buyer's access"),
+      expect.objectContaining({ errorId: expect.any(String) })
+    );
+  });
+
+  it("refund.updated on another environment's charge is ignored and not recorded: the refund has no tag, so the charge's is read", async () => {
     const bundle = buildContext({ ENVIRONMENT: 'production' });
     const { stripe } = stripeWithCharge({ codex_env: 'development' });
 
-    await handlePaymentWebhook(refundUpdatedEvent({}), stripe, bundle.context);
+    await handlePaymentWebhook(
+      refundUpdatedEvent({ status: 'failed', amount: 1000 }),
+      stripe,
+      bundle.context
+    );
 
+    expect(mockRecordFailedRefund).not.toHaveBeenCalled();
     expect(mockReverseSubscription).not.toHaveBeenCalled();
     expect(mockProcessRefund).not.toHaveBeenCalled();
   });

@@ -10327,7 +10327,7 @@ describe('SubscriptionService', () => {
     }
 
     /**
-     * The charge's succeeded refunds, as Stripe lists them (Codex-2hxff.8:
+     * The charge's settled refunds, as Stripe lists them (Codex-2hxff.8:
      * the clawback reads them from Stripe, not the event). Any other charge
      * has none, so a global sweep never applies them elsewhere.
      */

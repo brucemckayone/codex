@@ -55,7 +55,7 @@ import {
   findTransfersForPayouts,
   isDrainablePayout,
   type LedgerDeps,
-  listSucceededRefunds,
+  listClawableRefunds,
   markPayoutFailed,
   type OrganisationPayee,
   pendingReductionsFor,
@@ -4314,7 +4314,7 @@ export class SubscriptionService extends BaseService {
    * one-time purchase rows are PurchaseService.processRefund's, so running
    * both on every `charge.refunded` never reverses a transfer twice.
    *
-   * Each succeeded refund's share is recorded per slice (payout_reversals),
+   * Each refund's share is recorded per slice (payout_reversals),
    * so a redelivery does only what is left and a second partial refund is
    * clawed back too. A balance too low to cover it is a `refund_reviews` debt,
    * as for purchases (Codex-2hxff.8, D5).
@@ -4327,7 +4327,7 @@ export class SubscriptionService extends BaseService {
       {
         charge,
         source: { sourceType: 'subscription' },
-        refunds: () => listSucceededRefunds(this.stripe, charge.id),
+        refunds: () => listClawableRefunds(this.stripe, charge.id),
       }
     );
   }
