@@ -46,9 +46,10 @@ GROUP BY organization_id HAVING count(*) > 1;
 
 ### R2 — organisations with no active owner
 
-These get no ownership period, so **their share of every sale has no payee: it
-is logged and never recorded in the payouts ledger** (`Codex-2hxff.37`) — not
-paid later either, because there is no ledger row to release.
+These get no ownership period, so their share of every sale has no payee. Since
+PR #592 it is **held**, not lost: each slice is a pending `no_owner` row with no
+payee, logged as an error when recorded, and handed to whoever support makes
+the owner (`Codex-2hxff.37`). Until then nobody is paid it.
 
 ```sql
 SELECT o.id, o.slug, o.primary_connect_account_user_id AS pin
@@ -114,13 +115,89 @@ POST /api/admin/organizations/:orgId/owner      (admin-api, platform_owner)
   owner this way; add the person as an admin first.
 - Any previous owner becomes an admin; an open ownership offer is withdrawn;
   the team is emailed.
-- The new owner is paid for sales **from that moment on**. A sale between the
-  deploy and the assignment stays unrecorded.
+- The new owner is paid for sales **from that moment on**, and also receives
+  everything held for the organisation while it had no owner: the pending
+  `no_owner` rows move to them in the same transaction, and the response's
+  `heldPayoutsReleased` says how many and how much. A held slice whose sale
+  was refunded stays cancelled and is not handed over.
 
 As of 2026-10-13 production takes no real payments (it runs on the Stripe
-sandbox; see [status.md](status.md#decisions)), so assigning owners straight
-after the deploy loses nothing. Once real payments
-start, every R2 row must have an owner **before** a release like this one.
+sandbox; see [status.md](status.md#decisions)). With held slices, assigning
+owners after the deploy loses nothing either way; it only delays the payee.
+
+---
+
+## Before the deploy: one ledger row per slice (migration `0099`, PR #592)
+
+**What changes.** `0099` makes every payout slice unique per charge
+(`uq_payouts_org_slice_per_charge`, `uq_payouts_creator_slice_per_charge`) and
+lets the drains retry `failed` rows (`Codex-2hxff.11`). Two things in today's
+data can get in the way.
+
+### R5 — duplicate slices
+
+A duplicate slice already in the table (the bug `0099` fixes) makes its unique
+index fail. `db:migrate` runs this same query itself before applying **any**
+pending migration and stops with the database untouched if it returns a row
+(`packages/database/scripts/migration-preflight.ts`), so the deploy cannot fail
+halfway. Run it first anyway, so each duplicate is decided before deploy day.
+
+```sql
+-- Org slices: one per charge whoever the payee is
+SELECT stripe_charge_id, payout_type, count(*) AS n,
+       array_agg(user_id ORDER BY created_at) AS payees,
+       array_agg(status ORDER BY created_at) AS statuses,
+       array_agg(id ORDER BY created_at) AS ids
+FROM payouts
+WHERE stripe_charge_id IS NOT NULL
+  AND payout_type IN ('organization_fee', 'creator_payout_to_owner')
+GROUP BY stripe_charge_id, payout_type
+HAVING count(*) > 1
+UNION ALL
+-- Creator slices: one per charge per creator
+SELECT stripe_charge_id, payout_type, count(*),
+       array_agg(user_id ORDER BY created_at),
+       array_agg(status ORDER BY created_at),
+       array_agg(id ORDER BY created_at)
+FROM payouts
+WHERE stripe_charge_id IS NOT NULL AND payout_type = 'creator_payout'
+GROUP BY stripe_charge_id, payout_type, user_id
+HAVING count(*) > 1;
+```
+
+- **No rows:** nothing to do.
+- **Rows:** decide each one before deploying. Two `paid` rows mean the slice
+  was paid twice: reverse one transfer in Stripe, then keep the row that
+  matches the transfer left standing. Never delete a row that carries a
+  transfer id; mark the extra row `reversed`.
+
+### R6 — failed rows written before this release
+
+The drains now retry `failed` rows, but only those this ledger attempted. The
+old write paths recorded no attempt (`last_retry_at` empty), and the transfer
+they called failed may have landed anyway (a timeout, a reset connection) under
+metadata no lookup can match. Retrying them could pay twice, so the drains
+leave them alone.
+
+```sql
+SELECT id, user_id, organization_id, payout_type, amount_cents,
+       stripe_charge_id, purchase_id, subscription_id, course_subscription_id,
+       created_at
+FROM payouts
+WHERE status = 'failed' AND last_retry_at IS NULL
+ORDER BY created_at;
+```
+
+For each row, look in Stripe for a transfer to the payee's account around
+`created_at`, matching the amount and the source id in its metadata:
+
+- **Found:** set the row `paid`, with that `stripe_transfer_id` and
+  `resolved_at`.
+- **Not found:** set `last_retry_at = now() - interval '11 minutes'`, so the
+  next drain sends it.
+- **Its sale was refunded:** set it `cancelled_by_refund`. Old course
+  subscription rows may have no `stripe_charge_id`, so a refund never found
+  them; check the source's refund state.
 
 ---
 
