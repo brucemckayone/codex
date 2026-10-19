@@ -3,7 +3,10 @@
 Where the code does not yet meet this specification, the decisions the
 specification rests on, and what is still undecided.
 
-Last reviewed: 2026-10-14.
+Last reviewed: 2026-10-19.
+
+How the remaining work should be organised in the code, and in what order, is
+in [architecture.md](architecture.md) (agreed by the owner 2026-10-19).
 
 ---
 
@@ -22,10 +25,10 @@ all of these fixes in together as one PR"), then agreed to add the portal
 lockdown (`.4`) and environment tagging (`.5`) ("Include both"). Follow-ups:
 `Codex-2hxff.35` (production's price-change email wording — fixed by migration
 `0098`), `Codex-2hxff.36` (dropping the retired Connect pin column), and the
-pre-merge review's findings, `Codex-2hxff.37`–`.46`. Of those, `.37` matters
-before the production deploy: an organisation with no active owner has no
-payee, so its org slice is logged and never recorded. The production checks to
-run around that release (R1–R4) are in [release-checklist.md](release-checklist.md).
+pre-merge review's findings, `Codex-2hxff.37`–`.46`. Of those, `.37` (an
+organisation with no active owner had no payee, so its slice was dropped) was
+fixed by PR 2 below. The production checks to run around these releases
+(R1–R6) are in [release-checklist.md](release-checklist.md).
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
@@ -54,6 +57,9 @@ run around that release (R1–R4) are in [release-checklist.md](release-checklis
 | `Codex-2hxff.32` | P1 | Every one-off content and course price is at least £1.00 (tiers and course plans already are) | [purchases](purchases.md#what-can-be-bought) |
 | `Codex-2hxff.33` | P2 | A fee increase applies 30 days after an email; a decrease at once | [fees-and-splits](fees-and-splits.md#fee-configuration) |
 | `Codex-2hxff.34` | P3 | Creators are reminded monthly about money waiting for them | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
+| `Codex-2hxff.50` | P1 | Course-subscription invoices record their payouts (the charge is found through the invoice's PaymentIntent) | [connect-and-payouts](connect-and-payouts.md#the-payouts-ledger) |
+| `Codex-2hxff.51` | P2 | A subscription refund claws back every slice even when one row fails | [subscriptions](subscriptions.md#refunds) |
+| `Codex-2hxff.52` | P2 | Pausing, resuming, a failed payment and a trial ending work for course subscriptions as for tiers | [subscriptions](subscriptions.md#lifecycle-and-access) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
 
@@ -72,7 +78,8 @@ are reconciled by hand (R6).
 
 Follow-ups from its review: `Codex-2hxff.47` (a transfer to a replaced Connect
 account is not found), `Codex-2hxff.48` (failed rows retry forever) and
-`Codex-2hxff.49` (a replay re-splits with the current fees).
+`Codex-2hxff.49` (a replay re-splits with the current fees). The architecture
+survey of 2026-10-19 found `.50`–`.52` (rows above).
 
 Related open beads outside the epic: `Codex-in0g4` (refund reviews for subscriptions), `Codex-rtwpv` (fee writes not
 atomic), `Codex-sing6` (tier-change epic), `Codex-1ilxl` (account-wide seed
