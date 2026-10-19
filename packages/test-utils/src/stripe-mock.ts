@@ -273,6 +273,25 @@ export function createMockStripe(): Stripe {
         data: [],
         has_more: false,
       })),
+      // refund.updated names only the charge id; the webhook reads its
+      // amount and metadata from here (Codex-2hxff.8). Tests override it.
+      retrieve: vi.fn().mockImplementation(async (id: string) => ({
+        id,
+        object: 'charge',
+        amount: 0,
+        metadata: {},
+      })),
+    },
+
+    // The clawback reads a charge's refunds from Stripe, not from the event
+    // (listSucceededRefunds, Codex-2hxff.8). Default: none, so a test that
+    // does not set them claws back nothing.
+    refunds: {
+      list: vi.fn().mockImplementation(async () => ({
+        object: 'list',
+        data: [],
+        has_more: false,
+      })),
     },
   };
 

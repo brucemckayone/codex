@@ -11,6 +11,7 @@ import {
   InternalServiceError,
   mapErrorToResponse,
   NotFoundError,
+  ServiceUnavailableError,
   wrapError,
 } from '@codex/service-errors';
 import { describe, expect, it } from 'vitest';
@@ -237,6 +238,27 @@ describe('isTransientError', () => {
     it('a single failure is judged as itself', () => {
       expect(isTransientError(incomplete(outage()))).toBe(true);
       expect(isTransientError(incomplete(bug()))).toBe(false);
+    });
+  });
+
+  // Codex-2hxff.8: a step that could not run YET (another delivery holds it,
+  // or a payout for the refund is being paid) asks Stripe to retry.
+  describe('a service saying "not yet"', () => {
+    it('a ServiceUnavailableError is transient, though thrown on purpose', () => {
+      expect(
+        isTransientError(
+          new ServiceUnavailableError('another delivery holds it')
+        )
+      ).toBe(true);
+    });
+
+    it('it is transient as the cause of an incomplete clawback too', () => {
+      const incomplete = new InternalServiceError(
+        'Refund clawback incomplete',
+        undefined,
+        { cause: new ServiceUnavailableError('payout in flight') }
+      );
+      expect(isTransientError(incomplete)).toBe(true);
     });
   });
 

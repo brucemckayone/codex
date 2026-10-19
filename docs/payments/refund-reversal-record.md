@@ -23,7 +23,7 @@ The clawback engine (`@codex/payments` `reverseCharge`) has no record of which r
 
 For each refund of a charge, and each payout slice of that charge:
 
-- the refund's share of the slice is `floor(slice.amountCents × refund.amount / charge.amount)`. The denominator is the **Stripe charge amount** for every source (D1); the rounding stays with the platform;
+- the refund's share of the slice is `floor(gross × refunded-so-far / charge) − floor(gross × refunded-before / charge)`, with refunds ordered by Stripe's `created`. That is the spec's "same fraction, rounded down" applied cumulatively, so refunds that add up to the whole charge reverse each slice's gross exactly. The denominator is the **Stripe charge amount** for every source (D1); a partial refund's rounding stays with the platform;
 - a **paid** slice: that share is reversed with `transfers.createReversal`;
 - a **pending or failed** slice: a full refund cancels it (`cancelled_by_refund`, as today); a partial refund **reduces** it by that share before it is paid;
 - the **platform fee**: no transfer, so the share is recorded and absorbed;
@@ -81,10 +81,12 @@ What stays the same:
   - **The one gap:** a refund older than this change, on a charge that is refunded again later. Its share would be reversed a second time. To close it, step 2 skips any slice already `reversed` with no record (that is today's semantics), with a test.
 - Existing `refund_reviews` rows stay readable: `payout_reversal_id` is null on them.
 
-## 6. What the behaviour PR deletes and flips
+## 6. What the behaviour PR deletes and replaces
 
-- **Deleted from `profileFor`:** `denominator` (D1), `where` (D8), `retriesIncompleteCancels` (D2), `reversalFailedHasErrorId` and `messages` (one log vocabulary), `reversalMetadata` (source fields read from the row), `onInsufficientFunds` (one debt path). The profile is gone.
-- **Characterisation tests flipped:** 2, 3, 5, 6, 8 (the key and zero-amount cases), and 11 (selection) in both files, each renamed from "(defect)" to the spec behaviour.
+- **The per-source profile is gone.** One path runs for every source. Row scoping is the only difference left: a purchase's rows by its id, which covers rows recorded before charge ids were (D8), and a subscription's by charge id.
+- **The characterisation suites are replaced.** They pinned the old copies, defects included, so that the extraction (WP3b-2) could be proven to change nothing. Behaviour is now specified in `packages/payments/src/__tests__/clawback.integration.test.ts` (the engine). Two wiring suites cover each source: `refund-clawback.integration.test.ts` (@codex/purchase) and `subscription-refund-clawback.integration.test.ts` (@codex/subscription). A mutation probe of the engine suite turned the matching tests red for each of: per-refund rounding, an attempt that never advances, rejecting on a Stripe refusal, and reducing a slice a drain holds.
+- **A step Stripe refused does not reject the call.** A redelivery would get the same answer, and rejecting would end the webhook before the refund email. The hourly cron (`retryFailedClawbacks`) retries it with the next attempt's key, up to 5 attempts.
+- **A step that could not run YET is a `ServiceUnavailableError` (503),** which the webhook treats as transient. That covers another delivery holding the step, or a drain paying the slice.
 
 ## 7. Owner decisions (2026-10-19, all as recommended)
 

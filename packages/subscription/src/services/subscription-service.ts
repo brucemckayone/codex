@@ -50,17 +50,21 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  type ClawbackCharge,
   claimPayoutAttempts,
   findTransfersForPayouts,
   isDrainablePayout,
   type LedgerDeps,
+  listSucceededRefunds,
   markPayoutFailed,
   type OrganisationPayee,
+  pendingReductionsFor,
   recordPlatformFee,
   recordSlice,
   renewPayoutAttempt,
   resolveInvoiceCharge,
   resolveOrganisationPayee,
+  retryFailedClawbacks,
   reverseCharge,
   settlePayoutPaid,
   settleTransfer,
@@ -3724,7 +3728,17 @@ export class SubscriptionService extends BaseService {
       sourceType === 'purchase' ? 'one_off' : 'subscription',
       userId
     );
-    const totalCents = group.reduce((sum, row) => sum + row.amountCents, 0);
+    // Partial refunds reduce an unpaid slice before it is paid (Codex-2hxff.8).
+    // This read only gates the group; the amounts sent are re-read below,
+    // after the claim, when no reduction can change under the transfer.
+    const gateReductions = await pendingReductionsFor(
+      this.db,
+      group.map((row) => row.id)
+    );
+    const totalCents = group.reduce(
+      (sum, row) => sum + row.amountCents - (gateReductions.get(row.id) ?? 0),
+      0
+    );
 
     if (totalCents < payoutFees.minTransferCents) {
       this.obs.info(
@@ -3757,6 +3771,12 @@ export class SubscriptionService extends BaseService {
       group.map((payout) => payout.id)
     );
     const claimed = group.filter((payout) => attempts.has(payout.id));
+    const reductions = await pendingReductionsFor(
+      this.db,
+      claimed.map((payout) => payout.id)
+    );
+    const payable = (payout: (typeof group)[number]) =>
+      payout.amountCents - (reductions.get(payout.id) ?? 0);
     const alreadySent = await findTransfersForPayouts(
       this.stripe,
       stripeAccountId,
@@ -3767,7 +3787,7 @@ export class SubscriptionService extends BaseService {
     const paid = (payout: (typeof group)[number]) => {
       resolved++;
       if (payout.payoutType === 'creator_payout') {
-        creatorPaidCents += payout.amountCents;
+        creatorPaidCents += payable(payout);
         creatorPaidCount++;
       }
     };
@@ -3809,6 +3829,20 @@ export class SubscriptionService extends BaseService {
         continue;
       }
 
+      const amountCents = payable(payout);
+      if (amountCents <= 0) {
+        // Reduced to nothing: only a refund of the whole charge does that, and
+        // it cancels the row instead, so this is a ledger inconsistency.
+        failed++;
+        this.obs.error('A pending payout was reduced to nothing; not sent', {
+          errorId: crypto.randomUUID(),
+          pendingPayoutId: payout.id,
+          grossCents: payout.amountCents,
+          reducedCents: reductions.get(payout.id) ?? 0,
+        });
+        continue;
+      }
+
       let transfer: Stripe.Transfer;
       try {
         // GBP-only enforcement (Codex-yv18n) lives INSIDE the per-row
@@ -3825,7 +3859,7 @@ export class SubscriptionService extends BaseService {
         // charge's source-linked balance, not general platform balance.
         transfer = await this.stripe.transfers.create(
           {
-            amount: payout.amountCents,
+            amount: amountCents,
             currency: payoutCurrency,
             destination: stripeAccountId,
             ...(payout.stripeChargeId
@@ -3847,7 +3881,7 @@ export class SubscriptionService extends BaseService {
         this.obs.error('Failed to resolve pending payout', {
           pendingPayoutId: payout.id,
           subscriptionId: payout.subscriptionId,
-          amountCents: payout.amountCents,
+          amountCents,
           sourceType,
           error: (error as Error).message,
         });
@@ -4280,18 +4314,34 @@ export class SubscriptionService extends BaseService {
    * one-time purchase rows are PurchaseService.processRefund's, so running
    * both on every `charge.refunded` never reverses a transfer twice.
    *
-   * insufficient_funds is logged with an errorId and the row left `paid`:
-   * `refund_reviews.purchaseId` is NOT NULL, so a subscription obligation
-   * cannot be queued there yet (Codex-13v21 follow-up).
+   * Each succeeded refund's share is recorded per slice (payout_reversals),
+   * so a redelivery does only what is left and a second partial refund is
+   * clawed back too. A balance too low to cover it is a `refund_reviews` debt,
+   * as for purchases (Codex-2hxff.8, D5).
    */
   async reverseSubscriptionPayoutsForCharge(
-    chargeId: string,
-    refund: { refundAmountCents: number | null; stripeRefundId: string | null }
+    charge: ClawbackCharge
   ): Promise<void> {
     await reverseCharge(
       { ...this.ledger(), obs: this.obs },
-      { sourceType: 'subscription', chargeId },
-      refund
+      {
+        charge,
+        source: { sourceType: 'subscription' },
+        refunds: () => listSucceededRefunds(this.stripe, charge.id),
+      }
+    );
+  }
+
+  /**
+   * The hourly retry of clawback steps left `failed`, for every source: a
+   * step Stripe refused does not make the webhook retry (Codex-2hxff.8).
+   */
+  async retryFailedClawbacks(
+    olderThanMinutes = 15
+  ): Promise<{ charges: number; retried: number; stillFailing: number }> {
+    return retryFailedClawbacks(
+      { ...this.ledger(), obs: this.obs },
+      { olderThanMinutes }
     );
   }
 

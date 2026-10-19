@@ -23,7 +23,8 @@ export type ErrorStatusCode =
   | 409
   | 422
   | 429
-  | 500;
+  | 500
+  | 503;
 
 /**
  * Base error class for all service errors
@@ -168,6 +169,19 @@ export class InternalServiceError extends ServiceError {
     options?: ErrorOptions
   ) {
     super(message, 'INTERNAL_ERROR', 500, context, options);
+  }
+}
+
+/**
+ * Service unavailable (503)
+ * Thrown on purpose when the work could not be done YET and a retry will
+ * succeed: another worker holds the row, say. Unlike a ServiceError thrown on
+ * purpose, it is transient, so a Stripe webhook gets a 500 and redelivers
+ * (Codex-2hxff.8).
+ */
+export class ServiceUnavailableError extends ServiceError {
+  constructor(message: string, context?: Record<string, unknown>) {
+    super(message, 'SERVICE_UNAVAILABLE', 503, context);
   }
 }
 

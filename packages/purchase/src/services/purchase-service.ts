@@ -39,7 +39,9 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  type ClawbackCharge,
   type LedgerDeps,
+  listSucceededRefunds,
   recordPlatformFee,
   recordSlice,
   resolveOrganisationPayee,
@@ -1838,12 +1840,18 @@ export class PurchaseService extends BaseService {
    * 1. Ensure the purchase row exists (self-heal ordering race #4, Codex-aa08z)
    * 2. Update purchase status to 'refunded'
    * 3. Revoke content access (soft delete)
+   * 4. Claw back each succeeded refund's share of the payout slices
    *
-   * Idempotent: If purchase is already refunded, this is a no-op.
+   * Idempotent. An already-refunded purchase skips steps 2-3 but still runs
+   * step 4: what each refund did is recorded per slice (payout_reversals), so
+   * a redelivery does only what is left, and a later partial refund of the
+   * same charge is clawed back too (Codex-2hxff.8).
    */
   async processRefund(
     paymentIntentId: string,
-    refundDetails?: {
+    refundDetails: {
+      /** The refunded charge: its id and amount, the clawback's denominator. */
+      charge: ClawbackCharge;
       stripeRefundId?: string;
       refundAmountCents?: number;
       refundReason?: string;
@@ -1868,6 +1876,8 @@ export class PurchaseService extends BaseService {
           purchaseId: purchase.id,
           paymentIntentId,
         });
+        // The purchase is recorded; the clawback is not gated by it.
+        await this.clawBackRefunds(purchase.id, refundDetails.charge);
         return { userId: purchase.customerId };
       }
 
@@ -1917,27 +1927,11 @@ export class PurchaseService extends BaseService {
           );
       });
 
-      // Step: claw back the payout slices (Codex-h69cg) through the shared
-      // engine (@codex/payments clawback, Codex-2hxff.56). Out-of-transaction
-      // because it talks to Stripe; per-row error isolation so one bad
-      // reversal can never block the refund acknowledgement (the refund is
-      // already recorded on the purchases row above).
-      //
-      // Codex-d9t5r / DQ-7: refundAmountCents drives proportional reversal;
-      // stripeRefundId keys the Stripe idempotency suffix so two separate
-      // refund events of equal pence value don't collide.
-      await reverseCharge(
-        { ...this.ledger(), obs: this.obs },
-        {
-          sourceType: 'purchase',
-          purchaseId: purchase.id,
-          amountPaidCents: purchase.amountPaidCents,
-        },
-        {
-          refundAmountCents: refundDetails?.refundAmountCents ?? null,
-          stripeRefundId: refundDetails?.stripeRefundId ?? null,
-        }
-      );
+      // Step: claw back the payout slices (Codex-h69cg), out of the
+      // transaction because it talks to Stripe. The purchase is already
+      // recorded refunded above; a clawback step that must be retried rejects
+      // after every other step, and the webhook's 500 has Stripe redeliver.
+      await this.clawBackRefunds(purchase.id, refundDetails.charge);
 
       this.obs.info('Refund processed', {
         purchaseId: purchase.id,
@@ -1954,6 +1948,26 @@ export class PurchaseService extends BaseService {
     } catch (error) {
       this.handleError(error, 'processRefund');
     }
+  }
+
+  /**
+   * Claw back each succeeded refund of the charge from this purchase's
+   * payout slices (@codex/payments `reverseCharge`, Codex-2hxff.56, .8).
+   * Only succeeded refunds are clawed back; one still pending is clawed back
+   * when `refund.updated` re-runs processRefund (owner decision Q1).
+   */
+  private async clawBackRefunds(
+    purchaseId: string,
+    charge: ClawbackCharge
+  ): Promise<void> {
+    await reverseCharge(
+      { ...this.ledger(), obs: this.obs },
+      {
+        charge,
+        source: { sourceType: 'purchase', purchaseId },
+        refunds: () => listSucceededRefunds(this.stripe, charge.id),
+      }
+    );
   }
 
   /**

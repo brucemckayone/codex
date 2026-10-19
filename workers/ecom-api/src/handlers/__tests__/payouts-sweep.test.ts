@@ -6,13 +6,23 @@
  *   - does NOT throw when the service rejects (cron crash protection)
  *   - exits cleanly when required env vars are missing
  *   - forwards `olderThanMinutes` override to the service
+ *   - then retries failed refund clawbacks, isolated from the sweep
+ *     (Codex-2hxff.8)
  *
  * Consolidated into workers/ecom-api 2026-05-13. Lives alongside the Stripe
  * webhook handlers because the cron + the Stripe webhooks share an owner.
  */
 
 import { SubscriptionService } from '@codex/subscription';
-import { describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type MockInstance,
+  vi,
+} from 'vitest';
 
 import { runPayoutsSweep, runScheduledPayoutsSweep } from '../payouts-sweep';
 
@@ -63,6 +73,18 @@ function makeObs(): {
 }
 
 describe('ecom-api payouts-sweep handler', () => {
+  // The cron also retries failed clawbacks after the sweep. These tests are
+  // about the sweep, so the retry is a no-op here; its own tests are below.
+  let clawbackRetry: MockInstance<SubscriptionService['retryFailedClawbacks']>;
+  beforeEach(() => {
+    clawbackRetry = vi
+      .spyOn(SubscriptionService.prototype, 'retryFailedClawbacks')
+      .mockResolvedValue({ charges: 0, retried: 0, stillFailing: 0 });
+  });
+  afterEach(() => {
+    clawbackRetry.mockRestore();
+  });
+
   it('runPayoutsSweep delegates to SubscriptionService.sweepUnresolvedPayouts and logs the result', async () => {
     // Build a SubscriptionService-shaped stub by passing a pre-built db
     // that the real SubscriptionService constructor won't actually touch
@@ -286,7 +308,11 @@ describe('ecom-api payouts-sweep handler', () => {
     // Critical: NOT routed to obs.error — the handler-level error path is
     // reserved for top-level rejections (DB outage, etc.), not per-group
     // failures the service already handled.
-    expect(obs.info).toHaveBeenCalledTimes(1);
+    expect(
+      vi
+        .mocked(obs.info)
+        .mock.calls.filter(([m]) => m === 'payouts-sweep cron completed')
+    ).toHaveLength(1);
     expect(obs.error).not.toHaveBeenCalled();
 
     spy.mockRestore();
@@ -334,5 +360,68 @@ describe('ecom-api payouts-sweep handler', () => {
     expect(obs.error).not.toHaveBeenCalled();
 
     spy.mockRestore();
+  });
+
+  it('then retries failed refund clawbacks with the same age threshold, and logs the result (Codex-2hxff.8)', async () => {
+    const sweep = vi
+      .spyOn(SubscriptionService.prototype, 'sweepUnresolvedPayouts')
+      .mockResolvedValue({
+        groupsScanned: 0,
+        groupsResolved: 0,
+        groupsSkipped: 0,
+        errors: 0,
+      });
+    clawbackRetry.mockResolvedValue({
+      charges: 2,
+      retried: 1,
+      stillFailing: 1,
+    });
+    const { obs } = makeObs();
+
+    await runPayoutsSweep({
+      subscription: sweepService(),
+      obs: obs as never,
+      olderThanMinutes: 30,
+    });
+
+    expect(clawbackRetry).toHaveBeenCalledWith(30);
+    expect(sweep.mock.invocationCallOrder[0] ?? 0).toBeLessThan(
+      clawbackRetry.mock.invocationCallOrder[0] ?? 0
+    );
+    expect(obs.info).toHaveBeenCalledWith(
+      'payouts-sweep cron retried failed clawbacks',
+      expect.objectContaining({ charges: 2, retried: 1, stillFailing: 1 })
+    );
+    sweep.mockRestore();
+  });
+
+  it('a clawback retry that throws is logged and never fails the cron: the sweep result is still returned', async () => {
+    const counters = {
+      groupsScanned: 1,
+      groupsResolved: 1,
+      groupsSkipped: 0,
+      errors: 0,
+    };
+    const sweep = vi
+      .spyOn(SubscriptionService.prototype, 'sweepUnresolvedPayouts')
+      .mockResolvedValue(counters);
+    clawbackRetry.mockRejectedValue(new Error('database unavailable (test)'));
+    const { obs } = makeObs();
+
+    const result = await runPayoutsSweep({
+      subscription: sweepService(),
+      obs: obs as never,
+    });
+
+    expect(result).toEqual(counters);
+    expect(obs.error).toHaveBeenCalledWith(
+      'payouts-sweep cron could not retry failed clawbacks',
+      expect.objectContaining({ error: 'database unavailable (test)' })
+    );
+    expect(obs.error).not.toHaveBeenCalledWith(
+      'payouts-sweep cron failed at top level',
+      expect.anything()
+    );
+    sweep.mockRestore();
   });
 });

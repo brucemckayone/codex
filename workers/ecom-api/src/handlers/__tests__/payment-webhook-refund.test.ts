@@ -178,6 +178,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   let mockStripe: Stripe;
   let mockRelease: ReturnType<typeof vi.fn>;
   let mockProcessRefund: ReturnType<typeof vi.fn>;
+  let mockReverseSubscription: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -189,6 +190,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     mockClear.mockResolvedValue(undefined);
 
     mockProcessRefund = vi.fn().mockResolvedValue(undefined);
+    mockReverseSubscription = vi.fn().mockResolvedValue(undefined);
     mockRelease = vi.fn();
     mockStripe = {} as Stripe;
 
@@ -201,7 +203,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
         },
         // charge.refunded reverses subscription payouts first (Codex-13v21).
         subscription: {
-          reverseSubscriptionPayoutsForCharge: vi.fn(),
+          reverseSubscriptionPayoutsForCharge: mockReverseSubscription,
         },
       } as unknown as WebhookServices['services'],
       background: (promise) => promise,
@@ -386,11 +388,121 @@ describe('handlePaymentWebhook — charge.refunded', () => {
 
     await handlePaymentWebhook(event, mockStripe, bundle.context);
 
+    // The charge (id + amount) is the clawback's denominator for both
+    // sources (Codex-2hxff.8, D1).
+    const charge = { id: 'ch_test_refund', amountCents: 1999 };
+    expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
     expect(mockProcessRefund).toHaveBeenCalledWith('pi_meta', {
+      charge,
       stripeRefundId: 're_meta',
       refundAmountCents: 500,
       refundReason: 'fraudulent',
     });
+  });
+
+  // ── refund.updated (Codex-2hxff.8, owner decision Q1) ────────────────
+  // A refund still pending when charge.refunded arrived is clawed back once
+  // it has succeeded. The refund was recorded and its email sent already.
+
+  function refundUpdatedEvent(refund: Record<string, unknown>): Stripe.Event {
+    return {
+      id: `evt_refund_updated_${Math.random().toString(36).slice(2)}`,
+      type: STRIPE_EVENTS.REFUND_UPDATED,
+      data: {
+        object: {
+          id: 're_pending_then_paid',
+          object: 'refund',
+          charge: 'ch_updated',
+          status: 'succeeded',
+          reason: 'requested_by_customer',
+          ...refund,
+        },
+      },
+    } as unknown as Stripe.Event;
+  }
+
+  function stripeWithCharge(metadata: Record<string, string> = {}) {
+    const retrieve = vi.fn().mockResolvedValue({
+      id: 'ch_updated',
+      amount: 3000,
+      amount_refunded: 1000,
+      payment_intent: 'pi_updated',
+      metadata,
+    });
+    return {
+      stripe: { charges: { retrieve } } as unknown as Stripe,
+      retrieve,
+    };
+  }
+
+  it('refund.updated succeeded: claws back both sources on the retrieved charge, sends no email', async () => {
+    const bundle = buildContext();
+    const { stripe, retrieve } = stripeWithCharge();
+
+    await handlePaymentWebhook(refundUpdatedEvent({}), stripe, bundle.context);
+
+    expect(retrieve).toHaveBeenCalledWith('ch_updated');
+    const charge = { id: 'ch_updated', amountCents: 3000 };
+    expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
+    expect(mockProcessRefund).toHaveBeenCalledWith('pi_updated', {
+      charge,
+      stripeRefundId: 're_pending_then_paid',
+      refundAmountCents: 1000,
+      refundReason: 'requested_by_customer',
+    });
+    expect(sendEmailToWorker).not.toHaveBeenCalled();
+    expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  it('refund.updated still pending: nothing is clawed back and Stripe is not asked', async () => {
+    const bundle = buildContext();
+    const { stripe, retrieve } = stripeWithCharge();
+
+    await handlePaymentWebhook(
+      refundUpdatedEvent({ status: 'pending' }),
+      stripe,
+      bundle.context
+    );
+
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
+    expect(mockProcessRefund).not.toHaveBeenCalled();
+  });
+
+  it('refund.updated failed: no clawback runs, and the re-payment a person must make is logged with an errorId', async () => {
+    const bundle = buildContext();
+    const { stripe } = stripeWithCharge();
+
+    await handlePaymentWebhook(
+      refundUpdatedEvent({
+        status: 'failed',
+        failure_reason: 'lost_or_stolen_card',
+      }),
+      stripe,
+      bundle.context
+    );
+
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
+    expect(mockProcessRefund).not.toHaveBeenCalled();
+    expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('must be re-paid by hand'),
+      expect.objectContaining({
+        refundId: 're_pending_then_paid',
+        chargeId: 'ch_updated',
+        status: 'failed',
+        failureReason: 'lost_or_stolen_card',
+      })
+    );
+  });
+
+  it("refund.updated on another environment's charge is ignored: the refund has no tag, so the charge's is read", async () => {
+    const bundle = buildContext({ ENVIRONMENT: 'production' });
+    const { stripe } = stripeWithCharge({ codex_env: 'development' });
+
+    await handlePaymentWebhook(refundUpdatedEvent({}), stripe, bundle.context);
+
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
+    expect(mockProcessRefund).not.toHaveBeenCalled();
   });
 
   it('passes £-formatted refundAmount to the refund-processed email template', async () => {

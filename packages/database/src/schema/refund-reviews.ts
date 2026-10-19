@@ -14,11 +14,18 @@
  * reversal failed, creatorUserId is the recipient who owes the balance,
  * attemptedReversalCents is the figure we tried to claw back. The
  * `resolution` enum is populated only when ops marks the row resolved.
+ *
+ * One row per debt, for every source (Codex-2hxff.8, D5): each row points at
+ * the `payout_reversals` row that could not be covered, and the source
+ * (purchase or subscription) is read from the payout. `purchaseId` is set for
+ * a purchase's debt and null for a subscription's; rows written before
+ * payoutReversalId existed have it null.
  */
 
 import { relations, sql } from 'drizzle-orm';
 import {
   check,
+  index,
   integer,
   pgTable,
   text,
@@ -28,6 +35,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 import { purchases } from './ecommerce';
+import { payoutReversals } from './payout-reversals';
 import { payouts } from './payouts';
 import { users } from './users';
 
@@ -35,12 +43,18 @@ export const refundReviews = pgTable(
   'refund_reviews',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    purchaseId: uuid('purchase_id')
-      .notNull()
-      .references(() => purchases.id, { onDelete: 'restrict' }),
+    /** The purchase, for a purchase's debt; null for a subscription's. */
+    purchaseId: uuid('purchase_id').references(() => purchases.id, {
+      onDelete: 'restrict',
+    }),
     payoutId: uuid('payout_id')
       .notNull()
       .references(() => payouts.id, { onDelete: 'restrict' }),
+    /** The reversal this debt is for. Null only on rows written before it existed. */
+    payoutReversalId: uuid('payout_reversal_id').references(
+      () => payoutReversals.id,
+      { onDelete: 'restrict' }
+    ),
     creatorUserId: text('creator_user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
@@ -60,11 +74,13 @@ export const refundReviews = pgTable(
       .notNull(),
   },
   (table) => [
-    // Stripe webhook replays would otherwise insert duplicate rows. Only
-    // one OPEN review row per payout makes sense at a time; once resolved,
-    // history can accumulate (a creator who gets clawed back, withdraws
-    // again, and lands a second insufficient_funds is a real scenario).
-    uniqueIndex('uq_refund_reviews_open_per_payout')
+    // One debt per reversal: a replay collapses onto it, and two refunds of
+    // one charge that each hit insufficient funds are two debts, not one
+    // (Codex-2hxff.8). It replaces the one-open-row-per-payout index.
+    uniqueIndex('uq_refund_reviews_per_reversal')
+      .on(table.payoutReversalId)
+      .where(sql`${table.payoutReversalId} IS NOT NULL`),
+    index('idx_refund_reviews_open')
       .on(table.payoutId)
       .where(sql`${table.resolvedAt} IS NULL`),
     check(
@@ -90,6 +106,10 @@ export const refundReviewsRelations = relations(refundReviews, ({ one }) => ({
   payout: one(payouts, {
     fields: [refundReviews.payoutId],
     references: [payouts.id],
+  }),
+  payoutReversal: one(payoutReversals, {
+    fields: [refundReviews.payoutReversalId],
+    references: [payoutReversals.id],
   }),
   creator: one(users, {
     fields: [refundReviews.creatorUserId],

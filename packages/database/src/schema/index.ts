@@ -18,6 +18,7 @@ export * from './journeys';
 export * from './notifications';
 export * from './organization-ownership';
 export * from './organizations';
+export * from './payout-reversals';
 export * from './payouts';
 export * from './playback';
 export * from './refund-reviews';

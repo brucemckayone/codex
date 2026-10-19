@@ -7,11 +7,18 @@
  * an extraction that changes no behaviour.
  */
 
-// Reverse a refunded charge's payout slices, for every source (Codex-2hxff.56)
+// Claw back each refund's share of a charge's payout slices, for every
+// source, recorded per slice per refund (Codex-2hxff.56, .8)
 export {
+  type ClawbackCharge,
   type ClawbackDeps,
   type ClawbackRefund,
   type ClawbackSource,
+  listSucceededRefunds,
+  MAX_CLAWBACK_ATTEMPTS,
+  pendingReductionsFor,
+  refundShare,
+  retryFailedClawbacks,
   reverseCharge,
 } from './clawback';
 // The charge an invoice payment settled on: the key every invoice payout

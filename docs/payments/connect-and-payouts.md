@@ -245,7 +245,7 @@ Rules:
 | Creator slice of a subscription invoice | `${chargeId}_creator_${creatorId}` |
 | Creator pool to the owner (no agreements) | `${chargeId}_creator_pool_owner` |
 | Draining a pending or failed row | `payout_${payoutId}_${attempt}` |
-| Reversing a transfer for a refund | `${transferId}_reversal_${refundId}` |
+| Reversing a transfer for a refund | `${transferId}_reversal_${refundId}_${attempt}` (the attempt advances only after Stripe refuses) |
 | Reversing a transfer that landed on a row a refund had cancelled | `${transferId}_reversal_surplus` |
 
 Never replace a key with something random or time-based "for freshness": that
@@ -306,7 +306,9 @@ alignment.
 ## Reversals
 
 Refunds and disputes reverse paid slices in proportion and adjust pending ones;
-see [refunds](purchases.md#refunds) and [disputes](purchases.md#disputes). When
+see [refunds](purchases.md#refunds) and [disputes](purchases.md#disputes). What
+each refund did to each slice is one `payout_reversals` row
+([design](refund-reversal-record.md)); the `payouts` row is never rewritten. When
 a payee's balance cannot cover a reversal, a `refund_reviews` row records the
 debt, and it is deducted from their next payouts until cleared — they are told,
 and the debt and each deduction show in their earnings.

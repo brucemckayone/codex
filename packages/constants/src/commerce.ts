@@ -16,6 +16,9 @@ export const STRIPE_EVENTS = {
   ACCOUNT_DEAUTHORIZED: 'account.application.deauthorized',
   // Refunds
   CHARGE_REFUNDED: 'charge.refunded',
+  // A refund's status changed. A refund still pending when charge.refunded
+  // arrived is clawed back once this reports it succeeded (Codex-2hxff.8).
+  REFUND_UPDATED: 'refund.updated',
   // Disputes (treated as refunds for access purposes — purchase.disputedAt
   // is set and contentAccess is soft-deleted via processDispute)
   CHARGE_DISPUTE_CREATED: 'charge.dispute.created',

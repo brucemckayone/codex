@@ -20,15 +20,21 @@ import * as schema from '@codex/database/schema';
 import {
   creatorOrganizationAgreements,
   organizations,
+  type PayoutReversal,
+  payoutReversals,
   payouts as payoutsTable,
+  refundReviews,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import { claimPayoutAttempt } from '@codex/payments';
+import { claimPayoutAttempt, MAX_CLAWBACK_ATTEMPTS } from '@codex/payments';
 import type { FeeConfigService } from '@codex/purchase';
-import { UnsupportedCurrencyError } from '@codex/service-errors';
+import {
+  InternalServiceError,
+  UnsupportedCurrencyError,
+} from '@codex/service-errors';
 import {
   createMockStripe,
   createMockStripeInvoice,
@@ -65,6 +71,18 @@ import {
   TierNotFoundError,
 } from '../../errors';
 import { SubscriptionService } from '../subscription-service';
+
+/**
+ * Empty the payouts ledger, for a test that reads it globally (the sweeps).
+ * payout_reversals and refund_reviews reference payouts ON DELETE RESTRICT
+ * (Codex-2hxff.8), so they go first: otherwise the delete fails on any record
+ * a refund test, here or in another suite, has left behind.
+ */
+async function clearPayoutsLedger(db: ReturnType<typeof setupTestDatabase>) {
+  await db.delete(refundReviews);
+  await db.delete(payoutReversals);
+  await db.delete(payoutsTable);
+}
 
 describe('SubscriptionService', () => {
   let db: ReturnType<typeof setupTestDatabase>;
@@ -8643,6 +8661,130 @@ describe('SubscriptionService', () => {
       expect(legacyCall![0]).not.toHaveProperty('source_transaction');
     });
 
+    // Codex-2hxff.8: a partial refund of an unpaid slice is recorded as a done
+    // pending_reduction, and the slice's gross is never rewritten, so the
+    // drain pays gross minus the row's done reductions.
+    describe('partial-refund reductions (Codex-2hxff.8)', () => {
+      async function seedReducedRow(slug: string) {
+        const { org, sub, stripeAccountId } =
+          await seedConnectAndSubscription(slug);
+        const row = takeFirst(
+          await db
+            .insert(payoutsTable)
+            .values({
+              userId: creatorId,
+              organizationId: org.id,
+              subscriptionId: sub.id,
+              amountCents: 1000,
+              currency: 'gbp',
+              reason: 'connect_not_ready',
+              status: 'pending',
+              payoutType: 'creator_payout',
+            })
+            .returning()
+        );
+        await db.insert(payoutReversals).values([
+          // A partial refund's share, taken off before the row is paid.
+          {
+            payoutId: row.id,
+            causeType: 'refund',
+            causeId: `re_${createUniqueSlug('reduced')}`,
+            amountCents: 250,
+            kind: 'pending_reduction',
+            status: 'done',
+          },
+          // One not yet done takes nothing off.
+          {
+            payoutId: row.id,
+            causeType: 'refund',
+            causeId: `re_${createUniqueSlug('recorded')}`,
+            amountCents: 100,
+            kind: 'pending_reduction',
+            status: 'pending',
+          },
+        ]);
+        return { org, stripeAccountId, row };
+      }
+
+      it('pays a pending row its gross minus its done reductions, and the payout email quotes the net', async () => {
+        const { org, stripeAccountId, row } =
+          await seedReducedRow('2hxff8-drain-net');
+        const payoutMailer = vi.fn();
+        const serviceWithMailer = new SubscriptionService(
+          { db, environment: 'test' as const, payoutMailer },
+          stripe
+        );
+        const transferSpy = vi.mocked(stripe.transfers.create);
+        transferSpy.mockClear();
+
+        const result = await serviceWithMailer.resolvePendingPayouts(
+          org.id,
+          stripeAccountId
+        );
+
+        expect(result).toEqual({ resolved: 1, failed: 0 });
+        expect(transferSpy).toHaveBeenCalledTimes(1);
+        expect(transferSpy.mock.calls[0]?.[0]).toMatchObject({
+          amount: 750,
+          currency: 'gbp',
+          destination: stripeAccountId,
+          metadata: { payout_id: row.id },
+        });
+        // Paid, and the ledger row keeps the slice's gross.
+        expect(
+          takeFirst(
+            await db
+              .select()
+              .from(payoutsTable)
+              .where(eq(payoutsTable.id, row.id))
+          )
+        ).toMatchObject({ status: 'paid', amountCents: 1000 });
+        expect(payoutMailer).toHaveBeenCalledOnce();
+        expect(payoutMailer.mock.calls[0]?.[0].data.amountFormatted).toBe(
+          '£7.50'
+        );
+      });
+
+      it('gates the min-transfer floor on the net amount', async () => {
+        const { org, stripeAccountId, row } =
+          await seedReducedRow('2hxff8-drain-floor');
+        // The gross (1000) clears the floor; the net (750) does not.
+        const floorStub = {
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 900,
+        };
+        const feeConfig = {
+          getFeesForCreator: vi.fn(async () => floorStub),
+          getFeesForOrg: vi.fn(async () => floorStub),
+          getFeesPlatform: vi.fn(async () => floorStub),
+        } as unknown as FeeConfigService;
+        const serviceWithFloor = new SubscriptionService(
+          { db, environment: 'test' as const, feeConfig },
+          stripe
+        );
+        const transferSpy = vi.mocked(stripe.transfers.create);
+        transferSpy.mockClear();
+
+        const result = await serviceWithFloor.resolvePendingPayouts(
+          org.id,
+          stripeAccountId
+        );
+
+        expect(result.resolved).toBe(0);
+        expect(transferSpy).not.toHaveBeenCalled();
+        expect(
+          takeFirst(
+            await db
+              .select()
+              .from(payoutsTable)
+              .where(eq(payoutsTable.id, row.id))
+          ).status
+        ).toBe('pending');
+      });
+    });
+
     // ─── WP-10 (Codex-69t7c.10): payout-released notification ─────────────────
     describe('payout-released notification (WP-10)', () => {
       /**
@@ -8980,8 +9122,7 @@ describe('SubscriptionService', () => {
     }
 
     it('resolvePendingPayouts drains an orgless creator_payout row (organizationId = NULL)', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       const { org, stripeAccountId } = await seedOrglessConnect('wp5-orgless');
 
@@ -9035,8 +9176,7 @@ describe('SubscriptionService', () => {
     });
 
     it('resolvePendingPayouts drains orgless AND org-scoped rows for the same creator in one pass', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       const { org, tier1, stripeAccountId } =
         await createFullOrgWithDeterministicAccount('wp5-mixed');
@@ -9111,8 +9251,7 @@ describe('SubscriptionService', () => {
     });
 
     it('sweepUnresolvedPayouts drains an orgless creator_payout group (organizationId = NULL, userId present)', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       const { stripeAccountId } = await seedOrglessConnect('wp5-sweep-orgless');
 
@@ -9165,8 +9304,7 @@ describe('SubscriptionService', () => {
     });
 
     it('sweepUnresolvedPayouts still skips genuinely unroutable rows (userId IS NULL)', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       // A pending row with NO recipient userId is genuinely unroutable. (We
       // use payoutType 'creator_payout_to_owner' only to satisfy the
@@ -9208,8 +9346,7 @@ describe('SubscriptionService', () => {
     // that transaction was committing is invisible to its UPDATE, and nothing
     // else would ever move it; the sweep gives it to the owner it missed.
     it('sweepUnresolvedPayouts re-homes a held slice the ownership hand-over missed', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
       const org = takeFirst(
         await db
           .insert(schema.organizations)
@@ -9264,8 +9401,7 @@ describe('SubscriptionService', () => {
     });
 
     it('sweepUnresolvedPayouts leaves a held slice alone while the organisation still has no owner', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
       const org = takeFirst(
         await db
           .insert(schema.organizations)
@@ -9310,8 +9446,7 @@ describe('SubscriptionService', () => {
     });
 
     it('regression: org-scoped (tri-party) drain still resolves correctly', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       const { org, tier1, stripeAccountId } =
         await createFullOrgWithDeterministicAccount('wp5-triparty');
@@ -9449,8 +9584,7 @@ describe('SubscriptionService', () => {
 
     it('returns zero counters and makes no Stripe calls when no pending rows exist', async () => {
       // Ensure no leftover pending rows from earlier tests
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       const retrieveSpy = stubAccountsRetrieve(true);
       const transferSpy = vi.mocked(stripe.transfers.create);
@@ -9469,8 +9603,7 @@ describe('SubscriptionService', () => {
     });
 
     it('resolves the group when the Connect account now reports charges_enabled && payouts_enabled', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       const { org, sub, stripeAccountId } =
         await seedConnectAndSubscription('vv77x-ready');
@@ -9508,8 +9641,7 @@ describe('SubscriptionService', () => {
     });
 
     it('skips the group (no transfer) when the Connect account is still not ready', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       const { org, sub } = await seedConnectAndSubscription('vv77x-not-ready');
 
@@ -9543,8 +9675,7 @@ describe('SubscriptionService', () => {
     });
 
     it('groups by (orgId, userId) — N rows for one Connect account → one accounts.retrieve, one resolvePendingPayouts', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       const { org, sub, stripeAccountId } =
         await seedConnectAndSubscription('vv77x-grouping');
@@ -9609,8 +9740,7 @@ describe('SubscriptionService', () => {
     });
 
     it('isolates per-group failure — one Stripe.accounts.retrieve throwing does not abort other groups', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       // Two DISTINCT connect-account owners (Codex-69t7c: one account per
       // user) so one account can fail retrieve while the other succeeds.
@@ -9678,8 +9808,7 @@ describe('SubscriptionService', () => {
     });
 
     it('respects olderThanMinutes — rows newer than the threshold are NOT swept (webhook handles fresh rows)', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       const { org, sub } = await seedConnectAndSubscription('vv77x-fresh');
 
@@ -10090,22 +10219,24 @@ describe('SubscriptionService', () => {
     });
   });
 
-  // ─── reverseSubscriptionPayoutsForCharge (Codex-13v21) ────────────────
+  // ─── reverseSubscriptionPayoutsForCharge (Codex-13v21, Codex-2hxff.8) ─────
   // Subscription-invoice refund clawback — the subscription source of the
-  // shared engine (@codex/payments reverseCharge). Reverses creator/org transfers for a refunded
-  // subscription charge and flips the ledger rows; scoped to
-  // sourceType='subscription' so it can NEVER touch one-time-purchase rows
-  // (which processRefund already handles) — no double-clawback.
+  // shared engine (@codex/payments reverseCharge). For each SUCCEEDED refund
+  // of the charge (read from Stripe with refunds.list, oldest first), each
+  // slice's share is floor(gross × refunded-so-far / charge) less what the
+  // earlier refunds took, and is recorded as one payout_reversals row per
+  // (slice, refund): that record, not payouts.status, says whether a refund
+  // is handled. Scoped to sourceType='subscription' so it can NEVER touch
+  // one-time-purchase rows (which processRefund already handles) — no
+  // double-clawback. Design: docs/payments/refund-reversal-record.md.
   describe('reverseSubscriptionPayoutsForCharge (Codex-13v21)', () => {
-    async function seedSubPayouts(
-      chargeId: string,
-      opts: {
-        sourceType?: 'subscription' | 'purchase';
-        status?: string;
-      } = {}
-    ) {
+    // Every charge here is £10.00. The charge amount is each refund's
+    // denominator (Codex-2hxff.8, D1), not the sum of the ledger rows.
+    const CHARGE_CENTS = 1000;
+
+    async function seedSubscription(slugPrefix: string) {
       const { org, tier1 } = await createFullOrg(
-        `sub-clawback-${Math.random().toString(36).slice(2, 8)}`
+        `${slugPrefix}-${Math.random().toString(36).slice(2, 8)}`
       );
       const sub = takeFirst(
         await db
@@ -10117,105 +10248,303 @@ describe('SubscriptionService', () => {
           )
           .returning()
       );
+      return { org, sub };
+    }
+
+    async function seedSubPayouts(
+      chargeId: string,
+      opts: {
+        sourceType?: 'subscription' | 'purchase';
+        status?: string;
+      } = {}
+    ) {
+      const { org, sub } = await seedSubscription('sub-clawback');
       const sourceType = opts.sourceType ?? 'subscription';
       const status = opts.status ?? 'paid';
       // platform_fee (no transfer) + organization_fee + creator (transfers).
       // Gross = 100 + 135 + 765 = 1000.
-      await db.insert(payoutsTable).values([
-        {
-          organizationId: org.id,
-          subscriptionId: sub.id,
-          amountCents: 100,
-          payoutType: 'platform_fee',
-          status,
-          stripeChargeId: chargeId,
-          sourceType,
-          resolvedAt: new Date(),
-        },
-        {
-          userId: otherCreatorId,
-          organizationId: org.id,
-          subscriptionId: sub.id,
-          amountCents: 135,
-          payoutType: 'organization_fee',
-          status,
-          stripeTransferId: `tr_org_${chargeId}`,
-          stripeChargeId: chargeId,
-          sourceType,
-          resolvedAt: new Date(),
-        },
-        {
-          userId: otherCreatorId,
-          organizationId: org.id,
-          subscriptionId: sub.id,
-          amountCents: 765,
-          payoutType: 'creator_payout_to_owner',
-          status,
-          stripeTransferId: `tr_creator_${chargeId}`,
-          stripeChargeId: chargeId,
-          sourceType,
-          resolvedAt: new Date(),
-        },
-      ]);
-      return { org, sub };
+      const rows = await db
+        .insert(payoutsTable)
+        .values([
+          {
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 100,
+            payoutType: 'platform_fee',
+            status,
+            stripeChargeId: chargeId,
+            sourceType,
+            resolvedAt: new Date(),
+          },
+          {
+            userId: otherCreatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 135,
+            payoutType: 'organization_fee',
+            status,
+            stripeTransferId: `tr_org_${chargeId}`,
+            stripeChargeId: chargeId,
+            sourceType,
+            resolvedAt: new Date(),
+          },
+          {
+            userId: otherCreatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 765,
+            payoutType: 'creator_payout_to_owner',
+            status,
+            stripeTransferId: `tr_creator_${chargeId}`,
+            stripeChargeId: chargeId,
+            sourceType,
+            resolvedAt: new Date(),
+          },
+        ])
+        .returning();
+      const ofType = (payoutType: string) =>
+        takeFirst(rows.filter((row) => row.payoutType === payoutType));
+      return {
+        org,
+        sub,
+        rows,
+        platformFee: ofType('platform_fee'),
+        orgFee: ofType('organization_fee'),
+        creator: ofType('creator_payout_to_owner'),
+      };
     }
 
     function stubCreateReversal() {
-      const createReversal = vi.fn().mockResolvedValue({ id: 'trr_test' });
+      // A fresh trr_ id per call: payout_reversals.stripe_reversal_id is
+      // unique, so one shared id would fail the second slice's record.
+      const createReversal = vi
+        .fn()
+        .mockImplementation(async () => ({ id: `trr_${crypto.randomUUID()}` }));
       (
         stripe.transfers as unknown as { createReversal: typeof createReversal }
       ).createReversal = createReversal;
       return createReversal;
     }
 
-    it('reverses each transfer-bearing slice and flips all rows to reversed', async () => {
-      const chargeId = `ch_clawback_${Date.now()}`;
-      await seedSubPayouts(chargeId);
-      const createReversal = stubCreateReversal();
+    /**
+     * The charge's succeeded refunds, as Stripe lists them (Codex-2hxff.8:
+     * the clawback reads them from Stripe, not the event). Any other charge
+     * has none, so a global sweep never applies them elsewhere.
+     */
+    function mockSucceededRefunds(
+      chargeId: string,
+      refunds: ReadonlyArray<{ id: string; amount: number }>
+    ) {
+      vi.mocked(stripe.refunds.list).mockImplementation((async (
+        params?: Stripe.RefundListParams
+      ) => ({
+        object: 'list',
+        data:
+          params?.charge === chargeId
+            ? refunds.map((refund, index) => ({
+                ...refund,
+                object: 'refund',
+                status: 'succeeded',
+                created: index + 1,
+              }))
+            : [],
+        has_more: false,
+      })) as never);
+    }
 
-      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
-        refundAmountCents: 1000,
-        stripeRefundId: 're_full',
-      });
+    /** The charge as Stripe returns it; any other charge has amount 0. */
+    function mockCharge(chargeId: string) {
+      vi.mocked(stripe.charges.retrieve).mockImplementation((async (
+        id: string
+      ) => ({
+        id,
+        object: 'charge',
+        amount: id === chargeId ? CHARGE_CENTS : 0,
+        metadata: {},
+      })) as never);
+    }
 
-      // Two transfers reversed (org + creator); platform_fee has no transfer.
-      expect(createReversal).toHaveBeenCalledTimes(2);
-      const reversedIds = createReversal.mock.calls.map((c) => c[0]).sort();
-      expect(reversedIds).toEqual(
-        [`tr_creator_${chargeId}`, `tr_org_${chargeId}`].sort()
+    /** What the Stripe SDK throws: a message, the HTTP status, the code. */
+    function stripeError(
+      message: string,
+      fields: { statusCode?: number; code?: string }
+    ) {
+      return Object.assign(new Error(message), fields);
+    }
+
+    async function recordsFor(payoutIds: readonly string[]) {
+      return db
+        .select()
+        .from(payoutReversals)
+        .where(inArray(payoutReversals.payoutId, [...payoutIds]));
+    }
+
+    function recordOf(
+      records: readonly PayoutReversal[],
+      payoutId: string,
+      refundId?: string
+    ) {
+      return takeFirst(
+        records.filter(
+          (record) =>
+            record.payoutId === payoutId &&
+            (refundId === undefined || record.causeId === refundId)
+        )
       );
-      const amounts = createReversal.mock.calls
-        .map((c) => (c[1] as { amount: number }).amount)
-        .sort((a, b) => a - b);
-      expect(amounts).toEqual([135, 765]);
+    }
 
-      const { eq } = await import('drizzle-orm');
-      const rows = await db
+    async function rowsFor(chargeId: string) {
+      return db
         .select()
         .from(payoutsTable)
         .where(eq(payoutsTable.stripeChargeId, chargeId));
-      expect(rows).toHaveLength(3);
-      expect(rows.every((r) => r.status === 'reversed')).toBe(true);
-    });
+    }
 
-    it('no-ops when no subscription payouts exist for the charge', async () => {
-      const createReversal = stubCreateReversal();
-      await service.reverseSubscriptionPayoutsForCharge(
-        `ch_absent_${Date.now()}`,
-        { refundAmountCents: 500, stripeRefundId: 're_x' }
-      );
-      expect(createReversal).not.toHaveBeenCalled();
-    });
+    function statusOf(
+      rows: ReadonlyArray<{ id: string; status: string }>,
+      payoutId: string
+    ) {
+      return rows.find((row) => row.id === payoutId)?.status;
+    }
 
-    it('is idempotent — already-reversed rows are skipped', async () => {
-      const chargeId = `ch_idem_${Date.now()}`;
-      await seedSubPayouts(chargeId, { status: 'reversed' });
+    it('a full refund reverses each transfer-bearing slice, records each share, and flips all rows to reversed', async () => {
+      const chargeId = `ch_clawback_${createUniqueSlug('c')}`;
+      const { sub, rows, platformFee, orgFee, creator } =
+        await seedSubPayouts(chargeId);
+      const orgTransfer = `tr_org_${chargeId}`;
+      const creatorTransfer = `tr_creator_${chargeId}`;
       const createReversal = stubCreateReversal();
-      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
-        refundAmountCents: 1000,
-        stripeRefundId: 're_again',
+      mockSucceededRefunds(chargeId, [{ id: 're_full', amount: CHARGE_CENTS }]);
+
+      await service.reverseSubscriptionPayoutsForCharge({
+        id: chargeId,
+        amountCents: CHARGE_CENTS,
       });
+
+      const records = await recordsFor(rows.map((row) => row.id));
+      // Two transfers reversed (org + creator); platform_fee has no transfer.
+      // Codex-2hxff.8: the key carries the refund id AND the attempt, and the
+      // metadata names the refund and the payout_reversals record.
+      expect(createReversal).toHaveBeenCalledTimes(2);
+      expect(createReversal).toHaveBeenCalledWith(
+        orgTransfer,
+        {
+          amount: 135,
+          metadata: {
+            source_type: 'subscription',
+            subscription_id: sub.id,
+            charge_id: chargeId,
+            refund_id: 're_full',
+            payout_id: orgFee.id,
+            payout_reversal_id: recordOf(records, orgFee.id).id,
+            type: 'refund_reversal',
+            codex_env: 'test',
+          },
+        },
+        { idempotencyKey: `${orgTransfer}_reversal_re_full_0` }
+      );
+      expect(createReversal).toHaveBeenCalledWith(
+        creatorTransfer,
+        expect.objectContaining({ amount: 765 }),
+        { idempotencyKey: `${creatorTransfer}_reversal_re_full_0` }
+      );
+
+      // One record per slice for the refund. The platform fee's share is
+      // retained: no transfer, so nothing moves.
+      expect(records).toHaveLength(3);
+      expect(recordOf(records, platformFee.id)).toMatchObject({
+        causeType: 'refund',
+        causeId: 're_full',
+        kind: 'retained_fee',
+        amountCents: 100,
+        status: 'done',
+        stripeReversalId: null,
+      });
+      expect(recordOf(records, orgFee.id)).toMatchObject({
+        kind: 'transfer_reversal',
+        amountCents: 135,
+        status: 'done',
+        attempt: 0,
+        stripeReversalId: expect.stringMatching(/^trr_/),
+      });
+      expect(recordOf(records, creator.id)).toMatchObject({
+        kind: 'transfer_reversal',
+        amountCents: 765,
+        status: 'done',
+      });
+
+      const after = await rowsFor(chargeId);
+      expect(after).toHaveLength(3);
+      expect(after.every((r) => r.status === 'reversed')).toBe(true);
+    });
+
+    it('no-ops when no subscription payouts exist for the charge, without listing its refunds', async () => {
+      const chargeId = `ch_absent_${createUniqueSlug('c')}`;
+      const createReversal = stubCreateReversal();
+      mockSucceededRefunds(chargeId, [{ id: 're_x', amount: 500 }]);
+
+      await service.reverseSubscriptionPayoutsForCharge({
+        id: chargeId,
+        amountCents: CHARGE_CENTS,
+      });
+
       expect(createReversal).not.toHaveBeenCalled();
+      // The refunds are read only when the source has slices on the charge:
+      // every charge.refunded runs both sources, and most charges have one.
+      expect(stripe.refunds.list).not.toHaveBeenCalled();
+    });
+
+    it('a redelivery of the same refund reverses nothing again: its payout_reversals records are the gate (Codex-2hxff.8)', async () => {
+      // A partial refund, so the rows stay paid and only the records can
+      // say the refund was handled.
+      const chargeId = `ch_redeliver_${createUniqueSlug('c')}`;
+      const { rows } = await seedSubPayouts(chargeId);
+      const createReversal = stubCreateReversal();
+      mockSucceededRefunds(chargeId, [{ id: 're_redelivered', amount: 500 }]);
+      const charge = { id: chargeId, amountCents: CHARGE_CENTS };
+
+      await service.reverseSubscriptionPayoutsForCharge(charge);
+      await service.reverseSubscriptionPayoutsForCharge(charge);
+
+      // The first delivery's two transfer reversals, and nothing after.
+      expect(createReversal).toHaveBeenCalledTimes(2);
+      expect(await recordsFor(rows.map((row) => row.id))).toHaveLength(3);
+      expect((await rowsFor(chargeId)).every((r) => r.status === 'paid')).toBe(
+        true
+      );
+    });
+
+    it('a row already reversed before payout_reversals existed is not reversed again (Codex-2hxff.8 §5)', async () => {
+      // Formerly "is idempotent — already-reversed rows are skipped", which
+      // passed vacuously once the refunds came from Stripe. Idempotency is
+      // now the record's job (the test above); this pins the migration gap
+      // the design closes: a row the old engine reversed has no record, and
+      // a later refund of its charge must not reverse it a second time.
+      const chargeId = `ch_idem_${createUniqueSlug('c')}`;
+      const { rows, platformFee } = await seedSubPayouts(chargeId, {
+        status: 'reversed',
+      });
+      const createReversal = stubCreateReversal();
+      mockSucceededRefunds(chargeId, [
+        { id: 're_again', amount: CHARGE_CENTS },
+      ]);
+
+      await service.reverseSubscriptionPayoutsForCharge({
+        id: chargeId,
+        amountCents: CHARGE_CENTS,
+      });
+
+      expect(createReversal).not.toHaveBeenCalled();
+      // No slice gets a record, the platform fee included: a reversed row has
+      // nothing left to claw back, whatever its type.
+      const records = await recordsFor([
+        ...rows.map((row) => row.id),
+        platformFee.id,
+      ]);
+      expect(records).toEqual([]);
+      expect(
+        (await rowsFor(chargeId)).every((r) => r.status === 'reversed')
+      ).toBe(true);
     });
 
     it('cancels a never-transferred PENDING obligation for a refunded charge', async () => {
@@ -10227,71 +10556,58 @@ describe('SubscriptionService', () => {
       // pending write shape now carries the charge correlation; this asserts
       // the read side of that contract: a correlated pending row with no
       // transfer is cancelled, not paid later.
-      const chargeId = `ch_pending_${Date.now()}`;
-      const { org, tier1 } = await createFullOrg(
-        `sub-pending-clawback-${Math.random().toString(36).slice(2, 8)}`
-      );
-      const sub = takeFirst(
+      const chargeId = `ch_pending_${createUniqueSlug('c')}`;
+      const { org, sub } = await seedSubscription('sub-pending-clawback');
+      const row = takeFirst(
         await db
-          .insert(subscriptions)
-          .values(
-            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
-              status: 'active',
-            })
-          )
+          .insert(payoutsTable)
+          .values({
+            userId: otherCreatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 135,
+            payoutType: 'organization_fee',
+            status: 'pending',
+            reason: 'connect_not_ready',
+            // The fields executeTransfers now writes on every ledger row:
+            stripeChargeId: chargeId,
+            transferGroup: `sub_${sub.id}`,
+            sourceType: 'subscription',
+          })
           .returning()
       );
-      await db.insert(payoutsTable).values({
-        userId: otherCreatorId,
-        organizationId: org.id,
-        subscriptionId: sub.id,
-        amountCents: 135,
-        payoutType: 'organization_fee',
-        status: 'pending',
-        reason: 'connect_not_ready',
-        // The fields executeTransfers now writes on every ledger row:
-        stripeChargeId: chargeId,
-        transferGroup: `sub_${sub.id}`,
-        sourceType: 'subscription',
-      });
       const createReversal = stubCreateReversal();
+      mockSucceededRefunds(chargeId, [
+        { id: 're_pending', amount: CHARGE_CENTS },
+      ]);
 
-      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
-        refundAmountCents: null,
-        stripeRefundId: 're_pending',
+      await service.reverseSubscriptionPayoutsForCharge({
+        id: chargeId,
+        amountCents: CHARGE_CENTS,
       });
 
       // Nothing was ever transferred, so there is nothing to reverse at
       // Stripe — the obligation is simply cancelled in the ledger.
       expect(createReversal).not.toHaveBeenCalled();
-      const { eq } = await import('drizzle-orm');
-      const rows = await db
-        .select()
-        .from(payoutsTable)
-        .where(eq(payoutsTable.stripeChargeId, chargeId));
+      const rows = await rowsFor(chargeId);
       expect(rows).toHaveLength(1);
       expect(rows[0]?.status).toBe('cancelled_by_refund');
+      expect(takeFirst(await recordsFor([row.id]))).toMatchObject({
+        causeId: 're_pending',
+        kind: 'cancellation',
+        amountCents: 135,
+        status: 'done',
+        stripeReversalId: null,
+      });
     });
 
     // Codex-2hxff.11: a pending row is not proof that nothing moved. Its
     // transfer may have landed with the row never marked paid (a drain's
     // update failed, or it was in flight when the refund came), and Stripe
     // does not reverse transfers when a charge is refunded.
-    it('a PENDING row whose transfer went out anyway: the refund reverses it', async () => {
+    it('a PENDING row whose transfer went out anyway: the refund reverses all of it', async () => {
       const chargeId = `ch_landed_${crypto.randomUUID().slice(0, 12)}`;
-      const { org, tier1 } = await createFullOrg(
-        `sub-landed-${Math.random().toString(36).slice(2, 8)}`
-      );
-      const sub = takeFirst(
-        await db
-          .insert(subscriptions)
-          .values(
-            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
-              status: 'active',
-            })
-          )
-          .returning()
-      );
+      const { org, sub } = await seedSubscription('sub-landed');
       const [existing] = await db
         .select()
         .from(stripeConnectAccounts)
@@ -10335,17 +10651,29 @@ describe('SubscriptionService', () => {
         metadata: { payout_id: row.id },
       });
       const createReversal = stubCreateReversal();
+      mockSucceededRefunds(chargeId, [
+        { id: 're_landed', amount: CHARGE_CENTS },
+      ]);
 
-      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
-        refundAmountCents: null,
-        stripeRefundId: 're_landed',
+      await service.reverseSubscriptionPayoutsForCharge({
+        id: chargeId,
+        amountCents: CHARGE_CENTS,
       });
 
+      // Codex-2hxff.8: a transfer found on a cancelled row is reversed in
+      // full, so NO amount is sent (it used to send the row's 135), and the
+      // key carries the refund id and the attempt.
       expect(createReversal).toHaveBeenCalledTimes(1);
       expect(createReversal).toHaveBeenCalledWith(
         landed.id,
-        expect.objectContaining({ amount: 135 }),
-        { idempotencyKey: `${landed.id}_reversal_re_landed` }
+        {
+          metadata: expect.objectContaining({
+            refund_id: 're_landed',
+            payout_id: row.id,
+            type: 'refund_reversal',
+          }),
+        },
+        { idempotencyKey: `${landed.id}_reversal_re_landed_0` }
       );
       const after = takeFirst(
         await db.select().from(payoutsTable).where(eq(payoutsTable.id, row.id))
@@ -10354,39 +10682,440 @@ describe('SubscriptionService', () => {
         status: 'reversed',
         stripeTransferId: landed.id,
       });
+      expect(takeFirst(await recordsFor([row.id]))).toMatchObject({
+        kind: 'cancellation',
+        status: 'done',
+        stripeReversalId: expect.stringMatching(/^trr_/),
+      });
     });
 
-    it('reverses proportionally on a partial refund', async () => {
-      const chargeId = `ch_partial_${Date.now()}`;
-      await seedSubPayouts(chargeId);
+    it('a partial refund reverses each paid slice by its share and leaves every row paid (Codex-2hxff.8)', async () => {
+      // Before Codex-2hxff.8 a partial refund flipped every row to reversed,
+      // so a second partial refund of the charge clawed back nothing. A paid
+      // row is now reversed only once its done records add up to its gross,
+      // and the platform_fee row only on a full refund.
+      const chargeId = `ch_partial_${createUniqueSlug('c')}`;
+      const { rows, platformFee, orgFee, creator } =
+        await seedSubPayouts(chargeId);
+      const orgTransfer = `tr_org_${chargeId}`;
       const createReversal = stubCreateReversal();
-      // Half of gross 1000 = 500 → floor(135*500/1000)=67, floor(765*500/1000)=382.
-      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
-        refundAmountCents: 500,
-        stripeRefundId: 're_partial',
+      mockSucceededRefunds(chargeId, [{ id: 're_partial', amount: 500 }]);
+
+      // Half of the 1000 charge → floor(135*500/1000)=67,
+      // floor(765*500/1000)=382; the platform fee retains 50.
+      await service.reverseSubscriptionPayoutsForCharge({
+        id: chargeId,
+        amountCents: CHARGE_CENTS,
       });
+
       const amounts = createReversal.mock.calls
         .map((c) => (c[1] as { amount: number }).amount)
         .sort((a, b) => a - b);
       expect(amounts).toEqual([67, 382]);
+      expect(createReversal).toHaveBeenCalledWith(
+        orgTransfer,
+        expect.objectContaining({ amount: 67 }),
+        { idempotencyKey: `${orgTransfer}_reversal_re_partial_0` }
+      );
+
+      const records = await recordsFor(rows.map((row) => row.id));
+      expect(recordOf(records, platformFee.id)).toMatchObject({
+        kind: 'retained_fee',
+        amountCents: 50,
+        status: 'done',
+      });
+      expect(recordOf(records, orgFee.id)).toMatchObject({
+        kind: 'transfer_reversal',
+        amountCents: 67,
+        status: 'done',
+      });
+      expect(recordOf(records, creator.id)).toMatchObject({
+        kind: 'transfer_reversal',
+        amountCents: 382,
+        status: 'done',
+      });
+      expect((await rowsFor(chargeId)).every((r) => r.status === 'paid')).toBe(
+        true
+      );
+    });
+
+    it('a second partial refund claws back its own share; the rows are reversed once the refunds add up to the charge (Codex-2hxff.8)', async () => {
+      const chargeId = `ch_second_${createUniqueSlug('c')}`;
+      const { rows, platformFee, orgFee, creator } =
+        await seedSubPayouts(chargeId);
+      const orgTransfer = `tr_org_${chargeId}`;
+      const creatorTransfer = `tr_creator_${chargeId}`;
+      const createReversal = stubCreateReversal();
+      const charge = { id: chargeId, amountCents: CHARGE_CENTS };
+      const firstRefund = { id: 're_first', amount: 500 };
+
+      mockSucceededRefunds(chargeId, [firstRefund]);
+      await service.reverseSubscriptionPayoutsForCharge(charge);
+      // The second charge.refunded: Stripe now lists both refunds.
+      mockSucceededRefunds(chargeId, [
+        firstRefund,
+        { id: 're_second', amount: 500 },
+      ]);
+      createReversal.mockClear();
+      await service.reverseSubscriptionPayoutsForCharge(charge);
+
+      // Only the second refund's shares move: what the first left of each
+      // slice (135-67=68, 765-382=383), so the two add up to the gross.
+      expect(createReversal).toHaveBeenCalledTimes(2);
+      expect(createReversal).toHaveBeenCalledWith(
+        orgTransfer,
+        expect.objectContaining({ amount: 68 }),
+        { idempotencyKey: `${orgTransfer}_reversal_re_second_0` }
+      );
+      expect(createReversal).toHaveBeenCalledWith(
+        creatorTransfer,
+        expect.objectContaining({ amount: 383 }),
+        { idempotencyKey: `${creatorTransfer}_reversal_re_second_0` }
+      );
+      const records = await recordsFor(rows.map((row) => row.id));
+      expect(records).toHaveLength(6);
+      expect(recordOf(records, platformFee.id, 're_second')).toMatchObject({
+        kind: 'retained_fee',
+        amountCents: 50,
+        status: 'done',
+      });
+      expect(recordOf(records, orgFee.id, 're_second')).toMatchObject({
+        amountCents: 68,
+        status: 'done',
+      });
+      expect(recordOf(records, creator.id, 're_second')).toMatchObject({
+        amountCents: 383,
+        status: 'done',
+      });
+      expect(
+        (await rowsFor(chargeId)).every((r) => r.status === 'reversed')
+      ).toBe(true);
+    });
+
+    it('a partial refund reduces an unpaid slice, which stays pending; the refund that completes the charge cancels it (Codex-2hxff.8)', async () => {
+      const chargeId = `ch_reduce_${createUniqueSlug('c')}`;
+      const { org, sub } = await seedSubscription('sub-reduce');
+      const row = takeFirst(
+        await db
+          .insert(payoutsTable)
+          .values({
+            userId: otherCreatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 765,
+            payoutType: 'creator_payout',
+            status: 'pending',
+            reason: 'connect_not_ready',
+            stripeChargeId: chargeId,
+            transferGroup: `sub_${sub.id}`,
+            sourceType: 'subscription',
+          })
+          .returning()
+      );
+      const createReversal = stubCreateReversal();
+      const charge = { id: chargeId, amountCents: CHARGE_CENTS };
+      const firstRefund = { id: 're_reduce', amount: 500 };
+      const readRow = async () =>
+        takeFirst(
+          await db
+            .select()
+            .from(payoutsTable)
+            .where(eq(payoutsTable.id, row.id))
+        );
+
+      mockSucceededRefunds(chargeId, [firstRefund]);
+      await service.reverseSubscriptionPayoutsForCharge(charge);
+
+      // Nothing was transferred, so nothing is reversed. The row keeps its
+      // gross; the drain pays it less this reduction (floor(765*500/1000)).
+      expect(createReversal).not.toHaveBeenCalled();
+      expect(await readRow()).toMatchObject({
+        status: 'pending',
+        amountCents: 765,
+      });
+      expect(takeFirst(await recordsFor([row.id]))).toMatchObject({
+        causeId: 're_reduce',
+        kind: 'pending_reduction',
+        amountCents: 382,
+        status: 'done',
+      });
+
+      mockSucceededRefunds(chargeId, [
+        firstRefund,
+        { id: 're_complete', amount: 500 },
+      ]);
+      await service.reverseSubscriptionPayoutsForCharge(charge);
+
+      expect(createReversal).not.toHaveBeenCalled();
+      expect((await readRow()).status).toBe('cancelled_by_refund');
+      expect(
+        recordOf(await recordsFor([row.id]), row.id, 're_complete')
+      ).toMatchObject({
+        kind: 'cancellation',
+        amountCents: 383,
+        status: 'done',
+      });
     });
 
     it('does NOT touch one-time-purchase payout rows for the same charge (no double-clawback)', async () => {
-      const chargeId = `ch_purchase_src_${Date.now()}`;
-      await seedSubPayouts(chargeId, { sourceType: 'purchase' });
-      const createReversal = stubCreateReversal();
-      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
-        refundAmountCents: 1000,
-        stripeRefundId: 're_purchase',
+      const chargeId = `ch_purchase_src_${createUniqueSlug('c')}`;
+      const { rows } = await seedSubPayouts(chargeId, {
+        sourceType: 'purchase',
       });
+      const createReversal = stubCreateReversal();
+      mockSucceededRefunds(chargeId, [
+        { id: 're_purchase', amount: CHARGE_CENTS },
+      ]);
+
+      await service.reverseSubscriptionPayoutsForCharge({
+        id: chargeId,
+        amountCents: CHARGE_CENTS,
+      });
+
       // sourceType='purchase' → excluded → no reversal, rows untouched.
       expect(createReversal).not.toHaveBeenCalled();
-      const { eq } = await import('drizzle-orm');
-      const rows = await db
+      expect(stripe.refunds.list).not.toHaveBeenCalled();
+      expect(await recordsFor(rows.map((row) => row.id))).toEqual([]);
+      expect((await rowsFor(chargeId)).every((r) => r.status === 'paid')).toBe(
+        true
+      );
+    });
+
+    it('a payee balance too low for the reversal is a refund_reviews debt: the row stays paid and the call resolves (Codex-2hxff.8, D5)', async () => {
+      // Before Codex-2hxff.8 the subscription path could only log this,
+      // because refund_reviews.purchase_id was NOT NULL. A debt is now
+      // recorded for every source, one per reversal, to be recovered from
+      // the payee's future earnings.
+      const chargeId = `ch_debt_${createUniqueSlug('c')}`;
+      const { rows, orgFee, creator } = await seedSubPayouts(chargeId);
+      const orgTransfer = `tr_org_${chargeId}`;
+      const createReversal = stubCreateReversal();
+      createReversal.mockImplementation(async (transferId: string) => {
+        if (transferId === orgTransfer) {
+          throw stripeError('Insufficient funds in the connected account', {
+            statusCode: 400,
+            code: 'balance_insufficient',
+          });
+        }
+        return { id: `trr_${crypto.randomUUID()}` };
+      });
+      mockSucceededRefunds(chargeId, [{ id: 're_debt', amount: CHARGE_CENTS }]);
+
+      await expect(
+        service.reverseSubscriptionPayoutsForCharge({
+          id: chargeId,
+          amountCents: CHARGE_CENTS,
+        })
+      ).resolves.toBeUndefined();
+
+      const record = recordOf(
+        await recordsFor(rows.map((row) => row.id)),
+        orgFee.id
+      );
+      expect(record).toMatchObject({
+        kind: 'transfer_reversal',
+        amountCents: 135,
+        status: 'debt',
+        lastErrorCode: 'balance_insufficient',
+      });
+      const reviews = await db
         .select()
-        .from(payoutsTable)
-        .where(eq(payoutsTable.stripeChargeId, chargeId));
-      expect(rows.every((r) => r.status === 'paid')).toBe(true);
+        .from(refundReviews)
+        .where(eq(refundReviews.payoutReversalId, record.id));
+      expect(reviews).toHaveLength(1);
+      expect(reviews[0]).toMatchObject({
+        payoutId: orgFee.id,
+        purchaseId: null,
+        creatorUserId: otherCreatorId,
+        attemptedReversalCents: 135,
+        errorCode: 'balance_insufficient',
+        resolvedAt: null,
+      });
+      // Its transfer did succeed, so the slice stays paid; the creator's
+      // slice was reversed as usual.
+      const after = await rowsFor(chargeId);
+      expect(statusOf(after, orgFee.id)).toBe('paid');
+      expect(statusOf(after, creator.id)).toBe('reversed');
+    });
+
+    it('an indeterminate failure rejects so Stripe redelivers, keeping the key; the redelivery completes the step (Codex-2hxff.8)', async () => {
+      const chargeId = `ch_outage_${createUniqueSlug('c')}`;
+      const { rows, orgFee } = await seedSubPayouts(chargeId);
+      const orgTransfer = `tr_org_${chargeId}`;
+      // No HTTP status: the outcome at Stripe is unknown.
+      const outage = stripeError('socket hang up', {});
+      let down = true;
+      const createReversal = stubCreateReversal();
+      createReversal.mockImplementation(async (transferId: string) => {
+        if (down && transferId === orgTransfer) throw outage;
+        return { id: `trr_${crypto.randomUUID()}` };
+      });
+      mockSucceededRefunds(chargeId, [
+        { id: 're_outage', amount: CHARGE_CENTS },
+      ]);
+      const charge = { id: chargeId, amountCents: CHARGE_CENTS };
+
+      const error = await service
+        .reverseSubscriptionPayoutsForCharge(charge)
+        .then(
+          () => undefined,
+          (rejection: unknown) => rejection
+        );
+
+      // Every other step ran first; then the call rejects with the failure
+      // as its cause, so the webhook answers 500 and Stripe redelivers.
+      expect(error).toBeInstanceOf(InternalServiceError);
+      expect((error as Error).cause).toBe(outage);
+      expect(
+        recordOf(await recordsFor(rows.map((row) => row.id)), orgFee.id)
+      ).toMatchObject({ status: 'failed', attempt: 0 });
+      expect(statusOf(await rowsFor(chargeId), orgFee.id)).toBe('paid');
+
+      down = false;
+      createReversal.mockClear();
+      await service.reverseSubscriptionPayoutsForCharge(charge);
+
+      // Only the failed step runs again, with the SAME key: Stripe may have
+      // made the first reversal, and the key is what stops a second one.
+      expect(createReversal).toHaveBeenCalledTimes(1);
+      expect(createReversal).toHaveBeenCalledWith(
+        orgTransfer,
+        expect.objectContaining({ amount: 135 }),
+        { idempotencyKey: `${orgTransfer}_reversal_re_outage_0` }
+      );
+      expect(
+        recordOf(await recordsFor(rows.map((row) => row.id)), orgFee.id)
+      ).toMatchObject({ status: 'done', attempt: 0 });
+      expect(
+        (await rowsFor(chargeId)).every((r) => r.status === 'reversed')
+      ).toBe(true);
+    });
+
+    // The hourly cron's retry of steps left `failed` (Codex-2hxff.8). The
+    // sweep is GLOBAL: it reads every failed step older than its cutoff. So
+    // each test backdates its own step to 2000 and cuts off at 2001, and
+    // only ever sees steps that old, whatever other suites have left failed.
+    describe('retryFailedClawbacks (Codex-2hxff.8)', () => {
+      const LONG_AGO = new Date('2000-01-01T00:00:00Z');
+      const minutesSince2001 = () =>
+        Math.floor((Date.now() - Date.UTC(2001, 0, 1)) / 60_000);
+
+      /**
+       * A full refund whose org-fee reversal Stripe REFUSED (a definitive
+       * 4xx). A redelivery would get the same answer, so the step is left
+       * failed with the next attempt's key, and the call resolves.
+       */
+      async function refuseOrgFeeReversal(refundId: string) {
+        const chargeId = `ch_retry_${createUniqueSlug('c')}`;
+        const { rows, orgFee } = await seedSubPayouts(chargeId);
+        const orgTransfer = `tr_org_${chargeId}`;
+        const stripeState = { refuses: true };
+        const createReversal = stubCreateReversal();
+        createReversal.mockImplementation(async (transferId: string) => {
+          if (stripeState.refuses && transferId === orgTransfer) {
+            throw stripeError('Transfers are not allowed on this account', {
+              statusCode: 400,
+              code: 'transfers_not_allowed',
+            });
+          }
+          return { id: `trr_${crypto.randomUUID()}` };
+        });
+        mockSucceededRefunds(chargeId, [
+          { id: refundId, amount: CHARGE_CENTS },
+        ]);
+
+        await expect(
+          service.reverseSubscriptionPayoutsForCharge({
+            id: chargeId,
+            amountCents: CHARGE_CENTS,
+          })
+        ).resolves.toBeUndefined();
+
+        expect(createReversal).toHaveBeenCalledWith(
+          orgTransfer,
+          expect.anything(),
+          { idempotencyKey: `${orgTransfer}_reversal_${refundId}_0` }
+        );
+        const record = recordOf(
+          await recordsFor(rows.map((row) => row.id)),
+          orgFee.id
+        );
+        // Stripe stores a refusal against its key for 24h, so the attempt
+        // advances: the retry needs a new key to succeed.
+        expect(record).toMatchObject({
+          status: 'failed',
+          attempt: 1,
+          lastErrorCode: 'transfers_not_allowed',
+        });
+        expect(statusOf(await rowsFor(chargeId), orgFee.id)).toBe('paid');
+        return { chargeId, orgTransfer, record, createReversal, stripeState };
+      }
+
+      async function readRecord(recordId: string) {
+        return takeFirst(
+          await db
+            .select()
+            .from(payoutReversals)
+            .where(eq(payoutReversals.id, recordId))
+        );
+      }
+
+      it("retries a step Stripe refused with the next attempt's key, and settles its row", async () => {
+        const { chargeId, orgTransfer, record, createReversal, stripeState } =
+          await refuseOrgFeeReversal('re_refused');
+        await db
+          .update(payoutReversals)
+          .set({ updatedAt: LONG_AGO })
+          .where(eq(payoutReversals.id, record.id));
+        stripeState.refuses = false;
+        createReversal.mockClear();
+        mockCharge(chargeId);
+
+        const result = await service.retryFailedClawbacks(minutesSince2001());
+
+        expect(result.retried).toBeGreaterThanOrEqual(1);
+        // The charge and its refunds are read fresh from Stripe.
+        expect(stripe.charges.retrieve).toHaveBeenCalledWith(chargeId);
+        // Only the failed step runs; the slices already reversed are not.
+        expect(createReversal).toHaveBeenCalledTimes(1);
+        expect(createReversal).toHaveBeenCalledWith(
+          orgTransfer,
+          expect.objectContaining({ amount: 135 }),
+          { idempotencyKey: `${orgTransfer}_reversal_re_refused_1` }
+        );
+        expect(await readRecord(record.id)).toMatchObject({
+          status: 'done',
+          attempt: 1,
+          lastErrorCode: null,
+        });
+        expect(
+          (await rowsFor(chargeId)).every((r) => r.status === 'reversed')
+        ).toBe(true);
+      });
+
+      it(`leaves a step alone once it has had MAX_CLAWBACK_ATTEMPTS (${MAX_CLAWBACK_ATTEMPTS}) attempts`, async () => {
+        const { chargeId, record, createReversal, stripeState } =
+          await refuseOrgFeeReversal('re_exhausted');
+        // As if the hourly retry had been refused every time since.
+        await db
+          .update(payoutReversals)
+          .set({ attempt: MAX_CLAWBACK_ATTEMPTS, updatedAt: LONG_AGO })
+          .where(eq(payoutReversals.id, record.id));
+        stripeState.refuses = false;
+        createReversal.mockClear();
+        mockCharge(chargeId);
+
+        await service.retryFailedClawbacks(minutesSince2001());
+
+        // Left for a person: not read from Stripe, not reversed, not touched.
+        expect(stripe.charges.retrieve).not.toHaveBeenCalledWith(chargeId);
+        expect(createReversal).not.toHaveBeenCalled();
+        expect(await readRecord(record.id)).toMatchObject({
+          status: 'failed',
+          attempt: MAX_CLAWBACK_ATTEMPTS,
+          lastErrorCode: 'transfers_not_allowed',
+        });
+      });
     });
   });
 });
@@ -11184,8 +11913,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
     // untouched" — which stranded every failed transfer's money for good.
     // A failed row keeps its charge id and the sweep retries it.
     it('sweepUnresolvedPayouts retries pending AND failed rows — a paid row is left untouched', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       const { org, sub, stripeAccountId } = await seedDrainScenario(
         'e9v3b-drain-sweep-touch'
@@ -11322,8 +12050,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
     });
 
     it('sweepUnresolvedPayouts uses attemptedAt (not createdAt) for the age threshold — recent createdAt + old attemptedAt is swept', async () => {
-      const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM payouts`);
+      await clearPayoutsLedger(db);
 
       const { org, sub, stripeAccountId } = await seedDrainScenario(
         'e9v3b-drain-attemptedAt'

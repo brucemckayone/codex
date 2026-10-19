@@ -3,6 +3,7 @@
  *
  * Processes Stripe payment lifecycle events:
  * - charge.refunded → update purchase status, revoke content access
+ * - refund.updated → claw back a refund that was pending at charge.refunded
  * - charge.dispute.created → mark purchase disputed, revoke access (Codex-sxu5a)
  *
  * Cache invalidation uses the shared `invalidateForUser` helper from
@@ -19,7 +20,7 @@
 
 import { AccessRevocation } from '@codex/access';
 import { VersionedCache } from '@codex/cache';
-import { STRIPE_EVENTS } from '@codex/constants';
+import { isForeignStripeEnvironment, STRIPE_EVENTS } from '@codex/constants';
 import type { PurchaseService } from '@codex/purchase';
 import {
   invalidateForUser,
@@ -157,16 +158,17 @@ async function handleChargeRefunded(
   const paymentIntentId = extractPaymentIntentId(charge.payment_intent);
   const latestRefund = charge.refunds?.data?.[0];
 
+  // The charge's amount is every source's clawback denominator (D1); each
+  // succeeded refund's share is read from Stripe (Codex-2hxff.8).
+  const clawbackCharge = { id: charge.id, amountCents: charge.amount };
+
   // Subscription-invoice clawback (Codex-13v21): reverse the creator/org
   // transfers made at invoice.payment_succeeded for this charge. Keyed by
   // charge.id + sourceType='subscription', so it no-ops for one-time-purchase
   // charges (those are handled by processRefund below) — calling both never
   // double-reverses. Runs regardless of payment_intent presence because
   // subscription payouts are keyed by charge, not payment_intent.
-  await subscriptionService.reverseSubscriptionPayoutsForCharge(charge.id, {
-    refundAmountCents: charge.amount_refunded,
-    stripeRefundId: latestRefund?.id ?? null,
-  });
+  await subscriptionService.reverseSubscriptionPayoutsForCharge(clawbackCharge);
 
   if (!paymentIntentId) {
     obs?.warn('Refund event missing payment_intent', { chargeId: charge.id });
@@ -174,6 +176,7 @@ async function handleChargeRefunded(
   }
 
   const refundResult = await service.processRefund(paymentIntentId, {
+    charge: clawbackCharge,
     stripeRefundId: latestRefund?.id,
     refundAmountCents: charge.amount_refunded,
     refundReason: latestRefund?.reason ?? undefined,
@@ -198,6 +201,73 @@ async function handleChargeRefunded(
   }
 
   sendRefundEmail(c, charge);
+}
+
+/**
+ * A refund's status changed (`refund.updated`). A refund still pending when
+ * `charge.refunded` arrived is clawed back once it has succeeded (owner
+ * decision Q1, 2026-10-19). The refund was already recorded and its email
+ * sent by `charge.refunded`, so only the clawback runs here.
+ */
+async function handleRefundUpdated(
+  event: Stripe.Event,
+  stripe: Stripe,
+  service: PurchaseService,
+  subscriptionService: SubscriptionService,
+  c: Context<StripeWebhookEnv>
+): Promise<void> {
+  const obs = c.get('obs');
+  const refund = event.data.object as Stripe.Refund;
+  const chargeId =
+    typeof refund.charge === 'string' ? refund.charge : refund.charge?.id;
+  if (!chargeId) {
+    obs?.warn('Refund event names no charge', { refundId: refund.id });
+    return;
+  }
+
+  if (refund.status === 'failed' || refund.status === 'canceled') {
+    // Owner decision Q2: a clawback already taken is re-paid to the payee.
+    // Not built yet (Codex-2hxff.8 PR-B), so a person must re-pay it now.
+    obs?.error(
+      'A refund failed after it was issued; any clawback taken for it must be re-paid by hand',
+      {
+        errorId: crypto.randomUUID(),
+        refundId: refund.id,
+        chargeId,
+        status: refund.status,
+        failureReason: refund.failure_reason ?? null,
+      }
+    );
+    return;
+  }
+  if (refund.status !== 'succeeded') return;
+
+  // A refund carries no codex_env tag; its charge does. Production and local
+  // development share one Stripe sandbox (Codex-2hxff.5).
+  const charge = await stripe.charges.retrieve(chargeId);
+  const environment = c.env.ENVIRONMENT || 'development';
+  if (isForeignStripeEnvironment(charge.metadata, environment)) {
+    obs?.info("refund.updated ignored: another environment's charge", {
+      refundId: refund.id,
+      chargeId,
+      objectEnvironment: charge.metadata?.codex_env,
+      environment,
+    });
+    return;
+  }
+
+  const clawbackCharge = { id: charge.id, amountCents: charge.amount };
+  await subscriptionService.reverseSubscriptionPayoutsForCharge(clawbackCharge);
+  const paymentIntentId = extractPaymentIntentId(charge.payment_intent);
+  if (paymentIntentId) {
+    // An already-refunded purchase runs only its clawback.
+    await service.processRefund(paymentIntentId, {
+      charge: clawbackCharge,
+      stripeRefundId: refund.id,
+      refundAmountCents: charge.amount_refunded,
+      refundReason: refund.reason ?? undefined,
+    });
+  }
 }
 
 async function handleChargeDisputeCreated(
@@ -279,6 +349,16 @@ export async function handlePaymentWebhook(
     switch (event.type) {
       case STRIPE_EVENTS.CHARGE_REFUNDED:
         await handleChargeRefunded(event, service, subscriptionService, c);
+        break;
+
+      case STRIPE_EVENTS.REFUND_UPDATED:
+        await handleRefundUpdated(
+          event,
+          stripe,
+          service,
+          subscriptionService,
+          c
+        );
         break;
 
       case STRIPE_EVENTS.CHARGE_DISPUTE_CREATED:

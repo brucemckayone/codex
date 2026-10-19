@@ -227,11 +227,10 @@ Owner decision P-4, "Cancel + end access".
 - A **partial** refund leaves the subscription running.
 - Either way, the creator and organisation slices are reversed in proportion,
   exactly as for one-off purchases ([purchases.md](purchases.md#refunds)). A
-  shortfall on the payee's balance goes to `refund_reviews`, which must be able
-  to hold subscription rows (`Codex-in0g4`).
+  shortfall on the payee's balance goes to `refund_reviews`, which holds
+  subscription debts as well as purchase ones (one row per reversal).
 
-— **gap**: `Codex-2hxff.10` (today a refund moves money only),
-`Codex-2hxff.8` (clawback defects).
+— **gap**: `Codex-2hxff.10` (today a refund moves money only).
 
 ## Disputes
 

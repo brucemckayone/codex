@@ -52,9 +52,13 @@ const EVENT_ROUTES: Array<{
     handler: handleSubscriptionWebhook,
   },
   {
-    // charge.* and payment_intent.* → payment handler
+    // charge.*, refund.* and payment_intent.* → payment handler. refund.updated
+    // claws back a refund that was still pending at charge.refunded
+    // (Codex-2hxff.8).
     match: (type) =>
-      type.startsWith('charge.') || type.startsWith('payment_intent.'),
+      type.startsWith('charge.') ||
+      type.startsWith('refund.') ||
+      type.startsWith('payment_intent.'),
     label: 'Payment',
     handler: handlePaymentWebhook,
   },

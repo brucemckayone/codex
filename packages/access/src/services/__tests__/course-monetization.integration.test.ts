@@ -493,6 +493,7 @@ describe('Course monetization round-trip (WP-6)', () => {
 
     // Refund the charge → the entitlement this purchase granted is revoked.
     await svc.processRefund(pi, {
+      charge: { id: `ch_${randomUUID()}`, amountCents: 5000 },
       stripeRefundId: `re_${randomUUID()}`,
       refundAmountCents: 5000,
       refundReason: 'requested_by_customer',
@@ -557,6 +558,7 @@ describe('Course monetization round-trip (WP-6)', () => {
     expect(grantBefore?.revokedAt).toBeNull();
 
     await svc.processRefund(pi, {
+      charge: { id: `ch_${randomUUID()}`, amountCents: 3000 },
       stripeRefundId: `re_${randomUUID()}`,
       refundAmountCents: 3000,
       refundReason: 'requested_by_customer',
