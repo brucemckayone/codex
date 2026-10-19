@@ -3447,3 +3447,60 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     Soft, both widths). One read was redirected by the local `api` rate limit (the studio's
     membership check, about 20 pages a minute) and was read again on its own.
   - **No new request, no cache change.** The point travels in the page document with the picture.
+- **X77 · 2026-10-19 · 3c · Section controls, part two: a face for each quote, a mark for each
+  benefit, and the row that leads (Codex-61zsk.58, round b; BUILT. The owner approved the mock and
+  its data design, `phase3-sources/editor-3c/`, on 2026-10-13, initials only once one quote has a
+  photo included. Three choices below were decided without the owner, each marked.)**
+  - **A face for each quote.** A quote the creator adds may carry their photo of the person
+    (`photo`, an upload with its focal point; the field is decorative, since the name is what
+    reads). Once one quote in a section has a photo, every named byline leads with a 2.5rem circle,
+    the photo or the name's initials, the course's own quotes included, so the names line up; a
+    quote with no name has no circle, and a section with no photo draws exactly as before. The
+    face is `Media`'s, so a photo that fails to load falls back to the letters, and it is steered
+    by its focal point in all five layouts (`focal-point.svelte.test.ts`). `initials` moves to
+    `kit/model/`, shared with the guide's medallion.
+  - **Decided without the owner: the initials sit on the panel, as the guide's face does (X57).**
+    `--lp-panel` in `--lp-panel-ink`, the kit's text ink computed against the panel itself in every
+    scheme (at least 4.58:1, schemes.css fact 1), inside a hairline of the section's own line: on
+    Bold's near-white ground the panel is near-white too, and without the line the letters seemed
+    to float. Rejected:
+    the section's filled scheme, which the census sketched from `Media`'s mark: in Highlighted's
+    panel and the wall's first tile the circle would be the panel's own colour, and vanish.
+  - **A mark for each benefit.** One of twelve platform icons (`kit/model/marks.ts`, a closed
+    list read through `readOneOf`, so anything else reads as none). In Grid, Side by side and Mixed
+    tiles it sits above the item's name; in Checklist it takes the tick's place. The editor picks
+    it from tap-sized cells (a new `mark` control); choosing it again takes it away.
+  - **Decided without the owner: two inks, each where it was.** A mark above a name paints its
+    stroke in `--lp-mark-ink`, the graphic grade (§5: a drawn mark, never the colour of text; the
+    kit's guard test holds every file to it, and the mark obeys it through `stroke`, not `color`).
+    In Checklist the chosen icon keeps the tick's own box and ink, `--lp-accent`, the stricter text
+    grade, so every checklist saved before draws in the colour it did. Rejected: moving the tick
+    to the mark ink (every checklist page changes colour), and the accent for the new marks (the
+    contract keeps it for text).
+  - **The row that leads.** A definition may say which stored entry its layout draws larger
+    (`leadingItem`): the testimonials' Highlighted, Big quote and Wall, the mixed tiles' first, the
+    mosaic's first picture. The inspector tags that row "Leads" (to a screen reader, "…, leads in
+    this layout"); nothing is stored.
+  - **Decided without the owner: a creator's quote leads only when the course has none.** The
+    course's own testimonials are drawn first, so while it has any, no row the creator wrote is
+    tagged. Rejected: the first row always (it would tag a quote the page does not lead with).
+  - **In the browser** (the gallery's `?faces=1` and `?marks=1`, in 8 Styles at 1440 and 390).
+    Faces, all five layouts (80 reads): each of the 320 named bylines leads with a round 2.5rem
+    face (38.4px at the brand's density) beside and level with its name; the 80 photos loaded, the
+    240 sets of initials fit their circles, and no byline runs past its card, the wall's narrow
+    tile and the strip's 22rem card included. Marks, all four layouts (64 reads): each of the 256
+    marks is drawn before or above its own item's name and inside it, its stroke the mark ink
+    (Checklist's, the tick's accent), nearly all on a scheme where the two inks differ, so the read
+    can tell them apart. 144 reads, no faults, on the final code (the initials' ring included).
+  - **Tests** (CI): `TestimonialsBlock.svelte.test.ts` (no face before a photo; in every layout,
+    the photo and every other named quote's initials; a stray photo value is no face; the quote
+    that leads, and none while the course's come first), `BenefitsBlock.svelte.test.ts` (unknown
+    marks dropped; the checklist's tick replaced in place, `check` drawing the tick itself; above
+    its own item's name in the other three; the mixed tiles' lead), `focal-point.svelte.test.ts`
+    (the face steered in every layout; `testimonials.photo` names its cuts) and
+    `SectionInspector.svelte.test.ts` (the picker stores and takes away a mark; the Leads tag where
+    a layout leads, and only there; a quote's photo gets its focal tool). Calibrated: 14 plants,
+    each failing its own tests, every file restored; and the one the first run missed (the mark's
+    `aria-hidden`, which `IconBase` already sets) planted as an exposed mark, which fails.
+  - **No new request, no cache change.** A face is the page's own upload at its smallest stored
+    size; a mark is an icon the bundle already carries.
