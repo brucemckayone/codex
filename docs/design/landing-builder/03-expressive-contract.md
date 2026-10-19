@@ -2934,7 +2934,8 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       page): titles a median 2.9%, at most 5.5%; statements 4.0%, at most 4.5%; section headings
       3.1%. In Anton the sweep reads up to
       35%, as it reads up to 49% for dev's own headings. The sweep swaps a face in as a bare
-      family name, which may never take that face's own fit factor (Codex-61zsk.68).
+      family name, which may never take that face's own fit factor (Codex-61zsk.68). *Amended by
+      X82: it did not; with Anton's own factor the cost in Anton is a median 5.1%, at most 7.4%.*
   - **Rejected:**
     - Making each card an inline-size query container, so that `100cqi` is its room. Every kit size
       is a `cqi` token that resolves where it is used, so inside a card container every size in the
