@@ -3723,3 +3723,33 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     app's sheets clean; every spacing token a length). Calibrated: before the fix it fails on
     exactly the three rules, and the browser probe without the fix reads `0px`.
   - **No new request, no cache change.**
+- **X82 · 2026-10-19 · 3c follow-up · The louder-fit sweep swaps a face in as a brand's face, and
+  what the fit costs in Anton (Codex-61zsk.68, a fault in the instrument; decided without the owner,
+  with the reasons.)** X66 and X71 weigh a heading's widest word with each face's fit factor, which
+  `faces.css` picks with a style query on `--lp-font-display` written in the full stack, as the brand
+  pipeline composes it (`'Anton', 'Inter-fallback', system-ui, …`). The sweep swapped a face in by
+  setting `--font-heading` to the bare family (`'Anton'`), which no face's query matches, so every
+  swapped face was weighed with the kit's default factor.
+  - **Read in the browser** (the gallery's Bold page, brand 0, a section heading): with the sweep's
+    swap, Anton read `--lp-face-text` 0.796 and `--lp-face-caps` 0.753, the default; with
+    `--brand-font-heading` alone, so that the brand's own rule composes the stack, 0.48 and 0.418,
+    exactly what the full stack written by hand reads and what `faces.css` gives Anton. Unbounded
+    read 0.796 and 0.753 every way: its own factors are the default, so it was weighed right all
+    along, and no face was weighed narrower than it is.
+  - **The fix.** The sweep sets the brand's face only. A swap that does not draw the face in its full
+    stack is now a fault of the run (the bare swap's `'Anton'` fails that check; the brand's stack
+    passes), so the instrument cannot drift back unseen. `LOUDER_FIT_FACES` narrows a run as its
+    other filters do, and the count the run must read follows it.
+  - **What the fit costs in Anton, re-taken.** Anton only, in Bold's and Poster's Type (the only looks
+    the sweep swaps a face into), every page, 5 widths, 60 texts: no fault, and 33 (heading, text)
+    pairs whose words fit at the Style's size come out smaller, by a median 5.1% (90th 6.2%, the most
+    7.4%). X71 recorded "up to 35%" for titles and "up to 49%" for section headings in Anton: both
+    were Anton weighed as wide as Unbounded. The fit's cost in Anton is in line with each Style's own
+    face (at most 5.2%) and Unbounded (at most 7.3%). X71's line is amended to point here.
+  - **Decided without the owner: re-take only what the fault could move.** The fix changes the factor
+    of one face, Anton, and only where the sweep swaps a face in, so only that was read again (14
+    minutes), not the whole census. Rejected: re-taking the full sweep in every face, which reads
+    nothing the fix can change.
+  - **Tests.** The sweep is opt-in and local (`LOUDER_FIT=1`), not part of CI. Its new check was
+    calibrated on the browser reads above.
+  - **No change to what any page draws.** Only the instrument changed.
