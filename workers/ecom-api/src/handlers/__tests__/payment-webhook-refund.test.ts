@@ -38,34 +38,24 @@
 
 import { STRIPE_EVENTS } from '@codex/constants';
 import { createMockHonoContext, type MockHonoContext } from '@codex/test-utils';
+import type { WebhookServices } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StripeWebhookEnv } from '../../types';
 
-vi.mock('@codex/database', () => ({
-  createPerRequestDbClient: vi.fn(),
-}));
-
 vi.mock('@codex/subscription', () => ({
   invalidateForUser: vi.fn(),
-  // handlePaymentWebhook constructs a SubscriptionService to reverse
-  // subscription payouts on charge.refunded (Codex-13v21).
-  SubscriptionService: vi.fn(() => ({
-    reverseSubscriptionPayoutsForCharge: vi.fn(),
-  })),
 }));
 
-vi.mock('@codex/purchase', () => ({
-  PurchaseService: vi.fn(),
-}));
-
-// `createWebhookDbClient` must remain a real export — it forwards to the
-// (mocked) `createPerRequestDbClient`, so use importOriginal + spread.
+// The handler gets its PurchaseService and SubscriptionService from the
+// webhook composition root (Codex-2hxff.54); mock that seam so each test
+// hands over its own stubs. Every other export stays real.
 vi.mock('@codex/worker-utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/worker-utils')>();
   return {
     ...actual,
+    createWebhookServices: vi.fn(),
     sendEmailToWorker: vi.fn(),
   };
 });
@@ -82,10 +72,8 @@ vi.mock('@codex/access', () => ({
 }));
 
 import { AccessRevocation } from '@codex/access';
-import { createPerRequestDbClient } from '@codex/database';
-import { PurchaseService } from '@codex/purchase';
 import { invalidateForUser } from '@codex/subscription';
-import { sendEmailToWorker } from '@codex/worker-utils';
+import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import { handlePaymentWebhook } from '../payment-webhook';
 
 type KVMock = {
@@ -188,7 +176,7 @@ function createRefundEvent(
 
 describe('handlePaymentWebhook — charge.refunded', () => {
   let mockStripe: Stripe;
-  let mockCleanup: ReturnType<typeof vi.fn>;
+  let mockRelease: ReturnType<typeof vi.fn>;
   let mockProcessRefund: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -201,20 +189,24 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     mockClear.mockResolvedValue(undefined);
 
     mockProcessRefund = vi.fn().mockResolvedValue(undefined);
-    mockCleanup = vi.fn();
+    mockRelease = vi.fn();
     mockStripe = {} as Stripe;
 
-    (createPerRequestDbClient as ReturnType<typeof vi.fn>).mockReturnValue({
-      db: { mock: 'database' },
-      cleanup: mockCleanup,
+    // The registry's services, as the composition root hands them over.
+    vi.mocked(createWebhookServices).mockResolvedValue({
+      services: {
+        purchase: {
+          processRefund: mockProcessRefund,
+          processDispute: vi.fn().mockResolvedValue(undefined),
+        },
+        // charge.refunded reverses subscription payouts first (Codex-13v21).
+        subscription: {
+          reverseSubscriptionPayoutsForCharge: vi.fn(),
+        },
+      } as unknown as WebhookServices['services'],
+      background: (promise) => promise,
+      release: mockRelease,
     });
-
-    (PurchaseService as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      () => ({
-        processRefund: mockProcessRefund,
-        processDispute: vi.fn().mockResolvedValue(undefined),
-      })
-    );
   });
 
   it('positive one-time purchase: processRefund returns { userId } only → library cache bumped, NO revocation written', async () => {

@@ -11,16 +11,34 @@
  * webhook handlers because the cron + the Stripe webhooks share an owner.
  */
 
+import { SubscriptionService } from '@codex/subscription';
 import { describe, expect, it, vi } from 'vitest';
 
 import { runPayoutsSweep, runScheduledPayoutsSweep } from '../payouts-sweep';
 
-// Construct a minimal-ish Bindings stub. The handler only reads
-// DATABASE_URL, STRIPE_SECRET_KEY, and ENVIRONMENT.
+/** A real instance whose sweep each test stubs on the prototype. */
+function sweepService(): SubscriptionService {
+  return new SubscriptionService(
+    { db: {} as never, environment: 'test' },
+    {} as never
+  );
+}
+
+function fakeCtx() {
+  return {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext & { waitUntil: ReturnType<typeof vi.fn> };
+}
+
+// Construct a minimal-ish Bindings stub. The handler reads DATABASE_URL,
+// STRIPE_SECRET_KEY and ENVIRONMENT; the composition root it builds needs a
+// valid DB_METHOD too (the pool is constructed, never dialled).
 function makeEnv(
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
   return {
+    DB_METHOD: 'NEON_BRANCH',
     DATABASE_URL: 'postgres://test',
     STRIPE_SECRET_KEY: 'sk_test_123',
     ENVIRONMENT: 'test',
@@ -64,10 +82,8 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
     const result = await runPayoutsSweep({
-      db: {} as never,
-      stripe: {} as never,
+      subscription: sweepService(),
       obs: obs as never,
-      environment: 'test',
       olderThanMinutes: 30,
     });
 
@@ -101,10 +117,8 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
     const result = await runPayoutsSweep({
-      db: {} as never,
-      stripe: {} as never,
+      subscription: sweepService(),
       obs: obs as never,
-      environment: 'test',
     });
 
     expect(result).toBeNull();
@@ -132,7 +146,9 @@ describe('ecom-api payouts-sweep handler', () => {
     const { obs } = makeObs();
     const env = makeEnv({ DATABASE_URL: undefined });
 
-    await runScheduledPayoutsSweep(env as never, { obs: obs as never });
+    await runScheduledPayoutsSweep(env as never, fakeCtx(), {
+      obs: obs as never,
+    });
 
     expect(spy).not.toHaveBeenCalled();
     expect(obs.error).toHaveBeenCalledWith(
@@ -159,14 +175,27 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
 
-    // Pass pre-built db + stripe stubs so we don't need real connections.
-    await runScheduledPayoutsSweep(makeEnv() as never, {
-      db: {} as never,
+    // A Stripe stub so no real client is built; the pool is constructed by
+    // the composition root but never queried (the sweep is stubbed).
+    const ctx = fakeCtx();
+    await runScheduledPayoutsSweep(makeEnv() as never, ctx, {
       stripe: {} as never,
       obs: obs as never,
     });
 
     expect(spy).toHaveBeenCalledTimes(1);
+    // Codex-2hxff.54: the sweep runs on the registry's SubscriptionService,
+    // so a drained payout is split with configured fees and its payee gets
+    // the payout-released email (Codex-2hxff.7, .13). It used to be built
+    // with only { db, environment }.
+    const sweptBy = spy.mock.contexts[0] as {
+      feeConfig?: unknown;
+      payoutMailer?: unknown;
+    };
+    expect(sweptBy.feeConfig).toBeDefined();
+    expect(sweptBy.payoutMailer).toBeTypeOf('function');
+    // The pool is handed back after the sweep, on waitUntil.
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
 
     spy.mockRestore();
   });
@@ -204,10 +233,8 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
     const result = await runPayoutsSweep({
-      db: {} as never,
-      stripe: {} as never,
+      subscription: sweepService(),
       obs: obs as never,
-      environment: 'test',
       olderThanMinutes: 15,
     });
 
@@ -248,10 +275,8 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
     const result = await runPayoutsSweep({
-      db: {} as never,
-      stripe: {} as never,
+      subscription: sweepService(),
       obs: obs as never,
-      environment: 'test',
     });
 
     // result.errors AND result.groupsResolved both surface accurately
@@ -288,10 +313,8 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
     const result = await runPayoutsSweep({
-      db: {} as never,
-      stripe: {} as never,
+      subscription: sweepService(),
       obs: obs as never,
-      environment: 'test',
       olderThanMinutes: 30,
     });
 

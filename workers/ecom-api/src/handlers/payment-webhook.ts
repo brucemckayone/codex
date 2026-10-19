@@ -20,9 +20,12 @@
 import { AccessRevocation } from '@codex/access';
 import { VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
-import { PurchaseService } from '@codex/purchase';
-import { invalidateForUser, SubscriptionService } from '@codex/subscription';
-import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
+import type { PurchaseService } from '@codex/purchase';
+import {
+  invalidateForUser,
+  type SubscriptionService,
+} from '@codex/subscription';
+import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -262,17 +265,16 @@ export async function handlePaymentWebhook(
 ) {
   const obs = c.get('obs');
 
-  const { db, cleanup } = createWebhookDbClient(c.env);
+  // The registry's services, as routes get them (Codex-2hxff.54).
+  const { services, release } = await createWebhookServices(
+    c.env,
+    c.executionCtx,
+    { obs, stripe }
+  );
 
   try {
-    const service = new PurchaseService(
-      { db, environment: c.env.ENVIRONMENT || 'development' },
-      stripe
-    );
-    const subscriptionService = new SubscriptionService(
-      { db, environment: c.env.ENVIRONMENT || 'development' },
-      stripe
-    );
+    const service = services.purchase;
+    const subscriptionService = services.subscription;
 
     switch (event.type) {
       case STRIPE_EVENTS.CHARGE_REFUNDED:
@@ -287,6 +289,6 @@ export async function handlePaymentWebhook(
         obs?.info('Unhandled payment webhook event', { type: event.type });
     }
   } finally {
-    await cleanup();
+    release();
   }
 }

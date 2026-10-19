@@ -8,14 +8,9 @@
  * - Signature already verified by verifyStripeSignature middleware
  */
 
-import { VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
-import {
-  ConnectAccountService,
-  SubscriptionService,
-} from '@codex/subscription';
 import { uuidSchema, z } from '@codex/validation';
-import { createWebhookDbClient } from '@codex/worker-utils';
+import { createWebhookServices } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -35,40 +30,22 @@ export async function handleConnectWebhook(
 ) {
   const obs = c.get('obs');
 
-  const { db, cleanup } = createWebhookDbClient(c.env);
+  // The registry's services, as routes get them (Codex-2hxff.54).
+  const { services, background, release } = await createWebhookServices(
+    c.env,
+    c.executionCtx,
+    { obs, stripe }
+  );
 
   try {
-    // Wire VersionedCache so the service's internal `account.updated`
-    // invalidation runs against the same KV namespace the studio's
-    // `getStatus(orgId)` reads from. Without this, the cache would stay
-    // warm with stale requirements for up to 10 min after a Stripe push.
-    // Idempotent on duplicate webhook delivery — `cache.invalidate` is
-    // a single KV PUT of a fresh version timestamp.
-    //
-    // `waitUntil` is REQUIRED even though this handler's own use is an
-    // invalidation (Codex-03uh3). `invalidate` is awaited here and worked
-    // without it, but `ConnectAccountService.getStatus` reads through the SAME
-    // instance via `getWithResult`, and that data-slot put is NOT awaited — so
-    // without a sink workerd cancelled it and the studio's status read could
-    // never cache. The bug was invisible precisely because the invalidation
-    // half looked fine.
-    const cache = c.env.CACHE_KV
-      ? new VersionedCache({
-          kv: c.env.CACHE_KV,
-          prefix: 'cache',
-          waitUntil: (promise) => c.executionCtx.waitUntil(promise),
-          obs,
-        })
-      : undefined;
-
-    const service = new ConnectAccountService(
-      {
-        db,
-        environment: c.env.ENVIRONMENT || 'development',
-        cache,
-      },
-      stripe
-    );
+    // The registry's ConnectAccountService carries the VersionedCache the
+    // studio's `getStatus(orgId)` reads through, so the service's internal
+    // `account.updated` invalidation lands where that read looks. Without
+    // it the cache stayed warm with stale requirements for up to 10 min
+    // after a Stripe push. Its `waitUntil` sink matters too (Codex-03uh3):
+    // `getStatus` writes its data slot without awaiting it, and workerd
+    // cancels an un-sunk put.
+    const service = services.connect;
 
     switch (event.type) {
       case STRIPE_EVENTS.ACCOUNT_UPDATED: {
@@ -116,15 +93,12 @@ export async function handleConnectWebhook(
             );
           } else {
             const orgId = parsed.data.codex_organization_id;
-            const { db: subDb, cleanup: subCleanup } = createWebhookDbClient(
-              c.env
-            );
-            const subscriptionService = new SubscriptionService(
-              { db: subDb, environment: c.env.ENVIRONMENT || 'development' },
-              stripe
-            );
-            c.executionCtx.waitUntil(
-              subscriptionService
+            // After the response, on the shared pool: `release` holds the
+            // pool open until the drain settles. The registry's
+            // SubscriptionService carries the payout-released mailer
+            // (Codex-2hxff.13).
+            void background(
+              services.subscription
                 .resolvePendingPayouts(orgId, account.id)
                 .then((result) => {
                   obs?.info('Pending payouts resolved on account activation', {
@@ -140,7 +114,6 @@ export async function handleConnectWebhook(
                     error: (err as Error).message,
                   });
                 })
-                .finally(() => subCleanup())
             );
           }
         }
@@ -174,6 +147,6 @@ export async function handleConnectWebhook(
     // Errors propagate to createWebhookHandler for transient/permanent classification.
     // Transient errors (DB failures) → 500 (Stripe retries).
     // Permanent errors (business logic) → 200 (acknowledged).
-    await cleanup();
+    release();
   }
 }

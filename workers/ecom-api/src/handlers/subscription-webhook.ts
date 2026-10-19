@@ -30,7 +30,6 @@
 import { AccessRevocation, type RevocationReason } from '@codex/access';
 import { invalidateUserLibrary, VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
-import { FeeConfigService } from '@codex/purchase';
 import type {
   CourseSubscriptionWebhookResult,
   WebhookHandlerResult,
@@ -39,10 +38,8 @@ import {
   applyDuePendingPriceChange,
   CourseSubscriptionService,
   PENDING_PRICE_ID_KEY,
-  SubscriptionService,
-  TierService,
 } from '@codex/subscription';
-import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
+import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -208,15 +205,19 @@ export async function handleSubscriptionWebhook(
   const obs = c.get('obs');
   const webAppUrl = c.env.WEB_APP_URL || '';
 
-  const { db, cleanup } = createWebhookDbClient(c.env);
+  // The registry's services, as routes get them (Codex-2hxff.54):
+  // SubscriptionService with fee config, its mailers and its cache hooks, so
+  // every `handle*` method bumps the per-user library + per-org subscription
+  // KV versions itself.
+  const { services, release } = await createWebhookServices(
+    c.env,
+    c.executionCtx,
+    { obs, stripe }
+  );
 
   try {
-    // Wire the cache + waitUntil orchestrator hook so every `handle*`
-    // method on SubscriptionService bumps the per-user library +
-    // per-org subscription KV version keys internally on success. The
-    // webhook no longer calls `invalidateForUser` directly — the
-    // service owns invalidation. Mirror of the service-registry wiring
-    // used by `procedure()` routes.
+    // The handler's own invalidation helpers below (course buyer, Dashboard
+    // sync-back) keep a cache and waitUntil of their own.
     const cache = c.env.CACHE_KV
       ? new VersionedCache({
           kv: c.env.CACHE_KV,
@@ -229,52 +230,22 @@ export async function handleSubscriptionWebhook(
       : undefined;
     const waitUntil = c.executionCtx.waitUntil.bind(c.executionCtx);
 
-    const service = new SubscriptionService(
-      {
-        db,
-        environment: c.env.ENVIRONMENT || 'development',
-        cache,
-        waitUntil,
-        webAppUrl: c.env.WEB_APP_URL,
-      },
-      stripe
-    );
+    const service = services.subscription;
 
     // TierService serves `product.updated` / `price.created` from the
-    // Dashboard. It gets NO propagator: Studio is the only place a price is
-    // set, so a Price created in the Dashboard is logged as drift and never
-    // moves a subscriber (Codex-2hxff.3).
-    const tierService = new TierService(
-      {
-        db,
-        // X7 (Codex-z9fzv): pass dbWs explicitly. The per-request
-        // client returned by createPerRequestDbClient is already a
-        // DatabaseWs, so the same instance satisfies both slots and
-        // reuses the WebSocket connection.
-        dbWs: db,
-        environment: c.env.ENVIRONMENT || 'development',
-      },
-      stripe
-    );
+    // Dashboard. Studio is the only place a price is set, so a Price created
+    // in the Dashboard is logged as drift and never moves a subscriber
+    // (Codex-2hxff.3). The registry's TierService carries a propagator, but
+    // only `updateTier` (Studio) fires it; the two methods this webhook calls,
+    // `applyStripeProductUpdate` and `recordStripePriceDrift`, never do.
+    const tierService = services.tier;
 
     // Codex-2pryk WP-6: course-specific subscriptions flow through this SAME
     // webhook (they are mode=subscription). They are discriminated by the Stripe
     // subscription's `type: 'course_subscription'` metadata and routed to
     // CourseSubscriptionService so the org SubscriptionService never records a
     // course sub as an org subscription.
-    const courseSubService = new CourseSubscriptionService(
-      {
-        db,
-        environment: c.env.ENVIRONMENT || 'development',
-        feeConfig: new FeeConfigService({
-          db,
-          environment: c.env.ENVIRONMENT || 'development',
-          cache,
-          waitUntil,
-        }),
-      },
-      stripe
-    );
+    const courseSubService = services.courseSubscription;
 
     /**
      * Bump a course-sub buyer's library version (their entitlement + enrollment
@@ -696,6 +667,6 @@ export async function handleSubscriptionWebhook(
         });
     }
   } finally {
-    await cleanup();
+    release();
   }
 }

@@ -129,6 +129,12 @@ export {
   createWebhookDbClient,
   type WebhookDbEnv,
 } from './webhook-db-client';
+// Webhook + cron composition root (Codex-2hxff.54): the same service registry
+// procedure() builds, for code that runs outside it.
+export {
+  createWebhookServices,
+  type WebhookServices,
+} from './webhook-services';
 // Worker factory
 export {
   type CORSConfig,
