@@ -14367,7 +14367,7 @@ export const studio_page_editor_recovery_discarded = () => `Unsaved changes from
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_page_editor_stale_banner = () => `This page was saved in another tab. Reload to keep editing.`
+export const studio_page_editor_stale_banner = () => `This page was saved in another tab or on another device. Reload to keep editing.`
 
 
 /**

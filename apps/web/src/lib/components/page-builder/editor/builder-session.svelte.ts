@@ -139,6 +139,17 @@ function toKitPage(state: PageBuilderState): KitPage {
   return upgradePage({ design: state.design, sections: state.sections });
 }
 
+/**
+ * Did the save fail because the page moved on since this copy was read (412)?
+ * Read by status alone: a save can also meet a 409 (a slug in use), which the
+ * creator fixes by editing, not by reloading. A remote command's rejection
+ * carries the status on `.status`, as `collections/progress.ts` reads it.
+ */
+function isPreconditionFailed(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  return (error as { status?: unknown }).status === 412;
+}
+
 export function createBuilderSession(options: {
   pageId: () => string;
 }): BuilderSession {
@@ -281,6 +292,14 @@ export function createBuilderSession(options: {
    * one, and setting it back to the old value would never be sent.
    */
   let persistedOffer: PageOffer | undefined;
+  /**
+   * The page's revision as this tab last read or saved it (Codex-61zsk.18).
+   * Every page save names it, and the server refuses one (412) once another
+   * tab or device has saved since: the tab then goes {@link stale}. Kept out
+   * of the store, so it is never part of what a save compares or sends as
+   * page content.
+   */
+  let revision: string | undefined;
   let busy = $state<SessionBusy>(null);
   let stale = $state(false);
 
@@ -297,8 +316,10 @@ export function createBuilderSession(options: {
       id: _rowId,
       organizationId: _orgId,
       publishedAt: _publishedAt,
+      revision: loadedRevision,
       ...editable
     } = loaded;
+    revision = loadedRevision;
     // The kit reads v2 only; the saved baseline is the upgraded page, so a
     // legacy row is rewritten to v2 on its first save (contract §3).
     const kit = toKitPage(editable);
@@ -427,7 +448,23 @@ export function createBuilderSession(options: {
       pageId: rowId,
       payload,
       savedOffer: persistedOffer,
-      savePage: (input) => saveJourneyPage(toV2SaveBody(input)),
+      savePage: async (input) => {
+        try {
+          const saved = await saveJourneyPage({
+            ...toV2SaveBody(input),
+            ...(revision ? { revision } : {}),
+          });
+          // `?.`: a worker deployed before revisions answers 204, and its save
+          // has landed; the next save then goes unchecked rather than failing.
+          revision = saved?.revision;
+        } catch (error) {
+          // Another tab or device saved this page since this copy was read,
+          // and this save would have undone theirs (Codex-61zsk.18): the server
+          // refused it. Stop saving, as a tab that heard another tab does.
+          if (isPreconditionFailed(error)) goStale();
+          throw error;
+        }
+      },
       saveOffer: async (input) => {
         const saved = await updateJourneyOffer(input);
         persistedOffer = input.offer;

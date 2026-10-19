@@ -315,7 +315,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
         sections: [],
         brandOverrides: null,
       })
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ revision: expect.any(String) });
 
     const loaded = await serviceWithoutOrphanTracking.getJourneyForBuilder(
       orgId,

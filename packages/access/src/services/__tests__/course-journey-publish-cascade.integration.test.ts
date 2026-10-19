@@ -379,7 +379,7 @@ describe('Journey publish/unpublish cascade (Codex-xzwl5)', () => {
           sections: [],
           brandOverrides: null,
         })
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({ revision: expect.any(String) });
 
       expect((await readCourse(courseId))?.title).toBe(`${title} II`);
     });

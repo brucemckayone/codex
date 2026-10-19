@@ -438,7 +438,7 @@ export const createJourney = command(
 /** Persist the builder's draft (frozen save command). */
 export const saveJourneyPage = command(
   saveJourneyPageBodySchema,
-  async (record): Promise<void> => {
+  async (record): Promise<{ revision: string }> => {
     const ctx = await resolveStudioOrg();
     if (!ctx) {
       error(400, 'Journeys can only be saved within an organization');
@@ -449,8 +449,10 @@ export const saveJourneyPage = command(
     // 'The slug "bone-deep" is already in use' — true text a creator can act on in
     // three seconds, and text production replaces with "An unexpected error
     // occurred". `saveBuilderDraft` puts whatever arrives straight into the toast
-    // (`stage: 'page'`), so the honest sentence was one forward away.
-    await withServiceErrors(() =>
+    // (`stage: 'page'`), so the honest sentence was one forward away. A 412
+    // (another save got there first, Codex-61zsk.18) arrives the same way, and
+    // the builder session reads its status.
+    return withServiceErrors(() =>
       ctx.api.access.saveJourneyPage(ctx.orgId, record)
     );
   }
@@ -613,6 +615,10 @@ export const setJourneyStatus = command(
         sections: record.sections,
         ...(record.design ? { design: record.design } : {}),
         ...(record.seo ? { seo: record.seo } : {}),
+        // This writes the whole page back from the read above, so a builder
+        // save that lands in between would be undone: name the revision read,
+        // and the write is refused instead (Codex-61zsk.18).
+        ...(record.revision ? { revision: record.revision } : {}),
       };
       await ctx.api.access.saveJourneyPage(ctx.orgId, body);
     } catch (err) {

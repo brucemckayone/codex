@@ -1793,7 +1793,7 @@
   "studio_page_editor_toast_links_inert": "Buttons on the page don’t navigate while you edit. Use Preview to try them.",
   "studio_page_editor_recovery_restored": "Restored your unsaved changes",
   "studio_page_editor_recovery_discarded": "Unsaved changes from an earlier session weren’t restored because the page has changed since.",
-  "studio_page_editor_stale_banner": "This page was saved in another tab. Reload to keep editing.",
+  "studio_page_editor_stale_banner": "This page was saved in another tab or on another device. Reload to keep editing.",
   "studio_page_editor_stale_reload": "Reload",
   "studio_page_editor_closed_unsaved": "The editor closed before your change was saved. Open the page again to check it.",
   "studio_page_editor_context_failed": "Some of this page’s course details couldn’t be loaded, so the preview may be missing parts.",

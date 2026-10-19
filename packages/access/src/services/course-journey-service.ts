@@ -51,6 +51,7 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  PreconditionFailedError,
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
@@ -93,6 +94,7 @@ import type {
 } from '@codex/shared-types';
 import { PAGE_STYLE_IDS } from '@codex/validation';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { pageRevision } from './page-revision';
 import { resolvePracticeThumbnail } from './practice-thumbnail';
 
 /**
@@ -1743,6 +1745,9 @@ export class CourseJourneyService extends BaseService {
         // this projection the two meta fields would come back EMPTY after every
         // reload, which is the shape a creator reads as "it did not save".
         ...(row.seo ? { seo: row.seo as PageSeo } : {}),
+        // What the builder's saves name, so a save made from an out-of-date
+        // copy is refused (Codex-61zsk.18).
+        revision: await pageRevision(row),
       };
     } catch (error) {
       this.handleError(error, 'getJourneyForBuilder');
@@ -1954,6 +1959,14 @@ export class CourseJourneyService extends BaseService {
    * publishes the course (so the public sales page, which requires BOTH, goes
    * live in one action), unpublishing it unpublishes the course, and the course's
    * `slug`/`title` follow the page's.
+   *
+   * A save that names the `revision` it was made from is refused with a
+   * `PreconditionFailedError` (412) when the stored page has moved on since:
+   * another tab or device saved over it, and this copy would undo that save
+   * (Codex-61zsk.18, {@link pageRevision}). The row is locked while it is
+   * checked, so two saves made from one revision cannot both pass. A save
+   * without one writes as before. Returns the page's revision after the save,
+   * for the next one to name.
    */
   async saveJourneyPage(
     organizationId: string,
@@ -1993,12 +2006,20 @@ export class CourseJourneyService extends BaseService {
        * nothing about SEO" is treated as no instruction.
        */
       seo?: PageSeo;
+      /**
+       * The page's revision as the caller last read or saved it. Present, the
+       * save is refused if the stored page has moved on; absent, it is not
+       * checked (a caller that writes what it just read, such as a status
+       * change, has nothing to lose).
+       */
+      revision?: string;
     }
-  ): Promise<void> {
+  ): Promise<{ revision: string }> {
     // Captured inside the transaction below and read AFTER it commits — see
     // the page-image orphan scan following the try/catch for why acting on
     // "the old sections are gone" has to wait until they really are.
     let oldSections: PageSection[] | undefined;
+    let revision = '';
 
     try {
       const status: PageStatus = record.status;
@@ -2012,11 +2033,15 @@ export class CourseJourneyService extends BaseService {
           .select({
             id: landingPages.id,
             slug: landingPages.slug,
+            title: landingPages.title,
+            status: landingPages.status,
             publishedAt: landingPages.publishedAt,
             subjectType: landingPages.subjectType,
             subjectId: landingPages.subjectId,
+            brandOverrides: landingPages.brandOverrides,
             sections: landingPages.sections,
             design: landingPages.design,
+            seo: landingPages.seo,
             legacySnapshot: landingPages.legacySnapshot,
           })
           .from(landingPages)
@@ -2027,10 +2052,21 @@ export class CourseJourneyService extends BaseService {
               isNull(landingPages.deletedAt)
             )
           )
-          .limit(1);
+          .limit(1)
+          // Held to the commit, so a second save from the same revision waits
+          // and then reads this one's result, and is refused.
+          .for('update');
 
         if (!existing) {
           throw new NotFoundError('Journey page not found');
+        }
+        if (
+          record.revision !== undefined &&
+          (await pageRevision(existing)) !== record.revision
+        ) {
+          throw new PreconditionFailedError(
+            'This page was saved somewhere else since you opened it. Reload to keep editing.'
+          );
         }
         oldSections = existing.sections;
 
@@ -2092,7 +2128,7 @@ export class CourseJourneyService extends BaseService {
         const nowPublishedAt =
           publishing && !existing.publishedAt ? new Date() : undefined;
 
-        await tx
+        const [saved] = await tx
           .update(landingPages)
           .set({
             title: record.title,
@@ -2110,7 +2146,22 @@ export class CourseJourneyService extends BaseService {
               eq(landingPages.id, record.id),
               eq(landingPages.organizationId, organizationId)
             )
-          );
+          )
+          // The row as stored, not as sent: the revision the next read
+          // computes is of the stored columns (a `design` left alone, say).
+          .returning({
+            slug: landingPages.slug,
+            title: landingPages.title,
+            status: landingPages.status,
+            brandOverrides: landingPages.brandOverrides,
+            sections: landingPages.sections,
+            design: landingPages.design,
+            seo: landingPages.seo,
+          });
+        if (!saved) {
+          throw new NotFoundError('Journey page not found');
+        }
+        revision = await pageRevision(saved);
 
         if (subjectCourseId) {
           await this.cascadeCourseFromPage(tx, {
@@ -2163,7 +2214,7 @@ export class CourseJourneyService extends BaseService {
       const removedKeys = droppedPageImageKeys(oldSections, record.sections);
 
       if (removedKeys.length === 0) {
-        return;
+        return { revision };
       }
 
       const nominated = removedKeys.slice(
@@ -2230,6 +2281,7 @@ export class CourseJourneyService extends BaseService {
           scanError instanceof Error ? scanError.message : String(scanError),
       });
     }
+    return { revision };
   }
 
   /**

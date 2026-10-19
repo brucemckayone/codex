@@ -885,6 +885,66 @@ describe('another tab on the same page', () => {
 });
 
 /**
+ * Another DEVICE on the same page (Codex-61zsk.18). No channel reaches it, so
+ * each save names the revision this copy was made from, and the server
+ * refuses one made from a copy older than its own (412). The tab then goes
+ * stale, as for another tab.
+ */
+describe('another device on the same page', () => {
+  const READ = 'a'.repeat(32);
+  const SAVED = 'b'.repeat(32);
+  const failure = (status: number, message: string) =>
+    Object.assign(new Error(message), { status });
+
+  it('names the revision it read, then the one each save returns', async () => {
+    vi.useFakeTimers();
+    remotes.saveJourneyPage.mockResolvedValue({ revision: SAVED });
+    start(record({ revision: READ }));
+    editHeading('First');
+    vi.advanceTimersByTime(5000);
+    await drain();
+    editHeading('Second');
+    vi.advanceTimersByTime(5000);
+    await drain();
+
+    expect(
+      remotes.saveJourneyPage.mock.calls.map(([sent]) => sent.revision)
+    ).toEqual([READ, SAVED]);
+  });
+
+  it('goes stale when the server refuses a save made from an older copy, and saves nothing more', async () => {
+    vi.useFakeTimers();
+    remotes.saveJourneyPage.mockRejectedValueOnce(
+      failure(412, 'This page was saved somewhere else since you opened it.')
+    );
+    const session = start(record({ revision: READ }));
+    editHeading('Typed on this device');
+    vi.advanceTimersByTime(5000);
+    await drain();
+
+    expect(session.stale).toBe(true);
+    editHeading('Typed after the refusal');
+    vi.advanceTimersByTime(5000);
+    await drain();
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays editable when a save meets a slug in use (409), which editing fixes', async () => {
+    vi.useFakeTimers();
+    remotes.saveJourneyPage.mockRejectedValueOnce(
+      failure(409, 'The slug "bone-deep" is already in use')
+    );
+    const session = start(record({ revision: READ }));
+    editHeading('Typed');
+    vi.advanceTimersByTime(5000);
+    await drain();
+
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(1);
+    expect(session.stale).toBe(false);
+  });
+});
+
+/**
  * The four reads the canvas is drawn from besides the page. Each falls back
  * to its empty shape, so a FAILED read used to render as content that is
  * missing — no stages, no price, images on their plates — with nothing to
