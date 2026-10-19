@@ -5,7 +5,10 @@
     "config/vite/**",
     "config/tsconfig/**",
     "tsconfig.json",
-    "config/vitest/**"
+    "config/vitest/**",
+    "vitest.setup.ts",
+    ".github/workflows/testing.yml",
+    ".github/scripts/start-local-neon-proxy.sh"
   ],
   "tasks": {
     "build": {
@@ -35,6 +38,7 @@
       ],
       "passThroughEnv": [
         "DATABASE_URL",
+        "DATABASE_URL_LOCAL_PROXY",
         "NEON_API_KEY",
         "NEON_PROJECT_ID",
         "NEON_PARENT_BRANCH_ID"
@@ -52,7 +56,8 @@
     "test:e2e": {
       "dependsOn": ["^build"],
       "cache": false,
-      "env": ["DATABASE_URL", "DB_METHOD", "PLAYWRIGHT_BASE_URL", "CI"]
+      "env": ["DATABASE_URL", "DB_METHOD", "PLAYWRIGHT_BASE_URL", "CI"],
+      "passThroughEnv": ["DATABASE_URL_LOCAL_PROXY"]
     },
     "test:e2e:ui": {
       "cache": false,

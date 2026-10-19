@@ -1,41 +1,19 @@
 /**
  * Neon Testing Setup
  *
- * DEPRECATED: Per-file ephemeral branching has been replaced with
- * workflow-level Neon branches for better cost efficiency.
+ * DEPRECATED: per-file ephemeral Neon branches are gone, and so are the
+ * per-run CI branches that replaced them.
  *
- * NEW STRATEGY (GitHub Actions workflow-level branches):
- * ======================================================
- * - Each test domain gets ONE dedicated Neon branch per CI run, named
- *   `<domain>-<run_id>-<run_attempt>` so that two concurrent runs can never
- *   share a database (a shared name silently handed both runs one branch —
- *   see .github/workflows/testing.yml, "Generate Neon Branch Name"):
- *   - ci-unit-tests-* (shared by all package tests)
- *   - ci-auth-tests-* (auth worker)
- *   - ci-content-api-tests-* (content-api worker)
- *   - ci-identity-api-tests-* (identity-api worker)
- *   - ci-ecom-api-tests-* (ecom-api worker)
- *   - ci-e2e-api-tests-* (root E2E tests)
- *   - ci-e2e-web-tests-* (web app E2E tests)
+ * - LOCAL: DATABASE_URL_LOCAL_PROXY from .env.test (LOCAL_PROXY method), the
+ *   disposable `main_test` on the local Postgres container.
+ * - CI: every test job runs a Postgres service container plus the local Neon
+ *   proxy (.github/workflows/testing.yml, Codex-75m0t.2), migrated empty from
+ *   0001 on every run. DB_METHOD=LOCAL_PROXY and both URLs point at
+ *   db.localtest.me:5432/neondb. Only `migration-check` still forks a Neon
+ *   branch, of production, to apply the committed migrations to real data.
  *
- * COST SAVINGS:
- * - Before: 200+ ephemeral branches per CI run (per-test-file)
- * - After: 7 branches per CI run (per-domain)
- * - Savings: ~97% fewer Neon branches
- *
- * LOCAL DEVELOPMENT (unchanged):
- * - Uses DATABASE_URL from .env.test (LOCAL_PROXY method)
- * - NO branch creation (FREE, unlimited test runs)
- * - Fast execution with no provisioning delay
- *
- * CI/CD (new approach):
- * - GitHub Actions creates Neon branch per test domain
- * - DATABASE_URL is set at workflow level
- * - Tests use shared branch within their domain
- * - Branches cleaned up after workflow completes
- *
- * Migration: Remove all withNeonTestBranch() calls from test files.
- * Tests will automatically use DATABASE_URL from environment.
+ * Migration: remove any remaining withNeonTestBranch() calls. Tests use the
+ * database URL from the environment.
  */
 
 /**

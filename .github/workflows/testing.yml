@@ -16,9 +16,6 @@ permissions:
   contents: read
   actions: write
 
-env:
-  EXPIRES_IN_DAYS: 1
-
 # Deduplicates runs for the SAME ref (this is what cancels the `push` twin of a
 # pull_request run, and supersedes an earlier push to the same branch).
 #
@@ -300,11 +297,17 @@ jobs:
             # schema it was generated from, and the runner + preflight checks
             # that apply it. `migration-check` also runs when `workflows` is
             # true, so a change to that job is exercised by its own PR.
+            # The runner reads its connection from src/config (env.config.ts,
+            # which imports @codex/constants), and package.json holds the
+            # db:migrate script.
             migrations:
               - 'packages/database/src/migrations/**'
               - 'packages/database/src/schema/**'
+              - 'packages/database/src/config/**'
               - 'packages/database/scripts/migrate-direct.ts'
               - 'packages/database/scripts/migration-preflight.ts'
+              - 'packages/database/package.json'
+              - 'packages/constants/**'
 
   # ============================================================================
   # MIGRATION CHECK — the committed migrations apply to a copy of PRODUCTION
@@ -516,20 +519,23 @@ jobs:
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
-        # --env-mode=loose is what lets DATABASE_URL_LOCAL_PROXY reach the
-        # suites. turbo 2 runs in STRICT env mode by default and hands a task
-        # only the variables turbo.json declares; `tasks.test.env` lists
-        # DATABASE_URL and DB_METHOD but not DATABASE_URL_LOCAL_PROXY, the ONLY
-        # key LOCAL_PROXY reads, and vitest.setup.ts skips .env.test when CI is
-        # set. Strict, every DB suite throws "DATABASE_URL_LOCAL_PROXY
-        # environment variable is required" (reproduced, Codex-75m0t.2). Loose
-        # mode passes the environment through; the cache key is still built
-        # from the declared variables only. Drop the flag once turbo.json
-        # declares DATABASE_URL_LOCAL_PROXY (turbo.json is Codex-75m0t.1's).
+        # turbo runs in STRICT env mode: a task sees only the variables
+        # turbo.json declares. DATABASE_URL_LOCAL_PROXY, the one key
+        # LOCAL_PROXY reads (vitest.setup.ts skips .env.test when CI is set),
+        # is in `tasks.test.passThroughEnv`; undeclared, every DB suite throws
+        # "DATABASE_URL_LOCAL_PROXY environment variable is required"
+        # (reproduced, Codex-75m0t.2). Do not reach for --env-mode=loose: turbo
+        # hashes the env mode, so it misses the cache for every task, builds
+        # included.
+        #
+        # Results are cached across runs (Codex-75m0t.1): the database URL is
+        # passed through, not hashed. A change to this workflow, the proxy
+        # script, config/vitest or vitest.setup.ts invalidates them
+        # (turbo.json globalDependencies).
         run: |
           # Use Turborepo's built-in change detection instead of manual filtering
           # This runs tests for changed packages and packages that depend on them
-          pnpm test --env-mode=loose
+          pnpm test
         continue-on-error: true # Allow artifact upload even if tests fail
 
       - name: Upload test results
@@ -1333,11 +1339,12 @@ jobs:
           curl -f http://localhost:5173 || exit 1          # apps/web
           echo "All workers ready"
 
-      # `pnpm test:e2e` is `turbo run test:e2e --filter=web`, so it needs
-      # --env-mode=loose for the same reason as `pnpm test` in the `test` job:
-      # specs that write fixtures through dbHttp (helpers/subscription.ts,
-      # brand-editor-hero-effects.spec.ts) need DATABASE_URL_LOCAL_PROXY, and
-      # `tasks["test:e2e"].env` does not declare it.
+      # `pnpm test:e2e` is `turbo run test:e2e --filter=web`, in turbo's strict
+      # env mode. Specs that write fixtures through dbHttp
+      # (helpers/subscription.ts, brand-editor-hero-effects.spec.ts) need
+      # DATABASE_URL_LOCAL_PROXY, which `tasks["test:e2e"].passThroughEnv`
+      # declares. Not --env-mode=loose: turbo hashes the mode, so every
+      # dependency would be rebuilt under the workers already serving it.
       - name: Run E2E tests
         env:
           CI: "true"
@@ -1385,7 +1392,7 @@ jobs:
             echo "::error::Dead worker(s):$dead. Not running E2E; see worker-logs artifact."
             exit 1
           fi
-          pnpm test:e2e --env-mode=loose
+          pnpm test:e2e
 
       # Run visual tests with --update-snapshots to generate Linux baselines
       # TODO: Remove --update-snapshots after committing the generated snapshots
