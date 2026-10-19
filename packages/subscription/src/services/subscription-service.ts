@@ -101,6 +101,7 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../errors';
+import { resolveInvoiceCharge } from './invoice-charge';
 import {
   CLEAR_PENDING_PRICE_METADATA,
   schedulePriceChange,
@@ -603,23 +604,6 @@ export type PayoutReleasedMailer = (params: {
   organizationId?: string | null;
   data: Record<string, string | number | boolean>;
 }) => void;
-
-/**
- * Read the source-charge id from an invoice's inline `payments.data[0]`.
- * Returns null when payments are not expanded — see resolveInvoiceCharge
- * for the full fallback chain to recover the charge in that case.
- */
-function extractInvoiceCharge(invoice: Stripe.Invoice): string | null {
-  const payment = invoice.payments?.data?.[0];
-  const charge = payment?.payment?.charge;
-  return typeof charge === 'string' ? charge : null;
-}
-
-function extractInvoicePaymentIntent(invoice: Stripe.Invoice): string | null {
-  const payment = invoice.payments?.data?.[0];
-  const pi = payment?.payment?.payment_intent;
-  return typeof pi === 'string' ? pi : null;
-}
 
 export class SubscriptionService extends BaseService {
   private readonly stripe: Stripe;
@@ -1405,54 +1389,6 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Resolve the source charge id for a paid invoice.
-   *
-   * Why: Stripe 2024+ invoice payloads omit `payments.data` unless the
-   * invoice is retrieved with `expand: ['payments']`. The raw webhook
-   * event is an immutable snapshot, so the inline shape is almost always
-   * empty in production. Without this fallback chain, executeTransfers
-   * never runs (Codex-zdbhg).
-   *
-   * Order of resolution:
-   *   1. Inline `payments.data[0]` on the supplied invoice (test fixtures + cache hits)
-   *   2. Retrieve the invoice with `expand: ['payments']` (canonical Stripe 2024+ path)
-   *   3. If we have a payment_intent but no charge, `paymentIntents.retrieve → latest_charge`
-   *   4. Final fallback: `charges.list({ payment_intent })` — rare race after PI confirmation
-   */
-  private async resolveInvoiceCharge(
-    stripeInvoice: Stripe.Invoice
-  ): Promise<string | null> {
-    let chargeId = extractInvoiceCharge(stripeInvoice);
-    let piId = extractInvoicePaymentIntent(stripeInvoice);
-
-    if (!chargeId && !piId && stripeInvoice.id) {
-      const expanded = await this.stripe.invoices.retrieve(stripeInvoice.id, {
-        expand: ['payments'],
-      });
-      chargeId = extractInvoiceCharge(expanded);
-      piId = extractInvoicePaymentIntent(expanded);
-    }
-
-    if (chargeId) return chargeId;
-    if (!piId) return null;
-
-    const pi = await this.stripe.paymentIntents.retrieve(piId);
-    if (typeof pi.latest_charge === 'string') return pi.latest_charge;
-
-    // Idempotency-drift invariant: charges.list returns the most recent
-    // charge for this PI. We assume Stripe sets pi.latest_charge once and
-    // never reassigns. If that invariant breaks (e.g., PI re-charge after
-    // a failure), the chargeId resolved here could differ across webhook
-    // retries → idempotency keys diverge → executeTransfers may double-pay.
-    const charges = await this.stripe.charges.list({
-      payment_intent: piId,
-      limit: 1,
-    });
-    const first = charges.data?.[0];
-    return typeof first?.id === 'string' ? first.id : null;
-  }
-
-  /**
    * Handle invoice.payment_succeeded for subscription renewals.
    * Extends subscription period and creates revenue transfers.
    *
@@ -1491,7 +1427,10 @@ export class SubscriptionService extends BaseService {
     // is only populated when explicitly expanded on retrieve. Without the
     // expand-fallback chain below, every real invoice.payment_succeeded
     // event silently skipped transfers (Codex-zdbhg).
-    const sourceTransaction = await this.resolveInvoiceCharge(stripeInvoice);
+    const sourceTransaction = await resolveInvoiceCharge(
+      this.stripe,
+      stripeInvoice
+    );
     if (!sourceTransaction) {
       this.obs.warn(
         'Invoice has no charge or payment intent, skipping transfers',

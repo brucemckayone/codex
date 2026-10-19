@@ -42,6 +42,39 @@ import {
   CourseSubscriptionService,
 } from '../course-subscription-service';
 
+/**
+ * A card-paid invoice's payment as Stripe sends it: the PaymentIntent and NO
+ * `charge`. Stripe surfaces `charge` only for a charge without a PaymentIntent
+ * (sandbox invoice in_1USC217wyGmo4sh63iTqUPkW, 2026-10-19). These fixtures
+ * used to set both, which hid Codex-2hxff.50: the course path read only
+ * `charge`, so a real invoice recorded no payouts.
+ */
+function paidByCard(chargeId: string) {
+  return {
+    data: [
+      {
+        payment: {
+          type: 'payment_intent',
+          payment_intent: chargeId.replace(/^ch_/, 'pi_'),
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * createMockStripe's paymentIntents.retrieve mints a fresh `latest_charge` on
+ * every call. Real Stripe returns the same one, so a redelivered invoice
+ * resolves the same charge: pi_<x> → ch_<x>.
+ */
+function stripeWithStableCharges(): Stripe {
+  const stripe = createMockStripe();
+  vi.mocked(stripe.paymentIntents.retrieve).mockImplementation((async (
+    id: string
+  ) => ({ id, latest_charge: id.replace(/^pi_/, 'ch_') })) as never);
+  return stripe;
+}
+
 describe('CourseSubscriptionService lifecycle (WP-6)', () => {
   let db: Database;
   let subscriberId: string;
@@ -103,7 +136,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
 
     service = new CourseSubscriptionService(
       { db, environment: 'test' },
-      createMockStripe()
+      stripeWithStableCharges()
     );
   });
 
@@ -235,11 +268,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
           metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
         },
       },
-      payments: {
-        data: [
-          { payment: { payment_intent: `pi_${chargeId}`, charge: chargeId } },
-        ],
-      },
+      payments: paidByCard(chargeId),
     }) as unknown as Stripe.Invoice;
 
     await service.handleCourseInvoicePaymentSucceeded(invoice, sub);
@@ -257,6 +286,8 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     expect(byType.organization_fee).toBe(1);
     // Every row is attributed by courseSubscriptionId + sourceType='subscription'.
     expect(payoutRows.every((r) => r.sourceType === 'subscription')).toBe(true);
+    // Every slice is keyed on the charge the PaymentIntent resolved to.
+    expect(payoutRows.every((r) => r.stripeChargeId === chargeId)).toBe(true);
     // Split sums exactly to the charge amount.
     expect(payoutRows.reduce((s, r) => s + r.amountCents, 0)).toBe(5000);
 
@@ -267,6 +298,60 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
       .from(payouts)
       .where(eq(payouts.courseSubscriptionId, courseSubscriptionId as string));
     expect(payoutRowsAfter).toHaveLength(payoutRows.length);
+  });
+
+  // Codex-2hxff.50, the production shape end to end: the webhook's invoice
+  // carries no payments (Stripe omits them unless expanded), and the expanded
+  // payment names only the PaymentIntent. The course path read `charge` from
+  // both and recorded nothing.
+  it('a webhook invoice with no inline payments: the slices come from the expanded PaymentIntent', async () => {
+    const { cId, pId } = await makeCourseWithPlan();
+    const stripeSubId = `sub_${randomUUID().slice(0, 8)}`;
+    const sub = courseSubStripeObject(stripeSubId, cId, pId);
+    await service.handleCourseSubscriptionCreated(sub);
+    const [row] = await db
+      .select({ id: courseSubscriptions.id })
+      .from(courseSubscriptions)
+      .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSubId));
+    if (!row) throw new Error('course sub not recorded');
+
+    const chargeId = `ch_${randomUUID().slice(0, 8)}`;
+    const stripe = stripeWithStableCharges();
+    vi.mocked(stripe.invoices.retrieve).mockImplementation((async (
+      id: string
+    ) => ({ id, payments: paidByCard(chargeId) })) as never);
+    const webhookService = new CourseSubscriptionService(
+      { db, environment: 'test' },
+      stripe
+    );
+    const invoice = createMockStripeInvoice({
+      amount_paid: 5000,
+      currency: 'gbp',
+      parent: {
+        subscription_details: {
+          subscription: stripeSubId,
+          metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
+        },
+      },
+      payments: { data: [] },
+    }) as unknown as Stripe.Invoice;
+
+    await webhookService.handleCourseInvoicePaymentSucceeded(invoice, sub);
+
+    expect(stripe.invoices.retrieve).toHaveBeenCalledWith(invoice.id, {
+      expand: ['payments'],
+    });
+    const rows = await db
+      .select()
+      .from(payouts)
+      .where(eq(payouts.courseSubscriptionId, row.id));
+    expect(rows.map((r) => r.payoutType).sort()).toEqual([
+      'creator_payout',
+      'organization_fee',
+      'platform_fee',
+    ]);
+    expect(rows.every((r) => r.stripeChargeId === chargeId)).toBe(true);
+    expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(5000);
   });
 
   /** A course sub row + the invoice that pays it. */
@@ -289,11 +374,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
           metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
         },
       },
-      payments: {
-        data: [
-          { payment: { payment_intent: `pi_${chargeId}`, charge: chargeId } },
-        ],
-      },
+      payments: paidByCard(chargeId),
     }) as unknown as Stripe.Invoice;
     const slices = () =>
       db.select().from(payouts).where(eq(payouts.courseSubscriptionId, row.id));
@@ -332,7 +413,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     });
     const dying = new CourseSubscriptionService(
       { db: failing, environment: 'test' },
-      createMockStripe()
+      stripeWithStableCharges()
     );
     await expect(
       dying.handleCourseInvoicePaymentSucceeded(invoice, sub)
@@ -414,11 +495,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
           metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
         },
       },
-      payments: {
-        data: [
-          { payment: { payment_intent: `pi_${chargeId}`, charge: chargeId } },
-        ],
-      },
+      payments: paidByCard(chargeId),
     }) as unknown as Stripe.Invoice;
 
     await service.handleCourseInvoicePaymentSucceeded(invoice, sub);
