@@ -115,6 +115,14 @@ import {
 import { calculateRevenueSplit } from './revenue-split';
 import { mapStripeSubscriptionStatus } from './stripe-status-mapper';
 import {
+  cancelLostDisputeSubscription,
+  type DisputedSubscription,
+  type DisputeInput,
+  pauseBilling,
+  pauseDisputedSubscription,
+  restoreDisputedSubscription,
+} from './subscription-dispute';
+import {
   type InvalidationReason,
   invalidateForUser,
   type WaitUntilFn,
@@ -4351,6 +4359,73 @@ export class SubscriptionService extends BaseService {
       { ...this.ledger(), obs: this.obs },
       { olderThanMinutes }
     );
+  }
+
+  // ── Disputes (Codex-2hxff.9; docs/payments/subscription-disputes.md) ──
+
+  /**
+   * A chargeback opened on one of its invoices: access paused. Undefined for
+   * a purchase's dispute. Billing is paused separately, after the clawback.
+   */
+  async pauseForDispute(
+    input: DisputeInput
+  ): Promise<DisputedSubscription | undefined> {
+    const paused = await pauseDisputedSubscription(this.disputeDeps(), input);
+    if (paused) {
+      this.invalidateIfConfigured(
+        paused.userId,
+        paused.organizationId ?? undefined,
+        'subscription_paused'
+      );
+    }
+    return paused;
+  }
+
+  /** Billing paused while the chargeback is open (owner decision Q-A). */
+  async pauseBillingForDispute(
+    subscription: DisputedSubscription,
+    stripeDisputeId: string
+  ): Promise<void> {
+    await pauseBilling(this.disputeDeps(), subscription, stripeDisputeId);
+  }
+
+  /** A won dispute: access and billing restored, unless another chargeback is open. */
+  async restoreAfterDispute(
+    input: DisputeInput
+  ): Promise<
+    { subscription: DisputedSubscription; restored: boolean } | undefined
+  > {
+    const result = await restoreDisputedSubscription(this.disputeDeps(), input);
+    if (result?.restored) {
+      this.invalidateIfConfigured(
+        result.subscription.userId,
+        result.subscription.organizationId ?? undefined,
+        'subscription_resumed'
+      );
+    }
+    return result;
+  }
+
+  /** A lost dispute: access ended, and the subscription cancelled at Stripe. */
+  async cancelForLostDispute(
+    input: DisputeInput
+  ): Promise<DisputedSubscription | undefined> {
+    const ended = await cancelLostDisputeSubscription(
+      this.disputeDeps(),
+      input
+    );
+    if (ended) {
+      this.invalidateIfConfigured(
+        ended.userId,
+        ended.organizationId ?? undefined,
+        'cancel'
+      );
+    }
+    return ended;
+  }
+
+  private disputeDeps() {
+    return { db: this.db, stripe: this.stripe, obs: this.obs };
   }
 
   /**

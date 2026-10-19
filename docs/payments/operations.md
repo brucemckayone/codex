@@ -187,6 +187,7 @@ and again when moving to live mode.
 |---|---|
 | Webhook endpoints | Exactly the endpoints and events above; connect as a connected-accounts endpoint |
 | Billing customer portal | A configuration with cancelling, plan switching, pausing and profile edits **off**: `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` (created 2026-10-13; deliberately not the account default). Its id goes in `STRIPE_PORTAL_CONFIGURATION_ID`. The account default still allows cancelling, so every portal session passes the id |
+| Billing → Subscriptions → Manage disputed payments | **Do nothing** (Stripe's default). Our dispute webhook pauses billing while a chargeback is open and cancels on a loss; if Stripe cancelled on a dispute instead, a won dispute could not restore the subscription ([subscription-disputes.md](subscription-disputes.md)) |
 | Billing failed-payment retries | The retry schedule Stripe follows while a subscriber is `past_due`, with **cancel the subscription** as the action when all retries fail, so access ends when retries run out (owner decision P-3) |
 | Connect Express Dashboard features | Creators can change their payout bank account (Stripe's default) but **not** their payout schedule — schedule editing turned off (owner decision "Bank account only"). The schedule itself (a 14-day delay) is set per account by our code — **gap**: `Codex-2hxff.29` |
 | Connect branding | Platform name and icon shown during onboarding and in the Express Dashboard |

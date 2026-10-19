@@ -9,7 +9,9 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
+import { courseSubscriptions } from './course-commerce';
 import { purchases } from './ecommerce';
+import { subscriptions } from './subscriptions';
 
 /**
  * Disputes: one row per Stripe dispute, for any source (Codex-2hxff.9; design
@@ -39,6 +41,18 @@ export const disputes = pgTable(
     purchaseId: uuid('purchase_id').references(() => purchases.id, {
       onDelete: 'restrict',
     }),
+    /**
+     * The subscription the disputed invoice belongs to, set when the dispute
+     * first pauses it, so later events find it directly. At most one of these
+     * and `purchase_id` is set.
+     */
+    subscriptionId: uuid('subscription_id').references(() => subscriptions.id, {
+      onDelete: 'restrict',
+    }),
+    courseSubscriptionId: uuid('course_subscription_id').references(
+      () => courseSubscriptions.id,
+      { onDelete: 'restrict' }
+    ),
 
     amountCents: integer('amount_cents').notNull(),
     currency: varchar('currency', { length: 3 }).notNull(),
@@ -67,7 +81,15 @@ export const disputes = pgTable(
     // the hold's predicate (open, or lost and not yet applied) is not one a
     // partial index could imply, and the table stays small.
     index('idx_disputes_charge').on(table.stripeChargeId),
+    // A won dispute restores the subscription only when no other chargeback
+    // on it is still open.
+    index('idx_disputes_subscription').on(table.subscriptionId),
+    index('idx_disputes_course_subscription').on(table.courseSubscriptionId),
     check('check_disputes_amount_positive', sql`${table.amountCents} > 0`),
+    check(
+      'check_disputes_one_source',
+      sql`num_nonnulls(${table.purchaseId}, ${table.subscriptionId}, ${table.courseSubscriptionId}) <= 1`
+    ),
     check(
       'check_disputes_status',
       sql`${table.status} IN ('warning_needs_response', 'warning_under_review', 'warning_closed', 'needs_response', 'under_review', 'won', 'lost', 'prevented')`

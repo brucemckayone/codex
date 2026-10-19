@@ -1118,6 +1118,69 @@ describe('ContentAccessService Integration', () => {
         expect(result.items.some((i) => i.content.id === item.id)).toBe(true);
       });
 
+      it('excludes subscription content while the subscription is disputed (Codex-2hxff.9)', async () => {
+        const { creatorUserId, subscriberUserId, orgId, tierId } =
+          await seedOrgWithTierAndSubscriber();
+        const item = await createSubscriberContent(creatorUserId, orgId, {
+          slugPrefix: 'sub-disputed',
+          accessType: 'subscribers',
+          minimumTierId: tierId,
+          priceCents: 0,
+        });
+        await db
+          .update(subscriptions)
+          .set({ disputedAt: new Date() })
+          .where(eq(subscriptions.userId, subscriberUserId));
+
+        const result = await accessService.listUserLibrary(subscriberUserId, {
+          page: 1,
+          limit: 20,
+          filter: 'all',
+          sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
+        });
+
+        expect(result.items.some((i) => i.content.id === item.id)).toBe(false);
+      });
+
+      it('a disputed subscriber, not a follower, no longer sees followers-only content in the library (Codex-2hxff.9)', async () => {
+        const { creatorUserId, subscriberUserId, orgId } =
+          await seedOrgWithTierAndSubscriber();
+        const item = await createSubscriberContent(creatorUserId, orgId, {
+          slugPrefix: 'followers-disputed',
+          accessType: 'subscribers',
+          minimumTierId: null,
+          priceCents: 0,
+        });
+        await db
+          .update(content)
+          .set({ isFollowerGated: true })
+          .where(eq(content.id, item.id));
+        const listed = async () =>
+          (
+            await accessService.listUserLibrary(subscriberUserId, {
+              page: 1,
+              limit: 20,
+              filter: 'all',
+              sortBy: 'recent',
+              contentType: 'all',
+              accessType: 'all',
+              search: '',
+            })
+          ).items.some((i) => i.content.id === item.id);
+        // A subscription counts as following (Codex-xybr3).
+        expect(await listed()).toBe(true);
+
+        await db
+          .update(subscriptions)
+          .set({ disputedAt: new Date() })
+          .where(eq(subscriptions.userId, subscriberUserId));
+
+        expect(await listed()).toBe(false);
+      });
+
       it('includes tier-gated paid content (accessType=paid + minimumTierId)', async () => {
         const { creatorUserId, subscriberUserId, orgId, tierId } =
           await seedOrgWithTierAndSubscriber();
@@ -2126,6 +2189,34 @@ describe('ContentAccessService Integration', () => {
 
         expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
         expect(result.contentType).toBe('video');
+      });
+
+      it('should deny hybrid content to a subscriber whose subscription is disputed (Codex-2hxff.9)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const { org, proTier } =
+          await createHybridOrgWithTiers('hybrid-disputed');
+        const item = await createHybridContent(
+          org.id,
+          proTier.id,
+          'hybrid-disputed'
+        );
+        const [subUserId] = await seedTestUsers(db, 1);
+        // At the minimum tier, so only the dispute stands in the way.
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(subUserId, org.id, proTier.id, {
+            status: 'active',
+            disputedAt: new Date(),
+          })
+        );
+
+        await expect(
+          accessService.getStreamingUrl(subUserId, {
+            contentId: item.id,
+            expirySeconds: 3600,
+          })
+        ).rejects.toThrow(AccessDeniedError);
       });
 
       it('should grant hybrid content to subscriber above minimum tier (subscription path)', async () => {

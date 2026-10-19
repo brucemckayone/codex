@@ -388,8 +388,11 @@ async function handleRefundUpdated(
  *   cancelled (`cancelled_by_dispute`).
  *
  * A subscription invoice's dispute moves the same money (the clawback acts on
- * both sources); pausing and ending its subscription access is Codex-2hxff.9's
- * second PR.
+ * both sources), and acts on its subscription (docs/payments/
+ * subscription-disputes.md): a chargeback pauses its access, then its billing;
+ * a win restores both; a loss ends its access, then cancels it at Stripe.
+ * Each Stripe call comes after the clawback, so a Stripe failure cannot stop
+ * the money moving.
  */
 async function handleDispute(
   event: Stripe.Event,
@@ -437,6 +440,11 @@ async function handleDispute(
   if (!recorded || recorded.outcomeAppliedAt) return;
 
   const status = recorded.status;
+  const disputeInput = {
+    stripeDisputeId: dispute.id,
+    chargeId: charge.id,
+    paymentIntentId: paymentIntentId ?? null,
+  };
   const clawbackCharge = { id: charge.id, amountCents: charge.amount };
   const clawBack = async () => {
     await subscriptionService.reverseSubscriptionPayoutsForCharge(
@@ -464,7 +472,16 @@ async function handleDispute(
         revokeAccess(c, paused.userId, paused.orgId);
       }
     }
+    const pausedSubscription =
+      await subscriptionService.pauseForDispute(disputeInput);
+    blockSubscriber(c, pausedSubscription);
     await clawBack();
+    if (pausedSubscription) {
+      await subscriptionService.pauseBillingForDispute(
+        pausedSubscription,
+        dispute.id
+      );
+    }
     obs?.info('Chargeback opened: access paused, paid slices clawed back', {
       disputeId: dispute.id,
       chargeId,
@@ -481,6 +498,14 @@ async function handleDispute(
       if (restored?.userId && restored.orgId) {
         clearRevocation(c, restored.userId, restored.orgId);
       }
+    }
+    // Before the outcome is marked: a Stripe failure here is redelivered.
+    const subscription =
+      await subscriptionService.restoreAfterDispute(disputeInput);
+    if (subscription?.restored) {
+      const { userId, organizationId } = subscription.subscription;
+      invalidateLibrary(c, userId);
+      if (organizationId) clearRevocation(c, userId, organizationId);
     }
     await service.settleWonDispute(dispute.id);
     obs?.info('Dispute won: access restored, the clawback paid back', {
@@ -502,8 +527,16 @@ async function handleDispute(
         revokeAccess(c, ended.userId, ended.orgId);
       }
     }
+    // A subscription's access ends now; it is cancelled at Stripe after the
+    // clawback, so the cancel cannot keep the held slices from being cut.
+    const endedSubscription =
+      await subscriptionService.pauseForDispute(disputeInput);
+    blockSubscriber(c, endedSubscription);
     // The clawback now cancels or reduces the held slices like a refund.
     await clawBack();
+    if (endedSubscription) {
+      await subscriptionService.cancelForLostDispute(disputeInput);
+    }
     await service.markDisputeOutcomeApplied(dispute.id);
     obs?.info('Dispute lost: purchase refunded, held slices cancelled', {
       disputeId: dispute.id,
@@ -522,6 +555,21 @@ async function handleDispute(
     chargeId,
     status,
   });
+}
+
+/**
+ * A subscription a dispute paused or ended: its library caches cleared, and
+ * the streaming block written for its organisation.
+ */
+function blockSubscriber(
+  c: Context<StripeWebhookEnv>,
+  subscription: { userId: string; organizationId: string | null } | undefined
+): void {
+  if (!subscription) return;
+  invalidateLibrary(c, subscription.userId);
+  if (subscription.organizationId) {
+    revokeAccess(c, subscription.userId, subscription.organizationId);
+  }
 }
 
 function isOneOf(status: string, statuses: readonly string[]): boolean {

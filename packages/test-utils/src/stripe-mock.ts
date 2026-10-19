@@ -174,6 +174,21 @@ export function createMockStripe(): Stripe {
         ...createDefaultStripeSubscription({ id: _subId }),
         status: 'active',
       })),
+      // A lost dispute cancels the subscription at once (Codex-2hxff.9).
+      cancel: vi.fn().mockImplementation(async (_subId: string) => ({
+        ...createDefaultStripeSubscription({ id: _subId }),
+        status: 'canceled',
+      })),
+    },
+
+    // The invoice a payment intent paid: how a dispute finds its subscription
+    // when the charge has no payout rows (Codex-2hxff.9). None by default.
+    invoicePayments: {
+      list: vi.fn().mockResolvedValue({
+        object: 'list',
+        data: [],
+        has_more: false,
+      }),
     },
 
     // Transfers are remembered so `list` can return them: a drain looks up

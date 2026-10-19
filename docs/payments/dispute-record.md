@@ -96,7 +96,7 @@ The dispute endpoint already takes `charge.dispute.created`, `.updated` and `.cl
 - A disputed invoice has no purchase row. The `disputes` row is keyed by its charge, and the subscription is found from the invoice's payout rows (`subscription_id`).
 - **Paused** means the subscription's access is paused for the dispute's life, and its billing too (owner decision Q-A, [subscription-disputes.md](subscription-disputes.md)).
 - **Lost** cancels the subscription at Stripe (subscriptions.md).
-- The money (reversal, hold, re-pay, cancel) is the same for both sources and ships first. Pausing, restoring and cancelling the subscription ships in Codex-2hxff.9's second PR.
+- The money (reversal, hold, re-pay, cancel) is the same for both sources. Pausing, restoring and cancelling the subscription is designed in [subscription-disputes.md](subscription-disputes.md).
 
 ## 6. Migration
 

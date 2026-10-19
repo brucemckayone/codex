@@ -148,7 +148,10 @@ describe('handlePaymentWebhook — disputes', () => {
   let mockRetrieve: ReturnType<typeof vi.fn>;
   let mockRelease: ReturnType<typeof vi.fn>;
   let purchase: Record<string, ReturnType<typeof vi.fn>>;
+  let subscription: Record<string, ReturnType<typeof vi.fn>>;
   let mockReverseSubscription: ReturnType<typeof vi.fn>;
+  /** The order the handler's steps ran in. */
+  let calls: string[];
 
   const charge = { id: 'ch_test', amountCents: 1999 };
 
@@ -169,7 +172,29 @@ describe('handlePaymentWebhook — disputes', () => {
       metadata: {},
     });
     mockStripe = { charges: { retrieve: mockRetrieve } } as unknown as Stripe;
-    mockReverseSubscription = vi.fn().mockResolvedValue(undefined);
+    calls = [];
+    mockReverseSubscription = vi.fn().mockImplementation(async () => {
+      calls.push('clawback');
+    });
+    subscription = {
+      reverseSubscriptionPayoutsForCharge: mockReverseSubscription,
+      // A purchase's dispute by default: no subscription to act on.
+      pauseForDispute: vi.fn().mockImplementation(async () => {
+        calls.push('pause');
+        return undefined;
+      }),
+      pauseBillingForDispute: vi.fn().mockImplementation(async () => {
+        calls.push('pauseBilling');
+      }),
+      restoreAfterDispute: vi.fn().mockImplementation(async () => {
+        calls.push('restore');
+        return undefined;
+      }),
+      cancelForLostDispute: vi.fn().mockImplementation(async () => {
+        calls.push('cancel');
+        return undefined;
+      }),
+    };
     purchase = {
       // The record echoes the event's status unless a test says otherwise.
       recordDispute: vi.fn().mockImplementation(async (d) => ({
@@ -191,9 +216,7 @@ describe('handlePaymentWebhook — disputes', () => {
     vi.mocked(createWebhookServices).mockResolvedValue({
       services: {
         purchase,
-        subscription: {
-          reverseSubscriptionPayoutsForCharge: mockReverseSubscription,
-        },
+        subscription,
       } as unknown as WebhookServices['services'],
       background: (promise) => promise,
       release: mockRelease,
@@ -518,5 +541,131 @@ describe('handlePaymentWebhook — disputes', () => {
     ).resolves.not.toThrow();
     await expect(drainWaitUntil(bundle)).resolves.not.toThrow();
     expect(mockRevoke).toHaveBeenCalledTimes(1);
+  });
+
+  // ── a subscription invoice's dispute (docs/payments/subscription-disputes.md)
+
+  const disputedSubscription = {
+    kind: 'tier',
+    id: 'sub_row',
+    stripeSubscriptionId: 'sub_stripe',
+    userId: 'user_sub',
+    organizationId: 'org_sub',
+    status: 'active',
+  };
+  const disputeInput = {
+    stripeDisputeId: 'dp_test_dispute',
+    chargeId: 'ch_test',
+    paymentIntentId: 'pi_test_dispute',
+  };
+
+  it('a chargeback on a subscription invoice pauses its access first, and its billing only after the clawback', async () => {
+    subscription.pauseForDispute?.mockImplementationOnce(async () => {
+      calls.push('pause');
+      return disputedSubscription;
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createDisputeEvent(),
+      mockStripe,
+      bundle.context
+    );
+    await drainWaitUntil(bundle);
+
+    expect(subscription.pauseForDispute).toHaveBeenCalledWith(disputeInput);
+    expect(mockRevoke).toHaveBeenCalledWith('user_sub', 'org_sub', 'refund');
+    expect(subscription.pauseBillingForDispute).toHaveBeenCalledWith(
+      disputedSubscription,
+      'dp_test_dispute'
+    );
+    expect(calls).toEqual(['pause', 'clawback', 'pauseBilling']);
+  });
+
+  it('a chargeback on a purchase pauses no subscription billing', async () => {
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createDisputeEvent(),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(subscription.pauseBillingForDispute).not.toHaveBeenCalled();
+  });
+
+  it('won: the subscription is restored before the outcome is marked, and its block cleared', async () => {
+    recordedAs('won');
+    subscription.restoreAfterDispute?.mockImplementationOnce(async () => {
+      calls.push('restore');
+      return { subscription: disputedSubscription, restored: true };
+    });
+    purchase.settleWonDispute?.mockImplementationOnce(async () => {
+      calls.push('settle');
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      {
+        ...createDisputeEvent({ status: 'won' }),
+        type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+      } as Stripe.Event,
+      mockStripe,
+      bundle.context
+    );
+    await drainWaitUntil(bundle);
+
+    expect(subscription.restoreAfterDispute).toHaveBeenCalledWith(disputeInput);
+    expect(mockClear).toHaveBeenCalledWith('user_sub', 'org_sub');
+    expect(calls).toEqual(['restore', 'settle']);
+  });
+
+  it('won while another chargeback keeps the subscription paused: its block stays', async () => {
+    recordedAs('won');
+    subscription.restoreAfterDispute?.mockResolvedValueOnce({
+      subscription: disputedSubscription,
+      restored: false,
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      {
+        ...createDisputeEvent({ status: 'won' }),
+        type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+      } as Stripe.Event,
+      mockStripe,
+      bundle.context
+    );
+    await drainWaitUntil(bundle);
+
+    expect(mockClear).not.toHaveBeenCalledWith('user_sub', 'org_sub');
+  });
+
+  it('lost: the subscription access ends first, the clawback runs, then it is cancelled at Stripe, then the outcome is marked', async () => {
+    recordedAs('lost');
+    subscription.pauseForDispute?.mockImplementationOnce(async () => {
+      calls.push('pause');
+      return disputedSubscription;
+    });
+    purchase.markDisputeOutcomeApplied?.mockImplementationOnce(async () => {
+      calls.push('mark');
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      {
+        ...createDisputeEvent({ status: 'lost' }),
+        type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+      } as Stripe.Event,
+      mockStripe,
+      bundle.context
+    );
+    await drainWaitUntil(bundle);
+
+    expect(subscription.cancelForLostDispute).toHaveBeenCalledWith(
+      disputeInput
+    );
+    expect(mockRevoke).toHaveBeenCalledWith('user_sub', 'org_sub', 'refund');
+    expect(calls).toEqual(['pause', 'clawback', 'cancel', 'mark']);
   });
 });

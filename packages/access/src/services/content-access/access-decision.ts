@@ -224,6 +224,8 @@ async function decidePolicyAccess(
           SUBSCRIPTION_STATUS.ACTIVE,
           SUBSCRIPTION_STATUS.CANCELLING,
         ]),
+        // Paused while a chargeback on one of its invoices is open.
+        isNull(subscriptions.disputedAt),
         gt(subscriptions.currentPeriodEnd, new Date())
       ),
       with: { tier: true },

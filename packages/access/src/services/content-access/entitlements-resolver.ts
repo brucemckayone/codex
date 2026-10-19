@@ -34,12 +34,13 @@ import { SUBSCRIPTION_STATUS } from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
 import {
   courseStages,
+  courseSubscriptions,
   courseTierAccess,
   entitlements,
   stagePractices,
   subscriptions,
 } from '@codex/database/schema';
-import { and, eq, gt, inArray, isNull, or } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, or, type SQL, sql } from 'drizzle-orm';
 
 /**
  * Read-only query client. Both the base `DatabaseClient` and the transaction
@@ -73,11 +74,25 @@ const COURSE_GRANT_SOURCES: string[] = [
   'grant',
 ];
 
-/** A stored grant is live when not revoked and not past its optional expiry. */
+/**
+ * A course subscription's grant is paused while a chargeback on one of its
+ * invoices is open (`course_subscriptions.disputed_at`). Read here rather than
+ * revoking the grant: the subscription's own lifecycle rewrites the grant, and
+ * would re-grant it (Codex-2hxff.9, docs/payments/subscription-disputes.md).
+ */
+export function grantNotPausedByDispute(): SQL {
+  return sql`NOT EXISTS (SELECT 1 FROM ${courseSubscriptions} WHERE ${entitlements.source} = 'course_subscription' AND ${courseSubscriptions.id} = ${entitlements.sourceRef} AND ${courseSubscriptions.disputedAt} IS NOT NULL)`;
+}
+
+/**
+ * A stored grant is live when not revoked, not past its optional expiry, and
+ * not paused by a dispute.
+ */
 function liveGrant(now: Date) {
   return and(
     isNull(entitlements.revokedAt),
-    or(isNull(entitlements.expiresAt), gt(entitlements.expiresAt, now))
+    or(isNull(entitlements.expiresAt), gt(entitlements.expiresAt, now)),
+    grantNotPausedByDispute()
   );
 }
 
@@ -146,6 +161,8 @@ async function hasDerivedCourseTierAccess(
         eq(courseTierAccess.courseId, courseId),
         eq(subscriptions.userId, userId),
         inArray(subscriptions.status, GRANTING_SUBSCRIPTION_STATUSES),
+        // Paused while a chargeback on one of its invoices is open.
+        isNull(subscriptions.disputedAt),
         gt(subscriptions.currentPeriodEnd, new Date())
       )
     )
@@ -215,6 +232,8 @@ export async function resolveCourseEntitlementsBatch(
         inArray(courseTierAccess.courseId, ids),
         eq(subscriptions.userId, userId),
         inArray(subscriptions.status, GRANTING_SUBSCRIPTION_STATUSES),
+        // Paused while a chargeback on one of its invoices is open.
+        isNull(subscriptions.disputedAt),
         gt(subscriptions.currentPeriodEnd, now)
       )
     );

@@ -24,6 +24,7 @@ import { BaseService } from '@codex/service-errors';
 import type { Entitlement } from '@codex/shared-types';
 import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import {
+  grantNotPausedByDispute,
   hasCourseEntitlement,
   hasStoredContentEntitlement,
   resolveCourseEntitlementsBatch,
@@ -95,16 +96,23 @@ export class EntitlementsService extends BaseService {
     organizationId?: string
   ): Promise<Entitlement[]> {
     const now = new Date();
-    const rows = await this.db.query.entitlements.findMany({
-      where: and(
-        eq(entitlements.userId, userId),
-        organizationId
-          ? eq(entitlements.organizationId, organizationId)
-          : undefined,
-        isNull(entitlements.revokedAt),
-        or(isNull(entitlements.expiresAt), gt(entitlements.expiresAt, now))
-      ),
-    });
+    // The core builder, not `db.query`: the relational API qualifies every
+    // column in a raw `sql` filter with the root table's alias, which breaks
+    // the dispute check's subquery on `course_subscriptions`.
+    const rows = await this.db
+      .select()
+      .from(entitlements)
+      .where(
+        and(
+          eq(entitlements.userId, userId),
+          organizationId
+            ? eq(entitlements.organizationId, organizationId)
+            : undefined,
+          isNull(entitlements.revokedAt),
+          or(isNull(entitlements.expiresAt), gt(entitlements.expiresAt, now)),
+          grantNotPausedByDispute()
+        )
+      );
     return rows.map(toDomainEntitlement);
   }
 }
