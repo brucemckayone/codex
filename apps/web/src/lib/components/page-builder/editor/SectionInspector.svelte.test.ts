@@ -564,3 +564,114 @@ describe('the curriculum’s layered stages beside What’s inside', () => {
     expect(note()).toBeUndefined();
   });
 });
+
+// ── The section controls (04 §3.4, Codex-61zsk.58) ─────────────────────────
+
+describe('the controls inside a section', () => {
+  const image = { key: KEY, w: 1600, h: 1067 };
+  const section = (
+    id: string,
+    type: PageSection['type'],
+    props: Record<string, unknown> = {},
+    variant?: string
+  ): PageSection => ({
+    id,
+    type,
+    enabled: true,
+    props,
+    ...(variant ? { variant } : {}),
+  });
+  const button = (label: string) =>
+    [
+      ...document.body.querySelectorAll<HTMLButtonElement>('.field__choice'),
+    ].find((candidate) => candidate.textContent?.trim() === label);
+
+  it('places Text’s picture before or after the words, storing only “after”', () => {
+    render(
+      [hero('h'), section('t', 'text', { heading: 'Why', image }, 'statement')],
+      't'
+    );
+    expect(button('Before the words')?.getAttribute('aria-pressed')).toBe(
+      'true'
+    );
+    button('After the words')?.click();
+    flushSync();
+    expect(stored('t')?.props.imageAt).toBe('after');
+    expect(button('After the words')?.getAttribute('aria-pressed')).toBe(
+      'true'
+    );
+    button('Before the words')?.click();
+    flushSync();
+    expect(stored('t')?.props).not.toHaveProperty('imageAt');
+  });
+
+  it('offers no place for Text’s picture beside the words, in two columns', () => {
+    render(
+      [hero('h'), section('t', 'text', { heading: 'Why', image }, 'columns')],
+      't'
+    );
+    expect(button('After the words')).toBeUndefined();
+  });
+
+  it('offers to open the first question in the expandable list only', () => {
+    const label = () =>
+      [...document.body.querySelectorAll('.field__label')].some(
+        (candidate) => candidate.textContent === 'Open the first question'
+      );
+    render([hero('h'), section('f', 'faq', {}, 'accordion')], 'f');
+    expect(label()).toBe(true);
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+    render([hero('h'), section('f', 'faq', {}, 'columns')], 'f');
+    expect(label()).toBe(false);
+  });
+
+  it('steers a section’s background picture, keeping the rest of it', () => {
+    render(
+      [
+        hero('h'),
+        section('p', 'problem', { heading: 'Stuck?', background: image }),
+      ],
+      'p',
+      'bold',
+      'https://cdn.test'
+    );
+    const pads =
+      document.body.querySelectorAll<HTMLButtonElement>('.focus__pad');
+    expect(pads).toHaveLength(1);
+    expect(document.body.querySelectorAll('.focus__crop')).toHaveLength(2);
+    pads[0].dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })
+    );
+    flushSync();
+    expect(stored('p')?.props.background).toEqual({
+      ...image,
+      focus: { x: 48, y: 50 },
+    });
+  });
+
+  it('steers a benefit’s picture where the layout draws it, from the item’s own row', () => {
+    const items = [{ title: 'Calm', image }];
+    render(
+      [hero('h'), section('b', 'benefits', { items }, 'grid')],
+      'b',
+      'bold',
+      'https://cdn.test'
+    );
+    document.body.querySelector<HTMLButtonElement>('.item__toggle')?.click();
+    flushSync();
+    const pad = document.body.querySelector<HTMLButtonElement>('.focus__pad');
+    expect(pad).not.toBeNull();
+    pad?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })
+    );
+    flushSync();
+    expect((stored('b')?.props.items as { image: unknown }[])[0].image).toEqual(
+      {
+        ...image,
+        focus: { x: 50, y: 48 },
+      }
+    );
+  });
+});

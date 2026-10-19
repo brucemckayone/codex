@@ -38,7 +38,7 @@
 -->
 <script lang="ts">
   import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
-  import { pageImageSrcset, resolvePageImageUrl } from '../../../page-images';
+  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import type { PreviewMedia, SellPreview } from '../../../render/types';
   import { COPY } from '../../model/copy';
   import { heroFacts } from '../../model/facts';
@@ -88,6 +88,9 @@
   const ownSrcset = $derived(
     ownStill ? pageImageSrcset(content.image, context.mediaBaseUrl) : ''
   );
+  // Where the creator placed the image's subject, so a layout's crop keeps it
+  // (Codex-61zsk.58); a course still from the journey has none.
+  const ownFocus = $derived(ownStill ? storedFocus(content.image) : undefined);
   const frameSizes = $derived(
     layout === 'split' ? '(min-width: 50rem) 50vw, 100vw' : '100vw'
   );
@@ -207,6 +210,7 @@
       clip={media.clip}
       srcset={ownSrcset}
       sizes={frameSizes}
+      focus={ownFocus}
       {ratio}
       {pending}
       priority
@@ -219,6 +223,7 @@
       image={media.still}
       srcset={ownSrcset}
       sizes={frameSizes}
+      focus={ownFocus}
       {ratio}
       {pending}
       priority
@@ -240,6 +245,7 @@
           clip={settled.clip}
           srcset={ownSrcset}
           sizes="100vw"
+          focus={ownFocus}
           priority
           {alt}
         />
@@ -278,6 +284,7 @@
   <HeroPoster
     still={settled.still}
     srcset={ownSrcset}
+    focus={ownFocus}
     clip={settled.clip}
     reserve={(previewing || heroComing) && mode !== 'none'}
     {alt}

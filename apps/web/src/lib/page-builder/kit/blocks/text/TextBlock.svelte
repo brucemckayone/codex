@@ -12,10 +12,11 @@
 
   A join button appears only when the creator gives it words (`ctaLabel` or
   `note`). The creator's image (contract A5) joins the heading's column in
-  `columns`, and leads the passage in the other two.
+  `columns`, and leads the passage in the other two, or follows its words
+  (`imageAt: 'after'`, before the join button: Codex-61zsk.58).
 -->
 <script lang="ts">
-  import { resolvePageImageUrl } from '../../../page-images';
+  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
   import { paragraphs } from '../../model/read';
   import type { BlockProps } from '../../model/types';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -40,12 +41,15 @@
   // the statement itself.
   const headingSize = $derived(layout === 'statement' && content.body ? 'title' : 'heading');
   const image = $derived(resolvePageImageUrl(content.image, 'lg', context.mediaBaseUrl));
+  const focus = $derived(storedFocus(content.image));
   const beside = $derived(layout === 'columns');
+  // Beside the words in `columns`, the picture is neither before nor after them.
+  const after = $derived(content.imageAt === 'after' && !beside);
 </script>
 
 {#snippet figure(src: string)}
-  <div class="text__media">
-    <Media image={src} alt={content.image?.alt ?? ''} ratio="var(--_ratio)" />
+  <div class="text__media" data-at={after ? 'after' : undefined}>
+    <Media image={src} alt={content.image?.alt ?? ''} ratio="var(--_ratio)" {focus} />
   </div>
 {/snippet}
 
@@ -55,7 +59,7 @@
   data-long={long ? '' : undefined}
   data-long-lead={longLead ? '' : undefined}
 >
-  {#if image && !beside}{@render figure(image)}{/if}
+  {#if image && !beside && !after}{@render figure(image)}{/if}
   {#if content.eyebrow || content.heading || (image && beside)}
     <header class="text__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="text" {edit} />{/if}
@@ -86,6 +90,8 @@
   {:else if edit}
     <p class="text__empty" data-lp-edit-only>{TEXT_EMPTY}</p>
   {/if}
+
+  {#if image && after}{@render figure(image)}{/if}
 
   {#if asks}
     <ButtonRow
@@ -155,9 +161,23 @@
     gap: var(--lp-stack);
   }
 
-  /* The words stay tight to each other; the image stands a band-gap off them. */
+  /* The words stay tight to each other; the image stands a band-gap off them,
+     on whichever side they are. */
   .text[data-layout='statement'] > .text__media {
     margin-block-end: calc(var(--lp-gap) - var(--lp-stack));
+  }
+
+  .text[data-layout='statement'] > .text__media[data-at='after'] {
+    margin-block-start: calc(var(--lp-gap) - var(--lp-stack));
+  }
+
+  /* The passage keeps a little room under it for the join button (below). */
+  .text[data-layout='statement'] > :global(.lp-text.text__body + .text__media[data-at='after']) {
+    margin-block-start: calc(var(--lp-gap) - var(--lp-stack) - var(--space-2));
+  }
+
+  .text[data-layout='statement'] > .text__media[data-at='after']:last-child {
+    margin-block-end: 0;
   }
 
   .text[data-layout='statement'] > :global(.lp-text.text__body) {

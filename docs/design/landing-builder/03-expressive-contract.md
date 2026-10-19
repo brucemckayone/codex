@@ -3378,3 +3378,72 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     the
     offer's), a read of the two pages that draw three of them, at 768, reports 14 faults, all on
     exactly those three.
+- **X76 · 2026-10-14 · 3c · Section controls, part one: every picture a creator uploads is steered
+  by its focal point, a FAQ can open on its first answer, and Text's picture can follow the words
+  (Codex-61zsk.58, round a; BUILT. The owner approved the mock and its data design,
+  `phase3-sources/editor-3c/`, on 2026-10-13. Three choices below were decided without the owner,
+  each marked.)**
+  - **The focal point reaches every upload.** X64 stored the point on the picture (`ImageRef.focus`)
+    and only the Picture block's full width read it. Now every block that crops a creator's picture
+    steers it: the hero's own image in its five layouts (both of the poster's frames, the cover and
+    the split's), Text's picture, a benefit's in the grid and the mixed tiles, a story moment's in
+    the scroll (and its sticky frame), the chapters and the strip, every gallery picture, the
+    closing band's background and any section's background (`SectionShell`). A library still the
+    hero draws in place of an upload has no point, and is drawn as before.
+  - **A picture nobody pointed draws exactly as before.** `storedFocus` answers only a point the
+    creator placed: none, a malformed one or the centre is `undefined`, so `Media` writes no
+    `object-position` and every saved page keeps its markup. `readFocus`, which always answers (the
+    editor's dot needs a place), stays the editor's.
+  - **The editor previews each layout's own cut.** `focalLayouts` names, per layout, the shapes the
+    picture is cut to (`{ at: 'wide' | 'tablet' | 'phone', ratio }`); the focal tool draws one
+    preview per shape, its columns in proportion to the ratios so every preview has one height, and
+    is live only in a layout that cuts (it explains itself in the others, as before). An item's
+    field (a benefit's, a moment's, a gallery picture's) now hears the section's layout, which it
+    never did. Every image field must say where it is cut (`focal-point.svelte.test.ts`), so a new
+    one cannot ship without its previews.
+  - **Measured.** Every `.lp-media` frame and every section's surface, in the six types that carry
+    an upload, at each of their layouts, in eight Styles at 1440 and 390 (80 loads). The probe is
+    calibrated by the two frames fixed in CSS: a benefit's grid picture reads 3:2 and a strip's card
+    4:5 in every Style (Studio's 1.479 is its 1.2° tilt widening the box it is read by).
+  - **Decided without the owner: each preview is the Style that cuts hardest.** A Style's cut of a
+    3:2 photograph keeps a band; a harder cut's band lies inside a gentler one's, wherever the point
+    is. So the hardest cut shows what every Style keeps: the hero's cover is 15:8 wide (Clean; Bold
+    draws 1.51) and 2:3 on a phone. Each is named as a simple ratio no more than half a percent
+    gentler than the hardest measured (the mosaic's widest tile on a phone, 2.556, is named 13:5,
+    not 5:2, which would have shown 2% more than it keeps). A layout whose tiles differ (the mixed
+    tiles, the mosaic, the gallery's strip) previews the tile that cuts most; a tile's drift frame,
+    larger than the tile so its picture can move, is not a cut. Rejected: a preview per Style (the
+    field would need the page's Style, which no field reads), and the middle Style's (it shows a Style
+    keeping more than it does).
+  - **Decided without the owner: a background previews the middle band.** A section's shape is its
+    contents' height: 0.66 to 2.21 wide and 0.18 to 0.79 on a phone across the five types measured,
+    so no one cut is every band's. The preview is the middle one (7:5 wide, 1:2 on a phone).
+    Rejected: the hardest cut (a sliver no creator would recognise as their band).
+  - **The FAQ's first answer** (`openFirst`, the accordion only): open when the page opens, the rest
+    closed until tapped; without script every answer shows, as before. It is read once, when the
+    accordion is made, as the curriculum's accordion reads its first stage, so a later change never
+    reopens an answer the visitor closed; the canvas redraws the list, so the creator sees the
+    change at once.
+  - **Text's picture after the words** (`imageAt: 'after'`, in the statement and the centred
+    layouts): the head, the passage, the picture, then the ask, a band-gap off the words as it was
+    above them. In two columns the picture already sits in the heading's column beside the words,
+    so the choice is not offered there.
+  - **Decided without the owner: a choice stores only what it changes.** A new `choice` control (a
+    two-button group in the spacing dial's look) whose first option is the default and is stored as
+    the absent key, so every saved page reads as it did and the stored vocabulary is only `'after'`.
+    Rejected: storing `'before'` (a second spelling of every page saved before).
+  - **Tests** (CI): `focal-point.svelte.test.ts` (every place, every layout: the point reaches each
+    of the creator's pictures, and a picture with none has no `object-position`; every image field
+    names its cuts, in layouts the field is shown in), `page-images.test.ts`, the FAQ's, Text's and
+    the inspector's (the choice stores only "after"; the open-first toggle shows only in the
+    accordion; the background's and a benefit row's focal tools steer by arrow keys). Calibrated: 9
+    plants, each failing its own tests, every file restored.
+  - **In the browser** (the gallery's `?set=` and `?focus=`, in 8 Styles at 1440 and 390). Text's
+    picture after the words, light and dark, both layouts: all 64 read head, passage, picture, ask,
+    nothing overlapping, the picture as far off the words as the ask is off the picture. With a
+    point, every one of the 15 sample pictures in Benefits, Gallery, Picture, Story and Text is
+    steered by it, in every Style at both widths; without one, none writes an `object-position`
+    (Picture's full width included). The FAQ opens on its first answer and only that (Bold and
+    Soft, both widths). One read was redirected by the local `api` rate limit (the studio's
+    membership check, about 20 pages a minute) and was read again on its own.
+  - **No new request, no cache change.** The point travels in the page document with the picture.

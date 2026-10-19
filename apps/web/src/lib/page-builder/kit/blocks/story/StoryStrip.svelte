@@ -13,6 +13,7 @@
   unpictured card keeps the row's rhythm with the kit's designed plate.
 -->
 <script lang="ts">
+  import { storedFocus } from '../../../page-images';
   import Media from '../../primitives/Media.svelte';
   import ScrollStrip from '../../primitives/ScrollStrip.svelte';
   import { STORY_COPY } from './copy';
@@ -53,7 +54,12 @@
     {#each steps as step, index (index)}
       <li class="story-strip__card">
         {#if pictured}
-          <Media image={images[index]} alt={step.image?.alt ?? ''} ratio="4 / 5" />
+          <Media
+            image={images[index]}
+            alt={step.image?.alt ?? ''}
+            ratio="4 / 5"
+            focus={storedFocus(step.image)}
+          />
         {/if}
         <StoryWords {step} {level} />
       </li>

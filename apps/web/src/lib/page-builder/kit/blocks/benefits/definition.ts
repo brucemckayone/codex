@@ -81,6 +81,18 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
           hint: 'Optional. Shown with this item in the grid and in the mixed tiles.',
           control: 'image',
           layouts: ['grid', 'bento'],
+          // Each layout's frame at 1440 and 390, in the Style that cuts it
+          // most; the mixed tiles' is the widest tile's.
+          focalLayouts: {
+            grid: [
+              { at: 'wide', ratio: '3 / 2' },
+              { at: 'phone', ratio: '3 / 2' },
+            ],
+            bento: [
+              { at: 'wide', ratio: '7 / 2' },
+              { at: 'phone', ratio: '16 / 9' },
+            ],
+          },
         },
       ],
     },

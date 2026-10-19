@@ -6,6 +6,7 @@ import {
   readFocus,
   readSize,
   resolvePageImageUrl,
+  storedFocus,
 } from './page-images';
 
 describe('isImageRef', () => {
@@ -182,5 +183,28 @@ describe('readFocus — the focal point (Codex-61zsk.53)', () => {
     [null],
   ])('falls back to the centre for %p', (ref) => {
     expect(readFocus(ref)).toEqual({ x: 50, y: 50 });
+  });
+});
+
+describe('storedFocus — what a block steers by (Codex-61zsk.58)', () => {
+  const key = 'landing-pages/page-1/images/image-1';
+
+  it('is the point the creator placed, read as readFocus reads it', () => {
+    expect(storedFocus({ key, focus: { x: 64.4, y: 120 } })).toEqual({
+      x: 64,
+      y: 100,
+    });
+  });
+
+  // Nothing to steer by draws as before focal points: no `object-position`.
+  it.each([
+    [{ key }],
+    [{ key, focus: { x: 50, y: 50 } }],
+    [{ key, focus: { x: 49.6, y: 50.4 } }],
+    [{ key, focus: { x: '50', y: 20 } }],
+    [{ key, focus: { y: 20 } }],
+    [null],
+  ])('is nothing for %p', (ref) => {
+    expect(storedFocus(ref)).toBeUndefined();
   });
 });

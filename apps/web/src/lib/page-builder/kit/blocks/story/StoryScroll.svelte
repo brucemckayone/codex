@@ -15,6 +15,7 @@
 <script lang="ts">
   import type { Attachment } from 'svelte/attachments';
   import { NOTHING_FOLLOWS } from '../../motion/attributes';
+  import { storedFocus } from '../../../page-images';
   import Media from '../../primitives/Media.svelte';
   import type { StoryStep } from './definition';
   import StoryWords from './StoryWords.svelte';
@@ -69,7 +70,12 @@
         <StoryWords {step} {level} />
         {#if images[index]}
           <div class="story-scroll__media">
-            <Media image={images[index]} alt={step.image?.alt ?? ''} ratio="4 / 3" />
+            <Media
+              image={images[index]}
+              alt={step.image?.alt ?? ''}
+              ratio="4 / 3"
+              focus={storedFocus(step.image)}
+            />
           </div>
         {/if}
       </li>
@@ -80,7 +86,7 @@
       {#each images as image, index (index)}
         {#if image}
           <div class="story-scroll__shot" data-shown={shows[active] === index ? '' : undefined}>
-            <Media {image} alt="" />
+            <Media {image} alt="" focus={storedFocus(steps[index]?.image)} />
           </div>
         {/if}
       {/each}

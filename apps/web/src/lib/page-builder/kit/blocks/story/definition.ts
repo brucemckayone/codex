@@ -67,7 +67,26 @@ export const storyDefinition: BlockDefinition<StoryProps> = {
           control: 'textarea',
           maxLength: 400,
         },
-        { key: 'image', label: 'Picture', control: 'image' },
+        {
+          key: 'image',
+          label: 'Picture',
+          control: 'image',
+          // Each layout's frame at 1440 and 390, in the Style that cuts it most.
+          focalLayouts: {
+            scroll: [
+              { at: 'wide', ratio: '4 / 3' },
+              { at: 'phone', ratio: '4 / 3' },
+            ],
+            chapters: [
+              { at: 'wide', ratio: '11 / 5' },
+              { at: 'phone', ratio: '3 / 5' },
+            ],
+            strip: [
+              { at: 'wide', ratio: '4 / 5' },
+              { at: 'phone', ratio: '4 / 5' },
+            ],
+          },
+        },
       ],
     },
   ],

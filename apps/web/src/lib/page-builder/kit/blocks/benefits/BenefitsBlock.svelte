@@ -17,7 +17,7 @@
 <script lang="ts">
   import { hasHead } from '../../model/read';
   import { CheckIcon } from '$lib/components/ui/Icon';
-  import { resolvePageImageUrl } from '../../../page-images';
+  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -137,7 +137,12 @@
         {#each items as item, index (index)}
           <li>
             {#if pictured}
-              <Media image={tileImages[index]} alt={item.image?.alt ?? ''} ratio="3 / 2" />
+              <Media
+                image={tileImages[index]}
+                alt={item.image?.alt ?? ''}
+                ratio="3 / 2"
+                focus={storedFocus(item.image)}
+              />
             {/if}
             <Heading level={itemLevel} size="title" text={item.title} type="benefits" />
             {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}

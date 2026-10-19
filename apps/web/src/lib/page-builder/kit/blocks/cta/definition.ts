@@ -56,6 +56,13 @@ export const ctaDefinition: BlockDefinition<CtaProps> = {
       control: 'image',
       layouts: ['band'],
       decorative: true,
+      // The band at 1440 and 390, in the Style that cuts it most.
+      focalLayouts: {
+        band: [
+          { at: 'wide', ratio: '11 / 5' },
+          { at: 'phone', ratio: '1 / 2' },
+        ],
+      },
     },
   ],
   starter: ({ courseTitle }) => ({

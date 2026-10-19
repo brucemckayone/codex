@@ -22,6 +22,10 @@
     ?img=1..6 (the hero's photo; every picture field takes the next ones)
     ?eyebrow=<text> (the hero's eyebrow, which the sample leaves empty: a
       chip on Soft and Poster, so their tallest hero)
+    ?focus=<x>,<y> (every sample picture's focal point, in percent)
+    ?set=<type>.<key>:<value>,... (a section control on every section of that
+      type, `set=text.imageAt:after,faq.openFirst:true`; each block's own
+      reading still applies, so an unknown one draws nothing new)
     ?edit=1 (inline-edit attributes on)   ?chrome=0 (hide the studio chrome)
 -->
 <script lang="ts">
@@ -151,6 +155,12 @@
   const editing = $derived(param('edit') === '1');
   const chrome = $derived(param('chrome') !== '0');
 
+  /** `?focus=64,36`: the point every sample picture is steered by (Codex-61zsk.58). */
+  const point = $derived.by(() => {
+    const match = /^(\d{1,3}),(\d{1,3})$/.exec(param('focus'));
+    return match ? { x: Number(match[1]), y: Number(match[2]) } : undefined;
+  });
+
   /*
    * Every picture field takes the photos in turn, from the one after the
    * hero's. The files are plain JPEGs, not the size variants a real page
@@ -162,9 +172,22 @@
     PHOTOS.map((_, index) => {
       const n = ((photo + index) % PHOTOS.length) + 1;
       const { alt, caption } = PHOTOS[n - 1];
-      return { image: { key: `page-kit/img${n}.jpg#`, alt }, ...(caption ? { caption } : {}) };
+      const image = { key: `page-kit/img${n}.jpg#`, alt, ...(point ? { focus: point } : {}) };
+      return { image, ...(caption ? { caption } : {}) };
     })
   );
+
+  /** `?set=text.imageAt:after`: each control, by the type it is set on. */
+  const controls = $derived.by(() => {
+    const byType = new Map<string, Record<string, unknown>>();
+    for (const pair of param('set').split(',')) {
+      const match = /^([a-z]+)\.([A-Za-z]+):(.+)$/.exec(pair);
+      if (!match) continue;
+      const [, type, key, value] = match;
+      byType.set(type, { ...byType.get(type), [key]: value === 'true' ? true : value });
+    }
+    return byType;
+  });
 
   /** `?dials=colour:muted,corners:rounder`: unknown dials and steps are dropped. */
   const dials = $derived(
@@ -191,7 +214,16 @@
         }
       : drawn;
     const pictured = withMedia ? withSamplePictures(plain, pictures) : plain;
-    const sample = dials ? { ...pictured, design: { ...pictured.design, dials } } : pictured;
+    const controlled = controls.size
+      ? {
+          ...pictured,
+          sections: pictured.sections.map((section) => {
+            const set = controls.get(section.type);
+            return set ? { ...section, props: { ...section.props, ...set } } : section;
+          }),
+        }
+      : pictured;
+    const sample = dials ? { ...controlled, design: { ...controlled.design, dials } } : controlled;
     if (!only) return sample;
     const layout = param('layout');
     const scheme = param('scheme');

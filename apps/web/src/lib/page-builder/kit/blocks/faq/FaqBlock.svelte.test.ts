@@ -111,6 +111,72 @@ describe('FaqBlock', () => {
     expect(second.getAttribute('aria-expanded')).toBe('true');
   });
 
+  describe('accordion: the first question open (Codex-61zsk.58)', () => {
+    it('opens the first answer once the script runs, and leaves the rest closed', async () => {
+      await render({ ...SAMPLE, openFirst: true });
+      const [first, ...rest] = toggles();
+      expect(first.getAttribute('aria-expanded')).toBe('true');
+      expect(panel(first)?.hasAttribute('hidden')).toBe(false);
+      for (const button of rest)
+        expect(button.getAttribute('aria-expanded')).toBe('false');
+      // Still the visitor's to close.
+      first.click();
+      flushSync();
+      expect(first.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('leaves every answer open without the script, as before', () => {
+      mountFaq({ ...SAMPLE, openFirst: true });
+      for (const button of toggles())
+        expect(button.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    it('shows the creator’s change at once on the canvas', async () => {
+      const section: ResolvedSection = {
+        id: 'faq-1',
+        anchor: 'faq',
+        type: 'faq',
+        index: 12,
+        layout: 'accordion',
+        scheme: 'base',
+        spacing: 'regular',
+        headingLevel: 2,
+      };
+      const live = $state({
+        props: { ...SAMPLE } as Record<string, unknown>,
+        section,
+        context: sampleContext(),
+        edit: null,
+      });
+      app = mount(FaqBlock, { target: document.body, props: live });
+      flushSync();
+      await tick();
+      expect(toggles()[0].getAttribute('aria-expanded')).toBe('false');
+      live.props = { ...SAMPLE, openFirst: true };
+      flushSync();
+      await tick();
+      expect(toggles()[0].getAttribute('aria-expanded')).toBe('true');
+      live.props = { ...SAMPLE };
+      flushSync();
+      await tick();
+      expect(toggles()[0].getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('reads only a stored true, and is offered for the expandable list only', () => {
+      expect(
+        faqDefinition.coerce({ ...SAMPLE, openFirst: true }).openFirst
+      ).toBe(true);
+      for (const openFirst of ['true', 1, null, {}])
+        expect(
+          faqDefinition.coerce({ ...SAMPLE, openFirst }).openFirst,
+          String(openFirst)
+        ).toBeUndefined();
+      expect(
+        faqDefinition.fields.find((field) => field.key === 'openFirst')?.layouts
+      ).toEqual(['accordion']);
+    });
+  });
+
   it('accordion: opens an answer that find-in-page matched', async () => {
     await render(SAMPLE);
     const [first] = toggles();

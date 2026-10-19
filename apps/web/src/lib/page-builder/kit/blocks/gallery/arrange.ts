@@ -9,6 +9,8 @@ export interface Picture {
   url: string | null;
   alt: string;
   caption?: string;
+  /** Where its subject is, for a frame that crops it (`storedFocus`). */
+  focus?: { x: number; y: number };
 }
 
 /**
