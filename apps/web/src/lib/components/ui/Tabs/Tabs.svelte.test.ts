@@ -341,9 +341,11 @@ describe('Tabs accessibility', () => {
     document.body.innerHTML = '';
   });
 
-  const trigger = (n: number, root: ParentNode = document) =>
+  // HTMLElement | Document, not ParentNode: in web's tsc the workers types
+  // shadow the DOM's ParentNode (and `append`, hence appendChild below).
+  const trigger = (n: number, root: HTMLElement | Document = document) =>
     root.querySelector<HTMLButtonElement>(`[data-testid="trigger-${n}"]`);
-  const panel = (n: number, root: ParentNode = document) =>
+  const panel = (n: number, root: HTMLElement | Document = document) =>
     root.querySelector<HTMLElement>(`[data-testid="panel-${n}"]`);
 
   test('aria-selected follows the current tab', () => {
@@ -387,7 +389,8 @@ describe('Tabs accessibility', () => {
   test('two tab sets on one page never share an id', () => {
     const first = document.createElement('div');
     const second = document.createElement('div');
-    document.body.append(first, second);
+    document.body.appendChild(first);
+    document.body.appendChild(second);
     components.push(
       mount(TabsHarness, { target: first, props: { defaultValue: 'tab-1' } }),
       mount(TabsHarness, { target: second, props: { defaultValue: 'tab-1' } })
