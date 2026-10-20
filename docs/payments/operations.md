@@ -212,8 +212,12 @@ Both run at minute `0` so they share one database wake
   dispatches each event to the right handler by type. It must route every event
   production handles — **gap**: `Codex-2hxff.24` (no `product.*` or `price.*`).
 - Hosted dev endpoints are created by `.github/scripts/setup-stripe-dev-webhooks.sh`.
-  They must match production's endpoints, events and connected-accounts scope —
-  **gap**: `Codex-2hxff.24`.
+  Its endpoint list mirrors the production table above: the same endpoints,
+  events and connected-accounts scope. Change both together. The script creates
+  endpoints and does not update existing ones, so an endpoint made by an older
+  copy needs its events edited, or the endpoint recreated. No hosted dev
+  environment is deployed today (`ecom-api.dev.revelations.studio` does not
+  resolve).
 - A Cloudflare tunnel (`ecom-api-local.revelations.studio` → `localhost:42072`)
   can receive real endpoint deliveries locally.
 - Seeds refuse live keys. Seeded data should exercise the real fee split and
