@@ -129,7 +129,8 @@ function render(
   selectedId: string,
   style: string = 'bold',
   mediaBaseUrl: string | null = null,
-  offer: SampleOfferState = 'buy'
+  offer: SampleOfferState = 'buy',
+  offerRead: 'read' | 'loading' | 'failed' = 'read'
 ) {
   pageBuilder.open(PAGE_ID, {
     pageType: 'course',
@@ -157,6 +158,7 @@ function render(
         return pageBuilder.selectedSectionId;
       },
       context: sampleContext({ mediaBaseUrl, offer }),
+      offerRead,
       onDuplicate: vi.fn(),
       onToggle: vi.fn(),
       onDelete: vi.fn(),
@@ -583,6 +585,40 @@ describe('the pricing section’s options', () => {
 
     const trigger = firstOption()?.querySelector('.select-trigger');
     expect(trigger?.textContent?.trim()).toBe('No longer one of your options');
+  });
+
+  // An unread offer is null, as no offer is (codex-review): until it has
+  // answered, the picker can say neither that an option is gone nor that
+  // there is no way in, and a creator acting on either would undo good work.
+  it('says the options are loading, not that a stored one has gone', () => {
+    render(
+      [pricing([{ id: 'subscription-monthly', name: 'Monthly' }])],
+      'sec-price',
+      'bold',
+      null,
+      'unavailable',
+      'loading'
+    );
+
+    const fields = firstOption();
+    expect(fields?.querySelector('.select-trigger')).toBeNull();
+    expect(fields?.textContent).toContain('Loading your options');
+    expect(fields?.textContent).not.toContain('No longer one of your options');
+  });
+
+  it('says the options could not be loaded, not that there is no way in', () => {
+    render(
+      [pricing([{ name: 'Monthly' }])],
+      'sec-price',
+      'bold',
+      null,
+      'unavailable',
+      'failed'
+    );
+
+    const fields = firstOption();
+    expect(fields?.textContent).toContain('Your options could not be loaded');
+    expect(fields?.textContent).not.toContain('Set up a way in');
   });
 });
 

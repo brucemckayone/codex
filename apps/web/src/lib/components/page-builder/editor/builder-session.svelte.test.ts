@@ -394,6 +394,8 @@ describe('autosave', () => {
       'problem',
     ]);
     expect(sent.sections[0].props.heading).toBe('Bone Deep, again and again');
+    // The save's own chain, however deep, before reading where it ended.
+    await drain();
     expect(session.isDirty).toBe(false);
     expect(session.saveStatus).toBe('saved');
   });
@@ -942,6 +944,83 @@ describe('another device on the same page', () => {
     expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(1);
     expect(session.stale).toBe(false);
   });
+
+  // A save can commit after its answer is lost (a timeout, a 5xx): the
+  // server's revision is then this tab's own, and the next save is refused.
+  // That is not another device: the page it reads back is the lost save.
+  const LANDED = 'c'.repeat(32);
+
+  /** The read-back after a refusal: the page as `sent` left it. */
+  function readsBack(sent: Record<string, unknown>, revision: string) {
+    draft.refresh.mockImplementation(async () => {
+      draft.current = {
+        ...record(),
+        slug: sent.slug as string,
+        title: sent.title as string,
+        status: sent.status as JourneyPageRecord['status'],
+        brandOverrides:
+          sent.brandOverrides as JourneyPageRecord['brandOverrides'],
+        sections: sent.sections as PageSection[],
+        design: sent.design as JourneyPageRecord['design'],
+        revision,
+      };
+    });
+  }
+
+  it('does not go stale over its own save that landed unheard: it takes that revision and saves again', async () => {
+    vi.useFakeTimers();
+    remotes.saveJourneyPage
+      .mockRejectedValueOnce(failure(408, 'The request timed out'))
+      .mockRejectedValueOnce(
+        failure(412, 'This page was saved somewhere else since you opened it.')
+      )
+      .mockResolvedValue({ revision: SAVED });
+    const session = start(record({ revision: READ }));
+    editHeading('Landed though unheard');
+    vi.advanceTimersByTime(5000);
+    await drain();
+    readsBack(remotes.saveJourneyPage.mock.calls[0][0], LANDED);
+
+    editHeading('Typed after the timeout');
+    vi.advanceTimersByTime(5000);
+    await drain();
+
+    expect(session.stale).toBe(false);
+    const calls = remotes.saveJourneyPage.mock.calls.map(([sent]) => sent);
+    expect(calls.at(-1)?.revision).toBe(LANDED);
+    expect(calls.at(-1)?.sections[0].props.heading).toBe(
+      'Typed after the timeout'
+    );
+  });
+
+  it('still goes stale when the page it reads back is not its lost save', async () => {
+    vi.useFakeTimers();
+    // A retry WOULD land, so only the comparison keeps it from being sent.
+    remotes.saveJourneyPage
+      .mockRejectedValueOnce(failure(408, 'The request timed out'))
+      .mockRejectedValueOnce(
+        failure(412, 'This page was saved somewhere else since you opened it.')
+      )
+      .mockResolvedValue({ revision: SAVED });
+    const session = start(record({ revision: READ }));
+    editHeading('Mine, unheard');
+    vi.advanceTimersByTime(5000);
+    await drain();
+    readsBack(
+      {
+        ...remotes.saveJourneyPage.mock.calls[0][0],
+        title: 'Retitled on another device',
+      },
+      LANDED
+    );
+
+    editHeading('Typed after the timeout');
+    vi.advanceTimersByTime(5000);
+    await drain();
+
+    expect(session.stale).toBe(true);
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(2);
+  });
 });
 
 /**
@@ -1011,6 +1090,28 @@ describe('the course reads the canvas is drawn from', () => {
     offer.error = { status: 503, body: { message: 'Worker down again' } };
     flushSync();
     expect(session.contextError).toBe(true);
+  });
+
+  // `context.offer` is null both unread and when there is no offer, so the
+  // pricing picker is told which (Codex-61zsk.14, codex-review).
+  it('says whether the offer has answered, an answer of none included', () => {
+    const offer = new FakeQuery<unknown>();
+    remotes.getCourseOffer.mockReturnValue(offer);
+    const session = start(coursePage());
+    expect(session.offerRead).toBe('loading');
+
+    offer.current = null;
+    offer.loading = false;
+    flushSync();
+    expect(session.offerRead).toBe('read');
+
+    offer.error = { status: 503, body: { message: 'Worker down' } };
+    flushSync();
+    expect(session.offerRead).toBe('failed');
+  });
+
+  it('has no offer to wait for on a page with no course', () => {
+    expect(start(record()).offerRead).toBe('read');
   });
 });
 

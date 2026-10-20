@@ -10,6 +10,13 @@
 import type { OfferPath } from '$lib/page-builder/offer-paths';
 import * as m from '$paraglide/messages';
 
+/**
+ * What an `offer` field can pick from: the page's live ways in, or, while
+ * the offer read has not answered or has failed, which of those. Then the
+ * field says so instead of reading an unread offer as "no way in".
+ */
+export type OfferChoices = readonly OfferPath[] | 'loading' | 'failed';
+
 export interface OfferOption {
   value: string;
   label: string;

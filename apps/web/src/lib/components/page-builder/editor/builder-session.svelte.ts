@@ -102,6 +102,13 @@ export interface BuilderSession {
    * while a read is still loading, and once the creator puts the notice away.
    */
   readonly contextError: boolean;
+  /**
+   * Whether the offer read has answered. Until it has, or once it fails,
+   * `context.offer` is null, which reads as "no way in": the pricing
+   * section's picker must not say so (Codex-61zsk.14). A page with no
+   * course has nothing to read, so it is `read`.
+   */
+  readonly offerRead: 'read' | 'loading' | 'failed';
   /** Read each failed read again. */
   retryContext(): void;
   /** Put the notice away, until a read fails again. */
@@ -190,6 +197,17 @@ export function createBuilderSession(options: {
   // CTA on the canvas would be the member's "Continue".
   const offer = $derived(
     offerQuery?.current ? { ...offerQuery.current, entitled: false } : null
+  );
+  // `current` is undefined until the first answer, which may itself be null
+  // (no offer), and a re-read keeps the answer it had.
+  const offerRead = $derived<'read' | 'loading' | 'failed'>(
+    !offerQuery
+      ? 'read'
+      : offerQuery.error
+        ? 'failed'
+        : offerQuery.current !== undefined
+          ? 'read'
+          : 'loading'
   );
 
   // Each read above falls back to its EMPTY shape, which is right while it
@@ -433,6 +451,70 @@ export function createBuilderSession(options: {
     };
   }
 
+  type SaveBody = ReturnType<typeof toV2SaveBody>;
+
+  /**
+   * The body of a page save this tab never heard the end of (Codex-61zsk.18):
+   * a timeout, a dropped response or a 5xx can come after the write
+   * committed. The server's revision is then that save's, and the next save,
+   * naming the one before, is refused as if another device had saved.
+   */
+  let unconfirmed: SaveBody | null = null;
+
+  /** The columns a revision covers (`page-revision.ts`), as a body sends them. */
+  const REVISIONED = [
+    'slug',
+    'title',
+    'status',
+    'brandOverrides',
+    'sections',
+    'design',
+    'seo',
+  ] as const;
+
+  async function sendPage(body: SaveBody): Promise<void> {
+    try {
+      const saved = await saveJourneyPage({
+        ...body,
+        ...(revision ? { revision } : {}),
+      });
+      // `?.`: a worker deployed before revisions answers 204, and its save
+      // has landed; the next save then goes unchecked rather than failing.
+      revision = saved?.revision;
+      unconfirmed = null;
+    } catch (error) {
+      // Any answer but a refusal leaves whether the save landed unknown.
+      if (!isPreconditionFailed(error)) unconfirmed = body;
+      throw error;
+    }
+  }
+
+  /**
+   * Is the page the server holds the save this tab lost track of? Then a
+   * refusal was this tab's own save, not another device's: take the
+   * revision it produced. A page that holds anything else, or a read that
+   * fails, is another device's work, and the tab goes stale as before; a
+   * false match costs nothing, as the server already holds this tab's page.
+   */
+  async function adoptLostSave(): Promise<boolean> {
+    const lost = unconfirmed;
+    if (!lost || !draftQuery) return false;
+    try {
+      await draftQuery.refresh();
+    } catch {
+      return false;
+    }
+    const server = draftQuery.current;
+    if (!server?.revision) return false;
+    const holds = REVISIONED.every(
+      (key) => lost[key] === undefined || sameValue(server[key], lost[key])
+    );
+    if (!holds) return false;
+    revision = server.revision;
+    unconfirmed = null;
+    return true;
+  }
+
   async function saveNow(): Promise<AutosaveSaveResult> {
     // The one gate every save passes: a stale copy would write over newer work.
     if (stale)
@@ -449,19 +531,27 @@ export function createBuilderSession(options: {
       payload,
       savedOffer: persistedOffer,
       savePage: async (input) => {
+        const body = toV2SaveBody(input);
         try {
-          const saved = await saveJourneyPage({
-            ...toV2SaveBody(input),
-            ...(revision ? { revision } : {}),
-          });
-          // `?.`: a worker deployed before revisions answers 204, and its save
-          // has landed; the next save then goes unchecked rather than failing.
-          revision = saved?.revision;
+          await sendPage(body);
         } catch (error) {
+          if (!isPreconditionFailed(error)) throw error;
+          // Refused (412). This tab's own earlier save may be what moved the
+          // page, landed but unheard: then it takes that save's revision and
+          // sends this one again.
+          if (await adoptLostSave()) {
+            try {
+              await sendPage(body);
+              return;
+            } catch (retryError) {
+              if (isPreconditionFailed(retryError)) goStale();
+              throw retryError;
+            }
+          }
           // Another tab or device saved this page since this copy was read,
-          // and this save would have undone theirs (Codex-61zsk.18): the server
-          // refused it. Stop saving, as a tab that heard another tab does.
-          if (isPreconditionFailed(error)) goStale();
+          // and this save would have undone theirs (Codex-61zsk.18): the
+          // server refused it. Stop saving, as a tab that heard another does.
+          goStale();
           throw error;
         }
       },
@@ -820,6 +910,9 @@ export function createBuilderSession(options: {
     reloadTab,
     get contextError() {
       return contextError;
+    },
+    get offerRead() {
+      return offerRead;
     },
     retryContext,
     dismissContextError,

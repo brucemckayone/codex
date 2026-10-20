@@ -488,6 +488,7 @@
             context={session.context}
             brandOverrides={pageBuilder.pending?.brandOverrides ?? null}
             {theme}
+            offerRead={session.offerRead}
             onDuplicate={(id) => reveal(pageBuilder.duplicateSection(id))}
             onToggle={(id) => pageBuilder.toggleSection(id)}
             onDelete={remove}

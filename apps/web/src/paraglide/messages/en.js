@@ -15999,6 +15999,22 @@ export const studio_page_editor_offer_gone = () => `No longer one of your option
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_loading = () => `Loading your options…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_unread = () => `Your options could not be loaded just now, so none can be chosen here. Nothing set here has changed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_button_link_label = () => `Web address`
 
 

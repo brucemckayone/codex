@@ -41,6 +41,7 @@
     SIMPLE_SECTIONS,
   } from '$lib/page-builder/kit';
   import { deriveOfferPaths } from '$lib/page-builder/offer-paths';
+  import type { OfferChoices } from './offer-field';
   import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { isImageRef } from '$lib/page-builder/page-images';
@@ -62,6 +63,8 @@
     context: JourneySalesContext;
     brandOverrides?: BrandTokenOverrides | null;
     theme?: 'light' | 'dark';
+    /** Whether the offer read has answered (`BuilderSession.offerRead`). */
+    offerRead?: 'read' | 'loading' | 'failed';
     onDuplicate: (id: string) => void;
     onToggle: (id: string) => void;
     onDelete: (id: string) => void;
@@ -73,6 +76,7 @@
     context,
     brandOverrides = null,
     theme,
+    offerRead = 'read',
     onDuplicate,
     onToggle,
     onDelete,
@@ -224,7 +228,10 @@
   // The page's live ways in, for an `offer` field (Codex-61zsk.14): the very
   // derivation the pricing block draws from, so the field offers exactly the
   // options the page shows.
-  const offerPaths = $derived(deriveOfferPaths(context.offer, context.course));
+  // An unread offer is null, the same as no offer: the picker is told which.
+  const offerPaths: OfferChoices = $derived(
+    offerRead === 'read' ? deriveOfferPaths(context.offer, context.course) : offerRead
+  );
 
   function writeProp(key: string, value: unknown): void {
     // Deleted by the time a slow write arrived: there is nothing to write to.

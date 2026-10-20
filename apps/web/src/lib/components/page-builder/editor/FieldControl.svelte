@@ -18,7 +18,6 @@
   import type { BlockField } from '$lib/page-builder/kit';
   import { MARKS, type MarkId } from '$lib/page-builder/kit/model/marks';
   import Mark from '$lib/page-builder/kit/primitives/Mark.svelte';
-  import type { OfferPath } from '$lib/page-builder/offer-paths';
   import { isImageRef } from '$lib/page-builder/page-images';
   import { safeHref } from '$lib/page-builder/render/safe-href';
   import * as m from '$paraglide/messages';
@@ -28,7 +27,7 @@
   import ItemsField from './ItemsField.svelte';
   import ListField from './ListField.svelte';
   import MediaField from './MediaField.svelte';
-  import { offerOptions } from './offer-field';
+  import { type OfferChoices, offerOptions } from './offer-field';
 
   interface Props {
     field: BlockField;
@@ -42,7 +41,7 @@
     /** `items` only: the entry the layout draws larger, tagged "Leads". */
     leading?: number | null;
     /** `offer` only (and the `items` that hold one): the page's live ways in. */
-    offerPaths?: readonly OfferPath[];
+    offerPaths?: OfferChoices;
   }
 
   const {
@@ -104,9 +103,17 @@
 {:else if field.control === 'items'}
   <ItemsField {field} {value} {onChange} {mediaBaseUrl} {layout} {leading} {offerPaths} />
 {:else if field.control === 'offer'}
-  {@const offered = offerOptions(offerPaths, value)}
+  {@const offered = typeof offerPaths === 'string' ? [] : offerOptions(offerPaths, value)}
   <div class="field">
-    {#if offered.length > 0}
+    {#if typeof offerPaths === 'string'}
+      <!-- Not yet read, or not readable: neither "gone" nor "none" is known. -->
+      <span class="field__label">{field.label}</span>
+      <p class="field__hint" role="status">
+        {offerPaths === 'loading'
+          ? m.studio_page_editor_offer_loading()
+          : m.studio_page_editor_offer_unread()}
+      </p>
+    {:else if offered.length > 0}
       <Select
         id="{id}-offer"
         label={field.label}

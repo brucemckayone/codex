@@ -12,10 +12,10 @@
   import { tick } from 'svelte';
   import { ChevronDownIcon } from '$lib/components/ui/Icon';
   import type { BlockField } from '$lib/page-builder/kit';
-  import type { OfferPath } from '$lib/page-builder/offer-paths';
   import * as m from '$paraglide/messages';
   import FieldControl from './FieldControl.svelte';
   import { entryTitle, moveItem, readEntries } from './field-values';
+  import type { OfferChoices } from './offer-field';
   import SortableRows from './SortableRows.svelte';
 
   interface Props {
@@ -29,7 +29,7 @@
     /** The entry this layout draws larger than the rest, or `null`. */
     leading?: number | null;
     /** Passed through to an entry's `offer` field: the page's live ways in. */
-    offerPaths?: readonly OfferPath[];
+    offerPaths?: OfferChoices;
   }
 
   const {
