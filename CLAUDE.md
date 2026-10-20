@@ -49,7 +49,7 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServic
 
 ---
 
-## Packages (24 total)
+## Packages (25 total)
 
 ### Foundation (core infrastructure, no business logic)
 | Package | Purpose | Key Exports |
@@ -72,6 +72,7 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServic
 | **@codex/purchase** | Stripe, purchases | `PurchaseService` |
 | **@codex/subscription** | Tiers, Connect, subscription lifecycle | `TierService`, `SubscriptionService`, `ConnectAccountService` |
 | **@codex/agreements** | Revenue-share agreements | `AgreementService`, `validateProposedShare` |
+| **@codex/payments** | Payment domain modules (payouts ledger, organisation payee) shared by every payment path | `recordSlice`, `settleTransfer`, `resolveOrganisationPayee` |
 | **@codex/notifications** | Email, templates | `NotificationsService`, `TemplateService` |
 | **@codex/admin** | Admin analytics/mgmt | `AdminAnalyticsService` |
 | **@codex/transcoding** | RunPod transcoding | `TranscodingService` |

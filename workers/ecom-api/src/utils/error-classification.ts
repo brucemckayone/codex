@@ -16,7 +16,7 @@
  * Permanent errors return 200 → Stripe considers the webhook delivered.
  */
 
-import { ServiceError } from '@codex/service-errors';
+import { ServiceError, ServiceUnavailableError } from '@codex/service-errors';
 
 /**
  * Stripe error type strings (from stripe-node SDK). Authentication and
@@ -101,8 +101,19 @@ function isTransientAt(error: unknown, depth: number): boolean {
   // A ServiceError a service threw on purpose (NotFound, Validation, …) has no
   // cause and is permanent. One that WRAPS another error is as transient as
   // what it wraps.
+  // A service saying "not yet": the work will succeed on a retry.
+  if (error instanceof ServiceUnavailableError) return true;
+
   if (error instanceof ServiceError) {
     return error.cause !== undefined && isTransientAt(error.cause, depth + 1);
+  }
+
+  // Several failures reported together (the clawback's rows it could not
+  // cancel, Codex-2hxff.51) are worth a retry when any one of them is: the
+  // retry is idempotent, and a row left behind can be paid out on a refunded
+  // charge.
+  if (error instanceof AggregateError) {
+    return error.errors.some((inner) => isTransientAt(inner, depth + 1));
   }
 
   if (error instanceof Error) {

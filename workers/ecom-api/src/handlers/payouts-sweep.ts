@@ -37,7 +37,10 @@ const DEFAULT_OLDER_THAN_MINUTES = 15;
 
 export interface RunSweepDeps {
   /** The registry's SubscriptionService (see runScheduledPayoutsSweep). */
-  subscription: Pick<SubscriptionService, 'sweepUnresolvedPayouts'>;
+  subscription: Pick<
+    SubscriptionService,
+    'sweepUnresolvedPayouts' | 'retryFailedClawbacks'
+  >;
   /** Observability client (PII-redacted) */
   obs: ObservabilityClient;
   /** Optional override for the age threshold (mainly for tests) */
@@ -69,12 +72,36 @@ export async function runPayoutsSweep(deps: RunSweepDeps): Promise<{
       ...result,
     });
 
+    await retryClawbacks(subscription, obs, olderThanMinutes);
     return result;
   } catch (error) {
     obs.error('payouts-sweep cron failed at top level', {
       error: error instanceof Error ? error.message : String(error),
     });
     return null;
+  }
+}
+
+/**
+ * Retry clawback steps left `failed` (Codex-2hxff.8). Isolated from the payout
+ * sweep: its failure is logged and never fails the cron.
+ */
+async function retryClawbacks(
+  subscription: RunSweepDeps['subscription'],
+  obs: ObservabilityClient,
+  olderThanMinutes: number
+): Promise<void> {
+  try {
+    const result = await subscription.retryFailedClawbacks(olderThanMinutes);
+    obs.info('payouts-sweep cron retried failed clawbacks', {
+      olderThanMinutes,
+      ...result,
+    });
+  } catch (error) {
+    obs.error('payouts-sweep cron could not retry failed clawbacks', {
+      errorId: crypto.randomUUID(),
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

@@ -34,7 +34,7 @@ import {
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { resolveOrganisationPayee } from '../utils/resolve-organisation-payee';
+import { resolveOrganisationPayee } from '../resolve-organisation-payee';
 
 const LONG_AGO = new Date('2020-01-01T00:00:00Z');
 const TRANSFER_AT = new Date('2024-06-01T12:00:00Z');

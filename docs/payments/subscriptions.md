@@ -227,19 +227,32 @@ Owner decision P-4, "Cancel + end access".
 - A **partial** refund leaves the subscription running.
 - Either way, the creator and organisation slices are reversed in proportion,
   exactly as for one-off purchases ([purchases.md](purchases.md#refunds)). A
-  shortfall on the payee's balance goes to `refund_reviews`, which must be able
-  to hold subscription rows (`Codex-in0g4`).
+  shortfall on the payee's balance goes to `refund_reviews`, which holds
+  subscription debts as well as purchase ones (one row per reversal).
 
-— **gap**: `Codex-2hxff.10` (today a refund moves money only),
-`Codex-2hxff.8` (clawback defects).
+— **gap**: `Codex-2hxff.10` (today a refund moves money only).
 
 ## Disputes
 
 A disputed subscription invoice follows the dispute rules for purchases
-([purchases.md](purchases.md#disputes)): access is paused and the invoice's
-creator and organisation slices are reversed in proportion while it is open. If
-we win, both are restored. If we lose, the subscription is cancelled and access
-ends — **gap**: `Codex-2hxff.9`.
+([purchases.md](purchases.md#disputes)), and the money is handled the same way
+(the clawback acts on both sources). The subscription itself
+([subscription-disputes.md](subscription-disputes.md), owner decisions Q-A and
+Q-B):
+
+- **Chargeback opened:** access is paused (`disputed_at`, which every granting
+  query reads; for a course subscription, its stored grant) and so is billing
+  (`pause_collection` set to `void`), so no renewal is charged while access is
+  paused.
+- **Won:** access and billing are restored, unless another chargeback on the
+  same subscription is still open.
+- **Lost:** the subscription is cancelled at Stripe at once, with no proration;
+  `customer.subscription.deleted` then ends it here and sends the usual
+  cancellation email.
+- **Inquiry:** nothing changes for the subscriber.
+
+The subscriber is not told why access is paused: the account page still says
+Active (Q-B). A notice is planned, to be mocked up first: `Codex-2hxff.60`.
 
 ## Billing portal
 

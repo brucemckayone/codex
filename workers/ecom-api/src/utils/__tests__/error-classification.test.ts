@@ -11,6 +11,7 @@ import {
   InternalServiceError,
   mapErrorToResponse,
   NotFoundError,
+  ServiceUnavailableError,
   wrapError,
 } from '@codex/service-errors';
 import { describe, expect, it } from 'vitest';
@@ -208,6 +209,56 @@ describe('isTransientError', () => {
       const b = new InternalServiceError('b', undefined, { cause: a });
       Object.defineProperty(a, 'cause', { value: b });
       expect(isTransientError(a)).toBe(false);
+    });
+  });
+
+  // Codex-2hxff.51: the clawback finishes every row, then rejects with the
+  // rows it could not cancel as one InternalServiceError whose cause is the
+  // failure, or an AggregateError of them.
+  describe('several failures reported together', () => {
+    const outage = () => new Error('Connection terminated unexpectedly');
+    const bug = () => new TypeError('x is undefined');
+    const incomplete = (cause: unknown) =>
+      new InternalServiceError('Refund clawback incomplete', undefined, {
+        cause,
+      });
+
+    it('is transient when any one failure is, wherever it sits', () => {
+      expect(
+        isTransientError(incomplete(new AggregateError([bug(), outage()])))
+      ).toBe(true);
+    });
+
+    it('is permanent when every failure is', () => {
+      expect(
+        isTransientError(incomplete(new AggregateError([bug(), bug()])))
+      ).toBe(false);
+    });
+
+    it('a single failure is judged as itself', () => {
+      expect(isTransientError(incomplete(outage()))).toBe(true);
+      expect(isTransientError(incomplete(bug()))).toBe(false);
+    });
+  });
+
+  // Codex-2hxff.8: a step that could not run YET (another delivery holds it,
+  // or a payout for the refund is being paid) asks Stripe to retry.
+  describe('a service saying "not yet"', () => {
+    it('a ServiceUnavailableError is transient, though thrown on purpose', () => {
+      expect(
+        isTransientError(
+          new ServiceUnavailableError('another delivery holds it')
+        )
+      ).toBe(true);
+    });
+
+    it('it is transient as the cause of an incomplete clawback too', () => {
+      const incomplete = new InternalServiceError(
+        'Refund clawback incomplete',
+        undefined,
+        { cause: new ServiceUnavailableError('payout in flight') }
+      );
+      expect(isTransientError(incomplete)).toBe(true);
     });
   });
 

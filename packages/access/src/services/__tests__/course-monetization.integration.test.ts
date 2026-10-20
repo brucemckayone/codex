@@ -30,6 +30,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   content,
+  courseSubscriptionPlans,
+  courseSubscriptions,
   courses,
   courseTierAccess,
   entitlements,
@@ -66,8 +68,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   hasCourseEntitlement,
   hasStoredContentEntitlement,
+  resolveCourseEntitlementsBatch,
 } from '../content-access/entitlements-resolver';
 import { CourseAccessService } from '../course-access-service';
+import { EntitlementsService } from '../entitlements-service';
 
 /** Minimal Stripe stub — only `transfers.create` is reached by the payout path. */
 function makeStripeStub() {
@@ -493,6 +497,7 @@ describe('Course monetization round-trip (WP-6)', () => {
 
     // Refund the charge → the entitlement this purchase granted is revoked.
     await svc.processRefund(pi, {
+      charge: { id: `ch_${randomUUID()}`, amountCents: 5000 },
       stripeRefundId: `re_${randomUUID()}`,
       refundAmountCents: 5000,
       refundReason: 'requested_by_customer',
@@ -557,6 +562,7 @@ describe('Course monetization round-trip (WP-6)', () => {
     expect(grantBefore?.revokedAt).toBeNull();
 
     await svc.processRefund(pi, {
+      charge: { id: `ch_${randomUUID()}`, amountCents: 3000 },
       stripeRefundId: `re_${randomUUID()}`,
       refundAmountCents: 3000,
       refundReason: 'requested_by_customer',
@@ -693,5 +699,115 @@ describe('Course monetization round-trip (WP-6)', () => {
     expect(await hasStoredContentEntitlement(db, buyer2Id, contentRow.id)).toBe(
       false
     );
+  });
+
+  it('a disputed subscription pauses its course grants, stored and derived, until the dispute clears (Codex-2hxff.9)', async () => {
+    const [courseSubscriberId, tierSubscriberId] = await seedTestUsers(db, 2);
+    const viaCourseSub = await createCourse(db, orgAId, creatorId, {
+      priceCents: null,
+    });
+    const viaTier = await createCourse(db, orgAId, creatorId, {
+      priceCents: null,
+    });
+    const now = new Date();
+    const future = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    // A course subscription's STORED grant.
+    const [plan] = await db
+      .insert(courseSubscriptionPlans)
+      .values({
+        courseId: viaCourseSub,
+        priceMonthly: 5000,
+        priceAnnual: 50000,
+        stripeProductId: `prod_${randomUUID()}`,
+        stripePriceMonthlyId: `price_m_${randomUUID()}`,
+        stripePriceAnnualId: `price_a_${randomUUID()}`,
+      })
+      .returning();
+    const [courseSub] = await db
+      .insert(courseSubscriptions)
+      .values({
+        userId: courseSubscriberId ?? '',
+        courseId: viaCourseSub,
+        planId: plan?.id ?? '',
+        organizationId: orgAId,
+        stripeSubscriptionId: `sub_course_${randomUUID()}`,
+        stripeCustomerId: `cus_${randomUUID()}`,
+        status: 'active',
+        billingInterval: 'month',
+        currentPeriodStart: now,
+        currentPeriodEnd: future,
+      })
+      .returning();
+    await writeCourseSubscriptionEntitlement(db, {
+      userId: courseSubscriberId ?? '',
+      organizationId: orgAId,
+      courseId: viaCourseSub,
+      courseSubscriptionId: courseSub?.id ?? '',
+      expiresAt: future,
+    });
+
+    // A tier subscription's DERIVED grant.
+    await new CourseAccessService({ db, environment: 'test' }).setTierAccess(
+      orgAId,
+      viaTier,
+      [tierAId]
+    );
+    const [tierSub] = await db
+      .insert(subscriptions)
+      .values(
+        createTestSubscriptionInput(tierSubscriberId ?? '', orgAId, tierAId)
+      )
+      .returning();
+
+    const grants = async () => ({
+      courseSub: await hasCourseEntitlement(
+        db,
+        courseSubscriberId ?? '',
+        viaCourseSub
+      ),
+      courseSubBatch: (
+        await resolveCourseEntitlementsBatch(db, courseSubscriberId ?? '', [
+          viaCourseSub,
+        ])
+      ).has(viaCourseSub),
+      tier: await hasCourseEntitlement(db, tierSubscriberId ?? '', viaTier),
+      tierBatch: (
+        await resolveCourseEntitlementsBatch(db, tierSubscriberId ?? '', [
+          viaTier,
+        ])
+      ).has(viaTier),
+      // The stored-grant listing (derived tier grants never appear in it).
+      listed: (
+        await new EntitlementsService({
+          db,
+          environment: 'test',
+        }).getUserEntitlements(courseSubscriberId ?? '')
+      ).some((grant) => grant.resourceId === viaCourseSub),
+    });
+    const all = (value: boolean) => ({
+      courseSub: value,
+      courseSubBatch: value,
+      tier: value,
+      tierBatch: value,
+      listed: value,
+    });
+    expect(await grants()).toEqual(all(true));
+
+    const setDisputed = async (at: Date | null) => {
+      await db
+        .update(courseSubscriptions)
+        .set({ disputedAt: at })
+        .where(eq(courseSubscriptions.id, courseSub?.id ?? ''));
+      await db
+        .update(subscriptions)
+        .set({ disputedAt: at })
+        .where(eq(subscriptions.id, tierSub?.id ?? ''));
+    };
+    await setDisputed(new Date());
+    expect(await grants()).toEqual(all(false));
+
+    await setDisputed(null);
+    expect(await grants()).toEqual(all(true));
   });
 });

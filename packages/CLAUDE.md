@@ -1,6 +1,6 @@
 # Codex Packages
 
-24 packages across 3 layers: Foundation, Service, Utility.
+25 packages across 3 layers: Foundation, Service, Utility.
 
 ## Package Registry
 
@@ -23,6 +23,7 @@
 | **@codex/identity** | User profiles, identity | `IdentityService` | [identity/CLAUDE.md](identity/CLAUDE.md) |
 | **@codex/access** | Access control, signed URLs, playback | `ContentAccessService` | [access/CLAUDE.md](access/CLAUDE.md) |
 | **@codex/agreements** | Revenue-share agreement state machine (Codex-nk4km) | `AgreementService`, `validateProposedShare` | [agreements/CLAUDE.md](agreements/CLAUDE.md) |
+| **@codex/payments** | Payment domain modules every payment path calls: the payouts ledger, the organisation payee (decision D1) | `recordSlice`, `recordPlatformFee`, `settleTransfer`, `resolveOrganisationPayee` | [payments/CLAUDE.md](payments/CLAUDE.md) |
 | **@codex/purchase** | Stripe one-time checkout, purchase history | `PurchaseService`, `createStripeClient` | [purchase/CLAUDE.md](purchase/CLAUDE.md) |
 | **@codex/subscription** | Subscription tiers, Stripe Connect, revenue splits | `TierService`, `SubscriptionService`, `ConnectAccountService`, `calculateRevenueSplit` | [subscription/CLAUDE.md](subscription/CLAUDE.md) |
 | **@codex/notifications** | Email templates, sending | `NotificationsService`, `TemplateService`, `NotificationPreferencesService` | [notifications/CLAUDE.md](notifications/CLAUDE.md) |
@@ -59,8 +60,9 @@ Services (depend on Foundation):
   identity     → database, service-errors, validation, cloudflare-clients, cache
   access       → database, service-errors, cloudflare-clients, purchase
   agreements   → database, service-errors, validation, shared-types, observability, constants
-  purchase     → database, service-errors, validation, constants, cache (+ Stripe SDK)
-  subscription → database, service-errors, validation, constants, cache, purchase (+ Stripe SDK)
+  payments     → database, service-errors, constants (+ Stripe SDK types)
+  purchase     → database, service-errors, validation, constants, cache, payments (+ Stripe SDK)
+  subscription → database, service-errors, validation, constants, cache, payments, purchase (+ Stripe SDK)
   notifications→ database, service-errors, validation, platform-settings
   admin        → database, service-errors
   transcoding  → database, service-errors, cloudflare-clients
@@ -85,6 +87,7 @@ Utilities (used by Workers and Services):
 | Check access, generate streaming URLs | `@codex/access` |
 | User profile, avatars | `@codex/identity` |
 | Org settings (branding, features, contact) | `@codex/platform-settings` |
+| Payouts ledger (slices, transfers, drains, refund cancels), who the organisation payee is | `@codex/payments` |
 | One-time purchases, purchase history | `@codex/purchase` |
 | Subscription tiers, billing, Stripe Connect | `@codex/subscription` |
 | Revenue-share agreements, proposal state machine | `@codex/agreements` |

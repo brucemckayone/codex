@@ -212,13 +212,11 @@ app.post(
 );
 
 /**
- * Dispute events webhook
- * Handles: charge.dispute.created (via handlePaymentWebhook — Codex-sxu5a)
- *
- * Other dispute lifecycle events (charge.dispute.updated, closed,
- * funds_reinstated, funds_withdrawn) and radar.early_fraud_warning.* are
- * still logging-only and flow through the switch's `default` branch inside
- * `handlePaymentWebhook`.
+ * Dispute events webhook (via handlePaymentWebhook — Codex-sxu5a,
+ * Codex-2hxff.9): charge.dispute.created, .updated, .closed,
+ * .funds_withdrawn and .funds_reinstated record the dispute and act on its
+ * status (docs/payments/dispute-record.md). radar.early_fraud_warning.* is
+ * still logging-only, through the switch's `default` branch.
  */
 app.post(
   '/webhooks/stripe/dispute',

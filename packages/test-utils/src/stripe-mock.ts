@@ -60,6 +60,13 @@ export function createMockStripe(): Stripe {
     [key: string]: unknown;
   }> = [];
   const transfersByKey = new Map<string, (typeof createdTransfers)[number]>();
+  const createdReversals: Array<{
+    id: string;
+    object: 'transfer_reversal';
+    transfer: string;
+    amount: number;
+    metadata: Record<string, string>;
+  }> = [];
   const mock = {
     products: {
       create: vi
@@ -167,6 +174,21 @@ export function createMockStripe(): Stripe {
         ...createDefaultStripeSubscription({ id: _subId }),
         status: 'active',
       })),
+      // A lost dispute cancels the subscription at once (Codex-2hxff.9).
+      cancel: vi.fn().mockImplementation(async (_subId: string) => ({
+        ...createDefaultStripeSubscription({ id: _subId }),
+        status: 'canceled',
+      })),
+    },
+
+    // The invoice a payment intent paid: how a dispute finds its subscription
+    // when the charge has no payout rows (Codex-2hxff.9). None by default.
+    invoicePayments: {
+      list: vi.fn().mockResolvedValue({
+        object: 'list',
+        data: [],
+        has_more: false,
+      }),
     },
 
     // Transfers are remembered so `list` can return them: a drain looks up
@@ -237,15 +259,51 @@ export function createMockStripe(): Stripe {
       createReversal: vi
         .fn()
         .mockImplementation(
-          async (transferId: string, params: { amount?: number } = {}) => ({
-            id: nextId('trr'),
-            object: 'transfer_reversal',
-            transfer: transferId,
-            amount:
-              params.amount ??
-              createdTransfers.find((t) => t.id === transferId)?.amount ??
-              0,
-          })
+          async (
+            transferId: string,
+            params: { amount?: number; metadata?: Record<string, string> } = {}
+          ) => {
+            const reversal = {
+              id: nextId('trr'),
+              object: 'transfer_reversal' as const,
+              transfer: transferId,
+              amount:
+                params.amount ??
+                Number(
+                  createdTransfers.find((t) => t.id === transferId)?.amount ?? 0
+                ),
+              metadata: params.metadata ?? {},
+            };
+            createdReversals.push(reversal);
+            return reversal;
+          }
+        ),
+      // A transfer's reversals, newest first, as Stripe pages them. The won
+      // dispute's re-pay asks it whether a step whose outcome was never
+      // confirmed went through (Codex-2hxff.9).
+      listReversals: vi
+        .fn()
+        .mockImplementation(
+          async (
+            transferId: string,
+            params: { limit?: number; starting_after?: string } = {}
+          ) => {
+            let matching = createdReversals
+              .filter((r) => r.transfer === transferId)
+              .reverse();
+            if (params.starting_after) {
+              const after = matching.findIndex(
+                (r) => r.id === params.starting_after
+              );
+              matching = after === -1 ? [] : matching.slice(after + 1);
+            }
+            const limit = params.limit ?? 10;
+            return {
+              object: 'list',
+              data: matching.slice(0, limit),
+              has_more: matching.length > limit,
+            };
+          }
         ),
     },
 
@@ -257,8 +315,8 @@ export function createMockStripe(): Stripe {
     },
 
     // invoices.retrieve and charges.list back the Stripe 2024+ fallback
-    // chain in SubscriptionService.resolveInvoiceCharge — see
-    // subscription-service.ts. Default returns an empty payments array so
+    // chain in resolveInvoiceCharge — see
+    // packages/payments/src/invoice-charge.ts. Default returns an empty payments array so
     // tests that don't override see the "no charge resolvable" branch.
     invoices: {
       retrieve: vi.fn().mockImplementation(async (_id: string) => ({
@@ -268,6 +326,25 @@ export function createMockStripe(): Stripe {
     },
 
     charges: {
+      list: vi.fn().mockImplementation(async () => ({
+        object: 'list',
+        data: [],
+        has_more: false,
+      })),
+      // refund.updated names only the charge id; the webhook reads its
+      // amount and metadata from here (Codex-2hxff.8). Tests override it.
+      retrieve: vi.fn().mockImplementation(async (id: string) => ({
+        id,
+        object: 'charge',
+        amount: 0,
+        metadata: {},
+      })),
+    },
+
+    // The clawback reads a charge's refunds from Stripe, not from the event
+    // (listClawableRefunds, Codex-2hxff.8). Default: none, so a test that
+    // does not set them claws back nothing.
+    refunds: {
       list: vi.fn().mockImplementation(async () => ({
         object: 'list',
         data: [],

@@ -18,6 +18,7 @@ import {
   isServiceError,
   NotFoundError,
   ServiceError,
+  ServiceUnavailableError,
   StripeNotConfiguredError,
   ValidationError,
   wrapError,
@@ -213,6 +214,18 @@ describe('Base Service Errors', () => {
         contentId: '789',
         status: 'draft',
       });
+    });
+  });
+
+  describe('ServiceUnavailableError', () => {
+    it('is a 503 ServiceError with its own code and context', () => {
+      const error = new ServiceUnavailableError('Another delivery holds it', {
+        payoutReversalId: 'pr_1',
+      });
+      expect(error).toBeInstanceOf(ServiceError);
+      expect(error.statusCode).toBe(503);
+      expect(error.code).toBe('SERVICE_UNAVAILABLE');
+      expect(error.context).toEqual({ payoutReversalId: 'pr_1' });
     });
   });
 

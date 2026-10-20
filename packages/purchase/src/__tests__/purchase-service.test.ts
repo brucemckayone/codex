@@ -35,7 +35,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -58,6 +58,27 @@ import { PurchaseService } from '../services/purchase-service';
 
 /** The locked Billing Portal configuration (Codex-2hxff.4). */
 const PORTAL_CONFIG_ID = 'bpc_test_locked_portal';
+
+/**
+ * What `stripe.refunds.list({ charge })` answers: the charge's refunds, all
+ * succeeded, oldest first. The clawback reads them from Stripe, not from the
+ * event (Codex-2hxff.8), so a test that expects a reversal must say which
+ * refunds Stripe holds. `createMockStripe()` holds none by default.
+ */
+function refundList(
+  ...refunds: Array<{ id: string; amount: number }>
+): Stripe.Response<Stripe.ApiList<Stripe.Refund>> {
+  return {
+    object: 'list',
+    data: refunds.map((refund, i) => ({
+      ...refund,
+      object: 'refund',
+      status: 'succeeded',
+      created: 1_700_000_000 + i,
+    })),
+    has_more: false,
+  } as unknown as Stripe.Response<Stripe.ApiList<Stripe.Refund>>;
+}
 
 describe('PurchaseService Integration', () => {
   let db: Database;
@@ -197,6 +218,25 @@ describe('PurchaseService Integration', () => {
       .insert(schema.stripeConnectAccounts)
       .values(createTestConnectAccountInput(null, creatorId))
       .onConflictDoNothing();
+  }
+
+  /**
+   * The purchase's `payout_reversals` records (one per slice per refund,
+   * Codex-2hxff.8), each with its slice's type.
+   */
+  async function reversalRecordsOf(purchaseId: string) {
+    const rows = await db
+      .select({
+        record: schema.payoutReversals,
+        payoutType: schema.payouts.payoutType,
+      })
+      .from(schema.payoutReversals)
+      .innerJoin(
+        schema.payouts,
+        eq(schema.payoutReversals.payoutId, schema.payouts.id)
+      )
+      .where(eq(schema.payouts.purchaseId, purchaseId));
+    return rows.map(({ record, payoutType }) => ({ ...record, payoutType }));
   }
 
   describe('createCheckoutSession', () => {
@@ -2068,13 +2108,14 @@ describe('PurchaseService Integration', () => {
       );
 
       const paymentIntentId = `pi_ownerless_${crypto.randomUUID().slice(0, 12)}`;
+      const chargeId = `ch_ownerless_${crypto.randomUUID().slice(0, 12)}`;
       const purchase = await service.completePurchase(paymentIntentId, {
         customerId: otherUserId,
         contentId: content.id,
         organizationId: ownerless.id,
         amountPaidCents: 10000,
         currency: 'gbp',
-        stripeChargeId: `ch_ownerless_${crypto.randomUUID().slice(0, 12)}`,
+        stripeChargeId: chargeId,
       });
 
       const rows = await db
@@ -2102,8 +2143,13 @@ describe('PurchaseService Integration', () => {
       // A refund cancels it like any unpaid slice. The database must admit
       // a CANCELLED row with no payee: refused, the row would stay pending,
       // and the next owner would be paid for a refunded sale.
+      const refundId = `re_ownerless_${crypto.randomUUID().slice(0, 12)}`;
+      vi.mocked(stripe.refunds.list).mockResolvedValue(
+        refundList({ id: refundId, amount: 10000 })
+      );
       await service.processRefund(paymentIntentId, {
-        stripeRefundId: `re_ownerless_${crypto.randomUUID().slice(0, 12)}`,
+        charge: { id: chargeId, amountCents: 10000 },
+        stripeRefundId: refundId,
         refundAmountCents: 10000,
       });
       const [held] = await db
@@ -2120,6 +2166,26 @@ describe('PurchaseService Integration', () => {
         userId: null,
         reason: 'no_owner',
       });
+      // Each refund's record of what it did to a slice (Codex-2hxff.8).
+      expect(
+        (await reversalRecordsOf(purchase.id))
+          .map((r) => [r.payoutType, r.kind, r.status])
+          .sort()
+      ).toEqual([
+        ['creator_payout', 'transfer_reversal', 'done'],
+        ['organization_fee', 'cancellation', 'done'],
+        ['platform_fee', 'retained_fee', 'done'],
+      ]);
+
+      // Cleanup in foreign-key order (all restrict): reviews reference the
+      // reversal records, which reference the slices.
+      const payoutIds = rows.map((r) => r.id);
+      await db
+        .delete(schema.refundReviews)
+        .where(inArray(schema.refundReviews.payoutId, payoutIds));
+      await db
+        .delete(schema.payoutReversals)
+        .where(inArray(schema.payoutReversals.payoutId, payoutIds));
       await db
         .delete(schema.payouts)
         .where(eq(schema.payouts.purchaseId, purchase.id));
@@ -2484,7 +2550,14 @@ describe('PurchaseService Integration', () => {
             return Promise.resolve({ id: `trr_${id}` });
           }),
         },
-        refunds: { create: vi.fn() },
+        refunds: {
+          create: vi.fn(),
+          list: vi
+            .fn()
+            .mockResolvedValue(
+              refundList({ id: 're_test_001', amount: 10000 })
+            ),
+        },
       } as unknown as Stripe;
       const service = new PurchaseService(
         // biome-ignore lint/suspicious/noExplicitAny: test stub
@@ -2547,6 +2620,7 @@ describe('PurchaseService Integration', () => {
 
       // Refund the purchase
       await service.processRefund(paymentIntentId, {
+        charge: { id: chargeId, amountCents: 10000 },
         stripeRefundId: 're_test_001',
         refundAmountCents: 10000,
         refundReason: 'requested_by_customer',
@@ -2568,10 +2642,50 @@ describe('PurchaseService Integration', () => {
         .where(eq(schema.payouts.purchaseId, purchase.id));
       expect(after).toHaveLength(3);
       expect(after.every((r) => r.status === 'reversed')).toBe(true);
+
+      // One done record per slice for the refund (Codex-2hxff.8). Each
+      // reversal is keyed by the transfer, the refund and the attempt, and
+      // names its record in the metadata.
+      const records = await reversalRecordsOf(purchase.id);
+      const creatorRow = after.find((r) => r.payoutType === 'creator_payout');
+      const creatorRecord = records.find(
+        (r) => r.payoutType === 'creator_payout'
+      );
+      expect(records).toHaveLength(3);
+      expect(
+        records.every((r) => r.causeId === 're_test_001' && r.status === 'done')
+      ).toBe(true);
+      expect(
+        Object.fromEntries(records.map((r) => [r.payoutType, r.kind]))
+      ).toEqual({
+        platform_fee: 'retained_fee',
+        creator_payout: 'transfer_reversal',
+        organization_fee: 'transfer_reversal',
+      });
+      expect(creatorRecord?.stripeReversalId).toBe(`trr_${creatorTransferId}`);
+      expect(reversal).toHaveBeenCalledWith(
+        creatorTransferId,
+        {
+          amount: creatorRow?.amountCents,
+          metadata: {
+            source_type: 'purchase',
+            purchase_id: purchase.id,
+            charge_id: chargeId,
+            refund_id: 're_test_001',
+            payout_id: creatorRow?.id,
+            payout_reversal_id: creatorRecord?.id,
+            type: 'refund_reversal',
+            codex_env: 'test',
+          },
+        },
+        { idempotencyKey: `${creatorTransferId}_reversal_re_test_001_0` }
+      );
     });
 
-    it('refund is a no-op if rows are already reversed (idempotent)', async () => {
-      // Seed a purchase + manually-reversed rows.
+    // Codex-2hxff.8: the "already refunded" status no longer stops the
+    // clawback, so a redelivery runs it again. What stops a second reversal
+    // is the refund's done record on each slice.
+    it('a redelivered refund reverses nothing more: the reversal record is the gate (idempotent)', async () => {
       const stubFeeConfig = {
         getFeesForCreator: vi.fn().mockResolvedValue({
           platformFeePercent: 1000,
@@ -2580,7 +2694,13 @@ describe('PurchaseService Integration', () => {
           minTransferCents: 0,
         }),
       };
-      const reversal = vi.fn();
+      const reversal = vi.fn(async (id: string) => ({ id: `trr_${id}` }));
+      const listRefunds = vi.fn().mockResolvedValue(
+        refundList({
+          id: `re_idem_${crypto.randomUUID().slice(0, 12)}`,
+          amount: 1000,
+        })
+      );
       const stubStripe = {
         ...mockStripe,
         transfers: {
@@ -2590,6 +2710,7 @@ describe('PurchaseService Integration', () => {
           })),
           createReversal: reversal,
         },
+        refunds: { list: listRefunds },
       } as unknown as Stripe;
       const service = new PurchaseService(
         // biome-ignore lint/suspicious/noExplicitAny: test stub
@@ -2632,7 +2753,7 @@ describe('PurchaseService Integration', () => {
 
       const chargeId = `ch_idem_${Date.now()}`;
       const paymentIntentId = `pi_idem_${Date.now()}`;
-      await service.completePurchase(paymentIntentId, {
+      const purchase = await service.completePurchase(paymentIntentId, {
         customerId: otherUserId,
         contentId: content.id,
         organizationId,
@@ -2640,30 +2761,38 @@ describe('PurchaseService Integration', () => {
         currency: 'gbp',
         stripeChargeId: chargeId,
       });
+      const charge = { id: chargeId, amountCents: 1000 };
 
       // First refund — reverses the creator's transfer (org_fee = 0, so it is
       // the only one). Until Codex-2hxff.11 this stub's transfer had no id, the
       // slice was recorded as a failed transfer, and the test read "nothing to
       // reverse" as the idempotency it meant to check.
-      await service.processRefund(paymentIntentId);
-      const afterFirst = reversal.mock.calls.length;
-      // Second refund — short-circuits via the "already refunded" guard.
-      await service.processRefund(paymentIntentId);
+      await service.processRefund(paymentIntentId, { charge });
+      expect(reversal).toHaveBeenCalledTimes(1);
+      // Second delivery — the purchase is already refunded, but the clawback
+      // still reads the charge's refunds and finds each slice's record done.
+      await service.processRefund(paymentIntentId, { charge });
 
-      // The second refund reverses nothing more.
-      expect(reversal.mock.calls.length).toBe(afterFirst);
+      expect(listRefunds).toHaveBeenCalledTimes(2);
+      // The second refund reverses nothing more, and records nothing more.
+      expect(reversal).toHaveBeenCalledTimes(1);
+      const records = await reversalRecordsOf(purchase.id);
+      expect(records.map((r) => [r.payoutType, r.status]).sort()).toEqual([
+        ['creator_payout', 'done'],
+        ['platform_fee', 'done'],
+      ]);
     });
 
     // REGRESSION (PR #203 deep-review F-1, DQ-7) — partial refunds must
     // proportionally reverse the creator + org transfers, not the full
-    // slices. Current production code in `reversePayoutsForPurchase`
-    // (purchase-service.ts:1289-1297) passes `amount: row.amountCents`
-    // regardless of the partial-refund ratio, so a £5 partial refund on
-    // a £20 charge fully zeroes the creator's £15.30 slice and the org's
+    // slices. The refund clawback (then `reversePayoutsForPurchase` in
+    // purchase-service.ts, now @codex/payments `reverseCharge`) passed
+    // `amount: row.amountCents` regardless of the partial-refund ratio, so a
+    // £5 partial refund on a £20 charge fully zeroes the creator's £15.30 slice and the org's
     // £2.70 slice — net £13 of unaccounted loss. See
     // docs/pr-203-review/design-questions.md DQ-7.
     //
-    it('partial refund proportionally reverses creator + org transfers (DQ-7)', async () => {
+    it('each partial refund proportionally reverses creator + org transfers, a second one too (DQ-7, Codex-2hxff.8)', async () => {
       const stubFeeConfig = {
         getFeesForCreator: vi.fn().mockResolvedValue({
           platformFeePercent: 1000, // 10%
@@ -2711,10 +2840,19 @@ describe('PurchaseService Integration', () => {
             .fn()
             .mockImplementation((id: string, args: { amount: number }) => {
               reversalCalls.push({ transferId: id, amount: args.amount });
-              return Promise.resolve({ id: `trr_${id}` });
+              return Promise.resolve({
+                id: `trr_${id}_${reversalCalls.length}`,
+              });
             }),
         },
-        refunds: { create: vi.fn() },
+        refunds: {
+          create: vi.fn(),
+          list: vi
+            .fn()
+            .mockResolvedValue(
+              refundList({ id: 're_partial_001', amount: 500 })
+            ),
+        },
       } as unknown as Stripe;
       const partialService = new PurchaseService(
         // biome-ignore lint/suspicious/noExplicitAny: test stub
@@ -2760,7 +2898,7 @@ describe('PurchaseService Integration', () => {
       //   platform £2.00 (kept on balance, no transfer)
       //   org      £2.70 (transfer)
       //   creator  £15.30 (transfer)
-      await partialService.completePurchase(paymentIntentId, {
+      const purchase = await partialService.completePurchase(paymentIntentId, {
         customerId: otherUserId,
         contentId: content.id,
         organizationId: partialOrg.id,
@@ -2768,9 +2906,11 @@ describe('PurchaseService Integration', () => {
         currency: 'gbp',
         stripeChargeId: chargeId,
       });
+      const charge = { id: chargeId, amountCents: 2000 };
 
       // £5 partial refund (25% of £20).
       await partialService.processRefund(paymentIntentId, {
+        charge,
         stripeRefundId: 're_partial_001',
         refundAmountCents: 500,
         refundReason: 'requested_by_customer',
@@ -2780,14 +2920,81 @@ describe('PurchaseService Integration', () => {
       //   creator: floor(1530 * 0.25) = 382
       //   org:     floor(270  * 0.25) =  67
       //   residual: 1 cent — design choice in DQ-7 (recommendation: → platform).
-      const creatorReversal = reversalCalls.find(
-        (c) => c.transferId === creatorTransferId
+      const amountsByTransfer = (calls: typeof reversalCalls) =>
+        Object.fromEntries(calls.map((c) => [c.transferId, c.amount]));
+      expect(reversalCalls).toHaveLength(2);
+      expect(amountsByTransfer(reversalCalls)).toEqual({
+        [creatorTransferId]: 382,
+        [orgTransferId]: 67,
+      });
+
+      // A partial refund leaves every slice paid, with this refund's share
+      // recorded against it (Codex-2hxff.8). The platform absorbs its share.
+      const slices = async () =>
+        new Map(
+          (
+            await db
+              .select()
+              .from(schema.payouts)
+              .where(eq(schema.payouts.purchaseId, purchase.id))
+          ).map((r) => [r.payoutType, r.status])
+        );
+      expect(await slices()).toEqual(
+        new Map([
+          ['platform_fee', 'paid'],
+          ['creator_payout', 'paid'],
+          ['organization_fee', 'paid'],
+        ])
       );
-      const orgReversal = reversalCalls.find(
-        (c) => c.transferId === orgTransferId
+      const first = await reversalRecordsOf(purchase.id);
+      expect(
+        first.map((r) => [r.payoutType, r.kind, r.amountCents, r.status]).sort()
+      ).toEqual([
+        ['creator_payout', 'transfer_reversal', 382, 'done'],
+        ['organization_fee', 'transfer_reversal', 67, 'done'],
+        ['platform_fee', 'retained_fee', 50, 'done'],
+      ]);
+
+      // The partial refund left the purchase completed, so the buyer keeps
+      // access (owner decision P-1).
+      const purchaseStatus = async () =>
+        (
+          await db
+            .select({ status: schema.purchases.status })
+            .from(schema.purchases)
+            .where(eq(schema.purchases.id, purchase.id))
+        )[0]?.status;
+      expect(await purchaseStatus()).toBe('completed');
+
+      // A second, £15 refund completes the charge (£20 refunded so far): the
+      // purchase becomes refunded, and the clawback reverses the rest of each
+      // slice. Until Codex-2hxff.8 the first partial was the last.
+      vi.mocked(stubStripe.refunds.list).mockResolvedValue(
+        refundList(
+          { id: 're_partial_001', amount: 500 },
+          { id: 're_partial_002', amount: 1500 }
+        )
       );
-      expect(creatorReversal?.amount).toBe(382);
-      expect(orgReversal?.amount).toBe(67);
+      await partialService.processRefund(paymentIntentId, {
+        charge,
+        stripeRefundId: 're_partial_002',
+        refundAmountCents: 2000,
+      });
+      expect(await purchaseStatus()).toBe('refunded');
+
+      expect(reversalCalls).toHaveLength(4);
+      expect(amountsByTransfer(reversalCalls.slice(2))).toEqual({
+        [creatorTransferId]: 1530 - 382,
+        [orgTransferId]: 270 - 67,
+      });
+      expect(await slices()).toEqual(
+        new Map([
+          ['platform_fee', 'reversed'],
+          ['creator_payout', 'reversed'],
+          ['organization_fee', 'reversed'],
+        ])
+      );
+      expect(await reversalRecordsOf(purchase.id)).toHaveLength(6);
     });
 
     // Codex-d9t5r sentinel layer (DQ-7 part 2): when Stripe rejects the
@@ -2851,7 +3058,14 @@ describe('PurchaseService Integration', () => {
             return Promise.resolve({ id: `trr_${id}` });
           }),
         },
-        refunds: { create: vi.fn() },
+        refunds: {
+          create: vi.fn(),
+          list: vi
+            .fn()
+            .mockResolvedValue(
+              refundList({ id: 're_sentinel_001', amount: 1000 })
+            ),
+        },
       } as unknown as Stripe;
       const sentinelService = new PurchaseService(
         // biome-ignore lint/suspicious/noExplicitAny: test stub
@@ -2902,7 +3116,9 @@ describe('PurchaseService Integration', () => {
         stripeChargeId: chargeId,
       });
 
+      // A debt is recorded, not retried: the refund does not reject.
       await sentinelService.processRefund(paymentIntentId, {
+        charge: { id: chargeId, amountCents: 1000 },
         stripeRefundId: 're_sentinel_001',
         refundAmountCents: 1000,
         refundReason: 'requested_by_customer',
@@ -2926,24 +3142,38 @@ describe('PurchaseService Integration', () => {
         .select()
         .from(schema.refundReviews)
         .where(eq(schema.refundReviews.purchaseId, purchase.id));
+      // It is keyed by the slice's reversal record, which holds the debt
+      // (Codex-2hxff.8: one review per reversal, not per payout).
+      const creatorRecord = (await reversalRecordsOf(purchase.id)).find(
+        (r) => r.payoutType === 'creator_payout'
+      );
+      expect(creatorRecord).toMatchObject({
+        causeId: 're_sentinel_001',
+        kind: 'transfer_reversal',
+        status: 'debt',
+        lastErrorCode: 'insufficient_funds',
+        amountCents: creatorRow?.amountCents,
+      });
       expect(reviews).toHaveLength(1);
       expect(reviews[0]).toMatchObject({
         payoutId: creatorRow?.id,
+        payoutReversalId: creatorRecord?.id,
         creatorUserId: userId,
         errorCode: 'insufficient_funds',
+        attemptedReversalCents: creatorRow?.amountCents,
         resolution: null,
         resolvedAt: null,
       });
-      expect(reviews[0]!.attemptedReversalCents).toBeGreaterThan(0);
     });
 
     // REGRESSION (PR #203 deep-review F-2, bead Codex-92ej7, DQ-9) — when a
     // purchase completes with Connect-not-ready, the creator_payout +
     // organization_fee rows land as `status='pending'` with no
     // `stripeTransferId` (no Stripe call was made). If the buyer then refunds
-    // before Connect onboarding completes, `reversePayoutsForPurchase`
-    // (purchase-service.ts:1278-1331) marks ALL non-already-reversed rows as
-    // 'reversed' — including the pending ones that never had a transfer.
+    // before Connect onboarding completes, the clawback (then
+    // `reversePayoutsForPurchase` in purchase-service.ts) marked ALL
+    // non-already-reversed rows as 'reversed' — including the pending ones
+    // that never had a transfer.
     //
     // The sweep cron filters by `status='pending'`, so once these rows
     // become 'reversed' the sweep stops seeing them. If Connect onboarding
@@ -2989,12 +3219,21 @@ describe('PurchaseService Integration', () => {
         ...mockStripe,
         transfers: {
           create: vi.fn(), // must NOT be called — Connect not ready
+          // Asked by the cancel: no transfer went out for either slice.
+          list: vi.fn().mockResolvedValue({ data: [], has_more: false }),
           createReversal: vi.fn().mockImplementation((id: string) => {
             reversalCalls.push(id);
             return Promise.resolve({ id: `trr_${id}` });
           }),
         },
-        refunds: { create: vi.fn() },
+        refunds: {
+          create: vi.fn(),
+          list: vi
+            .fn()
+            .mockResolvedValue(
+              refundList({ id: 're_pending_001', amount: 1000 })
+            ),
+        },
       } as unknown as Stripe;
       const pendingService = new PurchaseService(
         // biome-ignore lint/suspicious/noExplicitAny: test stub
@@ -3068,6 +3307,7 @@ describe('PurchaseService Integration', () => {
 
       // Refund the purchase.
       await pendingService.processRefund(paymentIntentId, {
+        charge: { id: chargeId, amountCents: 1000 },
         stripeRefundId: 're_pending_001',
         refundAmountCents: 1000,
         refundReason: 'requested_by_customer',
@@ -3097,6 +3337,16 @@ describe('PurchaseService Integration', () => {
       expect(afterByType.get('organization_fee')?.status).toBe(
         'cancelled_by_refund'
       );
+
+      // Each is recorded as this refund's cancellation (Codex-2hxff.8).
+      const records = await reversalRecordsOf(purchase.id);
+      expect(
+        records.map((r) => [r.payoutType, r.kind, r.status]).sort()
+      ).toEqual([
+        ['creator_payout', 'cancellation', 'done'],
+        ['organization_fee', 'cancellation', 'done'],
+        ['platform_fee', 'retained_fee', 'done'],
+      ]);
     });
 
     // Codex-2hxff.11: a pending row is not proof that no money moved. Its
@@ -3154,7 +3404,7 @@ describe('PurchaseService Integration', () => {
             return { id: `trr_${id}` };
           }),
         },
-        refunds: { create: vi.fn() },
+        refunds: { create: vi.fn(), list: vi.fn() },
       } as unknown as Stripe;
       const landedService = new PurchaseService(
         // biome-ignore lint/suspicious/noExplicitAny: test stub
@@ -3228,15 +3478,20 @@ describe('PurchaseService Integration', () => {
         metadata: { payout_id: creatorRow.id },
       });
 
+      vi.mocked(stubStripe.refunds.list).mockResolvedValue(
+        refundList({ id: `re_landed_${run}`, amount: 1000 })
+      );
       await landedService.processRefund(paymentIntentId, {
+        charge: { id: `ch_landed_${run}`, amountCents: 1000 },
         stripeRefundId: `re_landed_${run}`,
         refundAmountCents: 1000,
       });
 
-      // Reversed in full, once — and only the transfer that existed.
-      expect(reversals).toEqual([
-        { id: landedId, amount: creatorRow.amountCents },
-      ]);
+      // Reversed in full, once — and only the transfer that existed. A
+      // transfer found for a cancelled slice is reversed with no amount, so
+      // Stripe reverses what is left of it (Codex-2hxff.8; it named the
+      // slice's amount before).
+      expect(reversals).toEqual([{ id: landedId, amount: undefined }]);
       const after = new Map(
         (
           await db
@@ -4214,6 +4469,7 @@ describe('PurchaseService Integration', () => {
 
       // Process refund
       await purchaseService.processRefund(paymentIntentId, {
+        charge: { id: `ch_${paymentIntentId}`, amountCents: 1999 },
         stripeRefundId: 're_test_123',
         refundAmountCents: 1999,
         refundReason: 'requested_by_customer',
@@ -4227,7 +4483,7 @@ describe('PurchaseService Integration', () => {
       expect(hasPurchase).toBe(false);
     });
 
-    it('should be idempotent — second refund on already-refunded is no-op', async () => {
+    it('should be idempotent — a second refund leaves the already-refunded purchase as it was', async () => {
       const media = await mediaService.create(
         {
           title: 'Idempotent Refund Video',
@@ -4266,24 +4522,36 @@ describe('PurchaseService Integration', () => {
 
       const paymentIntentId = `pi_refund_idem_${Date.now()}`;
 
-      await purchaseService.completePurchase(paymentIntentId, {
+      const purchase = await purchaseService.completePurchase(paymentIntentId, {
         customerId: otherUserId,
         contentId: content.id,
         organizationId,
         amountPaidCents: 999,
         currency: 'gbp',
       });
+      const charge = { id: `ch_${paymentIntentId}`, amountCents: 999 };
 
       // First refund
-      await purchaseService.processRefund(paymentIntentId);
+      await purchaseService.processRefund(paymentIntentId, { charge });
+      const refunded = await db.query.purchases.findFirst({
+        where: eq(schema.purchases.id, purchase.id),
+      });
 
-      // Second refund should not throw
-      await purchaseService.processRefund(paymentIntentId);
+      // Second refund should not throw. It still runs the clawback
+      // (Codex-2hxff.8), but the purchase is not refunded a second time.
+      await purchaseService.processRefund(paymentIntentId, { charge });
+      const after = await db.query.purchases.findFirst({
+        where: eq(schema.purchases.id, purchase.id),
+      });
+      expect(after?.status).toBe('refunded');
+      expect(after?.refundedAt).toEqual(refunded?.refundedAt);
     });
 
     it('should return without throwing for unknown paymentIntentId', async () => {
       // Should not throw — logs warning and returns
-      await purchaseService.processRefund('pi_unknown_refund_xyz');
+      await purchaseService.processRefund('pi_unknown_refund_xyz', {
+        charge: { id: 'ch_unknown_refund_xyz', amountCents: 1000 },
+      });
     });
 
     it('should store refund metadata (stripeRefundId, refundAmountCents, refundReason)', async () => {
@@ -4336,6 +4604,7 @@ describe('PurchaseService Integration', () => {
       const beforeRefund = Date.now();
 
       await purchaseService.processRefund(paymentIntentId, {
+        charge: { id: `ch_${paymentIntentId}`, amountCents: 2999 },
         stripeRefundId: 're_meta_test_456',
         refundAmountCents: 2999,
         refundReason: 'duplicate',
@@ -4473,6 +4742,7 @@ describe('PurchaseService Integration', () => {
       // re-raises rather than swallowing).
       await expect(
         failingService.processRefund(paymentIntentId, {
+          charge: { id: `ch_${paymentIntentId}`, amountCents: 1499 },
           stripeRefundId: 're_rollback_999',
           refundAmountCents: 1499,
           refundReason: 'requested_by_customer',
@@ -4552,7 +4822,9 @@ describe('PurchaseService Integration', () => {
       expect(hasAccessBefore).toBe(true);
 
       // Process refund
-      await purchaseService.processRefund(paymentIntentId);
+      await purchaseService.processRefund(paymentIntentId, {
+        charge: { id: `ch_${paymentIntentId}`, amountCents: 1499 },
+      });
 
       // Verify access is revoked after refund
       const hasAccessAfter = await purchaseService.verifyPurchase(
@@ -4614,6 +4886,7 @@ describe('PurchaseService Integration', () => {
 
       // Process refund — both operations should succeed atomically
       await purchaseService.processRefund(paymentIntentId, {
+        charge: { id: `ch_${paymentIntentId}`, amountCents: 999 },
         stripeRefundId: 're_atomic_789',
         refundAmountCents: 999,
         refundReason: 'requested_by_customer',
@@ -5550,7 +5823,7 @@ describe('PurchaseService Integration', () => {
     });
 
     // P4 — bi-party refund reverses the creator_payout + platform_fee rows.
-    // reversePayoutsForPurchase is data-driven (reads whatever rows exist), so
+    // The clawback (reverseCharge) is data-driven (reads whatever rows exist), so
     // with only 2 bi-party rows it reverses exactly those and never expects an
     // org row.
     it('refund reverses both bi-party rows (creator_payout transfer + platform_fee)', async () => {
@@ -5573,7 +5846,14 @@ describe('PurchaseService Integration', () => {
             return Promise.resolve({ id: `trr_${id}` });
           }),
         },
-        refunds: { create: vi.fn() },
+        refunds: {
+          create: vi.fn(),
+          list: vi
+            .fn()
+            .mockResolvedValue(
+              refundList({ id: 're_orgless_001', amount: 10000 })
+            ),
+        },
       } as unknown as Stripe;
       const service = new PurchaseService(
         // biome-ignore lint/suspicious/noExplicitAny: test stub
@@ -5604,6 +5884,7 @@ describe('PurchaseService Integration', () => {
       expect(before).toHaveLength(2);
 
       await service.processRefund(paymentIntentId, {
+        charge: { id: chargeId, amountCents: 10000 },
         stripeRefundId: 're_orgless_001',
         refundAmountCents: 10000,
         refundReason: 'requested_by_customer',
@@ -6087,7 +6368,13 @@ describe('PurchaseService Integration', () => {
           .completePurchase(paymentIntentId, metadata)
           .catch(() => {});
         restore();
+        const refundId = `re_replay_${crypto.randomUUID().slice(0, 12)}`;
+        vi.mocked(stripe.refunds.list).mockResolvedValue(
+          refundList({ id: refundId, amount: 10000 })
+        );
         await service.processRefund(paymentIntentId, {
+          charge: { id: chargeId, amountCents: 10000 },
+          stripeRefundId: refundId,
           refundAmountCents: 10000,
         });
 
@@ -6180,6 +6467,7 @@ describe('PurchaseService Integration', () => {
       };
 
       const result = await purchaseService.processRefund(paymentIntentId, {
+        charge: { id: `ch_${paymentIntentId}`, amountCents: 2999 },
         stripeRefundId: 're_race_1',
         refundAmountCents: 2999,
         refundReason: 'requested_by_customer',
@@ -6220,6 +6508,7 @@ describe('PurchaseService Integration', () => {
       ).mockResolvedValueOnce({ data: [] });
 
       const result = await purchaseService.processRefund(paymentIntentId, {
+        charge: { id: `ch_${paymentIntentId}`, amountCents: 500 },
         refundAmountCents: 500,
       });
 
@@ -6251,6 +6540,7 @@ describe('PurchaseService Integration', () => {
       listSpy.mockClear();
 
       const result = await purchaseService.processRefund(paymentIntentId, {
+        charge: { id: `ch_${paymentIntentId}`, amountCents: 1000 },
         refundAmountCents: 1000,
         stripeRefundId: 're_exists',
       });

@@ -151,11 +151,26 @@ can only be started in the Stripe Dashboard). Support can refund up to **14 days
 after the purchase (owner decision 2026-10-13, "14 days"). The customer-facing
 refund policy is being drafted for legal review — `Codex-2hxff.31`.
 
-Stripe sends `charge.refunded` to `/webhooks/stripe/payment`. Each event is
-handled for the amount **newly** refunded — the charge's cumulative
-`amount_refunded` minus what has already been processed — so a second partial
-refund claws back its own increment — **gap**: `Codex-2hxff.8` (partial
-refunds).
+Stripe sends `charge.refunded` to `/webhooks/stripe/payment`. The clawback
+reads the charge's **settled** refunds (succeeded or failed) from Stripe, not
+the event's cumulative `amount_refunded`. It records what each refund did to
+each slice, one `payout_reversals` row per slice per refund
+([design](refund-reversal-record.md)), so a second partial refund claws back
+its own share and a redelivery does only what is left. A refund still pending
+at Stripe is clawed back once `refund.updated` reports it settled (owner
+decision 2026-10-19).
+
+**A refund that fails** (owner decision 2026-10-19, "Hold it for support"). A
+refund can fail even after it succeeded, up to 30 days later. Stripe returns
+the money to the platform balance, but the customer must still be refunded
+some other way. So the clawback stands, and the failure is recorded in
+`refunds` (support's queue is its failed rows) and logged with an `errorId`.
+Support then either refunds the customer elsewhere or re-pays the creators —
+**gap**: `Codex-2hxff.28` (the screen and the re-pay action; until then a
+person does it by hand). A
+`canceled` refund paid nothing out and is never clawed back, but the purchase
+`charge.refunded` recorded stays refunded, so it is logged for a person to
+check the buyer's access.
 
 **A full refund** (the whole charge refunded):
 
@@ -177,34 +192,59 @@ refunds).
 
 - the buyer **keeps** access;
 - each paid creator and organisation slice is reversed by the same fraction as
-  the refund (rounded down);
-- each pending slice is reduced by the same fraction before it is paid;
+  the refund, rounded down. Each refund takes what it adds to the cumulative
+  fraction, so refunds that add up to the whole charge reverse each slice's
+  gross exactly;
+- each pending slice is reduced by the same fraction before it is paid (the
+  drain pays its amount less its reductions);
 - the platform absorbs its own fee's share of the refund and the rounding.
-  — **gap**: `Codex-2hxff.8` (today any refund removes access).
 
-**Reversals.** Each reversal uses the key `${transferId}_reversal_${refundId}`,
-so the refund id and reason are recorded on the purchase (`charge.refunds` must
-be expanded — Stripe stopped including it by default in API version
-2022-11-15) — **gap**: `Codex-2hxff.8`.
+The purchase stays `completed`, with the amount refunded so far; the refund
+that completes the charge makes it `refunded` and ends access. Whether a refund
+is full is read from the charge's cumulative `amount_refunded`.
 
-- If the payee's Connect balance is too low, a `refund_reviews` row is written
-  recording the debt. This is the chosen policy — reverse on refund, with a debt
+**Reversals.** Each reversal uses the key
+`${transferId}_reversal_${refundId}_${attempt}`. The attempt advances only
+after Stripe refuses a request, because Stripe replays a stored error for its
+key for 24 hours. After an outcome Stripe did not confirm, the same key is
+retried, which is what prevents a double reversal.
+
+**The record.** Each refund is a `refunds` row (one per Stripe refund, any
+source) with its amount, reason and Stripe status, which only moves forward
+(owner decision 2026-10-19, "One refunds table"). `charge.refunded` lists the
+charge's refunds from Stripe and records them all; `refund.updated` and
+`refund.failed` record each change. The purchase keeps the amount refunded so
+far and the newest refund's id and reason.
+
+- If the payee's Connect balance is too low (`insufficient_funds` or
+  `balance_insufficient`), a `refund_reviews` row is written recording the
+  debt, one per reversal, for purchases and subscriptions alike. This is the chosen policy — reverse on refund, with a debt
   ledger as the fallback (`Codex-13v21`). The debt is **recovered from the
   payee's future earnings** (owner decision 2026-10-13, "From future earnings") —
   **gap**: `Codex-2hxff.30`. Because payouts are held for the 14-day refund window
   ([payout timing](connect-and-payouts.md#payout-timing)), a refund normally finds
   the money still in the payee's Stripe balance; debts mostly come from disputes,
   which can arrive later. Refund reviews need an operations screen — **gap**:
-  `Codex-2hxff.8` (no reader today).
-- Any other reversal failure is retried. A row is marked `reversed` only once
-  the reversal succeeds — **gap**: `Codex-2hxff.8`.
+  `Codex-2hxff.28` (no reader today).
+- Any other reversal failure is retried, and nothing is marked done until it
+  succeeds. A database or Stripe outage makes the webhook return 500, so Stripe
+  redelivers. A request Stripe refused is retried by the hourly cron with the
+  next attempt's key; after 5 attempts it is left for a person. A slice is
+  marked `reversed` once its reversals add up to its whole amount.
 
 Stripe does not return its processing fee on a refund; the platform bears it.
 
 A refund that arrives before the purchase it belongs to is recorded (courses as
 well as content) and applied when the purchase completes — **gap**:
-`Codex-2hxff.8` (course refunds are dropped). The refund email is sent once,
-with the right details — **gap**: `Codex-2hxff.8`.
+`Codex-2hxff.8` (course refunds are dropped).
+
+**The refund email.** Each refund is emailed to the buyer once, with that
+refund's amount (owner decision 2026-10-19, "One per refund"). The refund's row
+is marked emailed (`notified_at`) before the email is sent, so a redelivered
+event sends nothing, and an email that then fails to send is not retried. For a
+purchase it says whether the buyer keeps access; for a subscription's charge it
+says neither. A failed or canceled refund is never emailed, and one waiting on
+the customer is emailed once it succeeds.
 
 ## Disputes
 
@@ -236,9 +276,27 @@ handling never relies on one.
 The same rules apply to course purchases and to disputed subscription invoices
 ([subscriptions.md](subscriptions.md#disputes)).
 
-— **gap**: `Codex-2hxff.9` (disputes: today only `created` is handled, no
-transfer is reversed, a won dispute never restores access, and held slices
-still pay out).
+**How it is recorded** ([design](dispute-record.md)). Each dispute is a
+`disputes` row, one per Stripe dispute, whose status moves forward only; every
+dispute event records it, then acts on the status the record has.
+
+- **A chargeback** is a clawback cause on the charge, with the same records,
+  keys, retries and debts as a refund, and its own Stripe key
+  `${transferId}_reversal_${disputeId}_${attempt}`. A dispute on a partly
+  refunded charge takes only what the refunds left.
+- **The hold.** The drain skips a slice whose sale has an open dispute or an
+  open inquiry (owner decision Q1: an inquiry takes no money, so the buyer
+  keeps access and only the payouts wait).
+- **Won.** Each reversed slice is paid back by a new pending payout row that
+  the next sweep pays (Q2), linked to its reversal so it is paid once. The
+  access the chargeback paused is restored and its streaming block lifted.
+- **Lost.** The purchase becomes `refunded` and held slices
+  `cancelled_by_dispute` (Q3).
+
+A slice a won dispute paid back is no longer what the share rule describes, so
+a later refund of it is recorded for a person (`slice_repaid`), not reversed.
+The dispute endpoint needs `charge.dispute.funds_withdrawn` and
+`.funds_reinstated` too, an owner change in Stripe.
 
 ## Failure handling at a glance
 

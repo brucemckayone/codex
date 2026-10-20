@@ -21,7 +21,7 @@
  * - **A refund freezes the row, then asks Stripe.** It cancels a pending or
  *   failed row first, so nothing can settle it afterwards, then looks for a
  *   transfer that went out anyway and reverses it
- *   (`cancelUnpaidPayoutForRefund`). A transfer that lands after the cancel
+ *   (`cancelUnpaidPayout`). A transfer that lands after the cancel
  *   finds its row cancelled and is reversed by whoever sent it
  *   (`settleTransfer`).
  * - **A failed transfer stays payable.** It keeps its charge id and is retried
@@ -40,9 +40,14 @@
  * recorded as a `failed` row and the call returns normally.
  */
 
-import { CURRENCY, stripeEnvMetadata } from '@codex/constants';
+import {
+  CURRENCY,
+  DISPUTE_CLOSED_STATUSES,
+  stripeEnvMetadata,
+} from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
 import {
+  disputes,
   type Payout,
   payouts,
   stripeConnectAccounts,
@@ -55,6 +60,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  notInArray,
   or,
   type SQL,
   sql,
@@ -165,9 +171,16 @@ const DRAINABLE: Array<'pending' | 'failed'> = ['pending', 'failed'];
  * they recorded as failed may have landed — a timeout, a reset connection —
  * under metadata with no `payout_id`, so no lookup can find it, and sending
  * again could pay twice.
+ *
+ * A row is also HELD while its sale has an open dispute or inquiry, by charge
+ * or, for a row recorded before charge ids, by purchase (owner decisions P-2
+ * and Q1, Codex-2hxff.9). A won or closed dispute releases it. A lost one
+ * keeps holding it until the loss is applied (`outcome_applied_at`), which
+ * cancels it (`cancelled_by_dispute`) or reduces it: released any earlier, a
+ * drain could pay a slice the buyer's bank has already taken back.
  */
 export function isDrainablePayout(): SQL {
-  return sql`(${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL))`;
+  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE (${notInArray(disputes.status, [...DISPUTE_CLOSED_STATUSES])} OR (${disputes.status} = 'lost' AND ${disputes.outcomeAppliedAt} IS NULL)) AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})))`;
 }
 
 /**
@@ -632,7 +645,7 @@ export async function renewPayoutAttempt(
 }
 
 /** What a refund did to a row that had not been marked paid. */
-export type RefundCancelOutcome =
+export type UnpaidCancelOutcome =
   /**
    * Cancelled. `transferId` is a transfer Stripe made for it anyway — the
    * caller reverses it like a paid row's.
@@ -646,13 +659,13 @@ export type RefundCancelOutcome =
   | { kind: 'changed'; row: Payout | undefined };
 
 /**
- * Cancel a pending or failed row for a refund — FIRST, so nothing can settle
- * it afterwards — then ask Stripe whether its transfer went out anyway. A
- * row is pending with a transfer in flight between reserve and settle, and
- * stays so if its settle fails; a failed row's transfer may have landed
- * despite the error. Without the lookup the refund would cancel the row and
- * leave that money with the payee (Stripe does not reverse transfers when a
- * charge is refunded).
+ * Cancel a pending or failed row for a refund, or for a lost dispute — FIRST,
+ * so nothing can settle it afterwards — then ask Stripe whether its transfer
+ * went out anyway. A row is pending with a transfer in flight between reserve
+ * and settle, and stays so if its settle fails; a failed row's transfer may
+ * have landed despite the error. Without the lookup the cancel would leave
+ * that money with the payee (Stripe does not reverse transfers when a charge
+ * is refunded or charged back).
  *
  * A transfer that lands after the cancel is the sender's to reverse: its
  * settle finds the row cancelled (`settleTransfer`).
@@ -660,15 +673,16 @@ export type RefundCancelOutcome =
  * If the Stripe lookup itself fails the row stays cancelled — most cancelled
  * rows never had a transfer — and the miss is logged for a person to check.
  */
-export async function cancelUnpaidPayoutForRefund(
+export async function cancelUnpaidPayout(
   deps: LedgerDeps,
   row: Payout,
+  status: 'cancelled_by_refund' | 'cancelled_by_dispute',
   now: Date = new Date()
-): Promise<RefundCancelOutcome> {
+): Promise<UnpaidCancelOutcome> {
   const [cancelled] = await deps.db
     .update(payouts)
     .set({
-      status: 'cancelled_by_refund',
+      status,
       resolvedAt: row.resolvedAt ?? now,
       updatedAt: now,
     })
@@ -702,7 +716,7 @@ export async function cancelUnpaidPayoutForRefund(
     return { kind: 'cancelled', transferId: found.get(row.id) };
   } catch (error) {
     deps.obs.error(
-      'A refund cancelled a payout but could not ask Stripe whether its transfer went out. Check it by hand',
+      'A payout was cancelled but Stripe could not be asked whether its transfer went out. Check it by hand',
       {
         errorId: crypto.randomUUID(),
         payoutId: row.id,

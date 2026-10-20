@@ -115,6 +115,10 @@ export const courseSubscriptions = pgTable(
 
     cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    // Set while a chargeback on one of its invoices is open: its stored grant
+    // stops granting (the resolver reads this), and billing is paused
+    // (Codex-2hxff.9, docs/payments/subscription-disputes.md).
+    disputedAt: timestamp('disputed_at', { withTimezone: true }),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

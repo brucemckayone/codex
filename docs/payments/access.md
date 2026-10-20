@@ -57,8 +57,10 @@ unpublished.
 |---|---|---|
 | Full refund of a purchase | That item (entitlement revoked) | — |
 | Partial refund of a purchase | Nothing (owner decision P-1) | — |
-| Dispute opened | That item, paused | The dispute is won |
-| Dispute lost | That item, for good | — |
+| Dispute opened on a purchase | That item, paused | The dispute is won |
+| Dispute lost on a purchase | That item, for good | — |
+| Dispute opened on a subscription invoice | Everything from that subscription, paused (`disputed_at`); its billing paused too | The dispute is won, and no other chargeback on it is open |
+| Dispute lost on a subscription invoice | Everything from that subscription: it is cancelled at Stripe | The person subscribes again |
 | Subscription cancelled (at period end) | Nothing until the period ends | The subscriber reactivates before it ends |
 | Subscription ends | Everything from that subscription | The person subscribes again |
 | Subscription paused | Everything from that subscription | It is resumed |
@@ -84,7 +86,7 @@ whatever happens to access in the meantime. Two layers close that gap:
 | A subscription ends, is paused, or Stripe gives up retrying | A subscription becomes active again or is resumed |
 | A purchase or subscription payment is fully refunded — **gap**: `Codex-2hxff.8` (not for one-off purchases today) | A payment succeeds after a failure |
 | A dispute opens | A subscription is reactivated or resumed through our routes |
-| | A dispute is won — **gap**: `Codex-2hxff.9` |
+| | A dispute is won (a purchase's; a subscription's — **gap**: `Codex-2hxff.9`) |
 
 The block is **not** written when a subscriber cancels at period end (they have
 paid for the period) or when a renewal payment fails and Stripe is retrying it —

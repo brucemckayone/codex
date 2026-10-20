@@ -447,7 +447,13 @@ describe('handlePaymentWebhook — cache invalidation on charge.refunded', () =>
     });
 
     (PurchaseService as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      () => ({ processRefund: mockProcessRefund })
+      () => ({
+        processRefund: mockProcessRefund,
+        // Codex-2hxff.8: charge.refunded records each refund and claims its
+        // email; these suites only check revocation and cache invalidation.
+        recordChargeRefunds: vi.fn().mockResolvedValue([]),
+        claimRefundEmails: vi.fn().mockResolvedValue([]),
+      })
     );
   });
 

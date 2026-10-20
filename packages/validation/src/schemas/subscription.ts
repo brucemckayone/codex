@@ -195,6 +195,7 @@ export const payoutStatusFilterEnum = z.enum([
   'failed',
   'reversed', // Codex-h69cg: refund-reversed rows
   'cancelled_by_refund', // Codex-92ej7 / DQ-9: refund hit before Connect activated
+  'cancelled_by_dispute', // Codex-2hxff.9: held for a dispute that was lost
   'needs_attention',
 ]);
 

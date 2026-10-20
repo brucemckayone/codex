@@ -27,7 +27,7 @@
 import { CacheType, type VersionedCache } from '@codex/cache';
 import { stripeEnvMetadata } from '@codex/constants';
 import { stripeConnectAccounts } from '@codex/database/schema';
-import { resolveOrganisationPayee } from '@codex/purchase';
+import { resolveOrganisationPayee } from '@codex/payments';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import { eq } from 'drizzle-orm';
 import type Stripe from 'stripe';

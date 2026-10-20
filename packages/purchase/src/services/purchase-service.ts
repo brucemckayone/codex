@@ -33,13 +33,26 @@ import {
   content,
   contentAccess,
   courses,
+  type Dispute,
+  disputes,
   entitlements,
-  payouts,
   purchases,
-  refundReviews,
+  type RefundStatus,
+  refunds,
   stripeConnectAccounts,
   users,
 } from '@codex/database/schema';
+import {
+  type ClawbackCharge,
+  type LedgerDeps,
+  listChargeRefunds,
+  listClawableRefunds,
+  recordPlatformFee,
+  recordSlice,
+  repayDispute,
+  resolveOrganisationPayee,
+  reverseCharge,
+} from '@codex/payments';
 import {
   BaseService,
   type ServiceConfig,
@@ -69,8 +82,10 @@ import {
   desc,
   eq,
   gte,
+  inArray,
   isNotNull,
   isNull,
+  lt,
   lte,
   or,
   type SQL,
@@ -87,14 +102,6 @@ import {
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
-import {
-  cancelUnpaidPayoutForRefund,
-  type LedgerDeps,
-  type RefundCancelOutcome,
-  recordPlatformFee,
-  recordSlice,
-} from '../utils/payout-ledger';
-import { resolveOrganisationPayee } from '../utils/resolve-organisation-payee';
 import { findActiveCreatorAgreementShare } from './agreement-share';
 import {
   writeContentPurchaseEntitlement,
@@ -113,6 +120,44 @@ function isStripeError(error: unknown): error is Error & { type: string } {
     typeof error.type === 'string' &&
     error.type.startsWith('Stripe')
   );
+}
+
+const REFUND_STATUSES: ReadonlySet<string> = new Set<RefundStatus>([
+  'pending',
+  'requires_action',
+  'succeeded',
+  'failed',
+  'canceled',
+]);
+
+/** A status the `refunds` table admits (its CHECK). */
+function isRefundStatus(status: string | null): status is RefundStatus {
+  return status !== null && REFUND_STATUSES.has(status);
+}
+
+/**
+ * How far along a dispute is: an inquiry, then a chargeback, then final. A
+ * dispute's row only moves to a higher rank (`recordDispute`).
+ */
+const DISPUTE_STATUS_RANK: ReadonlyMap<string, number> = new Map([
+  ['warning_needs_response', 0],
+  ['warning_under_review', 1],
+  ['needs_response', 2],
+  ['under_review', 3],
+  ['won', 4],
+  ['lost', 4],
+  ['warning_closed', 4],
+  ['prevented', 4],
+]);
+const FINAL_DISPUTE_RANK = 4;
+
+/** `DISPUTE_STATUS_RANK` in SQL, for the upsert's guard. */
+function disputeRank(status: SQL): SQL {
+  // The ranks are literals: a bound THEN parameter would be typed text.
+  const cases = [...DISPUTE_STATUS_RANK].map(
+    ([name, rank]) => sql`WHEN ${name} THEN ${sql.raw(String(rank))}`
+  );
+  return sql`(CASE ${status} ${sql.join(cases, sql` `)} END)`;
 }
 
 import type { PaginatedListResponse } from '@codex/shared-types';
@@ -1412,6 +1457,9 @@ export class PurchaseService extends BaseService {
     if (
       purchase.status !== PURCHASE_STATUS.COMPLETED ||
       purchase.refundedAt ||
+      // A partial refund keeps the purchase completed (P-1), so its amount,
+      // not its status, says it was refunded.
+      (purchase.refundAmountCents ?? 0) > 0 ||
       purchase.disputedAt
     ) {
       // Said out loud: if the first delivery lost a slice, a PARTIAL refund
@@ -1420,6 +1468,7 @@ export class PurchaseService extends BaseService {
         purchaseId: purchase.id,
         status: purchase.status,
         refundedAt: purchase.refundedAt?.toISOString() ?? null,
+        refundAmountCents: purchase.refundAmountCents,
         disputedAt: purchase.disputedAt?.toISOString() ?? null,
       });
       return;
@@ -1835,23 +1884,39 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Process a refund from a charge.refunded webhook event.
+   * Process a refund of a purchase's charge (`charge.refunded`; and
+   * `refund.updated`, which re-runs the clawback).
    *
    * Flow:
    * 1. Ensure the purchase row exists (self-heal ordering race #4, Codex-aa08z)
-   * 2. Update purchase status to 'refunded'
-   * 3. Revoke content access (soft delete)
+   * 2. Record the refund on the purchase:
+   *    - a FULL refund (the charge refunded in full) makes it `refunded` and
+   *      ends access: content access soft-deleted, its entitlement revoked;
+   *    - a PARTIAL refund keeps access (owner decision P-1, "Keep access"):
+   *      the purchase stays `completed`, with the amount refunded so far.
+   *    Each refund itself is a `refunds` row (`recordChargeRefunds`).
+   * 3. Claw back each refund's share of the payout slices
    *
-   * Idempotent: If purchase is already refunded, this is a no-op.
+   * Idempotent. An already-refunded purchase skips step 2 but still runs
+   * step 3: what each refund did is recorded per slice (payout_reversals), so
+   * a redelivery does only what is left (Codex-2hxff.8).
    */
   async processRefund(
     paymentIntentId: string,
-    refundDetails?: {
+    refundDetails: {
+      /** The refunded charge: its id and amount, the clawback's denominator. */
+      charge: ClawbackCharge;
+      /** The newest refund of the charge. */
       stripeRefundId?: string;
+      /**
+       * How much of the charge is refunded so far: Stripe's cumulative
+       * `charge.amount_refunded`. At least the charge's amount is a full
+       * refund. Absent, the refund is taken to be full.
+       */
       refundAmountCents?: number;
       refundReason?: string;
     }
-  ): Promise<{ userId: string } | undefined> {
+  ): Promise<{ userId: string; accessEnded: boolean } | undefined> {
     try {
       // Self-heal ordering race #4 (Codex-aa08z): if charge.refunded beat
       // checkout.session.completed, the row won't exist yet — rebuild it from
@@ -1871,344 +1936,261 @@ export class PurchaseService extends BaseService {
           purchaseId: purchase.id,
           paymentIntentId,
         });
-        return { userId: purchase.customerId };
+        // The purchase is recorded; the clawback is not gated by it.
+        await this.clawBackRefunds(purchase.id, refundDetails.charge);
+        return { userId: purchase.customerId, accessEnded: true };
       }
 
-      // Atomically update purchase status AND revoke content access
-      await this.db.transaction(async (tx) => {
-        // Update purchase status to refunded with tracking fields
-        await tx
+      const refundedCents =
+        refundDetails.refundAmountCents ?? refundDetails.charge.amountCents;
+      const isFull = refundedCents >= refundDetails.charge.amountCents;
+      const refundFields = {
+        updatedAt: new Date(),
+        refundAmountCents: refundedCents,
+        stripeRefundId: refundDetails.stripeRefundId ?? null,
+        refundReason: refundDetails.refundReason ?? null,
+      };
+
+      if (!isFull) {
+        // P-1: the buyer keeps access. The amount only grows, so a stale
+        // redelivery never lowers it.
+        await this.db
           .update(purchases)
-          .set({
-            status: PURCHASE_STATUS.REFUNDED,
-            updatedAt: new Date(),
-            refundedAt: new Date(),
-            refundAmountCents: refundDetails?.refundAmountCents ?? null,
-            stripeRefundId: refundDetails?.stripeRefundId ?? null,
-            refundReason: refundDetails?.refundReason ?? null,
-          })
-          .where(eq(purchases.id, purchase.id));
-
-        // Revoke content access (soft delete) — content purchases only. Course
-        // purchases grant no contentAccess row (they use entitlements).
-        if (purchase.contentId) {
-          await tx
-            .update(contentAccess)
-            .set({ deletedAt: new Date() })
-            .where(
-              and(
-                eq(contentAccess.userId, purchase.customerId),
-                eq(contentAccess.contentId, purchase.contentId),
-                isNull(contentAccess.deletedAt)
-              )
-            );
-        }
-
-        // Codex-2pryk WP-6: revoke the entitlement this purchase granted
-        // (content_purchase OR course_purchase — both carry sourceRef=purchase.id).
-        // Without this a refund would leave a LIVE grant the resolver still
-        // honours (access-integrity bug). Keyed on sourceRef so one statement
-        // covers either target. Idempotent (no-op if already revoked / absent).
-        await tx
-          .update(entitlements)
-          .set({ revokedAt: new Date() })
+          .set(refundFields)
           .where(
             and(
-              eq(entitlements.sourceRef, purchase.id),
-              isNull(entitlements.revokedAt)
+              eq(purchases.id, purchase.id),
+              eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+              or(
+                isNull(purchases.refundAmountCents),
+                lt(purchases.refundAmountCents, refundedCents)
+              )
             )
           );
-      });
+      } else {
+        // Atomically update purchase status AND revoke content access
+        await this.db.transaction(async (tx) => {
+          // Update purchase status to refunded with tracking fields
+          await tx
+            .update(purchases)
+            .set({
+              ...refundFields,
+              status: PURCHASE_STATUS.REFUNDED,
+              refundedAt: new Date(),
+            })
+            .where(eq(purchases.id, purchase.id));
 
-      // Step: reverse payouts ledger rows + the org-fee transfer (Codex-h69cg).
-      // Out-of-transaction because it talks to Stripe; per-row error isolation
-      // so one bad reversal can never block the refund acknowledgement (Stripe
-      // would retry the webhook, but the refund itself has already been
-      // recorded on the purchases row above).
-      //
-      // Codex-d9t5r / DQ-7: refundAmountCents drives proportional reversal;
-      // stripeRefundId keys the Stripe idempotency suffix so two separate
-      // refund events of equal pence value don't collide.
-      await this.reversePayoutsForPurchase(purchase, {
-        refundAmountCents: refundDetails?.refundAmountCents ?? null,
-        stripeRefundId: refundDetails?.stripeRefundId ?? null,
-      });
+          // Revoke content access (soft delete) — content purchases only. Course
+          // purchases grant no contentAccess row (they use entitlements).
+          if (purchase.contentId) {
+            await tx
+              .update(contentAccess)
+              .set({ deletedAt: new Date() })
+              .where(
+                and(
+                  eq(contentAccess.userId, purchase.customerId),
+                  eq(contentAccess.contentId, purchase.contentId),
+                  isNull(contentAccess.deletedAt)
+                )
+              );
+          }
+
+          // Codex-2pryk WP-6: revoke the entitlement this purchase granted
+          // (content_purchase OR course_purchase — both carry sourceRef=purchase.id).
+          // Without this a refund would leave a LIVE grant the resolver still
+          // honours (access-integrity bug). Keyed on sourceRef so one statement
+          // covers either target. Idempotent (no-op if already revoked / absent).
+          await tx
+            .update(entitlements)
+            .set({ revokedAt: new Date() })
+            .where(
+              and(
+                eq(entitlements.sourceRef, purchase.id),
+                isNull(entitlements.revokedAt)
+              )
+            );
+        });
+      }
+
+      // Step: claw back the payout slices (Codex-h69cg), out of the
+      // transaction because it talks to Stripe. The purchase is already
+      // recorded above; a clawback step that must be retried rejects after
+      // every other step, and the webhook's 500 has Stripe redeliver.
+      await this.clawBackRefunds(purchase.id, refundDetails.charge);
 
       this.obs.info('Refund processed', {
         purchaseId: purchase.id,
         contentId: purchase.contentId,
         customerId: purchase.customerId,
         paymentIntentId,
+        refundedCents,
+        accessEnded: isFull,
       });
 
       // Return the purchaser's userId so the webhook route can bump
       // COLLECTION_USER_LIBRARY — refunded content disappears from the
       // user's library on their next fetch. No orgId: one-time purchases
       // are content-scoped, not org-scoped, so only the library cache bumps.
-      return { userId: purchase.customerId };
+      return { userId: purchase.customerId, accessEnded: isFull };
     } catch (error) {
       this.handleError(error, 'processRefund');
     }
   }
 
   /**
-   * Reverse the payouts ledger rows + secondary transfers for a refunded
-   * purchase (Option B platform-charge model — Codex-h69cg).
-   *
-   * - `platform_fee`: no transfer existed; the platform retained the slice
-   *   on its balance. Marking the row `status='reversed'` is sufficient —
-   *   the refund itself returns money from the platform balance.
-   * - `creator_payout` AND `organization_fee`: each had a secondary
-   *   `transfers.create` call against the source charge. Both must be
-   *   reversed via `transfers.createReversal` with a deterministic
-   *   idempotency key so webhook replays are safe. Stripe does NOT
-   *   auto-reverse these for us — they're separate transfers.
-   *
-   * Codex-d9t5r / DQ-7: when `refundAmountCents` is set and less than
-   * the purchase's `amountPaidCents`, each transfer is reversed
-   * proportionally — `floor(row.amountCents * refundAmountCents / amountPaidCents)`.
-   * Integer math: residual rounding stays on the platform balance.
-   * Idempotency suffix `_${refundAmountCents}` prevents the second
-   * partial refund from replaying the first's reversal amount.
-   *
-   * Insufficient-funds sentinel: if Stripe rejects the reversal with
-   * `insufficient_funds` (creator already withdrew their slice),
-   * the payouts row stays `status='paid'` and a `refund_reviews` row
-   * captures the clawback obligation for ops to resolve.
-   *
-   * A pending or failed row is cancelled, then checked in Stripe for a
-   * transfer that went out anyway, which is reversed like a paid row's
-   * (`cancelUnpaidPayoutForRefund`, Codex-2hxff.11).
-   *
-   * Idempotent: rows already at `status='reversed'` or
-   * `'cancelled_by_refund'` are no-ops.
+   * Claw back each refund of the charge from this purchase's payout slices
+   * (@codex/payments `reverseCharge`, Codex-2hxff.56, .8). Only a refund that
+   * succeeded or failed is clawed back; one still pending is clawed back when
+   * `refund.updated` re-runs processRefund (owner decision Q1).
    */
-  private async reversePayoutsForPurchase(
-    purchase: Purchase,
-    refund: { refundAmountCents: number | null; stripeRefundId: string | null }
+  private async clawBackRefunds(
+    purchaseId: string,
+    charge: ClawbackCharge
   ): Promise<void> {
-    const rows = await this.db
-      .select()
-      .from(payouts)
-      .where(eq(payouts.purchaseId, purchase.id));
-
-    if (rows.length === 0) return;
-
-    const { refundAmountCents, stripeRefundId } = refund;
-    const isPartial =
-      refundAmountCents !== null &&
-      refundAmountCents > 0 &&
-      refundAmountCents < purchase.amountPaidCents;
-    // Capture the partial ratio's numerator once so we can narrow without
-    // re-asserting `refundAmountCents !== null` inside the per-row closure.
-    const partialRatioNumerator = isPartial ? refundAmountCents : null;
-    const reversalAmount = (rowAmountCents: number): number =>
-      partialRatioNumerator !== null
-        ? Math.floor(
-            (rowAmountCents * partialRatioNumerator) / purchase.amountPaidCents
-          )
-        : rowAmountCents;
-    // Prefer the Stripe refund ID for the idempotency suffix — it is the
-    // unique-per-refund identifier, so two distinct refund events of equal
-    // pence value get distinct keys. Fall back to the cents value for
-    // legacy paths that don't propagate the ID.
-    const idempotencySuffix = stripeRefundId
-      ? `_${stripeRefundId}`
-      : refundAmountCents !== null
-        ? `_${refundAmountCents}`
-        : '';
-
-    for (const listed of rows) {
-      let row: typeof payouts.$inferSelect = listed;
-      if (row.status === 'reversed' || row.status === 'cancelled_by_refund') {
-        continue;
+    await reverseCharge(
+      { ...this.ledger(), obs: this.obs },
+      {
+        charge,
+        source: { sourceType: 'purchase', purchaseId },
+        refunds: () => listClawableRefunds(this.stripe, charge.id),
       }
+    );
+  }
 
-      // A row never marked paid is cancelled FIRST — so nothing can settle
-      // it afterwards — then Stripe is asked whether its transfer went out
-      // anyway: in flight when the refund arrived, or made but never
-      // recorded (Codex-2hxff.11). Such a transfer is reversed below like a
-      // paid row's.
-      let transferId = row.stripeTransferId;
-      if (row.status === 'pending' || row.status === 'failed') {
-        let cancel: RefundCancelOutcome;
-        try {
-          cancel = await cancelUnpaidPayoutForRefund(this.ledger(), row);
-        } catch (cancelErr) {
-          // Logged, not thrown: the purchase is already recorded refunded, so
-          // a redelivery stops at the 'already processed' check and would
-          // never come back to this row.
-          this.obs.error('Failed to cancel payouts row for refund', {
-            errorId: crypto.randomUUID(),
-            purchaseId: purchase.id,
-            payoutId: row.id,
-            error:
-              cancelErr instanceof Error
-                ? cancelErr.message
-                : String(cancelErr),
-          });
-          continue;
-        }
-        if (cancel.kind === 'changed') {
-          // Paid since it was read: reverse it as paid. Anything else was
-          // handled by a concurrent delivery of this refund.
-          if (cancel.row?.status !== 'paid') continue;
-          row = cancel.row;
-          transferId = row.stripeTransferId;
-        } else if (cancel.transferId === undefined) {
-          continue;
-        } else {
-          transferId = cancel.transferId;
-        }
-      }
-
-      // Reverse the Stripe transfer when one exists. Under Option B both
-      // `creator_payout` AND `organization_fee` rows carry a
-      // `stripeTransferId` — each had a separate `transfers.create` against
-      // the source charge. `platform_fee` never carries one.
-      //
-      // Codex-d9t5r: skip the status flip in two cases — the Stripe
-      // reversal failed with insufficient_funds (refund_reviews captures
-      // the clawback obligation) or the partial-refund ratio floored the
-      // slice to zero (platform absorbs the sub-penny). In both cases the
-      // ledger stays truthful: status='paid' because the original transfer
-      // really did succeed.
-      let skipStatusFlip = false;
-      if (transferId) {
-        const amount = reversalAmount(row.amountCents);
-        if (amount === 0) {
-          skipStatusFlip = true;
-          this.obs.info('Reversal amount floored to zero, platform absorbs', {
-            purchaseId: purchase.id,
-            payoutId: row.id,
-            rowAmountCents: row.amountCents,
-            refundAmountCents,
-          });
-        } else {
-          try {
-            await this.stripe.transfers.createReversal(
-              transferId,
-              {
-                amount,
-                metadata: {
-                  purchase_id: purchase.id,
-                  payout_id: row.id,
-                  type: 'refund_reversal',
-                  ...stripeEnvMetadata(this.environment),
-                },
-              },
-              {
-                idempotencyKey: `${transferId}_reversal${idempotencySuffix}`,
-              }
-            );
-          } catch (reverseErr) {
-            const code = (reverseErr as { code?: string } | null)?.code;
-            this.obs.error('Failed to reverse Stripe transfer for refund', {
-              purchaseId: purchase.id,
-              payoutId: row.id,
-              stripeTransferId: transferId,
-              attemptedReversalCents: amount,
-              code: code ?? null,
-              error:
-                reverseErr instanceof Error
-                  ? reverseErr.message
-                  : String(reverseErr),
-            });
-            if (code === 'insufficient_funds' && row.userId) {
-              await this.recordRefundReview({
-                purchaseId: purchase.id,
-                payoutId: row.id,
-                creatorUserId: row.userId,
-                attemptedReversalCents: amount,
-                errorCode: code,
-                errorMessage:
-                  reverseErr instanceof Error ? reverseErr.message : null,
-              });
-              skipStatusFlip = true;
-            }
-            // Continue — per-row error isolation.
-          }
-        }
-      }
-
-      if (skipStatusFlip) continue;
-
-      // Codex-92ej7 / DQ-9: a pending/failed row whose transfer never
-      // happened was cancelled above ('cancelled_by_refund') and never gets
-      // here. Every row that does moved money — a paid creator/org transfer,
-      // the platform's retained fee, or a cancelled row whose transfer had
-      // gone out — and becomes 'reversed', with its transfer recorded.
-      const nextStatus = 'reversed' as const;
-
-      try {
-        await this.db
-          .update(payouts)
-          .set({
-            status: nextStatus,
-            stripeTransferId: transferId,
-            resolvedAt: row.resolvedAt ?? new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(payouts.id, row.id));
-      } catch (updateErr) {
-        this.obs.error('Failed to update payouts row after refund', {
-          purchaseId: purchase.id,
-          payoutId: row.id,
-          nextStatus,
-          error:
-            updateErr instanceof Error ? updateErr.message : String(updateErr),
+  /**
+   * Record a refund as Stripe reports it (`refunds`; owner decisions
+   * 2026-10-19). One row per Stripe refund, for any source; `purchaseId` is
+   * set when the charge is a purchase's. A failed row is support's to settle,
+   * and the clawback is left standing (see the table).
+   *
+   * A stale event never moves a row backwards: `failed` and `canceled` are
+   * final, and `succeeded` does not return to pending. Returns true when this
+   * call wrote the refund's status (a new row, or a newer status), so a
+   * redelivered event does not raise an alert again. A status Stripe has
+   * added since is logged and not written.
+   */
+  async recordRefund(refund: {
+    stripeRefundId: string;
+    stripeChargeId: string;
+    /** The charge's PaymentIntent, which finds the purchase if it is one. */
+    paymentIntentId: string | null;
+    amountCents: number;
+    currency: string;
+    status: string | null;
+    reason: string | null;
+    failureReason: string | null;
+    stripeCreatedAt: Date;
+  }): Promise<boolean> {
+    try {
+      const { status } = refund;
+      if (!isRefundStatus(status)) {
+        this.obs.warn('Refund has a status the refunds table does not know', {
+          refundId: refund.stripeRefundId,
+          status,
         });
+        return false;
       }
+      const [purchase] = refund.paymentIntentId
+        ? await this.db
+            .select({ id: purchases.id })
+            .from(purchases)
+            .where(eq(purchases.stripePaymentIntentId, refund.paymentIntentId))
+            .limit(1)
+        : [];
+      const written = await this.db
+        .insert(refunds)
+        .values({
+          stripeRefundId: refund.stripeRefundId,
+          stripeChargeId: refund.stripeChargeId,
+          purchaseId: purchase?.id ?? null,
+          amountCents: refund.amountCents,
+          currency: refund.currency,
+          status,
+          reason: refund.reason,
+          failureReason: refund.failureReason,
+          stripeCreatedAt: refund.stripeCreatedAt,
+        })
+        .onConflictDoUpdate({
+          target: refunds.stripeRefundId,
+          set: { status, failureReason: refund.failureReason },
+          // Forward only: Stripe does not deliver events in order.
+          setWhere: sql`${refunds.status} <> excluded.status AND ${refunds.status} NOT IN ('failed', 'canceled') AND NOT (${refunds.status} = 'succeeded' AND excluded.status IN ('pending', 'requires_action'))`,
+        })
+        .returning();
+      return written.length > 0;
+    } catch (error) {
+      this.handleError(error, 'recordRefund');
     }
   }
 
   /**
-   * Codex-d9t5r / DQ-7 sentinel: record an ops-resolution row when a
-   * Stripe reversal fails with `insufficient_funds`. The payouts row
-   * stays `status='paid'` because the original transfer succeeded —
-   * this row tracks the clawback obligation separately so ops can
-   * decide between creator-absorbed / platform-absorbed / manual.
+   * Record every refund of a charge, as Stripe lists them, in `refunds`
+   * (`charge.refunded`; owner decision 2026-10-19, "One refunds table"). The
+   * event names no refund: `charge.refunds` is no longer sent. Returns them
+   * newest first, so the caller can name the newest on the purchase.
    */
-  private async recordRefundReview(input: {
-    purchaseId: string;
-    payoutId: string;
-    creatorUserId: string;
-    attemptedReversalCents: number;
-    errorCode: string;
-    errorMessage: string | null;
-  }): Promise<void> {
+  async recordChargeRefunds(charge: {
+    id: string;
+    paymentIntentId: string | null;
+  }): Promise<Stripe.Refund[]> {
     try {
-      await this.db
-        .insert(refundReviews)
-        .values({
-          purchaseId: input.purchaseId,
-          payoutId: input.payoutId,
-          creatorUserId: input.creatorUserId,
-          attemptedReversalCents: input.attemptedReversalCents,
-          errorCode: input.errorCode,
-          errorMessage: input.errorMessage,
-        })
-        // Webhook replay safety: targets the partial unique index
-        // `uq_refund_reviews_open_per_payout` so the second delivery
-        // collapses while resolved history rows remain insertable.
-        .onConflictDoNothing({
-          target: refundReviews.payoutId,
-          where: sql`${refundReviews.resolvedAt} IS NULL`,
+      const listed = await listChargeRefunds(this.stripe, charge.id);
+      for (const refund of listed) {
+        await this.recordRefund({
+          stripeRefundId: refund.id,
+          stripeChargeId: charge.id,
+          paymentIntentId: charge.paymentIntentId,
+          amountCents: refund.amount,
+          currency: refund.currency,
+          status: refund.status,
+          reason: refund.reason ?? null,
+          failureReason: refund.failure_reason ?? null,
+          stripeCreatedAt: new Date(refund.created * 1000),
         });
-      this.obs.warn('Refund review queued for ops resolution', {
-        purchaseId: input.purchaseId,
-        payoutId: input.payoutId,
-        creatorUserId: input.creatorUserId,
-        attemptedReversalCents: input.attemptedReversalCents,
-        errorCode: input.errorCode,
-      });
-    } catch (insertErr) {
-      this.obs.error('Failed to write refund_reviews row', {
-        purchaseId: input.purchaseId,
-        payoutId: input.payoutId,
-        error:
-          insertErr instanceof Error ? insertErr.message : String(insertErr),
-      });
+      }
+      return [...listed].sort(
+        (a, b) => b.created - a.created || b.id.localeCompare(a.id)
+      );
+    } catch (error) {
+      this.handleError(error, 'recordChargeRefunds');
+    }
+  }
+
+  /**
+   * Claim the charge's refunds not yet emailed to the buyer, oldest first, so
+   * each refund is emailed once (owner decision 2026-10-19, "One per refund").
+   * The claim sets `notified_at` before the email is sent, so a redelivery
+   * finds nothing; an email that then fails to send is not retried. A refund
+   * that failed or was canceled is never emailed, nor one still waiting on the
+   * customer (`requires_action`).
+   */
+  async claimRefundEmails(
+    chargeId: string
+  ): Promise<Array<{ stripeRefundId: string; amountCents: number }>> {
+    try {
+      const claimed = await this.db
+        .update(refunds)
+        .set({ notifiedAt: new Date() })
+        .where(
+          and(
+            eq(refunds.stripeChargeId, chargeId),
+            isNull(refunds.notifiedAt),
+            inArray(refunds.status, ['pending', 'succeeded'])
+          )
+        )
+        .returning();
+      return claimed
+        .sort(
+          (a, b) =>
+            a.stripeCreatedAt.getTime() - b.stripeCreatedAt.getTime() ||
+            a.stripeRefundId.localeCompare(b.stripeRefundId)
+        )
+        .map((row) => ({
+          stripeRefundId: row.stripeRefundId,
+          amountCents: row.amountCents,
+        }));
+    } catch (error) {
+      this.handleError(error, 'claimRefundEmails');
     }
   }
 
@@ -2326,6 +2308,257 @@ export class PurchaseService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'processDispute');
+    }
+  }
+
+  /**
+   * Record a dispute as Stripe reports it (`disputes`; Codex-2hxff.9, design
+   * in docs/payments/dispute-record.md). One row per Stripe dispute, for any
+   * source; `purchaseId` is set when the charge is a purchase's. An open row
+   * holds the charge's unpaid payouts (`isDrainablePayout`).
+   *
+   * Forward only, because Stripe does not deliver events in order: an inquiry
+   * may become a chargeback, and a final status (`won`, `lost`,
+   * `warning_closed`, `prevented`) never changes. Returns the row as it now
+   * stands, which is what the caller acts on, not the event's snapshot. A
+   * status Stripe adds later is logged and not written.
+   */
+  async recordDispute(dispute: {
+    stripeDisputeId: string;
+    stripeChargeId: string;
+    paymentIntentId: string | null;
+    amountCents: number;
+    currency: string;
+    status: string;
+    reason: string | null;
+    stripeCreatedAt: Date;
+  }): Promise<Dispute | undefined> {
+    try {
+      const { status } = dispute;
+      if (!DISPUTE_STATUS_RANK.has(status)) {
+        this.obs.warn('Dispute has a status the disputes table does not know', {
+          disputeId: dispute.stripeDisputeId,
+          status,
+        });
+        return undefined;
+      }
+      const [purchase] = dispute.paymentIntentId
+        ? await this.db
+            .select({ id: purchases.id })
+            .from(purchases)
+            .where(eq(purchases.stripePaymentIntentId, dispute.paymentIntentId))
+            .limit(1)
+        : [];
+      await this.db
+        .insert(disputes)
+        .values({
+          stripeDisputeId: dispute.stripeDisputeId,
+          stripeChargeId: dispute.stripeChargeId,
+          purchaseId: purchase?.id ?? null,
+          amountCents: dispute.amountCents,
+          currency: dispute.currency,
+          status,
+          reason: dispute.reason,
+          stripeCreatedAt: dispute.stripeCreatedAt,
+        })
+        .onConflictDoUpdate({
+          target: disputes.stripeDisputeId,
+          set: { status, amountCents: dispute.amountCents },
+          // Forward only; the amount may still be corrected until it closes.
+          setWhere: sql`${disputeRank(sql`${disputes.status}`)} < ${disputeRank(sql`excluded.status`)} OR (${disputeRank(sql`${disputes.status}`)} < ${sql.raw(String(FINAL_DISPUTE_RANK))} AND ${disputes.status} = excluded.status AND ${disputes.amountCents} <> excluded.amount_cents)`,
+        });
+      const [current] = await this.db
+        .select()
+        .from(disputes)
+        .where(eq(disputes.stripeDisputeId, dispute.stripeDisputeId))
+        .limit(1);
+      return current;
+    } catch (error) {
+      this.handleError(error, 'recordDispute');
+    }
+  }
+
+  /**
+   * Claw back this purchase's slices for every cause on the charge: its
+   * refunds, and the chargebacks recorded in `disputes` (the dispute webhook).
+   * No purchase for the PaymentIntent (a subscription's charge): nothing.
+   */
+  async clawBackPurchaseCharge(
+    paymentIntentId: string,
+    charge: ClawbackCharge
+  ): Promise<void> {
+    try {
+      const [purchase] = await this.db
+        .select({ id: purchases.id })
+        .from(purchases)
+        .where(eq(purchases.stripePaymentIntentId, paymentIntentId))
+        .limit(1);
+      if (!purchase) return;
+      await this.clawBackRefunds(purchase.id, charge);
+    } catch (error) {
+      this.handleError(error, 'clawBackPurchaseCharge');
+    }
+  }
+
+  /**
+   * A WON dispute restores the buyer's access (owner decision P-2): the
+   * disputed mark is cleared, and the content access and entitlement it
+   * revoked are restored. A purchase refunded since keeps its access ended.
+   * Idempotent. Returns the buyer, for the library cache.
+   */
+  async restoreDisputedPurchase(
+    paymentIntentId: string
+  ): Promise<{ userId: string; orgId: string | null } | undefined> {
+    try {
+      const purchase = await this.db.query.purchases.findFirst({
+        where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+      });
+      if (!purchase) return undefined;
+      const scope = {
+        userId: purchase.customerId,
+        orgId: purchase.organizationId,
+      };
+      if (!purchase.disputedAt) return scope;
+
+      await this.db.transaction(async (tx) => {
+        await tx
+          .update(purchases)
+          .set({ disputedAt: null, updatedAt: new Date() })
+          .where(eq(purchases.id, purchase.id));
+        if (purchase.status !== PURCHASE_STATUS.COMPLETED) return;
+        if (purchase.contentId) {
+          await tx
+            .update(contentAccess)
+            .set({ deletedAt: null })
+            .where(
+              and(
+                eq(contentAccess.userId, purchase.customerId),
+                eq(contentAccess.contentId, purchase.contentId),
+                isNotNull(contentAccess.deletedAt)
+              )
+            );
+        }
+        await tx
+          .update(entitlements)
+          .set({ revokedAt: null })
+          .where(
+            and(
+              eq(entitlements.sourceRef, purchase.id),
+              isNotNull(entitlements.revokedAt)
+            )
+          );
+      });
+      this.obs.info('Won dispute restored access', {
+        purchaseId: purchase.id,
+        paymentIntentId,
+      });
+      return scope;
+    } catch (error) {
+      this.handleError(error, 'restoreDisputedPurchase');
+    }
+  }
+
+  /**
+   * A LOST dispute: the buyer keeps the money, so the purchase becomes
+   * `refunded` and its access stays ended (owner decision Q3). The amount
+   * refunded so far gains the disputed amount, capped at what was paid.
+   * Idempotent. Returns the buyer, for the library cache.
+   */
+  async processLostDispute(
+    paymentIntentId: string,
+    disputedCents: number
+  ): Promise<{ userId: string; orgId: string | null } | undefined> {
+    try {
+      const purchase = await this.db.query.purchases.findFirst({
+        where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+      });
+      if (!purchase) return undefined;
+      const scope = {
+        userId: purchase.customerId,
+        orgId: purchase.organizationId,
+      };
+      if (purchase.status === PURCHASE_STATUS.REFUNDED) return scope;
+
+      const now = new Date();
+      await this.db.transaction(async (tx) => {
+        await tx
+          .update(purchases)
+          .set({
+            status: PURCHASE_STATUS.REFUNDED,
+            refundedAt: now,
+            refundAmountCents: Math.min(
+              purchase.amountPaidCents,
+              (purchase.refundAmountCents ?? 0) + disputedCents
+            ),
+            updatedAt: now,
+          })
+          .where(eq(purchases.id, purchase.id));
+        // Revoked when the dispute opened; again here, in case it never was.
+        if (purchase.contentId) {
+          await tx
+            .update(contentAccess)
+            .set({ deletedAt: now })
+            .where(
+              and(
+                eq(contentAccess.userId, purchase.customerId),
+                eq(contentAccess.contentId, purchase.contentId),
+                isNull(contentAccess.deletedAt)
+              )
+            );
+        }
+        await tx
+          .update(entitlements)
+          .set({ revokedAt: now })
+          .where(
+            and(
+              eq(entitlements.sourceRef, purchase.id),
+              isNull(entitlements.revokedAt)
+            )
+          );
+      });
+      this.obs.info('Lost dispute recorded the purchase as refunded', {
+        purchaseId: purchase.id,
+        paymentIntentId,
+        disputedCents,
+      });
+      return scope;
+    } catch (error) {
+      this.handleError(error, 'processLostDispute');
+    }
+  }
+
+  /**
+   * A WON dispute's money (owner decision Q2): what it clawed back from every
+   * source's slices is paid back by new pending payout rows the next sweep
+   * pays (@codex/payments `repayDispute`). The held slices are released by
+   * the dispute closing. Then the outcome is marked applied.
+   */
+  async settleWonDispute(stripeDisputeId: string): Promise<void> {
+    try {
+      await repayDispute(
+        { ...this.ledger(), obs: this.obs },
+        { disputeId: stripeDisputeId }
+      );
+      await this.markDisputeOutcomeApplied(stripeDisputeId);
+    } catch (error) {
+      this.handleError(error, 'settleWonDispute');
+    }
+  }
+
+  /** A final status has been acted on: a redelivery stops at the record. */
+  async markDisputeOutcomeApplied(stripeDisputeId: string): Promise<void> {
+    try {
+      await this.db
+        .update(disputes)
+        .set({ outcomeAppliedAt: new Date() })
+        .where(
+          and(
+            eq(disputes.stripeDisputeId, stripeDisputeId),
+            isNull(disputes.outcomeAppliedAt)
+          )
+        );
+    } catch (error) {
+      this.handleError(error, 'markDisputeOutcomeApplied');
     }
   }
 
@@ -2718,7 +2951,8 @@ export class PurchaseService extends BaseService {
           // Net to org: their share on completed rows only. Refunded rows
           // already returned the customer's money so they zero out for net.
           netCents: sql<number>`COALESCE(SUM(${purchases.creatorPayoutCents} + ${purchases.organizationFeeCents}) FILTER (WHERE ${purchases.status} = 'completed'), 0)::int`,
-          refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}) FILTER (WHERE ${purchases.status} = 'refunded'), 0)::int`,
+          // Partial refunds too: they leave the purchase completed (P-1).
+          refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}), 0)::int`,
           count: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'completed')::int`,
         })
         .from(purchases)

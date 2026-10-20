@@ -218,6 +218,7 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'refundAmount',
     'originalAmount',
     'refundDate',
+    'accessNote',
   ],
 
   // Organization

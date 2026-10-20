@@ -50,23 +50,30 @@ import {
   users,
 } from '@codex/database/schema';
 import {
-  applyMinPlatformFeeFloor,
-  cancelUnpaidPayoutForRefund,
+  type ClawbackCharge,
   claimPayoutAttempts,
-  type FeeConfig,
-  type FeeConfigService,
-  type FeeContext,
   findTransfersForPayouts,
   isDrainablePayout,
   type LedgerDeps,
+  listClawableRefunds,
   markPayoutFailed,
   type OrganisationPayee,
+  pendingReductionsFor,
   recordPlatformFee,
   recordSlice,
   renewPayoutAttempt,
+  resolveInvoiceCharge,
   resolveOrganisationPayee,
+  retryFailedClawbacks,
+  reverseCharge,
   settlePayoutPaid,
   settleTransfer,
+} from '@codex/payments';
+import {
+  applyMinPlatformFeeFloor,
+  type FeeConfig,
+  type FeeConfigService,
+  type FeeContext,
   withStaleCustomerRecovery,
 } from '@codex/purchase';
 import {
@@ -101,13 +108,20 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../errors';
-import { resolveInvoiceCharge } from './invoice-charge';
 import {
   CLEAR_PENDING_PRICE_METADATA,
   schedulePriceChange,
 } from './pending-price-change';
 import { calculateRevenueSplit } from './revenue-split';
 import { mapStripeSubscriptionStatus } from './stripe-status-mapper';
+import {
+  cancelLostDisputeSubscription,
+  type DisputedSubscription,
+  type DisputeInput,
+  pauseBilling,
+  pauseDisputedSubscription,
+  restoreDisputedSubscription,
+} from './subscription-dispute';
 import {
   type InvalidationReason,
   invalidateForUser,
@@ -154,7 +168,8 @@ export type PayoutDisplayStatus =
   | 'resolved'
   | 'failed'
   | 'reversed'
-  | 'cancelled_by_refund';
+  | 'cancelled_by_refund'
+  | 'cancelled_by_dispute';
 
 /**
  * Read-model returned by `SubscriptionService.listSubscribers` (studio
@@ -289,6 +304,7 @@ type PayoutFilterOptions = {
     | 'failed'
     | 'reversed'
     | 'cancelled_by_refund'
+    | 'cancelled_by_dispute'
     | 'needs_attention';
   sourceType?: 'all' | 'purchase' | 'subscription';
   fromDate?: string;
@@ -378,6 +394,7 @@ function derivePayoutStatus(status: string): PayoutDisplayStatus {
   if (status === 'failed') return 'failed';
   if (status === 'reversed') return 'reversed';
   if (status === 'cancelled_by_refund') return 'cancelled_by_refund';
+  if (status === 'cancelled_by_dispute') return 'cancelled_by_dispute';
   return 'pending';
 }
 
@@ -2922,6 +2939,8 @@ export class SubscriptionService extends BaseService {
       conditions.push(eq(payouts.status, 'reversed'));
     } else if (status === 'cancelled_by_refund') {
       conditions.push(eq(payouts.status, 'cancelled_by_refund'));
+    } else if (status === 'cancelled_by_dispute') {
+      conditions.push(eq(payouts.status, 'cancelled_by_dispute'));
     } else if (status === 'needs_attention') {
       conditions.push(inArray(payouts.status, ['pending', 'failed']));
     }
@@ -3722,7 +3741,17 @@ export class SubscriptionService extends BaseService {
       sourceType === 'purchase' ? 'one_off' : 'subscription',
       userId
     );
-    const totalCents = group.reduce((sum, row) => sum + row.amountCents, 0);
+    // Partial refunds reduce an unpaid slice before it is paid (Codex-2hxff.8).
+    // This read only gates the group; the amounts sent are re-read below,
+    // after the claim, when no reduction can change under the transfer.
+    const gateReductions = await pendingReductionsFor(
+      this.db,
+      group.map((row) => row.id)
+    );
+    const totalCents = group.reduce(
+      (sum, row) => sum + row.amountCents - (gateReductions.get(row.id) ?? 0),
+      0
+    );
 
     if (totalCents < payoutFees.minTransferCents) {
       this.obs.info(
@@ -3755,6 +3784,12 @@ export class SubscriptionService extends BaseService {
       group.map((payout) => payout.id)
     );
     const claimed = group.filter((payout) => attempts.has(payout.id));
+    const reductions = await pendingReductionsFor(
+      this.db,
+      claimed.map((payout) => payout.id)
+    );
+    const payable = (payout: (typeof group)[number]) =>
+      payout.amountCents - (reductions.get(payout.id) ?? 0);
     const alreadySent = await findTransfersForPayouts(
       this.stripe,
       stripeAccountId,
@@ -3765,7 +3800,7 @@ export class SubscriptionService extends BaseService {
     const paid = (payout: (typeof group)[number]) => {
       resolved++;
       if (payout.payoutType === 'creator_payout') {
-        creatorPaidCents += payout.amountCents;
+        creatorPaidCents += payable(payout);
         creatorPaidCount++;
       }
     };
@@ -3807,6 +3842,20 @@ export class SubscriptionService extends BaseService {
         continue;
       }
 
+      const amountCents = payable(payout);
+      if (amountCents <= 0) {
+        // Reduced to nothing: only a refund of the whole charge does that, and
+        // it cancels the row instead, so this is a ledger inconsistency.
+        failed++;
+        this.obs.error('A pending payout was reduced to nothing; not sent', {
+          errorId: crypto.randomUUID(),
+          pendingPayoutId: payout.id,
+          grossCents: payout.amountCents,
+          reducedCents: reductions.get(payout.id) ?? 0,
+        });
+        continue;
+      }
+
       let transfer: Stripe.Transfer;
       try {
         // GBP-only enforcement (Codex-yv18n) lives INSIDE the per-row
@@ -3823,7 +3872,7 @@ export class SubscriptionService extends BaseService {
         // charge's source-linked balance, not general platform balance.
         transfer = await this.stripe.transfers.create(
           {
-            amount: payout.amountCents,
+            amount: amountCents,
             currency: payoutCurrency,
             destination: stripeAccountId,
             ...(payout.stripeChargeId
@@ -3845,7 +3894,7 @@ export class SubscriptionService extends BaseService {
         this.obs.error('Failed to resolve pending payout', {
           pendingPayoutId: payout.id,
           subscriptionId: payout.subscriptionId,
-          amountCents: payout.amountCents,
+          amountCents,
           sourceType,
           error: (error as Error).message,
         });
@@ -4268,208 +4317,115 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Reverse the subscription payout transfers for a refunded invoice charge
-   * (Codex-13v21). Mirror of `PurchaseService.reversePayoutsForPurchase` for the
-   * subscription pipeline: when a subscription invoice charge is refunded, the
-   * creator/org transfers made at invoice.payment_succeeded must be clawed back —
-   * Stripe does NOT auto-reverse separate `transfers.create` calls, so without
-   * this the platform absorbs the full gross while creators keep their slice.
+   * Claw back the subscription payout slices of a refunded invoice charge
+   * (Codex-13v21) through the shared engine (@codex/payments `reverseCharge`,
+   * Codex-2hxff.56). Stripe does NOT reverse separate `transfers.create`
+   * calls, so without this the platform pays the whole refund while
+   * creators keep their slices.
    *
-   * Scopes to `sourceType='subscription'` rows for the charge. One-time purchase
-   * rows carry `sourceType='purchase'` (handled by PurchaseService.processRefund),
-   * so calling BOTH on every `charge.refunded` never double-reverses the same
-   * transfer.
+   * Only `sourceType='subscription'` rows on the charge are reversed;
+   * one-time purchase rows are PurchaseService.processRefund's, so running
+   * both on every `charge.refunded` never reverses a transfer twice.
    *
-   * Partial refunds reverse each slice proportionally
-   * (`floor(row.amountCents * refundAmountCents / grossCents)`); residual rounding
-   * stays on the platform balance. Idempotency key `${transferId}_reversal_<suffix>`
-   * makes webhook replays and repeated partial refunds safe.
-   *
-   * A pending or failed row is cancelled, then checked in Stripe for a
-   * transfer that went out anyway, which is reversed like a paid row's
-   * (`cancelUnpaidPayoutForRefund`, Codex-2hxff.11).
-   *
-   * Idempotent: rows already `reversed`/`cancelled_by_refund` are skipped.
-   *
-   * insufficient_funds (creator already withdrew their slice): logged loudly with
-   * a correlatable errorId, leaving the row `paid` (the original transfer really
-   * succeeded). NOTE: the purchase path records a `refund_reviews` ops-queue row
-   * here, but `refund_reviews.purchaseId` is NOT NULL and cannot yet represent a
-   * subscription obligation — generalising that table is a tracked follow-up
-   * (Codex-13v21 design). Until then the obligation is visible in logs only.
+   * Each refund's share is recorded per slice (payout_reversals),
+   * so a redelivery does only what is left and a second partial refund is
+   * clawed back too. A balance too low to cover it is a `refund_reviews` debt,
+   * as for purchases (Codex-2hxff.8, D5).
    */
   async reverseSubscriptionPayoutsForCharge(
-    chargeId: string,
-    refund: { refundAmountCents: number | null; stripeRefundId: string | null }
+    charge: ClawbackCharge
   ): Promise<void> {
-    const rows = await this.db
-      .select()
-      .from(payouts)
-      .where(
-        and(
-          eq(payouts.stripeChargeId, chargeId),
-          eq(payouts.sourceType, 'subscription')
-        )
+    await reverseCharge(
+      { ...this.ledger(), obs: this.obs },
+      {
+        charge,
+        source: { sourceType: 'subscription' },
+        refunds: () => listClawableRefunds(this.stripe, charge.id),
+      }
+    );
+  }
+
+  /**
+   * The hourly retry of clawback steps left `failed`, for every source: a
+   * step Stripe refused does not make the webhook retry (Codex-2hxff.8).
+   */
+  async retryFailedClawbacks(olderThanMinutes = 15): Promise<{
+    charges: number;
+    retried: number;
+    stillFailing: number;
+    lostDisputesApplied: number;
+  }> {
+    return retryFailedClawbacks(
+      { ...this.ledger(), obs: this.obs },
+      { olderThanMinutes }
+    );
+  }
+
+  // ── Disputes (Codex-2hxff.9; docs/payments/subscription-disputes.md) ──
+
+  /**
+   * A chargeback opened on one of its invoices: access paused. Undefined for
+   * a purchase's dispute. Billing is paused separately, after the clawback.
+   */
+  async pauseForDispute(
+    input: DisputeInput
+  ): Promise<DisputedSubscription | undefined> {
+    const paused = await pauseDisputedSubscription(this.disputeDeps(), input);
+    if (paused) {
+      this.invalidateIfConfigured(
+        paused.userId,
+        paused.organizationId ?? undefined,
+        'subscription_paused'
       );
-
-    // Common case for a one-time-purchase charge (or an already-swept charge):
-    // no subscription rows → no-op.
-    if (rows.length === 0) return;
-
-    // Gross = the charged amount, reconstructed as the sum of the recorded
-    // slices (platform + org + creator). Denominator for a proportional refund.
-    const grossCents = rows.reduce((sum, r) => sum + r.amountCents, 0);
-
-    const { refundAmountCents, stripeRefundId } = refund;
-    const isPartial =
-      refundAmountCents !== null &&
-      refundAmountCents > 0 &&
-      grossCents > 0 &&
-      refundAmountCents < grossCents;
-    const partialRatioNumerator = isPartial ? refundAmountCents : null;
-    const reversalAmount = (rowAmountCents: number): number =>
-      partialRatioNumerator !== null
-        ? Math.floor((rowAmountCents * partialRatioNumerator) / grossCents)
-        : rowAmountCents;
-    const idempotencySuffix = stripeRefundId
-      ? `_${stripeRefundId}`
-      : refundAmountCents !== null
-        ? `_${refundAmountCents}`
-        : '';
-
-    for (const listed of rows) {
-      let row: typeof payouts.$inferSelect = listed;
-      if (row.status === 'reversed' || row.status === 'cancelled_by_refund') {
-        continue;
-      }
-
-      // A row never marked paid is cancelled FIRST — so nothing can settle
-      // it afterwards — then Stripe is asked whether its transfer went out
-      // anyway: in flight when the refund arrived, or made but never
-      // recorded (Codex-2hxff.11). Such a transfer is reversed below like a
-      // paid row's.
-      let transferId = row.stripeTransferId;
-      if (row.status === 'pending' || row.status === 'failed') {
-        const cancel = await cancelUnpaidPayoutForRefund(this.ledger(), row);
-        if (cancel.kind === 'changed') {
-          // Paid since it was read: reverse it as paid. Anything else was
-          // handled by a concurrent delivery of this refund.
-          if (cancel.row?.status !== 'paid') continue;
-          row = cancel.row;
-          transferId = row.stripeTransferId;
-        } else if (cancel.transferId === undefined) {
-          continue;
-        } else {
-          transferId = cancel.transferId;
-        }
-      }
-
-      let skipStatusFlip = false;
-      if (transferId) {
-        const amount = reversalAmount(row.amountCents);
-        if (amount === 0) {
-          skipStatusFlip = true;
-          this.obs.info(
-            'Subscription reversal amount floored to zero, platform absorbs',
-            {
-              chargeId,
-              payoutId: row.id,
-              rowAmountCents: row.amountCents,
-              refundAmountCents,
-            }
-          );
-        } else {
-          try {
-            await this.stripe.transfers.createReversal(
-              transferId,
-              {
-                amount,
-                metadata: {
-                  subscription_id: row.subscriptionId ?? '',
-                  charge_id: chargeId,
-                  payout_id: row.id,
-                  type: 'refund_reversal',
-                  ...stripeEnvMetadata(this.environment),
-                },
-              },
-              {
-                idempotencyKey: `${transferId}_reversal${idempotencySuffix}`,
-              }
-            );
-          } catch (reverseErr) {
-            const code = (reverseErr as { code?: string } | null)?.code;
-            const errorId = crypto.randomUUID();
-            this.obs.error(
-              'Failed to reverse subscription transfer for refund',
-              {
-                errorId,
-                chargeId,
-                payoutId: row.id,
-                stripeTransferId: transferId,
-                attemptedReversalCents: amount,
-                code: code ?? null,
-                error:
-                  reverseErr instanceof Error
-                    ? reverseErr.message
-                    : String(reverseErr),
-              }
-            );
-            if (code === 'insufficient_funds') {
-              // Creator already withdrew their slice; the customer refund still
-              // completed from the platform balance, so the platform now holds
-              // an unresolved clawback obligation. Leave the row 'paid'.
-              // NOTE (Codex-13v21): no refund_reviews row yet — that table's
-              // purchaseId is NOT NULL; subscription support is a tracked
-              // schema follow-up. Surfaced loudly meanwhile.
-              this.obs.error(
-                'Subscription clawback obligation unresolved (insufficient_funds) — NOT yet queued in refund_reviews',
-                {
-                  errorId,
-                  chargeId,
-                  payoutId: row.id,
-                  creatorUserId: row.userId,
-                  attemptedReversalCents: amount,
-                }
-              );
-              skipStatusFlip = true;
-            }
-            // Per-row error isolation — continue with remaining slices.
-          }
-        }
-      }
-
-      if (skipStatusFlip) continue;
-
-      // Every row left here moved money — a paid slice, the platform's
-      // retained fee, or a cancelled row whose transfer had gone out — and
-      // is now reversed. The transfer is recorded on the row either way.
-      const nextStatus = 'reversed' as const;
-
-      try {
-        await this.db
-          .update(payouts)
-          .set({
-            status: nextStatus,
-            stripeTransferId: transferId,
-            resolvedAt: row.resolvedAt ?? new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(payouts.id, row.id));
-      } catch (updateErr) {
-        this.obs.error(
-          'Failed to update subscription payouts row after refund',
-          {
-            chargeId,
-            payoutId: row.id,
-            nextStatus,
-            error:
-              updateErr instanceof Error
-                ? updateErr.message
-                : String(updateErr),
-          }
-        );
-      }
     }
+    return paused;
+  }
+
+  /** Billing paused while the chargeback is open (owner decision Q-A). */
+  async pauseBillingForDispute(
+    subscription: DisputedSubscription,
+    stripeDisputeId: string
+  ): Promise<void> {
+    await pauseBilling(this.disputeDeps(), subscription, stripeDisputeId);
+  }
+
+  /** A won dispute: access and billing restored, unless another chargeback is open. */
+  async restoreAfterDispute(
+    input: DisputeInput
+  ): Promise<
+    { subscription: DisputedSubscription; restored: boolean } | undefined
+  > {
+    const result = await restoreDisputedSubscription(this.disputeDeps(), input);
+    if (result?.restored) {
+      this.invalidateIfConfigured(
+        result.subscription.userId,
+        result.subscription.organizationId ?? undefined,
+        'subscription_resumed'
+      );
+    }
+    return result;
+  }
+
+  /** A lost dispute: access ended, and the subscription cancelled at Stripe. */
+  async cancelForLostDispute(
+    input: DisputeInput
+  ): Promise<DisputedSubscription | undefined> {
+    const ended = await cancelLostDisputeSubscription(
+      this.disputeDeps(),
+      input
+    );
+    if (ended) {
+      this.invalidateIfConfigured(
+        ended.userId,
+        ended.organizationId ?? undefined,
+        'cancel'
+      );
+    }
+    return ended;
+  }
+
+  private disputeDeps() {
+    return { db: this.db, stripe: this.stripe, obs: this.obs };
   }
 
   /**

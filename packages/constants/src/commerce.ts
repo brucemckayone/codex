@@ -16,9 +16,22 @@ export const STRIPE_EVENTS = {
   ACCOUNT_DEAUTHORIZED: 'account.application.deauthorized',
   // Refunds
   CHARGE_REFUNDED: 'charge.refunded',
+  // A refund's status changed. A refund still pending when charge.refunded
+  // arrived is clawed back once this reports it succeeded or failed
+  // (Codex-2hxff.8).
+  REFUND_UPDATED: 'refund.updated',
+  // A refund failed, possibly after it succeeded. Handled with refund.updated:
+  // the clawback stands and the failure is recorded for support.
+  REFUND_FAILED: 'refund.failed',
   // Disputes (treated as refunds for access purposes — purchase.disputedAt
   // is set and contentAccess is soft-deleted via processDispute)
   CHARGE_DISPUTE_CREATED: 'charge.dispute.created',
+  // The rest of a dispute's life (Codex-2hxff.9): each records the dispute's
+  // status, and a won or lost one is acted on once.
+  CHARGE_DISPUTE_UPDATED: 'charge.dispute.updated',
+  CHARGE_DISPUTE_CLOSED: 'charge.dispute.closed',
+  CHARGE_DISPUTE_FUNDS_WITHDRAWN: 'charge.dispute.funds_withdrawn',
+  CHARGE_DISPUTE_FUNDS_REINSTATED: 'charge.dispute.funds_reinstated',
   // Dashboard-drift detection + sync-back: tier metadata edited outside
   // Codex (e.g. in Stripe Dashboard) mirrors back into subscriptionTiers.
   // product.updated → mirror name/description.
@@ -29,6 +42,33 @@ export const STRIPE_EVENTS = {
   PRICE_CREATED: 'price.created',
   PRICE_UPDATED: 'price.updated',
 } as const;
+
+/**
+ * Stripe dispute statuses, grouped by what they mean here (Codex-2hxff.9;
+ * docs/payments/dispute-record.md).
+ *
+ * - An INQUIRY takes no money: it holds the sale's unpaid payouts, nothing more
+ *   (owner decision Q1).
+ * - An open CHARGEBACK has taken the disputed amount: paid slices are reversed
+ *   by its share, unpaid ones held.
+ * - CLOSED is final. `won` is paid back, `lost` keeps the reversals and
+ *   cancels the held slices; an inquiry that closed or was prevented took
+ *   nothing.
+ */
+export const DISPUTE_INQUIRY_STATUSES = [
+  'warning_needs_response',
+  'warning_under_review',
+] as const;
+export const DISPUTE_CHARGEBACK_OPEN_STATUSES = [
+  'needs_response',
+  'under_review',
+] as const;
+export const DISPUTE_CLOSED_STATUSES = [
+  'won',
+  'lost',
+  'warning_closed',
+  'prevented',
+] as const;
 
 /**
  * The Stripe metadata key naming the environment that created an object — the

@@ -269,6 +269,7 @@
     { value: 'failed', label: 'Failed' },
     { value: 'reversed', label: 'Reversed' },
     { value: 'cancelled_by_refund', label: 'Cancelled (refund)' },
+    { value: 'cancelled_by_dispute', label: 'Cancelled (dispute)' },
     { value: 'needs_attention', label: 'Needs attention' },
   ];
 
@@ -313,6 +314,7 @@
     if (status === 'failed') return 'Failed';
     if (status === 'reversed') return 'Reversed';
     if (status === 'cancelled_by_refund') return 'Cancelled (refund)';
+    if (status === 'cancelled_by_dispute') return 'Cancelled (dispute)';
     return 'Pending';
   }
 

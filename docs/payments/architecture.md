@@ -210,6 +210,16 @@ in `@codex/purchase` or below it. That is why the ledger is in
   `@codex/payments` depends on it (§7 D2).
 - Moving the ledger is one PR of import changes. It is cheaper now than after
   four more modules have been added beside it.
+- **Done (WP3a, Codex-2hxff.56.1):** `@codex/payments` exists, and
+  `payoutLedger`, `resolveOrganisationPayee` and `invoiceCharge` have moved
+  into it unchanged.
+- **Done (WP3b-2, Codex-2hxff.56.3):** `clawback` (`reverseCharge`) has moved
+  in unchanged, behind 41 characterisation tests (WP3b-1, Codex-2hxff.56.2).
+  The two copies' divergences are kept as a temporary per-source profile in
+  `clawback.ts`; each behaviour PR deletes the fields it settles. Rule A1 now
+  holds for reversals: `createReversal` is called only inside
+  `@codex/payments`. The drain's `transfers.create` is the one call left
+  outside (§3.11, WP5).
 
 The rejected alternative was to keep everything in
 `@codex/purchase/src/domain/`. That avoids a package for now, but leaves
@@ -230,9 +240,9 @@ The rejected alternative was to keep everything in
 | WP | Kind | What | Unblocks / absorbs |
 |---|---|---|---|
 | **WP0** | decision | **Done 2026-10-19.** The owner decided §7 D1–D4, all as recommended. | everything |
-| **WP1** | fix | **Done 2026-10-19 (PR for Codex-2hxff.50).** One `invoiceCharge` resolver (`@codex/subscription` `services/invoice-charge.ts`) used by both subscription kinds; fixtures send Stripe's real `payment_intent`-only shape. Sandbox checked: no course subscription exists, so there are no missed charges to replay. | P1 money bug; small |
+| **WP1** | fix | **Done 2026-10-19 (PR for Codex-2hxff.50).** One `invoiceCharge` resolver (now `@codex/payments` `invoice-charge.ts`, WP3a) used by both subscription kinds; fixtures send Stripe's real `payment_intent`-only shape. Sandbox checked: no course subscription exists, so there are no missed charges to replay. | P1 money bug; small |
 | **WP2** | extraction → behaviour | **Composition root** (C1), split 2026-10-19. **WP2a, done (Codex-2hxff.54):** `createWebhookServices` in `@codex/worker-utils` builds the registry's graph for every webhook and the cron. Not a pure extraction: configured fees and the money mailers now reach those paths (agreed in .7/.13; with empty fee config the split is unchanged). Webhooks stay on Neon, not Hyperdrive (Codex-tae55). **WP2b (Codex-2hxff.55):** money deps required at the type level. | .7 (wiring half), .13 (mailers), .43, CFG-06 |
-| **WP3** | extraction → behaviour | **Clawback engine** (C4): one `reverseCharge` over the ledger for every source, replacing both copies; `refund_reviews` for every source (Codex-in0g4's schema); the refund use case out of the worker. Absorbs .51. | .8 → .10 (refund half) → .9 → .30; .28 after WP6 |
+| **WP3** | extraction → behaviour | **In progress:** WP3a (package), WP3b-1 (characterisation tests) and WP3b-2 (extraction) are done, then .51 (every row attempted, then a retry). **The refund record** (Codex-2hxff.8 money half, [design](refund-reversal-record.md)): one `payout_reversals` row per slice per refund, settling D1–D5, D7 and D8, and replacing the per-source profile and the characterisation suites. Partial-refund access (P-1) and disputes follow. **Clawback engine** (C4): one `reverseCharge` over the ledger for every source, replacing both copies; `refund_reviews` for every source (Codex-in0g4's schema); the refund use case out of the worker. Absorbs .51. | .8 → .10 (refund half) → .9 → .30; .28 after WP6 |
 | **WP4** | extraction → behaviour | **Split and resolvers at one `at`** (C2 + C3): `splitCalculator`, `feeResolver(at)`, `agreementResolver(at)` in `@codex/agreements`; one `RecordSale`/`RecordInvoice` path for all four sale kinds. | .7 (floor everywhere), .19, .17, .18, .49, .33, Codex-rtwpv, -itvh8 |
 | **WP5** | extraction | **Every transfer through the ledger** (C6): the drain's send moves into `payoutLedger`, plus `no_owner` re-homing and one payability rule; the A1 scanning test. | .13, .48, .47, .34, Codex-k9qpd, -2f3wk, -4r55k/xjxw6 |
 | **WP6** | behaviour | **`issueRefund`** (C5), the only platform refund; its webhook runs WP3. | .9 (early-fraud refund), .14 (duplicate purchase), .15 (duplicate subscription), .28 |
@@ -305,7 +315,7 @@ From [work §1], plus .50–.52. A bead that names two WPs needs both.
 | Codex-2hxff.48 | Failed payout rows retry forever | WP5 (decision D-P2) |
 | Codex-2hxff.49 | A replay re-splits with current fees | WP4 |
 | Codex-2hxff.50 | Course-subscription invoices record no payouts | **WP1, done** |
-| Codex-2hxff.51 | A subscription refund stops at the first failing row | WP3 |
+| Codex-2hxff.51 | A subscription refund stops at the first failing row | **WP3, done**: every row is attempted, then the call rejects so Stripe retries |
 | Codex-2hxff.52 | Course subscriptions half-wired into the subscription webhook | WP7 |
 
 Related beads outside the epic: Codex-in0g4 (WP3), -rtwpv and -itvh8 (WP4),

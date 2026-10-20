@@ -74,7 +74,9 @@ export const payouts = pgTable(
     // 'platform_fee' | 'organization_fee' | 'creator_payout' | 'creator_payout_to_owner'
     payoutType: varchar('payout_type', { length: 32 }).notNull(),
 
-    // 'paid' | 'pending' | 'failed' | 'reversed' | 'cancelled_by_refund'
+    // 'paid' | 'pending' | 'failed' | 'reversed' | 'cancelled_by_refund' |
+    // 'cancelled_by_dispute' (a slice held for a dispute that was lost,
+    // Codex-2hxff.9)
     status: varchar('status', { length: 32 }).notNull(),
 
     // 'purchase' | 'subscription' — denormalized for cheap source filtering on
@@ -180,7 +182,7 @@ export const payouts = pgTable(
     check('check_payouts_amount_positive', sql`${table.amountCents} > 0`),
     check(
       'check_payouts_status',
-      sql`${table.status} IN ('paid', 'pending', 'failed', 'reversed', 'cancelled_by_refund')`
+      sql`${table.status} IN ('paid', 'pending', 'failed', 'reversed', 'cancelled_by_refund', 'cancelled_by_dispute')`
     ),
     check(
       'check_payouts_reason',
@@ -208,15 +210,15 @@ export const payouts = pgTable(
     // organisation's money while the organisation has no owner: it is held
     // pending as `no_owner` and handed to the next owner support assigns
     // (owner decision 2026-10-18, Codex-2hxff.37). It can never be paid
-    // without a payee: only a pending row may lack one — or one a refund
-    // cancelled, which nothing ever pays.
+    // without a payee: only a pending row may lack one — or one a refund or
+    // a lost dispute cancelled, which nothing ever pays.
     //
     // COALESCE: with `reason` NULL, `reason = 'no_owner'` is NULL, and a
     // CHECK that evaluates to NULL PASSES. Without it a payee-less org slice
     // with no reason would be admitted.
     check(
       'check_payouts_user_required',
-      sql`(${table.payoutType} = 'platform_fee') OR (${table.userId} IS NOT NULL) OR (COALESCE(${table.reason} = 'no_owner', false) AND ${table.status} IN ('pending', 'cancelled_by_refund') AND ${table.payoutType} IN ('organization_fee', 'creator_payout_to_owner'))`
+      sql`(${table.payoutType} = 'platform_fee') OR (${table.userId} IS NOT NULL) OR (COALESCE(${table.reason} = 'no_owner', false) AND ${table.status} IN ('pending', 'cancelled_by_refund', 'cancelled_by_dispute') AND ${table.payoutType} IN ('organization_fee', 'creator_payout_to_owner'))`
     ),
     // Invariant: a paid row must carry EITHER a stripe_transfer_id (subscription
     // pipeline + secondary org-fee transfer) OR a stripe_charge_id (destination-
@@ -260,7 +262,8 @@ export type PayoutStatus =
   | 'pending'
   | 'failed'
   | 'reversed'
-  | 'cancelled_by_refund';
+  | 'cancelled_by_refund'
+  | 'cancelled_by_dispute';
 export type PayoutReason =
   | 'connect_not_ready'
   | 'connect_restricted'

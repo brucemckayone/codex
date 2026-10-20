@@ -16,6 +16,7 @@ export {
   NotFoundError,
   RateLimitExceededError,
   ServiceError,
+  ServiceUnavailableError,
   StripeNotConfiguredError,
   UnauthorizedError,
   UnsupportedCurrencyError,
