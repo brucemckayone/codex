@@ -7,6 +7,7 @@
  *   - an untagged legacy product is NEVER archived
  *   - a `ci-*` namespace older than 24h is swept (products + customers)
  *   - search pagination walks every page, not just the first 100
+ *   - a customer a concurrent sweep already deleted is skipped, not fatal
  */
 
 import type Stripe from 'stripe';
@@ -209,6 +210,53 @@ describe('cleanupStripeSeedObjects', () => {
     ]);
     expect(summary.archivedStaleCi).toBe(1);
     expect(summary.deletedStaleCiCustomers).toBe(1);
+  });
+
+  it('skips a stale ci-* customer a concurrent sweep already deleted', async () => {
+    // Search is eventually consistent: a customer another run's sweep deleted
+    // seconds ago still comes back, and its delete 404s (Codex-hrubb).
+    const mock = buildMockStripe({
+      customerPages: [
+        [
+          product('cus_ci_gone', STALE_SEC, 'ci-111-aaaaaaaaaaaa'),
+          product('cus_ci_stale', STALE_SEC, 'ci-111-aaaaaaaaaaaa'),
+        ],
+      ],
+    });
+    mock.customers.del.mockRejectedValueOnce(
+      Object.assign(new Error("No such customer: 'cus_ci_gone'"), {
+        code: 'resource_missing',
+      })
+    );
+
+    const summary = await cleanupStripeSeedObjects(asStripe(mock), {
+      seedEnv: MY_ENV,
+      nowMs: NOW_MS,
+    });
+
+    expect(mock.customers.del.mock.calls.map(([id]) => id)).toEqual([
+      'cus_ci_gone',
+      'cus_ci_stale',
+    ]);
+    expect(summary.deletedStaleCiCustomers).toBe(1);
+  });
+
+  it('still fails on any other customer delete error', async () => {
+    const mock = buildMockStripe({
+      customerPages: [
+        [product('cus_ci_stale', STALE_SEC, 'ci-111-aaaaaaaaaaaa')],
+      ],
+    });
+    mock.customers.del.mockRejectedValueOnce(
+      Object.assign(new Error('Rate limited'), { code: 'rate_limit' })
+    );
+
+    await expect(
+      cleanupStripeSeedObjects(asStripe(mock), {
+        seedEnv: MY_ENV,
+        nowMs: NOW_MS,
+      })
+    ).rejects.toThrow('Rate limited');
   });
 
   it('walks every page of the product search', async () => {

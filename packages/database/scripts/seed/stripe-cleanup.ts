@@ -296,13 +296,22 @@ export async function cleanupStripeSeedObjects(
   // Stale CI customers. Deleting a customer cancels its subscriptions, which
   // would otherwise keep renewing on archived prices forever. Only `ci-*`
   // namespaces: a local or shared env reuses its customers on the next seed.
+  // Two runs can sweep the same stale namespace seconds apart, and search is
+  // eventually consistent, so the second still finds a customer the first
+  // just deleted and its delete 404s. Already gone is the goal, not a failure
+  // (Codex-hrubb).
   const seedCustomers = await searchAll(
     (params) => stripe.customers.search(params),
     "metadata['codex_seed']:'true'"
   );
   for (const customer of seedCustomers) {
     if (isStaleCiEnv(envOf(customer), seedEnv, customer.created, cutoffSec)) {
-      await stripe.customers.del(customer.id);
+      try {
+        await stripe.customers.del(customer.id);
+      } catch (error) {
+        if (isResourceMissing(error)) continue;
+        throw error;
+      }
       summary.deletedStaleCiCustomers++;
     }
   }
