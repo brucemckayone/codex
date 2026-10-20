@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BENTO_SPANS, bentoTiles } from './bento';
+import { BENTO_SPANS, bentoSizes, bentoTiles } from './bento';
 
 type Span = readonly [columns: number, rows: number];
 
@@ -70,5 +70,29 @@ describe('bento', () => {
       expect(cells[0][0]).toBe(0);
       expect(cells.find((row) => row.includes(side))?.at(-1)).toBe(side);
     }
+  });
+});
+
+describe('bentoSizes (Codex-61zsk.66)', () => {
+  it('a tile spans its share of six columns from 56rem; on two the lead spans both', () => {
+    // Three items: lead (4 of 6), small, small (2 of 6).
+    expect(bentoSizes(0, 3)).toBe(
+      '(min-width: 56rem) min(66.67vw, 54.67rem), (min-width: 36rem) min(100vw, 82rem), min(100vw, 82rem)'
+    );
+    expect(bentoSizes(1, 3)).toBe(
+      '(min-width: 56rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+    );
+  });
+
+  it("an even count's last tile spans both columns on two", () => {
+    // Four items: lead, side, half, half — the last half spans the pair.
+    expect(bentoSizes(3, 4)).toContain('(min-width: 36rem) min(100vw, 82rem)');
+    expect(bentoSizes(3, 4)).toContain('(min-width: 56rem) min(50vw, 41rem)');
+  });
+
+  it('a lone item spans the width at every size', () => {
+    expect(bentoSizes(0, 1)).toBe(
+      '(min-width: 56rem) min(100vw, 82rem), (min-width: 36rem) min(100vw, 82rem), min(100vw, 82rem)'
+    );
   });
 });

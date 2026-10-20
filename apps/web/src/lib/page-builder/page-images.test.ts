@@ -1,5 +1,9 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  columnSize,
   type ImageRef,
   isImageRef,
   pageImageSrcset,
@@ -206,5 +210,34 @@ describe('storedFocus — what a block steers by (Codex-61zsk.58)', () => {
     [null],
   ])('is nothing for %p', (ref) => {
     expect(storedFocus(ref)).toBeUndefined();
+  });
+});
+
+describe('columnSize (Codex-61zsk.66)', () => {
+  it('is the window, capped at the widest content column', () => {
+    expect(columnSize()).toBe('min(100vw, 82rem)');
+  });
+
+  it('takes a share of both for a picture across part of the column', () => {
+    expect(columnSize(0.5)).toBe('min(50vw, 41rem)');
+    expect(columnSize(0.25)).toBe('min(25vw, 20.5rem)');
+    expect(columnSize(1 / 3)).toBe('min(33.33vw, 27.33rem)');
+  });
+
+  // The cap must be the widest any Style draws, or a picture in that Style's
+  // column would declare less than it is drawn and fetch a file too small.
+  it('caps at the widest --lp-container any Style sets', () => {
+    const styles = join(dirname(fileURLToPath(import.meta.url)), 'kit/styles');
+    const widths = readdirSync(styles)
+      .filter((file) => file.endsWith('.css'))
+      .flatMap((file) =>
+        [
+          ...readFileSync(join(styles, file), 'utf8').matchAll(
+            /--lp-container:\s*([\d.]+)rem/g
+          ),
+        ].map((match) => Number(match[1]))
+      );
+    expect(widths.length).toBeGreaterThan(3);
+    expect(columnSize()).toBe(`min(100vw, ${Math.max(...widths)}rem)`);
   });
 });

@@ -22,12 +22,12 @@
 -->
 <script lang="ts">
   import { hasHead } from '../../model/read';
-  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
+  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
   import Text from '../../primitives/Text.svelte';
-  import { type Picture, pictureVariant } from './arrange';
+  import { type Picture, pictureSizes, pictureVariant } from './arrange';
   import { GALLERY_EMPTY, galleryDefinition } from './definition';
   import GalleryGrid from './GalleryGrid.svelte';
   import GalleryMosaic from './GalleryMosaic.svelte';
@@ -49,6 +49,9 @@
         pictureVariant(layout, index, all.length),
         context.mediaBaseUrl
       ),
+      // Every size it has, chosen at its tile's width (Codex-61zsk.66).
+      srcset: pageImageSrcset(item.image, context.mediaBaseUrl),
+      sizes: pictureSizes(layout, index, all.length),
       alt: item.image.alt ?? '',
       caption: item.caption,
       focus: storedFocus(item.image),

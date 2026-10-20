@@ -3,6 +3,7 @@ import {
   gridColumns,
   MOSAIC_SPANS,
   mosaicTiles,
+  pictureSizes,
   pictureVariant,
   stripShape,
 } from './arrange';
@@ -147,5 +148,61 @@ describe('pictureVariant', () => {
       'wide',
       'tall',
     ]);
+  });
+});
+
+describe('pictureSizes (Codex-61zsk.66)', () => {
+  it('a strip picture is its fixed height at its shape', () => {
+    expect(pictureSizes('strip', 0, 5)).toBe(
+      'clamp(19.5rem, calc(12rem + 24vw), 39rem)'
+    );
+    expect(pictureSizes('strip', 1, 5)).toBe(
+      'clamp(10.4rem, calc(6.4rem + 12.8vw), 20.8rem)'
+    );
+  });
+
+  it('a grid divides the column by its row from 60rem, in two from 36rem', () => {
+    expect(pictureSizes('grid', 0, 1)).toBe('min(100vw, 82rem)');
+    expect(pictureSizes('grid', 0, 3)).toBe(
+      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+    );
+    expect(pictureSizes('grid', 0, 4)).toBe(
+      '(min-width: 60rem) min(50vw, 41rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+    );
+  });
+
+  it('a mosaic tile takes its share of four columns, and on two the first spans both', () => {
+    const tiles = mosaicTiles(5);
+    expect(tiles[0]).toBe('large');
+    expect(pictureSizes('mosaic', 0, 5)).toBe(
+      '(min-width: 53rem) min(75vw, 61.5rem), min(100vw, 82rem)'
+    );
+    expect(pictureSizes('mosaic', 1, 5)).toMatch(/, min\(50vw, 41rem\)$/);
+    expect(pictureSizes('mosaic', 0, 1)).toBe('min(100vw, 82rem)');
+  });
+
+  // The pictures that take `lg` are the ones drawn wide: on the wide layout
+  // each declares at least half the column, and an `md` one a third at most.
+  it('agrees with pictureVariant on which pictures are the large ones', () => {
+    const wideShare = (sizes: string) =>
+      Number(/min\(([\d.]+)vw/.exec(sizes)?.[1]);
+    for (let count = 2; count <= 12; count++) {
+      for (const layout of ['mosaic', 'grid']) {
+        for (let index = 0; index < count; index++) {
+          const share = wideShare(pictureSizes(layout, index, count));
+          const large = pictureVariant(layout, index, count) === 'lg';
+          expect(
+            large ? share >= 50 : share <= 33.34,
+            `${layout} ${index}/${count}: ${share}vw`
+          ).toBe(true);
+        }
+      }
+      for (let index = 0; index < count; index++) {
+        const large = pictureVariant('strip', index, count) === 'lg';
+        expect(pictureSizes('strip', index, count)).toContain(
+          large ? '39rem' : '20.8rem'
+        );
+      }
+    }
   });
 });

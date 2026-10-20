@@ -352,3 +352,34 @@ describe('InstructorBlock', () => {
     expect(edits).toEqual([['quote', 'Twenty minutes is enough.']]);
   });
 });
+
+describe('InstructorBlock: every size the portrait has (Codex-61zsk.66)', () => {
+  const STILL = 'https://cdn.test/c1/media-thumbnails/m1/lg.webp';
+  const SET = ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w']
+    .map((size) => `https://cdn.test/c1/media-thumbnails/m1/${size}`)
+    .join(', ');
+
+  it.each([
+    ['split', '(min-width: 52rem) 50vw, 100vw'],
+    ['centered', 'min(100vw, 26rem)'],
+    ['quote', '6rem'],
+  ])('%s: offers the three sizes its URL names, at its drawn width', async (layout, sizes) => {
+    await render(GUIDE, { layout, media: { guidePortraitUrl: STILL } });
+    const img = [...document.body.querySelectorAll('img')].find(
+      (el) =>
+        el.getAttribute('src') === STILL &&
+        !el.classList.contains('signoff__face')
+    );
+    expect(img?.getAttribute('srcset')).toBe(SET);
+    expect(img?.getAttribute('sizes')).toBe(sizes);
+  });
+
+  it('a still whose URL names no sizes offers none', async () => {
+    await render(GUIDE, { layout: 'split' });
+    const img = document.body.querySelector(
+      `img[src="${MEDIA.guidePortraitUrl}"]`
+    );
+    expect(img).not.toBeNull();
+    expect(img?.hasAttribute('srcset')).toBe(false);
+  });
+});

@@ -326,7 +326,29 @@ describe('HeroBlock', () => {
       );
     });
 
-    it('offers no sizes for the course still, which is not a page image', async () => {
+    it('offers the three sizes a journey still has, not its one large file (Codex-61zsk.66)', async () => {
+      const still = `${CDN}/courses/c1/hero/lg.webp`;
+      await render(
+        { heading: 'H' },
+        {
+          layout: 'cover',
+          context: sampleContext({
+            media: { heroImageUrl: still },
+            mediaBaseUrl: CDN,
+          }),
+        }
+      );
+      const img = document.body.querySelector('img');
+      expect(img?.getAttribute('src')).toBe(still);
+      expect(img?.getAttribute('srcset')).toBe(
+        ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w']
+          .map((size) => `${CDN}/courses/c1/hero/${size}`)
+          .join(', ')
+      );
+      expect(img?.getAttribute('sizes')).toBe('100vw');
+    });
+
+    it('offers no sizes for a still whose URL names none', async () => {
       await render(
         { heading: 'H' },
         {

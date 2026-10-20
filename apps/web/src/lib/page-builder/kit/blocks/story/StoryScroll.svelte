@@ -23,10 +23,14 @@
   interface Props {
     steps: readonly StoryStep[];
     images: readonly (string | null)[];
+    /** Each picture's stored sizes (`pageImageSrcset`), by step. */
+    srcsets?: readonly string[];
+    /** How wide this layout draws a picture, for choosing from them. */
+    sizes?: string;
     level: 1 | 2 | 3;
   }
 
-  const { steps, images, level }: Props = $props();
+  const { steps, images, srcsets = [], sizes, level }: Props = $props();
 
   let live = $state(false);
   let active = $state(0);
@@ -72,6 +76,8 @@
           <div class="story-scroll__media">
             <Media
               image={images[index]}
+              srcset={srcsets[index]}
+              {sizes}
               alt={step.image?.alt ?? ''}
               ratio="4 / 3"
               focus={storedFocus(step.image)}
@@ -86,7 +92,7 @@
       {#each images as image, index (index)}
         {#if image}
           <div class="story-scroll__shot" data-shown={shows[active] === index ? '' : undefined}>
-            <Media {image} alt="" focus={storedFocus(steps[index]?.image)} />
+            <Media {image} srcset={srcsets[index]} {sizes} alt="" focus={storedFocus(steps[index]?.image)} />
           </div>
         {/if}
       {/each}

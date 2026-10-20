@@ -8,6 +8,7 @@ import {
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import { pictureSizes } from './arrange';
 import { GALLERY_COPY } from './copy';
 import { GALLERY_EMPTY, galleryDefinition } from './definition';
 import GalleryBlock from './GalleryBlock.svelte';
@@ -272,5 +273,26 @@ describe('GalleryBlock', () => {
     expect(starter.heading).toContain('Steady Ground');
     expect(starter).not.toHaveProperty('items');
     expect(galleryDefinition.sample).not.toHaveProperty('items');
+  });
+});
+
+describe('GalleryBlock: every size a picture has (Codex-61zsk.66)', () => {
+  it.each([
+    'grid',
+    'mosaic',
+    'strip',
+  ])("%s: each picture offers its set, at its tile's width", async (layout) => {
+    await render({ items: pictures(3) }, { layout });
+    const imgs = [...document.body.querySelectorAll('img')];
+    expect(imgs).toHaveLength(3);
+    imgs.forEach((img, index) => {
+      const key = `landing-pages/p1/images/g${index + 1}`;
+      expect(img.getAttribute('srcset')).toBe(
+        ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w']
+          .map((size) => `${CDN}/${key}/${size}`)
+          .join(', ')
+      );
+      expect(img.getAttribute('sizes')).toBe(pictureSizes(layout, index, 3));
+    });
   });
 });

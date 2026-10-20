@@ -16,7 +16,12 @@
   (`imageAt: 'after'`, before the join button: Codex-61zsk.58).
 -->
 <script lang="ts">
-  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
+  import {
+    columnSize,
+    pageImageSrcset,
+    resolvePageImageUrl,
+    storedFocus,
+  } from '../../../page-images';
   import { paragraphs } from '../../model/read';
   import type { BlockProps } from '../../model/types';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -42,6 +47,17 @@
   const headingSize = $derived(layout === 'statement' && content.body ? 'title' : 'heading');
   const image = $derived(resolvePageImageUrl(content.image, 'lg', context.mediaBaseUrl));
   const focus = $derived(storedFocus(content.image));
+  // Every size the picture has, at the width each form draws it: centred caps
+  // at 52rem, a statement spans the column, and columns take a half once the
+  // band is 56rem wide (Codex-61zsk.66).
+  const srcset = $derived(pageImageSrcset(content.image, context.mediaBaseUrl));
+  const sizes = $derived(
+    layout === 'centered'
+      ? 'min(100vw, 52rem)'
+      : layout === 'columns'
+        ? `(min-width: 56rem) ${columnSize(0.5)}, ${columnSize()}`
+        : columnSize()
+  );
   const beside = $derived(layout === 'columns');
   // Beside the words in `columns`, the picture is neither before nor after them.
   const after = $derived(content.imageAt === 'after' && !beside);
@@ -49,7 +65,7 @@
 
 {#snippet figure(src: string)}
   <div class="text__media" data-at={after ? 'after' : undefined}>
-    <Media image={src} alt={content.image?.alt ?? ''} ratio="var(--_ratio)" {focus} />
+    <Media image={src} {srcset} {sizes} alt={content.image?.alt ?? ''} ratio="var(--_ratio)" {focus} />
   </div>
 {/snippet}
 

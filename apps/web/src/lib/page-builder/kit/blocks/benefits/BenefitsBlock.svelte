@@ -19,7 +19,12 @@
 <script lang="ts">
   import { hasHead } from '../../model/read';
   import { CheckIcon } from '$lib/components/ui/Icon';
-  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
+  import {
+    columnSize,
+    pageImageSrcset,
+    resolvePageImageUrl,
+    storedFocus,
+  } from '../../../page-images';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -59,6 +64,17 @@
       : []
   );
   const pictured = $derived(tileImages.some(Boolean));
+  // Every size each picture has (Codex-61zsk.66). A grid card is one of the
+  // row's `--_n`: one alone, two from 36rem, then three or four from 60rem.
+  const tileSrcsets = $derived(
+    items.map((item) => pageImageSrcset(item.image, context.mediaBaseUrl))
+  );
+  const gridSizes = $derived.by(() => {
+    const count = items.length;
+    if (count <= 1) return columnSize();
+    const wide = [3, 5, 6, 9].includes(count) ? 3 : [4, 7, 8].includes(count) ? 4 : 2;
+    return `(min-width: 60rem) ${columnSize(1 / wide)}, (min-width: 36rem) ${columnSize(0.5)}, ${columnSize()}`;
+  });
 </script>
 
 {#snippet words()}
@@ -135,6 +151,7 @@
       <BenefitsBento
         {items}
         images={tileImages}
+        srcsets={tileSrcsets}
         level={itemLevel}
         featured={featuredScheme(page.style, section.scheme)}
       />
@@ -145,6 +162,8 @@
             {#if pictured}
               <Media
                 image={tileImages[index]}
+                srcset={tileSrcsets[index]}
+                sizes={gridSizes}
                 alt={item.image?.alt ?? ''}
                 ratio="3 / 2"
                 focus={storedFocus(item.image)}

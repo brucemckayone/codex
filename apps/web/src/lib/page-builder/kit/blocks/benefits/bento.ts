@@ -5,6 +5,7 @@
  * two-row block turns to the other side from the one above it
  * (`bento.test.ts` packs each one).
  */
+import { columnSize } from '../../../page-images';
 
 /**
  * A bento tile, as columns × rows of the six-column grid: `lead` 4×2, `side`
@@ -51,4 +52,16 @@ export function bentoTiles(count: number): BentoTile[] {
     { length: count },
     (_, index) => designed[index] ?? 'small'
   );
+}
+
+/**
+ * How wide a bento tile's picture is drawn, as `sizes`, so it fetches from
+ * its srcset the file its tile needs (Codex-61zsk.66): from 56rem a tile
+ * spans its share of six columns; on two (36rem to 56rem) the lead tile, and
+ * an even count's last, span both; under that every tile spans the column.
+ */
+export function bentoSizes(index: number, count: number): string {
+  const tile = bentoTiles(count)[index] ?? 'small';
+  const spansBoth = index === 0 || (index === count - 1 && count % 2 === 0);
+  return `(min-width: 56rem) ${columnSize(BENTO_SPANS[tile][0] / 6)}, (min-width: 36rem) ${spansBoth ? columnSize() : columnSize(0.5)}, ${columnSize()}`;
 }

@@ -23,13 +23,17 @@
   interface Props {
     steps: readonly StoryStep[];
     images: readonly (string | null)[];
+    /** Each picture's stored sizes (`pageImageSrcset`), by step. */
+    srcsets?: readonly string[];
+    /** How wide this layout draws a picture, for choosing from them. */
+    sizes?: string;
     level: 1 | 2 | 3;
     /** The region's name: the section heading, when there is one. */
     label?: string;
     anchor: string;
   }
 
-  const { steps, images, level, label, anchor }: Props = $props();
+  const { steps, images, srcsets = [], sizes, level, label, anchor }: Props = $props();
 
   const pictured = $derived(images.some(Boolean));
 
@@ -56,6 +60,8 @@
         {#if pictured}
           <Media
             image={images[index]}
+            srcset={srcsets[index]}
+            {sizes}
             alt={step.image?.alt ?? ''}
             ratio="4 / 5"
             focus={storedFocus(step.image)}

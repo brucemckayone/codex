@@ -16,6 +16,9 @@
 
   interface Props {
     still?: string | null;
+    /** The still's stored sizes, and how wide it is drawn (`Media`). */
+    srcset?: string;
+    sizes?: string;
     /** CSS aspect ratio; omit to fill the parent. */
     ratio?: string;
     alt?: string;
@@ -37,6 +40,8 @@
 
   const {
     still = null,
+    srcset,
+    sizes,
     ratio,
     alt = '',
     pending = false,
@@ -50,7 +55,7 @@
 </script>
 
 <div class="clip {className ?? ''}" data-place={place}>
-  <Media image={still} {ratio} {pending} {alt} {mark} {scheme} />
+  <Media image={still} {srcset} {sizes} {ratio} {pending} {alt} {mark} {scheme} />
   {#if children}<div class="clip__control">{@render children()}</div>{/if}
   {#if prompt && !still && !pending}
     <p class="clip__prompt" data-lp-edit-only><span>{prompt}</span></p>
