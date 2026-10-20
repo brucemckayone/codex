@@ -4,9 +4,11 @@
  * Tests for revenue split calculation logic
  */
 
+import { FEES } from '@codex/constants';
 import { describe, expect, it } from 'vitest';
 import { RevenueCalculationError } from '../errors';
 import {
+  applyMinPlatformFeeFloor,
   calculateRevenueSplit,
   DEFAULT_ORG_FEE_PERCENTAGE,
   DEFAULT_PLATFORM_FEE_PERCENTAGE,
@@ -295,6 +297,32 @@ describe('Revenue Calculator', () => {
       // a 10% slice to the org on one-off purchases by default. Override via
       // fee_config_org.one_off_org_fee_percent for per-org tuning.
       expect(DEFAULT_ORG_FEE_PERCENTAGE).toBe(1000);
+    });
+  });
+
+  describe('the default minimum platform fee (owner decision 2026-10-13)', () => {
+    it('a £1 sale with no fee row: platform 25p, organisation 9p, creator 66p', () => {
+      const split = applyMinPlatformFeeFloor(
+        100,
+        calculateRevenueSplit(100, FEES.PLATFORM_PERCENT, FEES.ORG_PERCENT),
+        FEES.MIN_PLATFORM_FEE_CENTS
+      );
+      expect(split).toMatchObject({
+        platformFeeCents: 25,
+        organizationFeeCents: 9,
+        creatorPayoutCents: 66,
+      });
+    });
+
+    it('a sale whose percentage already clears it is unchanged', () => {
+      const base = calculateRevenueSplit(
+        1000,
+        FEES.PLATFORM_PERCENT,
+        FEES.ORG_PERCENT
+      );
+      expect(
+        applyMinPlatformFeeFloor(1000, base, FEES.MIN_PLATFORM_FEE_CENTS)
+      ).toEqual(base);
     });
   });
 });

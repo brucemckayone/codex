@@ -123,6 +123,12 @@ export const FEES = {
   // org's Connect account. Override per-org via the `fee_config_org` table.
   ORG_PERCENT: 1000,
   SUBSCRIPTION_ORG_PERCENT: 1500, // 15.00% of post-platform-fee for subscriptions
+  // The platform never takes less than this from a sale (owner decision
+  // 2026-10-13: a £1 sale earns 10p at 10%, but Stripe charges about 21p).
+  // The code default, so every environment and every fresh database applies
+  // it; fee_config_platform.min_platform_fee_cents overrides it when a row
+  // exists. docs/payments/fees-and-splits.md.
+  MIN_PLATFORM_FEE_CENTS: 25,
 } as const;
 
 export const CURRENCY = {

@@ -43,7 +43,7 @@ Each value is looked up in this order; the first one set wins, column by column:
 | `oneOffOrgFeePercent` (platform row) | Organisation's cut of the post-platform pool on one-off sales | 1000 (10%) |
 | `subscriptionOrgFeePercent` (platform row) | Organisation's cut of the post-platform pool on subscriptions | 1500 (15%) |
 | `orgFeePercent` (organisation and override rows) | One organisation fee that replaces both platform values above | — |
-| `minPlatformFeeCents` | [Minimum platform fee](#minimum-platform-fee) | 0 |
+| `minPlatformFeeCents` | [Minimum platform fee](#minimum-platform-fee) | 25 (25p) |
 | `minTransferCents` | [Minimum transfer](#minimum-transfer) | 0 |
 
 **Notice.** A fee **increase**, at any level, is emailed to every affected
@@ -81,17 +81,20 @@ while Stripe's published UK card price is 1.5% + 20p, about 21.5p.
 - The platform fee is the **larger** of its percentage and `minPlatformFeeCents`.
 - The extra is taken from the creator first, then from the organisation; no slice
   goes below zero. If the floor exceeds the whole sale, the platform takes it all.
-- The floor is **25p** (`minPlatformFeeCents = 25`), and every price is at least
-  **£1.00**, so the floor always covers Stripe's fee (owner decision 2026-10-13,
+- The floor is **25p**. That is the code default (`FEES.MIN_PLATFORM_FEE_CENTS`),
+  so every environment and a fresh database apply it with no row;
+  `fee_config_platform.min_platform_fee_cents` overrides it when the row exists
+  (set in production on 2026-10-20). Every price is at least **£1.00**, so the
+  floor always covers Stripe's fee (owner decision 2026-10-13,
   "£1 price, 25p min fee (Recommended)"). Stripe itself refuses card charges
   under £0.30.
 - A £1.00 sale with no agreement: the normal split is 10 / 9 / 81; the 15p
   shortfall comes from the creator, giving **platform 25p, organisation 9p,
   creator 66p**.
 
-— **gap**: `Codex-2hxff.7` (the floor exists but is never applied to a sale, and
-is `0` today), `Codex-2hxff.32` (prices of 1p–29p pass validation and then fail
-at Stripe Checkout).
+— **gap**: `Codex-2hxff.32` (prices of 1p–29p pass validation and then fail
+at Stripe Checkout). The floor reaches every sale path since #597 (fee config in
+webhooks and the cron; `Codex-2hxff.7`, closed).
 
 ## Minimum transfer
 

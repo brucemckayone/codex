@@ -65,7 +65,9 @@ describe('FeeConfigService — fallback chain', () => {
     );
     expect(fees.platformFeePercent).toBe(FEES.PLATFORM_PERCENT);
     expect(fees.orgFeePercent).toBe(FEES.SUBSCRIPTION_ORG_PERCENT);
-    expect(fees.minPlatformFeeCents).toBe(0);
+    // The minimum platform fee applies with no row (owner decision 2026-10-13).
+    expect(fees.minPlatformFeeCents).toBe(25);
+    expect(fees.minPlatformFeeCents).toBe(FEES.MIN_PLATFORM_FEE_CENTS);
     expect(fees.minTransferCents).toBe(0);
   });
 
@@ -81,6 +83,7 @@ describe('FeeConfigService — fallback chain', () => {
     );
     expect(fees.platformFeePercent).toBe(FEES.PLATFORM_PERCENT);
     expect(fees.orgFeePercent).toBe(FEES.ORG_PERCENT);
+    expect(fees.minPlatformFeeCents).toBe(FEES.MIN_PLATFORM_FEE_CENTS);
   });
 
   it('uses platform row when no org/override exists', async () => {

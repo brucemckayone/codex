@@ -25,6 +25,7 @@ import {
   ACCESS_TYPES,
   CONTENT_STATUS,
   CURRENCY,
+  FEES,
   PURCHASE_STATUS,
   stripeEnvMetadata,
 } from '@codex/constants';
@@ -621,7 +622,7 @@ export class PurchaseService extends BaseService {
           : {
               platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
               orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
-              minPlatformFeeCents: 0,
+              minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
               minTransferCents: 0,
             };
 
@@ -1085,7 +1086,7 @@ export class PurchaseService extends BaseService {
           : {
               platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
               orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
-              minPlatformFeeCents: 0,
+              minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
               minTransferCents: 0,
             };
 
