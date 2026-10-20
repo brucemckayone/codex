@@ -90,6 +90,11 @@ for (const [width, height] of [
       ).toBeLessThanOrEqual(0);
       expect(await offScreen(page), 'controls past the screen').toEqual([]);
 
+      // The pointer starts at (0, 0), over the studio's desktop rail, whose
+      // flyout opens on hover and covers the tab row (CI, PR #616): rest it
+      // on the canvas, as a hand would, before reaching for anything.
+      await page.mouse.move(width * 0.7, height / 2);
+
       for (const name of TABS) {
         const tab = page.getByRole('tab', { name, exact: true });
         await tab.click();
