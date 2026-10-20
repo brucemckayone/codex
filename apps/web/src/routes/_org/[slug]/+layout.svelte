@@ -44,6 +44,9 @@
 
   // Studio routes have their own header/sidebar — hide the org chrome
   const isStudio = $derived(page.url.pathname.startsWith('/studio'));
+  // The page kit's gallery stands in for a live page (its screenshot mode),
+  // so the shader-backed page rules below apply there as on a live page.
+  const isKitGallery = $derived(page.url.pathname.startsWith('/studio/page-kit'));
   // Landing page needs mix-blend-mode to reach the shader canvas,
   // which requires dropping view-transition-name (it creates isolation)
   const isLanding = $derived(page.url.pathname === '/');
@@ -449,6 +452,7 @@
 <div
   class="org-layout"
   class:org-layout--studio={isStudio}
+  class:org-layout--kit-gallery={isKitGallery}
   class:org-layout--landing={isLanding}
   data-org-brand={hasBranding ? '' : undefined}
   data-org-bg={brandBackground ? '' : undefined}
@@ -601,16 +605,32 @@
      so the section's own veil sits on the shader itself. The kit clears its
      root and keeps every other section opaque (`kit/styles/surfaces.css`). A
      Style that asks for a hazy background takes a third of the blur, and one
-     that asks for a sharp background lifts it. */
-  .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere])) .org-main {
+     that asks for a sharp background lifts it.
+     Never in the studio but for the page kit's gallery, which stands in for a
+     live page (Codex-61zsk.21). The page editor draws a page, and a
+     thumbnail of it per Style, inside this root; with the rule live, every
+     page added or taken away under it (a tab's thumbnails, a gallery's
+     previews) had the browser re-match `:has()` here and restyle the WHOLE
+     page: 150-250ms of each Page-tab switch on a long page. The gate is two
+     classes and comes BEFORE the `:has()`: a compound that fails first never
+     reaches it, so nothing below the root is watched. A `:has()` in the gate
+     would itself mark the root as one to re-match. */
+  .org-layout[data-hero-shader-active]:is(:not(.org-layout--studio), .org-layout--kit-gallery):has(
+      :global(.lp[data-lp-atmosphere])
+    )
+    .org-main {
     background: transparent;
   }
 
-  .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere='hazy'])) {
+  .org-layout[data-hero-shader-active]:is(:not(.org-layout--studio), .org-layout--kit-gallery):has(
+      :global(.lp[data-lp-atmosphere='hazy'])
+    ) {
     --_shader-blur: var(--blur-xl);
   }
 
-  .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere='sharp']))
+  .org-layout[data-hero-shader-active]:is(:not(.org-layout--studio), .org-layout--kit-gallery):has(
+      :global(.lp[data-lp-atmosphere='sharp'])
+    )
     :global(.shader-hero--fullpage) {
     filter: none;
   }
@@ -624,16 +644,12 @@
      window, so the frame the GPU renders each tick and its mobile resolution
      cap are unchanged. `cover` keeps the shader's aspect; its crop is off
      screen. The reset caps a canvas at `max-width: 100%`. */
-  .org-layout[data-hero-shader-active]:not(.org-layout--landing):has(
-      :global(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp']))
-    )
+  .org-layout[data-hero-shader-active]:not(.org-layout--landing):is(:not(.org-layout--studio), .org-layout--kit-gallery):has(:global(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp'])))
     :global(.shader-hero--fullpage) {
     overflow: visible;
   }
 
-  .org-layout[data-hero-shader-active]:not(.org-layout--landing):has(
-      :global(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp']))
-    )
+  .org-layout[data-hero-shader-active]:not(.org-layout--landing):is(:not(.org-layout--studio), .org-layout--kit-gallery):has(:global(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp'])))
     :global(.shader-hero--fullpage canvas) {
     width: calc(100% + 4 * var(--_shader-blur, var(--blur-2xl)));
     max-width: none;
@@ -655,7 +671,10 @@
 
     /* The page ends above that clearance, so it keeps its usual cover: the
        shader is seen through the page's own veil, never raw below it. */
-    .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere])) .org-main {
+    .org-layout[data-hero-shader-active]:is(:not(.org-layout--studio), .org-layout--kit-gallery):has(
+        :global(.lp[data-lp-atmosphere])
+      )
+      .org-main {
       background: linear-gradient(color-mix(in srgb, var(--color-background) 80%, transparent) 0 0)
         bottom / 100% var(--space-20) no-repeat;
     }
