@@ -6,6 +6,7 @@
   Structure adapts to any brand via design tokens.
 -->
 <script lang="ts">
+  import { subscriptionStatusGrantsAccess } from '@codex/constants';
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { replaceState } from '$app/navigation';
@@ -313,9 +314,7 @@
   );
 
   const hasActiveSubscription = $derived(
-    (subQuery.data ?? []).some(
-      (s) => s.status === 'active' || s.status === 'cancelling'
-    )
+    (subQuery.data ?? []).some((s) => subscriptionStatusGrantsAccess(s.status))
   );
 
   const hasOrgAccess = $derived(

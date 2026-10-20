@@ -558,7 +558,7 @@
   "subscription_churn_reason_technical_issues": "Technical issues",
   "subscription_churn_reason_other": "Other",
   "subscription_churn_reason_other_required": "Tell us more so we can improve.",
-  "subscription_health_banner_past_due_single": "A subscription needs attention — update your payment method to restore access.",
+  "subscription_health_banner_past_due_single": "A subscription needs attention — update your payment method to keep access.",
   "subscription_health_banner_paused_single": "A subscription is paused. Resume to restore access.",
   "subscription_health_banner_multiple": "{count} subscriptions need attention.",
   "subscription_health_banner_cta_manage": "Manage subscriptions",

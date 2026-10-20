@@ -31,9 +31,12 @@ interface MappedStripeSubscription {
 /**
  * Deterministic Stripe-status → Codex-status resolution. `cancel_at_period_end
  * === true` shadows status='active' into CANCELLING (Stripe continues to
- * report 'active' for the remainder of the paid period). Unknown Stripe
- * strings (e.g. 'trialing', 'unpaid', 'incomplete_expired') fall through to
- * the `fallback` so callers can pass the prior DB status and not silently
+ * report 'active' for the remainder of the paid period). `unpaid` — Stripe
+ * gave up retrying a failed renewal — ends access exactly as `canceled` does
+ * (docs/payments/subscriptions.md#failed-payments), because `past_due` now
+ * grants access and an `unpaid` row left `past_due` would keep it for ever.
+ * Unknown Stripe strings (e.g. 'trialing', 'incomplete_expired') fall through
+ * to the `fallback` so callers can pass the prior DB status and not silently
  * discard state — the audit's V2 regression.
  */
 export function resolveStatus(
@@ -49,12 +52,13 @@ export function resolveStatus(
     case 'past_due':
       return SUBSCRIPTION_STATUS.PAST_DUE;
     case 'canceled':
+    case 'unpaid':
       return SUBSCRIPTION_STATUS.CANCELLED;
     case 'incomplete':
       return SUBSCRIPTION_STATUS.INCOMPLETE;
     case 'paused':
       return SUBSCRIPTION_STATUS.PAUSED;
-    // trialing, incomplete_expired, unpaid — Stripe statuses with no direct
+    // trialing, incomplete_expired — Stripe statuses with no direct
     // Codex counterpart today. Returning the fallback preserves the prior
     // DB state rather than silently coercing to 'active' / 'cancelled'.
     default:

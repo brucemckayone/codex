@@ -5214,6 +5214,42 @@ describe('SubscriptionService', () => {
       expect(updated.status).toBe('past_due');
     });
 
+    // Codex-2hxff.10: past_due GRANTS access while Stripe retries, so only a
+    // paid-up subscription may move to it.
+    it.each([
+      'incomplete',
+      'cancelled',
+      'paused',
+    ] as const)('leaves a %s subscription as it is (past_due would grant access)', async (status) => {
+      const { org, tier1 } = await createFullOrg(`invoice-failed-${status}`);
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status,
+            })
+          )
+          .returning()
+      );
+      const mockInvoice = createMockStripeInvoice({
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentFailed(mockInvoice);
+
+      const { eq } = await import('drizzle-orm');
+      const after = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, sub.id))
+      );
+      expect(after.status).toBe(status);
+    });
+
     it('should return { userId: undefined, orgId: undefined } for an unknown subscription', async () => {
       // Negative path — webhook for a subscription that never reached our DB.
       // Handler must not crash; userId/orgId are undefined so the route
@@ -5401,6 +5437,47 @@ describe('SubscriptionService', () => {
       expect(row.status).toBe('past_due');
       expect(result?.userId).toBe(otherCreatorId);
       expect(result?.orgId).toBe(org.id);
+    });
+
+    // Codex-2hxff.10: a FIRST invoice that failed leaves the Stripe
+    // subscription `incomplete`. The self-healed row takes that status, and
+    // stays there: past_due would grant access that was never paid for.
+    it('race #2, first invoice failed: the self-healed row is incomplete, not past_due', async () => {
+      const { org, tier1 } = await createFullOrg('selfheal-race2-incomplete');
+      const stripeSubId = uniqueStripeSubId('race2inc');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce({
+        ...buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        }),
+        status: 'incomplete',
+      });
+
+      const mockInvoice = createMockStripeInvoice({
+        billing_reason: 'subscription_create',
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentFailed(mockInvoice);
+
+      const { eq } = await import('drizzle-orm');
+      const row = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+          .limit(1)
+      );
+      expect(row.status).toBe('incomplete');
     });
 
     it('Stripe 404 on retrieve: handler returns cleanly, no transfer, no row inserted', async () => {

@@ -36,7 +36,8 @@ type BannerVariant = 'error' | 'warning';
 /**
  * Pick the banner's severity paint.
  *
- * `past_due` → error (access denial / dunning imminent)
+ * `past_due` → error (payment failed: access continues while Stripe
+ *              retries, and ends if every retry fails)
  * `paused`   → warning (reversible, user-initiated pause)
  * Mixed      → error (floor to the more severe case)
  *

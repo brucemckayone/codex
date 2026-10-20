@@ -32,7 +32,6 @@ fixed by PR 2 below. The production checks to run around these releases
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
-| `Codex-2hxff.10` | P2 | Access continues while a failed renewal is retried; a full refund cancels the subscription | [subscriptions](subscriptions.md#failed-payments) |
 | `Codex-2hxff.13` | P2 | Pending money is released as soon as the payee becomes payable | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
 | `Codex-2hxff.14` | P1 | Checkout only for content a purchase can unlock; no double purchases | [purchases](purchases.md#checkout) |
 | `Codex-2hxff.15` | P1 | Our subscription row always follows Stripe; duplicates are cancelled and refunded | [subscriptions](subscriptions.md#lifecycle-and-access) |
@@ -64,8 +63,9 @@ fixed by PR 2 below. The production checks to run around these releases
 minimum), `.8` (partial refunds) and `.9` (disputes) were merged to `dev` and
 released to production on 2026-10-20 (#617), so are not listed above; the
 dispute follow-ups are `.58`–`.61`. `Codex-2hxff.32` (every one-off price at
-least £1.00) is fixed in its own pull request. `.26` (this documentation) and
-`.31` (the policy drafts) are done.
+least £1.00) and `.10` (a failed renewal keeps access while Stripe retries; a
+full refund of the latest payment cancels) are fixed together in one pull
+request. `.26` (this documentation) and `.31` (the policy drafts) are done.
 
 `Codex-2hxff.6`, `.11`, `.12` and `.37` (label `payments-fix-pr-2`) are fixed in
 payments fix PR 2 and so are not listed above: webhooks answer 500 for a

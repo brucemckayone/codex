@@ -35,19 +35,20 @@ const TIERS: SubscriptionTier[] = [
 ];
 
 describe('isAccessGrantingSubscription', () => {
-  it('treats active and cancelling as access-granting', () => {
+  it('treats active, cancelling and past_due as access-granting', () => {
     expect(isAccessGrantingSubscription(makeSub({ status: 'active' }))).toBe(
       true
     );
     expect(
       isAccessGrantingSubscription(makeSub({ status: 'cancelling' }))
     ).toBe(true);
+    // A failed renewal keeps access while Stripe retries (Codex-2hxff.10).
+    expect(isAccessGrantingSubscription(makeSub({ status: 'past_due' }))).toBe(
+      true
+    );
   });
 
-  it('rejects past_due, paused, cancelled, and incomplete', () => {
-    expect(isAccessGrantingSubscription(makeSub({ status: 'past_due' }))).toBe(
-      false
-    );
+  it('rejects paused, cancelled, and incomplete', () => {
     expect(isAccessGrantingSubscription(makeSub({ status: 'paused' }))).toBe(
       false
     );

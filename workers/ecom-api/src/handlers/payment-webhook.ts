@@ -32,6 +32,7 @@ import {
 } from '@codex/constants';
 import type { PurchaseService } from '@codex/purchase';
 import {
+  type CourseSubscriptionService,
   invalidateForUser,
   type SubscriptionService,
 } from '@codex/subscription';
@@ -209,6 +210,7 @@ async function handleChargeRefunded(
   event: Stripe.Event,
   service: PurchaseService,
   subscriptionService: SubscriptionService,
+  courseSubscriptionService: CourseSubscriptionService,
   c: Context<StripeWebhookEnv>
 ): Promise<void> {
   const obs = c.get('obs');
@@ -256,19 +258,54 @@ async function handleChargeRefunded(
     accessEnded: refundResult?.accessEnded ?? null,
   });
 
-  // Library cache bump is always safe once we have a userId. Revocation
-  // is org-scoped and only fires when the refund is subscription-linked
-  // (service returns `{ userId, orgId }`). This conditional is wired ahead
-  // of time so that when subscription-linked refunds start returning orgId
-  // (see Codex-sxu5a for dispute work), revocation fires without another
-  // round of plumbing.
+  // Library cache bump is always safe once we have a userId. A purchase's
+  // access ends through its entitlement; the streaming block is written for
+  // a cancelled subscription below.
   invalidateLibrary(c, refundResult?.userId);
-  const result = refundResult as { userId: string; orgId?: string } | undefined;
-  if (result?.userId && result.orgId) {
-    revokeAccess(c, result.userId, result.orgId);
-  }
 
   await sendRefundEmails(c, service, charge, refundResult);
+
+  // Last, so a Stripe failure here never holds up the clawback, the purchase
+  // or the emails; a redelivery repeats only steps that are safe to repeat.
+  await endSubscriptionForFullRefund(
+    c,
+    subscriptionService,
+    courseSubscriptionService,
+    {
+      chargeId: charge.id,
+      paymentIntentId,
+      amountCents: charge.amount,
+      amountRefundedCents: charge.amount_refunded,
+    }
+  );
+}
+
+/**
+ * A full refund of the latest subscription payment cancels the subscription
+ * and ends access now (owner decision P-4; a partial refund leaves it
+ * running). It is cancelled at Stripe, then ended here exactly as
+ * `customer.subscription.deleted` ends it — that event re-applies the same
+ * state when it lands, and sends the cancellation email — and the streaming
+ * block is written.
+ */
+async function endSubscriptionForFullRefund(
+  c: Context<StripeWebhookEnv>,
+  subscriptionService: SubscriptionService,
+  courseSubscriptionService: CourseSubscriptionService,
+  charge: Parameters<SubscriptionService['cancelForFullRefund']>[0]
+): Promise<void> {
+  const ended = await subscriptionService.cancelForFullRefund(charge);
+  if (!ended) return;
+  const { subscription, cancelled } = ended;
+  if (subscription.kind === 'course') {
+    await courseSubscriptionService.handleCourseSubscriptionDeleted(cancelled);
+  } else {
+    await subscriptionService.handleSubscriptionDeleted(cancelled);
+  }
+  invalidateLibrary(c, subscription.userId);
+  if (subscription.organizationId) {
+    revokeAccess(c, subscription.userId, subscription.organizationId);
+  }
 }
 
 /**
@@ -598,7 +635,13 @@ export async function handlePaymentWebhook(
 
     switch (event.type) {
       case STRIPE_EVENTS.CHARGE_REFUNDED:
-        await handleChargeRefunded(event, service, subscriptionService, c);
+        await handleChargeRefunded(
+          event,
+          service,
+          subscriptionService,
+          services.courseSubscription,
+          c
+        );
         break;
 
       case STRIPE_EVENTS.REFUND_UPDATED:

@@ -69,6 +69,17 @@ describe('resolveStatus', () => {
     );
   });
 
+  // Codex-2hxff.10: past_due grants access, so an `unpaid` subscription (Stripe
+  // gave up retrying) left past_due would keep access for ever.
+  it('maps unpaid → CANCELLED, whatever the prior status', () => {
+    expect(resolveStatus('unpaid', false, SUBSCRIPTION_STATUS.PAST_DUE)).toBe(
+      SUBSCRIPTION_STATUS.CANCELLED
+    );
+    expect(resolveStatus('unpaid', true, SUBSCRIPTION_STATUS.ACTIVE)).toBe(
+      SUBSCRIPTION_STATUS.CANCELLED
+    );
+  });
+
   it('maps incomplete → INCOMPLETE', () => {
     expect(resolveStatus('incomplete', false, SUBSCRIPTION_STATUS.ACTIVE)).toBe(
       SUBSCRIPTION_STATUS.INCOMPLETE
@@ -85,16 +96,14 @@ describe('resolveStatus', () => {
     // The pre-audit handler fell through to `let status = sub.status`
     // silently — meaning `trialing`, `unpaid`, `incomplete_expired` all
     // left the DB status stale. The mapper returns the explicit fallback
-    // so callers can pass the prior status with their eyes open.
+    // so callers can pass the prior status with their eyes open. (`unpaid`
+    // is now mapped — see above.)
     expect(resolveStatus('trialing', false, SUBSCRIPTION_STATUS.PAUSED)).toBe(
       SUBSCRIPTION_STATUS.PAUSED
     );
     expect(
       resolveStatus('incomplete_expired', false, SUBSCRIPTION_STATUS.ACTIVE)
     ).toBe(SUBSCRIPTION_STATUS.ACTIVE);
-    expect(resolveStatus('unpaid', false, SUBSCRIPTION_STATUS.ACTIVE)).toBe(
-      SUBSCRIPTION_STATUS.ACTIVE
-    );
   });
 });
 

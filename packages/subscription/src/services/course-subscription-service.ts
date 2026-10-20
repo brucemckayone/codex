@@ -29,6 +29,7 @@
  */
 
 import {
+  ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   BILLING_INTERVAL,
   CONTENT_STATUS,
   CURRENCY,
@@ -85,9 +86,6 @@ import type { TierPriceChangeMailer } from './subscription-service';
 
 /** Marks a Stripe subscription as a course sub (vs. an org tier sub). */
 export const COURSE_SUBSCRIPTION_METADATA_TYPE = 'course_subscription';
-
-/** Statuses under which a course subscription's stored grant stays live. */
-const GRANTING_STATUSES = ['active', 'cancelling', 'past_due'];
 
 interface CourseSubscriptionServiceConfig extends ServiceConfig {
   /** Injected so invoice payouts resolve fees via the 3-tier fallback chain. */
@@ -785,7 +783,9 @@ export class CourseSubscriptionService extends BaseService {
           and(
             eq(courseSubscriptions.userId, userId),
             eq(courseSubscriptions.courseId, input.courseId),
-            inArray(courseSubscriptions.status, GRANTING_STATUSES)
+            inArray(courseSubscriptions.status, [
+              ...ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
+            ])
           )
         )
         .limit(1);

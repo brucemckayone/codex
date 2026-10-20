@@ -4487,7 +4487,7 @@ export const subscription_churn_reason_other_required = () => `Tell us more so w
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const subscription_health_banner_past_due_single = () => `A subscription needs attention — update your payment method to restore access.`
+export const subscription_health_banner_past_due_single = () => `A subscription needs attention — update your payment method to keep access.`
 
 
 /**

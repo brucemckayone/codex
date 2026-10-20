@@ -113,7 +113,10 @@ import {
   schedulePriceChange,
 } from './pending-price-change';
 import { calculateRevenueSplit } from './revenue-split';
-import { mapStripeSubscriptionStatus } from './stripe-status-mapper';
+import {
+  mapStripeSubscriptionStatus,
+  resolveStatus,
+} from './stripe-status-mapper';
 import {
   cancelLostDisputeSubscription,
   type DisputedSubscription,
@@ -127,6 +130,11 @@ import {
   invalidateForUser,
   type WaitUntilFn,
 } from './subscription-invalidation';
+import {
+  cancelForFullRefund,
+  type RefundCancellation,
+  type RefundedCharge,
+} from './subscription-refund';
 
 type Subscription = typeof subscriptions.$inferSelect;
 type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
@@ -1173,7 +1181,14 @@ export class SubscriptionService extends BaseService {
               typeof stripeSub.customer === 'string'
                 ? stripeSub.customer
                 : stripeSub.customer.id,
-            status: SUBSCRIPTION_STATUS.ACTIVE,
+            // Stripe's own status, not a blanket ACTIVE: a FIRST invoice that
+            // failed (invoice.payment_failed before .created) leaves the
+            // subscription `incomplete`, which must not grant access.
+            status: resolveStatus(
+              stripeSub.status,
+              stripeSub.cancel_at_period_end ?? false,
+              SUBSCRIPTION_STATUS.ACTIVE
+            ),
             billingInterval,
             currentPeriodStart: new Date(periodStart * 1000),
             currentPeriodEnd: new Date(periodEnd * 1000),
@@ -1600,17 +1615,40 @@ export class SubscriptionService extends BaseService {
         userId = sub.userId;
         orgId = sub.organizationId;
 
-        await this.db
+        // past_due GRANTS access while Stripe retries (owner decision P-3),
+        // so only a subscription that was paid up may move to it. A failed
+        // FIRST payment stays `incomplete`, and a late event never revives a
+        // cancelled or paused row.
+        const [moved] = await this.db
           .update(subscriptions)
           .set({
             status: SUBSCRIPTION_STATUS.PAST_DUE,
             updatedAt: new Date(),
           })
-          .where(eq(subscriptions.id, sub.id));
+          .where(
+            and(
+              eq(subscriptions.id, sub.id),
+              inArray(subscriptions.status, [
+                SUBSCRIPTION_STATUS.ACTIVE,
+                SUBSCRIPTION_STATUS.PAST_DUE,
+              ])
+            )
+          )
+          .returning();
 
-        this.obs.info('Subscription status updated to past_due', {
-          stripeSubscriptionId: stripeSubId,
-        });
+        if (moved) {
+          this.obs.info('Subscription status updated to past_due', {
+            stripeSubscriptionId: stripeSubId,
+          });
+        } else {
+          this.obs.info(
+            'Payment failed on a subscription not paid up; status kept',
+            {
+              stripeSubscriptionId: stripeSubId,
+              status: sub.status,
+            }
+          );
+        }
       }
     }
 
@@ -4422,6 +4460,21 @@ export class SubscriptionService extends BaseService {
       );
     }
     return ended;
+  }
+
+  // ── Refunds (Codex-2hxff.10; docs/payments/subscriptions.md#refunds) ──
+
+  /**
+   * A full refund of the latest payment: the subscription cancelled at Stripe
+   * (owner decision P-4). The caller then applies the cancellation as for
+   * `customer.subscription.deleted`, so access ends now rather than when that
+   * event lands. Undefined for a partial refund, a purchase, or an earlier
+   * payment. Tier and course subscriptions alike.
+   */
+  async cancelForFullRefund(
+    charge: RefundedCharge
+  ): Promise<RefundCancellation | undefined> {
+    return cancelForFullRefund(this.disputeDeps(), charge);
   }
 
   private disputeDeps() {

@@ -292,6 +292,32 @@ describe('Course monetization round-trip (WP-6)', () => {
     expect(await hasCourseEntitlement(db, tierSubUserId, courseId)).toBe(true);
   });
 
+  it('3b. a past_due tier subscription keeps derived course access; cancelled ends it (Codex-2hxff.10)', async () => {
+    const courseId = await createCourse(db, orgAId, creatorId, {
+      priceCents: null,
+    });
+    const svc = new CourseAccessService({ db, environment: 'test' });
+    await svc.setTierAccess(orgAId, courseId, [tierAId]);
+    const [userId] = await seedTestUsers(db, 1);
+    const [sub] = await db
+      .insert(subscriptions)
+      .values(
+        createTestSubscriptionInput(userId ?? '', orgAId, tierAId, {
+          status: 'past_due',
+        })
+      )
+      .returning();
+
+    // A failed renewal keeps access while Stripe retries (owner decision P-3).
+    expect(await hasCourseEntitlement(db, userId ?? '', courseId)).toBe(true);
+
+    await db
+      .update(subscriptions)
+      .set({ status: 'cancelled' })
+      .where(eq(subscriptions.id, sub?.id ?? ''));
+    expect(await hasCourseEntitlement(db, userId ?? '', courseId)).toBe(false);
+  });
+
   it('4. N1: a cross-org tier grant is rejected by the service guard AND the DB', async () => {
     const courseId = await createCourse(db, orgAId, creatorId, {
       priceCents: null,

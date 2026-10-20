@@ -118,6 +118,31 @@ export const SUBSCRIPTION_STATUS = {
 } as const;
 
 /**
+ * The statuses under which a subscription (org tier or course plan) grants
+ * access. `past_due` is one of them: a failed renewal keeps access while
+ * Stripe retries the card, and access ends when Stripe cancels (owner
+ * decision P-3, docs/payments/subscriptions.md#failed-payments). Every access
+ * gate reads this one list, so the two subscription kinds cannot drift apart.
+ */
+export const ACCESS_GRANTING_SUBSCRIPTION_STATUSES = [
+  SUBSCRIPTION_STATUS.ACTIVE,
+  SUBSCRIPTION_STATUS.CANCELLING,
+  SUBSCRIPTION_STATUS.PAST_DUE,
+] as const;
+
+/** Whether a subscription in `status` grants access (see the list above). */
+export function subscriptionStatusGrantsAccess(
+  status: string | null | undefined
+): boolean {
+  return (
+    status != null &&
+    (ACCESS_GRANTING_SUBSCRIPTION_STATUSES as readonly string[]).includes(
+      status
+    )
+  );
+}
+
+/**
  * Structured churn-reason taxonomy for subscription cancellation (Q7).
  *
  * Persisted on `subscriptions.churn_reason` alongside the existing free-text

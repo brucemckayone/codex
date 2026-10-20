@@ -12,8 +12,11 @@
  *   NOT belong in `CacheType`.
  * - TTL is 1200s (2× the max presigned URL TTL of 600s) to cover in-flight
  *   signed URLs minted just before revocation.
- * - Written by: `customer.subscription.deleted`, `invoice.payment_failed`,
- *   `charge.refunded`, `charge.dispute.created`, `customer.subscription.paused`.
+ * - Written by: `customer.subscription.deleted`, `customer.subscription.updated
+ *   → unpaid`, `charge.refunded` (a full refund of the latest subscription
+ *   payment), `charge.dispute.created`, `customer.subscription.paused`. NOT by
+ *   `invoice.payment_failed`: a failed renewal keeps access while Stripe
+ *   retries (owner decision P-3).
  * - Cleared by: `customer.subscription.updated → ACTIVE`,
  *   `invoice.payment_succeeded` after PAST_DUE, `customer.subscription.resumed`.
  * - NOT written on `cancel_at_period_end=true` — the user retains paid access

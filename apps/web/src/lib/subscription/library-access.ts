@@ -19,7 +19,9 @@
  *     so orgs the user has not recently visited don't grey out.
  *   - 'cancelling' keeps the card fully interactive (access still valid)
  *     and adds a corner badge.
- *   - 'past_due' / 'paused' dim the card and swap the CTA overlay.
+ *   - 'past_due' also keeps the card fully interactive (a failed renewal
+ *     keeps access while Stripe retries) and adds a "payment failed" badge.
+ *   - 'paused' dims the card and swaps the CTA overlay.
  */
 
 import type { SubscriptionItem } from '$lib/collections';
@@ -57,7 +59,8 @@ interface LibraryAccessInput {
  *   active     — no visual change (fully accessible)
  *   cancelling — corner badge "Ends {date}"; card stays fully accessible
  *   revoked    — dimmed card + hover CTA "Subscription ended — reactivate"
- *   past_due   — dimmed card + hover CTA "Payment failed — update payment"
+ *   past_due   — corner badge "Payment failed — update payment"; card stays
+ *                fully accessible while Stripe retries the card
  */
 type LibraryAccessState =
   | { kind: 'active' }

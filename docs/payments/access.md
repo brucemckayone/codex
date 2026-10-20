@@ -26,8 +26,10 @@ in the future. Each person holds at most one live entitlement per resource and
 source.
 
 **A tier subscription grants access** while its status is `active` or
-`cancelling` — and `past_due` while Stripe is still retrying the payment
-(**gap**: `Codex-2hxff.10`) — and the paid period has not ended. A higher tier
+`cancelling` — and `past_due` while Stripe is still retrying the payment —
+and the paid period has not ended. Course subscription plans follow the same
+statuses: every gate reads `ACCESS_GRANTING_SUBSCRIPTION_STATUSES`
+(`@codex/constants`). A higher tier
 includes everything in the tiers below it. A course is included in the exact
 tiers chosen for it in Studio.
 
@@ -64,9 +66,9 @@ unpublished.
 | Subscription cancelled (at period end) | Nothing until the period ends | The subscriber reactivates before it ends |
 | Subscription ends | Everything from that subscription | The person subscribes again |
 | Subscription paused | Everything from that subscription | It is resumed |
-| Renewal payment fails | Nothing while Stripe retries (owner decision P-3) — **gap**: `Codex-2hxff.10` | — |
+| Renewal payment fails | Nothing while Stripe retries (owner decision P-3) | — |
 | Stripe gives up retrying | Everything from that subscription | The person subscribes again |
-| Full refund of a subscription payment | The subscription is cancelled (owner decision P-4) — **gap**: `Codex-2hxff.10` | — |
+| Full refund of the latest subscription payment | Everything from that subscription: it is cancelled at Stripe (owner decision P-4) | The person subscribes again |
 
 ## Streaming revocation
 
@@ -84,13 +86,12 @@ whatever happens to access in the meantime. Two layers close that gap:
 | The block is written when | The block is cleared when |
 |---|---|
 | A subscription ends, is paused, or Stripe gives up retrying | A subscription becomes active again or is resumed |
-| A purchase or subscription payment is fully refunded — **gap**: `Codex-2hxff.8` (not for one-off purchases today) | A payment succeeds after a failure |
+| A purchase or the latest subscription payment is fully refunded — **gap**: `Codex-2hxff.8` (not for one-off purchases today) | A payment succeeds after a failure |
 | A dispute opens | A subscription is reactivated or resumed through our routes |
 | | A dispute is won (a purchase's; a subscription's — **gap**: `Codex-2hxff.9`) |
 
 The block is **not** written when a subscriber cancels at period end (they have
-paid for the period) or when a renewal payment fails and Stripe is retrying it —
-**gap**: `Codex-2hxff.10` (today a failed payment writes it).
+paid for the period) or when a renewal payment fails and Stripe is retrying it.
 
 ## Playback progress
 

@@ -135,7 +135,8 @@
      *
      *   'active'     — no change
      *   'cancelling' — corner 'Ends {date}' badge, card still fully accessible
-     *   'past_due'   — dimmed card + hover CTA 'Payment failed — update payment'
+     *   'past_due'   — corner 'Payment failed — update payment' badge, card still
+     *                  fully accessible while Stripe retries (owner decision P-3)
      *   'revoked'    — dimmed card + hover CTA 'Subscription ended — reactivate'
      */
     accessState?: 'active' | 'cancelling' | 'past_due' | 'revoked';
@@ -446,21 +447,17 @@
   );
 
   // ── Access-state decoration (Codex-k7ppt) ─────────────────────────────
-  // Cancelling: card stays fully interactive; small corner badge.
-  // past_due / revoked: card is dimmed + hover CTA overlay.
-  const isDimmed = $derived(
-    accessState === 'past_due' || accessState === 'revoked'
-  );
+  // Cancelling and past_due: card stays fully interactive; small corner badge
+  // (a failed renewal keeps access while Stripe retries the card).
+  // Revoked: card is dimmed + hover CTA overlay.
+  const isDimmed = $derived(accessState === 'revoked');
   const accessCtaLabel = $derived(
-    accessState === 'past_due'
-      ? m.library_access_payment_failed()
-      : accessState === 'revoked'
-        ? m.library_access_subscription_ended()
-        : ''
+    accessState === 'revoked' ? m.library_access_subscription_ended() : ''
   );
   // Format the period-end date for the 'Ends {date}' badge using the
   // user's locale. Short form keeps the badge compact.
-  const cancellingBadgeText = $derived.by(() => {
+  const accessBadgeText = $derived.by(() => {
+    if (accessState === 'past_due') return m.library_access_payment_failed();
     if (accessState !== 'cancelling' || !accessStatePeriodEnd) return '';
     const d = new Date(accessStatePeriodEnd);
     if (Number.isNaN(d.getTime())) return '';
@@ -661,15 +658,15 @@
         </div>
       {/if}
 
-      <!-- Access state: cancelling badge (top-left corner of thumbnail) -->
-      {#if accessState === 'cancelling' && cancellingBadgeText}
-        <span class="cc__access-badge" aria-label={cancellingBadgeText}>
-          {cancellingBadgeText}
+      <!-- Access state: cancelling / past_due badge (top-left corner of thumbnail) -->
+      {#if accessBadgeText}
+        <span class="cc__access-badge" aria-label={accessBadgeText}>
+          {accessBadgeText}
         </span>
       {/if}
     </div>
 
-    <!-- Access state: hover/tap CTA for past_due / revoked -->
+    <!-- Access state: hover/tap CTA for revoked -->
     {#if isDimmed}
       <a
         class="cc__access-cta"
