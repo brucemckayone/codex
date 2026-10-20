@@ -26,7 +26,7 @@
 	import { type CreateTabsProps, createTabs } from '@melt-ui/svelte';
 	import type { Snippet } from 'svelte';
 	import { untrack } from 'svelte';
-	import { setCtx } from './ctx.js';
+	import { setCtx, setTabsId } from './ctx.js';
 
 	type Props = Omit<CreateTabsProps, 'value' | 'onValueChange'> & {
 		children?: Snippet;
@@ -64,6 +64,8 @@
 		states: { value: valueStore }
 	} = builder;
 	setCtx(builder);
+	const uid = $props.id();
+	setTabsId(uid);
 
 	// Sync component props → Melt-UI options (one-way)
 	$effect(() => {

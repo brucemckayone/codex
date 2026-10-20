@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { HTMLAttributes } from 'svelte/elements';
-	import { getCtx } from './ctx.js';
+	import { getCtx, getTabsId, tabIds } from './ctx.js';
 
 	const {
 		value,
@@ -14,11 +14,20 @@
 	const {
 		elements: { trigger }
 	} = getCtx();
+	const setId = getTabsId();
+	const ids = $derived(tabIds(setId, value));
+	const attrs = $derived($trigger({ value, disabled }));
 </script>
 
+<!-- Melt marks the current tab only in `data-state`: a screen reader needs
+     `aria-selected`, and the panel this tab controls. -->
 <button
-	{...$trigger({ value, disabled })}
+	{...attrs}
 	use:trigger
+	role="tab"
+	id={ids.tab}
+	aria-selected={attrs['data-state'] === 'active'}
+	aria-controls={ids.panel}
 	class="tabs-trigger {className ?? ''}"
 	{...rest}
 >

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { HTMLAttributes } from 'svelte/elements';
-	import { getCtx } from './ctx.js';
+	import { getCtx, getTabsId, tabIds } from './ctx.js';
 
 	const {
 		value,
@@ -13,9 +13,19 @@
 	const {
 		elements: { content }
 	} = getCtx();
+	const setId = getTabsId();
+	const ids = $derived(tabIds(setId, value));
 </script>
 
-<div {...$content(value)} use:content class="tabs-content {className ?? ''}" {...rest}>
+<!-- Named by its own tab: Melt's `aria-labelledby` is the bare value. -->
+<div
+	{...$content(value)}
+	use:content
+	id={ids.panel}
+	aria-labelledby={ids.tab}
+	class="tabs-content {className ?? ''}"
+	{...rest}
+>
 	{@render children?.()}
 </div>
 
