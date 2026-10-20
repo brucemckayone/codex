@@ -1,3 +1,8 @@
+# The name is load-bearing and therefore stale: deploy-production.yml triggers
+# on `workflow_run: workflows: ["PR and Push CI (Neon ephemeral DB)"]`, so a
+# rename silently stops production deploys. Since Codex-75m0t.2 the test jobs
+# no longer use Neon (see "THE TEST DATABASE" below); only `migration-check`
+# still forks a Neon branch.
 name: PR and Push CI (Neon ephemeral DB)
 
 on:
@@ -11,9 +16,6 @@ permissions:
   contents: read
   actions: write
 
-env:
-  EXPIRES_IN_DAYS: 1
-
 # Deduplicates runs for the SAME ref (this is what cancels the `push` twin of a
 # pull_request run, and supersedes an earlier push to the same branch).
 #
@@ -21,11 +23,48 @@ env:
 # concurrency group, so a project-wide key would replace this per-ref dedup with
 # whole-repo serialisation: with cancel-in-progress it would cancel an in-flight
 # release the moment any PR pushed, and without it every run would queue behind
-# every other. Cross-run database isolation is solved where it belongs — by
-# per-run ephemeral branch names — not by refusing to let runs overlap.
+# every other. Cross-run database isolation is solved where it belongs — every
+# DB-using job runs its OWN Postgres service container — not by refusing to let
+# runs overlap.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE TEST DATABASE (Codex-75m0t.2)
+#
+# `test`, `worker-tests`, `e2e-api-tests` and `e2e-tests` each run two service
+# containers — Postgres 17 and the local Neon HTTP/WebSocket proxy — and reach
+# them through the SAME `DB_METHOD=LOCAL_PROXY` path local dev uses
+# (infrastructure/neon/docker-compose.dev.local.yml). They used to fork a Neon
+# branch each, and that cost two things: the FREE plan's 9 ephemeral branches
+# fit only two CI runs at once, so PRs queued for hours; and the project is in
+# aws-eu-west-2 while runners are in the US, so `pnpm test` (~30 min) was
+# mostly round trips.
+#
+# How a client gets to the database:
+#   - Every job sets DB_METHOD=LOCAL_PROXY and points DATABASE_URL and
+#     DATABASE_URL_LOCAL_PROXY at postgres://…@db.localtest.me:5432/neondb.
+#   - @codex/database and @codex/test-utils see the `db.localtest.me` host and
+#     rewrite HTTP to http://db.localtest.me:4444/sql and WebSocket to
+#     ws://db.localtest.me:4444/v1 — the proxy service, published on the
+#     runner's loopback. start-local-neon-proxy.sh pins the name to 127.0.0.1.
+#   - The proxy routes each client to the database named in the CLIENT'S URL
+#     (`neondb`); its own PG_CONNECTION_STRING names the maintenance database
+#     `postgres`, the auth/control-plane endpoint only, so its control-plane
+#     table never lands in the test database. It reaches Postgres by the
+#     service id `postgres`, which is a hostname on the job's network.
+#   - `pnpm --filter @codex/database db:migrate` (migrate-direct.ts) rewrites a
+#     db.localtest.me URL to postgres://…@localhost:5432/<db> and connects to
+#     the Postgres service directly.
+#   - `neondb` is on the cleanup guard's allowlist
+#     (packages/test-utils/src/destructive-target.ts) and is not `main`, which
+#     the worker suites refuse (config/vitest/worker-test-database.ts).
+#
+# The test database starts EMPTY and is migrated from 0001, not copied from
+# production. `migration-check` keeps the production-copy check, for the
+# changes that can break it.
+# ─────────────────────────────────────────────────────────────────────────────
 
 jobs:
   # Reclaim ONLY stale (leaked) Neon branches before creating new ones, so we
@@ -44,9 +83,14 @@ jobs:
   # several cleanup-bearing runs at once, so the race lost every time (the
   # workflow files were byte-identical to the last green run — it was purely a
   # timing regression). Deleting only branches OLDER than the longest possible
-  # run can never touch an in-flight branch. Each test job already deletes its
-  # own branch inline at completion (if: always()), so this job is purely a
-  # leaked-branch safety net for hard-cancelled runs.
+  # run can never touch an in-flight branch. `migration-check` — the one job
+  # here that still forks a branch — deletes its own inline at completion
+  # (if: always()), so this job is purely a leaked-branch safety net for
+  # hard-cancelled runs of this workflow and its manual siblings.
+  #
+  # Only `migration-check` waits for it. static-analysis and changes used to,
+  # which put it on every run's critical path although nothing else here forks
+  # a branch any more (Codex-75m0t.2).
   cleanup-stale-branches:
     runs-on: ubuntu-latest
     steps:
@@ -107,12 +151,10 @@ jobs:
 
   # Wait for static analysis to pass before running expensive tests
   static-analysis:
-    needs: [cleanup-stale-branches]
     uses: ./.github/workflows/static_analysis.yml
 
   changes:
     runs-on: ubuntu-latest
-    needs: [cleanup-stale-branches]  # Removed static-analysis - runs in parallel now
     outputs:
       # The COMMON tier. Any file under packages/ sets this, and it is the ONLY
       # term in worker-tests' COMMON_CHANGED. See the comment on the filter
@@ -145,6 +187,9 @@ jobs:
       # MUST run even when no source file changed — otherwise a workflow
       # fix is silently never exercised in CI.
       workflows: ${{ steps.filter.outputs.workflows }}
+      # Gates `migration-check`, the one job that still applies the
+      # migrations to a copy of PRODUCTION. See the filter for its scope.
+      migrations: ${{ steps.filter.outputs.migrations }}
     steps:
       - uses: actions/checkout@v5
       - name: Filter changed packages
@@ -185,10 +230,9 @@ jobs:
             # THE COST, STATED. A markdown-only edit under packages/ now fans
             # out to all seven worker suites. That is deliberate: the failure
             # direction of a glob is wasted CI, and the failure direction of a
-            # name list is an untested merge. Peak Neon branch usage is
-            # unchanged — it is bounded by worker-tests' `max-parallel: 4`, not
-            # by how many matrix jobs are eligible — so the 9-ephemeral-branch
-            # budget documented on that job still holds.
+            # name list is an untested merge. It costs runner minutes only:
+            # each worker suite runs on its own Postgres service container, so
+            # no Neon branch budget is spent (Codex-75m0t.2).
             #
             # The per-package filters below are NOT redundant with this: they
             # still drive the per-worker `WORKER_CHANGED` refinements and the
@@ -246,15 +290,51 @@ jobs:
             workflows:
               - '.github/workflows/testing.yml'
               - '.github/scripts/generate-dev-vars.sh'
+              - '.github/scripts/generate-worker-dev-vars.sh'
+              - '.github/scripts/start-local-neon-proxy.sh'
+            # What can make a committed migration fail on PRODUCTION's data
+            # while passing on the empty test database: the SQL itself, the
+            # schema it was generated from, and the runner + preflight checks
+            # that apply it. `migration-check` also runs when `workflows` is
+            # true, so a change to that job is exercised by its own PR.
+            # The runner reads its connection from src/config (env.config.ts,
+            # which imports @codex/constants), and package.json holds the
+            # db:migrate script.
+            migrations:
+              - 'packages/database/src/migrations/**'
+              - 'packages/database/src/schema/**'
+              - 'packages/database/src/config/**'
+              - 'packages/database/scripts/migrate-direct.ts'
+              - 'packages/database/scripts/migration-preflight.ts'
+              - 'packages/database/package.json'
+              - 'packages/constants/**'
 
-  test:
-    needs: [changes, static-analysis]  # Both must pass before running tests
+  # ============================================================================
+  # MIGRATION CHECK — the committed migrations apply to a copy of PRODUCTION
+  #
+  # The test jobs migrate an EMPTY Postgres from 0001, which proves the chain
+  # applies but not that the new migrations apply to production's schema
+  # history and DATA (a NOT NULL without a default on a populated table, a
+  # unique index over existing duplicates, a preflight that only fails on real
+  # rows). This job keeps that check: fork `production`, apply, delete. It is
+  # the one job in this workflow that still uses a Neon branch, and it runs
+  # only when the `migrations` filter (or this workflow) changed, so most runs
+  # spend no branch at all.
+  # ============================================================================
+
+  migration-check:
+    name: Migrations apply to a production copy
+    needs: [changes, cleanup-stale-branches]
+    # `!cancelled()` rather than the default `success()`: a failed stale-branch
+    # cleanup (a Neon API blip) must not SKIP this check, because a skipped job
+    # does not fail the run — the migrations would merge unchecked.
+    if: |
+      !cancelled() &&
+      needs.changes.result == 'success' &&
+      (needs.changes.outputs.migrations == 'true' ||
+       needs.changes.outputs.workflows == 'true')
     runs-on: ubuntu-latest
-    # Use test environment for environment-specific secrets and variables
     environment: test
-    strategy:
-      matrix:
-        node: [22]
     outputs:
       branch_id: ${{ steps.create-branch.outputs.branch_id }}
     steps:
@@ -267,16 +347,14 @@ jobs:
       # || true`, and on "already exists" it looks the branch up BY NAME and
       # emits that branch's id as its own `branch_id` output. So a shared name
       # does not surface as a collision error the job can react to: two
-      # concurrent runs silently receive ONE database, both migrate and seed
-      # into it, and whichever finishes first deletes it out from under the
-      # other (see the comment on `cleanup-neon-branches`).
+      # concurrent runs silently receive ONE database, and whichever finishes
+      # first deletes it out from under the other (see the comment on
+      # `cleanup-neon-branches`).
       - name: Generate Neon Branch Name
         id: branch-name
-        run: |
-          echo "name=ci-unit-tests-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_OUTPUT
+        run: echo "name=ci-migration-check-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
 
-      # Create Neon branch for unit tests
-      - name: Create Neon branch for tests
+      - name: Create Neon branch from production
         id: create-branch
         uses: neondatabase/create-branch-action@v6
         with:
@@ -285,6 +363,81 @@ jobs:
           parent_branch: production
           role: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+      - name: Use Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # migrate-direct.ts imports @codex/constants through its dist build.
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
+
+      # db_url (direct), not db_url_pooled: pgbouncer drops connections
+      # mid-DDL on Neon ephemeral branches.
+      - name: Apply migrations to the production copy
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
+          DB_METHOD: NEON_BRANCH
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/database db:migrate
+
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+
+  test:
+    needs: [changes, static-analysis]  # Both must pass before running tests
+    runs-on: ubuntu-latest
+    # Use test environment for environment-specific secrets and variables
+    environment: test
+    strategy:
+      matrix:
+        node: [22]
+    # The test database — see "THE TEST DATABASE" at the top of this file.
+    # This block is repeated verbatim in worker-tests, e2e-api-tests and
+    # e2e-tests; keep the four in step.
+    services:
+      postgres:
+        image: postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3 # postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: neondb
+        ports:
+          - 5432:5432
+        # Over TCP, not the socket: the image's first-boot init runs a
+        # temporary socket-only server, which a socket check reports ready.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d neondb"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+      neon-proxy:
+        image: ghcr.io/timowilhelm/local-neon-http-proxy@sha256:cd2ae14edf2feafbc3330492de5c80506f77274c3bd013154cdef697bdeb768a # :main, revision 7c86dc3, 2026-03-27
+        env:
+          PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/postgres
+        ports:
+          - 4444:4444
+    env:
+      DB_METHOD: LOCAL_PROXY
+      DATABASE_URL: postgres://postgres:postgres@db.localtest.me:5432/neondb
+      DATABASE_URL_LOCAL_PROXY: postgres://postgres:postgres@db.localtest.me:5432/neondb
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Start local Neon proxy
+        run: bash .github/scripts/start-local-neon-proxy.sh "${{ job.services.neon-proxy.id }}"
 
       # Install dependencies
       - name: Install pnpm
@@ -312,35 +465,12 @@ jobs:
       - name: Build constants package
         run: pnpm --filter @codex/constants build
 
-      # Database Setup: Apply committed migrations to ephemeral branch
-      # Note: Migrations are generated locally and committed; CI only applies them
-      # Note: db_url (direct) is used for migrations — db_url_pooled routes
-      # through pgbouncer which drops connections mid-DDL on Neon ephemeral
-      # branches. Runtime queries can still use the pooled URL.
-      - name: Apply migrations to ephemeral branch
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:migrate
-
-      # Save DATABASE_URL for preview deployments
-      - name: Save Neon connection details to artifact
-        run: |
-          echo "${{ steps.create-branch.outputs.db_url_pooled }}" > database-url.txt
-          echo "${{ steps.create-branch.outputs.branch_id }}" > branch-id.txt
-          echo "${{ steps.branch-name.outputs.name }}" > branch-name.txt
-
-      - name: Upload Neon connection artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: neon-connection-${{ github.run_id }}
-          path: |
-            database-url.txt
-            branch-id.txt
-            branch-name.txt
-          retention-days: 7 # Keep for workflow_run delays
+      # Database Setup: apply the committed migrations to the empty service
+      # database. Migrations are generated locally and committed; CI only
+      # applies them. Under LOCAL_PROXY migrate-direct.ts connects to
+      # Postgres directly on localhost:5432, not through the proxy.
+      - name: Apply migrations
+        run: pnpm --filter @codex/database db:migrate
 
       # Build all packages and workers in parallel using Turborepo
       # Turborepo automatically handles dependencies and parallelization
@@ -355,8 +485,6 @@ jobs:
       # vitest-pool-workers uses wrangler which reads these files for env vars
       - name: Generate worker dev vars for unit tests
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -365,7 +493,6 @@ jobs:
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
         run: |
-          echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$R2_SECRET_ACCESS_KEY"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
@@ -378,23 +505,8 @@ jobs:
       - name: Run tests for affected packages with Turborepo
         id: run-tests
         env:
-          # Direct (non-pooled) URL — Codex-w3hav. The unit/integration
-          # suites run ONE long test file at a time (turbo --concurrency=1 +
-          # every DB package sets sequentialTests:true / fileParallelism:false),
-          # so a single file like agreement-service.test.ts (82 tests, ~186s)
-          # or organization-service.test.ts (~116s) holds ONE WebSocket
-          # connection for its whole duration. Routed through pgbouncer
-          # (db_url_pooled) that long-lived pooled connection gets
-          # recycled/closed mid-suite, and the next query throws
-          # "Connection terminated unexpectedly" — surfacing as a failed seed
-          # insert, FK check, or read-back SELECT (the real cause behind the
-          # flaky test(20) failures, not any test-logic bug). The direct
-          # compute endpoint is stable for the suite's lifetime — the same
-          # reason the "Apply migrations" step above uses db_url. Because the
-          # suites are sequential, only ~1 direct connection is open at a
-          # time, so the lower non-pooled ceiling is not a concern.
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
+          # DB_METHOD / DATABASE_URL / DATABASE_URL_LOCAL_PROXY come from the
+          # job env (the service database).
           # R2 credentials for tests (using test buckets from environment)
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -407,8 +519,20 @@ jobs:
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
+        # turbo runs in STRICT env mode: a task sees only the variables
+        # turbo.json declares. DATABASE_URL_LOCAL_PROXY, the one key
+        # LOCAL_PROXY reads (vitest.setup.ts skips .env.test when CI is set),
+        # is in `tasks.test.passThroughEnv`; undeclared, every DB suite throws
+        # "DATABASE_URL_LOCAL_PROXY environment variable is required"
+        # (reproduced, Codex-75m0t.2). Do not reach for --env-mode=loose: turbo
+        # hashes the env mode, so it misses the cache for every task, builds
+        # included.
+        #
+        # Results are cached across runs (Codex-75m0t.1): the database URL is
+        # passed through, not hashed. A change to this workflow, the proxy
+        # script, config/vitest or vitest.setup.ts invalidates them
+        # (turbo.json globalDependencies).
         run: |
-          echo "::add-mask::$DATABASE_URL"
           # Use Turborepo's built-in change detection instead of manual filtering
           # This runs tests for changed packages and packages that depend on them
           pnpm test
@@ -429,54 +553,60 @@ jobs:
         if: steps.run-tests.outcome == 'failure'
         run: exit 1
 
-      # Cleanup: Delete Neon branch immediately after job completes
-      - name: Cleanup Neon branch
-        if: always() && steps.create-branch.outputs.branch_id
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
   # ============================================================================
-  # WORKER TESTS - Matrix Strategy (7 workers in parallel)
-  # Each worker gets its own Neon branch for test isolation
+  # WORKER TESTS - Matrix Strategy (8 workers in parallel)
+  # Each matrix job runs its own Postgres + Neon proxy service containers
   # Consolidated from 7 separate jobs into 1 matrix job (~650 lines saved)
   # ============================================================================
 
   worker-tests:
     name: ${{ matrix.name }} Tests
-    needs: [changes, test]
+    # What this job READS is `changes` (the per-worker should-run filters).
+    # It reads nothing from `test` — no output, artifact or database — so it
+    # no longer waits ~30 min for it; static-analysis stays as the cheap gate
+    # before expensive tests. Default `success()`: both must have passed.
+    needs: [changes, static-analysis]
     runs-on: ubuntu-latest
-    # Run if unit tests passed - individual worker conditions checked in steps
-    if: always() && needs.test.result == 'success'
     environment: test
+    # The test database — see "THE TEST DATABASE" at the top of this file.
+    # Same block as the `test` job; keep the four copies in step. Services
+    # cannot be conditional on the should-run step, so a skipped worker
+    # still starts them (~seconds, off the critical path).
+    services:
+      postgres:
+        image: postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3 # postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: neondb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d neondb"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+      neon-proxy:
+        image: ghcr.io/timowilhelm/local-neon-http-proxy@sha256:cd2ae14edf2feafbc3330492de5c80506f77274c3bd013154cdef697bdeb768a # :main, revision 7c86dc3, 2026-03-27
+        env:
+          PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/postgres
+        ports:
+          - 4444:4444
+    env:
+      DB_METHOD: LOCAL_PROXY
+      DATABASE_URL: postgres://postgres:postgres@db.localtest.me:5432/neondb
+      DATABASE_URL_LOCAL_PROXY: postgres://postgres:postgres@db.localtest.me:5432/neondb
     strategy:
       fail-fast: false
-      # Every matrix job forks its OWN ephemeral Neon branch, and the free plan
-      # caps this project at 10 branches total (`production` is permanent, so 9
-      # ephemeral slots). Shared branch names used to cap branch usage by
-      # accident: any number of concurrent runs reused the same 7 names. Now
-      # that names are per-run, 8 matrix jobs from two overlapping runs would
-      # want 16 slots. Capping parallelism keeps two concurrent runs inside the
-      # budget. E2E Web runs beside these jobs (it waits only for static
-      # analysis), so a run holds 3 worker branches plus E2E Web's 1, and two
-      # runs fit: 4 + 4 + production = 9. At 4 they would need 10.
-      #
-      # Three simultaneous runs that ALL fire the whole matrix would still
-      # exceed 9 — but that needs three concurrent pushes each touching
-      # worker-utils/database/security (the only filters that fan out to all 8),
-      # and the failure mode is now LOUD and correctly attributed: the action's
-      # `elif [[ $(cat branch_err) == *"ERROR:"* ]]` branch exits 1 in the job
-      # that could not get a database, rather than silently handing it someone
-      # else's. Raise this only alongside the plan's branch limit.
-      max-parallel: 3
+      # No `max-parallel`. It was 3 for one reason only — every matrix job
+      # forked its own Neon branch and the FREE plan has 9 ephemeral slots, so
+      # it kept two concurrent runs inside that budget. Each job now runs its
+      # own service database, so nothing is shared to ration (Codex-75m0t.2).
       matrix:
         include:
           - name: Auth Worker
             worker: auth
             dir: workers/auth
-            branch_prefix: ci-auth-tests
             turbo_key: auth-test
             # Secrets: BETTER_AUTH_SECRET only
             needs_r2: false
@@ -485,7 +615,6 @@ jobs:
           - name: Content API
             worker: content-api
             dir: workers/content-api
-            branch_prefix: ci-content-api-tests
             turbo_key: content-api-test
             # Secrets: R2, STRIPE, BETTER_AUTH_SECRET
             needs_r2: true
@@ -494,7 +623,6 @@ jobs:
           - name: Identity API
             worker: identity-api
             dir: workers/identity-api
-            branch_prefix: ci-identity-api-tests
             turbo_key: identity-api-test
             # Secrets: BETTER_AUTH_SECRET only
             needs_r2: false
@@ -503,7 +631,6 @@ jobs:
           - name: Admin API
             worker: admin-api
             dir: workers/admin-api
-            branch_prefix: ci-admin-api-tests
             turbo_key: admin-api-test
             # Secrets: BETTER_AUTH_SECRET only
             needs_r2: false
@@ -512,7 +639,6 @@ jobs:
           - name: Ecom API
             worker: ecom-api
             dir: workers/ecom-api
-            branch_prefix: ci-ecom-api-tests
             turbo_key: ecom-api-test
             # Secrets: STRIPE, BETTER_AUTH_SECRET
             needs_r2: false
@@ -521,7 +647,6 @@ jobs:
           - name: Organization API
             worker: organization-api
             dir: workers/organization-api
-            branch_prefix: ci-organization-api-tests
             turbo_key: organization-api-test
             # Secrets: BETTER_AUTH_SECRET only
             needs_r2: false
@@ -530,7 +655,6 @@ jobs:
           - name: Notifications API
             worker: notifications-api
             dir: workers/notifications-api
-            branch_prefix: ci-notifications-api-tests
             turbo_key: notifications-api-test
             # Secrets: BETTER_AUTH_SECRET only
             needs_r2: false
@@ -544,13 +668,10 @@ jobs:
           - name: Media API
             worker: media-api
             dir: workers/media-api
-            branch_prefix: ci-media-api-tests
             turbo_key: media-api-test
             # Secrets: WORKER_SHARED_SECRET only (RUNPOD_* are env.test fakes)
             needs_r2: false
             needs_stripe: false
-
-    # Note: Each matrix job cleans up its own Neon branch inline (no outputs needed)
 
     steps:
       # Step 1: Check if this worker should run based on changed files
@@ -565,7 +686,12 @@ jobs:
           # all) — so every step below was skipped and this job still reported
           # SUCCESS. The aggregate now lives in the `changes` job as a single
           # `packages/**` glob; the reasoning is on that filter.
-          COMMON_CHANGED="${{ needs.changes.outputs.shared-packages == 'true' }}"
+          #
+          # `workflows` is the one other term, for the reason documented on
+          # that output: a change to this workflow or its scripts must be
+          # exercised by its own run. Without it a CI-only PR skipped all 8
+          # suites and still reported green.
+          COMMON_CHANGED="${{ needs.changes.outputs.shared-packages == 'true' || needs.changes.outputs.workflows == 'true' }}"
 
           # Worker-specific conditions
           case "${{ matrix.worker }}" in
@@ -609,19 +735,9 @@ jobs:
       - uses: actions/checkout@v5
         if: steps.should-run.outputs.should_run == 'true'
 
-      - name: Create Neon branch
-        id: create-branch
+      - name: Start local Neon proxy
         if: steps.should-run.outputs.should_run == 'true'
-        uses: neondatabase/create-branch-action@v6
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          # branch_prefix is a PREFIX, never a usable branch name on its own:
-          # run_id + run_attempt are what stop two concurrent runs sharing one
-          # database. See "Generate Neon Branch Name" in the `test` job.
-          branch_name: ${{ matrix.branch_prefix }}-${{ github.run_id }}-${{ github.run_attempt }}
-          parent_branch: production
-          role: neondb_owner
-          api_key: ${{ secrets.NEON_API_KEY }}
+        run: bash .github/scripts/start-local-neon-proxy.sh "${{ job.services.neon-proxy.id }}"
 
       - name: Install pnpm
         if: steps.should-run.outputs.should_run == 'true'
@@ -655,13 +771,7 @@ jobs:
 
       - name: Apply migrations
         if: steps.should-run.outputs.should_run == 'true'
-        env:
-          # Direct (non-pooled) URL — pgbouncer drops connections mid-DDL.
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:migrate
+        run: pnpm --filter @codex/database db:migrate
 
       - name: Build dependencies
         if: steps.should-run.outputs.should_run == 'true'
@@ -671,11 +781,11 @@ jobs:
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
 
+      # Writes DB_METHOD, DATABASE_URL and DATABASE_URL_LOCAL_PROXY from the
+      # job env into .dev.vars.test, which is where the workers pool reads them.
       - name: Generate worker dev vars
         if: steps.should-run.outputs.should_run == 'true'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
           # Always needed
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           # Required by every worker — HMAC for inter-worker calls and
@@ -690,7 +800,6 @@ jobs:
           STRIPE_SECRET_KEY: ${{ matrix.needs_stripe && secrets.STRIPE_SECRET_KEY || '' }}
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ matrix.needs_stripe && secrets.STRIPE_WEBHOOK_SECRET_BOOKING || '' }}
         run: |
-          echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$BETTER_AUTH_SECRET"
           [ -n "$WORKER_SHARED_SECRET" ] && echo "::add-mask::$WORKER_SHARED_SECRET"
           [ -n "$R2_SECRET_ACCESS_KEY" ] && echo "::add-mask::$R2_SECRET_ACCESS_KEY"
@@ -703,8 +812,6 @@ jobs:
         id: run-tests
         if: steps.should-run.outputs.should_run == 'true'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           # R2 env vars for content-api tests
@@ -713,7 +820,6 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ matrix.needs_r2 && secrets.R2_SECRET_ACCESS_KEY || '' }}
           R2_BUCKET_MEDIA: ${{ matrix.needs_r2 && vars.R2_BUCKET_MEDIA || '' }}
         run: |
-          echo "::add-mask::$DATABASE_URL"
           cd ${{ matrix.dir }} && pnpm test
         continue-on-error: true
 
@@ -729,61 +835,55 @@ jobs:
         if: steps.should-run.outputs.should_run == 'true' && steps.run-tests.outcome == 'failure'
         run: exit 1
 
-      # Cleanup: Delete Neon branch immediately after job completes
-      - name: Cleanup Neon branch
-        if: always() && steps.create-branch.outputs.branch_id
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
   # ============================================================================
   # E2E API TESTS - Root /e2e/ directory tests
-  # Runs AFTER all worker tests complete
+  # Runs beside the unit and worker tests, on its own service database
   # ============================================================================
 
   e2e-api-tests:
     name: E2E API Tests
-    needs: [worker-tests]
-    # Run if all worker tests passed or were skipped (no failures), but NOT when
-    # the run itself is being cancelled.
-    #
-    # `always()` here was actively harmful. It opts a job into running DURING
-    # cancellation, and a cancelled `worker-tests` reports result 'cancelled',
-    # which satisfies `!= 'failure'`. So the deliberately-cancelled `push` twin
-    # of every pull_request run still launched this job, forked its own Neon
-    # branch and started a full E2E suite it could never finish — on EVERY push
-    # to a PR branch, not just when two runs happened to overlap. `!cancelled()`
-    # keeps the intended "run even if a dependency was skipped" behaviour while
-    # dropping the "run even though the run is being torn down" behaviour.
-    # (`cleanup-neon-branches` keeps `always()` on purpose — it MUST run during
-    # cancellation.)
+    # Reads nothing from `test` or `worker-tests` — no output, artifact or
+    # database; it builds, migrates and starts its own workers — and nothing
+    # from `changes` (it runs on every push). It used to wait for the whole
+    # worker matrix, which waited for `test`, so its verdict came last on the
+    # critical path. static-analysis stays as the cheap gate before expensive
+    # tests, and the default `success()` also keeps the cancelled `push` twin
+    # of a pull_request run from starting a suite it can never finish.
     # Runs in parallel with e2e-tests (web)
-    if: ${{ !cancelled() && needs.worker-tests.result != 'failure' }}
+    needs: [static-analysis]
     runs-on: ubuntu-latest
     environment: test
-    outputs:
-      branch_id: ${{ steps.create-branch.outputs.branch_id }}
+    # The test database — see "THE TEST DATABASE" at the top of this file.
+    # Same block as the `test` job; keep the four copies in step.
+    services:
+      postgres:
+        image: postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3 # postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: neondb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d neondb"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+      neon-proxy:
+        image: ghcr.io/timowilhelm/local-neon-http-proxy@sha256:cd2ae14edf2feafbc3330492de5c80506f77274c3bd013154cdef697bdeb768a # :main, revision 7c86dc3, 2026-03-27
+        env:
+          PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/postgres
+        ports:
+          - 4444:4444
+    env:
+      DB_METHOD: LOCAL_PROXY
+      DATABASE_URL: postgres://postgres:postgres@db.localtest.me:5432/neondb
+      DATABASE_URL_LOCAL_PROXY: postgres://postgres:postgres@db.localtest.me:5432/neondb
     steps:
       - uses: actions/checkout@v5
 
-      # Unique per run AND per attempt — a shared name hands two concurrent
-      # runs one database. See the `test` job's equivalent step for the
-      # adopt-on-conflict behaviour that makes this silent.
-      - name: Generate Neon Branch Name
-        id: branch-name
-        run: echo "name=ci-e2e-api-tests-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_OUTPUT
-
-      - name: Create Neon branch for E2E API tests
-        id: create-branch
-        uses: neondatabase/create-branch-action@v6
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: ${{ steps.branch-name.outputs.name }}
-          parent_branch: production
-          role: neondb_owner
-          api_key: ${{ secrets.NEON_API_KEY }}
+      - name: Start local Neon proxy
+        run: bash .github/scripts/start-local-neon-proxy.sh "${{ job.services.neon-proxy.id }}"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v5
@@ -811,13 +911,7 @@ jobs:
         run: pnpm --filter @codex/constants build
 
       - name: Apply migrations
-        env:
-          # Direct (non-pooled) URL — pgbouncer drops connections mid-DDL.
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:migrate
+        run: pnpm --filter @codex/database db:migrate
 
       - name: Build dependencies
         run: pnpm build
@@ -828,8 +922,6 @@ jobs:
 
       - name: Generate worker dev vars for all workers
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -861,7 +953,6 @@ jobs:
           B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
           B2_BUCKET: ${{ secrets.B2_BUCKET }}
         run: |
-          echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$R2_SECRET_ACCESS_KEY"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
@@ -878,11 +969,11 @@ jobs:
           chmod +x .github/scripts/generate-dev-vars.sh
           .github/scripts/generate-dev-vars.sh
 
+      # Plain vitest (`cd e2e && pnpm test`), not turbo, so the job env —
+      # DATABASE_URL_LOCAL_PROXY included — reaches it without --env-mode.
       - name: Run E2E API tests
         id: run-tests
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -892,7 +983,6 @@ jobs:
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
         run: |
-          echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           pnpm test:e2e:api
         continue-on-error: true
@@ -911,15 +1001,6 @@ jobs:
         if: steps.run-tests.outcome == 'failure'
         run: exit 1
 
-      # Cleanup: Delete Neon branch immediately after job completes
-      - name: Cleanup Neon branch
-        if: always() && steps.create-branch.outputs.branch_id
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
   # ============================================================================
   # E2E WEB TESTS - Web application E2E tests
   # ============================================================================
@@ -927,15 +1008,14 @@ jobs:
   e2e-tests:
     name: E2E Web Tests
     # Waits for static analysis only, not for the unit and worker tests: this
-    # job forks its own Neon branch, runs its own migrations and builds, and
-    # reads nothing those jobs produce. Behind them it started 27-36 min after
-    # a push (8 green runs, Codex-o50l8), so its verdict came at ~62 min. It
-    # runs beside them now, which is why worker-tests' `max-parallel` is 3.
+    # job runs its own service database, migrations and builds, and reads
+    # nothing those jobs produce. Behind them it started 27-36 min after a
+    # push (8 green runs, Codex-o50l8), so its verdict came at ~62 min.
     needs: [changes, static-analysis]
     # Only run E2E web tests if:
-    # 0. The run is not being cancelled — see the note on e2e-api-tests. With
-    #    `always()` the cancelled `push` twin of every pull_request run still
-    #    forked a Neon branch and started a full E2E suite it could not finish.
+    # 0. The run is not being cancelled. With `always()` the cancelled `push`
+    #    twin of every pull_request run still started a full E2E suite it
+    #    could not finish.
     # 1. Static analysis passed (as the unit tests require)
     # 2. AND there are web-related changes (web app, auth, or shared-types)
     if: |
@@ -947,28 +1027,39 @@ jobs:
        needs.changes.outputs.workflows == 'true')
     runs-on: ubuntu-latest
     environment: test
-    outputs:
-      branch_id: ${{ steps.create-branch.outputs.branch_id }}
+    # The test database — see "THE TEST DATABASE" at the top of this file.
+    # Same block as the `test` job; keep the four copies in step. Nine
+    # wrangler-dev workers plus 2 Playwright workers stay well inside
+    # Postgres' default max_connections (100); local dev runs the same load.
+    services:
+      postgres:
+        image: postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3 # postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: neondb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d neondb"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+      neon-proxy:
+        image: ghcr.io/timowilhelm/local-neon-http-proxy@sha256:cd2ae14edf2feafbc3330492de5c80506f77274c3bd013154cdef697bdeb768a # :main, revision 7c86dc3, 2026-03-27
+        env:
+          PG_CONNECTION_STRING: postgres://postgres:postgres@postgres:5432/postgres
+        ports:
+          - 4444:4444
+    env:
+      DB_METHOD: LOCAL_PROXY
+      DATABASE_URL: postgres://postgres:postgres@db.localtest.me:5432/neondb
+      DATABASE_URL_LOCAL_PROXY: postgres://postgres:postgres@db.localtest.me:5432/neondb
     steps:
       - uses: actions/checkout@v5
 
-      # Unique per run AND per attempt — a shared name hands two concurrent
-      # runs one database. See the `test` job's equivalent step for the
-      # adopt-on-conflict behaviour that makes this silent.
-      - name: Generate Neon Branch Name
-        id: branch-name
-        run: echo "name=ci-e2e-web-tests-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_OUTPUT
-
-      # Create Neon branch for E2E tests
-      - name: Create Neon branch for E2E
-        id: create-branch
-        uses: neondatabase/create-branch-action@v6
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: ${{ steps.branch-name.outputs.name }}
-          parent_branch: production
-          role: neondb_owner
-          api_key: ${{ secrets.NEON_API_KEY }}
+      - name: Start local Neon proxy
+        run: bash .github/scripts/start-local-neon-proxy.sh "${{ job.services.neon-proxy.id }}"
 
       # Install dependencies
       - name: Install pnpm
@@ -996,24 +1087,14 @@ jobs:
       - name: Build constants package
         run: pnpm --filter @codex/constants build
 
-      # Database Setup: Apply committed migrations to ephemeral branch
-      # Direct (non-pooled) URL — pgbouncer drops connections mid-DDL.
-      - name: Apply migrations to ephemeral branch
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:migrate
+      # Database Setup: apply the committed migrations to the service database
+      - name: Apply migrations
+        run: pnpm --filter @codex/database db:migrate
 
       # Build all packages and workers (including Auth Worker and dependencies)
       - name: Build all packages and workers with Turborepo
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm build
+        run: pnpm build
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
-          DB_METHOD: NEON_BRANCH
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info
@@ -1032,24 +1113,20 @@ jobs:
       # STRIPE_SECRET_KEY enables real Stripe test-mode subscription for
       # viewer@test.com; without it the seed falls back to synthetic IDs +
       # any checkout test would fail with 422.
+      #
+      # The seed wraps all inserts in a single long-lived dbWs.transaction()
+      # (seed-data.ts step [3/5]), which goes over the proxy's WebSocket path
+      # to the service database — there is no pooler in between to recycle
+      # the session mid-transaction (the reason it once had to use Neon's
+      # direct URL).
       - name: Seed test database
         env:
-          # Use db_url (DIRECT), not db_url_pooled. The seed wraps all
-          # inserts in a single long-lived dbWs.transaction() (seed-data.ts
-          # step [3/5]); over the PgBouncer pooler that session connection is
-          # recycled mid-transaction, so the content inserts silently roll
-          # back — the validator then sees 0 published rows for every access
-          # mode and fails. Same reasoning as the "Apply migrations" step
-          # above (lines ~318-327).
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
-          DB_METHOD: NEON_BRANCH
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
         run: |
-          echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           pnpm db:seed -- --force
 
@@ -1063,20 +1140,11 @@ jobs:
       # No args = seed the full fixture trio (of-blood-and-bones,
       # studio-alpha, studio-beta); `--org=<slug>` re-seeds one.
       - name: Seed portal journey fixtures
-        env:
-          # Same DIRECT url as the seed above — seed-portals.ts drives dbWs
-          # through the same long-lived session shape.
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
-          DB_METHOD: NEON_BRANCH
-        run: |
-          echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:seed:portals
+        run: pnpm --filter @codex/database db:seed:portals
 
       # Generate .dev.vars.test files for workers to use in CI
       - name: Generate worker dev vars for E2E
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           # All Stripe webhook secrets — passthrough ensures generate-dev-vars.sh
           # writes the real values to .dev.vars.test instead of falling back to
@@ -1106,7 +1174,6 @@ jobs:
           B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
           B2_BUCKET: ${{ secrets.B2_BUCKET }}
         run: |
-          echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_PAYMENT"
@@ -1138,8 +1205,6 @@ jobs:
           # Wait for auth worker to be ready
           timeout 60 bash -c 'until curl -f http://localhost:42069/health > /dev/null 2>&1; do sleep 1; done' \
             || { echo "::error::auth (:42069) never became healthy. Last 100 lines of worker-logs/auth.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/auth.log"; exit 1; }
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Identity API Worker in background
         run: |
@@ -1152,8 +1217,6 @@ jobs:
           # Wait for identity-api worker to be ready
           timeout 60 bash -c 'until curl -f http://localhost:42074/health > /dev/null 2>&1; do sleep 1; done' \
             || { echo "::error::identity-api (:42074) never became healthy. Last 100 lines of worker-logs/identity-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/identity-api.log"; exit 1; }
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Ecom API Worker in background
         run: |
@@ -1167,7 +1230,6 @@ jobs:
           timeout 60 bash -c 'until curl -f http://localhost:42072/health > /dev/null 2>&1; do sleep 1; done' \
             || { echo "::error::ecom-api (:42072) never became healthy. Last 100 lines of worker-logs/ecom-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/ecom-api.log"; exit 1; }
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
 
       # The studio +layout.server.ts calls getMyMembership + getMyOrganizations
@@ -1185,7 +1247,6 @@ jobs:
           timeout 60 bash -c 'until curl -f http://localhost:42071/health > /dev/null 2>&1; do sleep 1; done' \
             || { echo "::error::organization-api (:42071) never became healthy. Last 100 lines of worker-logs/organization-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/organization-api.log"; exit 1; }
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
 
       # Studio layout's draft-count call routes through content-api. Content
@@ -1201,7 +1262,6 @@ jobs:
           timeout 60 bash -c 'until curl -f http://localhost:4001/health > /dev/null 2>&1; do sleep 1; done' \
             || { echo "::error::content-api (:4001) never became healthy. Last 100 lines of worker-logs/content-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/content-api.log"; exit 1; }
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
 
       # Analytics page calls admin-api for revenue / subscribers / followers /
@@ -1218,8 +1278,6 @@ jobs:
           echo $! > admin-api-worker.pid
           timeout 60 bash -c 'until curl -f http://localhost:42073/health > /dev/null 2>&1; do sleep 1; done' \
             || { echo "::error::admin-api (:42073) never became healthy. Last 100 lines of worker-logs/admin-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/admin-api.log"; exit 1; }
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       # Notification preferences + email template specs route through this.
       - name: Start Notifications API Worker in background
@@ -1232,8 +1290,6 @@ jobs:
           echo $! > notifications-api-worker.pid
           timeout 60 bash -c 'until curl -f http://localhost:42075/health > /dev/null 2>&1; do sleep 1; done' \
             || { echo "::error::notifications-api (:42075) never became healthy. Last 100 lines of worker-logs/notifications-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/notifications-api.log"; exit 1; }
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       # Media upload + transcoding callback specs route through this. Uses a
       # mock RunPod endpoint per RUNPOD_DIRECT_URL in .dev.vars.test.
@@ -1247,12 +1303,9 @@ jobs:
           echo $! > media-api-worker.pid
           timeout 60 bash -c 'until curl -f http://localhost:4002/health > /dev/null 2>&1; do sleep 1; done' \
             || { echo "::error::media-api (:4002) never became healthy. Last 100 lines of worker-logs/media-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/media-api.log"; exit 1; }
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Wrangler dev server in background
         run: |
-          echo "::add-mask::$DATABASE_URL"
           cd apps/web
           mkdir -p "$GITHUB_WORKSPACE/worker-logs"
           # Keep the worker's output: a background job's stdout vanishes once
@@ -1262,8 +1315,6 @@ jobs:
           # Wait for server to be ready
           timeout 60 bash -c 'until curl -f http://localhost:5173 > /dev/null 2>&1; do sleep 1; done' \
             || { echo "::error::web (:5173) never became healthy. Last 100 lines of worker-logs/web.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/web.log"; exit 1; }
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Storybook server in background
         run: |
@@ -1288,11 +1339,15 @@ jobs:
           curl -f http://localhost:5173 || exit 1          # apps/web
           echo "All workers ready"
 
+      # `pnpm test:e2e` is `turbo run test:e2e --filter=web`, in turbo's strict
+      # env mode. Specs that write fixtures through dbHttp
+      # (helpers/subscription.ts, brand-editor-hero-effects.spec.ts) need
+      # DATABASE_URL_LOCAL_PROXY, which `tasks["test:e2e"].passThroughEnv`
+      # declares. Not --env-mode=loose: turbo hashes the mode, so every
+      # dependency would be rebuilt under the workers already serving it.
       - name: Run E2E tests
         env:
           CI: "true"
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
-          DB_METHOD: ${{ vars.DB_METHOD }}
           NODE_ENV: ${{ vars.NODE_ENV }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
@@ -1308,7 +1363,6 @@ jobs:
           # 0.0.0.0 so it accepts the lvh.me Host header.
           PLAYWRIGHT_BASE_URL: http://lvh.me:5173
         run: |
-          echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           # Liveness re-check, IMMEDIATELY before the suite. A worker that
           # passed its start-step health check can still be dead by now
@@ -1449,9 +1503,10 @@ jobs:
 
       # This repo is PUBLIC, so any signed-in user can download its artifacts,
       # and `::add-mask::` only masks the job log, never an uploaded file. Scrub
-      # every secret this job injects, plus credentials in any URL (a Neon
-      # branch inherits its parent's role password), BEFORE the upload below.
-      # Fail-closed: the upload only runs if this step succeeded (Codex-kkc8j).
+      # every secret this job injects, plus credentials in any URL, BEFORE the
+      # upload below. (The service database's postgres:postgres is not a
+      # secret, but the URL rule scrubs it like any other.) Fail-closed: the
+      # upload only runs if this step succeeded (Codex-kkc8j).
       - name: Scrub secrets from worker logs
         id: scrub-worker-logs
         if: failure()
@@ -1463,8 +1518,6 @@ jobs:
             s#(://[^:/\s"\x27@]+:)[^@\s"\x27]+@#${1}***@#g;
           ' worker-logs/*.log
         env:
-          REDACT_DB_URL: ${{ steps.create-branch.outputs.db_url }}
-          REDACT_DB_URL_POOLED: ${{ steps.create-branch.outputs.db_url_pooled }}
           REDACT_NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           REDACT_BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           REDACT_WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
@@ -1517,22 +1570,13 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 30
 
-      # Cleanup: Delete Neon branch immediately after job completes
-      - name: Cleanup Neon branch
-        if: always() && steps.create-branch.outputs.branch_id
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
   # ============================================================================
-  # CLEANUP - Safety net for any missed Neon branch deletions
-  # Note: Each test job already cleans up its own branch immediately after completion.
-  # This job serves as a final safety net only for the unit test and E2E jobs
-  # (worker-tests matrix jobs all clean up their own branches inline).
+  # CLEANUP - Safety net for a missed Neon branch deletion
+  # `migration-check` is the only job here that forks a branch, and it deletes
+  # its own inline at completion; this job is the safety net behind that step.
+  # The test jobs use service containers, which GitHub removes with the job.
   #
-  # Every delete here — and every inline "Cleanup Neon branch" step — is keyed on
+  # Every delete here — and the inline "Cleanup Neon branch" step — is keyed on
   # the `branch_id` that THIS run's create-branch step returned, never on a
   # branch name or a name pattern. Keep it that way, and keep branch names
   # per-run: those two rules are load-bearing together, not separately. The Neon
@@ -1545,32 +1589,16 @@ jobs:
   cleanup-neon-branches:
     name: Cleanup Neon Branches
     runs-on: ubuntu-latest
-    needs: [test, worker-tests, e2e-api-tests, e2e-tests]
-    if: always()
+    needs: [migration-check]
+    # `always()` on purpose — it MUST run during cancellation. Skipped with
+    # `migration-check`, since then there is no branch to clean up.
+    if: always() && needs.migration-check.result != 'skipped'
     steps:
-      - name: Delete unit test branch (safety net)
-        if: needs.test.result != 'skipped' && needs.test.outputs.branch_id && needs.test.outputs.branch_id != ''
+      - name: Delete migration-check branch (safety net)
+        if: needs.migration-check.outputs.branch_id && needs.migration-check.outputs.branch_id != ''
         continue-on-error: true
         run: |
           npm i -g neonctl@2
-          neonctl branches delete ${{ needs.test.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
-      - name: Delete E2E API test branch (safety net)
-        if: needs.e2e-api-tests.result != 'skipped' && needs.e2e-api-tests.outputs.branch_id && needs.e2e-api-tests.outputs.branch_id != ''
-        continue-on-error: true
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ needs.e2e-api-tests.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
-      - name: Delete E2E web test branch (safety net)
-        if: needs.e2e-tests.result != 'skipped' && needs.e2e-tests.outputs.branch_id && needs.e2e-tests.outputs.branch_id != ''
-        continue-on-error: true
-        run: |
-          npm i -g neonctl@2
-          neonctl branches delete ${{ needs.e2e-tests.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+          neonctl branches delete ${{ needs.migration-check.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}

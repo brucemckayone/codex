@@ -114,7 +114,9 @@ This ensures:
 - `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION`
 
 **Variables:**
-- `DB_METHOD` = `NEON_BRANCH`
+- `DB_METHOD` = `NEON_BRANCH` — read only by the manual `e2e-api-fast.yml` /
+  `e2e-debug.yml` now; `testing.yml`'s test jobs set `LOCAL_PROXY` themselves
+  (service containers, Codex-75m0t.2)
 - `NODE_ENV` = `test`
 - `R2_BUCKET_ASSETS` = `codex-assets-test`
 - `R2_BUCKET_MEDIA` = `codex-media-test`

@@ -134,7 +134,7 @@ test('creates content', async () => {
 | Environment | DB | Notes |
 |---|---|---|
 | **Local** | `DATABASE_URL_LOCAL_PROXY` from `.env.test`, `DB_METHOD=LOCAL_PROXY` | Disposable `main_test` on the local Postgres container (`pnpm db:test:setup`), shared by every local suite — use `createUniqueSlug()` to avoid conflicts. **Must NOT be `main`, the dev database — see below** |
-| **CI** | Workflow-created Neon branch per domain | `DATABASE_URL` injected by GitHub Actions; branch `neondb`, deleted after run |
+| **CI** | A Postgres service container + the local Neon proxy, per job | `DB_METHOD=LOCAL_PROXY`; both URLs at `db.localtest.me:5432/neondb`, migrated empty every run and discarded with the job (Codex-75m0t.2) |
 
 Note the variable name: under `DB_METHOD=LOCAL_PROXY` the resolver reads
 **`DATABASE_URL_LOCAL_PROXY`**, not `DATABASE_URL`
