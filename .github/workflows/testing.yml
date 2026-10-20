@@ -1058,6 +1058,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # First, before anything connects: keep the worker ports out of the
+      # kernel's ephemeral range (32768-60999), which 42069-42075 sit in.
+      # Every DB query in this job now goes to the local Neon proxy on
+      # 127.0.0.1 (Codex-75m0t.2), and each connection takes a random local
+      # port from that range, holding it in TIME_WAIT after it closes. The
+      # seed alone opens thousands, so one can sit on a worker's port when
+      # wrangler binds it: admin-api failed "Address already in use
+      # (127.0.0.1:42073)" on dev run 39414684946. A reserved port is never
+      # handed out as an ephemeral one.
+      - name: Reserve the worker ports
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=42069-42075
+
       - name: Start local Neon proxy
         run: bash .github/scripts/start-local-neon-proxy.sh "${{ job.services.neon-proxy.id }}"
 
