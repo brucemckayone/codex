@@ -244,6 +244,47 @@ export class OrphanedFileService extends BaseService {
   }
 
   /**
+   * Nominate the page-image objects a save dropped: one pending row per
+   * object, however often it is dropped (Codex-61zsk.17).
+   *
+   * An object already pending (its upload's row, or an earlier drop's) has
+   * that row's wait restarted, not a second row added. So a page toggled in
+   * and out of an image queues it once, not once per save, and the sweep
+   * waits {@link PAGE_IMAGE_GRACE_MS} after the LAST drop: appended, the
+   * upload's own pending row came due a week after the upload however
+   * recently the image was dropped.
+   *
+   * @param inputs - One per object key (`pageImageObjectKeys`)
+   * @returns How many objects had their pending row restarted, and how many
+   *   rows were added
+   */
+  async nominatePageImageObjects(
+    inputs: RecordOrphanInput[]
+  ): Promise<{ restarted: number; added: number }> {
+    if (inputs.length === 0) return { restarted: 0, added: 0 };
+    const restarted = await this.db
+      .update(schema.orphanedImageFiles)
+      .set({ orphanedAt: new Date() })
+      .where(
+        and(
+          eq(schema.orphanedImageFiles.imageType, 'page_image'),
+          eq(schema.orphanedImageFiles.status, 'pending'),
+          inArray(
+            schema.orphanedImageFiles.r2Key,
+            inputs.map((input) => input.r2Key)
+          )
+        )
+      )
+      // Whole rows: on the http|ws union `returning` takes no field map.
+      .returning();
+    const pending = new Set(restarted.map((row) => row.r2Key));
+    const added = await this.recordOrphanedFiles(
+      inputs.filter((input) => !pending.has(input.r2Key))
+    );
+    return { restarted: pending.size, added: added.length };
+  }
+
+  /**
    * Mark an orphan as successfully deleted
    */
   async markDeleted(id: string): Promise<void> {

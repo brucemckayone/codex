@@ -43,8 +43,8 @@ import {
 import type { OrphanedFileService } from '@codex/image-processing';
 import {
   droppedPageImageKeys,
+  pageIdOfPageImageKey,
   pageImageObjectKeys,
-  recordOrphansOrLog,
 } from '@codex/image-processing';
 import {
   BaseService,
@@ -2184,11 +2184,13 @@ export class CourseJourneyService extends BaseService {
     // alt? }`, with no per-type schema knowledge, so finding what changed
     // means deep-scanning both trees for page-image keys rather than diffing
     // named columns — see `droppedPageImageKeys` (`@codex/image-processing`,
-    // beside the key rules the upload and the sweep share). Any page's key
-    // counts, not only this page's: a duplicated page renders its source's
-    // keys, and dropping one must still nominate it. The sweep deletes one
-    // only if no page in the key's own org references it, so a key pasted
-    // in from another org can neither keep that org's image nor lose it.
+    // beside the key rules the upload and the sweep share). Any of this
+    // org's pages' keys counts, not only this page's: a duplicated page
+    // renders its source's keys, and dropping one must still nominate it.
+    // Another org's key does not (Codex-61zsk.17): the sweep deletes one only
+    // if no page in the key's OWN org references it, so a key pasted in from
+    // another org can neither keep that org's image nor lose it, and
+    // queueing it would only fill the queue every tenant's cleanup shares.
     //
     // What this queues is a NOMINATION, not a verdict. Undo, a duplicated
     // page and two overlapping saves can all put a reference back after the
@@ -2207,9 +2209,10 @@ export class CourseJourneyService extends BaseService {
     // BACK would be actively wrong — it would queue a key the (unchanged)
     // old sections still hold.
     //
-    // Recording never throws (`recordOrphansOrLog` swallows and logs). The
-    // scan and the lookup of what an upload minted can, and the outer try
-    // catches them: the save stands, and nothing is queued.
+    // The lookups and the nomination can throw, and the try catches them:
+    // the save stands, nothing is queued, and the error log names the
+    // dropped keys, so what went untracked can be found and queued by hand.
+    let nominated: string[] = [];
     try {
       const removedKeys = droppedPageImageKeys(oldSections, record.sections);
 
@@ -2217,10 +2220,7 @@ export class CourseJourneyService extends BaseService {
         return { revision };
       }
 
-      const nominated = removedKeys.slice(
-        0,
-        MAX_PAGE_IMAGES_NOMINATED_PER_SAVE
-      );
+      nominated = removedKeys.slice(0, MAX_PAGE_IMAGES_NOMINATED_PER_SAVE);
       if (removedKeys.length > nominated.length) {
         this.obs.warn('Page image nominations capped for one save', {
           context: 'landing-page-image',
@@ -2229,35 +2229,42 @@ export class CourseJourneyService extends BaseService {
           nominated: nominated.length,
         });
       }
-      const r2Keys = nominated.flatMap(pageImageObjectKeys);
+
+      const owned = await this.pageImageKeysOfOrg(organizationId, nominated);
+      if (owned.length < nominated.length) {
+        this.obs.warn("Page image nominations skipped: another org's images", {
+          context: 'landing-page-image',
+          pageId: record.id,
+          keys: nominated.filter((key) => !owned.includes(key)).slice(0, 20),
+        });
+      }
+      const r2Keys = owned.flatMap(pageImageObjectKeys);
 
       if (this.orphanedFileService) {
         // Only objects an upload minted (Codex-61zsk.17). A key is text a
-        // manager can write, and this queue is every tenant's: a fabricated
-        // key queued here would delay every other org's cleanup. An upload
-        // records its objects as it stores them, so a key with no row was
-        // never uploaded; it is skipped, and the skip is logged so a page
-        // that writes them is seen.
+        // manager can write, and this queue is every tenant's: a key of
+        // this org's own shape that no upload made would delay every other
+        // org's cleanup. An upload records its objects as it stores them, so
+        // a key with no row is fabricated, or its upload's record failed
+        // (that upload logged 'keys are untracked'); either way it is
+        // skipped, and the keys are logged.
         const minted =
           await this.orphanedFileService.mintedPageImageObjects(r2Keys);
         const mintedKeys = r2Keys.filter((r2Key) => minted.has(r2Key));
         if (mintedKeys.length < r2Keys.length) {
-          this.obs.warn('Page image nominations skipped: no upload made them', {
+          this.obs.warn('Page image nominations skipped: no upload row', {
             context: 'landing-page-image',
             pageId: record.id,
-            skipped: r2Keys.length - mintedKeys.length,
+            r2Keys: r2Keys.filter((r2Key) => !minted.has(r2Key)).slice(0, 20),
           });
         }
-        await recordOrphansOrLog(
-          this.orphanedFileService,
+        await this.orphanedFileService.nominatePageImageObjects(
           mintedKeys.map((r2Key) => ({
             r2Key,
             imageType: 'page_image' as const,
             entityId: record.id,
             entityType: 'landing_page' as const,
-          })),
-          this.obs,
-          'landing-page-image'
+          }))
         );
       } else {
         // The registry always supplies one (service-registry.ts, the
@@ -2277,11 +2284,47 @@ export class CourseJourneyService extends BaseService {
       this.obs.error('Page image orphan scan failed after a successful save', {
         context: 'landing-page-image',
         pageId: record.id,
+        keys: nominated,
         error:
           scanError instanceof Error ? scanError.message : String(scanError),
       });
     }
     return { revision };
+  }
+
+  /**
+   * Which of these page-image keys were uploaded to one of `organizationId`'s
+   * pages: the page id is part of the key (`pageIdOfPageImageKey`). Soft-
+   * deleted pages count, as they do for the sweep, since a restore brings
+   * their images back; so this is scoped by org alone, not `scopedNotDeleted`.
+   */
+  private async pageImageKeysOfOrg(
+    organizationId: string,
+    keys: string[]
+  ): Promise<string[]> {
+    const pageIds = [
+      ...new Set(
+        keys.flatMap((key) => {
+          const pageId = pageIdOfPageImageKey(key);
+          return pageId ? [pageId] : [];
+        })
+      ),
+    ];
+    if (pageIds.length === 0) return [];
+    const pages = await this.db
+      .select({ id: landingPages.id })
+      .from(landingPages)
+      .where(
+        and(
+          eq(landingPages.organizationId, organizationId),
+          inArray(landingPages.id, pageIds)
+        )
+      );
+    const own = new Set(pages.map((page) => page.id));
+    return keys.filter((key) => {
+      const pageId = pageIdOfPageImageKey(key);
+      return pageId !== null && own.has(pageId);
+    });
   }
 
   /**
