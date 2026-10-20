@@ -722,6 +722,7 @@ export class PurchaseService extends BaseService {
               creatorId: contentRecord.creatorId,
               revenueType: 'content_purchase',
               at: purchasedAt,
+              obs: this.obs,
             })
           : null;
 
@@ -1163,6 +1164,7 @@ export class PurchaseService extends BaseService {
             creatorId: course.creatorId,
             revenueType: 'content_purchase',
             at: purchasedAt,
+            obs: this.obs,
           }
         );
         const effectiveOrgFeePercent =

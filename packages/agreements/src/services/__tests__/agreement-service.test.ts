@@ -43,6 +43,10 @@ import {
   InvalidProposalStateError,
   ShareExceedsAvailableError,
 } from '../../errors';
+import {
+  DEPARTURE_TERMINATION_REASON,
+  terminateAgreementsOnDeparture,
+} from '../agreement-departure';
 import { AgreementService } from '../agreement-service';
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────
@@ -1545,9 +1549,10 @@ describe('AgreementService', () => {
       expect(results).toHaveLength(0);
     });
 
-    it('getActiveAgreements: effective_until <= activeAt does NOT surface (legacy time-slice)', async () => {
-      // Defence in depth: legacy `effective_until` filter still trims
-      // any rows whose explicit end-date is in the past.
+    it('getActiveAgreements: effective_until <= activeAt STILL surfaces (a review date, not an expiry)', async () => {
+      // Owner decision AGR-01 (Codex-2hxff.17): the agreement keeps paying
+      // past its review date until either side ends it. This test used to pin
+      // the opposite, a `effective_until` cutoff that silently stopped pay.
       const fx = await seedOrgFixture(db);
       const invoiceAt = new Date('2026-01-15T00:00:00Z');
       await db.insert(schema.creatorOrganizationAgreements).values({
@@ -1557,13 +1562,14 @@ describe('AgreementService', () => {
         revenueType: 'subscription',
         status: 'active',
         effectiveFrom: new Date('2025-12-01T00:00:00Z'),
-        effectiveUntil: new Date('2026-01-01T00:00:00Z'), // ended before invoice
+        effectiveUntil: new Date('2026-01-01T00:00:00Z'), // review date passed
       });
       const results = await service.getActiveAgreements({
         organizationId: fx.orgId,
         activeAt: invoiceAt,
       });
-      expect(results).toHaveLength(0);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.creatorId).toBe(fx.creatorAId);
     });
 
     // Codex-xz61z (I6): `getActiveAgreement` (singular) was dropped —
@@ -1844,6 +1850,76 @@ describe('AgreementService', () => {
       expect(params.templateName).toBe('agreement-terminated');
       // Recipient is the OTHER party — the creator
       expect(params.userId).toBe(fx.creatorAId);
+    });
+
+    // Owner decision AGR-09, "End on removal" (Codex-2hxff.18).
+    it('an agreement ended by removal emails the creator, with the reason and their share', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      const proposal = await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      await serviceWithMailer.acceptProposal({
+        proposalId: proposal.id,
+        acceptedByUserId: fx.creatorAId,
+      });
+      const ended = await terminateAgreementsOnDeparture(db, {
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        at: new Date(),
+      });
+      expect(ended).toHaveLength(1);
+      mailer.mockClear();
+
+      await serviceWithMailer.notifyTerminatedOnDeparture(ended);
+
+      expect(mailer).toHaveBeenCalledTimes(1);
+      const params = mailer.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params.templateName).toBe('agreement-terminated');
+      expect(params.userId).toBe(fx.creatorAId);
+      expect(params.organizationId).toBe(fx.orgId);
+      const data = params.data as Record<string, string>;
+      expect(data.terminationReason).toBe(DEPARTURE_TERMINATION_REASON);
+      expect(data.sharePercentDisplay).toBe('30%');
+    });
+
+    it('a departure notice with no active owner to name is skipped, and the rest still send', async () => {
+      const fx = await seedOrgFixture(db);
+      const other = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      const agreementIn = async (orgId: string, creatorId: string) =>
+        (
+          await db
+            .insert(schema.creatorOrganizationAgreements)
+            .values({
+              organizationId: orgId,
+              creatorId,
+              organizationFeePercentage: 7000,
+              revenueType: 'subscription',
+              status: 'terminated',
+              terminatedAt: new Date(),
+              effectiveFrom: new Date(Date.now() - 86_400_000),
+            })
+            .returning()
+        )[0];
+      const ownerless = await agreementIn(fx.orgId, fx.creatorAId);
+      const owned = await agreementIn(other.orgId, other.creatorAId);
+      if (!ownerless || !owned) throw new Error('agreements not inserted');
+      await db
+        .update(schema.organizationMemberships)
+        .set({ status: 'inactive' })
+        .where(eq(schema.organizationMemberships.userId, fx.ownerId));
+
+      await serviceWithMailer.notifyTerminatedOnDeparture([ownerless, owned]);
+
+      expect(mailer).toHaveBeenCalledTimes(1);
+      const params = mailer.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params.userId).toBe(other.creatorAId);
     });
 
     it('withdrawProposal does NOT fire any notification (silent withdrawal per epic plan)', async () => {

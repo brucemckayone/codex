@@ -743,6 +743,13 @@
       "when": 1792496476884,
       "tag": "0105_handy_corsair",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1792531579488,
+      "tag": "0106_agreement_review_reminder_copy",
+      "breakpoints": true
     }
   ]
 }

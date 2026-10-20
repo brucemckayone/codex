@@ -828,6 +828,9 @@ importers:
 
   packages/organization:
     dependencies:
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../agreements
       '@codex/constants':
         specifier: workspace:*
         version: link:../constants
@@ -945,6 +948,9 @@ importers:
 
   packages/purchase:
     dependencies:
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../agreements
       '@codex/cache':
         specifier: workspace:*
         version: link:../cache
@@ -1065,6 +1071,9 @@ importers:
 
   packages/subscription:
     dependencies:
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../agreements
       '@codex/cache':
         specifier: workspace:*
         version: link:../cache

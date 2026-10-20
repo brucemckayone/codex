@@ -63,6 +63,10 @@ import type {
   RevenueType,
 } from '../types';
 import {
+  DEPARTURE_TERMINATION_REASON,
+  type DepartureTerminatedAgreement,
+} from './agreement-departure';
+import {
   creatorShareFromLegacyOrgFee,
   formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,
@@ -1016,6 +1020,68 @@ export class AgreementService extends BaseService {
     }
   }
 
+  /**
+   * Emails the creator about each agreement ended because they are no longer
+   * a member of the organisation (`terminateAgreementsOnDeparture`, owner
+   * decision AGR-09). The organisation, through its first active owner, is the
+   * counterparty. Runs after the removal has committed, so a failure here is
+   * logged and never undoes it.
+   */
+  async notifyTerminatedOnDeparture(
+    agreements: readonly DepartureTerminatedAgreement[]
+  ): Promise<void> {
+    for (const terminated of agreements) {
+      try {
+        const [ownerRow] = await this.db
+          .select({ userId: organizationMemberships.userId })
+          .from(organizationMemberships)
+          .where(
+            and(
+              eq(
+                organizationMemberships.organizationId,
+                terminated.organizationId
+              ),
+              eq(organizationMemberships.role, 'owner'),
+              eq(organizationMemberships.status, 'active')
+            )
+          )
+          .limit(1);
+        if (!ownerRow) {
+          this.obs.warn(
+            'agreement departure notice skipped: no active owner for org',
+            { organizationId: terminated.organizationId }
+          );
+          continue;
+        }
+        await this.dispatchLifecycleEmail({
+          recipientUserId: terminated.creatorId,
+          organizationId: terminated.organizationId,
+          templateName: 'agreement-terminated',
+          extraContext: {
+            terminationReason: DEPARTURE_TERMINATION_REASON,
+            effectiveTerminationDate: this.formatDate(
+              terminated.terminatedAt ?? new Date()
+            ),
+          },
+          threadId: terminated.id,
+          counterpartyUserId: ownerRow.userId,
+          revenueType: terminated.revenueType as RevenueType,
+          sharePercent: 10000 - terminated.organizationFeePercentage,
+          termMonths: this.estimateTermMonths(
+            terminated.effectiveFrom,
+            terminated.effectiveUntil
+          ),
+          note: null,
+        });
+      } catch (error) {
+        this.obs.warn('agreement departure notice failed', {
+          agreementId: terminated.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
   // ── Public: reads ───────────────────────────────────────────────────────
 
   /**
@@ -1029,8 +1095,10 @@ export class AgreementService extends BaseService {
    *   time receives the full cut for that period)
    * - `effectiveFrom <= activeAt` (an agreement scheduled to start in
    *   the future never receives a payout for the current invoice)
-   * - `effectiveUntil IS NULL OR effectiveUntil > activeAt` (defence in
-   *   depth for the legacy time-sliced model)
+   * - NOT `effectiveUntil`: the term's end is a review date, not an expiry
+   *   (owner decision AGR-01, "Keeps paying"; Codex-2hxff.17). An agreement
+   *   past it is still active, here and in every payment path
+   *   (`agreementsInForce`).
    * - optional `revenueType` filter (subscription | content_purchase)
    *
    * When `activeAt` is omitted, defaults to `new Date()`. The payout
@@ -1064,10 +1132,6 @@ export class AgreementService extends BaseService {
             )
           ),
           lte(creatorOrganizationAgreements.effectiveFrom, at),
-          or(
-            isNull(creatorOrganizationAgreements.effectiveUntil),
-            gt(creatorOrganizationAgreements.effectiveUntil, at)
-          ),
           input.revenueType
             ? eq(creatorOrganizationAgreements.revenueType, input.revenueType)
             : undefined
@@ -1119,11 +1183,7 @@ export class AgreementService extends BaseService {
           and(
             eq(creatorOrganizationAgreements.organizationId, organizationId),
             eq(creatorOrganizationAgreements.status, 'active'),
-            lte(creatorOrganizationAgreements.effectiveFrom, now),
-            or(
-              isNull(creatorOrganizationAgreements.effectiveUntil),
-              gt(creatorOrganizationAgreements.effectiveUntil, now)
-            )
+            lte(creatorOrganizationAgreements.effectiveFrom, now)
           )
         )
         .orderBy(asc(creatorOrganizationAgreements.effectiveFrom));
@@ -1164,10 +1224,6 @@ export class AgreementService extends BaseService {
             )
           ),
           lte(creatorOrganizationAgreements.effectiveFrom, at),
-          or(
-            isNull(creatorOrganizationAgreements.effectiveUntil),
-            gt(creatorOrganizationAgreements.effectiveUntil, at)
-          ),
           input.revenueType
             ? eq(creatorOrganizationAgreements.revenueType, input.revenueType)
             : undefined
@@ -1213,12 +1269,13 @@ export class AgreementService extends BaseService {
   }
 
   /**
-   * Find active agreements approaching their term end (Codex-tugez).
+   * Find active agreements approaching their review date (Codex-tugez), for
+   * the reminder email. The review date is not an expiry (AGR-01).
    *
    * Filters:
-   *   - `status='active'` — only live agreements can expire
-   *   - `effectiveUntil IS NOT NULL` — indefinite agreements never expire
-   *   - `effectiveUntil > now` — not already past expiry
+   *   - `status='active'` — only live agreements are reviewed
+   *   - `effectiveUntil IS NOT NULL` — indefinite agreements have no review date
+   *   - `effectiveUntil > now` — the review date has not already passed
    *   - `effectiveUntil <= now + daysAhead days` — within the warning window
    *   - `expiringSoonEmailSentAt IS NULL` — idempotency gate; once the cron
    *     has fired for this row, it does not refire

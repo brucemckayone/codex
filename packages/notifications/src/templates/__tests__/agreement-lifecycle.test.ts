@@ -158,12 +158,12 @@ const FIXTURES: TemplateFixture[] = [
   },
   {
     name: 'agreement-expiring-soon',
-    expectedSubjectMatches: /expires soon/,
+    expectedSubjectMatches: /Time to review/,
     extraContext: { expiryDate: '2026-06-30' },
-    htmlTemplate: `<!DOCTYPE html><html><body><p>Hi {{recipientName}},</p><p>Your revenue-share agreement with {{orgName}} (counterparty {{otherPartyName}}) is approaching its expiry date.</p><p>Current share: {{sharePercentDisplay}} of post-platform {{revenueTypeLabel}} revenue</p><p>Expires on: {{expiryDate}}</p><a href="{{deepLinkUrl}}">Open new proposal</a></body></html>`,
-    textTemplate: `Hi {{recipientName}},\n\nYour revenue-share agreement with {{orgName}} (counterparty {{otherPartyName}}) is approaching its expiry date.\n\nCurrent share: {{sharePercentDisplay}} of post-platform {{revenueTypeLabel}} revenue\nOriginal term: {{termMonthsDisplay}}\nExpires on: {{expiryDate}}\n\nOpen a new proposal: {{deepLinkUrl}}\n\n{{platformName}}`,
+    htmlTemplate: `<!DOCTYPE html><html><body><p>Hi {{recipientName}},</p><p>Your revenue-share agreement with {{orgName}} (counterparty {{otherPartyName}}) reaches its review date soon.</p><p>Current share: {{sharePercentDisplay}} of post-platform {{revenueTypeLabel}} revenue</p><p>Review by: {{expiryDate}}</p><a href="{{deepLinkUrl}}">Open new proposal</a></body></html>`,
+    textTemplate: `Hi {{recipientName}},\n\nYour revenue-share agreement with {{orgName}} (counterparty {{otherPartyName}}) reaches its review date soon.\n\nCurrent share: {{sharePercentDisplay}} of post-platform {{revenueTypeLabel}} revenue\nOriginal term: {{termMonthsDisplay}}\nReview by: {{expiryDate}}\n\nOpen a new proposal: {{deepLinkUrl}}\n\n{{platformName}}`,
     bodyContains: [
-      'expiry',
+      'review',
       '30%',
       'post-platform subscription revenue',
       '2026-06-30',
@@ -378,7 +378,7 @@ describe('agreement-lifecycle templates (WP-5 — Codex-90de9)', () => {
       'agreement-terminated':
         'Revenue-share agreement with {{orgName}} terminated',
       'agreement-expiring-soon':
-        'Revenue-share agreement with {{orgName}} expires soon',
+        'Time to review your revenue-share agreement with {{orgName}}',
     };
     for (const fixture of FIXTURES) {
       const subjectTemplate = subjects[fixture.name];

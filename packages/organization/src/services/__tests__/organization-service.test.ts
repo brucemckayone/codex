@@ -1052,6 +1052,126 @@ describe('OrganizationService', () => {
         ).rejects.toThrow(OwnershipTransferRequiredError);
       });
 
+      // Owner decision AGR-09, "End on removal" (Codex-2hxff.18).
+      it("ends the member's agreements in that organisation, and only theirs, then tells the mailer", async () => {
+        const removed = memberMgmtTestUserIds[1];
+        const stays = memberMgmtTestUserIds[2];
+        const otherOrg = await service.create(
+          { name: `Other Org ${Date.now()}`, slug: createUniqueSlug('other') },
+          memberMgmtTestUserIds[3]
+        );
+        await db.insert(schema.organizationMemberships).values({
+          organizationId: otherOrg.id,
+          userId: removed,
+          role: 'creator',
+          status: 'active',
+        });
+        const agreementRow = (
+          organizationId: string,
+          creatorId: string,
+          revenueType: 'subscription' | 'content_purchase' = 'subscription'
+        ) => ({
+          organizationId,
+          creatorId,
+          revenueType,
+          organizationFeePercentage: 7000,
+          status: 'active' as const,
+          effectiveFrom: new Date(Date.now() - 86_400_000),
+        });
+        const [subscriptionShare, purchaseShare, colleague, elsewhere] =
+          await db
+            .insert(schema.creatorOrganizationAgreements)
+            .values([
+              agreementRow(memberMgmtTestOrgId, removed),
+              agreementRow(memberMgmtTestOrgId, removed, 'content_purchase'),
+              agreementRow(memberMgmtTestOrgId, stays),
+              agreementRow(otherOrg.id, removed),
+            ])
+            .returning();
+        if (!subscriptionShare || !purchaseShare || !colleague || !elsewhere) {
+          throw new Error('agreements not inserted');
+        }
+
+        const notified: Array<Array<{ id: string }>> = [];
+        const sent: Promise<unknown>[] = [];
+        const removing = new OrganizationService({
+          db,
+          environment: 'test',
+          r2PublicUrlBase: ASSET_CDN_BASE,
+          onAgreementsEndedByDeparture: async (agreements) => {
+            notified.push(agreements);
+          },
+          waitUntil: (promise) => sent.push(promise),
+        });
+
+        await removing.removeMember(memberMgmtTestOrgId, removed);
+        await Promise.all(sent);
+
+        const rows = await db.query.creatorOrganizationAgreements.findMany({
+          where: (agreements, { inArray }) =>
+            inArray(agreements.id, [
+              subscriptionShare.id,
+              purchaseShare.id,
+              colleague.id,
+              elsewhere.id,
+            ]),
+        });
+        const byId = new Map(rows.map((row) => [row.id, row]));
+        for (const ended of [subscriptionShare, purchaseShare]) {
+          const row = byId.get(ended.id);
+          expect(row?.status).toBe('terminated');
+          expect(row?.terminatedAt).toBeInstanceOf(Date);
+          expect(row?.terminatedByUserId).toBeNull();
+          expect(row?.terminationReason).toBe(
+            'No longer a member of the organisation'
+          );
+        }
+        expect(byId.get(colleague.id)?.status).toBe('active');
+        expect(byId.get(elsewhere.id)?.status).toBe('active');
+
+        expect(notified).toHaveLength(1);
+        expect(notified[0]?.map((agreement) => agreement.id).sort()).toEqual(
+          [subscriptionShare.id, purchaseShare.id].sort()
+        );
+      });
+
+      it('a removal still succeeds when the departure email fails', async () => {
+        const removed = memberMgmtTestUserIds[1];
+        await db.insert(schema.creatorOrganizationAgreements).values({
+          organizationId: memberMgmtTestOrgId,
+          creatorId: removed,
+          revenueType: 'subscription',
+          organizationFeePercentage: 7000,
+          status: 'active',
+          effectiveFrom: new Date(Date.now() - 86_400_000),
+        });
+        const sent: Promise<unknown>[] = [];
+        const removing = new OrganizationService({
+          db,
+          environment: 'test',
+          r2PublicUrlBase: ASSET_CDN_BASE,
+          onAgreementsEndedByDeparture: async () => {
+            throw new Error('mail service down');
+          },
+          waitUntil: (promise) => sent.push(promise),
+        });
+
+        await expect(
+          removing.removeMember(memberMgmtTestOrgId, removed)
+        ).resolves.toBeUndefined();
+        // The failure is caught and logged, never an unhandled rejection.
+        await expect(Promise.all(sent)).resolves.toBeDefined();
+
+        const membership = await db.query.organizationMemberships.findFirst({
+          where: (memberships, { and, eq }) =>
+            and(
+              eq(memberships.organizationId, memberMgmtTestOrgId),
+              eq(memberships.userId, removed)
+            ),
+        });
+        expect(membership?.status).toBe('inactive');
+      });
+
       it('should allow removing non-owner members', async () => {
         await service.removeMember(
           memberMgmtTestOrgId,

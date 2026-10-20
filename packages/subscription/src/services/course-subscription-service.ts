@@ -1217,6 +1217,7 @@ export class CourseSubscriptionService extends BaseService {
         creatorId,
         revenueType: 'subscription',
         at: invoiceCreatedAt,
+        obs: this.obs,
       }
     );
     const effectiveOrgFeePercent =

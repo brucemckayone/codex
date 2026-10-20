@@ -3,6 +3,11 @@
  */
 
 export {
+  DEPARTURE_TERMINATION_REASON,
+  type DepartureTerminatedAgreement,
+  terminateAgreementsOnDeparture,
+} from './agreement-departure';
+export {
   type ActiveAgreementShareView,
   creatorShareFromLegacyOrgFee,
   formatRevenueTypeLabel,
@@ -11,6 +16,11 @@ export {
   type ValidateProposedShareInput,
   validateProposedShare,
 } from './agreement-math';
+export {
+  type AgreementInForce,
+  type AgreementRevenueType,
+  agreementsInForce,
+} from './agreement-resolver';
 export {
   type AcceptProposalInput,
   type AgreementLifecycleMailer,

@@ -220,7 +220,7 @@ describe('buildOwnerAgreementFocusItems', () => {
     expect(expiring).toBeDefined();
     expect(expiring?.tone).toBe('warning');
     expect(expiring?.dismissable).toBe(true);
-    expect(expiring?.title).toMatch(/expires in 25 days/);
+    expect(expiring?.title).toMatch(/is due for review in 25 days/);
   });
 
   it('does NOT emit an expiring warning when effectiveUntil is beyond the 30-day window', () => {
@@ -403,7 +403,7 @@ describe('buildCreatorAgreementFocusItems', () => {
     expect(expiring?.tone).toBe('warning');
     expect(expiring?.dismissable).toBe(true);
     expect(expiring?.title).toMatch(
-      /Your agreement with Studio Alpha expires in 20 days/
+      /Your agreement with Studio Alpha is due for review in 20 days/
     );
   });
 

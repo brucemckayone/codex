@@ -68,11 +68,12 @@ Owner decision AGR-01, "Keeps paying", clarified as "Yes, any time".
   or a renegotiated agreement replaces it.
 - Thirty days before the review date both sides are emailed a reminder
   (`agreement-expiring-soon`, notifications-api cron `0 8 * * *`, production
-  only), worded as a review reminder.
+  only), worded as a review reminder. Migration 0106 rewrote the live
+  templates, unless an organisation had edited its own copy.
 
-— **gap**: `Codex-2hxff.17`. Today the review date acts as a hard cutoff: the
-creator silently drops to £0 on subscriptions while Studio still shows the
-agreement as active, and lapsed agreements still count against the 100% limit.
+`effective_until` stores the review date. Only the reminder scan
+(`findExpiringAgreements`) reads it. Payments, Studio, the 100% limit and the
+admin revenue view all treat an agreement past its review date as active.
 
 ## Ending an agreement
 
@@ -86,10 +87,17 @@ agreement as active, and lapsed agreements still count against the 100% limit.
 ### Leaving an organisation
 
 Owner decision AGR-09, "End on removal". When a creator is removed from an
-organisation, or leaves it, their agreements there are **terminated at that
-moment**. Money earned before then is still paid to them. The payout lookup also
-requires the creator to be an active member, as a safeguard — **gap**:
-`Codex-2hxff.18`.
+organisation, their agreements there are **terminated at that moment**
+(`terminateAgreementsOnDeparture`, in the same transaction as the membership
+change). The creator is emailed `agreement-terminated` after the commit. Their
+agreements in other organisations are untouched.
+
+Money earned before the removal is still paid to them. The resolver reads the
+termination time, not the membership. A webhook for an earlier invoice that
+lands, or is retried, after the removal still finds the agreement. A check on
+the membership as it is *now* would wrongly drop that share, so there is none.
+`removeMember` is the only way a creator's membership ends today. Any new way
+out must call `terminateAgreementsOnDeparture` too.
 
 ## How a share applies
 
@@ -101,18 +109,19 @@ requires the creator to be an active member, as a safeguard — **gap**:
 | Course subscription invoice | The course creator's `subscription` agreement | The default subscription organisation fee; the creator gets the rest |
 | Orgless sale | None | No organisation slice |
 
-One resolver decides which agreements apply, for every path — **gap**:
-`Codex-2hxff.19`:
+One resolver decides which agreements apply, for every path
+(`agreementsInForce` in `@codex/agreements`) — **gap**: `Codex-2hxff.19` for
+the two items marked "today":
 
 - it uses the sale's own time: the invoice's creation time for subscriptions and
   the payment time for purchases (today purchases use the time the webhook is
   processed);
 - an agreement counts if it is active at that time, or was terminated after it,
   and its effective dates cover it;
-- a missing proposal link is logged and skipped, never silently dropped (today
-  the purchase path's inner join hides it);
+- a missing proposal link is logged and skipped, never silently dropped, and
+  that creator gets no share rather than a newer agreement's;
 - results are ordered deterministically and counted once per creator, even
-  mid-renegotiation;
+  mid-renegotiation: the older agreement was the one in force;
 - the purchase or invoice records which agreement it used (today
   `creator_org_agreement_id` is always empty).
 

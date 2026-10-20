@@ -28,6 +28,7 @@
  * - Webhook handlers check-before-insert (same pattern as PurchaseService)
  */
 
+import { agreementsInForce } from '@codex/agreements';
 import type { VersionedCache } from '@codex/cache';
 import {
   BILLING_INTERVAL,
@@ -38,8 +39,6 @@ import {
 } from '@codex/constants';
 import { dateWindow, isUniqueViolation, toIso } from '@codex/database';
 import {
-  agreementProposals,
-  creatorOrganizationAgreements,
   organizationFollowers,
   organizationMemberships,
   type PayoutType,
@@ -89,12 +88,10 @@ import {
   and,
   desc,
   eq,
-  gt,
   inArray,
   isNotNull,
   isNull,
   lt,
-  lte,
   or,
   sql,
 } from 'drizzle-orm';
@@ -4583,109 +4580,19 @@ export class SubscriptionService extends BaseService {
     // gets the post-platform pool minus what the creators take, rounding
     // pennies included (Codex-2hxff.12).
     //
-    // Codex-rzfjw (WP-4): query the agreements model with all four
-    // WP-1 filters pinned at invoice fire time, and JOIN to the
-    // accepted proposal to read `proposed_creator_share_percent` as
-    // the authoritative share — NOT the legacy `organization_fee_percentage`
-    // column. The legacy column is dual-written by WP-2 (Discovery 2
-    // of project_revenue_share_wp1_discoveries) and will be dropped in a
-    // follow-up migration once this read path lands.
-    //
-    // Filters:
-    //   status='active'                         — only live agreements
-    //   revenueType='subscription'              — subscription pool
-    //   terminatedAt IS NULL OR > invoiceAt     — Q3 no pro-rating
-    //   effectiveFrom <= invoiceAt              — not-yet-active excluded
-    //   effectiveUntil IS NULL OR > invoiceAt   — legacy time-slice safety
-    //
-    // Backfilled legacy rows (migration 0072) have `current_proposal_id`
-    // pointing at a synthesised round-1 'accepted' proposal whose
-    // `proposed_creator_share_percent = 10000 - organization_fee_percentage`,
-    // so this JOIN handles both pre-WP-1 and post-WP-1 rows uniformly.
-    //
-    // Codex-ez3tl (I3): leftJoin + NULL skip. `current_proposal_id` is
-    // FK `onDelete: 'set null'`, so a proposal delete nulls the link.
-    // The pre-fix `innerJoin` silently dropped such rows. The leftJoin
-    // surfaces them; rows with NULL share are skipped with a warn log
-    // so misconfigurations don't go undetected.
-    const creatorAgreementsRaw = await this.db
-      .select({
-        agreementId: creatorOrganizationAgreements.id,
-        creatorId: creatorOrganizationAgreements.creatorId,
-        sharePercent: agreementProposals.proposedCreatorSharePercent,
-      })
-      .from(creatorOrganizationAgreements)
-      .leftJoin(
-        agreementProposals,
-        eq(
-          agreementProposals.id,
-          creatorOrganizationAgreements.currentProposalId
-        )
-      )
-      .where(
-        and(
-          eq(creatorOrganizationAgreements.organizationId, orgId),
-          eq(creatorOrganizationAgreements.revenueType, 'subscription'),
-          // Per Decision Q3: an agreement is active at invoice time if
-          // EITHER it is currently status='active' (never terminated), OR
-          // it was terminated AFTER the invoice fired. The schema's
-          // check_creator_org_agreement_terminated_shape enforces
-          // `(status='terminated') = (terminated_at IS NOT NULL)`, so
-          // status='active' guarantees terminatedAt IS NULL.
-          or(
-            eq(creatorOrganizationAgreements.status, 'active'),
-            and(
-              eq(creatorOrganizationAgreements.status, 'terminated'),
-              gt(creatorOrganizationAgreements.terminatedAt, invoiceCreatedAt)
-            )
-          ),
-          lte(creatorOrganizationAgreements.effectiveFrom, invoiceCreatedAt),
-          or(
-            isNull(creatorOrganizationAgreements.effectiveUntil),
-            gt(creatorOrganizationAgreements.effectiveUntil, invoiceCreatedAt)
-          )
-        )
-      );
-
-    const creatorAgreements: Array<{
-      creatorId: string;
-      sharePercent: number;
-    }> = [];
-    for (const row of creatorAgreementsRaw) {
-      // A creator has one slice per charge (uq_payouts_creator_slice_per_charge).
-      // Two agreements matching the same instant — corrupted data — would
-      // take two shares off the organisation's slice and record only one,
-      // so the second share would go nowhere. Count the first; flag the rest.
-      if (creatorAgreements.some((a) => a.creatorId === row.creatorId)) {
-        this.obs.error(
-          'payout: creator matches more than one agreement; using the first',
-          {
-            errorId: crypto.randomUUID(),
-            agreementId: row.agreementId,
-            organizationId: orgId,
-            creatorId: row.creatorId,
-            subscriptionId,
-          }
-        );
-        continue;
-      }
-      if (row.sharePercent === null) {
-        this.obs.warn(
-          'payout: agreement has no current_proposal_id; skipping',
-          {
-            agreementId: row.agreementId,
-            organizationId: orgId,
-            creatorId: row.creatorId,
-            subscriptionId,
-          }
-        );
-        continue;
-      }
-      creatorAgreements.push({
-        creatorId: row.creatorId,
-        sharePercent: row.sharePercent,
-      });
-    }
+    // The agreements in force at invoice fire time: one rule for every
+    // payment path (`agreementsInForce`, @codex/agreements). It reads the
+    // accepted proposal's `proposed_creator_share_percent`, never the legacy
+    // `organization_fee_percentage` column; keeps paying past the review date
+    // (owner decision AGR-01); requires the creator to still be a member
+    // (AGR-09); and returns one agreement per creator, deterministically — a
+    // creator has one slice per charge (uq_payouts_creator_slice_per_charge).
+    const creatorAgreements = await agreementsInForce(this.db, {
+      organizationId: orgId,
+      revenueType: 'subscription',
+      at: invoiceCreatedAt,
+      obs: this.obs,
+    });
 
     const postPlatformCents = orgFeeCents + creatorPayoutCents;
     const totalShareBps = creatorAgreements.reduce(

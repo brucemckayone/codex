@@ -183,7 +183,7 @@ happened to grow the method.
 | `issueRefund` | platform-initiated refunds (one function; its webhook runs `clawback`) | nothing today (none exists) | C5 |
 | `splitCalculator` | pure arithmetic: platform fee, floor, org, creators, rounding to the org | both `calculateRevenueSplit` copies and the fan-out in `executeTransfers` | C2 |
 | `feeResolver(at)` | the fee in force at `at` (time-versioned once Codex-2hxff.33 lands) | three fallbacks, "now" lookups | C2 |
-| `agreementResolver(at)` | the agreements in force at `at`: deterministic, deduped, live membership | 3 pasted queries | C3 |
+| `agreementResolver(at)` | the agreements in force at `at`: deterministic, deduped; removal ends them at that moment (`agreementsInForce`, exists) | 3 pasted queries | C3 |
 | `payeeResolver(at)` | organisation payee (exists) + creator payee + "payable" | 6 inline lookups and definitions | — |
 | `subscriptionLifecycle` | one event reducer for org tiers and course plans: Stripe status mirroring, tombstones, "at next renewal" changes | per-kind branches spread over a 500-line handler (.52) | C7 |
 | `accessPolicy` | which statuses and entitlements grant access | 4 copies of the status predicate | C7, C9 |
