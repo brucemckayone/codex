@@ -94,7 +94,7 @@ The platform's access hierarchy is **`subscribers ⊇ followers ⊇ public`**. A
 
 Inside the followers branch, checks run in this order:
 
-1. **Subscription** — `status IN (active, cancelling)` AND `currentPeriodEnd > now()`. Any tier qualifies (followers-only content has no tier gate at all). Paused / past_due / expired subscriptions are filtered out (the spec keeps `past_due` granting while Stripe retries — `Codex-2hxff.10`). On grant, `obs.info` emits `reason='followers_content_granted_via_subscription'` so analytics can distinguish the subscription-driven path from an explicit follow.
+1. **Subscription** — `status IN ACCESS_GRANTING_SUBSCRIPTION_STATUSES` (active, cancelling, and `past_due` while Stripe retries a failed renewal — `@codex/constants`) AND `disputed_at IS NULL` AND `currentPeriodEnd > now()`. Any tier qualifies (followers-only content has no tier gate at all). Paused / cancelled / expired subscriptions are filtered out. On grant, `obs.info` emits `reason='followers_content_granted_via_subscription'` so analytics can distinguish the subscription-driven path from an explicit follow.
 2. **Follower row** — fallback so ex-subscribers (status=cancelled) who are still following continue to see the content.
 3. **Management membership** — owner/admin/creator implicitly bypass the gate.
 

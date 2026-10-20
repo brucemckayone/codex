@@ -323,6 +323,13 @@ export function createMockStripe(): Stripe {
         id: _id,
         payments: { data: [] },
       })),
+      // A full refund of a subscription's current-period payment cancels it
+      // (Codex-2hxff.10); the period's invoice is found here. Tests override.
+      list: vi.fn().mockImplementation(async () => ({
+        object: 'list',
+        data: [],
+        has_more: false,
+      })),
     },
 
     charges: {

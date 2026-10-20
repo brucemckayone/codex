@@ -298,6 +298,26 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     expect(mockRevoke).toHaveBeenCalledWith('user_sub', 'org_sub', 'refund');
   });
 
+  // A permanent error would otherwise end as a quiet 200 from the webhook
+  // wrapper, leaving a customer refunded in full still billed.
+  it('a full-refund cancel that fails is alerted with an errorId for support, then rethrown', async () => {
+    mockCancelForFullRefund.mockRejectedValueOnce(new Error('Stripe said no'));
+    const bundle = buildContext();
+
+    await expect(
+      handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context)
+    ).rejects.toThrow('Stripe said no');
+
+    expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('could not be ended'),
+      expect.objectContaining({
+        errorId: expect.any(String),
+        error: 'Stripe said no',
+      })
+    );
+    expect(mockRevoke).not.toHaveBeenCalled();
+  });
+
   it('negative: processRefund returns void (unknown charge) → no cache bump, no revocation, email still sent', async () => {
     mockProcessRefund.mockResolvedValueOnce(undefined);
     const bundle = buildContext();

@@ -224,23 +224,35 @@ Owner decision P-3, "After retries fail".
 
 Owner decision P-4, "Cancel + end access".
 
-- A **full** refund of the latest subscription payment cancels the subscription
-  immediately, ends access and writes the streaming block.
+- A **full** refund of the payment for the **current billing period** cancels
+  the subscription immediately and ends access.
 - A **partial** refund leaves the subscription running.
-- A full refund of an **earlier** payment leaves it running too.
+- A full refund of an **earlier** period's payment, or of a payment that
+  bought no period (an upgrade's proration invoice), leaves it running too
+  (owner decision 2026-10-20, "Current period's payment").
 - Either way, the creator and organisation slices are reversed in proportion,
   exactly as for one-off purchases ([purchases.md](purchases.md#refunds)). A
   shortfall on the payee's balance goes to `refund_reviews`, which holds
   subscription debts as well as purchase ones (one row per reversal).
 
-"Latest" is Stripe's `latest_invoice` on the subscription, compared with the
-invoice the refunded charge paid. The cancel is applied here at once, as for
+The current period's payment is the newest **paid** invoice Stripe raised to
+buy a period (`billing_reason` `subscription_create` or `subscription_cycle`),
+compared with the invoice the refunded charge paid. Stripe's `latest_invoice`
+is not used: after an upgrade it is the proration invoice, and while a renewal
+is retried it is the unpaid one. The cancel is applied here at once, as for
 `customer.subscription.deleted` (which re-applies it when it lands). Tier and
-course subscriptions are handled alike.
+course subscriptions are handled alike, except for the streaming block: a
+tier subscription's is written, while a course plan's grant is revoked
+instead, as on deletion — the org-wide block would also stop the subscriber's
+purchases and tier content (owner decision 2026-10-20).
+
+If the cancel fails, the webhook raises an alert with an `errorId` (check the
+subscription at Stripe and the subscriber's access by hand) and Stripe
+redelivers the event when the failure is transient.
 
 Known limit: a full refund that later **fails** has still cancelled the
 subscription; the customer subscribes again, and support settles the failed
-refund as for a purchase.
+refund as for a purchase (the failed-refund alert says so).
 
 ## Disputes
 

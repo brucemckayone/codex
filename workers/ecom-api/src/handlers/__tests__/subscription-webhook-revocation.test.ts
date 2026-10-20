@@ -14,7 +14,7 @@
  * | ---------------------------------- | -------- | -------- | --------------- |
  * | customer.subscription.deleted      |   yes    |   yes    |       yes       |
  * | invoice.payment_failed (PAST_DUE)  |   no — access continues while Stripe retries (P-3) |
- * | charge.refunded (full, latest sub payment) | yes | yes |       yes       |
+ * | charge.refunded (full, current-period tier payment) | yes | yes | yes |
  * | customer.subscription.updated *NOT* (cancel_at_period_end etc.)   |
  *
  * The "must-not-happen" paths are mandatory per `feedback_security_deep_test`:
@@ -1305,7 +1305,10 @@ describe('handlePaymentWebhook — access revocation on charge.refunded', () => 
     );
   });
 
-  it('positive: a course plan cancelled for a full refund → ended by the course service + revocation', async () => {
+  // Owner decision 2026-10-20: a course plan's grant is revoked (as on
+  // deletion), and the org-wide block — which would also stop the subscriber's
+  // purchases and tier content — is NOT written.
+  it('a course plan cancelled for a full refund → ended by the course service, NO org-wide revocation', async () => {
     mockCancelForFullRefund.mockResolvedValueOnce({
       ...tierEnded,
       subscription: { ...tierEnded.subscription, kind: 'course' },
@@ -1319,14 +1322,10 @@ describe('handlePaymentWebhook — access revocation on charge.refunded', () => 
       courseServiceInstance().handleCourseSubscriptionDeleted
     ).toHaveBeenCalledWith(cancelledSub);
     expect(mockTierDeleted).not.toHaveBeenCalled();
-    expect(mockRevoke).toHaveBeenCalledWith(
-      'user_refund',
-      'org_refund',
-      'refund'
-    );
+    expect(mockRevoke).not.toHaveBeenCalled();
   });
 
-  it('negative: nothing cancelled (partial refund, purchase, earlier payment) → revocation NOT written', async () => {
+  it('negative: nothing cancelled (partial refund, purchase, another payment) → revocation NOT written', async () => {
     mockCancelForFullRefund.mockResolvedValueOnce(undefined);
     const bundle = buildContext();
 

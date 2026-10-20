@@ -1,9 +1,11 @@
 /**
  * A refunded subscription payment (Codex-2hxff.10; owner decision P-4,
- * docs/payments/subscriptions.md#refunds): a FULL refund of the LATEST
- * payment cancels the subscription at Stripe, at once and without proration;
- * a partial refund, a refund of an earlier payment, or a subscription already
- * ended cancels nothing. Tier and course subscriptions alike.
+ * docs/payments/subscriptions.md#refunds): a FULL refund of the CURRENT
+ * PERIOD's payment cancels the subscription at Stripe, at once and without
+ * proration; a partial refund, a refund of an earlier period's payment or of
+ * an upgrade's proration invoice, or a subscription already ended cancels
+ * nothing (owner decision 2026-10-20, "Current period's payment"). Tier and
+ * course subscriptions alike.
  *
  * The money is specified in subscription-refund-clawback.integration.test.ts;
  * the webhook applying the cancellation in
@@ -164,13 +166,15 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
   }
 
   /**
-   * Stripe as it would answer for a charge that paid `invoiceId` of
-   * `stripeSubscriptionId`, whose latest invoice is `latestInvoice`.
+   * Stripe as it would answer for a charge that paid `invoiceId` (raised for
+   * `billingReason`) of `stripeSubscriptionId`, whose paid invoices, newest
+   * first, are `paidInvoices`.
    */
   function stripeKnows(args: {
     stripeSubscriptionId: string;
     invoiceId: string;
-    latestInvoice: string | { id: string } | null;
+    billingReason?: string;
+    paidInvoices: Array<{ id: string; billing_reason: string }>;
     status?: Stripe.Subscription.Status;
   }) {
     vi.mocked(stripe.invoicePayments.list).mockResolvedValue({
@@ -180,6 +184,7 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
     } as never);
     vi.mocked(stripe.invoices.retrieve).mockResolvedValue({
       id: args.invoiceId,
+      billing_reason: args.billingReason ?? 'subscription_cycle',
       parent: {
         subscription_details: { subscription: args.stripeSubscriptionId },
       },
@@ -187,7 +192,11 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
     vi.mocked(stripe.subscriptions.retrieve).mockResolvedValue({
       id: args.stripeSubscriptionId,
       status: args.status ?? 'active',
-      latest_invoice: args.latestInvoice,
+    } as never);
+    vi.mocked(stripe.invoices.list).mockResolvedValue({
+      object: 'list',
+      data: args.paidInvoices,
+      has_more: false,
     } as never);
   }
 
@@ -202,13 +211,16 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
 
   // ── cancels ───────────────────────────────────────────────────────────
 
-  it('a full refund of the latest payment cancels a tier subscription at Stripe, at once and without proration', async () => {
+  it("a full refund of the current period's payment cancels a tier subscription at Stripe, at once and without proration", async () => {
     const sub = await tierSubscription();
     const stripeId = sub.stripeSubscriptionId ?? '';
     stripeKnows({
       stripeSubscriptionId: stripeId,
-      invoiceId: 'in_latest',
-      latestInvoice: 'in_latest',
+      invoiceId: 'in_cycle',
+      paidInvoices: [
+        { id: 'in_cycle', billing_reason: 'subscription_cycle' },
+        { id: 'in_first', billing_reason: 'subscription_create' },
+      ],
     });
     const charge = fullRefund();
 
@@ -216,11 +228,18 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
 
     expect(ended?.subscription).toMatchObject({ kind: 'tier', id: sub.id });
     expect(ended?.cancelled.status).toBe('canceled');
+    expect(stripe.invoices.list).toHaveBeenCalledWith({
+      subscription: stripeId,
+      status: 'paid',
+      limit: 20,
+    });
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith(
       stripeId,
       {
         prorate: false,
-        cancellation_details: { comment: 'Latest payment refunded in full' },
+        cancellation_details: {
+          comment: "Current period's payment refunded in full",
+        },
       },
       { idempotencyKey: `${charge.chargeId}_refund_cancel` }
     );
@@ -230,9 +249,11 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
     const sub = await courseSubscription();
     stripeKnows({
       stripeSubscriptionId: sub.stripeSubscriptionId,
-      invoiceId: 'in_course_latest',
-      // An expanded latest invoice matches as well as an id.
-      latestInvoice: { id: 'in_course_latest' },
+      invoiceId: 'in_course_first',
+      billingReason: 'subscription_create',
+      paidInvoices: [
+        { id: 'in_course_first', billing_reason: 'subscription_create' },
+      ],
     });
 
     const ended = await service.cancelForFullRefund(fullRefund());
@@ -259,19 +280,56 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
     stripeKnows({
       stripeSubscriptionId: sub.stripeSubscriptionId ?? '',
       invoiceId: 'in_last_month',
-      latestInvoice: 'in_this_month',
+      paidInvoices: [
+        { id: 'in_this_month', billing_reason: 'subscription_cycle' },
+        { id: 'in_last_month', billing_reason: 'subscription_cycle' },
+      ],
     });
 
     expect(await service.cancelForFullRefund(fullRefund())).toBeUndefined();
     expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
   });
 
+  it("a full refund of an upgrade's proration invoice leaves the subscription running, and asks Stripe no more", async () => {
+    const sub = await tierSubscription();
+    stripeKnows({
+      stripeSubscriptionId: sub.stripeSubscriptionId ?? '',
+      invoiceId: 'in_proration',
+      billingReason: 'subscription_update',
+      paidInvoices: [
+        { id: 'in_proration', billing_reason: 'subscription_update' },
+        { id: 'in_cycle', billing_reason: 'subscription_cycle' },
+      ],
+    });
+
+    expect(await service.cancelForFullRefund(fullRefund())).toBeUndefined();
+    expect(stripe.invoices.list).not.toHaveBeenCalled();
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+  });
+
+  it("the current period's payment still cancels when an upgrade's proration invoice is newer", async () => {
+    const sub = await tierSubscription();
+    stripeKnows({
+      stripeSubscriptionId: sub.stripeSubscriptionId ?? '',
+      invoiceId: 'in_cycle',
+      paidInvoices: [
+        { id: 'in_proration', billing_reason: 'subscription_update' },
+        { id: 'in_cycle', billing_reason: 'subscription_cycle' },
+      ],
+    });
+
+    const ended = await service.cancelForFullRefund(fullRefund());
+
+    expect(ended?.subscription.id).toBe(sub.id);
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
+  });
+
   it('a subscription already cancelled at Stripe is not cancelled again', async () => {
     const sub = await tierSubscription();
     stripeKnows({
       stripeSubscriptionId: sub.stripeSubscriptionId ?? '',
-      invoiceId: 'in_latest',
-      latestInvoice: 'in_latest',
+      invoiceId: 'in_cycle',
+      paidInvoices: [{ id: 'in_cycle', billing_reason: 'subscription_cycle' }],
       status: 'canceled',
     });
 
@@ -294,8 +352,8 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
   it('an invoice for a subscription we hold no row for cancels nothing', async () => {
     stripeKnows({
       stripeSubscriptionId: `sub_unknown_${uid()}`,
-      invoiceId: 'in_latest',
-      latestInvoice: 'in_latest',
+      invoiceId: 'in_cycle',
+      paidInvoices: [{ id: 'in_cycle', billing_reason: 'subscription_cycle' }],
     });
 
     expect(await service.cancelForFullRefund(fullRefund())).toBeUndefined();

@@ -1501,7 +1501,14 @@ export class SubscriptionService extends BaseService {
       .set({
         currentPeriodStart: new Date(periodStart * 1000),
         currentPeriodEnd: new Date(periodEnd * 1000),
-        status: SUBSCRIPTION_STATUS.ACTIVE,
+        // The live subscription's status, not a blanket ACTIVE: a late or
+        // replayed invoice never revives one Stripe has cancelled (a refund,
+        // a lost dispute), and a renewal keeps `cancel_at_period_end`.
+        status: resolveStatus(
+          stripeSub.status,
+          stripeSub.cancel_at_period_end ?? false,
+          SUBSCRIPTION_STATUS.ACTIVE
+        ),
         amountCents,
         platformFeeCents: split.platformFeeCents,
         organizationFeeCents: split.organizationFeeCents,
@@ -1841,6 +1848,15 @@ export class SubscriptionService extends BaseService {
       sub.status as (typeof SUBSCRIPTION_STATUS)[keyof typeof SUBSCRIPTION_STATUS]
     );
     const newTierId = mapped.tierId;
+
+    if (await this.endedAtStripe(sub, mapped.status)) {
+      this.obs.warn('Late subscription event ignored: cancelled at Stripe', {
+        subscriptionId: sub.id,
+        stripeSubscriptionId: stripeSubId,
+        eventStatus: stripeSubscription.status,
+      });
+      return undefined;
+    }
 
     await this.db
       .update(subscriptions)
@@ -4479,6 +4495,31 @@ export class SubscriptionService extends BaseService {
 
   private disputeDeps() {
     return { db: this.db, stripe: this.stripe, obs: this.obs };
+  }
+
+  /**
+   * Whether an event that would bring a CANCELLED row back is stale: the
+   * subscription has ended at Stripe, where `canceled` is final
+   * (docs/payments/subscriptions.md#lifecycle-and-access: a late or replayed
+   * event never brings back a subscription that has ended). Asked only in
+   * that case, so it costs a Stripe call only then. A subscription Stripe
+   * marked `unpaid` and the customer later paid is live again, and returns.
+   */
+  private async endedAtStripe(
+    sub: Subscription,
+    wouldBecome: string
+  ): Promise<boolean> {
+    if (
+      sub.status !== SUBSCRIPTION_STATUS.CANCELLED ||
+      wouldBecome === SUBSCRIPTION_STATUS.CANCELLED ||
+      !sub.stripeSubscriptionId
+    ) {
+      return false;
+    }
+    const live = await this.stripe.subscriptions.retrieve(
+      sub.stripeSubscriptionId
+    );
+    return live.status === 'canceled' || live.status === 'incomplete_expired';
   }
 
   /**

@@ -73,6 +73,13 @@ export async function subscriptionFromPayoutRows(
   return undefined;
 }
 
+export interface PaidInvoice {
+  invoiceId: string;
+  stripeSubscriptionId: string | null;
+  /** Why Stripe raised it: `subscription_cycle`, `subscription_update`, … */
+  billingReason: string | null;
+}
+
 /**
  * The invoice a payment intent paid, and the Stripe subscription it bills.
  * Undefined when the payment intent paid no invoice (a one-off purchase).
@@ -80,9 +87,7 @@ export async function subscriptionFromPayoutRows(
 export async function invoiceForPaymentIntent(
   deps: SubscriptionChargeDeps,
   paymentIntentId: string | null
-): Promise<
-  { invoiceId: string; stripeSubscriptionId: string | null } | undefined
-> {
+): Promise<PaidInvoice | undefined> {
   if (!paymentIntentId) return undefined;
   const page = await deps.stripe.invoicePayments.list({
     payment: { type: 'payment_intent', payment_intent: paymentIntentId },
@@ -98,7 +103,11 @@ export async function invoiceForPaymentIntent(
     typeof subscriptionRef === 'string'
       ? subscriptionRef
       : (subscriptionRef?.id ?? null);
-  return { invoiceId, stripeSubscriptionId };
+  return {
+    invoiceId,
+    stripeSubscriptionId,
+    billingReason: invoice.billing_reason ?? null,
+  };
 }
 
 /** Our tier or course subscription for a Stripe subscription id. */

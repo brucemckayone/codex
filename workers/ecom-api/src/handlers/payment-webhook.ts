@@ -281,12 +281,19 @@ async function handleChargeRefunded(
 }
 
 /**
- * A full refund of the latest subscription payment cancels the subscription
- * and ends access now (owner decision P-4; a partial refund leaves it
- * running). It is cancelled at Stripe, then ended here exactly as
- * `customer.subscription.deleted` ends it — that event re-applies the same
- * state when it lands, and sends the cancellation email — and the streaming
- * block is written.
+ * A full refund of the current period's subscription payment cancels the
+ * subscription and ends access now (owner decision P-4; a partial refund, or
+ * one of another payment, leaves it running). It is cancelled at Stripe, then
+ * ended here as `customer.subscription.deleted` ends it — that event
+ * re-applies the same state when it lands, and sends the cancellation email.
+ *
+ * A tier subscription's streaming block is written too. A course plan's grant
+ * is revoked instead, as on deletion: the org-wide block would also stop the
+ * subscriber's purchases and tier content (owner decision 2026-10-20).
+ *
+ * A failure is alerted with what support needs, then rethrown: a transient one
+ * makes Stripe redeliver, and a permanent one would otherwise end as a quiet
+ * 200 while the customer, refunded in full, goes on being billed.
  */
 async function endSubscriptionForFullRefund(
   c: Context<StripeWebhookEnv>,
@@ -294,17 +301,33 @@ async function endSubscriptionForFullRefund(
   courseSubscriptionService: CourseSubscriptionService,
   charge: Parameters<SubscriptionService['cancelForFullRefund']>[0]
 ): Promise<void> {
-  const ended = await subscriptionService.cancelForFullRefund(charge);
-  if (!ended) return;
-  const { subscription, cancelled } = ended;
-  if (subscription.kind === 'course') {
-    await courseSubscriptionService.handleCourseSubscriptionDeleted(cancelled);
-  } else {
+  try {
+    const ended = await subscriptionService.cancelForFullRefund(charge);
+    if (!ended) return;
+    const { subscription, cancelled } = ended;
+    if (subscription.kind === 'course') {
+      await courseSubscriptionService.handleCourseSubscriptionDeleted(
+        cancelled
+      );
+      invalidateLibrary(c, subscription.userId);
+      return;
+    }
     await subscriptionService.handleSubscriptionDeleted(cancelled);
-  }
-  invalidateLibrary(c, subscription.userId);
-  if (subscription.organizationId) {
-    revokeAccess(c, subscription.userId, subscription.organizationId);
+    invalidateLibrary(c, subscription.userId);
+    if (subscription.organizationId) {
+      revokeAccess(c, subscription.userId, subscription.organizationId);
+    }
+  } catch (error) {
+    c.get('obs')?.error(
+      "A subscription payment was refunded in full but the subscription could not be ended: check it at Stripe and the subscriber's access by hand",
+      {
+        errorId: crypto.randomUUID(),
+        chargeId: charge.chargeId,
+        paymentIntentId: charge.paymentIntentId,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+    throw error;
   }
 }
 
@@ -378,7 +401,7 @@ async function handleRefundUpdated(
   }
   if (refund.status === 'failed' && changed) {
     obs?.error(
-      'A refund failed at Stripe: support must refund the customer another way, or re-pay the creators',
+      "A refund failed at Stripe: support must refund the customer another way, or re-pay the creators. A subscription whose current period's payment it refunded in full has already been cancelled",
       {
         errorId: crypto.randomUUID(),
         refundId: refund.id,

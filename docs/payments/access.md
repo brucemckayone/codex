@@ -68,7 +68,7 @@ unpublished.
 | Subscription paused | Everything from that subscription | It is resumed |
 | Renewal payment fails | Nothing while Stripe retries (owner decision P-3) | — |
 | Stripe gives up retrying | Everything from that subscription | The person subscribes again |
-| Full refund of the latest subscription payment | Everything from that subscription: it is cancelled at Stripe (owner decision P-4) | The person subscribes again |
+| Full refund of the current period's subscription payment | Everything from that subscription: it is cancelled at Stripe (owner decision P-4) | The person subscribes again |
 
 ## Streaming revocation
 
@@ -86,7 +86,7 @@ whatever happens to access in the meantime. Two layers close that gap:
 | The block is written when | The block is cleared when |
 |---|---|
 | A subscription ends, is paused, or Stripe gives up retrying | A subscription becomes active again or is resumed |
-| A purchase or the latest subscription payment is fully refunded — **gap**: `Codex-2hxff.8` (not for one-off purchases today) | A payment succeeds after a failure |
+| A purchase or a tier subscription's current-period payment is fully refunded — **gap**: `Codex-2hxff.8` (not for one-off purchases today) | A payment succeeds after a failure |
 | A dispute opens | A subscription is reactivated or resumed through our routes |
 | | A dispute is won (a purchase's; a subscription's — **gap**: `Codex-2hxff.9`) |
 

@@ -1101,6 +1101,80 @@ describe('SubscriptionService', () => {
   // ─── handleSubscriptionUpdated ────────────────────────────────────
 
   describe('handleSubscriptionUpdated', () => {
+    // Codex-2hxff.10: past_due now grants access, so a late or replayed event
+    // reviving a cancelled row would hand access back. Stripe's `canceled` is
+    // final; the live subscription decides.
+    describe('a cancelled row and a reviving event', () => {
+      async function cancelledSub(label: string) {
+        const { org, tier1 } = await createFullOrg(label);
+        return takeFirst(
+          await db
+            .insert(subscriptions)
+            .values(
+              createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+                status: 'cancelled',
+              })
+            )
+            .returning()
+        );
+      }
+      const snapshot = (id: string | null, status: string) =>
+        ({
+          id,
+          status,
+          cancel_at_period_end: false,
+          metadata: {},
+          items: {
+            data: [
+              {
+                current_period_start: Math.floor(Date.now() / 1000),
+                current_period_end: Math.floor(Date.now() / 1000) + 86400,
+              },
+            ],
+          },
+        }) as unknown as Stripe.Subscription;
+      const statusOf = async (id: string) => {
+        const { eq } = await import('drizzle-orm');
+        return takeFirst(
+          await db.select().from(subscriptions).where(eq(subscriptions.id, id))
+        ).status;
+      };
+
+      it.each([
+        'past_due',
+        'active',
+      ])('a stale %s event stays ignored while Stripe has it cancelled', async (eventStatus) => {
+        const sub = await cancelledSub(
+          `wh-stale-${eventStatus.replace('_', '-')}`
+        );
+        vi.mocked(stripe.subscriptions.retrieve).mockResolvedValueOnce({
+          id: sub.stripeSubscriptionId,
+          status: 'canceled',
+        } as never);
+
+        const result = await service.handleSubscriptionUpdated(
+          snapshot(sub.stripeSubscriptionId, eventStatus)
+        );
+
+        expect(result).toBeUndefined();
+        expect(await statusOf(sub.id)).toBe('cancelled');
+      });
+
+      it('comes back when Stripe has it live again (unpaid, then paid)', async () => {
+        const sub = await cancelledSub('wh-unpaid-paid');
+        vi.mocked(stripe.subscriptions.retrieve).mockResolvedValueOnce({
+          id: sub.stripeSubscriptionId,
+          status: 'active',
+        } as never);
+
+        await service.handleSubscriptionUpdated(
+          snapshot(sub.stripeSubscriptionId, 'active')
+        );
+
+        expect(await statusOf(sub.id)).toBe('active');
+      });
+    });
+
     it('should map active status (cancel_at_period_end=false)', async () => {
       const { org, tier1 } = await createFullOrg('wh-active');
       const sub = takeFirst(
@@ -3087,6 +3161,57 @@ describe('SubscriptionService', () => {
   // ─── handleInvoicePaymentSucceeded ────────────────────────────────
 
   describe('handleInvoicePaymentSucceeded', () => {
+    // Codex-2hxff.10: the status written is the live subscription's, not a
+    // blanket ACTIVE — so a late invoice never revives one Stripe cancelled
+    // (a full refund, a lost dispute), and a renewal keeps cancelling.
+    it.each([
+      ['cancelled', 'canceled', false, 'cancelled'],
+      ['active', 'active', true, 'cancelling'],
+      ['past_due', 'active', false, 'active'],
+    ] as const)('a %s row, live Stripe %s (cancel_at_period_end=%s) → %s', async (rowStatus, liveStatus, cancelAtPeriodEnd, expected) => {
+      const { org, tier1 } = await createFullOrg(
+        `invoice-live-${rowStatus.replace('_', '-')}-${expected}`
+      );
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: rowStatus,
+            })
+          )
+          .returning()
+      );
+      const now = Math.floor(Date.now() / 1000);
+      vi.mocked(stripe.subscriptions.retrieve).mockResolvedValueOnce({
+        id: sub.stripeSubscriptionId,
+        status: liveStatus,
+        cancel_at_period_end: cancelAtPeriodEnd,
+        items: {
+          data: [
+            { current_period_start: now, current_period_end: now + 86400 },
+          ],
+        },
+      } as never);
+
+      await service.handleInvoicePaymentSucceeded(
+        createMockStripeInvoice({
+          amount_paid: 499,
+          parent: {
+            subscription_details: { subscription: sub.stripeSubscriptionId },
+          },
+        }) as unknown as Stripe.Invoice
+      );
+
+      const after = takeFirst(
+        await db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, sub.id))
+      );
+      expect(after.status).toBe(expected);
+    });
+
     it('should update period dates and execute revenue transfers', async () => {
       const { org, tier1 } = await createFullOrg('invoice-success');
       const sub = takeFirst(
