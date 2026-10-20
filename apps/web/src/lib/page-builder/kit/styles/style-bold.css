@@ -68,7 +68,7 @@
   --lp-tracking-heading: -0.03em;
   --lp-tracking-title: -0.015em;
   --lp-weight-label: var(--font-bold);
-  --lp-measure-lead: 36ch;
+  --lp-measure-lead: 36;
 
   /* ── the button's label: larger, at the weight the org gives its loudest
      call, its home hero's (semibold) ───────────────────────────────────── */
@@ -507,9 +507,10 @@
 }
 
 :is(.lp, #lp-style)[data-lp-type-facet='bold'] .stat__label {
-  max-inline-size: 24ch;
+  max-inline-size: calc(24 * var(--lp-measure-unit));
   font-size: var(--lp-size-body);
   font-weight: var(--lp-weight-label);
+  --lp-measure-unit: var(--lp-zero-label);
 }
 
 :is(.lp, #lp-style)[data-lp-style='bold'] .stat__label {

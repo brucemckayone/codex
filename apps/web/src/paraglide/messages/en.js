@@ -14367,7 +14367,7 @@ export const studio_page_editor_recovery_discarded = () => `Unsaved changes from
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_page_editor_stale_banner = () => `This page was saved in another tab. Reload to keep editing.`
+export const studio_page_editor_stale_banner = () => `This page was saved in another tab or on another device. Reload to keep editing.`
 
 
 /**
@@ -15968,6 +15968,46 @@ export const studio_page_editor_button_section_hidden = (params) => `${params.se
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_button_section_none = () => `There is no other section on this page to go to yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_pick = () => `Choose an option`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_none = () => `Set up a way in on your Offer tab first: its options appear here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_gone = () => `No longer one of your options`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_loading = () => `Loading your options…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_unread = () => `Your options could not be loaded just now, so none can be chosen here. Nothing set here has changed.`
 
 
 /**

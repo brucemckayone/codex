@@ -46,7 +46,7 @@
   /* base.css spaces every `li` but the last, which unevens a row.
      Its name's room (03 X71): its share of the column, `--_n` across, less
      its inset, its padding and border (Bold opens it, below). A lone card's
-     measure is in the body's `ch`, which no title can read, so its room is
+     measure is in the body's `0`s, which no title can read, so its room is
      the column, which is never narrower. */
   .card {
     --_inset: calc(var(--space-6) + var(--lp-border));
@@ -87,7 +87,7 @@
   }
 
   .cards[data-count='1'] {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   @container (min-width: 36rem) {

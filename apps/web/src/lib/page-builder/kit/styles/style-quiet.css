@@ -69,8 +69,8 @@
   /* The button's label, barely tracked. */
   --lp-button-tracking: 0.01em;
 
-  --lp-measure: 60ch;
-  --lp-measure-lead: 36ch;
+  --lp-measure: 60;
+  --lp-measure-lead: 36;
 }
 
 .lp[data-lp-style='quiet'] {
@@ -227,16 +227,10 @@
   .text[data-layout='statement']:not([data-long-lead])
   .text__body
   > p:first-child {
-  max-inline-size: 30ch;
+  max-inline-size: calc(30 * var(--lp-measure-unit));
   font-size: calc(var(--lp-size-lead) * 1.42);
   line-height: 1.34;
   letter-spacing: -0.012em;
-}
-
-/* The statement is the one passage that reads along; the lines answering it
-   keep their soft ink, as they do without motion. */
-:is(.lp, #lp-style)[data-lp-style='quiet'] .text[data-layout='statement'] .text__body > p:not(:first-child) {
-  animation: none;
 }
 
 /* ── the ask, understated ────────────────────────────────────────────────── */

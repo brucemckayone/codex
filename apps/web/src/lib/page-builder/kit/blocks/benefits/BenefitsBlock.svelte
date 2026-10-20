@@ -174,9 +174,9 @@
     align-content: start;
   }
 
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .benefits :global(.lp-heading[data-size='heading']) {
-    max-inline-size: 20ch;
+    max-inline-size: calc(20 * var(--lp-measure-unit));
   }
 
   .benefits ul {
@@ -241,7 +241,7 @@
 
   /* Its name's room (03 X71): its share of the column, less its inset, the
      padding and border a Style that boxes it gives it (Soft, below). A lone
-     card's measure is in the body's `ch`, which no title can read, so its
+     card's measure is in the body's `0`s, which no title can read, so its
      room is the column, which is never narrower. */
   .benefits-grid li {
     --_inset: 0px;
@@ -256,7 +256,7 @@
   }
 
   .benefits-grid[data-count='1'] {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   /* The picture leads the tile; its name keeps the tile's own rhythm under it. */

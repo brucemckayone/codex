@@ -79,6 +79,14 @@ export type OrphanStatus = (typeof ORPHAN_STATUS_VALUES)[number];
  * 1. R2 cleanup fails after successful DB update (network error, R2 unavailable)
  * 2. Entity deleted but R2 cleanup failed
  * 3. DB error after partial R2 upload (rolled back but files remain)
+ * 4. A page image (`page_image`): recorded by its upload, and nominated again
+ *    when a save drops it; the sweep deletes it only if no page shows it
+ *
+ * `page_image` rows are also the UPLOAD LEDGER (Codex-61zsk.17): a row of
+ * any status proves an upload minted that object, and a save nominates only
+ * those (`OrphanedFileService.mintedPageImageObjects`). Never purge
+ * `page_image` rows as queue hygiene: once its row is gone, a dropped image
+ * is skipped as never uploaded, and its R2 objects are kept for good.
  *
  * Cleanup strategy:
  * - Durable Object runs alarm every hour
@@ -140,6 +148,11 @@ export const orphanedImageFiles = pgTable(
       table.status,
       table.orphanedAt
     ),
+
+    // For a page save: which dropped keys an upload minted
+    // (OrphanedFileService.mintedPageImageObjects, Codex-61zsk.17). Rows are
+    // never deleted, so without it the lookup scans every upload ever made.
+    index('idx_orphaned_files_r2_key').on(table.r2Key),
 
     // CHECK constraints
     check(

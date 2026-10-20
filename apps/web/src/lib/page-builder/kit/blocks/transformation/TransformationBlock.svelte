@@ -96,9 +96,9 @@
     gap: var(--lp-stack);
   }
 
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .tf__head :global(.lp-heading) {
-    max-inline-size: 20ch;
+    max-inline-size: calc(20 * var(--lp-measure-unit));
   }
 
   /* global.css caps every `p` at 65ch; the prompt spans its region. */

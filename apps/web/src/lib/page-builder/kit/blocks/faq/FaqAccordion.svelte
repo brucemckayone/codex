@@ -132,7 +132,7 @@
   .faq-acc__answer {
     display: grid;
     gap: var(--lp-paragraph-gap);
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
     padding-block-end: var(--space-6);
     padding-inline-end: calc(var(--space-5) + var(--space-6));
     color: var(--lp-ink-soft);

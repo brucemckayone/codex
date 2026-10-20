@@ -23,6 +23,7 @@ import { withFallback } from '$lib/brand-editor/font-fallbacks';
 import { brandOverridesToCssVars } from '$lib/page-builder/render/brand-overrides';
 import {
   FACE_SCALE,
+  FACE_ZERO,
   faceSpellings,
   facesSheet,
   GLYPH_WEIGHT,
@@ -46,6 +47,24 @@ describe('the face lookup', () => {
       ),
     ].sort();
     expect(Object.keys(FACE_SCALE).sort()).toEqual(offered);
+    // Each face's `0` too (Codex-61zsk.64): a face with none keeps `1ch`,
+    // whose measures move when the face lands.
+    expect(Object.keys(FACE_ZERO).sort()).toEqual(offered);
+  });
+
+  it('gives every face a 0 a measure can count in', () => {
+    for (const [face, [at400, at700]] of Object.entries(FACE_ZERO)) {
+      for (const zero of [at400, at700]) {
+        expect(zero, face).toBeGreaterThan(0.35);
+        expect(zero, face).toBeLessThan(1);
+      }
+      expect(facesSheet(), face).toContain(
+        `    --lp-zero-display-400: ${at400}em;\n    --lp-zero-display-700: ${at700}em;\n`
+      );
+      expect(facesSheet(), face).toContain(
+        `    --lp-zero-body-400: ${at400}em;\n    --lp-zero-body-700: ${at700}em;\n`
+      );
+    }
   });
 
   // One face with a space in its name and one without, through each writer,
@@ -72,10 +91,36 @@ describe('the face lookup', () => {
     }
   });
 
+  // The body face's `0`, which a body measure counts in (Codex-61zsk.64), is
+  // matched the same way, through the body's own writers.
+  it.each([
+    'Archivo Black',
+    'Syne',
+    'Inter',
+  ])('matches %s as every writer spells it for the body', (face) => {
+    const written = [
+      brandOverridesToCssVars({ fontBody: face })['--brand-font-body'],
+      darkTokenOverridesToCssVars({ 'font-body': face })[
+        '--brand-font-body-dark'
+      ],
+      withFallback(face, `'${face}'`),
+    ];
+    for (const value of written) {
+      const resolved = `${value}, ${SANS_STACK_TAIL}`;
+      expect(faceSpellings(face), resolved).toContain(resolved);
+      expect(facesSheet()).toContain(`style(--lp-font-body: ${resolved})`);
+    }
+  });
+
   it('is right about how the org layout and the live preview quote a face', () => {
-    expect(read('../../../../routes/_org/[slug]/+layout.svelte')).toContain(
+    const layout = read('../../../../routes/_org/[slug]/+layout.svelte');
+    expect(layout).toContain(
       // biome-ignore lint/suspicious/noTemplateCurlyInString: asserts source text that contains a template literal
       "style:--brand-font-heading={brandFontHeading ? withFallback(brandFontHeading, `'${brandFontHeading}'`) : undefined}"
+    );
+    expect(layout).toContain(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: asserts source text that contains a template literal
+      "style:--brand-font-body={brandFontBody ? withFallback(brandFontBody, `'${brandFontBody}'`) : undefined}"
     );
     const injection = read('../../../brand-editor/css-injection.ts');
     // biome-ignore lint/suspicious/noTemplateCurlyInString: asserts source text that contains a template literal
@@ -115,16 +160,22 @@ describe('the face lookup', () => {
     );
   });
 
+  it('matches on the face the body is drawn in', () => {
+    expect(read('kit.css')).toMatch(
+      /\.lp \{[^}]*--lp-font-body: var\(--font-body, var\(--font-sans\)\);[^}]*font-family: var\(--lp-font-body\);/
+    );
+  });
+
   it('is loaded with the kit', () => {
     expect(read('../PageRenderer.svelte')).toContain(
       "import './styles/faces.css';"
     );
   });
 
-  it('leaves an unknown face the widest scale, which no face exceeds', () => {
+  it('leaves an unknown face the widest scale, which no face exceeds, and 1ch', () => {
     const [caps, text] = widestScale();
     expect(facesSheet()).toContain(
-      `.lp {\n  --lp-face-caps: ${caps};\n  --lp-face-text: ${text};\n}`
+      `.lp {\n  --lp-face-caps: ${caps};\n  --lp-face-text: ${text};\n  --lp-zero-display-400: 1ch;\n  --lp-zero-display-700: 1ch;\n  --lp-zero-body-400: 1ch;\n  --lp-zero-body-700: 1ch;\n}`
     );
     for (const [face, [faceCaps, faceText]] of Object.entries(FACE_SCALE)) {
       expect(faceCaps, face).toBeLessThanOrEqual(caps);

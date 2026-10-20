@@ -162,7 +162,7 @@
   .button__note {
     justify-self: var(--lp-actions-align, start);
     margin: 0;
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-small);
     line-height: var(--lp-leading-body);

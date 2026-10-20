@@ -746,8 +746,10 @@ app.get(
 /**
  * PUT /api/journeys/studio/journeys/:pageId?organizationId=  { ...record }
  * Persist the builder's draft (sections/brand/title/slug/status). Publishing a
- * course page publishes its subject course too. 204 on success.
- * @returns {null}
+ * course page publishes its subject course too. 200 with the page's revision
+ * after the save, for the next save to name; 412 when the body names a
+ * revision the stored page has moved on from (Codex-61zsk.18).
+ * @returns {{ revision: string }}
  */
 app.put(
   '/studio/journeys/:pageId',
@@ -762,7 +764,7 @@ app.put(
       query: journeyOrgQuerySchema,
       body: saveJourneyPageBodySchema,
     },
-    handler: async (ctx): Promise<null> => {
+    handler: async (ctx): Promise<{ revision: string }> => {
       // The URL id and the body id must identify the SAME page — else the URL
       // names a different resource than the one mutated (audit/caching/least-
       // surprise; review L1). Not an IDOR — both are org-scoped by the service —
@@ -772,7 +774,7 @@ app.put(
           'Path id does not match the page id in the body'
         );
       }
-      await ctx.services.courseJourney.saveJourneyPage(
+      const saved = await ctx.services.courseJourney.saveJourneyPage(
         ctx.organizationId,
         ctx.input.body
       );
@@ -784,7 +786,7 @@ app.put(
         ctx.organizationId,
         ctx.obs
       );
-      return null;
+      return saved;
     },
   })
 );

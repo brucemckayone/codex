@@ -552,11 +552,11 @@
   .hero-centered :global(.lp-heading),
   .hero-centered :global(.lp-text) {
     margin-inline: auto;
-    max-inline-size: 18ch;
+    max-inline-size: calc(18 * var(--lp-measure-unit));
   }
 
   .hero-centered :global(.lp-text) {
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
   }
 
   .hero-centered__media {

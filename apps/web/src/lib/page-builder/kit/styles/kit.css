@@ -110,8 +110,16 @@
   --lp-pad-regular: clamp(var(--space-16), var(--space-8) + 5cqi, var(--space-24));
   --lp-pad-spacious: clamp(var(--space-20), var(--space-10) + 8cqi, var(--space-32));
   --lp-container: 76rem;
-  --lp-measure: 62ch;
-  --lp-measure-lead: 44ch;
+  /* A line's measure is a COUNT of the face's own `0`s, never `ch`
+     (Codex-61zsk.64): `1ch` is the `0` of whatever font draws the line, so a
+     measure in it widened as the brand's face replaced its fallback, and the
+     block re-wrapped. Each measure is `calc(<count> * var(--lp-measure-unit))`,
+     the unit read where the measure is used: the `0` of the face the element
+     is drawn in, which the section (below) and each face it draws set. A
+     count is not a length: a measure that leaves out the unit is none. */
+  --lp-measure: 62;
+  --lp-measure-lead: 44;
+  --lp-measure-unit: 1ch;
   /* The tallest a Picture section stands in the column (03 X64): it narrows
      instead, so a portrait never runs past a laptop screen. */
   --lp-picture-tall: 45rem;
@@ -246,6 +254,20 @@
      re-set the gutter or the container there, and `cqi` resolves where it is
      used: against this section. */
   --lp-column: calc(100cqi - 2 * max(var(--lp-gutter), (100cqi - var(--lp-container)) / 2));
+  /* Each type role's `0`, in em of the size it is drawn at: the face the role
+     is set in (display, heading and title in the display face; body and
+     label in the body face) at the role's weight, between the face's 400 and
+     700 (`styles/faces.css`). Declared on the section because that is where
+     the sheet matches the face, and a `var()` is read where it is declared. A
+     face the sheet does not know keeps `1ch`. An element drawn in a role sets
+     it as its measure's unit (`Heading.svelte` by size, a quote set like a
+     heading); the rest of a section measures in the body's. */
+  --lp-zero-display: calc(var(--lp-zero-display-400) + (var(--lp-zero-display-700) - var(--lp-zero-display-400)) * (clamp(400, var(--lp-weight-display), 700) - 400) / 300);
+  --lp-zero-heading: calc(var(--lp-zero-display-400) + (var(--lp-zero-display-700) - var(--lp-zero-display-400)) * (clamp(400, var(--lp-weight-heading), 700) - 400) / 300);
+  --lp-zero-title: calc(var(--lp-zero-display-400) + (var(--lp-zero-display-700) - var(--lp-zero-display-400)) * (clamp(400, var(--lp-weight-title), 700) - 400) / 300);
+  --lp-zero-body: calc(var(--lp-zero-body-400) + (var(--lp-zero-body-700) - var(--lp-zero-body-400)) * (clamp(400, var(--lp-weight-body), 700) - 400) / 300);
+  --lp-zero-label: calc(var(--lp-zero-body-400) + (var(--lp-zero-body-700) - var(--lp-zero-body-400)) * (clamp(400, var(--lp-weight-label), 700) - 400) / 300);
+  --lp-measure-unit: var(--lp-zero-body);
 }
 
 .lp-section[data-lp-spacing='compact'] {

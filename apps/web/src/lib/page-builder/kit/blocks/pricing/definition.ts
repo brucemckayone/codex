@@ -91,8 +91,7 @@ export const pricingDefinition: BlockDefinition<PricingProps> = {
           key: 'id',
           label: 'Which option',
           hint: 'Choose one of the options set up in your Offer tab.',
-          control: 'text',
-          maxLength: 80,
+          control: 'offer',
         },
         { key: 'name', label: 'Name', control: 'text', maxLength: 60 },
         {

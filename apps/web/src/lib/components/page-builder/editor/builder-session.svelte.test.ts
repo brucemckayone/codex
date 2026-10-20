@@ -394,6 +394,8 @@ describe('autosave', () => {
       'problem',
     ]);
     expect(sent.sections[0].props.heading).toBe('Bone Deep, again and again');
+    // The save's own chain, however deep, before reading where it ended.
+    await drain();
     expect(session.isDirty).toBe(false);
     expect(session.saveStatus).toBe('saved');
   });
@@ -885,6 +887,143 @@ describe('another tab on the same page', () => {
 });
 
 /**
+ * Another DEVICE on the same page (Codex-61zsk.18). No channel reaches it, so
+ * each save names the revision this copy was made from, and the server
+ * refuses one made from a copy older than its own (412). The tab then goes
+ * stale, as for another tab.
+ */
+describe('another device on the same page', () => {
+  const READ = 'a'.repeat(32);
+  const SAVED = 'b'.repeat(32);
+  const failure = (status: number, message: string) =>
+    Object.assign(new Error(message), { status });
+
+  it('names the revision it read, then the one each save returns', async () => {
+    vi.useFakeTimers();
+    remotes.saveJourneyPage.mockResolvedValue({ revision: SAVED });
+    start(record({ revision: READ }));
+    editHeading('First');
+    vi.advanceTimersByTime(5000);
+    await drain();
+    editHeading('Second');
+    vi.advanceTimersByTime(5000);
+    await drain();
+
+    expect(
+      remotes.saveJourneyPage.mock.calls.map(([sent]) => sent.revision)
+    ).toEqual([READ, SAVED]);
+  });
+
+  it('goes stale when the server refuses a save made from an older copy, and saves nothing more', async () => {
+    vi.useFakeTimers();
+    remotes.saveJourneyPage.mockRejectedValueOnce(
+      failure(412, 'This page was saved somewhere else since you opened it.')
+    );
+    const session = start(record({ revision: READ }));
+    editHeading('Typed on this device');
+    vi.advanceTimersByTime(5000);
+    await drain();
+
+    expect(session.stale).toBe(true);
+    editHeading('Typed after the refusal');
+    vi.advanceTimersByTime(5000);
+    await drain();
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays editable when a save meets a slug in use (409), which editing fixes', async () => {
+    vi.useFakeTimers();
+    remotes.saveJourneyPage.mockRejectedValueOnce(
+      failure(409, 'The slug "bone-deep" is already in use')
+    );
+    const session = start(record({ revision: READ }));
+    editHeading('Typed');
+    vi.advanceTimersByTime(5000);
+    await drain();
+
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(1);
+    expect(session.stale).toBe(false);
+  });
+
+  // A save can commit after its answer is lost (a timeout, a 5xx): the
+  // server's revision is then this tab's own, and the next save is refused.
+  // That is not another device: the page it reads back is the lost save.
+  const LANDED = 'c'.repeat(32);
+
+  /** The read-back after a refusal: the page as `sent` left it. */
+  function readsBack(sent: Record<string, unknown>, revision: string) {
+    draft.refresh.mockImplementation(async () => {
+      draft.current = {
+        ...record(),
+        slug: sent.slug as string,
+        title: sent.title as string,
+        status: sent.status as JourneyPageRecord['status'],
+        brandOverrides:
+          sent.brandOverrides as JourneyPageRecord['brandOverrides'],
+        sections: sent.sections as PageSection[],
+        design: sent.design as JourneyPageRecord['design'],
+        revision,
+      };
+    });
+  }
+
+  it('does not go stale over its own save that landed unheard: it takes that revision and saves again', async () => {
+    vi.useFakeTimers();
+    remotes.saveJourneyPage
+      .mockRejectedValueOnce(failure(408, 'The request timed out'))
+      .mockRejectedValueOnce(
+        failure(412, 'This page was saved somewhere else since you opened it.')
+      )
+      .mockResolvedValue({ revision: SAVED });
+    const session = start(record({ revision: READ }));
+    editHeading('Landed though unheard');
+    vi.advanceTimersByTime(5000);
+    await drain();
+    readsBack(remotes.saveJourneyPage.mock.calls[0][0], LANDED);
+
+    editHeading('Typed after the timeout');
+    vi.advanceTimersByTime(5000);
+    await drain();
+
+    expect(session.stale).toBe(false);
+    const calls = remotes.saveJourneyPage.mock.calls.map(([sent]) => sent);
+    expect(calls.at(-1)?.revision).toBe(LANDED);
+    expect(calls.at(-1)?.sections[0].props.heading).toBe(
+      'Typed after the timeout'
+    );
+  });
+
+  it('still goes stale when the page it reads back is not its lost save', async () => {
+    vi.useFakeTimers();
+    // A retry WOULD land, so only the comparison keeps it from being sent.
+    remotes.saveJourneyPage
+      .mockRejectedValueOnce(failure(408, 'The request timed out'))
+      .mockRejectedValueOnce(
+        failure(412, 'This page was saved somewhere else since you opened it.')
+      )
+      .mockResolvedValue({ revision: SAVED });
+    const session = start(record({ revision: READ }));
+    editHeading('Mine, unheard');
+    vi.advanceTimersByTime(5000);
+    await drain();
+    readsBack(
+      {
+        ...remotes.saveJourneyPage.mock.calls[0][0],
+        title: 'Retitled on another device',
+      },
+      LANDED
+    );
+
+    editHeading('Typed after the timeout');
+    vi.advanceTimersByTime(5000);
+    await drain();
+
+    expect(session.stale).toBe(true);
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
  * The four reads the canvas is drawn from besides the page. Each falls back
  * to its empty shape, so a FAILED read used to render as content that is
  * missing — no stages, no price, images on their plates — with nothing to
@@ -951,6 +1090,28 @@ describe('the course reads the canvas is drawn from', () => {
     offer.error = { status: 503, body: { message: 'Worker down again' } };
     flushSync();
     expect(session.contextError).toBe(true);
+  });
+
+  // `context.offer` is null both unread and when there is no offer, so the
+  // pricing picker is told which (Codex-61zsk.14, codex-review).
+  it('says whether the offer has answered, an answer of none included', () => {
+    const offer = new FakeQuery<unknown>();
+    remotes.getCourseOffer.mockReturnValue(offer);
+    const session = start(coursePage());
+    expect(session.offerRead).toBe('loading');
+
+    offer.current = null;
+    offer.loading = false;
+    flushSync();
+    expect(session.offerRead).toBe('read');
+
+    offer.error = { status: 503, body: { message: 'Worker down' } };
+    flushSync();
+    expect(session.offerRead).toBe('failed');
+  });
+
+  it('has no offer to wait for on a page with no course', () => {
+    expect(start(record()).offerRead).toBe('read');
   });
 });
 

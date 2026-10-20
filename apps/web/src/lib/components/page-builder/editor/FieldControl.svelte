@@ -27,6 +27,7 @@
   import ItemsField from './ItemsField.svelte';
   import ListField from './ListField.svelte';
   import MediaField from './MediaField.svelte';
+  import { type OfferChoices, offerOptions } from './offer-field';
 
   interface Props {
     field: BlockField;
@@ -39,6 +40,8 @@
     sectionId?: string;
     /** `items` only: the entry the layout draws larger, tagged "Leads". */
     leading?: number | null;
+    /** `offer` only (and the `items` that hold one): the page's live ways in. */
+    offerPaths?: OfferChoices;
   }
 
   const {
@@ -49,6 +52,7 @@
     layout,
     sectionId = '',
     leading = null,
+    offerPaths = [],
   }: Props = $props();
 
   const id = $props.id();
@@ -97,7 +101,33 @@
 {#if field.control === 'list'}
   <ListField {field} {value} {onChange} />
 {:else if field.control === 'items'}
-  <ItemsField {field} {value} {onChange} {mediaBaseUrl} {layout} {leading} />
+  <ItemsField {field} {value} {onChange} {mediaBaseUrl} {layout} {leading} {offerPaths} />
+{:else if field.control === 'offer'}
+  {@const offered = typeof offerPaths === 'string' ? [] : offerOptions(offerPaths, value)}
+  <div class="field">
+    {#if typeof offerPaths === 'string'}
+      <!-- Not yet read, or not readable: neither "gone" nor "none" is known. -->
+      <span class="field__label">{field.label}</span>
+      <p class="field__hint" role="status">
+        {offerPaths === 'loading'
+          ? m.studio_page_editor_offer_loading()
+          : m.studio_page_editor_offer_unread()}
+      </p>
+    {:else if offered.length > 0}
+      <Select
+        id="{id}-offer"
+        label={field.label}
+        options={offered}
+        value={typeof value === 'string' && value ? value : undefined}
+        placeholder={m.studio_page_editor_offer_pick()}
+        onValueChange={(next) => onChange(next || undefined)}
+      />
+      {#if field.hint}<p class="field__hint">{field.hint}</p>{/if}
+    {:else}
+      <span class="field__label">{field.label}</span>
+      <p class="field__hint">{m.studio_page_editor_offer_none()}</p>
+    {/if}
+  </div>
 {:else if field.control === 'media'}
   <MediaField {field} />
 {:else if field.control === 'image'}

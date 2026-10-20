@@ -6,9 +6,11 @@
  * Redirects to login if not authenticated, PRESERVING the requested path so a
  * bookmarked deep link (a builder URL, say) survives the sign-in — see
  * {@link _safeStudioRedirect}.
- * Redirects to home if not a privileged member.
+ * Redirects to home if not a privileged member. A membership read that FAILS is
+ * a retryable 503, never that redirect: a failure is not an answer.
  */
-import { redirect } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
+import { ApiError } from '$lib/api/errors';
 import { logger } from '$lib/observability';
 import { getMyOrganizations } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
@@ -113,13 +115,32 @@ export const load: LayoutServerLoad = async ({
     // creation, which would otherwise bounce them to access_denied. We call the
     // RAW api client (NOT the cached remote getMyMembership query(), which would
     // dedupe repeat reads) so each retry attempt is a fresh DB read.
+    //
+    // A FAILED read is a 503, not `role: null` (Codex-61zsk.22). The endpoint
+    // admits non-members on purpose and answers them 200 with `role: null`, so
+    // a throw here is the backend failing, not the caller's answer. Read as
+    // `role: null`, it bounced a signed-in owner out of their own studio under
+    // load; a 503 leaves them on an error page they can retry. A 401 is not
+    // the backend failing but the session ending since the hook read it:
+    // retrying cannot help, so it goes to sign in, as no session does above.
     resolveMembershipWithRetry(() => api.org.getMyMembership(org.id)).catch(
       (err: unknown) => {
+        const status = ApiError.isApiError(err) ? err.status : undefined;
         logger.error('studio-layout:getMyMembership failed', {
           orgId: org.id,
+          status,
           error: String(err),
         });
-        return { role: null, joinedAt: null, pendingOwnershipOffer: null };
+        if (status === 401) {
+          redirect(
+            302,
+            `/login?redirect=${encodeURIComponent(_safeStudioRedirect(url))}`
+          );
+        }
+        error(
+          503,
+          'We could not check your access to this studio just now. Please try again.'
+        );
       }
     ),
     getMyOrganizations().catch((err: unknown) => {

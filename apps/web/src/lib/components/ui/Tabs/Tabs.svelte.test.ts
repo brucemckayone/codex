@@ -325,3 +325,83 @@ describe('Tabs compound component integration', () => {
     expect(exports.Content).toBeDefined();
   });
 });
+
+/**
+ * Melt (0.86) marks the current tab only in `data-state` and labels each
+ * panel by its bare value, an id nothing has (Codex-61zsk.11, found by the
+ * page editor's tablet check). A screen reader needs the selected state and
+ * a tab and panel that name each other.
+ */
+describe('Tabs accessibility', () => {
+  let components: ReturnType<typeof mount>[] = [];
+
+  afterEach(() => {
+    for (const c of components) unmount(c);
+    components = [];
+    document.body.innerHTML = '';
+  });
+
+  // HTMLElement | Document, not ParentNode: in web's tsc the workers types
+  // shadow the DOM's ParentNode (and `append`, hence appendChild below).
+  const trigger = (n: number, root: HTMLElement | Document = document) =>
+    root.querySelector<HTMLButtonElement>(`[data-testid="trigger-${n}"]`);
+  const panel = (n: number, root: HTMLElement | Document = document) =>
+    root.querySelector<HTMLElement>(`[data-testid="panel-${n}"]`);
+
+  test('aria-selected follows the current tab', () => {
+    components.push(
+      mount(TabsHarness, {
+        target: document.body,
+        props: { defaultValue: 'tab-1' },
+      })
+    );
+    flushSync();
+    expect(trigger(1)?.getAttribute('aria-selected')).toBe('true');
+    expect(trigger(2)?.getAttribute('aria-selected')).toBe('false');
+
+    trigger(2)?.click();
+    flushSync();
+    expect(trigger(1)?.getAttribute('aria-selected')).toBe('false');
+    expect(trigger(2)?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  test('each tab controls its panel, and the panel is named by its tab', () => {
+    components.push(
+      mount(TabsHarness, {
+        target: document.body,
+        props: { defaultValue: 'tab-1' },
+      })
+    );
+    flushSync();
+    for (const n of [1, 2, 3]) {
+      const tab = trigger(n);
+      const owned = panel(n);
+      expect(tab?.id).toBeTruthy();
+      expect(owned?.id).toBeTruthy();
+      expect(tab?.getAttribute('aria-controls')).toBe(owned?.id);
+      expect(owned?.getAttribute('aria-labelledby')).toBe(tab?.id);
+      expect(
+        document.getElementById(owned?.getAttribute('aria-labelledby') ?? '')
+      ).toBe(tab);
+    }
+  });
+
+  test('two tab sets on one page never share an id', () => {
+    const first = document.createElement('div');
+    const second = document.createElement('div');
+    document.body.appendChild(first);
+    document.body.appendChild(second);
+    components.push(
+      mount(TabsHarness, { target: first, props: { defaultValue: 'tab-1' } }),
+      mount(TabsHarness, { target: second, props: { defaultValue: 'tab-1' } })
+    );
+    flushSync();
+    expect(trigger(1, first)?.id).not.toBe(trigger(1, second)?.id);
+    expect(panel(1, first)?.getAttribute('aria-labelledby')).toBe(
+      trigger(1, first)?.id
+    );
+    expect(panel(1, second)?.getAttribute('aria-labelledby')).toBe(
+      trigger(1, second)?.id
+    );
+  });
+});

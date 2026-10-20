@@ -45,9 +45,10 @@
   .lp-text {
     display: grid;
     gap: var(--lp-paragraph-gap);
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
     font-family: var(--lp-font-body);
     font-weight: var(--lp-weight-body);
+    --lp-measure-unit: var(--lp-zero-body);
     text-wrap: pretty;
   }
 
@@ -58,7 +59,7 @@
   .lp-text[data-size='lead'] {
     font-size: var(--lp-size-lead);
     line-height: var(--lp-leading-lead);
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
   }
 
   .lp-text[data-size='body'] {

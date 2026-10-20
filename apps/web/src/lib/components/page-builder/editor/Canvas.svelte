@@ -55,7 +55,8 @@
     device: Device;
     theme: 'light' | 'dark';
     selectedId: string | null;
-    onSelect: (id: string | null) => void;
+    /** `how`: on the section itself, or into its words (edited in place). */
+    onSelect: (id: string | null, how: 'section' | 'words') => void;
     onCommit: (sectionId: string, key: string, value: string) => void;
     onInsert: (afterId: string | null) => void;
     onAction: (action: SectionAction, id: string) => void;
@@ -199,15 +200,18 @@
     );
   }
 
+  // How a section was picked comes from the click's own target, not from
+  // focus: a click on a section's padding puts Chrome's caret in its nearest
+  // words, so focus says "words" for both.
   function handleClick(event: MouseEvent): void {
-    onSelect(sectionIdAt(event.target));
+    onSelect(sectionIdAt(event.target), fieldFrom(event.target) ? 'words' : 'section');
   }
 
   function handleFocusIn(event: FocusEvent): void {
     const field = fieldFrom(event.target);
     if (!field) return;
     inline.begin(field);
-    if (field.sectionId !== selectedId) onSelect(field.sectionId);
+    if (field.sectionId !== selectedId) onSelect(field.sectionId, 'words');
   }
 
   function handleFocusOut(event: FocusEvent): void {

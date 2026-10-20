@@ -21,6 +21,7 @@ export type ErrorStatusCode =
   | 403
   | 404
   | 409
+  | 412
   | 422
   | 429
   | 500
@@ -124,6 +125,20 @@ export class ConflictError extends ServiceError {
     options?: ErrorOptions
   ) {
     super(message, 'CONFLICT', 409, context, options);
+  }
+}
+
+/**
+ * Precondition failed error (412)
+ * Thrown when a write names the revision it was made from and the stored row
+ * has moved on since (optimistic concurrency): the caller's copy is out of
+ * date. Distinct from {@link ConflictError}, which a write can also meet (a
+ * slug in use), because the caller must tell them apart by status alone: one
+ * is fixed by changing the input, the other by reloading.
+ */
+export class PreconditionFailedError extends ServiceError {
+  constructor(message: string, context?: Record<string, unknown>) {
+    super(message, 'PRECONDITION_FAILED', 412, context);
   }
 }
 

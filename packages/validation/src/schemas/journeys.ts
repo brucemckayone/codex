@@ -529,6 +529,13 @@ export const saveJourneyPageBodySchema = z
     sections: z.array(pageSectionSchema).max(60),
     design: sectionDesignSchema.optional(),
     seo: pageSeoSchema.optional(),
+    // The revision the copy was made from (Codex-61zsk.18): honoured, the
+    // save is refused (412) once the stored page has moved on. Optional: a
+    // caller that writes what it just read sends none and is not checked.
+    revision: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/)
+      .optional(),
   })
   .strict();
 export type SaveJourneyPageBody = z.infer<typeof saveJourneyPageBodySchema>;

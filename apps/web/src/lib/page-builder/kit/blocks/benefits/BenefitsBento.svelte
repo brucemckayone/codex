@@ -157,12 +157,13 @@
     --lp-weight-title: var(--lp-weight-heading);
     --lp-leading-title: var(--lp-leading-heading);
     --lp-tracking-title: var(--lp-tracking-heading);
-    max-inline-size: 18ch;
+    --lp-measure-unit: var(--lp-zero-heading);
+    max-inline-size: calc(18 * var(--lp-measure-unit));
   }
 
   /* global.css caps every `p` at 65ch and spaces it; a tile sets its own. */
   .benefits-bento__detail {
-    max-inline-size: 48ch;
+    max-inline-size: calc(48 * var(--lp-measure-unit));
     margin: 0;
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-body);

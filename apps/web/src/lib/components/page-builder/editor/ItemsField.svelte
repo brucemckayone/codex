@@ -15,6 +15,7 @@
   import * as m from '$paraglide/messages';
   import FieldControl from './FieldControl.svelte';
   import { entryTitle, moveItem, readEntries } from './field-values';
+  import type { OfferChoices } from './offer-field';
   import SortableRows from './SortableRows.svelte';
 
   interface Props {
@@ -27,9 +28,19 @@
     layout?: string;
     /** The entry this layout draws larger than the rest, or `null`. */
     leading?: number | null;
+    /** Passed through to an entry's `offer` field: the page's live ways in. */
+    offerPaths?: OfferChoices;
   }
 
-  const { field, value, onChange, mediaBaseUrl = null, layout, leading = null }: Props = $props();
+  const {
+    field,
+    value,
+    onChange,
+    mediaBaseUrl = null,
+    layout,
+    leading = null,
+    offerPaths = [],
+  }: Props = $props();
 
   const id = $props.id();
   const entries = $derived(readEntries(value));
@@ -124,6 +135,7 @@
                 onChange={(next) => setKey(index, itemField.key, next)}
                 {mediaBaseUrl}
                 {layout}
+                {offerPaths}
               />
             {/each}
           {/if}

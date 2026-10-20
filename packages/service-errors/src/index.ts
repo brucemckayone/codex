@@ -14,6 +14,7 @@ export {
   InternalServiceError,
   isServiceError,
   NotFoundError,
+  PreconditionFailedError,
   RateLimitExceededError,
   ServiceError,
   ServiceUnavailableError,

@@ -65,7 +65,7 @@
   --lp-weight-heading: var(--heading-weight, var(--font-semibold));
   --lp-weight-label: var(--font-medium);
 
-  --lp-measure-lead: 40ch;
+  --lp-measure-lead: 40;
 }
 
 .lp[data-lp-style='soft'] {

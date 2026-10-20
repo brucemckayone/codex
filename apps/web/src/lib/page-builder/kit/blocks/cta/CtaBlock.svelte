@@ -124,14 +124,14 @@
     isolation: isolate;
   }
 
-  /* The heading measures itself in its own `ch`; the body keeps its measure. */
+  /* The heading measures itself in its own face's `0`s; the body keeps its measure. */
   .cta__words {
     display: grid;
     gap: var(--lp-stack);
   }
 
   .cta__words :global(.lp-heading) {
-    max-inline-size: 18ch;
+    max-inline-size: calc(18 * var(--lp-measure-unit));
   }
 
   /* The glow belongs to Cinematic's dark room only; on a light band it would
@@ -207,9 +207,9 @@
   }
 
   /* ── compact ───────────────────────────────────────────────────────────── */
-  /* One line where it fits: the 18ch cap is for the band's display heading. */
+  /* One line where it fits: the 18-`0` cap is for the band's display heading. */
   .cta[data-layout='compact'] .cta__words :global(.lp-heading) {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   /* Wide: the words beside the offer wherever the title's widest word fits

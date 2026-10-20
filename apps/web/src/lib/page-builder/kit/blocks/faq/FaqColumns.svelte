@@ -60,7 +60,7 @@
   .faq-cols__answer {
     display: grid;
     gap: var(--lp-paragraph-gap);
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-body);
     line-height: var(--lp-leading-body);

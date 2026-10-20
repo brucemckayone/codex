@@ -31,7 +31,7 @@
     display: flex;
     align-items: flex-start;
     gap: var(--space-3);
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
     text-align: start;
     padding: var(--space-4) var(--space-5);
     border: var(--lp-border) var(--border-style) var(--lp-button-line);

@@ -43,14 +43,15 @@ import {
 import type { OrphanedFileService } from '@codex/image-processing';
 import {
   droppedPageImageKeys,
+  pageIdOfPageImageKey,
   pageImageObjectKeys,
-  recordOrphansOrLog,
 } from '@codex/image-processing';
 import {
   BaseService,
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  PreconditionFailedError,
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
@@ -93,6 +94,7 @@ import type {
 } from '@codex/shared-types';
 import { PAGE_STYLE_IDS } from '@codex/validation';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { pageRevision } from './page-revision';
 import { resolvePracticeThumbnail } from './practice-thumbnail';
 
 /**
@@ -1743,6 +1745,9 @@ export class CourseJourneyService extends BaseService {
         // this projection the two meta fields would come back EMPTY after every
         // reload, which is the shape a creator reads as "it did not save".
         ...(row.seo ? { seo: row.seo as PageSeo } : {}),
+        // What the builder's saves name, so a save made from an out-of-date
+        // copy is refused (Codex-61zsk.18).
+        revision: await pageRevision(row),
       };
     } catch (error) {
       this.handleError(error, 'getJourneyForBuilder');
@@ -1954,6 +1959,14 @@ export class CourseJourneyService extends BaseService {
    * publishes the course (so the public sales page, which requires BOTH, goes
    * live in one action), unpublishing it unpublishes the course, and the course's
    * `slug`/`title` follow the page's.
+   *
+   * A save that names the `revision` it was made from is refused with a
+   * `PreconditionFailedError` (412) when the stored page has moved on since:
+   * another tab or device saved over it, and this copy would undo that save
+   * (Codex-61zsk.18, {@link pageRevision}). The row is locked while it is
+   * checked, so two saves made from one revision cannot both pass. A save
+   * without one writes as before. Returns the page's revision after the save,
+   * for the next one to name.
    */
   async saveJourneyPage(
     organizationId: string,
@@ -1993,12 +2006,20 @@ export class CourseJourneyService extends BaseService {
        * nothing about SEO" is treated as no instruction.
        */
       seo?: PageSeo;
+      /**
+       * The page's revision as the caller last read or saved it. Present, the
+       * save is refused if the stored page has moved on; absent, it is not
+       * checked (a caller that writes what it just read, such as a status
+       * change, has nothing to lose).
+       */
+      revision?: string;
     }
-  ): Promise<void> {
+  ): Promise<{ revision: string }> {
     // Captured inside the transaction below and read AFTER it commits — see
     // the page-image orphan scan following the try/catch for why acting on
     // "the old sections are gone" has to wait until they really are.
     let oldSections: PageSection[] | undefined;
+    let revision = '';
 
     try {
       const status: PageStatus = record.status;
@@ -2012,11 +2033,15 @@ export class CourseJourneyService extends BaseService {
           .select({
             id: landingPages.id,
             slug: landingPages.slug,
+            title: landingPages.title,
+            status: landingPages.status,
             publishedAt: landingPages.publishedAt,
             subjectType: landingPages.subjectType,
             subjectId: landingPages.subjectId,
+            brandOverrides: landingPages.brandOverrides,
             sections: landingPages.sections,
             design: landingPages.design,
+            seo: landingPages.seo,
             legacySnapshot: landingPages.legacySnapshot,
           })
           .from(landingPages)
@@ -2027,10 +2052,21 @@ export class CourseJourneyService extends BaseService {
               isNull(landingPages.deletedAt)
             )
           )
-          .limit(1);
+          .limit(1)
+          // Held to the commit, so a second save from the same revision waits
+          // and then reads this one's result, and is refused.
+          .for('update');
 
         if (!existing) {
           throw new NotFoundError('Journey page not found');
+        }
+        if (
+          record.revision !== undefined &&
+          (await pageRevision(existing)) !== record.revision
+        ) {
+          throw new PreconditionFailedError(
+            'This page was saved somewhere else since you opened it. Reload to keep editing.'
+          );
         }
         oldSections = existing.sections;
 
@@ -2092,7 +2128,7 @@ export class CourseJourneyService extends BaseService {
         const nowPublishedAt =
           publishing && !existing.publishedAt ? new Date() : undefined;
 
-        await tx
+        const [saved] = await tx
           .update(landingPages)
           .set({
             title: record.title,
@@ -2110,7 +2146,22 @@ export class CourseJourneyService extends BaseService {
               eq(landingPages.id, record.id),
               eq(landingPages.organizationId, organizationId)
             )
-          );
+          )
+          // The row as stored, not as sent: the revision the next read
+          // computes is of the stored columns (a `design` left alone, say).
+          .returning({
+            slug: landingPages.slug,
+            title: landingPages.title,
+            status: landingPages.status,
+            brandOverrides: landingPages.brandOverrides,
+            sections: landingPages.sections,
+            design: landingPages.design,
+            seo: landingPages.seo,
+          });
+        if (!saved) {
+          throw new NotFoundError('Journey page not found');
+        }
+        revision = await pageRevision(saved);
 
         if (subjectCourseId) {
           await this.cascadeCourseFromPage(tx, {
@@ -2133,11 +2184,13 @@ export class CourseJourneyService extends BaseService {
     // alt? }`, with no per-type schema knowledge, so finding what changed
     // means deep-scanning both trees for page-image keys rather than diffing
     // named columns — see `droppedPageImageKeys` (`@codex/image-processing`,
-    // beside the key rules the upload and the sweep share). Any page's key
-    // counts, not only this page's: a duplicated page renders its source's
-    // keys, and dropping one must still nominate it. The sweep deletes one
-    // only if no page in the key's own org references it, so a key pasted
-    // in from another org can neither keep that org's image nor lose it.
+    // beside the key rules the upload and the sweep share). Any of this
+    // org's pages' keys counts, not only this page's: a duplicated page
+    // renders its source's keys, and dropping one must still nominate it.
+    // Another org's key does not (Codex-61zsk.17): the sweep deletes one only
+    // if no page in the key's OWN org references it, so a key pasted in from
+    // another org can neither keep that org's image nor lose it, and
+    // queueing it would only fill the queue every tenant's cleanup shares.
     //
     // What this queues is a NOMINATION, not a verdict. Undo, a duplicated
     // page and two overlapping saves can all put a reference back after the
@@ -2156,20 +2209,18 @@ export class CourseJourneyService extends BaseService {
     // BACK would be actively wrong — it would queue a key the (unchanged)
     // old sections still hold.
     //
-    // Recording never throws (`recordOrphansOrLog` swallows and logs), so the
-    // outer try here is defensive insurance around the scan itself, not
-    // around the record call.
+    // The lookups and the nomination can throw, and the try catches them:
+    // the save stands, nothing is queued, and the error log names the
+    // dropped keys, so what went untracked can be found and queued by hand.
+    let nominated: string[] = [];
     try {
       const removedKeys = droppedPageImageKeys(oldSections, record.sections);
 
       if (removedKeys.length === 0) {
-        return;
+        return { revision };
       }
 
-      const nominated = removedKeys.slice(
-        0,
-        MAX_PAGE_IMAGES_NOMINATED_PER_SAVE
-      );
+      nominated = removedKeys.slice(0, MAX_PAGE_IMAGES_NOMINATED_PER_SAVE);
       if (removedKeys.length > nominated.length) {
         this.obs.warn('Page image nominations capped for one save', {
           context: 'landing-page-image',
@@ -2178,19 +2229,42 @@ export class CourseJourneyService extends BaseService {
           nominated: nominated.length,
         });
       }
-      const r2Keys = nominated.flatMap(pageImageObjectKeys);
+
+      const owned = await this.pageImageKeysOfOrg(organizationId, nominated);
+      if (owned.length < nominated.length) {
+        this.obs.warn("Page image nominations skipped: another org's images", {
+          context: 'landing-page-image',
+          pageId: record.id,
+          keys: nominated.filter((key) => !owned.includes(key)).slice(0, 20),
+        });
+      }
+      const r2Keys = owned.flatMap(pageImageObjectKeys);
 
       if (this.orphanedFileService) {
-        await recordOrphansOrLog(
-          this.orphanedFileService,
-          r2Keys.map((r2Key) => ({
+        // Only objects an upload minted (Codex-61zsk.17). A key is text a
+        // manager can write, and this queue is every tenant's: a key of
+        // this org's own shape that no upload made would delay every other
+        // org's cleanup. An upload records its objects as it stores them, so
+        // a key with no row is fabricated, or its upload's record failed
+        // (that upload logged 'keys are untracked'); either way it is
+        // skipped, and the keys are logged.
+        const minted =
+          await this.orphanedFileService.mintedPageImageObjects(r2Keys);
+        const mintedKeys = r2Keys.filter((r2Key) => minted.has(r2Key));
+        if (mintedKeys.length < r2Keys.length) {
+          this.obs.warn('Page image nominations skipped: no upload row', {
+            context: 'landing-page-image',
+            pageId: record.id,
+            r2Keys: r2Keys.filter((r2Key) => !minted.has(r2Key)).slice(0, 20),
+          });
+        }
+        await this.orphanedFileService.nominatePageImageObjects(
+          mintedKeys.map((r2Key) => ({
             r2Key,
             imageType: 'page_image' as const,
             entityId: record.id,
             entityType: 'landing_page' as const,
-          })),
-          this.obs,
-          'landing-page-image'
+          }))
         );
       } else {
         // The registry always supplies one (service-registry.ts, the
@@ -2210,10 +2284,47 @@ export class CourseJourneyService extends BaseService {
       this.obs.error('Page image orphan scan failed after a successful save', {
         context: 'landing-page-image',
         pageId: record.id,
+        keys: nominated,
         error:
           scanError instanceof Error ? scanError.message : String(scanError),
       });
     }
+    return { revision };
+  }
+
+  /**
+   * Which of these page-image keys were uploaded to one of `organizationId`'s
+   * pages: the page id is part of the key (`pageIdOfPageImageKey`). Soft-
+   * deleted pages count, as they do for the sweep, since a restore brings
+   * their images back; so this is scoped by org alone, not `scopedNotDeleted`.
+   */
+  private async pageImageKeysOfOrg(
+    organizationId: string,
+    keys: string[]
+  ): Promise<string[]> {
+    const pageIds = [
+      ...new Set(
+        keys.flatMap((key) => {
+          const pageId = pageIdOfPageImageKey(key);
+          return pageId ? [pageId] : [];
+        })
+      ),
+    ];
+    if (pageIds.length === 0) return [];
+    const pages = await this.db
+      .select({ id: landingPages.id })
+      .from(landingPages)
+      .where(
+        and(
+          eq(landingPages.organizationId, organizationId),
+          inArray(landingPages.id, pageIds)
+        )
+      );
+    const own = new Set(pages.map((page) => page.id));
+    return keys.filter((key) => {
+      const pageId = pageIdOfPageImageKey(key);
+      return pageId !== null && own.has(pageId);
+    });
   }
 
   /**

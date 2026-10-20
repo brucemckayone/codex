@@ -63,7 +63,7 @@
   --lp-tracking-title: -0.006em;
   --lp-tracking-label: 0.01em;
 
-  --lp-measure-lead: 42ch;
+  --lp-measure-lead: 42;
 }
 
 .lp[data-lp-style='path'] {

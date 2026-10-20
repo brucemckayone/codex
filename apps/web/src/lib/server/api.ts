@@ -1418,9 +1418,14 @@ export function createServerApi(
            * properties through a variable.
            */
           seo?: JourneyPageRecord['seo'];
+          /**
+           * The revision the copy was made from: named, the save is refused
+           * (412) once the stored page has moved on (Codex-61zsk.18).
+           */
+          revision?: JourneyPageRecord['revision'];
         }
       ) =>
-        request<null>(
+        request<{ revision: string }>(
           'access',
           `/api/journeys/studio/journeys/${encodeURIComponent(
             record.id

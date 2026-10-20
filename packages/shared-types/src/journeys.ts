@@ -926,6 +926,12 @@ export interface JourneyPageRecord extends PageBuilderState {
   id: string;
   organizationId: string;
   publishedAt: string | null;
+  /**
+   * The page's revision as read (Codex-61zsk.18): a save that names it is
+   * refused (412) once another save has changed the page. Server-owned, so
+   * never part of the editable {@link PageBuilderState}.
+   */
+  revision?: string;
 }
 
 /**

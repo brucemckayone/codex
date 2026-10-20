@@ -109,7 +109,7 @@
   }
 
   .tm-marquee__lane:has(> :only-child) {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   .tm-marquee__lane[data-copy] {
@@ -128,15 +128,10 @@
      wall, its room is made on the voice, on top of whatever padding a Style
      gives the card: the mark clears the card's edge by that whole padding —
      an open card (a rule, no sides) starts it on the rule — and the words and
-     the name keep one edge. Voice's own sizes, pinned by the block's test. */
+     the name keep one edge. The room is Voice's own (`--lp-voice-room`), so
+     it follows every size Voice or a Type sets. */
   .tm-marquee__card > :global(.voice) {
-    --_quote: var(--lp-size-lead);
-    --_hang: 0.4;
-    padding-inline-start: calc(var(--_quote) * var(--_hang));
-  }
-
-  .tm-marquee__card > :global(.voice[data-length='long']) {
-    --_quote: var(--lp-size-body);
+    padding-inline-start: var(--lp-voice-room);
   }
 
   .tm-marquee__toggle {
