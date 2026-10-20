@@ -32,6 +32,7 @@ import {
   BILLING_INTERVAL,
   CONTENT_STATUS,
   CURRENCY,
+  FEES,
   stripeEnvMetadata,
 } from '@codex/constants';
 import { isUniqueViolation } from '@codex/database';
@@ -1192,7 +1193,7 @@ export class CourseSubscriptionService extends BaseService {
       : {
           platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
           orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
-          minPlatformFeeCents: 0,
+          minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
           minTransferCents: 0,
         };
 

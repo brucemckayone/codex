@@ -675,7 +675,7 @@ export class SubscriptionService extends BaseService {
             : ctx === 'subscription'
               ? FEES.SUBSCRIPTION_ORG_PERCENT
               : FEES.ORG_PERCENT,
-        minPlatformFeeCents: 0,
+        minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
         minTransferCents: 0,
       };
     }
