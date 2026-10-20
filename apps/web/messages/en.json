@@ -1620,6 +1620,7 @@
   "studio_builder_pricing_problem_annual_min": "The annual price must be at least £1.00.",
   "studio_builder_pricing_problem_annual_cap": "The annual price must be no more than 12× the monthly price.",
   "studio_builder_pricing_problem_oneoff_required": "Set a price for the one-off purchase.",
+  "studio_builder_pricing_problem_oneoff_min": "The one-off price must be at least £1.00.",
   "studio_builder_pricing_title": "Access & pricing",
   "studio_builder_pricing_sub": "The journey’s offer · one source of truth",
   "studio_builder_pricing_callout_before": "This is the",

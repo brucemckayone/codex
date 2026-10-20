@@ -14,7 +14,9 @@ A **gap** marker means the code does not behave this way yet; see
 **Content** can be bought when all of these hold:
 
 - it is published and not deleted;
-- it is marked purchasable and has a price of at least £1.00 — **gap**: `Codex-2hxff.32`;
+- it is marked purchasable and has a price of at least £1.00. Validation
+  refuses 1p–99p on every price (`PRICE_LIMITS` in `@codex/constants`), and
+  checkout refuses an older row priced below £1.00 before it reaches Stripe;
 - its access rule honours a purchase. Content that is course-only, team-only
   or followers-only is not sold on its own — **gap**: `Codex-2hxff.14`
   (checkout gating).

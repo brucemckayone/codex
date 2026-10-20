@@ -171,6 +171,17 @@ export const FEES = {
   MIN_PLATFORM_FEE_CENTS: 25,
 } as const;
 
+/**
+ * The range every price must sit in, in pence: content, courses, tiers and
+ * course subscription plans alike (owner decision 2026-10-13). Stripe refuses
+ * card charges under £0.30, and at £1.00 the 25p minimum platform fee still
+ * covers a UK card fee (about 1.5% + 20p). docs/payments/purchases.md.
+ */
+export const PRICE_LIMITS = {
+  MIN_CENTS: 100, // £1.00
+  MAX_CENTS: 10_000_000, // £100,000
+} as const;
+
 export const CURRENCY = {
   GBP: 'gbp',
   USD: 'usd',

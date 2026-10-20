@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { userIdSchema, uuidSchema } from '../primitives';
+import {
+  priceCentsSchema,
+  salePriceCentsSchema,
+  userIdSchema,
+  uuidSchema,
+} from '../primitives';
 
 /**
  * Primitive Validation Schema Tests
@@ -179,5 +184,53 @@ describe('uuidSchema vs userIdSchema', () => {
 
     // UUID schema rejects Better Auth IDs (not UUID format)
     expect(() => uuidSchema.parse(betterAuthId)).toThrow('Invalid ID format');
+  });
+});
+
+/**
+ * Every price is at least £1.00 (Codex-2hxff.32). Stripe refuses card charges
+ * under £0.30, so a 1p–29p price used to pass validation and then fail at
+ * Checkout; 30p–99p sold at a loss once the card fee came off.
+ */
+describe('priceCentsSchema', () => {
+  it.each([null, 0, 100, 4900, 10_000_000])('accepts %s', (cents) => {
+    expect(priceCentsSchema.parse(cents)).toBe(cents);
+  });
+
+  it.each([
+    1, 29, 30, 99,
+  ])('refuses %ip as below the £1.00 minimum', (cents) => {
+    expect(() => priceCentsSchema.parse(cents)).toThrow(
+      'Minimum price is £1.00 (100 pence)'
+    );
+  });
+
+  it('refuses a negative, fractional or over-limit price', () => {
+    expect(() => priceCentsSchema.parse(-100)).toThrow(
+      'Price cannot be negative'
+    );
+    expect(() => priceCentsSchema.parse(150.5)).toThrow(
+      'Price must be a whole number (pence)'
+    );
+    expect(() => priceCentsSchema.parse(10_000_001)).toThrow(
+      'Maximum price is £100,000'
+    );
+  });
+});
+
+describe('salePriceCentsSchema', () => {
+  it('accepts £1.00 to £100,000', () => {
+    expect(salePriceCentsSchema.parse(100)).toBe(100);
+    expect(salePriceCentsSchema.parse(10_000_000)).toBe(10_000_000);
+  });
+
+  it('refuses no price at all: zero, null, and anything under £1.00', () => {
+    expect(() => salePriceCentsSchema.parse(0)).toThrow(
+      'Minimum price is £1.00 (100 pence)'
+    );
+    expect(() => salePriceCentsSchema.parse(99)).toThrow(
+      'Minimum price is £1.00 (100 pence)'
+    );
+    expect(() => salePriceCentsSchema.parse(null)).toThrow();
   });
 });

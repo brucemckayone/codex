@@ -12983,6 +12983,14 @@ export const studio_builder_pricing_problem_oneoff_required = () => `Set a price
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_pricing_problem_oneoff_min = () => `The one-off price must be at least £1.00.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_pricing_title = () => `Access & pricing`
 
 

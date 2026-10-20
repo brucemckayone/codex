@@ -425,15 +425,16 @@ export const createContentSchema = baseContentSchema
   )
   .refine(
     (data) => {
-      // Purchasable content requires a positive price (SPEC §6.1 — priceCents
-      // pairs with isPurchasable).
+      // Purchasable content requires a price (SPEC §6.1 — priceCents pairs
+      // with isPurchasable). `priceCentsSchema` already refuses 1p–99p, so any
+      // positive price that reaches here is at least £1.00.
       if (data.isPurchasable) {
         return !!data.priceCents && data.priceCents > 0;
       }
       return true;
     },
     {
-      message: 'Purchasable content requires a price greater than £0',
+      message: 'Purchasable content requires a price of at least £1.00',
       path: ['priceCents'],
     }
   )
@@ -584,7 +585,7 @@ export const updateContentSchema = baseContentSchema
       return !!data.priceCents && data.priceCents > 0;
     },
     {
-      message: 'Purchasable content requires a price greater than £0',
+      message: 'Purchasable content requires a price of at least £1.00',
       path: ['priceCents'],
     }
   )

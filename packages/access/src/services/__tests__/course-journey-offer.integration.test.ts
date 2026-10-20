@@ -261,6 +261,31 @@ describe('CourseJourneyService.updateJourneyOffer (journey pricing write path)',
     expect(await readPrice(courseId)).toBe(2500);
   });
 
+  it('REFUSES an enabled one-off priced at £0 — zero is no price', async () => {
+    await svc.updateJourneyOffer(
+      orgAId,
+      pageId,
+      offerBag({ oneOffEnabled: true, oneOffPriceCents: 2500 })
+    );
+
+    await expect(
+      svc.updateJourneyOffer(
+        orgAId,
+        pageId,
+        offerBag({ oneOffEnabled: true, oneOffPriceCents: 0 })
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(
+      svc.updateJourneyOffer(
+        orgAId,
+        pageId,
+        offerBag({ subscriptionEnabled: true, subscriptionPriceCents: 0 })
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(await readPrice(courseId)).toBe(2500);
+  });
+
   it('REFUSES an enabled course subscription with no price', async () => {
     await expect(
       svc.updateJourneyOffer(
