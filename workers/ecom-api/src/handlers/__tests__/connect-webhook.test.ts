@@ -26,21 +26,17 @@ import type { StripeWebhookEnv } from '../../types';
 
 // Mock the module under test's dependencies BEFORE importing.
 // The handler gets its services from `createWebhookServices`; mock that seam
-// so each test hands over its own stubs. `createWebhookDbClient` stays a spy
-// so the drain tests can prove no second DB client is opened.
+// so each test hands over its own stubs, and the drain tests can prove the
+// whole event runs on the one set it returns.
 vi.mock('@codex/worker-utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/worker-utils')>();
   return {
     ...actual,
     createWebhookServices: vi.fn(),
-    createWebhookDbClient: vi.fn(),
   };
 });
 
-import {
-  createWebhookDbClient,
-  createWebhookServices,
-} from '@codex/worker-utils';
+import { createWebhookServices } from '@codex/worker-utils';
 import { handleConnectWebhook } from '../connect-webhook';
 
 type StripeConnectRow = {
@@ -413,7 +409,6 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     expect(releasedAt).toBeGreaterThan(registeredAt);
     // One pool for the whole event: no second DB client, no bare waitUntil.
     expect(createWebhookServices).toHaveBeenCalledOnce();
-    expect(createWebhookDbClient).not.toHaveBeenCalled();
     expect(waitUntilSpy).not.toHaveBeenCalled();
 
     await settleDrain();

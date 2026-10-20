@@ -88,7 +88,7 @@ grep -rn 'new [A-Z][a-zA-Z]*Service(' workers/*/src --include='*.ts' \
 # Each match is a candidate finding
 ```
 
-Webhook handlers (Stripe, RunPod) are the documented exception — they manage their own DB lifecycle with `createPerRequestDbClient` + `waitUntil(cleanup())`.
+Stripe webhooks and the payouts cron are NOT an exception: since Codex-2hxff.54 they get services from `createWebhookServices(env, executionCtx, { obs, stripe })` and `release()` them in `finally`, so a `new XService(` in `workers/ecom-api` is a finding. The RunPod webhook (media-api) is the documented exception: it builds `TranscodingService` on the stateless `createDbClient(env)`.
 
 **Findings to flag:**
 

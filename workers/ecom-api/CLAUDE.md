@@ -53,11 +53,15 @@ The payouts sweep runs from `scheduled` (`handlers/payouts-sweep.ts`), cron
 ```
 verifyStripeSignature → createWebhookHandler (logs; 200, or 500 on a transient error)
   → handler(event, stripe, c)
-    → createWebhookDbClient(env) — per-request WebSocket client for transactions
-    → service method (business logic lives in @codex/purchase / @codex/subscription)
-    → waitUntil: cache invalidation + emails (fire-and-forget)
-    → finally: await cleanup()
+    → createWebhookServices(c.env, c.executionCtx, { obs, stripe })
+        — the registry's services, as routes get them (Codex-2hxff.54)
+    → services.<name>.method() (business logic lives in the packages)
+    → background(promise): DB work after the response, on the shared pool
+    → waitUntil(promise): KV cache invalidation and emails
+    → finally: release() — closes the pool once background work settles
 ```
+
+The payouts cron builds its services the same way (`handlers/payouts-sweep.ts`).
 
 ## Strict Rules
 
@@ -68,18 +72,22 @@ verifyStripeSignature → createWebhookHandler (logs; 200, or 500 on a transient
   processed, deliberately skipped, or failed permanently. A `ServiceError` that
   wraps a transient cause is still transient (`Codex-2hxff.6`).
 - **MUST** make every handler idempotent — Stripe delivers at least once.
-- **MUST** build services in webhook and cron code with the **same** config as the
-  service registry (`feeConfig`, `mailer`, `payoutMailer`, `webAppUrl`, `cache`,
-  `waitUntil`) — otherwise fee configuration and emails are silently skipped
-  (`Codex-2hxff.7`).
+- **MUST** get services from `createWebhookServices` (`@codex/worker-utils`),
+  never build them by hand. It gives webhooks and crons the registry's whole
+  graph (`feeConfig`, the mailers, `webAppUrl`, caches), the webhook's own
+  verified Stripe client, and the Neon driver even where Hyperdrive is bound.
+  Hand-built services silently skipped fee configuration and emails
+  (`Codex-2hxff.7`, `.13`).
 - **MUST** ignore events about Stripe objects created by another environment —
   production and local development share one sandbox (`Codex-2hxff.5`).
-- **MUST** use `createWebhookDbClient(env)` and release it in a `finally` block.
-  Every handler `await`s `cleanup()` today; whether it should be
-  `waitUntil(cleanup())` instead is open in `Codex-ev3k` (webhook lifecycle
-  hygiene).
-- **MUST** fire-and-forget cache invalidation and emails through `waitUntil`;
-  never block the webhook response on them.
+- **MUST** call `release()` in a `finally` block, exactly once per
+  `createWebhookServices` call. It hands the pool's teardown to `waitUntil`
+  after the background work settles, so it never blocks the response.
+- **MUST** run DB work that outlives the response through `background(...)`.
+  A promise on plain `waitUntil` that queries the database races `release()`,
+  which can close the pool under it.
+- **MUST** fire-and-forget KV cache invalidation and emails through
+  `waitUntil`; never block the webhook response on them.
 - **NEVER** put DB queries or email composition in handlers — delegate to services.
 - **NEVER** expose Stripe secret keys, or raw Stripe error messages, in responses
   or logs.

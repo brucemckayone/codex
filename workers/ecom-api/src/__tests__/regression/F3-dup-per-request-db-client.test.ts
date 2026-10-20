@@ -27,7 +27,10 @@
  * over the literal three-field call shape inside ecom-api handlers.
  *
  * Fix landed: `createWebhookDbClient(env)` in `@codex/worker-utils` —
- * each handler imports it and calls it with `c.env`.
+ * each handler imported it and called it with `c.env`. Superseded by
+ * `createWebhookServices` (Codex-2hxff.54), which builds the registry's
+ * services on one shared client; the helper was deleted once nothing called
+ * it (Codex-2hxff.57). The guard still holds: no handler builds its own.
  */
 // Vite `?raw` baked-at-build-time imports — works under both Node and the
 // workerd runtime used by @cloudflare/vitest-pool-workers (which has no
@@ -65,7 +68,7 @@ describe('iter-011 F3 — createPerRequestDbClient triple-field shape duplicated
       }
     }
 
-    // Pre-fix: 5 offenders. Post-fix: 0 (createWebhookDbClient owns the call).
+    // Pre-fix: 5 offenders. Post-fix: 0 (createWebhookServices owns the client).
     expect(
       offenders,
       `Inline createPerRequestDbClient(...) call shape duplicated. Extract to a shared helper. Offenders:\n${offenders.map((o) => `  ${o.path}:${o.line}`).join('\n')}`

@@ -109,7 +109,7 @@ These rules are MANDATORY. Every agent working anywhere in this codebase MUST fo
 
 - **MUST** use `ctx.services.*` from the service registry for all services in `procedure()` handlers — NEVER create ad-hoc service instances with `createDbClient(env)` in route files
 - **MUST** add new services to the registry (`packages/worker-utils/src/procedure/service-registry.ts`) following the lazy getter pattern before using them in route handlers
-- Webhook handlers that bypass `procedure()` (Stripe HMAC, RunPod) are the only exception — they manage their own DB lifecycle with `createPerRequestDbClient` + `waitUntil(cleanup())`
+- Webhook handlers that bypass `procedure()` (Stripe HMAC, RunPod) and crons are the only exception. Stripe webhooks and the payouts cron get the registry's services from `createWebhookServices(env, executionCtx, { obs, stripe })` (`@codex/worker-utils`) and call `release()` in `finally`; DB work after the response goes through its `background()`, never plain `waitUntil`. The RunPod webhook (media-api) uses the stateless `createDbClient(env)`, which has no pool to close
 
 ### Error Handling
 
