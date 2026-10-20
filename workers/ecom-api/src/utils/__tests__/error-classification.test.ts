@@ -6,6 +6,14 @@
  * - Permanent errors (return 200, acknowledged)
  */
 
+import {
+  ConflictError,
+  InternalServiceError,
+  mapErrorToResponse,
+  NotFoundError,
+  ServiceUnavailableError,
+  wrapError,
+} from '@codex/service-errors';
 import { describe, expect, it } from 'vitest';
 import { isTransientError } from '../error-classification';
 
@@ -118,11 +126,17 @@ describe('isTransientError', () => {
         false
       );
     });
+  });
 
-    it('should return false for Stripe authentication error', () => {
-      expect(
-        isTransientError(createStripeError('StripeAuthenticationError', 401))
-      ).toBe(false);
+  // A bad key or a missing permission is a deploy misconfiguration, not bad
+  // data: once fixed, Stripe's redelivery succeeds. Acknowledging it would
+  // drop the event — on checkout, a sale completed with no payout slices.
+  describe('Stripe configuration errors', () => {
+    it.each([
+      ['StripeAuthenticationError', 401],
+      ['StripePermissionError', 403],
+    ])('%s is transient', (type, status) => {
+      expect(isTransientError(createStripeError(type, status))).toBe(true);
     });
   });
 
@@ -147,6 +161,201 @@ describe('isTransientError', () => {
       const { ServiceError } = require('@codex/service-errors');
       const err = new ServiceError('Not found', 404);
       expect(isTransientError(err)).toBe(false);
+    });
+  });
+
+  // Codex-2hxff.6: a service wraps every unknown error (handleError →
+  // wrapError) and keeps the original on `cause`. The wrap must not hide an
+  // outage from the classifier, and must not make a bug look transient.
+  describe('errors wrapped by a service', () => {
+    it('a wrapped connection error is transient', () => {
+      expect(
+        isTransientError(wrapError(new Error('Connection terminated')))
+      ).toBe(true);
+    });
+
+    it('a wrapped bug stays permanent', () => {
+      expect(isTransientError(wrapError(new TypeError('x is undefined')))).toBe(
+        false
+      );
+    });
+
+    it('a ServiceError thrown on purpose (no cause) stays permanent', () => {
+      expect(isTransientError(new NotFoundError('Purchase not found'))).toBe(
+        false
+      );
+    });
+
+    it('a wrapped unique violation (a replay) stays permanent', () => {
+      const replay = wrapError(
+        Object.assign(
+          new Error('duplicate key value violates unique constraint "x"'),
+          { code: '23505' }
+        )
+      );
+      expect(replay).toBeInstanceOf(ConflictError);
+      expect(isTransientError(replay)).toBe(false);
+    });
+
+    it('the original is never part of the API response', () => {
+      const wrapped = wrapError(new Error('password=hunter2 connection lost'));
+      expect(
+        JSON.stringify(mapErrorToResponse(wrapped).response)
+      ).not.toContain('hunter2');
+    });
+
+    it('a cause chain that loops ends permanent instead of recursing forever', () => {
+      const a = new InternalServiceError('a');
+      const b = new InternalServiceError('b', undefined, { cause: a });
+      Object.defineProperty(a, 'cause', { value: b });
+      expect(isTransientError(a)).toBe(false);
+    });
+  });
+
+  // Codex-2hxff.51: the clawback finishes every row, then rejects with the
+  // rows it could not cancel as one InternalServiceError whose cause is the
+  // failure, or an AggregateError of them.
+  describe('several failures reported together', () => {
+    const outage = () => new Error('Connection terminated unexpectedly');
+    const bug = () => new TypeError('x is undefined');
+    const incomplete = (cause: unknown) =>
+      new InternalServiceError('Refund clawback incomplete', undefined, {
+        cause,
+      });
+
+    it('is transient when any one failure is, wherever it sits', () => {
+      expect(
+        isTransientError(incomplete(new AggregateError([bug(), outage()])))
+      ).toBe(true);
+    });
+
+    it('is permanent when every failure is', () => {
+      expect(
+        isTransientError(incomplete(new AggregateError([bug(), bug()])))
+      ).toBe(false);
+    });
+
+    it('a single failure is judged as itself', () => {
+      expect(isTransientError(incomplete(outage()))).toBe(true);
+      expect(isTransientError(incomplete(bug()))).toBe(false);
+    });
+  });
+
+  // Codex-2hxff.8: a step that could not run YET (another delivery holds it,
+  // or a payout for the refund is being paid) asks Stripe to retry.
+  describe('a service saying "not yet"', () => {
+    it('a ServiceUnavailableError is transient, though thrown on purpose', () => {
+      expect(
+        isTransientError(
+          new ServiceUnavailableError('another delivery holds it')
+        )
+      ).toBe(true);
+    });
+
+    it('it is transient as the cause of an incomplete clawback too', () => {
+      const incomplete = new InternalServiceError(
+        'Refund clawback incomplete',
+        undefined,
+        { cause: new ServiceUnavailableError('payout in flight') }
+      );
+      expect(isTransientError(incomplete)).toBe(true);
+    });
+  });
+
+  describe('Postgres SQLSTATE codes', () => {
+    const pg = (code: string) =>
+      Object.assign(new Error('database error'), { code });
+
+    it.each([
+      ['08006', 'connection failure'],
+      ['08001', 'unable to connect'],
+      ['40001', 'serialization failure'],
+      ['40P01', 'deadlock'],
+      ['53300', 'too many connections'],
+      ['57P01', 'admin shutdown'],
+      ['57P03', 'cannot connect now'],
+      ['57014', 'statement timeout'],
+    ])('%s (%s) is transient', (code) => {
+      expect(isTransientError(pg(code))).toBe(true);
+    });
+
+    it.each([
+      ['23505', 'unique violation'],
+      ['23503', 'foreign key violation'],
+      ['22P02', 'invalid text representation'],
+      ['42703', 'undefined column'],
+    ])('%s (%s) is permanent', (code) => {
+      expect(isTransientError(pg(code))).toBe(false);
+    });
+
+    it('a permanent SQLSTATE wins over a message that reads transient', () => {
+      // A constraint or column named after a timeout must not make a CHECK
+      // violation retry for three days.
+      const check = Object.assign(
+        new Error(
+          'new row violates check constraint "check_connection_timeout"'
+        ),
+        { code: '23514' }
+      );
+      expect(isTransientError(check)).toBe(false);
+    });
+
+    // EBUSY is five letters but no SQLSTATE (no class starts with E): it
+    // must not short-circuit to "permanent" before the message is read.
+    it('a five-letter socket code is not mistaken for a SQLSTATE', () => {
+      expect(
+        isTransientError(
+          Object.assign(new Error('socket timeout: resource busy'), {
+            code: 'EBUSY',
+          })
+        )
+      ).toBe(true);
+    });
+  });
+
+  describe("drizzle's query error", () => {
+    // drizzle 0.44: message = the SQL plus every bound value; cause = the
+    // driver's error.
+    const drizzle = (params: string, cause: Error) =>
+      Object.assign(new Error(`Failed query: select 1\nparams: ${params}`), {
+        name: 'DrizzleQueryError',
+        cause,
+      });
+
+    it('is judged by the driver error, never by its bound values', () => {
+      const permanent = Object.assign(new Error('violates check'), {
+        code: '23514',
+      });
+      expect(
+        isTransientError(
+          wrapError(drizzle('a user typed "connection timeout"', permanent))
+        )
+      ).toBe(false);
+    });
+
+    it('a dropped connection under it is transient', () => {
+      const dropped = Object.assign(new Error('Connection terminated'), {
+        code: '08006',
+      });
+      expect(isTransientError(wrapError(drizzle('x', dropped)))).toBe(true);
+    });
+  });
+
+  describe('socket errors under a driver error', () => {
+    it("fetch's `cause.code = 'ECONNRESET'` is transient", () => {
+      const fetchFailed = new Error('request to the database was refused', {
+        cause: Object.assign(new Error('other side closed'), {
+          code: 'ECONNRESET',
+        }),
+      });
+      expect(isTransientError(fetchFailed)).toBe(true);
+    });
+
+    it("Neon's `sourceError` is followed", () => {
+      const neon = Object.assign(new Error('Error querying the database'), {
+        sourceError: Object.assign(new Error('read'), { code: 'EPIPE' }),
+      });
+      expect(isTransientError(neon)).toBe(true);
     });
   });
 

@@ -6,21 +6,49 @@
  *   - does NOT throw when the service rejects (cron crash protection)
  *   - exits cleanly when required env vars are missing
  *   - forwards `olderThanMinutes` override to the service
+ *   - then retries failed refund clawbacks, isolated from the sweep
+ *     (Codex-2hxff.8)
  *
  * Consolidated into workers/ecom-api 2026-05-13. Lives alongside the Stripe
  * webhook handlers because the cron + the Stripe webhooks share an owner.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { SubscriptionService } from '@codex/subscription';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type MockInstance,
+  vi,
+} from 'vitest';
 
 import { runPayoutsSweep, runScheduledPayoutsSweep } from '../payouts-sweep';
 
-// Construct a minimal-ish Bindings stub. The handler only reads
-// DATABASE_URL, STRIPE_SECRET_KEY, and ENVIRONMENT.
+/** A real instance whose sweep each test stubs on the prototype. */
+function sweepService(): SubscriptionService {
+  return new SubscriptionService(
+    { db: {} as never, environment: 'test' },
+    {} as never
+  );
+}
+
+function fakeCtx() {
+  return {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext & { waitUntil: ReturnType<typeof vi.fn> };
+}
+
+// Construct a minimal-ish Bindings stub. The handler reads DATABASE_URL,
+// STRIPE_SECRET_KEY and ENVIRONMENT; the composition root it builds needs a
+// valid DB_METHOD too (the pool is constructed, never dialled).
 function makeEnv(
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
   return {
+    DB_METHOD: 'NEON_BRANCH',
     DATABASE_URL: 'postgres://test',
     STRIPE_SECRET_KEY: 'sk_test_123',
     ENVIRONMENT: 'test',
@@ -45,6 +73,23 @@ function makeObs(): {
 }
 
 describe('ecom-api payouts-sweep handler', () => {
+  // The cron also retries failed clawbacks after the sweep. These tests are
+  // about the sweep, so the retry is a no-op here; its own tests are below.
+  let clawbackRetry: MockInstance<SubscriptionService['retryFailedClawbacks']>;
+  beforeEach(() => {
+    clawbackRetry = vi
+      .spyOn(SubscriptionService.prototype, 'retryFailedClawbacks')
+      .mockResolvedValue({
+        charges: 0,
+        retried: 0,
+        stillFailing: 0,
+        lostDisputesApplied: 0,
+      });
+  });
+  afterEach(() => {
+    clawbackRetry.mockRestore();
+  });
+
   it('runPayoutsSweep delegates to SubscriptionService.sweepUnresolvedPayouts and logs the result', async () => {
     // Build a SubscriptionService-shaped stub by passing a pre-built db
     // that the real SubscriptionService constructor won't actually touch
@@ -64,10 +109,8 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
     const result = await runPayoutsSweep({
-      db: {} as never,
-      stripe: {} as never,
+      subscription: sweepService(),
       obs: obs as never,
-      environment: 'test',
       olderThanMinutes: 30,
     });
 
@@ -101,10 +144,8 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
     const result = await runPayoutsSweep({
-      db: {} as never,
-      stripe: {} as never,
+      subscription: sweepService(),
       obs: obs as never,
-      environment: 'test',
     });
 
     expect(result).toBeNull();
@@ -132,7 +173,9 @@ describe('ecom-api payouts-sweep handler', () => {
     const { obs } = makeObs();
     const env = makeEnv({ DATABASE_URL: undefined });
 
-    await runScheduledPayoutsSweep(env as never, { obs: obs as never });
+    await runScheduledPayoutsSweep(env as never, fakeCtx(), {
+      obs: obs as never,
+    });
 
     expect(spy).not.toHaveBeenCalled();
     expect(obs.error).toHaveBeenCalledWith(
@@ -159,14 +202,27 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
 
-    // Pass pre-built db + stripe stubs so we don't need real connections.
-    await runScheduledPayoutsSweep(makeEnv() as never, {
-      db: {} as never,
+    // A Stripe stub so no real client is built; the pool is constructed by
+    // the composition root but never queried (the sweep is stubbed).
+    const ctx = fakeCtx();
+    await runScheduledPayoutsSweep(makeEnv() as never, ctx, {
       stripe: {} as never,
       obs: obs as never,
     });
 
     expect(spy).toHaveBeenCalledTimes(1);
+    // Codex-2hxff.54: the sweep runs on the registry's SubscriptionService,
+    // so a drained payout is split with configured fees and its payee gets
+    // the payout-released email (Codex-2hxff.7, .13). It used to be built
+    // with only { db, environment }.
+    const sweptBy = spy.mock.contexts[0] as {
+      feeConfig?: unknown;
+      payoutMailer?: unknown;
+    };
+    expect(sweptBy.feeConfig).toBeDefined();
+    expect(sweptBy.payoutMailer).toBeTypeOf('function');
+    // The pool is handed back after the sweep, on waitUntil.
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
 
     spy.mockRestore();
   });
@@ -204,10 +260,8 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
     const result = await runPayoutsSweep({
-      db: {} as never,
-      stripe: {} as never,
+      subscription: sweepService(),
       obs: obs as never,
-      environment: 'test',
       olderThanMinutes: 15,
     });
 
@@ -248,10 +302,8 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
     const result = await runPayoutsSweep({
-      db: {} as never,
-      stripe: {} as never,
+      subscription: sweepService(),
       obs: obs as never,
-      environment: 'test',
     });
 
     // result.errors AND result.groupsResolved both surface accurately
@@ -261,7 +313,11 @@ describe('ecom-api payouts-sweep handler', () => {
     // Critical: NOT routed to obs.error — the handler-level error path is
     // reserved for top-level rejections (DB outage, etc.), not per-group
     // failures the service already handled.
-    expect(obs.info).toHaveBeenCalledTimes(1);
+    expect(
+      vi
+        .mocked(obs.info)
+        .mock.calls.filter(([m]) => m === 'payouts-sweep cron completed')
+    ).toHaveLength(1);
     expect(obs.error).not.toHaveBeenCalled();
 
     spy.mockRestore();
@@ -288,10 +344,8 @@ describe('ecom-api payouts-sweep handler', () => {
 
     const { obs } = makeObs();
     const result = await runPayoutsSweep({
-      db: {} as never,
-      stripe: {} as never,
+      subscription: sweepService(),
       obs: obs as never,
-      environment: 'test',
       olderThanMinutes: 30,
     });
 
@@ -311,5 +365,69 @@ describe('ecom-api payouts-sweep handler', () => {
     expect(obs.error).not.toHaveBeenCalled();
 
     spy.mockRestore();
+  });
+
+  it('then retries failed refund clawbacks with the same age threshold, and logs the result (Codex-2hxff.8)', async () => {
+    const sweep = vi
+      .spyOn(SubscriptionService.prototype, 'sweepUnresolvedPayouts')
+      .mockResolvedValue({
+        groupsScanned: 0,
+        groupsResolved: 0,
+        groupsSkipped: 0,
+        errors: 0,
+      });
+    clawbackRetry.mockResolvedValue({
+      charges: 2,
+      retried: 1,
+      stillFailing: 1,
+      lostDisputesApplied: 0,
+    });
+    const { obs } = makeObs();
+
+    await runPayoutsSweep({
+      subscription: sweepService(),
+      obs: obs as never,
+      olderThanMinutes: 30,
+    });
+
+    expect(clawbackRetry).toHaveBeenCalledWith(30);
+    expect(sweep.mock.invocationCallOrder[0] ?? 0).toBeLessThan(
+      clawbackRetry.mock.invocationCallOrder[0] ?? 0
+    );
+    expect(obs.info).toHaveBeenCalledWith(
+      'payouts-sweep cron retried failed clawbacks',
+      expect.objectContaining({ charges: 2, retried: 1, stillFailing: 1 })
+    );
+    sweep.mockRestore();
+  });
+
+  it('a clawback retry that throws is logged and never fails the cron: the sweep result is still returned', async () => {
+    const counters = {
+      groupsScanned: 1,
+      groupsResolved: 1,
+      groupsSkipped: 0,
+      errors: 0,
+    };
+    const sweep = vi
+      .spyOn(SubscriptionService.prototype, 'sweepUnresolvedPayouts')
+      .mockResolvedValue(counters);
+    clawbackRetry.mockRejectedValue(new Error('database unavailable (test)'));
+    const { obs } = makeObs();
+
+    const result = await runPayoutsSweep({
+      subscription: sweepService(),
+      obs: obs as never,
+    });
+
+    expect(result).toEqual(counters);
+    expect(obs.error).toHaveBeenCalledWith(
+      'payouts-sweep cron could not retry failed clawbacks',
+      expect.objectContaining({ error: 'database unavailable (test)' })
+    );
+    expect(obs.error).not.toHaveBeenCalledWith(
+      'payouts-sweep cron failed at top level',
+      expect.anything()
+    );
+    sweep.mockRestore();
   });
 });

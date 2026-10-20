@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import { createSlugSchema, priceCentsSchema, uuidSchema } from '../primitives';
 import {
+  buttonActionSchema,
   COLOUR_SCHEME_IDS,
   PAGE_STYLE_IDS,
+  pageDialsSchema,
+  pageFacetsSchema,
   SECTION_SPACING_IDS,
   SECTION_TYPE_IDS,
   type SectionTypeId,
@@ -247,12 +250,14 @@ const designAxis = <const T extends readonly [string, ...string[]]>(
  * per-axis `.catch` for `scheme`/`spacing`, and REJECT for `style` (owner
  * decision 2026-09-28, Codex-61zsk.29 — see {@link designAxis} above).
  *
- * `scheme`/`spacing` are a SECTION's v2 style; `style` is the PAGE's v2 look
- * (this one object backs both `pageSectionSchema.design` and
- * `saveJourneyPageBodySchema.design`, exactly as it already backed both roles
- * for the nine legacy axes). A section never sets `style` and a page never
- * sets `scheme`/`spacing`; nothing reads the unused one for either role, so
- * the extra optional keys are harmless.
+ * `scheme`/`spacing` are a SECTION's v2 style; `style`, `dials` and `facets`
+ * are the PAGE's v2 look (this one object backs both `pageSectionSchema.design`
+ * and `saveJourneyPageBodySchema.design`, exactly as it already backed both
+ * roles for the nine legacy axes). A section never sets the page's keys and a
+ * page never sets `scheme`/`spacing`; nothing reads the unused one for either
+ * role, so the extra optional keys are harmless. The page's dials degrade
+ * per dial (`landing-page.ts` `pageDialsSchema`, 03 X61), and its Type as
+ * `pageFacetsSchema` says (03 X73).
  *
  * PRUNED (contract §3: "the server ... validates writes (v2 keys added by
  * WP1, legacy keys pruned by WP9)"): the nine legacy design axes
@@ -280,6 +285,8 @@ export const sectionDesignSchema = z.object({
       error: 'Unknown page Style. Refresh and choose a Style again.',
     })
     .optional(),
+  dials: pageDialsSchema,
+  facets: pageFacetsSchema,
 });
 export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
 
@@ -324,38 +331,55 @@ export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
  * declares `sections: PageSection[]`, so any drift between this schema and the
  * frozen contract fails `pnpm typecheck` at that call site.
  */
-export const pageSectionSchema = z.object({
-  // Capped like every other string here; the builder mints uuids (36 chars).
-  id: z.string().min(1).max(100),
-  type: z.enum(SECTION_TYPE_IDS as [SectionTypeId, ...SectionTypeId[]]),
-  enabled: z.boolean(),
-  variant: z.string().max(60).optional(),
-  name: z.string().max(200).optional(),
-  design: sectionDesignSchema.optional(),
-  // BOUNDED, not merely typed (Codex-us9ay residual 1). `props` is a passthrough
-  // record by design — its per-type shape belongs to the renderer + editor, and
-  // `render/coerce.ts` treats every field as untrusted at the read boundary — but
-  // "no shape" was being read as "no size", so a management-role client could
-  // write an arbitrarily large document into `landing_pages.sections`.
-  //
-  // A SERIALISED-BYTE cap rather than a key count: the cost is the jsonb we store
-  // and re-serialise on every builder load, and a key count bounds neither one
-  // long string nor a deep nested array. 16KB is ~70x the largest section this
-  // platform has ever stored (measured: 228 bytes across all 28 stored sections),
-  // so it cannot reject a real page while still refusing a pasted document.
-  //
-  // The `.default({})` stays OUTERMOST-in-effect: `.refine` appends a check rather
-  // than wrapping, so the INPUT type is still widened (the key is optional for the
-  // caller) while the OUTPUT stays required — which is what keeps the inferred body
-  // assignable to the service's `sections: PageSection[]` with no boundary cast.
-  props: z
-    .record(z.string(), z.unknown())
-    .default({})
-    .refine(
-      (props) => JSON.stringify(props).length <= 16_384,
-      'Section props are too large (16KB limit)'
-    ),
-});
+export const pageSectionSchema = z
+  .object({
+    // Capped like every other string here; the builder mints uuids (36 chars).
+    id: z.string().min(1).max(100),
+    type: z.enum(SECTION_TYPE_IDS as [SectionTypeId, ...SectionTypeId[]]),
+    enabled: z.boolean(),
+    variant: z.string().max(60).optional(),
+    name: z.string().max(200).optional(),
+    design: sectionDesignSchema.optional(),
+    // BOUNDED, not merely typed (Codex-us9ay residual 1). `props` is a passthrough
+    // record by design — its per-type shape belongs to the renderer + editor, and
+    // `render/coerce.ts` treats every field as untrusted at the read boundary — but
+    // "no shape" was being read as "no size", so a management-role client could
+    // write an arbitrarily large document into `landing_pages.sections`.
+    //
+    // A SERIALISED-BYTE cap rather than a key count: the cost is the jsonb we store
+    // and re-serialise on every builder load, and a key count bounds neither one
+    // long string nor a deep nested array. 16KB is ~70x the largest section this
+    // platform has ever stored (measured: 228 bytes across all 28 stored sections),
+    // so it cannot reject a real page while still refusing a pasted document.
+    //
+    // The `.default({})` stays OUTERMOST-in-effect: `.refine` appends a check rather
+    // than wrapping, so the INPUT type is still widened (the key is optional for the
+    // caller) while the OUTPUT stays required — which is what keeps the inferred body
+    // assignable to the service's `sections: PageSection[]` with no boundary cast.
+    props: z
+      .record(z.string(), z.unknown())
+      .default({})
+      .refine(
+        (props) => JSON.stringify(props).length <= 16_384,
+        'Section props are too large (16KB limit)'
+      ),
+  })
+  .superRefine((section, ctx) => {
+    // The one prop this schema DOES shape (03 X64): a Button's action decides
+    // where a visitor is sent, so a link that is not https, or an action
+    // outside the proven set, is refused here rather than trusted to the
+    // renderer alone. The editor only ever writes a valid one.
+    if (section.type !== 'button' || section.props.action === undefined) return;
+    const action = buttonActionSchema.safeParse(section.props.action);
+    if (action.success) return;
+    for (const issue of action.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: ['props', 'action', ...issue.path.map(String)],
+      });
+    }
+  });
 
 /**
  * Page-level SEO / share metadata (`PageBuilderState.seo`) — the SEO panel's
@@ -505,6 +529,13 @@ export const saveJourneyPageBodySchema = z
     sections: z.array(pageSectionSchema).max(60),
     design: sectionDesignSchema.optional(),
     seo: pageSeoSchema.optional(),
+    // The revision the copy was made from (Codex-61zsk.18): honoured, the
+    // save is refused (412) once the stored page has moved on. Optional: a
+    // caller that writes what it just read sends none and is not checked.
+    revision: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/)
+      .optional(),
   })
   .strict();
 export type SaveJourneyPageBody = z.infer<typeof saveJourneyPageBodySchema>;
@@ -573,8 +604,9 @@ export const updateJourneySellMediaBodySchema = z
     guidePortraitMediaId: uuidSchema.nullable().default(null),
     // A27 (Codex-wqxv4): the hero still and the guide's signature. Same
     // total-write, `.nullable().default(null)` treatment as the four above, so an
-    // omitted slot CLEARS. Both are `media_items` refs — the still resolved is
-    // the picked item's thumbnail, since `media_items` is video/audio only.
+    // omitted slot CLEARS. Both are `media_items` refs. The hero's still is the
+    // picked item's thumbnail; the signature's is never read, as that slot is
+    // retired (Codex-61zsk.47), but it is still sent back, so it is kept.
     heroMediaId: uuidSchema.nullable().default(null),
     signatureMediaId: uuidSchema.nullable().default(null),
   })

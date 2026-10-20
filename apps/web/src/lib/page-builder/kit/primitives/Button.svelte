@@ -8,6 +8,10 @@
   elsewhere — which answers the pointer without touching the colours.
 
   On the canvas the link does not navigate, so a click lands in the label.
+
+  With `onpress` in place of `href` it is a button instead, drawn the same:
+  one that opens something on the page (a Button section's film, 03 X64).
+  On the canvas it opens nothing.
 -->
 <script lang="ts">
   import type { HTMLAnchorAttributes } from 'svelte/elements';
@@ -16,7 +20,9 @@
   import { editAttrs } from './edit';
 
   interface Props extends Omit<HTMLAnchorAttributes, 'href' | 'type'> {
-    href: string;
+    /** Where it goes. Absent: a button that runs `onpress`. */
+    href?: string;
+    onpress?: () => void;
     label: string;
     /**
      * `secondary` follows the Style (Bold draws it as an underlined link);
@@ -33,6 +39,7 @@
 
   const {
     href,
+    onpress,
     label,
     variant = 'primary',
     size = 'md',
@@ -51,17 +58,30 @@
   }
 </script>
 
-<a
-  class="lp-button {className ?? ''}"
-  data-variant={variant}
-  data-size={size}
-  {href}
-  aria-label={name}
-  onclick={edit ? stayOnCanvas : undefined}
-  {...rest}
->
-  <span class="lp-button__label" {...labelAttrs}>{label}</span>
-</a>
+{#if href === undefined}
+  <button
+    type="button"
+    class="lp-button {className ?? ''}"
+    data-variant={variant}
+    data-size={size}
+    aria-label={name}
+    onclick={edit ? undefined : onpress}
+  >
+    <span class="lp-button__label" {...labelAttrs}>{label}</span>
+  </button>
+{:else}
+  <a
+    class="lp-button {className ?? ''}"
+    data-variant={variant}
+    data-size={size}
+    {href}
+    aria-label={name}
+    onclick={edit ? stayOnCanvas : undefined}
+    {...rest}
+  >
+    <span class="lp-button__label" {...labelAttrs}>{label}</span>
+  </a>
+{/if}
 
 <style>
   .lp-button {
@@ -71,7 +91,9 @@
     gap: var(--space-2);
     min-block-size: var(--lp-button-height);
     min-inline-size: var(--tap-target-min);
-    padding: var(--space-3) var(--lp-button-pad);
+    /* Block padding only for a label that wraps: one line sits inside the
+       org's button height (kit.css) at every Style's label size. */
+    padding: var(--space-2) var(--lp-button-pad);
     border: var(--border-width-thick) var(--border-style) transparent;
     border-radius: var(--lp-radius-button);
     font-family: var(--lp-font-body);
@@ -87,8 +109,12 @@
       border-color var(--duration-fast) var(--ease-default);
   }
 
+  button.lp-button {
+    cursor: pointer;
+  }
+
   .lp-button[data-size='lg'] {
-    min-block-size: calc(var(--lp-button-height) + var(--space-2));
+    min-block-size: var(--lp-button-height-lg);
     padding-inline: calc(var(--lp-button-pad) * 1.25);
   }
 

@@ -7,7 +7,14 @@ import {
   layout,
   noteField,
 } from '../../model/fields';
-import { compact, readItems, readText } from '../../model/read';
+import { MARK_OPTIONS, MARKS, type MarkId } from '../../model/marks';
+import {
+  compact,
+  firstItem,
+  readItems,
+  readOneOf,
+  readText,
+} from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
 
 export interface BenefitItem {
@@ -15,6 +22,8 @@ export interface BenefitItem {
   detail?: string;
   /** Atop the tile in `grid`; filling its tile in `bento` (contract A5). */
   image?: ImageRef;
+  /** An icon above its name; in `checklist`, in place of the tick (Codex-61zsk.58). */
+  mark?: MarkId;
 }
 
 export type BenefitsProps = {
@@ -76,11 +85,30 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
           maxLength: 160,
         },
         {
+          key: 'mark',
+          label: 'Mark',
+          hint: 'Optional. A small icon above its name; in the checklist, in place of the tick. Choose it again to take it away.',
+          control: 'mark',
+          options: MARK_OPTIONS,
+        },
+        {
           key: 'image',
           label: 'Image',
           hint: 'Optional. Shown with this item in the grid and in the mixed tiles.',
           control: 'image',
           layouts: ['grid', 'bento'],
+          // Each layout's frame at 1440 and 390, in the Style that cuts it
+          // most; the mixed tiles' is the widest tile's.
+          focalLayouts: {
+            grid: [
+              { at: 'wide', ratio: '3 / 2' },
+              { at: 'phone', ratio: '3 / 2' },
+            ],
+            bento: [
+              { at: 'wide', ratio: '7 / 2' },
+              { at: 'phone', ratio: '16 / 9' },
+            ],
+          },
         },
       ],
     },
@@ -148,10 +176,18 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
                 title,
                 detail: readText(entry, 'detail', 160),
                 image: isImageRef(entry.image) ? entry.image : undefined,
+                mark: readOneOf(entry, 'mark', MARKS),
               })
             : null;
         },
         9
       ),
     }),
+  // The mixed tiles' first tile is the large, filled one.
+  leadingItem: (raw, layout) =>
+    layout === 'bento'
+      ? firstItem(raw, 'items', (entry) =>
+          Boolean(readText(entry, 'title', 80))
+        )
+      : null,
 };

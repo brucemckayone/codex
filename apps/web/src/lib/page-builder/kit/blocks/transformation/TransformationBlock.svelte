@@ -16,6 +16,7 @@
   arrange, they never censor); only its connector is left out.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -42,7 +43,7 @@
 </script>
 
 <div class="tf" data-layout={layout}>
-  {#if content.eyebrow || content.heading || content.body}
+  {#if hasHead(content)}
     <header class="tf__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="transformation" {edit} />{/if}
       {#if content.heading}
@@ -95,9 +96,9 @@
     gap: var(--lp-stack);
   }
 
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .tf__head :global(.lp-heading) {
-    max-inline-size: 20ch;
+    max-inline-size: calc(20 * var(--lp-measure-unit));
   }
 
   /* global.css caps every `p` at 65ch; the prompt spans its region. */
@@ -113,12 +114,16 @@
   }
 
   /* Soft centres the head over its pair of cards, as its pricing does; the
-     cards themselves keep reading from the start. */
-  :global(.lp[data-lp-style='soft']) .tf[data-layout='columns'] {
+     cards themselves keep reading from the start. A toggle drawn as the
+     columns (wider than a phone, X55) is the columns, so it centres too. */
+  :global(.lp[data-lp-style='soft'])
+    .tf:is([data-layout='columns'], [data-layout='toggle']:has(:global(.tf-cols))) {
     --lp-actions-align: center;
   }
 
-  :global(.lp[data-lp-style='soft']) .tf[data-layout='columns'] .tf__head {
+  :global(.lp[data-lp-style='soft'])
+    .tf:is([data-layout='columns'], [data-layout='toggle']:has(:global(.tf-cols)))
+    .tf__head {
     justify-items: center;
     text-align: center;
   }
@@ -136,7 +141,9 @@
     justify-items: center;
   }
 
-  :global(.lp[data-lp-style='soft']) .tf[data-layout='columns'] :global(.lp-eyebrow),
+  :global(.lp[data-lp-style='soft'])
+    .tf:is([data-layout='columns'], [data-layout='toggle']:has(:global(.tf-cols)))
+    :global(.lp-eyebrow),
   :global(.lp:is([data-lp-style='soft'], [data-lp-style='cinematic']))
     .tf[data-layout='statement']
     :global(.lp-eyebrow) {

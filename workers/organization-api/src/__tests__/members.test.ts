@@ -30,21 +30,17 @@ vi.mock('@codex/database', () => ({
   dbHttp: {},
 }));
 
-vi.mock('@codex/organization', () => ({
+vi.mock('@codex/organization', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@codex/organization')>()),
   OrganizationService: vi.fn(),
 }));
 
+import { OwnershipTransferRequiredError } from '@codex/organization';
 import { ConflictError, NotFoundError } from '@codex/service-errors';
+import { updateMemberRoleSchema } from '@codex/validation';
 
 // Define error classes locally for testing since we're testing
 // the service layer behavior in isolation
-class LastOwnerError extends Error {
-  constructor() {
-    super('Cannot remove or demote the last owner of the organization');
-    this.name = 'LastOwnerError';
-  }
-}
-
 class MemberNotFoundError extends Error {
   constructor(_userId: string) {
     super('Member not found');
@@ -380,21 +376,11 @@ describe('Member Management API Routes', () => {
       expect(result.role).toBe('admin');
     });
 
-    it('should allow promoting to owner', async () => {
-      const context = createMockContext({
-        input: {
-          params: { id: 'org-123', userId: 'user-1' },
-          body: { role: 'owner' },
-        },
-      });
-      context.services.organization = mockService;
-
-      await mockService.updateMemberRole('org-123', 'user-1', 'owner');
-
-      expect(mockService.updateMemberRole).toHaveBeenCalledWith(
-        'org-123',
-        'user-1',
-        'owner'
+    // Codex-2hxff.2: ownership moves only by transfer, so the PATCH body
+    // schema itself refuses `owner` (400 before the handler runs).
+    it('refuses promoting to owner at the schema', () => {
+      expect(updateMemberRoleSchema.safeParse({ role: 'owner' }).success).toBe(
+        false
       );
     });
 
@@ -434,8 +420,10 @@ describe('Member Management API Routes', () => {
       ).rejects.toThrow(MemberNotFoundError);
     });
 
-    it('should map LastOwnerError to 422', async () => {
-      mockService.updateMemberRole.mockRejectedValueOnce(new LastOwnerError());
+    it("surfaces OwnershipTransferRequiredError (409) for the owner's role", async () => {
+      mockService.updateMemberRole.mockRejectedValueOnce(
+        new OwnershipTransferRequiredError()
+      );
 
       const context = createMockContext({
         input: {
@@ -447,7 +435,10 @@ describe('Member Management API Routes', () => {
 
       await expect(
         mockService.updateMemberRole('org-123', 'last-owner', 'member')
-      ).rejects.toThrow(LastOwnerError);
+      ).rejects.toMatchObject({
+        code: 'OWNERSHIP_TRANSFER_REQUIRED',
+        statusCode: 409,
+      });
     });
   });
 
@@ -485,8 +476,10 @@ describe('Member Management API Routes', () => {
       ).rejects.toThrow(MemberNotFoundError);
     });
 
-    it('should map LastOwnerError to 422', async () => {
-      mockService.removeMember.mockRejectedValueOnce(new LastOwnerError());
+    it('surfaces OwnershipTransferRequiredError (409) for removing the owner', async () => {
+      mockService.removeMember.mockRejectedValueOnce(
+        new OwnershipTransferRequiredError()
+      );
 
       const context = createMockContext({
         input: {
@@ -497,7 +490,10 @@ describe('Member Management API Routes', () => {
 
       await expect(
         mockService.removeMember('org-123', 'last-owner')
-      ).rejects.toThrow(LastOwnerError);
+      ).rejects.toMatchObject({
+        code: 'OWNERSHIP_TRANSFER_REQUIRED',
+        statusCode: 409,
+      });
     });
   });
 
@@ -573,10 +569,11 @@ describe('Member Management API Routes', () => {
     });
 
     it('should validate role enum for update', () => {
-      const validRoles = ['owner', 'admin', 'creator', 'member'];
-
-      for (const role of validRoles) {
-        expect(validRoles.includes(role)).toBe(true);
+      for (const role of ['admin', 'creator', 'member']) {
+        expect(updateMemberRoleSchema.safeParse({ role }).success).toBe(true);
+      }
+      for (const role of ['owner', 'subscriber', 'invalid']) {
+        expect(updateMemberRoleSchema.safeParse({ role }).success).toBe(false);
       }
     });
 

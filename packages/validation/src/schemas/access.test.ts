@@ -23,7 +23,7 @@ describe('Content Access Validation Schemas', () => {
     it('should use default expiry when not provided', () => {
       // Default tightened from 3600 → 600 (10 min) to bound post-revocation
       // exposure for cancelled subscriptions. See
-      // docs/subscription-cache-audit/phase-2-followup.md — Phase 3.
+      // docs/payments/access.md — "Streaming revocation".
       const input = { contentId: validUUID };
       const result = getStreamingUrlSchema.parse(input);
       expect(result.expirySeconds).toBe(600);

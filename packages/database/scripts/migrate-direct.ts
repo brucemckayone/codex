@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
 import pg from 'pg';
 import { DbEnvConfig } from '../src/config/env.config';
+import { runMigrationPreflights } from './migration-preflight';
 
 const { Client } = pg;
 
@@ -96,20 +97,37 @@ const main = async () => {
       return;
     }
 
-    // Apply migrations
-    let appliedCount = 0;
+    // Which migrations this run will apply
+    const pending: Migration[] = [];
     for (const migration of migrations) {
-      // Check if migration has already been applied
       const existing = await client.query(
         'SELECT id FROM "__drizzle_migrations" WHERE hash = $1',
         [migration.name]
       );
-
       if (existing.rows.length > 0) {
         console.log(`  ⏭ Skipped: ${migration.name} (already applied)`);
         continue;
       }
+      pending.push(migration);
+    }
 
+    // Before ANY is applied: a check that fails leaves the database as it
+    // was, instead of a run that stops halfway (see migration-preflight.ts).
+    const failures = await runMigrationPreflights(
+      client,
+      pending.map((migration) => migration.name)
+    );
+    if (failures.length > 0) {
+      for (const failure of failures)
+        console.error(`  ✗ Preflight: ${failure}`);
+      throw new Error(
+        `${failures.length} migration preflight check(s) failed; nothing was applied`
+      );
+    }
+
+    // Apply migrations
+    let appliedCount = 0;
+    for (const migration of pending) {
       try {
         console.log(`  📝 Applying: ${migration.name}`);
         await client.query(migration.sql);

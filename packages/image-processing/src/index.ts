@@ -25,9 +25,11 @@ export {
 // for cleanup (`CourseJourneyService`) and the sweep that deletes them
 // (media-api's orphan DO) must agree with the upload on every key.
 export {
+  droppedPageImageKeys,
   pageIdOfPageImageKey,
   pageImageKey,
   pageImageKeyOfObject,
+  pageImageKeysIn,
   pageImageObjectKeys,
 } from './page-image-keys';
 export { type ImageProcessingResult, ImageProcessingService } from './service';

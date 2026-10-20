@@ -19,15 +19,15 @@
 import { invalidateUserLibrary } from '@codex/cache';
 import { CURRENCY } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
-import { PurchaseService } from '@codex/purchase';
 import {
   checkoutSessionMetadataSchema,
   courseCheckoutSessionMetadataSchema,
 } from '@codex/validation';
-import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
+import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
+import { isTransientError } from '../utils/error-classification';
 
 /**
  * Retrieve the charge id + Stripe-collected application fee for a PaymentIntent.
@@ -53,6 +53,11 @@ async function resolvePaymentIntentCharge(
           : (paymentIntent.latest_charge?.id ?? null),
     };
   } catch (piError) {
+    // The charge id is what every payout slice is paid from. A temporary
+    // failure is rethrown so the webhook answers 500 and Stripe retries —
+    // carrying on without it completed the sale with no slices at all
+    // (Codex-2hxff.11, PAY-08).
+    if (isTransientError(piError)) throw piError;
     obs?.warn('Could not retrieve PaymentIntent for fee reconciliation', {
       paymentIntentId,
       error: piError instanceof Error ? piError.message : String(piError),
@@ -122,11 +127,25 @@ export async function handleCheckoutCompleted(
     return;
   }
 
+  // The payment time: the event's `created`, which Stripe keeps on every
+  // redelivery. The org payee and the agreements resolve at this instant, so a
+  // retry after an ownership transfer still pays the owner at the sale
+  // (Codex-2hxff.2) — processing time would pay the new one.
+  const paidAt = Number.isFinite(event.created)
+    ? new Date(event.created * 1000)
+    : undefined;
+
   // Codex-2pryk WP-6: a `kind: 'course'` session targets a COURSE, not content.
   // Route to the course completion path and return — the content metadata schema
   // below does not apply to it.
   if (session.metadata?.kind === 'course') {
-    await handleCourseCheckoutCompleted(session, paymentIntentId, stripe, c);
+    await handleCourseCheckoutCompleted(
+      session,
+      paymentIntentId,
+      paidAt,
+      stripe,
+      c
+    );
     return;
   }
 
@@ -170,28 +189,27 @@ export async function handleCheckoutCompleted(
         ? paymentIntent.latest_charge
         : (paymentIntent.latest_charge?.id ?? null);
   } catch (piError) {
-    // Non-fatal — reconciliation is best-effort. Missing chargeId here means
-    // the payouts pipeline degrades to a no-op for this purchase; the purchase
-    // + access grant still complete via the transaction below.
+    // A temporary failure is rethrown so Stripe retries: without the charge
+    // id no payout slice can be recorded (Codex-2hxff.11, PAY-08). A
+    // permanent one leaves it missing — the purchase + access grant still
+    // complete, and completePurchase logs the unpaid slices as an error.
+    if (isTransientError(piError)) throw piError;
     obs?.warn('Could not retrieve PaymentIntent for fee reconciliation', {
       paymentIntentId,
       error: piError instanceof Error ? piError.message : String(piError),
     });
   }
 
-  // Create per-request db client for transaction support
-  // DATABASE_URL_LOCAL_PROXY is optional and set only in test environments
-  const { db, cleanup } = createWebhookDbClient(c.env);
+  // The registry's PurchaseService, as routes get it: configured fees, the
+  // creator-connect-needed mailer, the web-app URL (Codex-2hxff.54).
+  const { services, release } = await createWebhookServices(
+    c.env,
+    c.executionCtx,
+    { obs, stripe }
+  );
 
   try {
-    // Initialize purchase service with transaction-capable db
-    const purchaseService = new PurchaseService(
-      {
-        db,
-        environment: c.env.ENVIRONMENT || 'development',
-      },
-      stripe
-    );
+    const purchaseService = services.purchase;
 
     // Complete purchase (atomic transaction: purchase + content access)
     // organizationId already transformed to null by schema if empty/undefined
@@ -203,6 +221,7 @@ export async function handleCheckoutCompleted(
       currency: CURRENCY.GBP,
       stripeApplicationFeeCents,
       stripeChargeId,
+      paidAt,
     });
 
     obs?.info('Purchase completed successfully', {
@@ -248,7 +267,7 @@ export async function handleCheckoutCompleted(
       });
     }
   } finally {
-    await cleanup();
+    release();
   }
 }
 
@@ -263,6 +282,7 @@ export async function handleCheckoutCompleted(
 async function handleCourseCheckoutCompleted(
   session: Stripe.Checkout.Session,
   paymentIntentId: string,
+  paidAt: Date | undefined,
   stripe: Stripe,
   c: Context<StripeWebhookEnv>
 ): Promise<void> {
@@ -294,12 +314,13 @@ async function handleCourseCheckoutCompleted(
   const { stripeChargeId, stripeApplicationFeeCents } =
     await resolvePaymentIntentCharge(stripe, paymentIntentId, obs);
 
-  const { db, cleanup } = createWebhookDbClient(c.env);
+  const { services, release } = await createWebhookServices(
+    c.env,
+    c.executionCtx,
+    { obs, stripe }
+  );
   try {
-    const purchaseService = new PurchaseService(
-      { db, environment: c.env.ENVIRONMENT || 'development' },
-      stripe
-    );
+    const purchaseService = services.purchase;
 
     const purchase = await purchaseService.completeCoursePurchase(
       paymentIntentId,
@@ -310,6 +331,7 @@ async function handleCourseCheckoutCompleted(
         currency: CURRENCY.GBP,
         stripeApplicationFeeCents,
         stripeChargeId,
+        paidAt,
       }
     );
 
@@ -351,6 +373,6 @@ async function handleCourseCheckoutCompleted(
       });
     }
   } finally {
-    await cleanup();
+    release();
   }
 }

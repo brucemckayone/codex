@@ -27,6 +27,7 @@ export const PATH: StyleDefinition = {
     curriculum: 'map',
     preview: 'feature',
     gallery: 'strip',
+    inside: 'carousel',
     instructor: 'split',
     testimonials: 'featured',
     faq: 'accordion',
@@ -34,6 +35,11 @@ export const PATH: StyleDefinition = {
     cta: 'band',
     stats: 'row',
     text: 'columns',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'start',
+    break: 'space',
+    button: 'stack',
   },
   schemes: {
     hero: 'base',
@@ -46,12 +52,19 @@ export const PATH: StyleDefinition = {
     curriculum: 'soft',
     preview: 'base',
     gallery: 'soft',
+    inside: 'base',
     instructor: 'base',
     testimonials: 'contrast',
     stats: 'soft',
     pricing: 'base',
     faq: 'soft',
     cta: 'brand',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   // The recommended way in is the other ground, ringed in the route's colour
   // (style-path.css); on a coloured band it is the plain ground.
@@ -66,6 +79,7 @@ export const PATH: StyleDefinition = {
   order: STORY_ORDER,
   starter: [
     'hero',
+    'inside',
     'problem',
     'story',
     'curriculum',
@@ -77,4 +91,7 @@ export const PATH: StyleDefinition = {
   ],
   // A humanist pair, the faces of wayfinding signs (03 §4.1).
   fonts: { heading: 'Lato', body: 'Source Sans 3' },
+  // Hazy, as Studio: the org's moving background through a third of the
+  // inner pages' blur and a thinner veil, so it is seen moving (03 X53, X59).
+  atmosphere: 'hazy',
 };

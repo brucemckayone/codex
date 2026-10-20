@@ -3,8 +3,11 @@
 # Called by CI workflow after environment variables are set by GitHub Actions
 #
 # Required environment variables:
-#   DATABASE_URL - Neon database connection string
-#   DB_METHOD - Database connection method (NEON_BRANCH)
+#   DATABASE_URL - Database connection string
+#   DB_METHOD - Database connection method (LOCAL_PROXY in testing.yml since
+#     Codex-75m0t.2; NEON_BRANCH in the manual e2e-* workflows)
+#   DATABASE_URL_LOCAL_PROXY - Required when DB_METHOD=LOCAL_PROXY; written
+#     only when set
 #   BETTER_AUTH_SECRET - Auth secret (optional, has default)
 #   STRIPE_SECRET_KEY - Stripe API key (for ecom-api, content-api)
 #   STRIPE_WEBHOOK_SECRET_BOOKING - Stripe webhook secret
@@ -33,6 +36,13 @@ BETTER_AUTH_URL=http://localhost:42069
 AUTH_TRUST_HOST=true
 WORKER_SHARED_SECRET=${WORKER_SHARED_SECRET:-${BETTER_AUTH_SECRET:-test-secret-key-minimum-32-characters-long}}
 EOF
+
+  # LOCAL_PROXY reads ONLY this key, and only media-api's env.test defines it.
+  # Written only when set, so it never blanks that env.test value — see the
+  # same block in generate-worker-dev-vars.sh.
+  if [ -n "${DATABASE_URL_LOCAL_PROXY:-}" ]; then
+    echo "DATABASE_URL_LOCAL_PROXY=${DATABASE_URL_LOCAL_PROXY}" >> "${VARS_FILE}"
+  fi
 
   # Add Stripe and R2 variables for workers that need them
   case "${worker}" in

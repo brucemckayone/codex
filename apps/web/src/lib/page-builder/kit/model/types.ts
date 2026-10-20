@@ -15,6 +15,8 @@ import type { JourneySalesContext } from '../../render/types';
 import type { JourneySellMediaSlot } from '../../sell-media-store.svelte';
 import type {
   ColourSchemeId,
+  PageDials,
+  PageFacets,
   PageStyleId,
   SectionSpacingId,
   SectionTypeId,
@@ -31,6 +33,10 @@ export interface SectionStyle {
 /** The page-level design (`landing_pages.design`). */
 export interface PageDesign {
   style?: PageStyleId;
+  /** The page's dials (03 X61); an unset dial is the Style's. */
+  dials?: PageDials;
+  /** Another Style's Type on this page (03 X73); unset is the Style's own. */
+  facets?: PageFacets;
 }
 
 /** A persisted section in kit vocabulary. `variant` is the layout id. */
@@ -62,6 +68,14 @@ export interface ResolvedSection {
   spacing: SectionSpacingId;
   /** 1 for the page's single hero heading, 2 everywhere else. */
   headingLevel: 1 | 2;
+  /**
+   * A simple section's join (03 X64, `joinSimpleSections`): it takes the
+   * ground of the section `above` (a Picture, Break or Button finishing that
+   * band) or `below` (a Heading announcing the next one). Absent for every
+   * ordinary section, and for a simple one that stands on its own: a colour
+   * the creator chose, or no neighbour it may join.
+   */
+  join?: 'above' | 'below';
 }
 
 // ─── Blocks ──────────────────────────────────────────────────────────────────
@@ -90,7 +104,10 @@ export interface BlockField {
    * `text`/`textarea` may also be edited inline on the canvas (`inline`).
    * `list` = string[] · `items` = object[] described by `itemFields` ·
    * `media` = one of the journey's sell-media slots · `image` = the creator's
-   * own uploaded image, stored as an `ImageRef` (contract A3/A5).
+   * own uploaded image, stored as an `ImageRef` (contract A3/A5) · `choice` =
+   * a few `options` side by side, the first the default, stored as the absent
+   * key (Codex-61zsk.58) · `mark` = one of the kit's marks (`model/marks.ts`)
+   * or none, picked from its icons (Codex-61zsk.58).
    */
   control:
     | 'text'
@@ -98,10 +115,17 @@ export interface BlockField {
     | 'url'
     | 'toggle'
     | 'select'
+    | 'choice'
+    | 'mark'
     | 'list'
     | 'items'
     | 'media'
-    | 'image';
+    | 'image'
+    /** A Button's action (03 X64): where it goes, from the proven set. */
+    | 'action'
+    /** One of the page's live ways in (`deriveOfferPaths`), stored as its
+     *  id: an option a creator describes is one the offer has (Codex-61zsk.14). */
+    | 'offer';
   inline?: boolean;
   placeholder?: string;
   maxLength?: number;
@@ -116,6 +140,25 @@ export interface BlockField {
    *  hides a field whose layout doesn't use it; the block never force-hides
    *  content the creator filled (layouts arrange, they don't censor). */
   layouts?: readonly string[];
+  /** The Styles this field applies to. Absent = every Style. A Break's mark
+   *  is offered only where the Style has one to draw (03 X64). */
+  styles?: readonly PageStyleId[];
+  /** `image` only: the layouts that crop this picture, each with the shapes
+   *  it is cut to. The inspector offers a focal point under the upload, live
+   *  in these layouts with a preview of each cut, and explained in the others
+   *  (03 X64, Codex-61zsk.58). */
+  focalLayouts?: Readonly<Record<string, readonly FocalCrop[]>>;
+}
+
+/**
+ * One shape a layout cuts a picture to, on a wide screen, a tablet or a
+ * phone: what the focal point's preview shows that screen keeping. Measured
+ * in every Style, the shape a picture is drawn at where it is cut most.
+ */
+export interface FocalCrop {
+  at: 'wide' | 'tablet' | 'phone';
+  /** A CSS aspect ratio, `'2 / 1'`. */
+  ratio: string;
 }
 
 export interface BlockLayout {
@@ -125,7 +168,9 @@ export interface BlockLayout {
 }
 
 /** Where a section type sits in the add-section gallery. */
-export type BlockGroup = 'opening' | 'story' | 'proof' | 'offer' | 'details';
+export type BlockGroup =
+  /** The simple one-job sections, first in the gallery (03 X64). */
+  'basics' | 'opening' | 'story' | 'proof' | 'offer' | 'details';
 
 /** Inputs for writing a new section's starter props. */
 export interface TemplateContext {
@@ -156,4 +201,15 @@ export interface BlockDefinition<P = Record<string, unknown>> {
   sample: P;
   /** Tolerant reader: unknown keys dropped, wrong types → absent. */
   coerce: (raw: Record<string, unknown>) => P;
+  /**
+   * The index in the stored `items` of the entry this layout draws larger
+   * than the rest (the first quote's panel, the mixed tiles' lead), or `null`
+   * where none leads. The editor tags its row "Leads"; nothing is stored
+   * (Codex-61zsk.58).
+   */
+  leadingItem?: (
+    raw: Record<string, unknown>,
+    layout: string,
+    context: JourneySalesContext
+  ) => number | null;
 }

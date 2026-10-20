@@ -335,3 +335,79 @@ describe('BenefitsBlock', () => {
     });
   });
 });
+
+describe('a mark for each item (Codex-61zsk.58)', () => {
+  const ITEMS = [
+    { title: 'Live circles', detail: 'Every Sunday.', mark: 'heart' },
+    { title: 'Audio', detail: 'For the walk.' },
+  ];
+  /** The drawn shape inside an element: its svg's markup. */
+  const shape = (el: Element | null | undefined) =>
+    el?.querySelector('svg')?.innerHTML ?? null;
+
+  it('reads only a mark the kit can draw', () => {
+    const content = benefitsDefinition.coerce({
+      items: [
+        { title: 'One', mark: 'heart' },
+        { title: 'Two', mark: 'unicorn' },
+        { title: 'Three', mark: 7 },
+      ],
+    });
+    expect(content.items?.map((item) => item.mark)).toEqual([
+      'heart',
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it('checklist: the chosen mark takes the tick’s place, and the tick is the default', async () => {
+    await render({ items: ITEMS }, { layout: 'checklist' });
+    const [marked, plain] = all('.benefits-checks__mark');
+    const tick = shape(plain);
+    expect(tick).not.toBeNull();
+    expect(shape(marked)).not.toBe(tick);
+    expect(all('.benefits-checks__mark svg')).toHaveLength(2);
+
+    await rerender(
+      { items: [{ ...ITEMS[0], mark: 'check' }, ITEMS[1]] },
+      { layout: 'checklist' }
+    );
+    const [chosenTick, defaultTick] = all('.benefits-checks__mark');
+    expect(shape(chosenTick)).toBe(shape(defaultTick));
+  });
+
+  it.each([
+    ['grid', '.benefits__mark'],
+    ['split', '.benefits__mark'],
+    ['bento', '.benefits-bento__mark'],
+  ] as const)('%s: the mark sits above its own item’s name, and only there', async (layout, mark) => {
+    await render({ items: ITEMS }, { layout });
+    const marks = all(mark);
+    expect(marks).toHaveLength(1);
+    const item = marks[0]?.closest('li');
+    expect(item?.textContent).toContain('Live circles');
+    const name = [
+      ...(item?.querySelectorAll('.lp-heading, .benefits-rows__name') ?? []),
+    ][0];
+    expect(name).toBeDefined();
+    // Before the name in the item's reading order.
+    expect(marks[0]?.compareDocumentPosition(name as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    // Decoration: the name is what reads.
+    expect(marks[0]?.querySelector('svg')?.getAttribute('aria-hidden')).toBe(
+      'true'
+    );
+  });
+
+  it('bento: its mixed tiles’ first tile leads, in no other layout', () => {
+    const lead = benefitsDefinition.leadingItem;
+    const raw = {
+      items: [{ title: '' }, { title: 'First kept' }, { title: 'Third' }],
+    };
+    for (const layout of SECTION_LAYOUTS.benefits)
+      expect(lead?.(raw, layout, sampleContext()), layout).toBe(
+        layout === 'bento' ? 1 : null
+      );
+  });
+});

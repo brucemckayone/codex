@@ -128,14 +128,24 @@ describe('the org shader on a blurred Moving-background page', () => {
   });
 
   it('runs the canvas twice the blur radius past every edge, in the blur’s own token', () => {
-    const token = blur?.decls
+    // The radius: a token, or a Style's own (`--_shader-blur`, 03 X53) over
+    // one, written the same way in the blur and in the overscan.
+    const radius = blur?.decls
       .get('filter')
-      ?.match(/^blur\(var\((--[\w-]+)\)\)$/)?.[1];
-    expect(token, 'the blur is written in a token').toBeDefined();
+      ?.match(/^blur\((var\(--[\w-]+(?:, var\(--[\w-]+\))?\))\)$/)?.[1];
+    expect(radius, 'the blur is written in a token').toBeDefined();
     const d = canvas!.decls;
-    expect(d.get('width')).toBe(`calc(100% + 4 * var(${token}))`);
-    expect(d.get('height')).toBe(`calc(100% + 4 * var(${token}))`);
-    expect(d.get('margin')).toBe(`calc(-2 * var(${token}))`);
+    expect(d.get('width')).toBe(`calc(100% + 4 * ${radius})`);
+    expect(d.get('height')).toBe(`calc(100% + 4 * ${radius})`);
+    expect(d.get('margin')).toBe(`calc(-2 * ${radius})`);
+    // A Style's own radius is a token too, wherever it is set.
+    const own = radius?.match(/^var\((--[\w-]+), /)?.[1];
+    const setters = own ? rules.filter((r) => r.decls.has(own)) : [];
+    if (own) expect(setters.length, `something sets ${own}`).toBeGreaterThan(0);
+    for (const r of setters)
+      expect(r.decls.get(own as string), r.selector).toMatch(
+        /^var\(--blur-[\w-]+\)$/
+      );
     // reset.css caps every canvas at `max-width: 100%`.
     expect(d.get('max-width')).toBe('none');
     // One scale for both axes: the shader keeps its aspect, the crop is off screen.

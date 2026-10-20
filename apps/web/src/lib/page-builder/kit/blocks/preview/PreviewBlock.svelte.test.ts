@@ -5,7 +5,11 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
-import type { JourneySalesContext, PreviewMedia } from '../../../render/types';
+import type {
+  JourneySalesContext,
+  PreviewMedia,
+  SellPreview,
+} from '../../../render/types';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
@@ -142,19 +146,124 @@ describe('PreviewBlock', () => {
     expect(play()).toBeDefined();
   });
 
+  // Codex-61zsk.37 (C1): the public page kept the words, so a visitor read
+  // "Try the first practice" above nothing.
   it.each(
     SECTION_LAYOUTS.preview
-  )('%s: no clip leaves the words, and only the words, on the public page', async (layout) => {
+  )('%s: with no clip the public page draws no section at all', async (layout) => {
     await render(SAMPLE, { layout, reel: null });
-    expect(document.body.querySelector('h2')?.textContent).toBe(SAMPLE.heading);
-    expect(document.body.querySelector('figure')).toBeNull();
-    expect(text()).not.toContain(SAMPLE.caption);
+    expect(document.body.querySelector('h2')).toBeNull();
+    expect(text().trim()).toBe('');
+    expect(document.body.querySelector('.lp-media')).toBeNull();
+    // The band is told to fold away (by the rule the parity test checks).
+    expect(document.body.querySelector('.preview-none')).not.toBeNull();
   });
 
-  it('asks for the clip on the canvas', async () => {
-    await render(SAMPLE, { reel: null, edit: { commit: () => {} } });
+  it('holds the frame while the clip is on its way, as the server sends it, and folds away once there is none', async () => {
+    let settle: (value: SellPreview | null) => void = () => {};
+    const context = {
+      ...sampleContext(),
+      sellPreview: new Promise<SellPreview | null>((resolve) => {
+        settle = resolve;
+      }),
+    };
+    await render(SAMPLE, { context });
+    expect(document.body.querySelector('h2')?.textContent).toBe(SAMPLE.heading);
+    expect(
+      document.body.querySelector('.lp-media[data-pending]')
+    ).not.toBeNull();
+    expect(document.body.querySelector('.preview-none')).toBeNull();
+    settle({ intro: null, reel: null });
+    await tick();
+    await Promise.resolve();
+    flushSync();
+    expect(document.body.querySelector('h2')).toBeNull();
+    expect(document.body.querySelector('.preview-none')).not.toBeNull();
+  });
+
+  // Codex-61zsk.40: the awaited course view says whether a clip can come.
+  // With none, the band folds from the first paint instead of drawing whole
+  // and then vanishing once the stream settles.
+  describe('with the awaited view saying which clip can come', () => {
+    const awaiting = (
+      attached: boolean
+    ): {
+      context: JourneySalesContext;
+      settle: (value: SellPreview | null) => void;
+    } => {
+      let settle: (value: SellPreview | null) => void = () => {};
+      const context = {
+        ...sampleContext({
+          course: {
+            filmsAttached: { hero: false, intro: true, reel: attached },
+          },
+        }),
+        sellPreview: new Promise<SellPreview | null>((resolve) => {
+          settle = resolve;
+        }),
+      };
+      return { context, settle };
+    };
+
+    it.each(
+      SECTION_LAYOUTS.preview
+    )('%s: with no clip attached the public page folds from the first paint', async (layout) => {
+      await render(SAMPLE, { layout, context: awaiting(false).context });
+      expect(document.body.querySelector('h2')).toBeNull();
+      expect(document.body.querySelector('.lp-media')).toBeNull();
+      expect(document.body.querySelector('.preview-none')).not.toBeNull();
+    });
+
+    it('with one attached, holds its place while it is on its way', async () => {
+      await render(SAMPLE, { context: awaiting(true).context });
+      expect(document.body.querySelector('h2')?.textContent).toBe(
+        SAMPLE.heading
+      );
+      expect(
+        document.body.querySelector('.lp-media[data-pending]')
+      ).not.toBeNull();
+      expect(document.body.querySelector('.preview-none')).toBeNull();
+    });
+
+    it('a clip that arrives although none was attached still shows', async () => {
+      const { context, settle } = awaiting(false);
+      await render(SAMPLE, { context });
+      settle({ reel: REEL, intro: null });
+      await tick();
+      await Promise.resolve();
+      flushSync();
+      expect(document.body.querySelector('h2')?.textContent).toBe(
+        SAMPLE.heading
+      );
+      expect(document.body.querySelector('.preview-none')).toBeNull();
+    });
+
+    it('with none attached the canvas still keeps the words and the plate', async () => {
+      await render(SAMPLE, {
+        context: awaiting(false).context,
+        edit: { commit: () => {} },
+      });
+      expect(document.body.querySelector('h2')?.textContent).toBe(
+        SAMPLE.heading
+      );
+      expect(document.body.querySelector('.lp-media')).not.toBeNull();
+    });
+  });
+
+  it.each(
+    SECTION_LAYOUTS.preview
+  )('%s: the canvas keeps the words and the plate, and asks for the clip', async (layout) => {
+    await render(SAMPLE, { layout, reel: null, edit: { commit: () => {} } });
+    expect(document.body.querySelector('h2')?.textContent).toBe(SAMPLE.heading);
+    expect(document.body.querySelector('.lp-media__plate')).not.toBeNull();
     expect(text()).toContain(PREVIEW_PROMPT);
     expect(play()).toBeUndefined();
+  });
+
+  it('draws the section once the clip is there, with nothing to fold it away', async () => {
+    await render(SAMPLE);
+    expect(document.body.querySelector('.preview-none')).toBeNull();
+    expect(document.body.querySelector('[data-lp-edit-only]')).toBeNull();
   });
 
   it('never plays on the canvas', async () => {

@@ -30,7 +30,7 @@
    heavier one tops each section on the ground, so a run of them reads as
    separate claims. Pictures bleed: the hero's photograph runs edge to edge
    into the next slab, and the guide and the clips meet the page edge.
-   Corners bend a little: a quarter of the brand radius, never past
+   Corners bend a little: a quarter of the org's corners, never past
    `--radius-sm`, never a pill (03 §4.2).
 
    MOTION. Headlines BUILD. The hero's headline lifts out of its own baseline
@@ -45,16 +45,19 @@
    Fonts: no suggestion — the brand's own face is the point.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.lp[data-lp-style='bold'] {
+/* Bold's Type, wherever it is drawn: its own page, or another Style's that
+   borrows it (03 X73). Keyed on the page's Type, never on its Style, and it
+   declares no token the Style block below does. */
+.lp[data-lp-type-facet='bold'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(3.25rem, 0.25rem + 10.6cqi, 10rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(2.25rem, 0.6rem + 5.6cqi, 5.75rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(3.25rem, 0.25rem + 10.6cqi, 10rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(2.25rem, 0.6rem + 5.6cqi, 5.75rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.35rem, 1rem + 1.2cqi, 2rem) * var(--lp-scale));
   --lp-size-lead: calc(clamp(1.25rem, 1.05rem + 0.75cqi, 1.625rem) * var(--lp-scale));
   --lp-size-body: calc(clamp(1.125rem, 1rem + 0.35cqi, 1.3125rem) * var(--lp-scale));
   --lp-size-price: calc(clamp(3.5rem, 1.25rem + 6.8cqi, 7.5rem) * var(--lp-scale));
   /* The close speaks nearly as loud as the promise. */
-  --lp-size-cta: calc(clamp(2.75rem, 0.25rem + 9cqi, 8.5rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.75rem, 0.25rem + 9cqi, 8.5rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 0.9;
   --lp-leading-heading: 0.94;
@@ -65,28 +68,33 @@
   --lp-tracking-heading: -0.03em;
   --lp-tracking-title: -0.015em;
   --lp-weight-label: var(--font-bold);
+  --lp-measure-lead: 36;
 
-  /* ── shape: a quarter of the brand radius, never past `--radius-sm` ───── */
-  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
-  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
-  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  /* ── the button's label: larger, at the weight the org gives its loudest
+     call, its home hero's (semibold) ───────────────────────────────────── */
+  --lp-button-size: calc(clamp(1.05rem, 1rem + 0.3cqi, 1.25rem) * var(--lp-scale));
+  --lp-button-weight: var(--font-semibold);
+  --lp-button-tracking: -0.01em;
+}
+
+.lp[data-lp-style='bold'] {
+  /* ── shape: a quarter of the org's corners, never past `--radius-sm` ──── */
+  --lp-radius-card: clamp(0rem, calc(var(--radius-card) * 0.25), var(--radius-sm));
+  --lp-radius-media: clamp(0rem, calc(var(--radius-lg) * 0.25), var(--radius-sm));
+  --lp-radius-button: clamp(0rem, calc(var(--radius-button) * 0.25), var(--radius-sm));
   --lp-radius-chip: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
   /* Item rules, and the heavier one over a section on the ground. */
   --lp-rule: calc(var(--border-width-thick) * 1.5);
   --_bold-slab: calc(var(--border-width-thick) * 3);
 
-  /* ── buttons: large, square-shouldered, solid ─────────────────────────── */
-  --lp-button-height: max(var(--tap-target-min), var(--space-14));
+  /* ── buttons: square-shouldered, solid ────────────────────────────────── */
+  /* The org's button height (kit.css), wide (its label is the Type's). */
   --lp-button-pad: var(--space-8);
-  --lp-button-size: calc(clamp(1.05rem, 1rem + 0.3cqi, 1.25rem) * var(--lp-scale));
-  --lp-button-weight: var(--font-bold);
-  --lp-button-tracking: -0.01em;
 
   /* ── rhythm: the widest column, room for the type to be big ───────────── */
   --lp-pad-regular: clamp(var(--space-16), var(--space-6) + 7cqi, var(--space-32));
   --lp-pad-spacious: clamp(var(--space-20), var(--space-8) + 10cqi, calc(var(--space-32) * 1.25));
   --lp-container: 82rem;
-  --lp-measure-lead: 36ch;
 
   /* ── motion ───────────────────────────────────────────────────────────── */
   /* The hero's headline lifts out of its own baseline; the words under it
@@ -105,10 +113,14 @@
 /* Risen from behind a line just under its own last baseline. The clip's foot
    and the travel move by the same amount (100% + 0.3em between them at
    every frame), so the line stands still while the words rise through it
-   and the first line surfaces first. The overhang is 0.3em of the HEADLINE
-   (its wrapper takes the display size below): at leading under 1 the
+   and the first line surfaces first. The overhang is in the HEADLINE's em
+   (its wrapper takes the display size, HeroBlock): at leading under 1 the
    glyphs stand past their line box, and a clip in the body's em would keep
-   the descenders cut after the lift ends. */
+   the descenders cut after the lift ends. The hero keeps its last frame, so
+   its clip stays as long as the page is open: 0.3em under the last line, and
+   a whole em over the first, where a mark over a capital stands (Anton's
+   É, Å and Ö reach 0.38em past the line box at this leading; 03 X74). The
+   top opens only as the words rise, so the first frame still shows nothing. */
 @keyframes lp-bold-lift {
   from {
     translate: 0 calc(100% + 0.6em);
@@ -117,12 +129,8 @@
 
   to {
     translate: 0 0;
-    clip-path: inset(-0.3em -0.15em);
+    clip-path: inset(-1em -0.15em -0.3em);
   }
-}
-
-:is(.lp, #lp-style)[data-lp-style='bold'] .hero__enter-h {
-  font-size: calc(var(--lp-size-display) * var(--lp-display-scale, 1));
 }
 
 /* ── a long promise steps down ───────────────────────────────────────────── */
@@ -136,23 +144,23 @@
    picture, which drops by one headline line, steps down with it. A phone
    draws the display at its floor already, where a long headline runs on. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-statement:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-statement:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.7;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-centered:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-centered:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.62;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-cover__copy:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-cover__copy:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.5;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-poster:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-poster:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.45;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-split__copy:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-split__copy:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.4;
   }
 }
@@ -167,19 +175,19 @@
    step above the long one, so a longer headline is never set larger. The
    centred hero holds every medium headline at its own size. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-statement:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-statement:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.9;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-cover__copy:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-cover__copy:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.7;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-poster:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-poster:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.65;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-split__copy:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-split__copy:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.55;
   }
 }
@@ -199,25 +207,97 @@
    value. An unset length counts as the longest the field takes. */
 @supports (line-height: pow(2, 0.5)) {
   @container (min-width: 56rem) {
-    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='bold'] .lp-section[data-lp-type='hero']
       .hero-statement:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(43 / var(--lp-heading-chars, 120), 0.45));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='bold'] .lp-section[data-lp-type='hero']
       .hero-split__copy:has(> .hero__headline) {
       --lp-display-scale: calc(0.7 * min(1, pow(31 / var(--lp-heading-chars, 120), 0.36)));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='bold'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(19 / var(--lp-heading-chars, 120), 0.39));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='bold'] .lp-section[data-lp-type='hero']
       .hero-centered:has(> .hero__headline) {
       --lp-display-scale: calc(0.84 * min(1, pow(57 / var(--lp-heading-chars, 120), 0.55)));
     }
+  }
+}
+
+/* ── on another Style's page (03 X74) ─────────────────────────────────────── */
+/* Bold's hero was fitted to Bold's own column and spacing (above). On a page
+   that borrows the Type the line is the page's, so each pair and layout that
+   needs it draws the hero smaller by a factor: the largest at which it ends
+   no further past a 1440 × 900 fold, and cuts no word, that the page's own
+   Type does, at every length from 20 to 120 in four word families and two
+   faces, with the hero's eyebrow and without it, with 1% to spare
+   (`type-fit.spec.ts`). A pair that holds at full size has none, and a page's
+   own Type never has one. The page's Style sits inside `:where()`, so each
+   weighs what the Type's own rules weigh. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
+    --lp-type-fit: 0.93;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.88;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-cover__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.97;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    --lp-type-fit: 0.91;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-poster:has(> .hero__headline) {
+    --lp-type-fit: 0.93;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
+    --lp-type-fit: 0.94;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.97;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    --lp-type-fit: 0.95;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
+    --lp-type-fit: 0.98;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.97;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    --lp-type-fit: 0.95;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-poster:has(> .hero__headline) {
+    --lp-type-fit: 0.98;
   }
 }
 
@@ -230,7 +310,7 @@
    heading is simply there. */
 @media screen and (prefers-reduced-motion: no-preference) {
   :root[data-theme]
-    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='bold']
+    .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='bold']
     .lp-section:not([data-lp-type='hero'])
     .lp-heading:is([data-size='display'], [data-size='heading'])[data-lp-enter]:not(
       [data-lp-build],
@@ -245,10 +325,19 @@
 /* Drawn in the section's own background, at the head of its content column,
    so it moves nothing. Never on the first section (the hero), on a colour
    slab (the colour already parts it), or over an image or the shader. The
-   structural `+` also keeps it off the editor's one-section colour tiles. */
+   structural `+` also keeps it off the editor's one-section colour tiles.
+   Not on a section that continues the band above (03 X58): the slab says a
+   new section starts, and it would sit in that section's words. Never on a
+   Break, which is space, nor under a marked one, whose mark is this slab
+   (03 X64). */
 :is(.lp, #lp-style)[data-lp-style='bold']
   .lp-section
-  + .lp-section:is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]) {
+  + .lp-section:is([data-lp-scheme='base'], [data-lp-scheme='soft']):not(
+    [data-lp-on-media],
+    [data-lp-continues],
+    [data-lp-type='break'],
+    .lp-section:has(.lp-break[data-mark]) + *
+  ) {
   background:
     linear-gradient(var(--lp-ink) 0 0) 50%
       calc(var(--lp-pad) - clamp(var(--space-6), 2.4cqi, var(--space-10))) /
@@ -266,6 +355,7 @@
       .benefits__head,
       .curriculum__head,
       .gallery__head,
+      .inside__head,
       .story__head,
       .tf__head,
       .tm:not([data-layout='quote']) > .tm__head,
@@ -274,6 +364,8 @@
     grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
     column-gap: var(--lp-gap);
     max-inline-size: none;
+    /* The heading spans the column, past the head's measure (03 X62). */
+    --lp-heading-column: var(--lp-column);
   }
 
   :is(.lp, #lp-style)[data-lp-style='bold']
@@ -281,6 +373,7 @@
       .benefits__head,
       .curriculum__head,
       .gallery__head,
+      .inside__head,
       .story__head,
       .tf__head,
       .tm:not([data-layout='quote']) > .tm__head,
@@ -295,6 +388,7 @@
       .benefits__head,
       .curriculum__head,
       .gallery__head,
+      .inside__head,
       .story__head,
       .tf__head,
       .tm:not([data-layout='quote']) > .tm__head,
@@ -309,7 +403,7 @@
    portrait — steps down one size, so it keeps to two or three lines in its
    share of the column instead of breaking a word to a line. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='bold']
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']
     :is(
       .pricing[data-layout='focus'] > .pricing__head,
       .stats[data-layout='grid'] > .stats__head,
@@ -322,7 +416,7 @@
       .preview-split__words,
       .video-split__words
     ) {
-    --lp-size-heading: calc(clamp(2.25rem, 0.6rem + 3.9cqi, 4.25rem) * var(--lp-scale));
+    --lp-size-heading: calc(clamp(2.25rem, 0.6rem + 3.9cqi, 4.25rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   }
 }
 
@@ -331,9 +425,15 @@
    the stage's name can stand beside, its number set in the display face. */
 :is(.lp, #lp-style)[data-lp-style='bold'] .timeline {
   --_marker: clamp(var(--space-12), 4.5cqi, var(--space-20));
+}
+
+/* Bold's Type sets the stage's name larger beside it (03 X73, H9). */
+:is(.lp, #lp-style)[data-lp-type-facet='bold'] .timeline {
   --lp-size-title: calc(clamp(1.5rem, 1rem + 1.8cqi, 2.6rem) * var(--lp-scale));
 }
 
+/* The number is the block's: its size is the block's, and its tracking is
+   read from the page's Type, so it follows whichever Type is drawn (H9). */
 :is(.lp, #lp-style)[data-lp-style='bold'] .timeline__marker {
   font-size: calc(var(--_marker) * 0.6);
   letter-spacing: var(--lp-tracking-display);
@@ -342,7 +442,7 @@
 /* ── the story told as headlines ─────────────────────────────────────────── */
 /* Each moment's name at a heading's scale, so the scroll reads as a run of
    headlines, each coming to full ink as it becomes the one in view. */
-:is(.lp, #lp-style)[data-lp-style='bold'] .story-scroll {
+:is(.lp, #lp-style)[data-lp-type-facet='bold'] .story-scroll {
   --lp-size-title: calc(clamp(1.75rem, 0.9rem + 3cqi, 3.5rem) * var(--lp-scale));
   --lp-leading-title: var(--lp-leading-heading);
   --lp-tracking-title: var(--lp-tracking-heading);
@@ -372,10 +472,29 @@
   border-block-start: none;
 }
 
+/* An open tile's name has the tile's whole width, so its room is that
+   (`BenefitsBento.svelte`, 03 X71). */
+:is(.lp, #lp-style)[data-lp-style='bold'] .benefits-bento__tile:not([data-lead]) {
+  --_inset: 0px;
+}
+
+/* A practice card is topped by its picture, so the rule tops its words. */
+:is(.lp, #lp-style)[data-lp-style='bold'] .practice-card__meta {
+  padding-block-start: var(--space-3);
+  border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);
+}
+
+/* A layered stage is topped by the same rule, over its heading's whole line
+   (`StageLayers.svelte` draws the row). */
+:is(.lp, #lp-style)[data-lp-style='bold'] .layers__stage::before {
+  content: '';
+  border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);
+}
+
 /* ── the numbers: counted up, at display size ────────────────────────────── */
 /* Fewer to a line, so each figure can take the display size: four make two
    pairs, never four small ones. Labels read at body size under them. */
-:is(.lp, #lp-style)[data-lp-style='bold'] .stats[data-layout='row'] {
+:is(.lp, #lp-style)[data-lp-type-facet='bold'] .stats[data-layout='row'] {
   --_figure: var(--lp-size-display);
 }
 
@@ -387,9 +506,41 @@
   }
 }
 
-:is(.lp, #lp-style)[data-lp-style='bold'] .stat__label {
-  max-inline-size: 24ch;
+:is(.lp, #lp-style)[data-lp-type-facet='bold'] .stat__label {
+  max-inline-size: calc(24 * var(--lp-measure-unit));
   font-size: var(--lp-size-body);
   font-weight: var(--lp-weight-label);
+  --lp-measure-unit: var(--lp-zero-label);
+}
+
+:is(.lp, #lp-style)[data-lp-style='bold'] .stat__label {
   color: var(--lp-ink);
+}
+
+/* A Moving background in the tint of Bold's own cards (03 X33), where the
+   org's shader runs behind it: the shader through the plain ground reads as a
+   grey band. Now that an org's shader is on by default (03 X50,
+   Codex-61zsk.35), every Style but Poster's and Cinematic's panels takes it.
+   Without a shader the section draws its glow in the brand's hues, and the
+   plain ground stays exactly as it was. */
+.org-layout[data-hero-shader-active] .lp[data-lp-style='bold'] {
+  --lp-atmosphere-ground: tint;
+}
+
+/* ── the simple sections (03 X64) ────────────────────────────────────────── */
+/* A marked Break draws the slab Bold already parts its sections with, in the
+   middle of the pause, across the column. */
+:is(.lp, #lp-style)[data-lp-style='bold'] .lp-break__mark {
+  inline-size: 100%;
+  block-size: var(--_bold-slab);
+  background: var(--lp-ink);
+}
+
+/* A Picture's caption under a printed rule, except across the page, where
+   the photograph's own edge is the rule. */
+:is(.lp, #lp-style)[data-lp-style='bold']
+  .lp-section[data-lp-type='picture']:not([data-lp-layout='full'])
+  .picture__caption {
+  padding-block-start: var(--space-2);
+  border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);
 }

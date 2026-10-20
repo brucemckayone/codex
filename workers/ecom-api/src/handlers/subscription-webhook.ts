@@ -30,20 +30,51 @@
 import { AccessRevocation, type RevocationReason } from '@codex/access';
 import { invalidateUserLibrary, VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
-import { FeeConfigService } from '@codex/purchase';
 import type {
   CourseSubscriptionWebhookResult,
   WebhookHandlerResult,
 } from '@codex/subscription';
 import {
+  applyDuePendingPriceChange,
   CourseSubscriptionService,
-  SubscriptionService,
-  TierService,
+  PENDING_PRICE_ID_KEY,
 } from '@codex/subscription';
-import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
+import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
+import { isTransientError } from '../utils/error-classification';
+
+/**
+ * Swap a due pending price in (Codex-2hxff.3) without letting a permanent
+ * failure pass as a warning.
+ *
+ * Runs AFTER the DB sync, so the event's own work is already done. A transient
+ * Stripe failure is rethrown: the 500 makes Stripe redeliver, and the sync is
+ * idempotent. A permanent one (an archived or deleted Price) would otherwise
+ * reach the generic "permanent error (acknowledged)" WARN and vanish, leaving a
+ * subscriber who was emailed a date billed the old price. It is logged at
+ * error level, with what is needed to act on it, and the event acknowledged.
+ * The marker stays: every later renewal reports it again until it is resolved.
+ */
+async function applyPendingPriceChangeOrReport(
+  c: Context<StripeWebhookEnv>,
+  stripe: Stripe,
+  subscription: Stripe.Subscription
+): Promise<void> {
+  try {
+    await applyDuePendingPriceChange(stripe, subscription);
+  } catch (error) {
+    if (isTransientError(error)) throw error;
+    c.get('obs')?.error('Pending price change could not be applied', {
+      subscriptionId: subscription.id,
+      pendingPriceId: subscription.metadata?.[PENDING_PRICE_ID_KEY],
+      errorType: (error as { type?: string }).type,
+      errorCode: (error as { code?: string }).code,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 /**
  * Fire-and-forget write of a per-user, per-org KV revocation key after a
@@ -52,7 +83,7 @@ import type { StripeWebhookEnv } from '../types';
  * window where a presigned R2 URL issued before revocation is still usable.
  *
  * See packages/access/src/services/access-revocation.ts and
- * docs/subscription-cache-audit/phase-2-followup.md for the design.
+ * docs/payments/access.md ("Streaming revocation") for the design.
  *
  * No-op when:
  *   - CACHE_KV binding absent (dev stub / misconfigured env) — revocation is
@@ -118,7 +149,7 @@ function revokeAccess(
  * Errors are swallowed inside the `waitUntil` promise so a KV hiccup never
  * surfaces as a webhook 500 (Stripe would retry unnecessarily).
  *
- * See bead Codex-13ml3 and docs/subscription-cache-audit/phase-2-followup.md.
+ * See bead Codex-13ml3 and docs/payments/access.md ("Streaming revocation").
  */
 function clearAccess(
   c: Context<StripeWebhookEnv>,
@@ -174,15 +205,19 @@ export async function handleSubscriptionWebhook(
   const obs = c.get('obs');
   const webAppUrl = c.env.WEB_APP_URL || '';
 
-  const { db, cleanup } = createWebhookDbClient(c.env);
+  // The registry's services, as routes get them (Codex-2hxff.54):
+  // SubscriptionService with fee config, its mailers and its cache hooks, so
+  // every `handle*` method bumps the per-user library + per-org subscription
+  // KV versions itself.
+  const { services, release } = await createWebhookServices(
+    c.env,
+    c.executionCtx,
+    { obs, stripe }
+  );
 
   try {
-    // Wire the cache + waitUntil orchestrator hook so every `handle*`
-    // method on SubscriptionService bumps the per-user library +
-    // per-org subscription KV version keys internally on success. The
-    // webhook no longer calls `invalidateForUser` directly — the
-    // service owns invalidation. Mirror of the service-registry wiring
-    // used by `procedure()` routes.
+    // The handler's own invalidation helpers below (course buyer, Dashboard
+    // sync-back) keep a cache and waitUntil of their own.
     const cache = c.env.CACHE_KV
       ? new VersionedCache({
           kv: c.env.CACHE_KV,
@@ -195,105 +230,22 @@ export async function handleSubscriptionWebhook(
       : undefined;
     const waitUntil = c.executionCtx.waitUntil.bind(c.executionCtx);
 
-    // Q1.3 (Codex-7kc83): wire a mailer thunk so Dashboard-originated
-    // price changes (price.created → applyStripePriceCreated →
-    // propagateTierPriceToActiveSubscriptions) notify each affected
-    // subscriber. Mirrors the service-registry wiring used by
-    // `procedure()` routes. Same fire-and-forget semantics as
-    // cache invalidation: the webhook response returns 200 immediately
-    // and emails land on `waitUntil`.
-    const mailer = (params: {
-      to: string;
-      toName?: string;
-      templateName: 'subscription-tier-price-change';
-      category: 'transactional';
-      userId?: string;
-      organizationId?: string | null;
-      data: Record<string, string | number | boolean>;
-    }) => {
-      sendEmailToWorker(c.env, c.executionCtx, params);
-    };
+    const service = services.subscription;
 
-    const service = new SubscriptionService(
-      {
-        db,
-        environment: c.env.ENVIRONMENT || 'development',
-        cache,
-        waitUntil,
-        mailer,
-        webAppUrl: c.env.WEB_APP_URL,
-      },
-      stripe
-    );
-
-    // TierService is constructed lazily — only `product.updated` and
-    // `price.created` events use it for Dashboard sync-back. All other
-    // events fall through to SubscriptionService.
-    //
-    // Q1.2 (Codex-3xyyb): inject a propagator thunk so
-    // `applyStripePriceCreated` fans the newly-adopted canonical Price
-    // id out to every active/cancelling subscription on the tier. The
-    // propagator runs on `executionCtx.waitUntil` — the webhook returns
-    // 200 immediately, and the per-sub Stripe updates (batched inside
-    // the service) complete asynchronously. This keeps the webhook
-    // response well under Stripe's delivery-timeout window even for
-    // tiers with many subscribers. The inner method owns per-sub error
-    // handling; a fire-and-forget catch on the outer promise just
-    // prevents unhandled-rejection noise on a catastrophic failure.
-    const tierService = new TierService(
-      {
-        db,
-        // X7 (Codex-z9fzv): pass dbWs explicitly. The per-request
-        // client returned by createPerRequestDbClient is already a
-        // DatabaseWs, so the same instance satisfies both slots and
-        // reuses the WebSocket connection.
-        dbWs: db,
-        environment: c.env.ENVIRONMENT || 'development',
-        propagator: (args) => {
-          c.executionCtx.waitUntil(
-            service
-              .propagateTierPriceToActiveSubscriptions(
-                args.tierId,
-                args.newStripePriceId,
-                { organizationId: args.organizationId }
-              )
-              .then(() => undefined)
-              .catch((error) => {
-                obs?.warn(
-                  'subscription-webhook: propagateTierPriceToActiveSubscriptions threw (tail caught)',
-                  {
-                    tierId: args.tierId,
-                    organizationId: args.organizationId,
-                    newStripePriceId: args.newStripePriceId,
-                    error:
-                      error instanceof Error ? error.message : String(error),
-                  }
-                );
-              })
-          );
-        },
-      },
-      stripe
-    );
+    // TierService serves `product.updated` / `price.created` from the
+    // Dashboard. Studio is the only place a price is set, so a Price created
+    // in the Dashboard is logged as drift and never moves a subscriber
+    // (Codex-2hxff.3). The registry's TierService carries a propagator, but
+    // only `updateTier` (Studio) fires it; the two methods this webhook calls,
+    // `applyStripeProductUpdate` and `recordStripePriceDrift`, never do.
+    const tierService = services.tier;
 
     // Codex-2pryk WP-6: course-specific subscriptions flow through this SAME
     // webhook (they are mode=subscription). They are discriminated by the Stripe
     // subscription's `type: 'course_subscription'` metadata and routed to
     // CourseSubscriptionService so the org SubscriptionService never records a
     // course sub as an org subscription.
-    const courseSubService = new CourseSubscriptionService(
-      {
-        db,
-        environment: c.env.ENVIRONMENT || 'development',
-        feeConfig: new FeeConfigService({
-          db,
-          environment: c.env.ENVIRONMENT || 'development',
-          cache,
-          waitUntil,
-        }),
-      },
-      stripe
-    );
+    const courseSubService = services.courseSubscription;
 
     /**
      * Bump a course-sub buyer's library version (their entitlement + enrollment
@@ -415,6 +367,7 @@ export async function handleSubscriptionWebhook(
               subscription
             );
           invalidateCourseBuyer(courseResult);
+          await applyPendingPriceChangeOrReport(c, stripe, subscription);
           obs?.info('Course subscription updated', {
             subscriptionId: subscription.id,
           });
@@ -430,7 +383,7 @@ export async function handleSubscriptionWebhook(
         // Revocation is deliberately NOT written here by default:
         //  - `cancel_at_period_end=true` toggles status to CANCELLING but
         //    the user has paid access through `currentPeriodEnd` (product
-        //    decision — see docs/subscription-cache-audit/phase-2-followup.md)
+        //    decision — see docs/payments/access.md)
         //  - mid-subscription tier changes do not reduce access
         //  - transitions TO active (reactivation) are handled by a sibling
         //    bead (Codex-13ml3) which issues `revocation.clear`
@@ -460,6 +413,13 @@ export async function handleSubscriptionWebhook(
         if (subscription.status === 'active') {
           clearAccess(c, result);
         }
+
+        // A renewal is a `customer.subscription.updated`: if a Studio price
+        // change is pending and this subscription's next renewal is ≥ 30 days
+        // after the notice, swap it in now (no proration — the next renewal
+        // bills it). After the DB sync, so a failed swap never skips it
+        // (Codex-2hxff.3).
+        await applyPendingPriceChangeOrReport(c, stripe, subscription);
 
         obs?.info('Subscription updated', {
           subscriptionId: subscription.id,
@@ -648,25 +608,11 @@ export async function handleSubscriptionWebhook(
       }
 
       case STRIPE_EVENTS.PRICE_CREATED: {
-        // Q1 product decision (sync-back part b): when a Dashboard
-        // operator creates a new Price on a Codex-managed Product (the
-        // workflow for changing an amount, because Stripe Prices are
-        // immutable), adopt it as canonical for the tier+interval and
-        // archive whichever Price the tier previously referenced.
-        // See TierService.applyStripePriceCreated for the idempotency
-        // + metadata contract.
+        // Studio is the only place a tier price is set. A Price created in
+        // the Dashboard is logged as drift and never adopted or propagated
+        // (Codex-2hxff.3) — see TierService.recordStripePriceDrift.
         const price = event.data.object as Stripe.Price;
-        const syncResult = await tierService.applyStripePriceCreated(price);
-
-        if (syncResult?.changed) {
-          obs?.info('Adopted Stripe Dashboard-created Price as canonical', {
-            tierId: syncResult.tierId,
-            organizationId: syncResult.organizationId,
-            stripePriceId: price.id,
-            eventId: event.id,
-          });
-          invalidateOrgAfterSyncBack(syncResult);
-        }
+        await tierService.recordStripePriceDrift(price);
         break;
       }
 
@@ -721,6 +667,6 @@ export async function handleSubscriptionWebhook(
         });
     }
   } finally {
-    await cleanup();
+    release();
   }
 }

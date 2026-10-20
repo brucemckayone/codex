@@ -11,6 +11,11 @@
   stays joined however tall an open stop grows: a line down from the marker,
   then a bend across the gap to the next marker. Wide, the stops step from
   side to side and the route winds; narrow, they line up and it runs straight.
+
+  A stop's name and its count are one `<hgroup>`, the heading and its line, so
+  the name's track is the whole room between the marker and the sign: the
+  room its title is fitted to (03 X71). The count sits beside the name while
+  the name's longest word leaves it room, and under the name when it does not.
 -->
 <script lang="ts">
   import type { JourneyStageView } from '$lib/page-builder';
@@ -48,10 +53,12 @@
         <details class="map__stop" open={index === firstOpen}>
           <summary class="map__summary">
             {@render marker(index)}
-            <Heading {level} size="title" text={stage.name} type="curriculum" class="map__name" />
-            {#if stage.practices.length > 0}
-              <span class="map__count">{CURRICULUM_COPY.practices(stage.practices.length)}</span>
-            {/if}
+            <hgroup class="map__head">
+              <Heading {level} size="title" text={stage.name} type="curriculum" class="map__name" />
+              {#if stage.practices.length > 0}
+                <p class="map__count">{CURRICULUM_COPY.practices(stage.practices.length)}</p>
+              {/if}
+            </hgroup>
             <span class="map__sign" aria-hidden="true"></span>
           </summary>
           <div class="map__inside">
@@ -63,7 +70,9 @@
         <div class="map__stop">
           <div class="map__summary">
             {@render marker(index)}
-            <Heading {level} size="title" text={stage.name} type="curriculum" class="map__name" />
+            <hgroup class="map__head">
+              <Heading {level} size="title" text={stage.name} type="curriculum" class="map__name" />
+            </hgroup>
           </div>
         </div>
       {/if}
@@ -72,13 +81,22 @@
 </ol>
 
 <style>
+  /* A stop is the list's width while the stops line up, and 60% of it where
+     they step (below). The list is the column, and past it whatever reach a
+     Style gives it: Path pulls it out onto the page's route
+     (style-path.css), and its margin is drawn from that reach. */
   .map {
     --_dot: var(--space-12);
     --_gap: clamp(var(--space-10), var(--space-6) + 4cqi, var(--space-20));
     --_route: var(--border-width-thick);
+    --_sign: var(--space-5);
+    --_beside: var(--space-4);
+    --_reach: 0px;
+    --_stop: calc(var(--lp-column) + var(--_reach));
     display: grid;
     row-gap: var(--_gap);
     margin: 0;
+    margin-inline-start: calc(-1 * var(--_reach));
     padding: 0;
     list-style: none;
     interpolate-size: allow-keywords;
@@ -122,18 +140,40 @@
   }
 
   /* ── a stop ────────────────────────────────────────────────────────────── */
+  /* The name's room is its track: the stop, less the marker, the sign and the
+     gaps beside them (03 X71). */
   .map__summary {
+    --lp-title-column: calc(var(--_stop) - var(--_dot) - var(--_sign) - 2 * var(--_beside));
     display: grid;
-    grid-template-columns: var(--_dot) minmax(0, 1fr) auto var(--space-5);
+    grid-template-columns: var(--_dot) minmax(0, 1fr) var(--_sign);
     align-items: start;
-    column-gap: var(--space-4);
+    column-gap: var(--_beside);
     color: var(--lp-ink);
     list-style: none;
   }
 
   /* A stop with nothing inside has no count and nothing to open. */
   div.map__summary {
+    --lp-title-column: calc(var(--_stop) - var(--_dot) - var(--_beside));
     grid-template-columns: var(--_dot) minmax(0, 1fr);
+  }
+
+  /* The count stands beside the name while the name's longest word leaves it
+     room, on the name's first line, and under the name when it does not, so
+     a long word has the whole track. A title never hyphenates, so its
+     narrowest is that word, and capped at the track it breaks rather than
+     overruns. */
+  .map__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: first baseline;
+    gap: var(--space-0-5) var(--_beside);
+    margin: 0;
+  }
+
+  .map__head > :global(.map__name) {
+    flex: 1 1 0;
+    max-inline-size: 100%;
   }
 
   details > .map__summary {
@@ -145,8 +185,7 @@
   }
 
   /* On the marker's middle, however the name wraps. */
-  .map__summary > :global(.map__name),
-  .map__count {
+  .map__head > :global(.map__name) {
     padding-block-start: max(var(--space-0), calc((var(--_dot) - 1lh) / 2));
   }
 
@@ -176,6 +215,8 @@
   }
 
   .map__count {
+    flex: none;
+    margin: 0;
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-small);
     line-height: var(--lp-leading-title);
@@ -208,7 +249,7 @@
   }
 
   @media (hover: hover) {
-    details > .map__summary:hover > :global(.map__name) {
+    details > .map__summary:hover :global(.map__name) {
       text-decoration: underline;
       text-decoration-thickness: var(--border-width);
       text-underline-offset: var(--lp-underline-offset);
@@ -223,7 +264,7 @@
   }
 
   .map__gloss {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
     margin: 0;
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-body);
@@ -233,30 +274,19 @@
 
   /* A phone: the count tucks under the name, the two beside the marker. */
   @container (max-width: 30rem) {
-    .map__summary {
-      grid-template-columns: var(--_dot) minmax(0, 1fr) var(--space-5);
-      align-content: center;
-      row-gap: var(--space-0-5);
-      min-block-size: var(--_dot);
+    .map__head {
+      align-self: center;
     }
 
-    .map__marker {
-      grid-row: 1 / span 2;
-    }
-
-    .map__summary:has(.map__count) > :global(.map__name) {
+    .map__head:has(.map__count) > :global(.map__name) {
       padding-block-start: var(--space-0-5);
     }
 
     .map__count {
-      grid-column: 2;
-      grid-row: 2;
-      padding-block-start: 0;
+      flex-basis: 100%;
     }
 
     .map__sign {
-      grid-column: 3;
-      grid-row: 1 / span 2;
       align-self: center;
       margin-block-start: 0;
     }
@@ -266,6 +296,10 @@
      A stop is 60% of the list, so the far side begins 40% in — two thirds of
      a stop's own width, which is what the bend spans. */
   @container (min-width: 48rem) {
+    .map {
+      --_stop: calc((var(--lp-column) + var(--_reach)) * 0.6);
+    }
+
     .map__stage {
       inline-size: 60%;
     }
@@ -294,7 +328,7 @@
 
   /* The stop opens rather than snaps, where the browser can animate it. */
   @media (prefers-reduced-motion: no-preference) {
-    :global(.lp:not([data-lp-still])) .map__stop::details-content {
+    :global(.lp:not([data-lp-still], [data-lp-motion='still'])) .map__stop::details-content {
       block-size: 0;
       overflow: clip;
       transition:
@@ -302,11 +336,11 @@
         content-visibility var(--duration-slow) allow-discrete;
     }
 
-    :global(.lp:not([data-lp-still])) .map__stop[open]::details-content {
+    :global(.lp:not([data-lp-still], [data-lp-motion='still'])) .map__stop[open]::details-content {
       block-size: auto;
     }
 
-    :global(.lp:not([data-lp-still])) .map__sign::after {
+    :global(.lp:not([data-lp-still], [data-lp-motion='still'])) .map__sign::after {
       transition: rotate var(--duration-fast) var(--ease-out);
     }
   }

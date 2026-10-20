@@ -27,10 +27,12 @@
  *   7. An inactive (invited/removed) membership does NOT grant attachment — the
  *      guard checks `status = 'active'`, not mere row existence.
  *   8. The A27 slots (`heroMediaId` / `signatureMediaId`, Codex-wqxv4) round-trip,
- *      are covered by the SAME org guard, and — the part that actually matters —
- *      are PROJECTED onto the public sell-preview payload. A15's finding was that
- *      two slots persisted and nothing public read them, so a new slot is not
- *      done until the served payload carries it.
+ *      are covered by the SAME org guard, and the hero — the part that actually
+ *      matters — is PROJECTED onto the public sell-preview payload. A15's finding
+ *      was that two slots persisted and nothing public read them, so a new slot
+ *      is not done until the served payload carries it. The signature film is
+ *      the exception, on purpose: it is stored but never projected, as only an
+ *      uploaded mark is a signature (Codex-61zsk.47).
  *
  * Falsifiability: every assertion re-reads the persisted row, so dropping the
  * org guard, the merge, the null-clear, or the URL resolution fails the test.
@@ -472,6 +474,43 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
     ).rejects.toThrow(ForbiddenError);
   });
 
+  // Codex-61zsk.47: no surface offers the retired Signature film, so the
+  // builder sends back whatever is stored. A film deleted since must not block
+  // every later save, as nothing could clear it; a NEW id is still checked.
+  it('keeps a stored Signature film that has since been deleted, and still checks a new one', async () => {
+    const film = await seedMedia(creatorId, 'signature-later-deleted');
+    await svc.updateJourneySellMedia(
+      orgAId,
+      pageId,
+      mediaBag({ signatureMediaId: film })
+    );
+    await db
+      .update(mediaItems)
+      .set({ deletedAt: new Date() })
+      .where(eq(mediaItems.id, film));
+
+    const returned = await svc.updateJourneySellMedia(
+      orgAId,
+      pageId,
+      mediaBag({ introVideoMediaId: introId, signatureMediaId: film })
+    );
+    expect(returned.introVideoMediaId).toBe(introId);
+    expect(returned.signatureMediaId).toBe(film);
+    expect((await readCourse(courseId))?.signatureMediaId).toBe(film);
+
+    await expect(
+      svc.updateJourneySellMedia(
+        orgAId,
+        pageId,
+        mediaBag({ signatureMediaId: deletedMediaId })
+      )
+    ).rejects.toThrow(ForbiddenError);
+    expect((await readCourse(courseId))?.signatureMediaId).toBe(film);
+
+    await svc.updateJourneySellMedia(orgAId, pageId, mediaBag());
+    expect((await readCourse(courseId))?.signatureMediaId).toBeNull();
+  });
+
   it('rejects a media id that does not exist at all', async () => {
     await expect(
       svc.updateJourneySellMedia(
@@ -648,7 +687,7 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
         .where(eq(courses.id, courseId));
     });
 
-    it('resolves the hero and signature to CDN thumbnail URLs', async () => {
+    it('resolves the hero to its CDN thumbnail URL, and never a signature film’s frame as the signature', async () => {
       await svc.updateJourneySellMedia(
         orgAId,
         pageId,
@@ -676,9 +715,11 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
       // thumbnail. Compared against the seeded key so a projection that returned
       // some other media's thumbnail would fail.
       expect(preview?.heroImageUrl).toBe(`${CDN}/${heroMedia?.thumbnailKey}`);
-      expect(preview?.signatureUrl).toBe(
-        `${CDN}/${signatureMedia?.thumbnailKey}`
-      );
+      // The signature is the uploaded mark alone (Codex-61zsk.47). The film is
+      // stored, and has a frame that could stand in, but a frame is a photo,
+      // and the sign-off drew it where a mark belongs. With no upload, none.
+      expect(signatureMedia?.thumbnailKey).toBeTruthy();
+      expect(preview?.signatureUrl).toBeNull();
 
       // ...AND `toClip` for the same item, which is what `Codex-uj4jc` added. The
       // manifest used to be discarded here: the hero was handed only a poster URL,

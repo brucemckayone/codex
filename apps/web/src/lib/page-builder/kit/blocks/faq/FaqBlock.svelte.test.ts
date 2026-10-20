@@ -5,6 +5,7 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import { COPY } from '../../model/copy';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
@@ -110,6 +111,72 @@ describe('FaqBlock', () => {
     expect(second.getAttribute('aria-expanded')).toBe('true');
   });
 
+  describe('accordion: the first question open (Codex-61zsk.58)', () => {
+    it('opens the first answer once the script runs, and leaves the rest closed', async () => {
+      await render({ ...SAMPLE, openFirst: true });
+      const [first, ...rest] = toggles();
+      expect(first.getAttribute('aria-expanded')).toBe('true');
+      expect(panel(first)?.hasAttribute('hidden')).toBe(false);
+      for (const button of rest)
+        expect(button.getAttribute('aria-expanded')).toBe('false');
+      // Still the visitor's to close.
+      first.click();
+      flushSync();
+      expect(first.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('leaves every answer open without the script, as before', () => {
+      mountFaq({ ...SAMPLE, openFirst: true });
+      for (const button of toggles())
+        expect(button.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    it('shows the creator’s change at once on the canvas', async () => {
+      const section: ResolvedSection = {
+        id: 'faq-1',
+        anchor: 'faq',
+        type: 'faq',
+        index: 12,
+        layout: 'accordion',
+        scheme: 'base',
+        spacing: 'regular',
+        headingLevel: 2,
+      };
+      const live = $state({
+        props: { ...SAMPLE } as Record<string, unknown>,
+        section,
+        context: sampleContext(),
+        edit: null,
+      });
+      app = mount(FaqBlock, { target: document.body, props: live });
+      flushSync();
+      await tick();
+      expect(toggles()[0].getAttribute('aria-expanded')).toBe('false');
+      live.props = { ...SAMPLE, openFirst: true };
+      flushSync();
+      await tick();
+      expect(toggles()[0].getAttribute('aria-expanded')).toBe('true');
+      live.props = { ...SAMPLE };
+      flushSync();
+      await tick();
+      expect(toggles()[0].getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('reads only a stored true, and is offered for the expandable list only', () => {
+      expect(
+        faqDefinition.coerce({ ...SAMPLE, openFirst: true }).openFirst
+      ).toBe(true);
+      for (const openFirst of ['true', 1, null, {}])
+        expect(
+          faqDefinition.coerce({ ...SAMPLE, openFirst }).openFirst,
+          String(openFirst)
+        ).toBeUndefined();
+      expect(
+        faqDefinition.fields.find((field) => field.key === 'openFirst')?.layouts
+      ).toEqual(['accordion']);
+    });
+  });
+
   it('accordion: opens an answer that find-in-page matched', async () => {
     await render(SAMPLE);
     const [first] = toggles();
@@ -152,6 +219,61 @@ describe('FaqBlock', () => {
       unmount(app);
       app = null;
     }
+  });
+
+  // Codex-61zsk.37 (C1): with no heading, the contact sat alone at the top of
+  // the side column, ahead of the questions it answers for.
+  it.each(
+    SECTION_LAYOUTS.faq
+  )('%s: the contact closes the list, after the last answer, heading or not', async (layout) => {
+    const contact = {
+      contactLabel: SAMPLE.contactLabel,
+      contactHref: SAMPLE.contactHref,
+    };
+    for (const props of [SAMPLE, { items: ITEMS, ...contact }]) {
+      await render(props, { layout });
+      const paragraph = (words?: string) =>
+        [...document.body.querySelectorAll('p')].find(
+          (p) => p.textContent?.trim() === words
+        );
+      const lastAnswer = paragraph(ITEMS.at(-1)?.answer);
+      const ask = paragraph(COPY.faq.stillWondering);
+      const link = [...document.body.querySelectorAll('a')].find(
+        (a) => a.textContent?.trim() === contact.contactLabel
+      );
+      expect(
+        lastAnswer && ask && link,
+        `${layout}: the closing row`
+      ).toBeTruthy();
+      const follows = (a: Node, b: Node) =>
+        Boolean(
+          a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
+        );
+      expect(follows(lastAnswer as Node, ask as Node)).toBe(true);
+      expect(follows(ask as Node, link as Node)).toBe(true);
+      // In the list's own column: as a row of its own after the list it would
+      // fall under the side column, orphaned again.
+      expect(
+        ask?.closest('.faq > *'),
+        `${layout}: in the questions' column`
+      ).toBe(lastAnswer?.closest('.faq > *'));
+      unmount(app);
+      app = null;
+    }
+  });
+
+  it('accordion with no words sets the list across the band, never beside an empty column', async () => {
+    const sided = () =>
+      document.body.querySelector('.faq')?.hasAttribute('data-sided');
+    await render({
+      items: ITEMS,
+      contactLabel: SAMPLE.contactLabel,
+      contactHref: SAMPLE.contactHref,
+    });
+    expect(sided()).toBe(false);
+    unmount(app);
+    await render({ items: ITEMS, ctaLabel: 'Join us' });
+    expect(sided()).toBe(false);
   });
 
   it('links the contact words safely: a bare address becomes an email link', async () => {

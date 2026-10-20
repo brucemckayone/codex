@@ -12,6 +12,7 @@
   read as a gap.
 -->
 <script lang="ts">
+  import { storedFocus } from '../../../page-images';
   import Media from '../../primitives/Media.svelte';
   import type { StoryStep } from './definition';
   import StoryWords from './StoryWords.svelte';
@@ -30,7 +31,7 @@
     <li class="story-chapter" data-lp-on-media data-pictured={images[index] ? '' : undefined}>
       {#if images[index]}
         <div class="story-chapter__media" data-lp-parallax="1">
-          <Media image={images[index]} alt={step.image?.alt ?? ''} />
+          <Media image={images[index]} alt={step.image?.alt ?? ''} focus={storedFocus(step.image)} />
         </div>
       {:else}
         <span class="lp-atmos story-chapter__glow" aria-hidden="true"></span>
@@ -118,7 +119,7 @@
     grid-row: 1;
     color: color-mix(in oklab, var(--lp-ink) 34%, transparent);
     font-family: var(--lp-font-display);
-    font-size: var(--lp-size-heading);
+    font-size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1));
     font-weight: var(--lp-weight-display);
     font-synthesis: none;
     font-variant-numeric: lining-nums tabular-nums;
@@ -131,11 +132,12 @@
   }
 
   .story-chapter :global(.story-words .lp-heading) {
-    max-inline-size: 18ch;
+    max-inline-size: calc(18 * var(--lp-measure-unit));
   }
 
-  /* No heading above: the first scene starts at the section's top edge. */
+  /* No heading above: the first scene starts at the section's top edge (on
+     a section that continues the band above, already there: 03 X58). */
   :global(.story:not(:has(> .story__head))) > .story-chapters {
-    margin-block-start: calc(-1 * var(--lp-pad));
+    margin-block-start: calc(-1 * var(--lp-pad-start));
   }
 </style>

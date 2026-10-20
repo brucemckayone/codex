@@ -23,14 +23,14 @@
  * All queries scoped by organizationId. Soft delete only.
  */
 
-import { CURRENCY } from '@codex/constants';
+import { CURRENCY, stripeEnvMetadata } from '@codex/constants';
 import type { DatabaseWs } from '@codex/database';
 import {
   content,
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
-import { resolvePrimaryConnect } from '@codex/purchase';
+import { resolveOrganisationPayee } from '@codex/payments';
 import {
   BaseService,
   InternalServiceError,
@@ -56,11 +56,12 @@ type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
  * own tier records, subscriptions own subscription mutations).
  *
  * Implemented by
- * `SubscriptionService.propagateTierPriceToActiveSubscriptions`. Both
- * TierService call sites (sync-back from Stripe Dashboard in
- * `applyStripePriceCreated`, and the Codex-UI `updateTier` flow) invoke
- * this hook AFTER the tier DB persist commits — a propagation failure
- * therefore does not roll back the price change on the tier itself.
+ * `SubscriptionService.propagateTierPriceToActiveSubscriptions`. Its one
+ * call site, the Studio `updateTier` flow, invokes this hook AFTER the tier
+ * DB persist commits — a propagation failure therefore does not roll back
+ * the price change on the tier itself. `interval` is load-bearing: only that
+ * interval's subscribers move (Codex-2hxff.3). A Dashboard-created Price is
+ * never propagated (`recordStripePriceDrift`).
  *
  * Fire-and-forget is the caller's responsibility: if an
  * `ExecutionContext` is available, wrap the call in `waitUntil(...)`
@@ -215,6 +216,7 @@ export class TierService extends BaseService {
           metadata: {
             codex_organization_id: orgId,
             codex_type: 'subscription_tier',
+            ...stripeEnvMetadata(this.environment),
           },
         },
         { idempotencyKey: `tier-product-${idempotencyBase}` }
@@ -228,7 +230,11 @@ export class TierService extends BaseService {
             unit_amount: input.priceMonthly,
             currency: CURRENCY.GBP,
             recurring: { interval: 'month' },
-            metadata: { codex_organization_id: orgId, interval: 'month' },
+            metadata: {
+              codex_organization_id: orgId,
+              interval: 'month',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `tier-price-monthly-${idempotencyBase}` }
         ),
@@ -238,7 +244,11 @@ export class TierService extends BaseService {
             unit_amount: input.priceAnnual,
             currency: CURRENCY.GBP,
             recurring: { interval: 'year' },
-            metadata: { codex_organization_id: orgId, interval: 'year' },
+            metadata: {
+              codex_organization_id: orgId,
+              interval: 'year',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `tier-price-annual-${idempotencyBase}` }
         ),
@@ -373,7 +383,11 @@ export class TierService extends BaseService {
               unit_amount: input.priceMonthly,
               currency: CURRENCY.GBP,
               recurring: { interval: 'month' },
-              metadata: { codex_organization_id: orgId, interval: 'month' },
+              metadata: {
+                codex_organization_id: orgId,
+                interval: 'month',
+                ...stripeEnvMetadata(this.environment),
+              },
             },
             { idempotencyKey: `tier-update-price-monthly-${idempotencyBase}` }
           );
@@ -396,7 +410,11 @@ export class TierService extends BaseService {
               unit_amount: input.priceAnnual,
               currency: CURRENCY.GBP,
               recurring: { interval: 'year' },
-              metadata: { codex_organization_id: orgId, interval: 'year' },
+              metadata: {
+                codex_organization_id: orgId,
+                interval: 'year',
+                ...stripeEnvMetadata(this.environment),
+              },
             },
             { idempotencyKey: `tier-update-price-annual-${idempotencyBase}` }
           );
@@ -812,134 +830,71 @@ export class TierService extends BaseService {
   }
 
   /**
-   * Adopt a newly-created Stripe Price as the canonical price for a
-   * Codex-managed tier, archiving whichever price the tier previously
-   * referenced for the same billing interval.
+   * `price.created` from Stripe: Studio is the ONLY place a tier price is set
+   * (docs/payments/subscriptions.md → Price changes). A Price created anywhere
+   * else is logged as drift and NOT applied — the tier keeps its Price and no
+   * subscriber moves (Codex-2hxff.3). This used to adopt the Price and move
+   * every subscriber on it.
    *
-   * This mirrors Codex's own `updateTier` flow: Stripe Prices are
-   * immutable, so a Dashboard operator changing an amount creates a new
-   * Price. Without this handler, the new Price would sit orphaned in
-   * Stripe and future checkouts would continue to use the old amount.
-   *
-   * Requirements for adoption (all must hold, otherwise returns null):
-   * - event carries `codex_organization_id` in metadata
-   * - price is active (`active=true`) and has a recurring interval
-   * - the tier exists (non-deleted) and is owned by the same org
-   * - the tier's current price id for that interval is different from
-   *   the incoming price id (prevents replay from archiving a price the
-   *   tier already adopted)
-   *
-   * The old price is archived via `stripe.prices.update({ active: false })`
-   * after the DB commit. A failure to archive is logged but does not
-   * fail the webhook — Stripe is the source of truth, the tier is
-   * already updated, and the orphaned active-but-unreferenced price is
-   * operator-visible in Dashboard.
+   * Studio's own Prices carry `codex_organization_id`; their `price.created`
+   * is expected and needs nothing (`updateTier` already wrote the tier — or is
+   * about to, if the event outruns its commit). An untagged recurring Price
+   * on a tier's Product came from the Dashboard: that is the drift.
    */
-  async applyStripePriceCreated(price: Stripe.Price): Promise<{
-    tierId: string;
-    organizationId: string;
-    changed: boolean;
-  } | null> {
-    const orgId = price.metadata?.codex_organization_id;
-    if (!orgId) return null;
-    if (!price.active) return null;
-
+  async recordStripePriceDrift(price: Stripe.Price): Promise<void> {
+    if (!price.active) return;
     const interval = price.recurring?.interval;
-    if (interval !== 'month' && interval !== 'year') return null;
+    if (interval !== 'month' && interval !== 'year') return;
 
     const productId =
       typeof price.product === 'string' ? price.product : price.product?.id;
-    if (!productId) return null;
+    if (!productId) return;
 
     try {
       const [tier] = await this.db
-        .select()
+        .select({
+          id: subscriptionTiers.id,
+          organizationId: subscriptionTiers.organizationId,
+          stripePriceMonthlyId: subscriptionTiers.stripePriceMonthlyId,
+          stripePriceAnnualId: subscriptionTiers.stripePriceAnnualId,
+        })
         .from(subscriptionTiers)
         .where(
           and(
             eq(subscriptionTiers.stripeProductId, productId),
-            eq(subscriptionTiers.organizationId, orgId),
             isNull(subscriptionTiers.deletedAt)
           )
         )
         .limit(1);
+      if (!tier) return;
 
-      if (!tier) return null;
+      const currentPriceId =
+        interval === 'month'
+          ? tier.stripePriceMonthlyId
+          : tier.stripePriceAnnualId;
+      if (currentPriceId === price.id) return;
 
-      const isMonthly = interval === 'month';
-      const currentPriceId = isMonthly
-        ? tier.stripePriceMonthlyId
-        : tier.stripePriceAnnualId;
-
-      // Idempotency: replaying the same price.created event after the
-      // tier has already adopted the new price is a silent no-op.
-      if (currentPriceId === price.id) {
-        return { tierId: tier.id, organizationId: orgId, changed: false };
-      }
-
-      const newAmount = price.unit_amount ?? 0;
-
-      await this.db
-        .update(subscriptionTiers)
-        .set({
-          ...(isMonthly
-            ? { stripePriceMonthlyId: price.id, priceMonthly: newAmount }
-            : { stripePriceAnnualId: price.id, priceAnnual: newAmount }),
-          updatedAt: new Date(),
-        })
-        .where(eq(subscriptionTiers.id, tier.id));
-
-      this.obs.info(
-        'Adopted Stripe Dashboard-created Price as canonical for tier',
-        {
-          tierId: tier.id,
-          organizationId: orgId,
-          interval,
-          oldStripePriceId: currentPriceId,
-          newStripePriceId: price.id,
-          newAmount,
-        }
-      );
-
-      // Archive the old price in Stripe to match Codex-UI behaviour.
-      // Non-fatal on failure — the DB already has the new price; the
-      // stale active price in Stripe is a recoverable operator issue.
-      if (currentPriceId) {
-        try {
-          await this.stripe.prices.update(currentPriceId, { active: false });
-        } catch (cleanupError) {
-          this.obs.warn(
-            'Failed to archive superseded Stripe Price after Dashboard sync-back',
-            {
-              tierId: tier.id,
-              organizationId: orgId,
-              stalePriceId: currentPriceId,
-              error:
-                cleanupError instanceof Error
-                  ? cleanupError.message
-                  : String(cleanupError),
-            }
-          );
-        }
-      }
-
-      // Q1.2 (Codex-3xyyb): fan the new Price id out to every active /
-      // cancelling subscription already on this tier so mid-cycle
-      // renewals bill the new amount. Runs AFTER the tier persist +
-      // archive — a propagation failure does not undo the sync-back.
-      // The propagator itself is a fire-and-forget thunk in production
-      // (the wiring layer wraps it in `waitUntil`), so this await
-      // resolves quickly.
-      await this.firePropagation({
+      const context = {
         tierId: tier.id,
-        newStripePriceId: price.id,
-        organizationId: orgId,
+        organizationId: tier.organizationId,
         interval,
-      });
-
-      return { tierId: tier.id, organizationId: orgId, changed: true };
+        tierPriceId: currentPriceId,
+        stripePriceId: price.id,
+        unitAmount: price.unit_amount,
+      };
+      if (price.metadata?.codex_organization_id) {
+        this.obs.info(
+          'Studio-created tier Price seen before its tier write; nothing to do',
+          context
+        );
+        return;
+      }
+      this.obs.error(
+        'Tier Price created outside Studio (drift) — NOT applied; set prices in Studio',
+        context
+      );
     } catch (error) {
-      this.handleError(error, 'applyStripePriceCreated');
+      this.handleError(error, 'recordStripePriceDrift');
     }
   }
 
@@ -1010,13 +965,12 @@ export class TierService extends BaseService {
   /**
    * Validate that the org has an active Stripe Connect account.
    *
-   * Resolves the org's canonical account via the shared `resolvePrimaryConnect`
-   * (org → `primaryConnectAccountUserId` → that user's single account; one
-   * account per user, Codex-69t7c). No pinned account, or one missing the
+   * The org's account is its current owner's (Codex-2hxff.2; one account per
+   * user, Codex-69t7c). An owner with no account, or one missing the
    * charges/payouts capabilities, means the org is not ready.
    */
   private async requireActiveConnect(orgId: string): Promise<void> {
-    const account = await resolvePrimaryConnect(this.db, orgId);
+    const account = (await resolveOrganisationPayee(this.db, orgId))?.account;
     if (!account || !account.chargesEnabled || !account.payoutsEnabled) {
       throw new ConnectAccountNotReadyError(orgId);
     }

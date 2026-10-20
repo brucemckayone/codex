@@ -9,12 +9,22 @@
 
   Cinematic dissolves the frame into its dark room, so its play button moves
   from the corner to the middle of the picture. The clip streams on
-  `sellPreview` with its space held while it loads; no clip → the public page
-  drops the frame and its caption, the canvas asks for one. The button row
-  appears only when the creator writes one.
+  `sellPreview`, but the awaited course view says whether one can come
+  (`course.filmsAttached.reel`, Codex-61zsk.40). With none, the public page
+  folds the band from the first paint. With one, it sends the section whole,
+  the frame holding its space (its HTML is the final state, 03 §10), and only
+  a clip that fails to resolve leaves it to fold once the stream settles: the
+  public page never leaves its words above nothing (Codex-61zsk.37). The page
+  folds the section before its bands resolve, by the same rule (`filmToShow`),
+  so the bands either side never meet as one (Codex-61zsk.57); the block's
+  own marker below folds it only when it is mounted outside the page, as in
+  its own tests. Where
+  the page is looked at (the canvas, a still thumbnail) the
+  section keeps its frame, the kit's plate in it, and on the canvas a prompt
+  for the clip. The button row appears only when the creator writes one.
 -->
 <script lang="ts">
-  import type { PreviewMedia } from '../../../render/types';
+  import { filmToShow } from '../../model/films';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -22,6 +32,7 @@
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
   import Text from '../../primitives/Text.svelte';
+  import { settled } from '../hero/settled.svelte';
   import ClipFrame from '../video/ClipFrame.svelte';
   import Watch from '../video/Watch.svelte';
   import { PREVIEW_COPY } from './copy';
@@ -37,6 +48,21 @@
   const hasTop = $derived(Boolean(content.eyebrow || content.heading));
   const hasCta = $derived(Boolean(content.ctaLabel || content.note));
   const captionAttrs = $derived(editAttrs('preview', 'caption', edit));
+
+  // The clip once the stream settles, read in place (`settled.svelte.ts`):
+  // `undefined` until then and on the server, `null` if the read failed.
+  const preview = $derived(settled(context.sellPreview));
+  const pending = $derived(preview === undefined);
+  const clip = $derived(preview?.reel ?? null);
+  // No clip to show (`filmToShow`, which the page's fold reads too): settled
+  // with none, or none can come, which the awaited view knows before the
+  // stream settles (Codex-61zsk.40). A clip that arrives anyway still shows.
+  const clipless = $derived(
+    filmToShow(context.course.filmsAttached?.reel, preview, 'reel') === false
+  );
+  const shown = $derived(!clipless || page.still || !!edit);
+  // A section with no clip is the creator's alone: the canvas's own.
+  const creatorOnly = $derived(clipless ? '' : undefined);
 </script>
 
 {#snippet top()}
@@ -72,12 +98,8 @@
   {/if}
 {/snippet}
 
-{#snippet frame(clip: PreviewMedia | null, pending: boolean)}
-  <figure
-    class="preview__clip"
-    data-layout={section.layout}
-    data-lp-edit-only={!clip && !pending ? '' : undefined}
-  >
+{#snippet frame()}
+  <figure class="preview__clip" data-layout={section.layout} data-lp-edit-only={creatorOnly}>
     {#if clip}
       <ClipFrame still={clip.posterUrl} ratio="var(--_ratio)" {place}>
         <Watch {clip} label={PREVIEW_COPY.watch} {title} {edit} />
@@ -95,37 +117,37 @@
   </figure>
 {/snippet}
 
-{#snippet stage()}
-  {#await context.sellPreview}
-    {@render frame(null, true)}
-  {:then preview}
-    {#if preview?.reel || edit}
-      {@render frame(preview?.reel ?? null, false)}
-    {/if}
-  {/await}
-{/snippet}
-
-{#if split}
-  <div class="preview-split">
-    {#if hasTop || content.body || hasCta}
-      <div class="preview-split__words">
-        {#if hasTop}{@render top()}{/if}
-        {@render more()}
-      </div>
-    {/if}
-    {@render stage()}
-  </div>
-{:else}
-  {@render stage()}
-  {#if hasTop || content.body || hasCta}
-    <div class="preview-words">
-      {#if hasTop}{@render top()}{/if}
-      {#if content.body || hasCta}<div class="preview__more">{@render more()}</div>{/if}
+{#if clipless}
+  <!-- No clip: the live page folds this band away. -->
+  <span class="preview-none" hidden></span>
+{/if}
+{#if shown}
+  {#if split}
+    <div class="preview-split" data-lp-edit-only={creatorOnly}>
+      {#if hasTop || content.body || hasCta}
+        <div class="preview-split__words">
+          {#if hasTop}{@render top()}{/if}
+          {@render more()}
+        </div>
+      {/if}
+      {@render frame()}
     </div>
+  {:else}
+    <!-- Side by side, no space between: nothing is left behind when the
+         canvas's own parts are set aside. -->
+    {@render frame()}{#if hasTop || content.body || hasCta}<div class="preview-words" data-lp-edit-only={creatorOnly}>
+        {#if hasTop}{@render top()}{/if}
+        {#if content.body || hasCta}<div class="preview__more">{@render more()}</div>{/if}
+      </div>{/if}
   {/if}
 {/if}
 
 <style>
+  /* ── no clip on the live page: no band either ──────────────────────────── */
+  :global(.lp:not([data-lp-still]) .lp-section:has(> .lp-inner > .preview-none)) {
+    display: none;
+  }
+
   /* ── shared ────────────────────────────────────────────────────────────── */
   .preview__top,
   .preview__more,
@@ -150,7 +172,7 @@
 
   .preview__caption {
     margin: 0;
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-small);
     line-height: var(--lp-leading-body);

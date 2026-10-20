@@ -88,6 +88,8 @@ export interface JourneyFixture {
  * The v2 sections `db:seed:portals` writes for each seeded page, by page slug:
  * each portal opens from its own recipe (03 §8, `PortalSpec.recipe`), less the
  * testimonials, which the seed leaves out (no live testimonials behind them).
+ * Mirrors `RECIPES` in `packages/database/scripts/seed-portals.ts`: a section
+ * added to a recipe there is added here in the same change.
  */
 const SEEDED_SECTIONS = {
   // Cinematic · show
@@ -97,6 +99,8 @@ const SEEDED_SECTIONS = {
   // Studio · full
   'ancestral-threads': [
     'hero',
+    // "What's inside", second in every full page (03 X63).
+    'inside',
     'problem',
     'transformation',
     'benefits',

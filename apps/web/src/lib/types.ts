@@ -20,6 +20,7 @@ import type {
   Subscription,
   SubscriptionTier,
 } from '@codex/database/schema';
+import type { MyMembershipResponse } from '@codex/shared-types';
 import type { HeroLayout } from '@codex/validation';
 
 export interface ContentWithRelations extends Content {
@@ -239,7 +240,7 @@ export interface ConnectRequirements {
 
 /**
  * Connect account status response.
- * Returned by GET /connect/status
+ * Returned by GET /connect/me/status and POST /connect/me/sync
  */
 export interface ConnectAccountStatusResponse {
   isConnected: boolean;
@@ -265,8 +266,17 @@ export interface ConnectAccountStatusResponse {
 }
 
 /**
+ * An organisation's payout status — status fields only, for any member.
+ * Returned by GET /connect/organization-status (Codex-2hxff.1).
+ */
+export type OrganizationPayoutStatusResponse = Pick<
+  ConnectAccountStatusResponse,
+  'isConnected' | 'chargesEnabled' | 'payoutsEnabled' | 'status'
+>;
+
+/**
  * Connect onboard response.
- * Returned by POST /connect/onboard
+ * Returned by POST /connect/me/onboard
  */
 export interface ConnectOnboardResponse {
   accountId: string;
@@ -275,7 +285,7 @@ export interface ConnectOnboardResponse {
 
 /**
  * Connect dashboard link response.
- * Returned by POST /connect/dashboard
+ * Returned by POST /connect/me/dashboard
  */
 export interface ConnectDashboardResponse {
   url: string;
@@ -308,6 +318,123 @@ export interface OrgMemberItem {
   status: string;
   joinedAt: string;
 }
+
+// ─── Ownership Transfer Types (Codex-2hxff.2) ──────────────────────────────
+//
+// Mirrors the fixed API contract in
+// `docs/handover/payments-sources/ownership-transfer/api-contract.md`. Defined
+// here (not in $lib/server/api) because the studio components read them.
+
+export type OwnershipRole = 'owner' | 'admin' | 'creator';
+
+export type OwnershipOfferStatus =
+  | 'open'
+  | 'accepted'
+  | 'declined'
+  | 'withdrawn'
+  | 'expired';
+
+export type OwnershipWithdrawnReason =
+  | 'owner_cancelled'
+  | 'recipient_ineligible'
+  | 'support_reassigned';
+
+/** One offer row, as the offer / withdraw / decline routes return it. */
+export interface OwnershipOffer {
+  id: string;
+  organizationId: string;
+  offeredByUserId: string;
+  recipientUserId: string;
+  status: OwnershipOfferStatus;
+  withdrawnReason: OwnershipWithdrawnReason | null;
+  expiresAt: string;
+  respondedAt: string | null;
+  createdAt: string;
+}
+
+export interface OwnershipEligibleRecipient {
+  userId: string;
+  name: string;
+  role: 'admin' | 'creator';
+  joinedAt: string;
+  payoutsReady: boolean;
+}
+
+export interface OwnershipActiveAgreement {
+  creatorName: string;
+  revenueType: 'subscription' | 'content_purchase';
+  /** The creator's share in basis points (10000 = 100%). */
+  shareBps: number;
+  /** `effective_from`. */
+  since: string;
+}
+
+export interface OwnershipLastOutcome {
+  status: Exclude<OwnershipOfferStatus, 'open'>;
+  recipientName: string;
+  /** `responded_at`. */
+  at: string;
+  withdrawnReason: OwnershipWithdrawnReason | null;
+}
+
+/**
+ * `GET /api/organizations/:id/ownership`. The optional fields are OMITTED for
+ * viewers who may not see them — see each comment.
+ */
+export interface OwnershipView {
+  owner: {
+    userId: string;
+    name: string;
+    avatarUrl: string | null;
+    /** `started_at` of the open ownership period. */
+    ownerSince: string;
+    /** The owner's Connect account has charges + payouts enabled. */
+    payoutsReady: boolean;
+  };
+  viewerRole: OwnershipRole;
+  /** Owner, or the offer's recipient. Null for everyone else and when none is open. */
+  openOffer: {
+    id: string;
+    /** `payoutsReady` drives the state 6 "your payouts aren't set up" warning. */
+    recipient: { userId: string; name: string; payoutsReady: boolean };
+    offeredBy: { userId: string; name: string };
+    offeredAt: string;
+    expiresAt: string;
+  } | null;
+  /** OWNER ONLY: the newest closed offer (mockup state 9). */
+  lastOutcome?: OwnershipLastOutcome | null;
+  /** OWNER ONLY: active admins and creators, excluding the owner. */
+  eligibleRecipients?: OwnershipEligibleRecipient[];
+  /** OWNER ONLY: drives the state 3 "your subscription income will stop" warning. */
+  ownerHasSubscriptionAgreement?: boolean;
+  /** Owner or the open offer's recipient: the state 6 list. */
+  activeAgreements?: OwnershipActiveAgreement[];
+}
+
+/** `POST …/offers/:offerId/accept`. */
+export interface OwnershipAccepted {
+  /** The caller, now the owner. */
+  ownerUserId: string;
+  ownerSince: string;
+  /** Now an admin. */
+  previousOwnerUserId: string;
+}
+
+/** The caller's open, unexpired offer for an org (on my-membership). */
+export interface PendingOwnershipOffer {
+  offerId: string;
+  offeredByName: string;
+  expiresAt: string;
+}
+
+/**
+ * `GET /api/organizations/:id/members/my-membership` after Codex-2hxff.2.
+ * Widened locally rather than in `@codex/shared-types` so apps/web does not
+ * wait on a package rebuild; the extra field is additive.
+ */
+export type MyMembershipWithOwnership = MyMembershipResponse & {
+  pendingOwnershipOffer: PendingOwnershipOffer | null;
+};
 
 // ─── Organization Types ────────────────────────────────────────────────────
 

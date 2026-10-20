@@ -17,9 +17,17 @@
  * the only place a brief retry is justified.
  */
 
+import type { PendingOwnershipOffer } from '$lib/types';
+
 export interface MembershipRole {
   role: string | null;
   joinedAt: string | null;
+  /**
+   * The caller's open ownership offer (Codex-2hxff.2). Optional because the
+   * retry's own fallback and older responses carry none; the studio layout
+   * reads it as `?? null`.
+   */
+  pendingOwnershipOffer?: PendingOwnershipOffer | null;
 }
 
 export interface ResolveMembershipOptions {

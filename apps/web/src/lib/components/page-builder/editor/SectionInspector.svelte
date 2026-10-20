@@ -10,28 +10,47 @@
   a Style default that steps back to the page colour so two identical bands
   never touch. Every write goes through the store, so undo, autosave and the
   canvas see it at once.
+
+  A simple section (a Picture, Heading, Break or Button, 03 X64) takes the
+  colour of the section it joins, so its colour reads "Matches the section
+  above" (or below) until the creator picks one; it takes no background
+  picture; and a Break has no colour at all. The inspector says when a
+  Break sits where the colour already changes, when two Breaks add up, and
+  when a Heading has no section below it to introduce.
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { page as appPage } from '$app/state';
+  import { brandEditor } from '$lib/brand-editor';
   import { CopyIcon, EyeIcon, EyeOffIcon, TrashIcon } from '$lib/components/ui/Icon';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
     type BlockField,
     DEFINITIONS,
+    type FocalCrop,
     type KitPage,
     type KitSection,
+    OWN_BACKDROP,
+    resolveGroundBands,
     resolveLayout,
     resolveScheme,
     resolveSections,
     resolveSpacing,
+    spacingSource,
     resolveStyle,
-    type SectionTypeId,
+    SIMPLE_SECTIONS,
   } from '$lib/page-builder/kit';
+  import { deriveOfferPaths } from '$lib/page-builder/offer-paths';
+  import type { OfferChoices } from './offer-field';
+  import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
+  import { isImageRef } from '$lib/page-builder/page-images';
+  import { pageGrounds } from '$lib/page-builder/render/brand-overrides';
   import type { JourneySalesContext } from '$lib/page-builder/render/types';
   import * as m from '$paraglide/messages';
   import FieldControl from './FieldControl.svelte';
   import { fieldsForLayout, sameValue } from './field-values';
+  import FocalPointField from './FocalPointField.svelte';
   import ImageField from './ImageField.svelte';
   import LayoutPicker from './LayoutPicker.svelte';
   import { sectionIcon } from './outline';
@@ -44,6 +63,8 @@
     context: JourneySalesContext;
     brandOverrides?: BrandTokenOverrides | null;
     theme?: 'light' | 'dark';
+    /** Whether the offer read has answered (`BuilderSession.offerRead`). */
+    offerRead?: 'read' | 'loading' | 'failed';
     onDuplicate: (id: string) => void;
     onToggle: (id: string) => void;
     onDelete: (id: string) => void;
@@ -55,6 +76,7 @@
     context,
     brandOverrides = null,
     theme,
+    offerRead = 'read',
     onDuplicate,
     onToggle,
     onDelete,
@@ -64,10 +86,10 @@
 
   /**
    * Types with a backdrop of their own — the hero's media, the call to
-   * action's own background field (01 A5) — take no generic one. The list
-   * `SectionShell` draws by; a test holds the two together.
+   * action's own background field (01 A5) — take no generic one, and nor
+   * does a simple section, which takes its neighbour's ground (03 X64):
+   * `SectionShell`'s own lists, imported, so the two cannot drift.
    */
-  const OWN_BACKDROP: readonly SectionTypeId[] = ['hero', 'cta'];
   const BACKGROUND: BlockField = {
     key: 'background',
     label: m.studio_page_editor_background_title(),
@@ -75,6 +97,17 @@
     control: 'image',
     decorative: true,
   };
+
+  /**
+   * A background covers its band, whose shape is its contents' height
+   * across the screen, so no one cut is every band's: these are the middle
+   * band of the ones measured, five section types in every Style at 1440
+   * and 390 (Codex-61zsk.58).
+   */
+  const BACKGROUND_CROPS: readonly FocalCrop[] = [
+    { at: 'wide', ratio: '7 / 5' },
+    { at: 'phone', ratio: '1 / 2' },
+  ];
 
   // Pinned for the life of this inspector, which Inspector re-creates for
   // every section (`{#key section.id}`). A write that arrives after the
@@ -89,20 +122,81 @@
     return pageBuilder.sections.find((s) => s.id === sectionId)?.props[key];
   }
 
+  const background = $derived(valueOf(BACKGROUND.key));
+
   const definition = $derived(DEFINITIONS[section.type]);
   const Glyph = $derived(sectionIcon(section.type));
   const style = $derived(resolveStyle(page.design));
   const hidden = $derived(section.enabled === false);
 
+  // The colour the canvas draws (03 X48, X50): the org's moving background,
+  // and the band its ground is in, as Canvas hands them to the page.
+  const drawn = $derived.by(() => {
+    const pending = brandEditor.isOpen ? brandEditor.pending : null;
+    return {
+      orgShader: orgShader(appPage.data.org, pending),
+      grounds: resolveGroundBands(
+        orgGrounds(appPage.data.org, pending),
+        pageGrounds(brandOverrides)
+      ),
+    };
+  });
+
   /** A hidden section is not on the page, so it has no neighbour to step back from. */
   function resolvedIn(target: KitPage) {
-    return resolveSections(target).find((s) => s.id === section.id);
+    return resolveSections(target, drawn).find((s) => s.id === section.id);
   }
 
   const current = $derived(resolvedIn(page));
+  const simple = $derived(SIMPLE_SECTIONS.has(section.type));
+  const takesBackground = $derived(!OWN_BACKDROP.has(section.type) && !simple);
+
+  // The neighbours the canvas draws around this section, for the notes a
+  // simple section's joins need.
+  const around = $derived.by(() => {
+    const drawnSections = resolveSections(page, drawn);
+    const at = drawnSections.findIndex((s) => s.id === section.id);
+    return at === -1
+      ? { above: undefined, below: undefined }
+      : { above: drawnSections[at - 1], below: drawnSections[at + 1] };
+  });
+  const joinNote = $derived(
+    !simple || section.design?.scheme !== undefined
+      ? null
+      : current?.join === 'above'
+        ? m.studio_page_editor_colour_matches_above()
+        : current?.join === 'below'
+          ? m.studio_page_editor_colour_matches_below()
+          : null
+  );
+  const breakNotes = $derived.by(() => {
+    if (section.type !== 'break' || !current) return [];
+    const notes: string[] = [];
+    // It takes the band above, so the colour changes at its foot.
+    if (around.below && around.below.scheme !== current.scheme) {
+      notes.push(m.studio_page_editor_break_ground_change());
+    }
+    if (around.above?.type === 'break' || around.below?.type === 'break') {
+      notes.push(m.studio_page_editor_break_twice());
+    }
+    return notes;
+  });
+  const headingFallback = $derived(section.type === 'heading' && current?.join === 'above');
   const layout = $derived(current?.layout ?? resolveLayout(section.type, section.variant, style));
-  const scheme = $derived(current?.scheme ?? resolveScheme(section.type, section.design, style));
-  const spacing = $derived(current?.spacing ?? resolveSpacing(section.design, layout));
+  // Layered stages draws the course's practices as What's inside's cards, so
+  // a page with both shows every card twice. Advice only: nothing is hidden.
+  const repeatsInside = $derived(
+    section.type === 'curriculum' &&
+      layout === 'layered' &&
+      page.sections.some((s) => s.type === 'inside' && s.enabled !== false)
+  );
+  const scheme = $derived(
+    current?.scheme ??
+      resolveScheme(section.type, section.design, style, drawn, page.design.dials?.colour)
+  );
+  const spacing = $derived(
+    current?.spacing ?? resolveSpacing(section.design, layout, page.design.dials?.spacing)
+  );
   const styleLayout = $derived(resolveLayout(section.type, undefined, style));
   const styleScheme = $derived.by(() => {
     const unset = {
@@ -111,15 +205,32 @@
         s.id === section.id ? { ...s, design: { ...s.design, scheme: undefined } } : s
       ),
     };
-    return resolvedIn(unset)?.scheme ?? resolveScheme(section.type, undefined, style);
+    return (
+      resolvedIn(unset)?.scheme ??
+      resolveScheme(section.type, undefined, style, drawn, page.design.dials?.colour)
+    );
   });
   // Item fields follow the layout too: a benefits tile's image only shows in `grid`.
+  // A field may belong to some Styles only (a Break's mark, 03 X64).
   const fields = $derived(
-    fieldsForLayout(definition.fields, layout).map((field) =>
+    fieldsForLayout(
+      definition.fields.filter((field) => !field.styles || field.styles.includes(style)),
+      layout
+    ).map((field) =>
       field.itemFields
         ? { ...field, itemFields: fieldsForLayout(field.itemFields, layout) }
         : field
     )
+  );
+  // The entry this layout draws larger than the rest, its row tagged "Leads"
+  // (Codex-61zsk.58); the definition knows, nothing is stored.
+  const leading = $derived(definition.leadingItem?.(section.props, layout, context) ?? null);
+  // The page's live ways in, for an `offer` field (Codex-61zsk.14): the very
+  // derivation the pricing block draws from, so the field offers exactly the
+  // options the page shows.
+  // An unread offer is null, the same as no offer: the picker is told which.
+  const offerPaths: OfferChoices = $derived(
+    offerRead === 'read' ? deriveOfferPaths(context.offer, context.course) : offerRead
   );
 
   function writeProp(key: string, value: unknown): void {
@@ -190,6 +301,9 @@
         {theme}
         onChoose={(next) => pageBuilder.setSectionLayout(section.id, next)}
       />
+      {#if repeatsInside}
+        <p class="section-inspector__hint" data-note="repeat">{m.studio_page_editor_layout_repeat()}</p>
+      {/if}
     </section>
   {/if}
 
@@ -197,19 +311,31 @@
     <h3 class="section-inspector__group-title" id="{id}-colour">
       {m.studio_page_editor_colour_title()}
     </h3>
-    <SchemeSwatches
-      {style}
-      {theme}
-      {brandOverrides}
-      value={scheme}
-      styleDefault={styleScheme}
-      chosen={section.design?.scheme !== undefined}
-      onChoose={(next) => pageBuilder.setSectionStyle(section.id, { scheme: next })}
-      onReset={() => pageBuilder.setSectionStyle(section.id, { scheme: undefined })}
-    />
+    {#if section.type === 'break'}
+      <p class="section-inspector__hint">{m.studio_page_editor_break_colour()}</p>
+    {:else}
+      <SchemeSwatches
+        {style}
+        {theme}
+        {brandOverrides}
+        value={scheme}
+        styleDefault={styleScheme}
+        chosen={section.design?.scheme !== undefined}
+        onChoose={(next) => pageBuilder.setSectionStyle(section.id, { scheme: next })}
+        onReset={() => pageBuilder.setSectionStyle(section.id, { scheme: undefined })}
+      />
+      {#if joinNote}
+        <p class="section-inspector__hint" data-note="join">{joinNote}</p>
+      {:else if simple && section.design?.scheme !== undefined}
+        <p class="section-inspector__hint" data-note="own">{m.studio_page_editor_colour_own()}</p>
+      {/if}
+      {#if headingFallback}
+        <p class="section-inspector__hint" data-note="heading">{m.studio_page_editor_heading_fallback()}</p>
+      {/if}
+    {/if}
   </section>
 
-  {#if !OWN_BACKDROP.includes(section.type)}
+  {#if takesBackground}
     <div class="section-inspector__group" data-control="background">
       <h3 class="section-inspector__group-title" id="{id}-background">
         {BACKGROUND.label}
@@ -222,6 +348,14 @@
         decorative
         labelledby="{id}-background"
       />
+      {#if isImageRef(background)}
+        <FocalPointField
+          image={background}
+          mediaBaseUrl={context.mediaBaseUrl}
+          crops={BACKGROUND_CROPS}
+          onChange={(next) => writeProp(BACKGROUND.key, next)}
+        />
+      {/if}
     </div>
   {/if}
 
@@ -232,9 +366,13 @@
     <SpacingControl
       value={spacing}
       chosen={section.design?.spacing !== undefined}
+      fromPage={spacingSource(section.design, layout, page.design.dials?.spacing) === 'page'}
       onChoose={(next) => pageBuilder.setSectionStyle(section.id, { spacing: next })}
       onReset={() => pageBuilder.setSectionStyle(section.id, { spacing: undefined })}
     />
+    {#each breakNotes as note (note)}
+      <p class="section-inspector__hint" data-note="break">{note}</p>
+    {/each}
   </section>
 
   {#if fields.length > 0}
@@ -249,6 +387,10 @@
             value={valueOf(field.key)}
             onChange={(next) => writeProp(field.key, next)}
             mediaBaseUrl={context.mediaBaseUrl}
+            {layout}
+            {sectionId}
+            leading={field.key === 'items' ? leading : null}
+            {offerPaths}
           />
         {/each}
       </div>

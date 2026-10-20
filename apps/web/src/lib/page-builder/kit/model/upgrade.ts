@@ -35,6 +35,8 @@ import {
   isSectionSpacingId,
   isSectionTypeId,
   type PageStyleId,
+  readPageDials,
+  readPageFacets,
   type SectionTypeId,
 } from './ids';
 import { DENSITY_TO_SPACING, SURFACE_TO_SCHEME } from './legacy/axis-style-map';
@@ -204,25 +206,39 @@ function resolveSectionStyle(rawDesign: unknown): SectionStyle | undefined {
 }
 
 /**
- * The page's v2 `PageDesign` (`{ style? }`). `style` on the raw bag wins
- * outright (v2 pass-through, including an ALREADY-invalid value the guard
- * rejects — see below). Otherwise the legacy nine-axis bundle is matched
- * against the eight look presets and mapped per contract §3's table;
- * "Full Send, Signal, unrecognised → `bold`" is unconditional, so this
- * ALWAYS returns an explicit Style, never an absent one (contract's own
- * runtime default is `bold` too — see `ids.ts` `DEFAULT_PAGE_STYLE` — so an
- * unrecognised legacy bundle and a v2 page created with none both end up at
- * the same value; a RECOGNISED legacy look does not, which is the point).
+ * The page's v2 `PageDesign` (`{ style, dials?, facets? }`). Its dials pass
+ * through, each kept only at a known step (03 X61), and its Type only where
+ * its Style may take it (03 X73): this is the one place a stored page
+ * reaches the kit, and the editor saves what it returns, so a key left out
+ * here is dropped on load AND wiped on the next save.
  */
 function resolvePageDesign(rawDesign: unknown): PageDesign {
+  const style = resolvePageStyle(rawDesign);
+  const raw = isPlainObject(rawDesign) ? rawDesign : {};
+  const dials = readPageDials(raw.dials);
+  const facets = readPageFacets(raw.facets, style);
+  return { style, ...(dials && { dials }), ...(facets && { facets }) };
+}
+
+/**
+ * `style` on the raw bag wins outright (v2 pass-through, including an
+ * ALREADY-invalid value the guard rejects — see below). Otherwise the legacy
+ * nine-axis bundle is matched against the eight look presets and mapped per
+ * contract §3's table; "Full Send, Signal, unrecognised → `bold`" is
+ * unconditional, so this ALWAYS returns an explicit Style, never an absent
+ * one (contract's own runtime default is `bold` too — see `ids.ts`
+ * `DEFAULT_PAGE_STYLE` — so an unrecognised legacy bundle and a v2 page
+ * created with none both end up at the same value; a RECOGNISED legacy look
+ * does not, which is the point).
+ */
+function resolvePageStyle(rawDesign: unknown): PageStyleId {
   if (isPlainObject(rawDesign) && isPageStyleId(rawDesign.style)) {
-    return { style: rawDesign.style };
+    return rawDesign.style;
   }
   const preset = matchLegacyLook(rawDesign);
-  const style: PageStyleId = preset
+  return preset
     ? (own(LOOK_ID_TO_STYLE, preset.id) ?? UNRECOGNISED_STYLE)
     : UNRECOGNISED_STYLE;
-  return { style };
 }
 
 /** One raw array entry → a `KitSection`, or null to drop it (unknown type,

@@ -205,6 +205,8 @@ export async function listUserLibrary(
               SUBSCRIPTION_STATUS.ACTIVE,
               SUBSCRIPTION_STATUS.CANCELLING,
             ]),
+            // Paused while a chargeback on one of its invoices is open.
+            isNull(subscriptions.disputedAt),
             gt(subscriptions.currentPeriodEnd, new Date()),
             ...(input.organizationId
               ? [eq(subscriptions.organizationId, input.organizationId)]
@@ -733,6 +735,7 @@ export async function listUserLibrary(
                 WHERE ${subscriptions.userId} = ${userId}
                   AND ${subscriptions.organizationId} = ${content.organizationId}
                   AND ${subscriptions.status} IN (${SUBSCRIPTION_STATUS.ACTIVE}, ${SUBSCRIPTION_STATUS.CANCELLING})
+                  AND ${subscriptions.disputedAt} IS NULL
                   AND ${subscriptions.currentPeriodEnd} > ${asOf})`
   );
 

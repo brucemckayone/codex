@@ -34,15 +34,25 @@
 
 <style>
   .cards {
+    --_n: 1;
     display: grid;
+    grid-template-columns: repeat(var(--_n), minmax(0, 1fr));
     gap: var(--lp-gap);
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
-  /* base.css spaces every `li` but the last, which unevens a row. */
+  /* base.css spaces every `li` but the last, which unevens a row.
+     Its name's room (03 X71): its share of the column, `--_n` across, less
+     its inset, its padding and border (Bold opens it, below). A lone card's
+     measure is in the body's `0`s, which no title can read, so its room is
+     the column, which is never narrower. */
   .card {
+    --_inset: calc(var(--space-6) + var(--lp-border));
+    --lp-title-column: calc(
+      (var(--lp-column) - (var(--_n) - 1) * var(--lp-gap)) / var(--_n) - 2 * var(--_inset)
+    );
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
@@ -55,7 +65,7 @@
   .card__num {
     color: var(--lp-accent);
     font-family: var(--lp-font-display);
-    font-size: var(--lp-size-heading);
+    font-size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1));
     font-weight: var(--lp-weight-display);
     font-synthesis: none;
     font-variant-numeric: lining-nums tabular-nums;
@@ -77,24 +87,25 @@
   }
 
   .cards[data-count='1'] {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   @container (min-width: 36rem) {
     .cards:not([data-count='1']) {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      --_n: 2;
     }
   }
 
   /* Wide: three to a row, except where two divides the set evenly. */
   @container (min-width: 60rem) {
     .cards:not([data-count='1'], [data-count='2'], [data-count='4']) {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      --_n: 3;
     }
   }
 
   /* Bold: open columns under a hard ink rule; the number in ink, huge. */
   :global(.lp[data-lp-style='bold']) .card {
+    --_inset: 0px;
     padding-inline: 0;
     border: none;
     border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);

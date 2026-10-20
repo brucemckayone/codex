@@ -37,7 +37,7 @@
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
   import {
-    getConnectStatus,
+    getOrganizationPayoutStatus,
     getSubscriptionStats,
     listSubscribers,
     listTiers,
@@ -122,7 +122,7 @@
   // so this page can't claim "you're set up, add tiers" for an account the
   // backend would reject.
   const connectQuery = $derived(
-    isOwner && orgId ? getConnectStatus(orgId) : null
+    isOwner && orgId ? getOrganizationPayoutStatus(orgId) : null
   );
   const connectStatus = $derived<ConnectReadinessStatus>(
     (connectQuery as QueryResult<ConnectReadinessStatus> | null)?.current ?? {

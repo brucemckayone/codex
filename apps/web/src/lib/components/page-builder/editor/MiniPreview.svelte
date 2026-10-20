@@ -40,6 +40,9 @@
 </script>
 
 <script lang="ts">
+  import { page as appPage } from '$app/state';
+  import { brandEditor } from '$lib/brand-editor';
+  import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import { type KitPage, PageRenderer } from '$lib/page-builder/kit';
 
@@ -72,6 +75,14 @@
 
   const scale = $derived(frameWidth > 0 ? frameWidth / width : 0);
   const offset = $derived(Math.max(0, (frameHeight - contentHeight * scale) / 2));
+  // The org's own backgrounds, so the kit keeps its real ground (03 X48).
+  const grounds = $derived(
+    orgGrounds(appPage.data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
+  // The org's moving background, so the hero takes it (03 X50, X51).
+  const shader = $derived(
+    orgShader(appPage.data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
   const thumbContext = $derived({ ...context, sellPreview: stillsOf(context.sellPreview) });
 
   /** Render once the frame comes within 200px of the viewport, then stay. */
@@ -148,7 +159,7 @@
       {@attach stripIds}
       {@attach measureStage}
     >
-      <PageRenderer page={page} context={thumbContext} {brandOverrides} {theme} still sticky={false} />
+      <PageRenderer page={page} context={thumbContext} {brandOverrides} {theme} still sticky={false} orgGrounds={grounds} orgShader={shader} />
     </div>
   {/if}
 </div>

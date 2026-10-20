@@ -204,4 +204,14 @@ describe('the entrance stage', () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     expect(stageFor(placed())).toBeNull();
   });
+
+  // 03 X62: the dial's `still` is the page reduced motion sees; its `gentle`
+  // keeps the entrances.
+  it('stages nothing with the motion dial at still, and stages at gentle', () => {
+    page.setAttribute('data-lp-motion', 'still');
+    expect(stageFor(placed())).toBeNull();
+    page.setAttribute('data-lp-motion', 'gentle');
+    expect(stageFor(placed())).not.toBeNull();
+    page.removeAttribute('data-lp-motion');
+  });
 });

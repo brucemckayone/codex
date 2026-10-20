@@ -19,6 +19,7 @@
 
 import {
   courseSubscriptionPlans,
+  courseSubscriptions,
   courses,
   organizationMemberships,
   organizations,
@@ -35,9 +36,17 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type Stripe from 'stripe';
-import { afterAll, beforeAll, describe, expect, it, type Mock } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  type Mock,
+  vi,
+} from 'vitest';
 import {
   ConnectAccountNotReadyError,
   CourseSubscriptionPlanExistsError,
@@ -199,12 +208,115 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
     // Monthly swapped to a NEW immutable Price; annual was unchanged so kept.
     expect(updated.stripePriceMonthlyId).not.toBe(first.stripePriceMonthlyId);
     expect(updated.stripePriceAnnualId).toBe(first.stripePriceAnnualId);
-    // The superseded monthly Price is archived, not deleted (grandfathering).
+    // The superseded monthly Price is archived, not deleted: an archived Price
+    // still bills whoever is on it until their 30-day move (Codex-2hxff.3).
     expect(spies.prices.update).toHaveBeenCalledWith(
       first.stripePriceMonthlyId,
       { active: false }
     );
     expect(await planRows(courseId)).toHaveLength(1);
+  });
+
+  // Owner decision P-6, "Same rule as tiers" (Codex-2hxff.3): a plan's price
+  // change reaches its existing subscribers on THAT interval, at their first
+  // renewal ≥ 30 days after the email. Course plans used to grandfather forever.
+  it("3b. a price change moves that interval's subscribers under the 30-day rule, and emails them", async () => {
+    const courseId = await newCourse();
+    await service.upsertPlan(orgId, courseId, {
+      priceMonthly: 1500,
+      priceAnnual: 15000,
+    });
+    const plan = takeFirst(await planRows(courseId));
+
+    const ns = createUniqueSlug('cps');
+    const [monthlyUser, annualUser] = await seedTestUsers(db, 2);
+    const seeded = await db
+      .insert(courseSubscriptions)
+      .values(
+        (
+          [
+            [monthlyUser, 'month', `sub_${ns}_m`],
+            [annualUser, 'year', `sub_${ns}_y`],
+          ] as const
+        ).map(([userId, billingInterval, stripeSubscriptionId]) => ({
+          userId: userId as string,
+          courseId,
+          planId: plan.id,
+          organizationId: orgId,
+          stripeSubscriptionId,
+          stripeCustomerId: `cus_${ns}`,
+          status: 'active',
+          billingInterval,
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: new Date(Date.now() + 10 * 86_400_000),
+        }))
+      )
+      .returning({ id: courseSubscriptions.id });
+
+    const fanOutStripe = createMockStripe();
+    const renewal = Math.floor(Date.now() / 1000) + 10 * 86_400;
+    const retrieve = vi.fn().mockImplementation(async (id: string) => ({
+      id,
+      status: 'active',
+      billing_cycle_anchor: renewal,
+      metadata: {},
+      items: {
+        data: [
+          {
+            id: `si_${id}`,
+            current_period_end: renewal,
+            price: {
+              id: 'price_old_m',
+              unit_amount: 1500,
+              recurring: { interval: 'month' },
+            },
+          },
+        ],
+      },
+    }));
+    const update = vi.fn().mockResolvedValue({});
+    Object.assign(fanOutStripe.subscriptions, { retrieve, update });
+    const mailer = vi.fn();
+    const fanOutService = new CourseSubscriptionService(
+      { db, environment: 'test', mailer, webAppUrl: 'https://app.test' },
+      fanOutStripe
+    );
+
+    try {
+      // Monthly changes; annual stays the same.
+      await fanOutService.upsertPlan(orgId, courseId, {
+        priceMonthly: 1800,
+        priceAnnual: 15000,
+      });
+
+      // Only the monthly subscriber is read — the annual one is never touched.
+      expect(retrieve).toHaveBeenCalledTimes(1);
+      expect(retrieve).toHaveBeenCalledWith(`sub_${ns}_m`);
+      // Renews in 10 days: too soon, so marked pending (no item swap yet).
+      const [, params] = update.mock.calls[0] ?? [];
+      expect(params).not.toHaveProperty('items');
+      expect(params).toMatchObject({
+        metadata: { codex_pending_price_id: expect.any(String) },
+      });
+      expect(mailer).toHaveBeenCalledTimes(1);
+      expect(mailer.mock.calls[0]?.[0]).toMatchObject({
+        templateName: 'subscription-tier-price-change',
+        to: expect.any(String),
+        data: {
+          planName: 'Plan Course',
+          oldPriceFormatted: '£15.00',
+          newPriceFormatted: '£18.00',
+          billingInterval: 'month',
+        },
+      });
+    } finally {
+      await db.delete(courseSubscriptions).where(
+        inArray(
+          courseSubscriptions.id,
+          seeded.map((row) => row.id)
+        )
+      );
+    }
   });
 
   it('4. createPlan twice conflicts — the reason upsertPlan exists', async () => {

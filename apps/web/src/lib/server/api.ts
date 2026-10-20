@@ -52,7 +52,6 @@ import type {
   ContactSettingsResponse,
   CourseOffer,
   FeatureSettingsResponse,
-  MyMembershipResponse,
   OrganizationPublicStatsResponse,
   OrganizationWithRole,
   PaginatedListResponse,
@@ -76,7 +75,6 @@ import type {
   CancelSubscriptionInput,
   ChangeTierInput,
   ConnectMeOnboardInput,
-  ConnectOnboardInput,
   CreateCategoryInput,
   CreateCheckoutInput,
   CreatePortalSessionInput,
@@ -129,6 +127,7 @@ import type {
   JourneySellMedia,
   PageOffer,
 } from '$lib/page-builder';
+import type { PageImageUpload } from '$lib/page-builder/page-images';
 import type { SellPreview } from '$lib/page-builder/render';
 // Import local types that extend DB types with relations
 // OrgMemberItem is in $lib/types (not here) so components can import it
@@ -141,8 +140,13 @@ import type {
   ContentWithRelations,
   CurrentSubscription,
   MediaItemWithRelations,
+  MyMembershipWithOwnership,
   OrganizationData,
+  OrganizationPayoutStatusResponse,
   OrgMemberItem,
+  OwnershipAccepted,
+  OwnershipOffer,
+  OwnershipView,
   SubscriptionCheckoutResponse,
   SubscriptionStats,
   SubscriptionTier,
@@ -1414,9 +1418,14 @@ export function createServerApi(
            * properties through a variable.
            */
           seo?: JourneyPageRecord['seo'];
+          /**
+           * The revision the copy was made from: named, the save is refused
+           * (412) once the stored page has moved on (Codex-61zsk.18).
+           */
+          revision?: JourneyPageRecord['revision'];
         }
       ) =>
-        request<null>(
+        request<{ revision: string }>(
           'access',
           `/api/journeys/studio/journeys/${encodeURIComponent(
             record.id
@@ -1661,8 +1670,8 @@ export function createServerApi(
         organizationId: string,
         pageId: string,
         file: File
-      ): Promise<{ key: string; url: string }> =>
-        forwardMultipartUpload<{ key: string; url: string }>({
+      ): Promise<PageImageUpload> =>
+        forwardMultipartUpload<PageImageUpload>({
           url: `${serverApiUrl(
             platform,
             'access'
@@ -1713,9 +1722,8 @@ export function createServerApi(
         }),
 
       /**
-       * Clear the course's signature. The guide then falls back down A32's chain
-       * — the signature media ref's poster still, then whatever the composition
-       * draws without one — so clearing this is not the same as having none.
+       * Clear the course's signature. The guide then signs off with the typeset
+       * name: the upload is the signature's only source (Codex-61zsk.47).
        */
       deleteJourneySignatureImage: (organizationId: string, pageId: string) =>
         request<void>(
@@ -1971,7 +1979,9 @@ export function createServerApi(
        * Used for access control and role-based UI rendering.
        *
        * @param id - Organization UUID
-       * @returns Membership data with role, status, and joinedAt timestamp
+       * @returns Membership data with role, status, joinedAt, and the caller's
+       *   open ownership offer for this org (`pendingOwnershipOffer`, null when
+       *   none — Codex-2hxff.2)
        *
        * @example
        * ```typescript
@@ -1982,7 +1992,7 @@ export function createServerApi(
        * ```
        */
       getMyMembership: (id: string) =>
-        request<MyMembershipResponse>(
+        request<MyMembershipWithOwnership>(
           'org',
           `/api/organizations/${id}/members/my-membership`
         ),
@@ -2094,6 +2104,58 @@ export function createServerApi(
         request<{ count: number }>(
           'org',
           `/api/organizations/${id}/followers/count`
+        ),
+    },
+
+    /**
+     * Organisation ownership transfer (organization-api, Codex-2hxff.2).
+     *
+     * One owner per organisation; the owner offers ownership to an active
+     * admin or creator, who accepts or declines. Role rules live in the
+     * service, so every route returns 403/409/422 codes the UI maps to copy.
+     *
+     * The withdraw / accept / decline routes declare NO `input.body`, so they
+     * are sent with no body at all — a body on a route that declares none is
+     * never read, and `procedure()` treats a declared body as mandatory.
+     */
+    ownership: {
+      /** The ownership card's view; fields are omitted per viewer. */
+      get: (orgId: string) =>
+        request<OwnershipView>('org', `/api/organizations/${orgId}/ownership`),
+
+      /** Owner only. `confirmName` must equal the org name (trimmed, any case). */
+      offer: (
+        orgId: string,
+        data: { recipientUserId: string; confirmName: string }
+      ) =>
+        request<OwnershipOffer>(
+          'org',
+          `/api/organizations/${orgId}/ownership/offers`,
+          { method: 'POST', body: JSON.stringify(data) }
+        ),
+
+      /** Owner only. */
+      withdraw: (orgId: string, offerId: string) =>
+        request<OwnershipOffer>(
+          'org',
+          `/api/organizations/${orgId}/ownership/offers/${offerId}/withdraw`,
+          { method: 'POST' }
+        ),
+
+      /** The offer's recipient only. The caller becomes the owner. */
+      accept: (orgId: string, offerId: string) =>
+        request<OwnershipAccepted>(
+          'org',
+          `/api/organizations/${orgId}/ownership/offers/${offerId}/accept`,
+          { method: 'POST' }
+        ),
+
+      /** The offer's recipient only. */
+      decline: (orgId: string, offerId: string) =>
+        request<OwnershipOffer>(
+          'org',
+          `/api/organizations/${orgId}/ownership/offers/${offerId}/decline`,
+          { method: 'POST' }
         ),
     },
 
@@ -2898,51 +2960,15 @@ export function createServerApi(
      */
     connect: {
       /**
-       * Start Connect onboarding — creates Express account + returns onboarding URL
+       * The org's payout status — read-only, for any member. GET
+       * /connect/organization-status. Status fields only: the account holder's
+       * own details and dashboard link are reachable only through /me below
+       * (Codex-2hxff.1).
        */
-      onboard: (data: ConnectOnboardInput) =>
-        request<ConnectOnboardResponse>(
+      getOrganizationStatus: (organizationId: string) =>
+        request<OrganizationPayoutStatusResponse>(
           'ecom',
-          `/connect/onboard?organizationId=${encodeURIComponent(data.organizationId)}`,
-          {
-            method: 'POST',
-            body: JSON.stringify(data),
-          }
-        ),
-
-      /**
-       * Get Connect account status for an org
-       */
-      getStatus: (organizationId: string) =>
-        request<ConnectAccountStatusResponse>(
-          'ecom',
-          `/connect/status?organizationId=${encodeURIComponent(organizationId)}`
-        ),
-
-      /**
-       * Get Stripe Express dashboard link
-       */
-      getDashboardLink: (organizationId: string) =>
-        request<ConnectDashboardResponse>(
-          'ecom',
-          `/connect/dashboard?organizationId=${encodeURIComponent(organizationId)}`,
-          {
-            method: 'POST',
-            body: JSON.stringify({ organizationId }),
-          }
-        ),
-
-      /**
-       * Sync Connect account status with Stripe (polls Stripe API)
-       */
-      syncStatus: (organizationId: string) =>
-        request<ConnectAccountStatusResponse>(
-          'ecom',
-          `/connect/sync?organizationId=${encodeURIComponent(organizationId)}`,
-          {
-            method: 'POST',
-            body: JSON.stringify({ organizationId }),
-          }
+          `/connect/organization-status?organizationId=${encodeURIComponent(organizationId)}`
         ),
 
       // ── Creator-self-scoped /me routes (Codex-69t7c.3 / WP3) ──────────────

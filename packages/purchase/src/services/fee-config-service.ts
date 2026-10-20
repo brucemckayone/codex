@@ -94,14 +94,14 @@ export interface AuditLogFilters {
 const CODE_DEFAULT_SUBSCRIPTION: Readonly<FeeConfig> = Object.freeze({
   platformFeePercent: FEES.PLATFORM_PERCENT,
   orgFeePercent: FEES.SUBSCRIPTION_ORG_PERCENT,
-  minPlatformFeeCents: 0,
+  minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
   minTransferCents: 0,
 });
 
 const CODE_DEFAULT_ONE_OFF: Readonly<FeeConfig> = Object.freeze({
   platformFeePercent: FEES.PLATFORM_PERCENT,
   orgFeePercent: FEES.ORG_PERCENT,
-  minPlatformFeeCents: 0,
+  minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
   minTransferCents: 0,
 });
 
@@ -243,7 +243,9 @@ export class FeeConfigService extends BaseService {
           existing?.oneOffOrgFeePercent ??
           FEES.ORG_PERCENT,
         minPlatformFeeCents:
-          updates.minPlatformFeeCents ?? existing?.minPlatformFeeCents ?? 0,
+          updates.minPlatformFeeCents ??
+          existing?.minPlatformFeeCents ??
+          FEES.MIN_PLATFORM_FEE_CENTS,
         minTransferCents:
           updates.minTransferCents ?? existing?.minTransferCents ?? 0,
       };

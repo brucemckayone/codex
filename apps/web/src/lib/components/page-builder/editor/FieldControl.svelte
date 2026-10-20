@@ -5,27 +5,55 @@
   the creator types (blank = the key is removed, exactly as the canvas's
   inline edit commits), so the inspector and inline editing are two views of
   one value: whichever is typed in, the other follows. `mediaBaseUrl` is
-  only for `image` fields, which preview the stored image against it.
+  only for `image` fields, which preview the stored image against it. An
+  `image` field with `focalLayouts` offers its focal point under it (03 X64),
+  live in those layouts; an `action` field is a Button's destination. A
+  `choice` presses one of its options, the first being the absent key. A
+  `mark` presses one of the kit's marks; pressing the chosen one again takes
+  it away (Codex-61zsk.58).
 -->
 <script lang="ts">
   import Select from '$lib/components/ui/Select/Select.svelte';
   import Switch from '$lib/components/ui/Switch/Switch.svelte';
   import type { BlockField } from '$lib/page-builder/kit';
+  import { MARKS, type MarkId } from '$lib/page-builder/kit/model/marks';
+  import Mark from '$lib/page-builder/kit/primitives/Mark.svelte';
+  import { isImageRef } from '$lib/page-builder/page-images';
   import { safeHref } from '$lib/page-builder/render/safe-href';
   import * as m from '$paraglide/messages';
+  import ButtonActionField from './ButtonActionField.svelte';
+  import FocalPointField from './FocalPointField.svelte';
   import ImageField from './ImageField.svelte';
   import ItemsField from './ItemsField.svelte';
   import ListField from './ListField.svelte';
   import MediaField from './MediaField.svelte';
+  import { type OfferChoices, offerOptions } from './offer-field';
 
   interface Props {
     field: BlockField;
     value: unknown;
     onChange: (value: unknown) => void;
     mediaBaseUrl?: string | null;
+    /** The section's resolved layout, for a field that depends on it (a focal point). */
+    layout?: string;
+    /** The section this field belongs to (a Button never targets itself). */
+    sectionId?: string;
+    /** `items` only: the entry the layout draws larger, tagged "Leads". */
+    leading?: number | null;
+    /** `offer` only (and the `items` that hold one): the page's live ways in. */
+    offerPaths?: OfferChoices;
   }
 
-  const { field, value, onChange, mediaBaseUrl = null }: Props = $props();
+  const {
+    field,
+    value,
+    onChange,
+    mediaBaseUrl = null,
+    layout,
+    sectionId = '',
+    leading = null,
+    offerPaths = [],
+  }: Props = $props();
 
   const id = $props.id();
   const text = $derived(typeof value === 'string' ? value : '');
@@ -48,12 +76,58 @@
   function writeText(next: string): void {
     onChange(next.trim() ? next : undefined);
   }
+
+  const options = $derived(field.options ?? []);
+  // A value the options don't hold reads as the default, as the block reads it.
+  const chosen = $derived(
+    options.find((option) => option.value === value)?.value ?? options[0]?.value
+  );
+
+  function choose(next: string): void {
+    onChange(next === options[0]?.value ? undefined : next);
+  }
+
+  // A mark the kit cannot draw reads as none, as the block reads it.
+  const isMark = (option: string): option is MarkId => (MARKS as readonly string[]).includes(option);
+  const marks = $derived(
+    options.filter((option): option is { value: MarkId; label: string } => isMark(option.value))
+  );
+
+  function mark(next: string): void {
+    onChange(next === value ? undefined : next);
+  }
 </script>
 
 {#if field.control === 'list'}
   <ListField {field} {value} {onChange} />
 {:else if field.control === 'items'}
-  <ItemsField {field} {value} {onChange} {mediaBaseUrl} />
+  <ItemsField {field} {value} {onChange} {mediaBaseUrl} {layout} {leading} {offerPaths} />
+{:else if field.control === 'offer'}
+  {@const offered = typeof offerPaths === 'string' ? [] : offerOptions(offerPaths, value)}
+  <div class="field">
+    {#if typeof offerPaths === 'string'}
+      <!-- Not yet read, or not readable: neither "gone" nor "none" is known. -->
+      <span class="field__label">{field.label}</span>
+      <p class="field__hint" role="status">
+        {offerPaths === 'loading'
+          ? m.studio_page_editor_offer_loading()
+          : m.studio_page_editor_offer_unread()}
+      </p>
+    {:else if offered.length > 0}
+      <Select
+        id="{id}-offer"
+        label={field.label}
+        options={offered}
+        value={typeof value === 'string' && value ? value : undefined}
+        placeholder={m.studio_page_editor_offer_pick()}
+        onValueChange={(next) => onChange(next || undefined)}
+      />
+      {#if field.hint}<p class="field__hint">{field.hint}</p>{/if}
+    {:else}
+      <span class="field__label">{field.label}</span>
+      <p class="field__hint">{m.studio_page_editor_offer_none()}</p>
+    {/if}
+  </div>
 {:else if field.control === 'media'}
   <MediaField {field} />
 {:else if field.control === 'image'}
@@ -64,6 +138,16 @@
     {mediaBaseUrl}
     decorative={field.decorative}
   />
+  {#if field.focalLayouts && isImageRef(value)}
+    <FocalPointField
+      image={value}
+      {mediaBaseUrl}
+      crops={(layout !== undefined && field.focalLayouts[layout]) || []}
+      onChange={(next) => onChange(next)}
+    />
+  {/if}
+{:else if field.control === 'action'}
+  <ButtonActionField {field} {value} {onChange} {sectionId} />
 {:else if field.control === 'toggle'}
   <div class="field field--toggle">
     <span class="field__label" id="{id}-label">{field.label}</span>
@@ -73,6 +157,52 @@
       aria-describedby={field.hint ? `${id}-hint` : undefined}
       onCheckedChange={(checked) => onChange(checked ? true : undefined)}
     />
+    {#if field.hint}<p class="field__hint" id="{id}-hint">{field.hint}</p>{/if}
+  </div>
+{:else if field.control === 'choice'}
+  <div class="field">
+    <span class="field__label" id="{id}-label">{field.label}</span>
+    <div
+      class="field__choices"
+      role="group"
+      aria-labelledby="{id}-label"
+      aria-describedby={field.hint ? `${id}-hint` : undefined}
+      style:--_count={options.length}
+    >
+      {#each options as option (option.value)}
+        <button
+          type="button"
+          class="field__choice"
+          aria-pressed={chosen === option.value}
+          onclick={() => choose(option.value)}
+        >
+          {option.label}
+        </button>
+      {/each}
+    </div>
+    {#if field.hint}<p class="field__hint" id="{id}-hint">{field.hint}</p>{/if}
+  </div>
+{:else if field.control === 'mark'}
+  <div class="field">
+    <span class="field__label" id="{id}-label">{field.label}</span>
+    <div
+      class="field__marks"
+      role="group"
+      aria-labelledby="{id}-label"
+      aria-describedby={field.hint ? `${id}-hint` : undefined}
+    >
+      {#each marks as option (option.value)}
+        <button
+          type="button"
+          class="field__mark"
+          aria-label={option.label}
+          aria-pressed={value === option.value}
+          onclick={() => mark(option.value)}
+        >
+          <Mark mark={option.value} size="1.25rem" />
+        </button>
+      {/each}
+    </div>
     {#if field.hint}<p class="field__hint" id="{id}-hint">{field.hint}</p>{/if}
   </div>
 {:else if field.control === 'select'}
@@ -154,6 +284,81 @@
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     color: var(--color-text);
+  }
+
+  /* The spacing control's group (SpacingControl): a well, the pressed option
+     raised on it. */
+  .field__choices {
+    display: grid;
+    grid-template-columns: repeat(var(--_count), minmax(0, 1fr));
+    gap: var(--space-0-5);
+    padding: var(--space-0-5);
+    border-radius: var(--radius-md);
+    background: color-mix(in oklab, var(--color-text) 6%, transparent);
+  }
+
+  .field__choice {
+    min-block-size: var(--tap-target-min);
+    padding: var(--space-1) var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-secondary);
+    font: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+  }
+
+  .field__choice:hover {
+    color: var(--color-text);
+  }
+
+  .field__choice[aria-pressed='true'] {
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-weight: var(--font-medium);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .field__choice:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-text);
+    outline-offset: var(--focus-offset);
+  }
+
+  /* The marks: as many tap-sized cells as fit, the chosen one raised. */
+  .field__marks {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--tap-target-min), 1fr));
+    gap: var(--space-0-5);
+    padding: var(--space-0-5);
+    border-radius: var(--radius-md);
+    background: color-mix(in oklab, var(--color-text) 6%, transparent);
+  }
+
+  .field__mark {
+    display: grid;
+    place-items: center;
+    min-block-size: var(--tap-target-min);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+  }
+
+  .field__mark:hover {
+    color: var(--color-text);
+  }
+
+  .field__mark[aria-pressed='true'] {
+    background: var(--color-surface);
+    color: var(--color-text);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .field__mark:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-text);
+    outline-offset: var(--focus-offset);
   }
 
   .field__input {

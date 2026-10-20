@@ -16,6 +16,7 @@
   column.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import { resolvePageImageUrl } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
@@ -45,7 +46,7 @@
 </script>
 
 <div class="story lp-bleed" data-layout={layout}>
-  {#if content.eyebrow || content.heading || content.body}
+  {#if hasHead(content)}
     <header class="story__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="story" {edit} />{/if}
       {#if content.heading}
@@ -90,15 +91,17 @@
     grid-column: bleed;
   }
 
+  /* The measure is its heading's room too (louder's fit, 03 X62). */
   .story__head {
     display: grid;
     gap: var(--lp-stack);
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
+    --lp-heading-column: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .story__head :global(.lp-heading) {
-    max-inline-size: 20ch;
+    max-inline-size: calc(20 * var(--lp-measure-unit));
   }
 
   /* global.css caps every `p` at 65ch; the prompt spans its region. */

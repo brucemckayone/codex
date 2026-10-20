@@ -12,10 +12,11 @@
 
   A join button appears only when the creator gives it words (`ctaLabel` or
   `note`). The creator's image (contract A5) joins the heading's column in
-  `columns`, and leads the passage in the other two.
+  `columns`, and leads the passage in the other two, or follows its words
+  (`imageAt: 'after'`, before the join button: Codex-61zsk.58).
 -->
 <script lang="ts">
-  import { resolvePageImageUrl } from '../../../page-images';
+  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
   import { paragraphs } from '../../model/read';
   import type { BlockProps } from '../../model/types';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -40,12 +41,15 @@
   // the statement itself.
   const headingSize = $derived(layout === 'statement' && content.body ? 'title' : 'heading');
   const image = $derived(resolvePageImageUrl(content.image, 'lg', context.mediaBaseUrl));
+  const focus = $derived(storedFocus(content.image));
   const beside = $derived(layout === 'columns');
+  // Beside the words in `columns`, the picture is neither before nor after them.
+  const after = $derived(content.imageAt === 'after' && !beside);
 </script>
 
 {#snippet figure(src: string)}
-  <div class="text__media">
-    <Media image={src} alt={content.image?.alt ?? ''} ratio="var(--_ratio)" />
+  <div class="text__media" data-at={after ? 'after' : undefined}>
+    <Media image={src} alt={content.image?.alt ?? ''} ratio="var(--_ratio)" {focus} />
   </div>
 {/snippet}
 
@@ -55,7 +59,7 @@
   data-long={long ? '' : undefined}
   data-long-lead={longLead ? '' : undefined}
 >
-  {#if image && !beside}{@render figure(image)}{/if}
+  {#if image && !beside && !after}{@render figure(image)}{/if}
   {#if content.eyebrow || content.heading || (image && beside)}
     <header class="text__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="text" {edit} />{/if}
@@ -87,6 +91,8 @@
     <p class="text__empty" data-lp-edit-only>{TEXT_EMPTY}</p>
   {/if}
 
+  {#if image && after}{@render figure(image)}{/if}
+
   {#if asks}
     <ButtonRow
       {context}
@@ -112,9 +118,9 @@
     align-content: start;
   }
 
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .text__head :global(.lp-heading[data-size='heading']) {
-    max-inline-size: 20ch;
+    max-inline-size: calc(20 * var(--lp-measure-unit));
   }
 
   /* Calm and low above a passage; a little taller beside one. */
@@ -155,9 +161,23 @@
     gap: var(--lp-stack);
   }
 
-  /* The words stay tight to each other; the image stands a band-gap off them. */
+  /* The words stay tight to each other; the image stands a band-gap off them,
+     on whichever side they are. */
   .text[data-layout='statement'] > .text__media {
     margin-block-end: calc(var(--lp-gap) - var(--lp-stack));
+  }
+
+  .text[data-layout='statement'] > .text__media[data-at='after'] {
+    margin-block-start: calc(var(--lp-gap) - var(--lp-stack));
+  }
+
+  /* The passage keeps a little room under it for the join button (below). */
+  .text[data-layout='statement'] > :global(.lp-text.text__body + .text__media[data-at='after']) {
+    margin-block-start: calc(var(--lp-gap) - var(--lp-stack) - var(--space-2));
+  }
+
+  .text[data-layout='statement'] > .text__media[data-at='after']:last-child {
+    margin-block-end: 0;
   }
 
   .text[data-layout='statement'] > :global(.lp-text.text__body) {
@@ -166,7 +186,7 @@
   }
 
   .text[data-layout='statement'] :global(.text__body > p:first-child) {
-    max-inline-size: 34ch;
+    max-inline-size: calc(34 * var(--lp-measure-unit));
     color: var(--lp-ink);
     font-size: calc(var(--lp-size-title) * 1.3);
     line-height: var(--leading-snug);
@@ -174,14 +194,14 @@
   }
 
   .text[data-layout='statement'][data-long-lead] :global(.text__body > p:first-child) {
-    max-inline-size: 40ch;
+    max-inline-size: calc(40 * var(--lp-measure-unit));
     font-size: var(--lp-size-lead);
     line-height: var(--lp-leading-lead);
     text-wrap: pretty;
   }
 
   .text[data-layout='statement'] :global(.text__body > p:not(:first-child)) {
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
     color: var(--lp-ink-soft);
   }
 
@@ -234,6 +254,8 @@
     .text[data-layout='columns'] > .text__head {
       position: sticky;
       top: var(--space-12);
+      /* The heading's room is its half (louder's fit, 03 X62). */
+      --lp-heading-column: calc((var(--lp-column) - var(--lp-gap) * 1.5) / 2);
     }
 
     .text[data-layout='columns'] .text__media {
@@ -244,6 +266,7 @@
        image turns wide and low rather than towering over the band. */
     .text[data-layout='columns']:not(:has(> :global(.text__body))) > .text__head {
       grid-column: 1 / -1;
+      --lp-heading-column: var(--lp-column);
     }
 
     .text[data-layout='columns']:not(:has(> :global(.text__body))) .text__media {
@@ -268,7 +291,7 @@
   /* Several paragraphs keep the centred column but read from the start of
      each line: centred prose past a few lines is hard to follow. */
   .text[data-layout='centered'][data-long] > :global(.lp-text.text__body) {
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
     text-align: start;
   }
 </style>

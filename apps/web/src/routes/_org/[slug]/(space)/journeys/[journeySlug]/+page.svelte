@@ -3,12 +3,14 @@
 
   Public journey sales page (SPEC §8.2). The awaited `coursePage` drives the SEO
   head + JSON-LD (rendered synchronously — never gated on streamed data), and
-  `JourneyRenderer` renders the page's sections with per-page brand overrides.
-  The streamed `sellPreview` promise is threaded straight through to the renderer
-  where the intro/reel sections `{#await}` it behind poster skeletons.
+  the kit's `PageRenderer` renders the page's sections with per-page brand
+  overrides, against the context `buildPublicContext` assembles. The streamed
+  `sellPreview` promise is threaded through that context to the blocks that
+  show its films, which wait for it without holding the page.
 -->
 <script lang="ts">
   import { page } from '$app/state';
+  import { brandEditor } from '$lib/brand-editor';
   import DraftPreviewBanner from '$lib/components/journeys/DraftPreviewBanner.svelte';
   import { StructuredData } from '$lib/components/seo';
   import { PageRenderer } from '$lib/page-builder/kit';
@@ -18,6 +20,7 @@
     type OfferBillingInterval,
     type OfferPath,
   } from '$lib/page-builder/offer-paths';
+  import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import { buildPublicContext, offerAsVisitor } from '$lib/page-builder/public-context';
   import { buildJourneyUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
@@ -167,7 +170,7 @@
   );
 
   // The checkout each path deep-links to — absolute, because JSON-LD is consumed
-  // outside page context. Mirrors `JourneyRenderer`'s own `checkoutUrl`: the PAGE
+  // outside page context. As the pre-kit renderer's `checkoutUrl` was: the PAGE
   // slug, which is the key the checkout route resolves by.
   const checkoutUrl = $derived(
     new URL(
@@ -234,6 +237,14 @@
 
   /** The selling organisation, from the org layout's awaited data. */
   const orgName = $derived(data.org?.name ?? null);
+  // The org's own backgrounds, so the kit keeps its real ground (03 X48).
+  const grounds = $derived(
+    orgGrounds(data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
+  // The org's moving background, so the hero takes it (03 X50, X51).
+  const shader = $derived(
+    orgShader(data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
 
   // Course JSON-LD for rich results.
   //
@@ -347,4 +358,6 @@
   page={data.kitPage}
   {context}
   brandOverrides={data.coursePage.page.brandOverrides}
+  orgGrounds={grounds}
+  orgShader={shader}
 />

@@ -12,17 +12,21 @@
   A join button appears only when the creator gives it words (`ctaLabel` or
   `note`). A grid or bento tile may carry the creator's image (contract A5);
   in the grid, once one does, every tile holds the same frame, so a mixed row
-  still reads as a set.
+  still reads as a set. An item's mark (Codex-61zsk.58) sits above its name,
+  in the mark ink (03 §5: a drawn mark, never the text grade); in the
+  checklist it takes the tick's place, in the tick's own box and ink.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import { CheckIcon } from '$lib/components/ui/Icon';
-  import { resolvePageImageUrl } from '../../../page-images';
+  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
+  import Mark from '../../primitives/Mark.svelte';
   import Media from '../../primitives/Media.svelte';
   import Text from '../../primitives/Text.svelte';
   import BenefitsBento from './BenefitsBento.svelte';
@@ -35,7 +39,7 @@
   const layout = $derived(section.layout);
   const items = $derived(content.items ?? []);
   const asks = $derived(Boolean(content.ctaLabel || content.note));
-  const headed = $derived(Boolean(content.eyebrow || content.heading || content.body));
+  const headed = $derived(hasHead(content));
   // A tile's name sits one level under the section heading, or takes its
   // level when there is none, so the outline never skips a step.
   const itemLevel = $derived(
@@ -100,6 +104,7 @@
       <ul class="benefits-rows">
         {#each items as item, index (index)}
           <li>
+            {#if item.mark}<span class="benefits__mark"><Mark mark={item.mark} /></span>{/if}
             <p class="benefits-rows__name">{item.title}</p>
             {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
           </li>
@@ -116,7 +121,9 @@
       <ul class="benefits-checks">
         {#each items as item, index (index)}
           <li>
-            <span class="benefits-checks__mark" aria-hidden="true"><CheckIcon size="1em" /></span>
+            <span class="benefits-checks__mark" aria-hidden="true">
+              {#if item.mark}<Mark mark={item.mark} />{:else}<CheckIcon size="1em" />{/if}
+            </span>
             <div>
               <p class="benefits-checks__name">{item.title}</p>
               {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
@@ -136,8 +143,14 @@
         {#each items as item, index (index)}
           <li>
             {#if pictured}
-              <Media image={tileImages[index]} alt={item.image?.alt ?? ''} ratio="3 / 2" />
+              <Media
+                image={tileImages[index]}
+                alt={item.image?.alt ?? ''}
+                ratio="3 / 2"
+                focus={storedFocus(item.image)}
+              />
             {/if}
+            {#if item.mark}<span class="benefits__mark"><Mark mark={item.mark} /></span>{/if}
             <Heading level={itemLevel} size="title" text={item.title} type="benefits" />
             {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
           </li>
@@ -161,9 +174,9 @@
     align-content: start;
   }
 
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .benefits :global(.lp-heading[data-size='heading']) {
-    max-inline-size: 20ch;
+    max-inline-size: calc(20 * var(--lp-measure-unit));
   }
 
   .benefits ul {
@@ -188,6 +201,20 @@
     text-wrap: pretty;
   }
 
+  /* An item's mark, above its name: larger than the tick, smaller than a
+     picture, so it marks the item without becoming one. The mark ink paints
+     its stroke (03 §5: graphic grade, never the colour of text). */
+  .benefits__mark {
+    display: inline-flex;
+    justify-self: start;
+    font-size: var(--space-7);
+    line-height: 1;
+  }
+
+  .benefits__mark :global(svg) {
+    stroke: var(--lp-mark-ink);
+  }
+
   /* global.css caps every `p` at 65ch; the prompt spans its region. */
   .benefits__empty {
     max-inline-size: none;
@@ -200,12 +227,27 @@
   }
 
   /* ── grid ──────────────────────────────────────────────────────────────── */
+  /* Each name reads as a promise, not a caption (03 X55): two fifths of the
+     way from the Style's title size to its heading's; four across, a fifth,
+     so a name of a few words still sits in its narrower column. The row is
+     `--_n` across, so a card knows its room. */
   .benefits-grid {
+    --lp-title-lift: 0.4;
+    --_n: 1;
     display: grid;
+    grid-template-columns: repeat(var(--_n), minmax(0, 1fr));
     gap: var(--space-10) var(--lp-gap);
   }
 
+  /* Its name's room (03 X71): its share of the column, less its inset, the
+     padding and border a Style that boxes it gives it (Soft, below). A lone
+     card's measure is in the body's `0`s, which no title can read, so its
+     room is the column, which is never narrower. */
   .benefits-grid li {
+    --_inset: 0px;
+    --lp-title-column: calc(
+      (var(--lp-column) - (var(--_n) - 1) * var(--lp-gap)) / var(--_n) - 2 * var(--_inset)
+    );
     display: grid;
     align-content: start;
     gap: var(--space-3);
@@ -214,7 +256,7 @@
   }
 
   .benefits-grid[data-count='1'] {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   /* The picture leads the tile; its name keeps the tile's own rhythm under it. */
@@ -224,7 +266,7 @@
 
   @container (min-width: 36rem) {
     .benefits-grid:not([data-count='1']) {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      --_n: 2;
     }
   }
 
@@ -232,11 +274,12 @@
      seven and eight; 3 across for the rest), so no row is left with one. */
   @container (min-width: 60rem) {
     .benefits-grid:is([data-count='3'], [data-count='5'], [data-count='6'], [data-count='9']) {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      --_n: 3;
     }
 
     .benefits-grid:is([data-count='4'], [data-count='7'], [data-count='8']) {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      --lp-title-lift: 0.2;
+      --_n: 4;
     }
   }
 
@@ -314,6 +357,8 @@
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       align-items: center;
       column-gap: calc(var(--lp-gap) * 1.5);
+      /* The heading's room is its half (louder's fit, 03 X62). */
+      --lp-heading-column: calc((var(--lp-column) - var(--lp-gap) * 1.5) / 2);
     }
 
     .benefits[data-layout='split'][data-long] {
@@ -348,6 +393,7 @@
   }
 
   :global(.lp[data-lp-style='soft']) .benefits-grid li {
+    --_inset: calc(var(--space-6) + var(--lp-border));
     padding: var(--space-6);
     border: var(--lp-border) var(--border-style) var(--lp-line);
     border-radius: var(--lp-radius-card);
@@ -357,11 +403,13 @@
      larger sets in threes, never four narrow cards to a row. */
   @container (min-width: 60rem) {
     :global(.lp[data-lp-style='soft']) .benefits-grid[data-count='4'] {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      --lp-title-lift: 0.4;
+      --_n: 2;
     }
 
     :global(.lp[data-lp-style='soft']) .benefits-grid:is([data-count='7'], [data-count='8']) {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      --lp-title-lift: 0.4;
+      --_n: 3;
     }
   }
 

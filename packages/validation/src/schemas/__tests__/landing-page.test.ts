@@ -11,19 +11,25 @@
 import { describe, expect, it } from 'vitest';
 import {
   COLOUR_SCHEME_IDS,
+  PAGE_DIALS,
   PAGE_STYLE_IDS,
   pageDesignSchema,
+  pageDialsSchema,
+  pageFacetsSchema,
   SECTION_LAYOUTS,
   SECTION_SPACING_IDS,
   SECTION_TYPE_IDS,
   sectionStyleSchema,
+  TYPE_FACETS,
 } from '../landing-page';
 
 describe('SECTION_LAYOUTS / SECTION_TYPE_IDS', () => {
   it('derives the type ids from the layout record keys, in declaration order', () => {
     expect(SECTION_TYPE_IDS).toEqual(Object.keys(SECTION_LAYOUTS));
-    // 14 from 01-contract §2, + story and gallery (03-expressive-contract §3).
-    expect(SECTION_TYPE_IDS).toHaveLength(16);
+    // 14 from 01-contract §2, + story and gallery (03-expressive-contract §3),
+    // + inside, "What's inside" (03 X63, Codex-61zsk.52), + the four simple
+    // sections, picture, heading, break and button (03 X64, Codex-61zsk.53).
+    expect(SECTION_TYPE_IDS).toHaveLength(21);
   });
 
   it("every type's layout list is non-empty", () => {
@@ -89,5 +95,68 @@ describe('pageDesignSchema', () => {
 
   it('accepts an empty bag', () => {
     expect(pageDesignSchema.parse({})).toEqual({});
+  });
+});
+
+describe('pageDialsSchema (03 X61)', () => {
+  it('accepts every step of every dial', () => {
+    for (const [dial, steps] of Object.entries(PAGE_DIALS))
+      for (const step of steps)
+        expect(pageDialsSchema.parse({ [dial]: step })).toEqual({
+          [dial]: step,
+        });
+  });
+
+  it('declares exactly the dials PAGE_DIALS lists', () => {
+    const all = Object.fromEntries(
+      Object.entries(PAGE_DIALS).map(([dial, steps]) => [dial, steps[1]])
+    );
+    expect(pageDialsSchema.parse(all)).toEqual(all);
+  });
+
+  // A dial's unknown step is the dial's reset (the Style's own), never a
+  // failed save: the same degrade as a section's scheme.
+  it("degrades an unknown step to the Style's, strips an unknown dial, and drops a bag that is not one", () => {
+    expect(
+      pageDialsSchema.parse({
+        colour: 'neon',
+        corners: 'brand',
+        texture: 'grain',
+      })
+    ).toEqual({ corners: 'brand' });
+    for (const bag of ['muted', 7, null, ['vivid']])
+      expect(pageDialsSchema.parse(bag)).toBeUndefined();
+  });
+
+  it('rides on the page design, beside its Style', () => {
+    expect(
+      pageDesignSchema.parse({ style: 'soft', dials: { spacing: 'spacious' } })
+    ).toEqual({ style: 'soft', dials: { spacing: 'spacious' } });
+    expect(pageDesignSchema.parse({ style: 'soft', dials: 'airy' })).toEqual({
+      style: 'soft',
+    });
+  });
+});
+
+describe('pageFacetsSchema (03 X73)', () => {
+  it('accepts every Type', () => {
+    for (const type of TYPE_FACETS)
+      expect(pageFacetsSchema.parse({ type })).toEqual({ type });
+  });
+
+  // An unknown Type is the Style's own, never a failed save, as a dial's
+  // unknown step is. Which Style may take which Type is checked on read.
+  it("degrades an unknown Type to the Style's, and drops a bag that is not one", () => {
+    expect(pageFacetsSchema.parse({ type: 'path', surface: 'soft' })).toEqual(
+      {}
+    );
+    for (const bag of ['poster', 7, null, ['bold']])
+      expect(pageFacetsSchema.parse(bag)).toBeUndefined();
+  });
+
+  it('rides on the page design, beside its dials', () => {
+    expect(
+      pageDesignSchema.parse({ style: 'clean', facets: { type: 'poster' } })
+    ).toEqual({ style: 'clean', facets: { type: 'poster' } });
   });
 });

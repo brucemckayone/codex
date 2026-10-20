@@ -207,6 +207,32 @@ describe('rate limit — IP trust', () => {
     expect(await trusted.json()).toEqual({ ip: '203.0.113.7' });
   });
 
+  it('withholds a loopback address — the local stack’s own server-side hop', async () => {
+    const app = new Hono();
+    app.get('/', (c) => c.json({ ip: trustedClientIp(c) }));
+    const ipFor = async (address: string) =>
+      (
+        await app.request('/', { headers: { 'cf-connecting-ip': address } })
+      ).json();
+
+    // Miniflare stamps the caller's socket address, in whichever form the
+    // socket reports it (Codex-4p2l7).
+    for (const loopback of [
+      '127.0.0.1',
+      '127.88.3.4',
+      '::1',
+      '0:0:0:0:0:0:0:1',
+      '::ffff:127.0.0.1',
+    ]) {
+      expect(await ipFor(loopback), loopback).toEqual({ ip: null });
+    }
+
+    // Either side of the range stays countable.
+    for (const client of ['126.255.255.255', '128.0.0.1', '::2']) {
+      expect(await ipFor(client), client).toEqual({ ip: client });
+    }
+  });
+
   it('withholds the IP on a worker-to-worker hop', async () => {
     const app = new Hono();
     app.get('/', (c) => c.json({ ip: trustedClientIp(c) }));

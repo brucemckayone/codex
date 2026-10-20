@@ -8,11 +8,13 @@ This directory contains GitHub Actions workflows for the Codex platform.
 
 **[testing.yml](./workflows/testing.yml)** - Main test workflow
 - Runs on all pushes and PRs
-- Creates ephemeral Neon database branches
+- Each test job runs its own Postgres 17 + local Neon proxy service containers
+  (`DB_METHOD=LOCAL_PROXY`, the local-dev path); no Neon branches
+- Applies migrations to a Neon copy of `production` only when migrations or
+  schema change (`migration-check`)
 - Runs static analysis (types, lint, format)
 - Runs unit tests on changed packages
 - Runs E2E tests (when web app changes)
-- Uploads DATABASE_URL artifact for preview deployment
 
 ### Preview Deployments
 

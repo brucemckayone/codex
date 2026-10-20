@@ -48,6 +48,12 @@ import { enforcePolicyInline } from '../helpers';
  */
 const EGRESS_IP = '2a06:98c0:3600::103';
 
+/**
+ * What miniflare stamps on every server-side call from apps/web on the local
+ * stack and in CI: the platform's own hop, like `EGRESS_IP` in production.
+ */
+const LOOPBACK_IP = '127.0.0.1';
+
 /** TEST-NET-3. Never inside a Cloudflare range, so genuinely countable. */
 const CLIENT_IP = '203.0.113.7';
 const OTHER_CLIENT_IP = '198.51.100.9';
@@ -315,6 +321,30 @@ describe('procedure rate limiting · subject isolation', () => {
     });
     expect(otherAddress.error).toBeUndefined();
   });
+
+  it('keeps users apart when all of them arrive over the local stack’s loopback hop', async () => {
+    const binding = makeBinding(100);
+    const env = { RATE_LIMIT_API: binding };
+    const policy = { auth: 'required' as const };
+
+    // An E2E run: many users, one request or so each, every one of them
+    // relayed by apps/web from 127.0.0.1. Counted on the address, the run
+    // shared one 'api' bucket and a user's FIRST lookup 429'd (Codex-4p2l7).
+    for (let i = 0; i < 100; i++) {
+      await run({ policy, env, user: { id: `user-${i}` }, ip: LOOPBACK_IP });
+    }
+
+    const nextUser = await run({
+      policy,
+      env,
+      user: { id: 'user-100' },
+      ip: LOOPBACK_IP,
+    });
+    expect(nextUser.error).toBeUndefined();
+    expect(binding.keys.some((key) => key.includes(':trusted-ip:'))).toBe(
+      false
+    );
+  });
 });
 
 // ============================================================================
@@ -370,6 +400,26 @@ describe('procedure rate limiting · auth levels', () => {
     });
 
     expect(error).toBeUndefined();
+    expect(binding.calls()).toBe(0);
+    expect(obs.error).not.toHaveBeenCalled();
+    expect(obs.warn).not.toHaveBeenCalled();
+  });
+
+  it('does not count, or complain about, an anonymous read over the local stack’s loopback hop', async () => {
+    const binding = makeBinding(100);
+    const obs = makeObs();
+
+    // The org layout's public lookup, relayed by apps/web on the local stack.
+    for (let i = 0; i < 101; i++) {
+      const { error } = await run({
+        policy: { auth: 'none', rateLimit: 'api' },
+        env: { RATE_LIMIT_API: binding },
+        ip: LOOPBACK_IP,
+        obs,
+      });
+      expect(error, `read ${i + 1}`).toBeUndefined();
+    }
+
     expect(binding.calls()).toBe(0);
     expect(obs.error).not.toHaveBeenCalled();
     expect(obs.warn).not.toHaveBeenCalled();

@@ -24,6 +24,7 @@ export const POSTER: StyleDefinition = {
     curriculum: 'cards',
     preview: 'feature',
     gallery: 'strip',
+    inside: 'carousel',
     instructor: 'split',
     testimonials: 'marquee',
     faq: 'accordion',
@@ -31,6 +32,11 @@ export const POSTER: StyleDefinition = {
     cta: 'band',
     stats: 'row',
     text: 'statement',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'start',
+    break: 'space',
+    button: 'stack',
   },
   schemes: {
     hero: 'brand',
@@ -43,12 +49,19 @@ export const POSTER: StyleDefinition = {
     curriculum: 'accent',
     preview: 'base',
     gallery: 'base',
+    inside: 'base',
     instructor: 'base',
     testimonials: 'accent',
     stats: 'brand',
     pricing: 'base',
     faq: 'base',
     cta: 'brand',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   // On paper the one filled card is a block of the brand colour; inside a
   // colour field it is paper. Never brand-in-accent: a brand with no second
@@ -65,6 +78,7 @@ export const POSTER: StyleDefinition = {
   order: STORY_ORDER,
   starter: [
     'hero',
+    'inside',
     'problem',
     'transformation',
     'benefits',

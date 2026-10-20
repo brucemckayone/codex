@@ -9,7 +9,7 @@ Hono worker factory, `procedure()` handler, and shared middleware stack. This is
 - **`multipartProcedure(config)`** — Extension of `procedure()` for file upload endpoints (FormData + file validation)
 - **`binaryUploadProcedure(config)`** — For raw binary uploads (non-FormData)
 - **`PaginatedResult`** — Marker class; `procedure()` checks `instanceof` to emit list envelope
-- **`createServiceRegistry(env, obs?, orgId?, executionCtx?)`** — Lazy-loaded service factory (called internally by `procedure()`; `executionCtx` wires `waitUntil` so VersionedCache writes survive the response)
+- **`createServiceRegistry(env, obs?, orgId?, executionCtx?, cachePreset?, background?)`** — Lazy-loaded service factory (called internally by `procedure()`; `executionCtx` wires `waitUntil` so VersionedCache writes survive the response; `background` is procedure()'s tracker, and every service hook that defers **DB** work after the response — ownership/agreement emails, tier and course-plan price fan-outs — goes through it so `pool.end()` waits. Plain `waitUntil` is for KV/fetch only.)
 - **`sendEmailToWorker(env, executionCtx, params)`** — Worker-to-worker email trigger helper (fire-and-forget via `executionCtx.waitUntil`)
 - **`createHealthCheckHandler(options)`** — Standard health endpoint (DB/KV/R2 checks)
 - **`sequence(...middleware)`** — Compose middleware in order
@@ -182,7 +182,10 @@ procedure({ policy: { auth: 'worker' }, ... })
 
 ## Exceptions (bypass procedure())
 
-Stripe webhooks and RunPod webhooks use raw Hono handlers + `waitUntil(cleanup())` because they need HMAC-SHA256 validation before any parsing. They manage their own DB lifecycle with `createWebhookDbClient(c.env)` + `waitUntil(cleanup())` (the RunPod webhook in media-api uses `createDbClient` directly).
+Stripe webhooks and RunPod webhooks use raw Hono handlers because they need HMAC-SHA256 validation before any parsing.
+
+- **Stripe webhooks and the payouts cron** get the registry's services from `createWebhookServices(env, executionCtx, { obs, stripe })` (`src/webhook-services.ts`, Codex-2hxff.54). It returns `{ services, background, release }`: the same graph routes get (fee config, mailers, `webAppUrl`, caches), built on the webhook's own Stripe client and the Neon driver. Call `release()` in `finally`. It closes the pool only after the work handed to `background()` settles. So DB work after the response goes through `background()`, never plain `waitUntil`.
+- **The RunPod webhook** (media-api) uses the stateless `createDbClient(c.env)` directly, which has no pool to close.
 
 ## Reference Files
 

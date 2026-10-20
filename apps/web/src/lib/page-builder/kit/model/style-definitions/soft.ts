@@ -26,6 +26,7 @@ export const SOFT: StyleDefinition = {
     curriculum: 'cards',
     preview: 'split',
     gallery: 'mosaic',
+    inside: 'carousel',
     instructor: 'centered',
     testimonials: 'featured',
     faq: 'accordion',
@@ -33,6 +34,11 @@ export const SOFT: StyleDefinition = {
     cta: 'band',
     stats: 'grid',
     text: 'centered',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'center',
+    break: 'space',
+    button: 'stack',
   },
   schemes: {
     hero: 'soft',
@@ -45,12 +51,22 @@ export const SOFT: StyleDefinition = {
     curriculum: 'soft',
     preview: 'base',
     gallery: 'soft',
+    // On the page, under the tinted hero. The mock-up continued the hero's
+    // tint, but a Style's own order never runs one tint into the next: the
+    // two would read as one oversized slab (03 X63).
+    inside: 'base',
     instructor: 'base',
     testimonials: 'soft',
     stats: 'base',
     pricing: 'base',
     faq: 'soft',
     cta: 'brand',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   // The one filled card is a pebble of the primary on page and tint alike; on
   // a dark band it is the light tint, inside a colour field the page, and
@@ -66,6 +82,7 @@ export const SOFT: StyleDefinition = {
   order: STORY_ORDER,
   starter: [
     'hero',
+    'inside',
     'problem',
     'transformation',
     'benefits',
@@ -77,4 +94,7 @@ export const SOFT: StyleDefinition = {
     'cta',
   ],
   fonts: { heading: 'Nunito', body: 'Outfit' },
+  // Hazy, as Studio: the org's moving background through a third of the
+  // inner pages' blur and a thinner veil, so it is seen moving (03 X53, X59).
+  atmosphere: 'hazy',
 };

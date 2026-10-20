@@ -181,6 +181,26 @@
     reveal(id);
   }
 
+  /*
+   * A section picked by the creator is inspected too (contract §7), so with
+   * no room to dock the drawer opens for it, on a tablet or a 1280 laptop as
+   * on a wide screen. Not for a click into its words: that edits them in
+   * place, and the drawer would cover the line being typed.
+   */
+  function inspect(id: string | null): void {
+    if (id && placement === 'drawer') drawerOpen = true;
+  }
+
+  function pickOnCanvas(id: string | null, how: 'section' | 'words'): void {
+    select(id);
+    if (how === 'section') inspect(id);
+  }
+
+  function pickInOutline(id: string): void {
+    selectAndReveal(id);
+    inspect(id);
+  }
+
   function remove(id: string): void {
     const index = sections.findIndex((s) => s.id === id);
     if (index < 0) return;
@@ -335,7 +355,7 @@
           <SectionOutline
             {sections}
             {selectedId}
-            onSelect={selectAndReveal}
+            onSelect={pickInOutline}
             onToggle={(id) => pageBuilder.toggleSection(id)}
             onDuplicate={(id) => reveal(pageBuilder.duplicateSection(id))}
             onDelete={remove}
@@ -355,6 +375,7 @@
               context={session.context}
               brandOverrides={pageBuilder.pending?.brandOverrides ?? null}
               {theme}
+              onPreview={() => void session.preview()}
             />
           {/if}
         </Tabs.Content>
@@ -427,7 +448,7 @@
           {device}
           {theme}
           {selectedId}
-          onSelect={select}
+          onSelect={pickOnCanvas}
           onCommit={commit}
           onInsert={openPicker}
           onAction={onCanvasAction}
@@ -467,6 +488,7 @@
             context={session.context}
             brandOverrides={pageBuilder.pending?.brandOverrides ?? null}
             {theme}
+            offerRead={session.offerRead}
             onDuplicate={(id) => reveal(pageBuilder.duplicateSection(id))}
             onToggle={(id) => pageBuilder.toggleSection(id)}
             onDelete={remove}
@@ -480,6 +502,7 @@
   <SectionGallery
     bind:open={pickerOpen}
     style={pageStyle}
+    design={session.page?.design}
     brandOverrides={pageBuilder.pending?.brandOverrides ?? null}
     {theme}
     afterLabel={pickerAfterLabel}

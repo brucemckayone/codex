@@ -269,6 +269,7 @@
     { value: 'failed', label: 'Failed' },
     { value: 'reversed', label: 'Reversed' },
     { value: 'cancelled_by_refund', label: 'Cancelled (refund)' },
+    { value: 'cancelled_by_dispute', label: 'Cancelled (dispute)' },
     { value: 'needs_attention', label: 'Needs attention' },
   ];
 
@@ -291,7 +292,7 @@
    * Only two states earn a colour here: settled (success) and failed (error).
    *
    * `pending` used to fall through to `warning` — amber reads as "a problem to
-   * fix", but pending is the pipeline's normal pre-drain state (docs/payouts:
+   * fix", but pending is the pipeline's normal pre-drain state (docs/payments/connect-and-payouts.md:
    * the webhook drain plus the safety-net cron drain both resolve it), so it
    * was colouring healthy rows as exceptions. `reversed` and
    * `cancelled_by_refund` are terminal bookkeeping outcomes, and
@@ -313,6 +314,7 @@
     if (status === 'failed') return 'Failed';
     if (status === 'reversed') return 'Reversed';
     if (status === 'cancelled_by_refund') return 'Cancelled (refund)';
+    if (status === 'cancelled_by_dispute') return 'Cancelled (dispute)';
     return 'Pending';
   }
 
@@ -336,7 +338,7 @@
 
   /**
    * Human-readable reason string. The DB enum is `connect_not_ready |
-   * connect_restricted | transfer_failed | min_transfer_floor`.
+   * connect_restricted | transfer_failed | min_transfer_floor | no_owner`.
    */
   function reasonLabel(reason: string): string {
     switch (reason) {
@@ -348,6 +350,10 @@
         return 'Transfer failed';
       case 'min_transfer_floor':
         return 'Below minimum transfer';
+      // The organisation had no owner at the sale's time (Codex-2hxff.37);
+      // held for the next owner.
+      case 'no_owner':
+        return 'Waiting for an owner';
       default:
         return reason;
     }

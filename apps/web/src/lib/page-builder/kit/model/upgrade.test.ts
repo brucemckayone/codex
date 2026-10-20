@@ -1040,3 +1040,102 @@ describe('upgradePage · look → Style, all eight presets + unrecognised', () =
     });
   });
 });
+
+describe("upgradePage · the page's dials (03 X61)", () => {
+  // The editor saves what upgradePage returns, so a dial dropped here is
+  // dropped on load AND wiped on the next save.
+  it('carries the dials through, and again (idempotent)', () => {
+    const page = {
+      design: {
+        style: 'soft',
+        dials: { colour: 'vivid', corners: 'rounder', spacing: 'compact' },
+      },
+      sections: [],
+    };
+    const upgraded = upgradePage(page);
+    expect(upgraded.design).toEqual(page.design);
+    expect(
+      upgradePage(upgraded as unknown as { design: unknown; sections: unknown })
+    ).toEqual(upgraded);
+  });
+
+  it('keeps only known dials at known steps, and no dials key when none survive', () => {
+    expect(
+      upgradePage({
+        design: {
+          style: 'bold',
+          dials: {
+            colour: 'neon',
+            corners: 'brand',
+            texture: 'grain',
+            constructor: 'x',
+          },
+        },
+        sections: [],
+      }).design
+    ).toEqual({ style: 'bold', dials: { corners: 'brand' } });
+    for (const dials of [{ colour: 'neon' }, 'muted', null, ['vivid'], {}])
+      expect(
+        upgradePage({ design: { style: 'bold', dials }, sections: [] }).design
+      ).toEqual({
+        style: 'bold',
+      });
+  });
+
+  it('keeps the dials on a page whose look is still a legacy bundle', () => {
+    expect(
+      upgradePage({
+        design: { density: 'airy', dials: { spacing: 'spacious' } },
+        sections: [],
+      }).design.dials
+    ).toEqual({ spacing: 'spacious' });
+  });
+});
+
+describe("upgradePage · the page's Type (03 X73)", () => {
+  // A Type the page's Style may not take reads as the Style's own and leaves
+  // no key, so the editor's next save drops it. Path takes no Type (03 X74);
+  // `readPageFacets` is tested with a list of its own in facets.test.ts.
+  it('drops a Type the Style may not take, an unknown one, and a bag that is not one', () => {
+    for (const facets of [
+      { type: 'poster' },
+      { type: 'path' },
+      'poster',
+      null,
+      {},
+    ])
+      expect(
+        upgradePage({ design: { style: 'path', facets }, sections: [] }).design
+      ).toEqual({ style: 'path' });
+  });
+
+  it('keeps the dials beside a Type it drops', () => {
+    expect(
+      upgradePage({
+        design: {
+          style: 'path',
+          dials: { drama: 'louder' },
+          facets: { type: 'bold' },
+        },
+        sections: [],
+      }).design
+    ).toEqual({ style: 'path', dials: { drama: 'louder' } });
+  });
+
+  it('carries a Type its Style may take, beside the dials', () => {
+    expect(
+      upgradePage({
+        design: {
+          style: 'bold',
+          dials: { drama: 'louder' },
+          facets: { type: 'poster' },
+        },
+        sections: [],
+      }).design
+    ).toEqual({
+      style: 'bold',
+      dials: { drama: 'louder' },
+      facets: { type: 'poster' },
+    });
+  });
+});

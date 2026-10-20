@@ -136,6 +136,72 @@ describe('ScrollStrip', () => {
     ).toBe(true);
   });
 
+  // Codex-61zsk.55: a row with a heading of its own carries its buttons in
+  // that heading's line, above the row. Without one, nothing changes.
+  const parts = () =>
+    [...(document.body.querySelector('.lp-strip')?.children ?? [])].map((el) =>
+      el.className.replace(/\s*svelte-\S+/g, '').trim()
+    );
+
+  it('without a heading, keeps its buttons in their own line under the row', () => {
+    render(3);
+    expect(parts()).toEqual(['lp-strip__track', 'lp-strip__nav']);
+    const nav = document.body.querySelector('.lp-strip__nav') as HTMLElement;
+    expect([...nav.children].map((el) => el.tagName)).toEqual([
+      'BUTTON',
+      'BUTTON',
+    ]);
+    expect(document.body.querySelector('.lp-strip__head')).toBeNull();
+  });
+
+  it('with a heading, leads the buttons’ line with it, above the row', () => {
+    render(3, {
+      head: createRawSnippet(() => ({
+        render: () => '<h3 class="stage-name">Stage 2</h3>',
+      })),
+    });
+    expect(parts()).toEqual([
+      'lp-strip__nav lp-strip__nav--head',
+      'lp-strip__track',
+    ]);
+    const nav = document.body.querySelector('.lp-strip__nav') as HTMLElement;
+    expect(nav.firstElementChild?.className).toMatch(/lp-strip__head/);
+    expect(nav.querySelector('.lp-strip__head > h3')?.textContent).toBe(
+      'Stage 2'
+    );
+    const [previous, next] = buttons();
+    expect(previous.getAttribute('aria-controls')).toBe('gallery-pictures');
+    expect(next.getAttribute('aria-label')).toBe('Next picture');
+    expect(nav.hasAttribute('data-idle')).toBe(true);
+  });
+
+  // Hidden by CSS, which the test DOM does not apply: read the rules, comments
+  // stripped, so a rule commented out reads as gone.
+  it('hides only the buttons, never the heading, with nothing to scroll or no script', async () => {
+    const source = (await import('./ScrollStrip.svelte?raw')).default as string;
+    const css = (source.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '').replace(
+      /\/\*[\s\S]*?\*\//g,
+      ''
+    );
+    const block = (selector: string) =>
+      css.match(
+        new RegExp(
+          `${selector.replace(/[[\]().*+?^$|\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`
+        )
+      )?.[1] ?? '';
+    expect(block('.lp-strip__nav[data-idle] > :not(.lp-strip__head)')).toMatch(
+      /visibility:\s*hidden/
+    );
+    expect(css).not.toMatch(/\.lp-strip__nav\[data-idle\]\s*\{/);
+    const scriptless =
+      css.match(/@media \(scripting: none\)\s*\{([\s\S]*?\})\s*\}/)?.[1] ?? '';
+    expect(scriptless).toMatch(/\.lp-strip__nav:not\(\.lp-strip__nav--head\)/);
+    expect(scriptless).toMatch(
+      /\.lp-strip__nav--head > :not\(\.lp-strip__head\)/
+    );
+    expect(scriptless).not.toMatch(/\.lp-strip__head\b(?!\))/);
+  });
+
   describe('with a row wider than the screen, of items that differ in width', () => {
     // Items of 300 and 200 alternating, 20 apart: they start at 0, 320, 540, 860…
     const WIDTHS = [300, 200, 300, 200, 300, 200];
@@ -165,9 +231,11 @@ describe('ScrollStrip', () => {
         writable: true,
         value: scrollTo,
       });
-      // Each item sits at its start, less the scroll, past a 48px inset.
+      // Each item sits at its start, less the scroll, past a 48px inset; the
+      // row's own window is 800 wide.
       vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
         function (this: Element) {
+          if (isTrack(this)) return { left: 0, width: 800 } as DOMRect;
           const i = Number(this.getAttribute('data-i') ?? 0);
           return {
             left: 48 + STARTS[i] - scrollLeft,
@@ -234,6 +302,47 @@ describe('ScrollStrip', () => {
       scrollTo.mockReset();
       next.click();
       expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    // Codex-61zsk.52: "1–3 of 18" beside the arrows of a long row.
+    const position = (first: number, last: number, total: number) =>
+      `${first}–${last} of ${total}`;
+    const readout = () =>
+      document.body.querySelector('.lp-strip__position') as HTMLElement | null;
+
+    it('says which items are wholly in view, counted from 1, as the row scrolls', () => {
+      render(WIDTHS.length, { position });
+      // At the start: 48–348 and 368–568 fit the 800 window; 588–888 does not.
+      expect(readout()?.textContent).toBe('1–2 of 6');
+      scrolled(320);
+      expect(readout()?.textContent).toBe('2–4 of 6');
+      scrolled(1100);
+      expect(readout()?.textContent).toBe('5–6 of 6');
+    });
+
+    it('keeps the position from a screen reader, which hears the list itself', () => {
+      render(WIDTHS.length, { position });
+      expect(readout()?.getAttribute('aria-hidden')).toBe('true');
+      // It leads the buttons' row.
+      expect(readout()?.parentElement?.firstElementChild).toBe(readout());
+    });
+
+    it('draws no position for a row that does not ask for one', () => {
+      render(WIDTHS.length);
+      expect(readout()).toBeNull();
+    });
+
+    // Codex-61zsk.55: a heading's room is its line less the buttons; the
+    // readout's width is its words', which no rule can take from that room.
+    it('draws no position beside a row’s own heading', () => {
+      render(WIDTHS.length, {
+        position,
+        head: createRawSnippet(() => ({
+          render: () => '<h3 class="stage-name">Stage 2</h3>',
+        })),
+      });
+      expect(document.body.querySelector('.lp-strip__head')).not.toBeNull();
+      expect(readout()).toBeNull();
     });
 
     it('jumps rather than glides under reduced motion', () => {

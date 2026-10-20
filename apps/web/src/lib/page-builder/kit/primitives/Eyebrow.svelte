@@ -1,9 +1,12 @@
 <!--
   @component Eyebrow
 
-  The optional short label above a heading. Sentence case in every Style (the
-  ALL-CAPS tracked label over every heading is exactly the tell the kit avoids);
-  Styles vary it only through tokens — weight, tracking, and Soft's pill fill.
+  The optional short label above a heading: the kit's kicker. It is in the
+  org's own label case (`--text-transform-label`, uppercase unless the org or
+  the page chose otherwise), so it reads like the kickers on the org's own
+  pages; uppercase, it takes the org's label tracking (`kit.css`). Styles vary
+  it only through tokens — weight, its tracking when it is not uppercase, and
+  Soft's pill fill.
 -->
 <script lang="ts">
   import type { SectionTypeId } from '../model/ids';

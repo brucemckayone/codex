@@ -97,6 +97,7 @@ const PRACTICES_PER_PORTAL = 4;
 const RECIPES = {
   full: [
     { type: 'hero' },
+    { type: 'inside' },
     { type: 'problem' },
     { type: 'transformation' },
     { type: 'benefits' },
@@ -191,6 +192,13 @@ interface PortalSpec {
    * test's subject away.
    */
   pins?: Partial<Record<SeededType, string>>;
+  /**
+   * Pins for ONE org's copy of this page, over {@link pins}. Every org in
+   * {@link FIXTURE_ORGS} seeds the same portals, and one org's test subject
+   * can be another org's: a layout pinned for a test on one would move the
+   * page a test reads on another.
+   */
+  orgPins?: Record<string, Partial<Record<SeededType, string>>>;
   stages: [StageSpec, StageSpec, StageSpec];
   /** How many of this portal's practices are marked complete. */
   completions: number;
@@ -257,8 +265,10 @@ const PORTALS: PortalSpec[] = [
     // Family history kept by hand: prints, pen marks and paper.
     style: 'studio',
     recipe: 'full',
-    // What is handed down, and what is chosen: the before and after as a switch.
-    pins: { transformation: 'toggle' },
+    // What is handed down, and what is chosen: the before and after as a
+    // switch on a phone, side by side wider; what's included as named tiles
+    // (e2e/page-kit/type-rank.spec.ts measures both).
+    pins: { transformation: 'toggle', benefits: 'grid' },
     stages: [
       { name: 'The near ones', gloss: 'Parents, and their weather.' },
       { name: 'The far ones', gloss: 'Names you were never told.' },
@@ -280,6 +290,11 @@ const PORTALS: PortalSpec[] = [
     // The journey recipe's own pin too; set here so the test survives a
     // change of recipe.
     pins: { curriculum: 'map' },
+    // The cover hero on a page that sells, which the browser suite reads
+    // (`e2e/page-kit/brand-fidelity.spec.ts`, D10): its main button over the
+    // picture. Of Blood & Bones' alone: studio-alpha's 'glow' shader opens
+    // its pages on the moving background, which a cover would draw over.
+    orgPins: { 'of-blood-and-bones': { hero: 'cover' } },
     stages: [
       { name: 'Looking back', gloss: 'What the walking changed.' },
       { name: 'Marking it', gloss: 'A rite so the body knows it ended.' },
@@ -479,7 +494,7 @@ async function seedOrgPortals(orgSlug: string): Promise<void> {
     // seeded is exactly the case that has to backfill one. Reconciling (rather
     // than inserting inside `createPortal`) is what makes the fix reach rows that
     // already exist.
-    await reconcilePage(org.id, userId, courseId, spec);
+    await reconcilePage(org.id, orgSlug, userId, courseId, spec);
     await reconcilePrice(courseId, spec);
     await retirePlans(courseId, spec);
     await reconcileCover(courseId, spec);
@@ -508,6 +523,7 @@ async function seedOrgPortals(orgSlug: string): Promise<void> {
  */
 async function reconcilePage(
   organizationId: string,
+  orgSlug: string,
   creatorId: string,
   courseId: string,
   spec: PortalSpec
@@ -529,7 +545,7 @@ async function reconcilePage(
     featured: spec.featured ?? false,
     subjectType: 'course' as const,
     subjectId: courseId,
-    sections: buildSections(spec),
+    sections: buildSections(spec, orgSlug),
     // The page-kit v2 STYLE (`docs/design/landing-builder/01-contract.md`
     // §2/§3, BINDING; WP-9b) — each portal's OWN choice (see `PortalSpec.style`),
     // not a single shared bundle. This used to be one legacy nine-axis bundle
@@ -617,7 +633,9 @@ const PAGE_COPY: Record<
     curriculum: { heading: string; body: string };
     instructor: { bridge: string; quote: string };
     pricing: { heading: string; body: string; ctaLabel: string; note?: string };
+    /** A heading always: without one the questions start untitled. */
     faq: {
+      heading: string;
       items: [
         { question: string; answer: string },
         { question: string; answer: string },
@@ -711,6 +729,7 @@ const PAGE_COPY: Record<
       ctaLabel: 'Begin the descent',
     },
     faq: {
+      heading: 'Before the descent',
       items: [
         {
           question: 'Do I need any experience with somatic work?',
@@ -837,6 +856,7 @@ const PAGE_COPY: Record<
       ctaLabel: 'Begin tending',
     },
     faq: {
+      heading: 'What people ask before they begin',
       items: [
         {
           question: 'Is this therapy?',
@@ -926,11 +946,12 @@ const PAGE_COPY: Record<
     },
     pricing: {
       heading: 'Join Ancestral Threads',
-      body: 'A one-off payment opens the whole lineage practice, once and for good.',
+      body: 'Every way in opens the whole lineage practice: all three stages, at the pace the work asks.',
       ctaLabel: 'Take up the thread',
-      note: 'One payment. Yours to keep and return to.',
+      note: 'No deadline to finish. Come back to any stage when you need it.',
     },
     faq: {
+      heading: 'Before you take up the thread',
       items: [
         {
           question: 'What if I know very little about my family history?',
@@ -955,7 +976,7 @@ const PAGE_COPY: Record<
       heading: 'The thread is still in your hands',
       body: 'Begin tracing what you were handed — and decide, deliberately, what you hand on.',
       ctaLabel: 'Take up the thread',
-      note: 'One payment, no deadline to finish.',
+      note: 'No deadline to finish.',
     },
   },
   'return-to-the-shoreline': {
@@ -1021,9 +1042,10 @@ const PAGE_COPY: Record<
       heading: 'Join Return to the Shoreline',
       body: 'A short, complete rite — use it once, or at the end of every long chapter.',
       ctaLabel: 'Walk to the shoreline',
-      note: 'One payment, yours to repeat.',
+      note: 'Walk it again at the close of the next long thing.',
     },
     faq: {
+      heading: 'Before you walk it',
       items: [
         {
           question: 'What kind of ending is this for?',
@@ -1048,7 +1070,7 @@ const PAGE_COPY: Record<
       heading: 'Let this one actually end',
       body: 'Walk the three stages, and come back up into ordinary light on purpose.',
       ctaLabel: 'Walk to the shoreline',
-      note: 'One payment, yours to repeat.',
+      note: 'Short enough for one sitting, and made to be repeated.',
     },
     story: {
       heading: 'The last stretch of the walk',
@@ -1118,7 +1140,7 @@ const PAGE_COPY: Record<
  * `courses.priceCents` (or its absence) is what actually drives the CTA a
  * visitor sees, and the framing text here stays honest against either state.
  */
-function buildSections(spec: PortalSpec) {
+function buildSections(spec: PortalSpec, orgSlug: string) {
   const copy = PAGE_COPY[spec.slug];
   if (!copy) {
     throw new Error(
@@ -1147,6 +1169,15 @@ function buildSections(spec: PortalSpec) {
         body: spec.lede,
         ctaLabel: copy.hero.ctaLabel,
         note: copy.hero.note,
+      },
+    }),
+    // Every practice as a card, straight from the curriculum (03 X63): only
+    // the framing is authored, and it names the portal's own course.
+    inside: () => ({
+      name: "What's inside",
+      props: {
+        heading: "What's inside",
+        body: `Every practice in ${spec.title}, in the order you'll meet them.`,
       },
     }),
     problem: () => ({
@@ -1205,6 +1236,7 @@ function buildSections(spec: PortalSpec) {
     faq: () => ({
       name: 'Questions',
       props: {
+        heading: copy.faq.heading,
         items: copy.faq.items,
         contactLabel: copy.faq.contactLabel,
         contactHref: copy.faq.contactHref,
@@ -1231,8 +1263,17 @@ function buildSections(spec: PortalSpec) {
     readonly type: SeededType;
     readonly layout?: string;
   }[] = RECIPES[spec.recipe];
-  // A pin on a section the recipe does not have would quietly pin nothing.
-  for (const type of Object.keys(spec.pins ?? {})) {
+  // A pin for an org the seed never runs, or on a section the recipe does not
+  // have, would quietly pin nothing.
+  for (const pinned of Object.keys(spec.orgPins ?? {})) {
+    if (!FIXTURE_ORGS.includes(pinned)) {
+      throw new Error(
+        `buildSections: "${spec.slug}" pins layouts for "${pinned}", which is not one of ${FIXTURE_ORGS.join(', ')}`
+      );
+    }
+  }
+  const pins = { ...spec.pins, ...spec.orgPins?.[orgSlug] };
+  for (const type of Object.keys(pins)) {
     if (!recipe.some((section) => section.type === type)) {
       throw new Error(
         `buildSections: "${spec.slug}" pins a ${type} layout, but the ${spec.recipe} recipe has no ${type} section`
@@ -1241,7 +1282,7 @@ function buildSections(spec: PortalSpec) {
   }
   return recipe.map(({ type, layout: recipeLayout }) => {
     const { name, props } = sections[type]();
-    const layout = spec.pins?.[type] ?? recipeLayout;
+    const layout = pins[type] ?? recipeLayout;
     return {
       id: crypto.randomUUID(),
       type,

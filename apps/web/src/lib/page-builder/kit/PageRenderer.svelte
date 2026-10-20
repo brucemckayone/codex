@@ -6,12 +6,31 @@
 
   PAGE BRAND OVERRIDES keep today's mechanism: the root becomes a nested
   `[data-org-brand]` carrying only the overridden `--brand-*` inputs
-  (`render/brand-overrides.ts`); anything unset inherits the org. The page's
+  (`render/brand-overrides.ts`); anything unset inherits the org. A page
+  that sets its own background also carries `data-org-bg`, so the org's
+  surfaces, text and border are derived from it in that background's theme
+  — the kit draws those tokens (`styles/schemes.css`), and gives the other
+  theme back to the org's when the page sets no twin for it
+  (`data-page-bg`: light, dark or both). The page's
   own fonts are loaded here, because the org layout loads only the org's.
+
+  THE GROUND'S POLE AND BAND (03 X48) follow the org's ground, not the
+  viewer's theme, and CSS cannot read a colour's lightness: so each theme's
+  ground is resolved here (`model/resolve.ts`) from the org's backgrounds
+  (the `orgGrounds` prop: the caller passes the layout's data, or the brand
+  editor's while it is open) and the page's own, and named on the root as
+  `data-ground-light` /
+  `data-ground-dark`. A moving background is drawn only on the bands it is
+  proven on, and as `base` elsewhere.
 
   EDITING changes attributes, never structure: with `edit` the text fields
   carry the inline-edit seam, the root is still (no entrance), sections carry
   their id for selection, and there is no floating bar over the canvas.
+
+  STILL (a thumbnail, or editing) is also on the page context, so a block may
+  draw what stands in for missing media there — a plate, a frame waiting for
+  a picture — and never on the public page. What the canvas alone draws is
+  marked `data-lp-edit-only`.
 
   `theme` is a SCOPED preview (`data-lp-theme`) for thumbnails and the dev
   route; it never touches `<html data-theme>` (ref 11-theming §4).
@@ -20,20 +39,44 @@
   background" section, so the org layout clears the stack above its shader
   for this page only. Never set while editing or still — the canvas and
   thumbnails sit inside the studio, and there `atmosphere` draws its glow.
+  While it is set, the root also keeps each section's veil as thin as the
+  Style asks wherever the shader drawn behind it allows (`atmosphere-veil.ts`,
+  03 X54).
+
+  THE TYPE FACET (03 X73): `data-lp-type-facet` names the Style whose type
+  the page is set in, which is the page's own Style unless the page borrows
+  a Type its Style may take (`TYPE_FACET_BASES`). It is ALWAYS set, so a
+  Type rule keyed on it weighs exactly what it weighed keyed on the Style.
 
   ENTRANCES (03 X13): the root hosts the page's stage (`motion/entrances.ts`),
   which plays each reveal, build and mark once as the visitor reaches it.
   Nothing is staged while still.
 -->
 <script lang="ts">
+  import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
   import type { BrandTokenOverrides } from '$lib/page-builder';
-  import { brandOverridesToStyleAttr } from '../render/brand-overrides';
+  import {
+    brandOverridesToCssVars,
+    brandOverridesToStyleAttr,
+    pageGrounds,
+  } from '../render/brand-overrides';
   import type { JourneySalesContext } from '../render/types';
+  import { settled } from './blocks/hero/settled.svelte';
   import { priceWithCadence } from './model/copy';
+  import { filmToShow } from './model/films';
   import { brandFontsHref } from './model/fonts';
+  import { readPageDials, readPageFacets, type TypeFacet } from './model/ids';
   import { pricingView } from './model/offer';
   import { readText } from './model/read';
-  import { resolveSections, resolveStyle } from './model/resolve';
+  import {
+    continuingSections,
+    foldForVisitors,
+    resolveGroundBands,
+    resolveSections,
+    resolveStyle,
+    type ThemeGrounds,
+  } from './model/resolve';
+  import { atmosphereVeil } from './atmosphere-veil';
   import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
   import { entrances } from './motion/entrances';
@@ -42,6 +85,7 @@
   import SectionShell from './SectionShell.svelte';
   import StickyCta from './StickyCta.svelte';
   import './styles/kit.css';
+  import './styles/faces.css';
   import './styles/schemes.css';
   import './styles/surfaces.css';
   import './styles/motion.css';
@@ -65,6 +109,25 @@
     still?: boolean;
     /** Show the floating call to action. Never shown while editing. */
     sticky?: boolean;
+    /**
+     * The org's own backgrounds per theme, as its layout paints them
+     * (`$lib/page-builder/org-grounds.ts`; 03 X48). Passed in as plain data,
+     * never read from a store here. Absent: no org background, so each
+     * theme takes its own pole.
+     */
+    orgGrounds?: ThemeGrounds;
+    /**
+     * The org has a moving background, a shader preset other than 'none'
+     * (`orgShader` in `$lib/page-builder/org-grounds.ts`; 03 X50, X51): the
+     * hero then defaults to `atmosphere`. Plain data, as above.
+     */
+    orgShader?: boolean;
+    /**
+     * The kit gallery's proof (03 X73): draw this Type whether or not this
+     * Style may take it yet, so a pair is measured before it is offered. A
+     * page never passes it.
+     */
+    proofType?: TypeFacet;
   }
 
   const {
@@ -76,11 +139,49 @@
     theme,
     still = false,
     sticky = true,
+    orgGrounds = {},
+    orgShader = false,
+    proofType,
   }: Props = $props();
 
   const style = $derived(resolveStyle(page.design));
-  const sections = $derived(resolveSections(page));
+  // The dials drawn in CSS name their step on the root, a known one only
+  // (`kit.css`, `motion.css`; 03 X61); colour and spacing are resolved per
+  // section.
+  const dials = $derived(readPageDials(page.design.dials));
+  const typeFacet = $derived(
+    proofType ?? readPageFacets(page.design.facets, style)?.type ?? style
+  );
+  // Nothing moves on its own at either step of the motion dial, and the org's
+  // moving background behind the page is that too (03 X62). Held only while
+  // the page is shown live: the studio's shader is still already. A boolean,
+  // so a new page object with the same dial never lets go and takes hold
+  // again (a still shader would jump to a later frame).
+  const holdsShader = $derived(!still && !edit && dials?.motion !== undefined);
+  $effect(() => {
+    if (holdsShader) return shaderTone.hold();
+  });
+  const grounds = $derived(resolveGroundBands(orgGrounds, pageGrounds(brandOverrides)));
+  // A visitor's page folds what nobody would see (03 X64): an empty Picture
+  // or Heading, a Button with nowhere to go, a film section with no film
+  // (Codex-61zsk.57). It happens before the bands resolve, so no band rule
+  // counts it. The canvas and stills keep them all. The films follow the
+  // stream, by the blocks' own rule (`filmToShow`): a section folds once its
+  // film is known not to come, and a film that arrives anyway brings it back.
+  const films = $derived(edit || still ? undefined : settled(context.sellPreview));
+  const drawn = $derived(
+    edit || still
+      ? page
+      : foldForVisitors(page, {
+          introFilm: filmToShow(context.course.filmsAttached?.intro, films, 'intro'),
+          previewFilm: filmToShow(context.course.filmsAttached?.reel, films, 'reel'),
+        })
+  );
+  const sections = $derived(resolveSections(drawn, { orgShader, grounds }));
   const propsById = $derived(new Map(page.sections.map((s) => [s.id, s.props])));
+  const continuing = $derived(continuingSections(drawn, sections));
+  // Each drawn section's anchor, for a Button that jumps to one (03 X64).
+  const anchors = $derived(new Map(sections.map((s) => [s.id, s.anchor])));
   const edits = $derived(
     new Map<string, BlockEdit | null>(
       sections.map((s) => [
@@ -90,15 +191,40 @@
     )
   );
   const brandStyle = $derived(brandOverridesToStyleAttr(brandOverrides));
+  // `org-brand.css` derives the surfaces, text and border from the background
+  // only under `[data-org-bg]`, which has no page-override twin: a page that
+  // sets its own background carries the attribute, so they follow it — in
+  // that background's own theme only (`schemes.css`, owner D7).
+  // Which theme(s) that background is for: the kit selects on this, never on
+  // the style text, to give the other theme back to the org.
+  const pageBg = $derived.by(() => {
+    const vars = brandOverridesToCssVars(brandOverrides);
+    const light = '--brand-bg' in vars;
+    const dark = '--brand-bg-dark' in vars;
+    return light && dark ? 'both' : light ? 'light' : dark ? 'dark' : undefined;
+  });
   const fontsHref = $derived(brandFontsHref(brandOverrides));
 
   setKitPage({
     get style() {
       return style;
     },
+    // As `data-lp-still` below: editing is always still.
+    get still() {
+      return still || !!edit;
+    },
+    get offerProps() {
+      return offerProps;
+    },
+    anchorOf(id: string) {
+      return anchors.get(id);
+    },
   });
 
-  /** The floating bar says what the page's own offer button says. */
+  /**
+   * The pricing section's props: the floating bar, and every block that
+   * sells (through `setKitPage`), feature the path they recommend.
+   */
   const offerProps = $derived(
     propsById.get(sections.find((s) => s.type === 'pricing')?.id ?? '') ?? {}
   );
@@ -113,6 +239,11 @@
     return featured ? priceWithCadence(featured) : undefined;
   });
   const showSticky = $derived(sticky && !edit && sections.length > 0);
+  // The floating bar is the org's own raised card (its card colour, D9),
+  // holding the org's own button, unless a Style names a band for it (phase
+  // 3a): a dark bar is a band the org's site never shows, and its button
+  // would have to move to stay legible.
+  const stickyScheme = $derived(STYLES[style].sticky ?? 'base');
   const signature = $derived(sections.map((s) => `${s.id}:${s.layout}`).join('|'));
   // The org's shader draws in the ORG's colours, so a page with its own
   // colours shows the glow (which follows them) rather than clash (03 X11).
@@ -133,13 +264,22 @@
 <div
   class="lp"
   data-lp-style={style}
+  data-lp-type-facet={typeFacet}
+  data-lp-corners={dials?.corners}
+  data-lp-drama={dials?.drama}
+  data-lp-motion={dials?.motion}
   data-lp-theme={theme}
   data-lp-still={still || edit ? '' : undefined}
   data-lp-editing={edit ? '' : undefined}
   data-lp-atmosphere={atmosphere}
   data-org-brand={brandStyle ? '' : undefined}
+  data-org-bg={pageBg ? '' : undefined}
+  data-page-bg={pageBg}
+  data-ground-light={grounds.light}
+  data-ground-dark={grounds.dark}
   style={brandStyle}
-  {@attach entrances(still || !!edit)}
+  {@attach entrances(still || !!edit || dials?.motion === 'still')}
+  {@attach atmosphereVeil(!!atmosphere)}
 >
   <div class="lp-page">
     {#each sections as section (section.id)}
@@ -148,6 +288,7 @@
         {section}
         background={propsById.get(section.id)?.background}
         mediaBaseUrl={context.mediaBaseUrl}
+        continues={continuing.has(section.id)}
         editing={!!edit}
         selected={selectedId === section.id}
       >
@@ -165,7 +306,7 @@
       {context}
       label={stickyLabel}
       priceLine={stickyPrice}
-      scheme={STYLES[style].sticky ?? 'contrast'}
+      scheme={stickyScheme}
       {signature}
     />
   {/if}

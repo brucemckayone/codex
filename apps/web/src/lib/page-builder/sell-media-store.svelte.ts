@@ -40,7 +40,9 @@ import { remoteErrorMessage } from './builder-save';
  * Three of the six are real `courses` columns, `guidePortraitMediaId` lives in
  * the `guide` jsonb bag and the two A27 slots are real columns again — but that
  * asymmetry is entirely the service's to hide: every slot here is a flat
- * `mediaId` the pickers set identically.
+ * `mediaId` the pickers set identically. `signatureMediaId` is retired
+ * (Codex-61zsk.47, `RETIRED_MEDIA_SLOTS`): loaded and saved, so what a creator
+ * picked is kept, but no picker offers it and the public page never reads it.
  */
 export type JourneySellMediaSlot =
   | 'introVideoMediaId'
@@ -166,8 +168,8 @@ class SellMediaStore {
    * The UPLOAD only, for the identical reason as {@link #heroImageUrl}: if this
    * also held `signatureMediaId`'s poster frame, the panel could not tell "the
    * creator uploaded a mark" from "a film happens to have a frame", and it would
-   * offer a Remove that removes nothing. `CourseSellPreview.signatureUrl` owns
-   * the public chain.
+   * offer a Remove that removes nothing. Publicly the signature is this upload
+   * too (`CourseSellPreview.signatureUrl`, Codex-61zsk.47): no film stands in.
    */
   #signatureImageUrl = $state<string | null>(null);
   /** The org's ready media items, for the pickers. */
@@ -513,12 +515,9 @@ class SellMediaStore {
   }
 
   /**
-   * Clear the UPLOADED signature.
-   *
-   * This does NOT unsign the letter: the public chain then falls through to
-   * `signatureMediaId`'s poster frame, and only with neither does the letter sign
-   * off with the typeset name alone. So the panel must not describe this as
-   * "remove the signature".
+   * Clear the UPLOADED signature, the signature's only source (Codex-61zsk.47):
+   * the letter then signs off with the typeset name alone, which is what the
+   * panel's toast says.
    */
   async clearSignatureImage(): Promise<void> {
     const pageId = this.#pageId;

@@ -1,0 +1,1 @@
+CREATE INDEX "idx_orphaned_files_r2_key" ON "orphaned_image_files" USING btree ("r2_key");

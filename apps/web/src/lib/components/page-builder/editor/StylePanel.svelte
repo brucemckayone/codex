@@ -16,6 +16,12 @@
   for this page and Style; the page model has no place for that, so this
   browser remembers it (and, with no storage, this visit does).
 
+  Between them, "Adjust <Style>" (PageDials, Codex-61zsk.59): the page's
+  dials and its headlines from another Style. Each Style card shows the page
+  as it would be in that Style, its dials included and its Type where that
+  Style may take it; choosing a Style that may not take the page's Type takes
+  it off in the same step, and says so.
+
   Eight live renders are this panel's cost, so the shell mounts it only while
   the Style tab is open.
 -->
@@ -30,6 +36,8 @@
 
 <script lang="ts">
   import { tick } from 'svelte';
+  import { page as appPage } from '$app/state';
+  import { brandEditor } from '$lib/brand-editor';
   import { findFont } from '$lib/brand-editor/font-catalog';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
@@ -37,8 +45,10 @@
     type KitPage,
     type KitSection,
     PAGE_STYLE_IDS,
+    type PageStyleId,
     resolveStyle,
     STYLES,
+    TYPE_FACET_BASES,
   } from '$lib/page-builder/kit';
   import { brandFontsHref } from '$lib/page-builder/kit/model/fonts';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
@@ -48,15 +58,18 @@
   import BrandFontField from './BrandFontField.svelte';
   import MiniPreview from './MiniPreview.svelte';
   import { orgFonts } from './org-fonts';
+  import PageDials from './PageDials.svelte';
 
   interface Props {
     page: KitPage;
     context: JourneySalesContext;
     brandOverrides?: BrandTokenOverrides | null;
     theme?: 'light' | 'dark';
+    /** Opens the page's preview (the motion dial points to it). */
+    onPreview?: () => void;
   }
 
-  const { page, context, brandOverrides = null, theme }: Props = $props();
+  const { page, context, brandOverrides = null, theme, onPreview = () => {} }: Props = $props();
 
   // Read once, before a font picker below can preview over it (org-fonts.ts).
   const organisation = orgFonts();
@@ -72,12 +85,45 @@
         props: { ...DEFINITIONS.hero.sample },
       }
   );
+  // Each card is this page in that Style: its dials, and its Type where that
+  // Style may take it, so a card shows what choosing it would give.
   const previews = $derived(
-    PAGE_STYLE_IDS.map((id) => ({
-      style: STYLES[id],
-      page: { design: { style: id }, sections: [{ ...hero, enabled: true }] } satisfies KitPage,
-    }))
+    PAGE_STYLE_IDS.map((id) => {
+      const type = page.design.facets?.type;
+      const design = {
+        style: id,
+        ...(page.design.dials ? { dials: page.design.dials } : {}),
+        ...(type && TYPE_FACET_BASES[id].includes(type) ? { facets: { type } } : {}),
+      };
+      return {
+        style: STYLES[id],
+        page: { design, sections: [{ ...hero, enabled: true }] } satisfies KitPage,
+      };
+    })
   );
+
+  /** The brand's corners are rounded at all; with no radius of its own, the kit's are. */
+  const roundedBrand = $derived.by(() => {
+    const radius = brandEditor.isOpen ? brandEditor.pending?.radius : appPage.data.org?.brandRadius;
+    return typeof radius === 'number' ? radius > 0 : true;
+  });
+
+  // A polite status: a Type that came off with a Style, a reset.
+  let status = $state('');
+  function announce(text: string): void {
+    // Cleared first, so the same words twice are announced twice.
+    status = '';
+    void tick().then(() => (status = text));
+  }
+
+  function chooseStyle(id: PageStyleId): void {
+    // Read before the write: `page` follows the store at once.
+    const from = current;
+    const type = page.design.facets?.type;
+    pageBuilder.setPageStyle(id);
+    if (id !== from && type && !TYPE_FACET_BASES[id].includes(type))
+      announce(m.studio_page_editor_facet_dropped({ style: STYLES[id].label, voice: STYLES[type].label }));
+  }
   const overrides = $derived(brandOverrides ?? {});
 
   /** The chosen Style's pair, while it is not what the page renders now. */
@@ -172,7 +218,7 @@
           data-style={preview.style.id}
           aria-pressed={active}
           aria-describedby="style-card-{preview.style.id}"
-          onclick={() => pageBuilder.setPageStyle(preview.style.id)}
+          onclick={() => chooseStyle(preview.style.id)}
         >
           <MiniPreview
             class="style-card__thumb"
@@ -217,6 +263,18 @@
       {/if}
     </div>
   </section>
+
+  <PageDials
+    design={page.design}
+    {theme}
+    {brandOverrides}
+    {roundedBrand}
+    sample={sample.heading}
+    {onPreview}
+    {announce}
+  />
+
+  <p class="sr-only" role="status" aria-live="polite">{status}</p>
 
   <section class="style-panel__group" aria-labelledby="style-panel-brand">
     <h2 class="style-panel__title" id="style-panel-brand">{m.studio_page_editor_brand_title()}</h2>

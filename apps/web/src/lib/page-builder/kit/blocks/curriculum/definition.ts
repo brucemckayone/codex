@@ -21,6 +21,10 @@ export type CurriculumProps = {
 export const CURRICULUM_EMPTY =
   'Your stages appear here. Add them on the Curriculum tab.';
 
+/** The canvas prompt under a layered stage with nothing in it, while editing. */
+export const CURRICULUM_EMPTY_STAGE =
+  'Nothing in this stage yet. Add practices to it on the Curriculum tab.';
+
 export const curriculumDefinition: BlockDefinition<CurriculumProps> = {
   type: 'curriculum',
   label: 'Curriculum',
@@ -44,6 +48,11 @@ export const curriculumDefinition: BlockDefinition<CurriculumProps> = {
       'map',
       'Journey map',
       'Your stages as stops along a drawn route, each opening to show its practices.'
+    ),
+    layout(
+      'layered',
+      'Layered stages',
+      'Each stage its own row of practice cards that visitors swipe through.'
     ),
   ],
   fields: [

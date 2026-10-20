@@ -143,5 +143,3 @@ export type {
   SaleListItem,
   SalesStats,
 } from './types';
-// Connect routing helpers (Codex-sec7i)
-export { resolvePrimaryConnect } from './utils/resolve-primary-connect';

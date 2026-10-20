@@ -14,4 +14,13 @@ export {
 export {
   OrganizationService,
   type OrganizationServiceConfig,
+  type OwnershipMailer,
+  type OwnershipTemplateName,
 } from './organization-service';
+export {
+  OWNERSHIP_OFFER_TTL_MS,
+  type OwnershipChange,
+  type OwnershipOfferDto,
+  type OwnershipViewCore,
+  type OwnershipViewerRole,
+} from './ownership-transfer';

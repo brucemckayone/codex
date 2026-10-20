@@ -285,6 +285,29 @@ describe('Inspector — section', () => {
     );
   });
 
+  it('says when the size comes from the page’s spacing dial, and only then (Codex-61zsk.59)', () => {
+    render([
+      { id: 'f', type: 'faq', enabled: true, props: {} },
+      { id: 'c', type: 'cta', enabled: true, variant: 'compact', props: {} },
+    ]);
+    pageBuilder.setPageDial('spacing', 'spacious');
+    flushSync();
+    expect(el('.spacing__note').textContent?.trim()).toBe(
+      'Large, from the page.'
+    );
+    // A compact layout outranks the dial (resolveSpacing), so it says so.
+    pageBuilder.selectSection('c');
+    flushSync();
+    expect(el('.spacing__note').textContent?.trim()).toBe(
+      'Small is the default for this layout.'
+    );
+    // A section's own spacing shows the reset instead of a note.
+    pageBuilder.selectSection('f');
+    flushSync();
+    click('[data-spacing="compact"]');
+    expect(document.querySelector('.spacing__note')).toBeNull();
+  });
+
   it('reads and writes text, counting against the limit; blank removes the key', () => {
     render([
       { id: 'h', type: 'hero', enabled: true, props: { heading: 'Rest well' } },
@@ -430,7 +453,8 @@ describe('Inspector — section', () => {
           '.item__fields .field__label, .item__fields .image__label'
         ),
       ].map((label) => label.textContent?.trim());
-    expect(labels()).toEqual(['Item', 'One line about it']);
+    // A mark is offered in every layout; the picture only where it is drawn.
+    expect(labels()).toEqual(['Item', 'One line about it', 'Mark']);
 
     pageBuilder.setSectionLayout('b', 'grid');
     flushSync();
@@ -473,5 +497,18 @@ describe('Inspector — page', () => {
     expect(el('.page-inspector__facts').textContent).toContain('2');
     click('.page-inspector__button');
     expect(props.onChangeStyle).toHaveBeenCalled();
+  });
+
+  it('says in one line what the page adjusts, in the dials’ order (Codex-61zsk.59)', () => {
+    render([{ id: 'h', type: 'hero', enabled: true, props: {} }], null);
+    const line = () => el('[data-adjusted]').textContent?.trim();
+    expect(line()).toBe('Not adjusted: Bold’s own throughout.');
+    pageBuilder.setPageDial('corners', 'rounder');
+    pageBuilder.setPageDial('colour', 'muted');
+    pageBuilder.setTypeFacet('quiet');
+    flushSync();
+    expect(line()).toBe(
+      'Adjusted: Less colour · Rounder corners · Quiet’s headlines.'
+    );
   });
 });

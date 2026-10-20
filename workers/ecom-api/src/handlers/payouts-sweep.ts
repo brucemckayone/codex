@@ -20,11 +20,14 @@
  * per-group `errors` field returned by the service method.
  */
 
-import type { Database } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
 import { createStripeClient } from '@codex/purchase';
 import type { Bindings } from '@codex/shared-types';
-import { SubscriptionService } from '@codex/subscription';
+import type { SubscriptionService } from '@codex/subscription';
+import {
+  createWebhookServices,
+  type WebhookServices,
+} from '@codex/worker-utils';
 import type Stripe from 'stripe';
 
 /** Default age threshold — only sweep rows old enough that the
@@ -33,14 +36,13 @@ import type Stripe from 'stripe';
 const DEFAULT_OLDER_THAN_MINUTES = 15;
 
 export interface RunSweepDeps {
-  /** Pre-constructed DB client (per-request HTTP client) */
-  db: Database;
-  /** Pre-constructed Stripe client */
-  stripe: Stripe;
+  /** The registry's SubscriptionService (see runScheduledPayoutsSweep). */
+  subscription: Pick<
+    SubscriptionService,
+    'sweepUnresolvedPayouts' | 'retryFailedClawbacks'
+  >;
   /** Observability client (PII-redacted) */
   obs: ObservabilityClient;
-  /** Environment label for service config */
-  environment: string;
   /** Optional override for the age threshold (mainly for tests) */
   olderThanMinutes?: number;
 }
@@ -57,22 +59,20 @@ export async function runPayoutsSweep(deps: RunSweepDeps): Promise<{
   errors: number;
 } | null> {
   const {
-    db,
-    stripe,
+    subscription,
     obs,
-    environment,
     olderThanMinutes = DEFAULT_OLDER_THAN_MINUTES,
   } = deps;
 
   try {
-    const service = new SubscriptionService({ db, environment }, stripe);
-    const result = await service.sweepUnresolvedPayouts(olderThanMinutes);
+    const result = await subscription.sweepUnresolvedPayouts(olderThanMinutes);
 
     obs.info('payouts-sweep cron completed', {
       olderThanMinutes,
       ...result,
     });
 
+    await retryClawbacks(subscription, obs, olderThanMinutes);
     return result;
   } catch (error) {
     obs.error('payouts-sweep cron failed at top level', {
@@ -83,16 +83,46 @@ export async function runPayoutsSweep(deps: RunSweepDeps): Promise<{
 }
 
 /**
- * Scheduled-handler entry point. Constructs Database + Stripe + Observability
- * from env, validates required env vars (logs and exits cleanly on missing
- * config), and delegates to `runPayoutsSweep`.
+ * Retry clawback steps left `failed` (Codex-2hxff.8). Isolated from the payout
+ * sweep: its failure is logged and never fails the cron.
+ */
+async function retryClawbacks(
+  subscription: RunSweepDeps['subscription'],
+  obs: ObservabilityClient,
+  olderThanMinutes: number
+): Promise<void> {
+  try {
+    const result = await subscription.retryFailedClawbacks(olderThanMinutes);
+    obs.info('payouts-sweep cron retried failed clawbacks', {
+      olderThanMinutes,
+      ...result,
+    });
+  } catch (error) {
+    obs.error('payouts-sweep cron could not retry failed clawbacks', {
+      errorId: crypto.randomUUID(),
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Scheduled-handler entry point. Validates required env vars (logs and exits
+ * cleanly on missing config), builds the registry's services through the
+ * webhook composition root (Codex-2hxff.54) — so the drain carries fee config
+ * and the payout-released mailer, as routes do — and delegates to
+ * `runPayoutsSweep`.
  *
  * Exposed as a function so the test suite can drive it without needing the
  * full `scheduled()` Cloudflare interface.
  */
 export async function runScheduledPayoutsSweep(
   env: Bindings,
-  deps?: Partial<RunSweepDeps>
+  ctx: ExecutionContext,
+  deps?: {
+    obs?: ObservabilityClient;
+    stripe?: Stripe;
+    olderThanMinutes?: number;
+  }
 ): Promise<void> {
   const obs =
     deps?.obs ??
@@ -107,17 +137,28 @@ export async function runScheduledPayoutsSweep(
     return;
   }
 
-  const { createDbClient } = await import('@codex/database');
-  const db = deps?.db ?? createDbClient(env);
-  const stripe = deps?.stripe ?? createStripeClient(env.STRIPE_SECRET_KEY);
+  let webhookServices: WebhookServices;
+  try {
+    webhookServices = await createWebhookServices(env, ctx, {
+      obs,
+      stripe: deps?.stripe ?? createStripeClient(env.STRIPE_SECRET_KEY),
+    });
+  } catch (error) {
+    obs.error('payouts-sweep: could not build services, skipping', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
 
-  await runPayoutsSweep({
-    db,
-    stripe,
-    obs,
-    environment: env.ENVIRONMENT ?? 'development',
-    olderThanMinutes: deps?.olderThanMinutes,
-  });
+  try {
+    await runPayoutsSweep({
+      subscription: webhookServices.services.subscription,
+      obs,
+      olderThanMinutes: deps?.olderThanMinutes,
+    });
+  } finally {
+    webhookServices.release();
+  }
 }
 
 /**
@@ -136,7 +177,7 @@ export function dispatchScheduled(
   ctx: ExecutionContext
 ): void {
   ctx.waitUntil(
-    runScheduledPayoutsSweep(env).catch((error: unknown) => {
+    runScheduledPayoutsSweep(env, ctx).catch((error: unknown) => {
       // runScheduledPayoutsSweep already swallows its own errors and logs
       // via ObservabilityClient — this .catch is the belt-and-braces guard
       // against future refactors that drop the inner try/catch.

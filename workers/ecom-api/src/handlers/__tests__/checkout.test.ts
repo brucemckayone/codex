@@ -18,21 +18,33 @@ import {
   createMockStripeCheckoutEvent,
   type MockHonoContext,
 } from '@codex/test-utils';
+import type { WebhookServices } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StripeWebhookEnv } from '../../types';
 
 // Mock modules before imports
-vi.mock('@codex/database', () => ({
-  createPerRequestDbClient: vi.fn(),
-}));
-
-vi.mock('@codex/purchase', () => ({
-  PurchaseService: vi.fn(),
-}));
+// The handler gets its PurchaseService from the webhook composition root
+// (Codex-2hxff.54). Mock that seam so each test hands over its own stub;
+// every other export stays real.
+vi.mock('@codex/worker-utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@codex/worker-utils')>();
+  return {
+    ...actual,
+    createWebhookServices: vi.fn(),
+  };
+});
 
 vi.mock('@codex/validation', () => ({
+  courseCheckoutSessionMetadataSchema: {
+    parse: vi.fn((data) => ({
+      kind: 'course',
+      customerId: data.customerId,
+      courseId: data.courseId,
+      organizationId: data.organizationId || null,
+    })),
+  },
   checkoutSessionMetadataSchema: {
     parse: vi.fn((data) => {
       if (!data?.customerId || !data?.contentId) {
@@ -47,9 +59,8 @@ vi.mock('@codex/validation', () => ({
   },
 }));
 
-import { createPerRequestDbClient } from '@codex/database';
-import { PurchaseService } from '@codex/purchase';
 import { checkoutSessionMetadataSchema } from '@codex/validation';
+import { createWebhookServices } from '@codex/worker-utils';
 // Import after mocks
 import { handleCheckoutCompleted } from '../checkout';
 
@@ -75,11 +86,26 @@ function createContext(
   };
 }
 
+/**
+ * Attach an `executionCtx` — createMockHonoContext omits it. Only the
+ * service-initialisation tests need one, to prove the handler hands the
+ * request's own context to `createWebhookServices`.
+ */
+function attachExecutionCtx(
+  mock: MockHonoContext<StripeWebhookEnv['Bindings']>
+): ExecutionContext {
+  const executionCtx = {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext;
+  (mock as unknown as Record<string, unknown>).executionCtx = executionCtx;
+  return executionCtx;
+}
+
 describe('handleCheckoutCompleted', () => {
   let mockStripe: Stripe;
   let mockCompletePurchase: ReturnType<typeof vi.fn>;
-  let mockCleanup: ReturnType<typeof vi.fn>;
-  let mockDb: Record<string, unknown>;
+  let mockRelease: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -90,35 +116,19 @@ describe('handleCheckoutCompleted', () => {
       customerId: 'user_123',
       contentId: 'content_456',
     });
-    mockCleanup = vi.fn();
-    mockDb = { mock: 'database' };
+    mockRelease = vi.fn();
 
-    // Reset mocks with proper argument validation
-    (createPerRequestDbClient as ReturnType<typeof vi.fn>).mockImplementation(
-      (config: {
-        DATABASE_URL: string;
-        DATABASE_URL_LOCAL_PROXY?: string;
-        DB_METHOD: string;
-      }) => {
-        // Validate that config object is passed with required fields
-        expect(config).toBeDefined();
-        expect(config.DATABASE_URL).toBeDefined();
-        expect(typeof config.DATABASE_URL).toBe('string');
-        expect(config.DB_METHOD).toBeDefined();
-        return { db: mockDb, cleanup: mockCleanup };
-      }
-    );
-
-    (PurchaseService as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      (config: { db: unknown; environment: string }, stripeClient: Stripe) => {
-        // Validate that both config and stripe client are passed
-        expect(config).toBeDefined();
-        expect(config.db).toBeDefined();
-        expect(config.environment).toBeDefined();
-        expect(stripeClient).toBeDefined();
-        return { completePurchase: mockCompletePurchase };
-      }
-    );
+    // The registry's services, as the composition root hands them over.
+    vi.mocked(createWebhookServices).mockResolvedValue({
+      services: {
+        purchase: {
+          completePurchase: mockCompletePurchase,
+          completeCoursePurchase: mockCompletePurchase,
+        },
+      } as unknown as WebhookServices['services'],
+      background: (promise) => promise,
+      release: mockRelease,
+    });
   });
 
   describe('successful purchase completion', () => {
@@ -137,8 +147,8 @@ describe('handleCheckoutCompleted', () => {
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
-      // Verify PurchaseService was instantiated
-      expect(PurchaseService).toHaveBeenCalled();
+      // Verify the registry's services were built (once) for this event
+      expect(createWebhookServices).toHaveBeenCalledOnce();
 
       // Verify completePurchase was called with correct params
       expect(mockCompletePurchase).toHaveBeenCalledWith(
@@ -162,8 +172,29 @@ describe('handleCheckoutCompleted', () => {
         })
       );
 
-      // Verify cleanup was called
-      expect(mockCleanup).toHaveBeenCalled();
+      // Verify the services' pool was released
+      expect(mockRelease).toHaveBeenCalledOnce();
+    });
+
+    // Codex-2hxff.2 review (H5): the sale time is the event's `created` (kept
+    // on every redelivery), never the time the webhook happens to run.
+    it("passes the event's created time as paidAt", async () => {
+      const event = createMockStripeCheckoutEvent({
+        eventId: 'evt_test_paid_at',
+        sessionId: 'cs_test_paid_at',
+        paymentIntentId: 'pi_test_paid_at',
+        metadata: { customerId: 'user_123', contentId: 'content_456' },
+      }) as unknown as Stripe.Event;
+      const created = 1_760_000_000;
+      (event as { created: number }).created = created;
+      const { context } = createContext();
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(mockCompletePurchase).toHaveBeenCalledWith(
+        'pi_test_paid_at',
+        expect.objectContaining({ paidAt: new Date(created * 1000) })
+      );
     });
 
     it('should handle payment_intent as string', async () => {
@@ -361,8 +392,8 @@ describe('handleCheckoutCompleted', () => {
      * See workers/ecom-api/src/utils/webhook-handler.ts and
      * workers/ecom-api/src/utils/error-classification.ts.
      *
-     * The handler MUST still run cleanup() on the error path via its
-     * try { ... } finally { await cleanup(); } block — DB connection leaks
+     * The handler MUST still run release() on the error path via its
+     * try { ... } finally { release(); } block — DB connection leaks
      * on errors are a real safety regression under load.
      */
 
@@ -398,13 +429,13 @@ describe('handleCheckoutCompleted', () => {
 
       mockCompletePurchase.mockRejectedValueOnce(new Error('Test error'));
 
-      // Cleanup runs in a `finally` block — assert it fired even though
+      // Release runs in a `finally` block — assert it fired even though
       // the handler rethrew the underlying error.
       await expect(
         handleCheckoutCompleted(event, mockStripe, context)
       ).rejects.toThrow('Test error');
 
-      expect(mockCleanup).toHaveBeenCalled();
+      expect(mockRelease).toHaveBeenCalledOnce();
     });
 
     it('should preserve error type and message for the wrapper to log', async () => {
@@ -505,8 +536,11 @@ describe('handleCheckoutCompleted', () => {
     });
   });
 
+  // Codex-2hxff.54: the handler no longer builds its DB client or
+  // PurchaseService; the registry does, from the bindings and Stripe client
+  // the handler passes to createWebhookServices. These assert that hand-off.
   describe('service initialization', () => {
-    it('should pass correct config to createPerRequestDbClient', async () => {
+    it('should pass the database bindings to createWebhookServices', async () => {
       const event = createMockStripeCheckoutEvent({
         metadata: {
           customerId: 'user_123',
@@ -521,15 +555,18 @@ describe('handleCheckoutCompleted', () => {
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
-      expect(createPerRequestDbClient).toHaveBeenCalledWith(
+      // The per-request DB client is now built by the registry from these.
+      expect(createWebhookServices).toHaveBeenCalledWith(
         expect.objectContaining({
           DATABASE_URL: 'postgresql://custom-test-url',
           DB_METHOD: 'PRODUCTION',
-        })
+        }),
+        context.executionCtx,
+        expect.anything()
       );
     });
 
-    it('should pass db and environment to PurchaseService', async () => {
+    it("should complete the purchase on the registry's PurchaseService", async () => {
       const event = createMockStripeCheckoutEvent({
         metadata: {
           customerId: 'user_123',
@@ -543,54 +580,61 @@ describe('handleCheckoutCompleted', () => {
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
-      expect(PurchaseService).toHaveBeenCalledWith(
-        expect.objectContaining({
-          db: mockDb,
-          environment: 'production',
-        }),
-        mockStripe
-      );
-    });
-
-    it('should pass stripe client to PurchaseService', async () => {
-      const event = createMockStripeCheckoutEvent({
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
-      }) as unknown as Stripe.Event;
-      const { context } = createContext();
-
-      await handleCheckoutCompleted(event, mockStripe, context);
-
-      // Verify stripe client was passed as second argument
-      expect(PurchaseService).toHaveBeenCalledWith(
-        expect.anything(),
-        mockStripe
-      );
-    });
-
-    it('should default environment to development when not set', async () => {
-      const event = createMockStripeCheckoutEvent({
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
-      }) as unknown as Stripe.Event;
-      const { context } = createContext({
-        ENVIRONMENT: undefined,
-      });
-
-      await handleCheckoutCompleted(event, mockStripe, context);
-
-      expect(PurchaseService).toHaveBeenCalledWith(
-        expect.objectContaining({
-          environment: 'development',
-        }),
+      // db + environment are now the registry's to wire; the handler hands
+      // it the bindings (ENVIRONMENT included) and uses `services.purchase`.
+      expect(createWebhookServices).toHaveBeenCalledWith(
+        expect.objectContaining({ ENVIRONMENT: 'production' }),
+        context.executionCtx,
         expect.anything()
       );
+      expect(mockCompletePurchase).toHaveBeenCalledOnce();
+    });
+
+    it('should pass stripe client to createWebhookServices', async () => {
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const { context, mock } = createContext();
+      const executionCtx = attachExecutionCtx(mock);
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      // The webhook's verified Stripe client and the request's own
+      // executionCtx (release() schedules pool cleanup on it).
+      expect(createWebhookServices).toHaveBeenCalledWith(
+        context.env,
+        executionCtx,
+        expect.objectContaining({ obs: mock._obs, stripe: mockStripe })
+      );
+    });
+
+    it('should leave the environment default to the registry', async () => {
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      const { context, mock } = createContext({
+        ENVIRONMENT: undefined,
+      });
+      const executionCtx = attachExecutionCtx(mock);
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      // The 'development' default moved into the registry's getEnvironment().
+      expect(createWebhookServices).toHaveBeenCalledWith(
+        context.env,
+        executionCtx,
+        expect.objectContaining({ stripe: mockStripe })
+      );
+      const [env] = vi.mocked(createWebhookServices).mock.calls[0] ?? [];
+      expect(env?.ENVIRONMENT).toBeUndefined();
     });
   });
 
@@ -706,6 +750,77 @@ describe('handleCheckoutCompleted', () => {
       // Current behavior: processes anyway
       // If we want to reject unpaid, add validation in handler
       expect(mockCompletePurchase).toHaveBeenCalled();
+    });
+  });
+
+  // Codex-2hxff.11 (PAY-08): the charge id from the PaymentIntent is what
+  // every payout slice is paid from. A TEMPORARY lookup failure used to be
+  // logged and skipped, so the sale completed with no slices at all; it now
+  // rejects, and createWebhookHandler answers 500 so Stripe retries.
+  describe('the PaymentIntent lookup fails', () => {
+    const outage = () =>
+      Object.assign(new Error('Connection to Stripe failed'), {
+        type: 'StripeConnectionError',
+      });
+    const missing = () =>
+      Object.assign(new Error('No such payment_intent'), {
+        type: 'StripeInvalidRequestError',
+        statusCode: 404,
+      });
+    const stripeWhoseLookup = (error: Error) =>
+      ({
+        paymentIntents: { retrieve: vi.fn().mockRejectedValue(error) },
+      }) as unknown as Stripe;
+
+    it('temporarily (content) → rejects; the purchase is NOT completed without its charge', async () => {
+      const event = createMockStripeCheckoutEvent({
+        metadata: { customerId: 'user_123', contentId: 'content_456' },
+      }) as unknown as Stripe.Event;
+
+      await expect(
+        handleCheckoutCompleted(
+          event,
+          stripeWhoseLookup(outage()),
+          createContext().context
+        )
+      ).rejects.toThrow('Connection to Stripe failed');
+      expect(mockCompletePurchase).not.toHaveBeenCalled();
+    });
+
+    it('temporarily (course) → rejects; the purchase is NOT completed without its charge', async () => {
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          kind: 'course',
+          customerId: 'user_123',
+          courseId: 'course_456',
+        },
+      }) as unknown as Stripe.Event;
+
+      await expect(
+        handleCheckoutCompleted(
+          event,
+          stripeWhoseLookup(outage()),
+          createContext().context
+        )
+      ).rejects.toThrow('Connection to Stripe failed');
+      expect(mockCompletePurchase).not.toHaveBeenCalled();
+    });
+
+    it('permanently → the purchase still completes (the buyer paid), with no charge id', async () => {
+      const event = createMockStripeCheckoutEvent({
+        metadata: { customerId: 'user_123', contentId: 'content_456' },
+      }) as unknown as Stripe.Event;
+
+      await handleCheckoutCompleted(
+        event,
+        stripeWhoseLookup(missing()),
+        createContext().context
+      );
+
+      expect(mockCompletePurchase).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ stripeChargeId: null })
+      );
     });
   });
 });

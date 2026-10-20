@@ -1,10 +1,17 @@
 /**
  * The canvas draws the public page (contract §6) — for the media blocks, apart
- * from their empty-media prompts, the one element a creator needs and a
- * visitor must never see. Each is marked `data-lp-edit-only`; this mirrors
- * `PageRenderer.svelte.test.ts`'s identity check with that element removed.
+ * from what only a creator needs and a visitor must never see: an empty-media
+ * prompt, and (Codex-61zsk.37) a film section with no film, which the public
+ * page does not draw at all: it folds the section before its bands resolve
+ * (Codex-61zsk.57). Each empty-media element is marked `data-lp-edit-only`;
+ * this mirrors `PageRenderer.svelte.test.ts`'s identity check with them, and
+ * the folded sections, removed.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tick } from 'svelte';
+import { parse } from 'svelte/compiler';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   flushSync,
@@ -14,6 +21,8 @@ import {
 import { sampleContext, samplePage } from '../../model/sample';
 import PageRenderer from '../../PageRenderer.svelte';
 import type { PageEdit } from '../../page-context';
+import { PREVIEW_PROMPT } from '../preview/definition';
+import { VIDEO_PROMPT } from './definition';
 
 let app: ReturnType<typeof mount> | null = null;
 
@@ -23,15 +32,27 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-async function render(edit: PageEdit | null) {
-  const page = samplePage('bold', ['video', 'preview', 'instructor', 'stats']);
+async function render(
+  options: { edit?: PageEdit | null; still?: boolean } = {}
+) {
+  // The film sections come last, and the page sets no dials: the public page
+  // folds them before its bands resolve, so a banded section beside one (after
+  // it, or before it under the vivid colour dial, which reads the next band)
+  // can take another colour there than on the canvas. That difference is the
+  // fold's purpose; this compares the rest.
+  const page = samplePage('bold', ['instructor', 'stats', 'video', 'preview']);
   // No intro, reel, portrait, curriculum or numbers of the creator's own:
   // every block's empty state at once.
   const stats = page.sections.find((section) => section.type === 'stats');
   if (stats) stats.props = { heading: 'At a glance', live: true };
   app = mount(PageRenderer, {
     target: document.body,
-    props: { page, context: { ...sampleContext(), stages: [] }, edit },
+    props: {
+      page,
+      context: { ...sampleContext(), stages: [] },
+      edit: options.edit ?? null,
+      still: options.still ?? false,
+    },
   });
   flushSync();
   await tick();
@@ -40,10 +61,17 @@ async function render(edit: PageEdit | null) {
   return document.body.querySelector('.lp') as HTMLElement;
 }
 
+const band = (root: HTMLElement, type: string) =>
+  root.querySelector(`.lp-section[data-lp-type="${type}"]`);
+
+/** The film sections a visitor's page folds when their films are not coming. */
+const FOLDED = ['video', 'preview'];
+
 function withoutEditing(root: HTMLElement, dropCanvasOnly: boolean): string {
   const copy = root.cloneNode(true) as HTMLElement;
   if (dropCanvasOnly) {
     for (const el of copy.querySelectorAll('[data-lp-edit-only]')) el.remove();
+    for (const type of FOLDED) band(copy, type)?.remove();
   }
   for (const el of copy.querySelectorAll('[contenteditable]')) {
     for (const attr of [
@@ -70,15 +98,91 @@ function withoutEditing(root: HTMLElement, dropCanvasOnly: boolean): string {
   return copy.innerHTML.replace(/<!--[\s\S]*?-->/g, '');
 }
 
+type CssNode = {
+  type: string;
+  property?: string;
+  value?: string;
+  prelude?: { start: number; end: number };
+  block?: { children: CssNode[] } | null;
+};
+
+/** What each selector of a component's <style> declares; comments stripped. */
+function declarations(file: string): Map<string, Record<string, string>> {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), file),
+    'utf8'
+  );
+  const squash = (s: string) =>
+    s
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const rules = new Map<string, Record<string, string>>();
+  const visit = (nodes: CssNode[]) => {
+    for (const node of nodes) {
+      const children = node.block?.children ?? [];
+      if (node.type === 'Rule' && node.prelude) {
+        const selector = squash(
+          source.slice(node.prelude.start, node.prelude.end)
+        );
+        const own = rules.get(selector) ?? {};
+        for (const child of children)
+          if (child.type === 'Declaration')
+            own[child.property ?? ''] = squash(child.value ?? '');
+        rules.set(selector, own);
+      }
+      visit(children);
+    }
+  };
+  visit((parse(source, { modern: true }).css?.children ?? []) as CssNode[]);
+  return rules;
+}
+
 describe('media blocks on the canvas', () => {
-  it('draw the public markup, apart from the prompts only a creator sees', async () => {
-    const publicRoot = await render(null);
+  it('draw the public markup, apart from what only a creator sees', async () => {
+    const publicRoot = await render();
     expect(publicRoot.querySelector('[data-lp-edit-only]')).toBeNull();
+    for (const type of FOLDED) expect(band(publicRoot, type), type).toBeNull();
     const publicHtml = withoutEditing(publicRoot, false);
     unmount(app);
 
-    const canvas = await render({ commit: () => {} });
-    expect(canvas.querySelectorAll('[data-lp-edit-only]').length).toBe(4);
+    const canvas = await render({ edit: { commit: () => {} } });
+    // Every media section with nothing to show asks for it there.
+    for (const type of ['video', 'preview', 'instructor', 'stats']) {
+      expect(
+        band(canvas, type)?.querySelector('[data-lp-edit-only]'),
+        type
+      ).not.toBeNull();
+    }
     expect(withoutEditing(canvas, true)).toBe(publicHtml);
+  });
+
+  it('with no clip, a film section draws no band on the public page and its shape in a still thumbnail', async () => {
+    const publicRoot = await render();
+    for (const type of FOLDED) expect(band(publicRoot, type), type).toBeNull();
+    unmount(app);
+
+    const thumbnail = await render({ still: true });
+    for (const [type, prompt] of [
+      ['video', VIDEO_PROMPT],
+      ['preview', PREVIEW_PROMPT],
+    ]) {
+      const section = band(thumbnail, type);
+      expect(section?.querySelector('h2'), type).not.toBeNull();
+      expect(section?.querySelector('.lp-media__plate'), type).not.toBeNull();
+      // The prompt is the canvas's: a thumbnail is only a picture.
+      expect(section?.textContent, type).not.toContain(prompt);
+    }
+  });
+
+  it.each([
+    ['VideoBlock.svelte', 'video-none'],
+    ['../preview/PreviewBlock.svelte', 'preview-none'],
+  ])('%s folds its band away on the public page when there is no clip', (file, marker) => {
+    expect(
+      declarations(file).get(
+        `:global(.lp:not([data-lp-still]) .lp-section:has(> .lp-inner > .${marker}))`
+      )
+    ).toEqual({ display: 'none' });
   });
 });

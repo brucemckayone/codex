@@ -33,19 +33,22 @@
    SIGNATURE. The poster hero: the headline in capitals at full scale, set
    round a photograph that runs off the sheet, a sticker on top.
 
-   Corners: the brand radius bent by 0.25 and capped at `--radius-sm`
+   Corners: the org's bent by 0.25 and capped at `--radius-sm`
    (03 §4.2); stickers are pills only if the brand is rounded at all.
    Fonts: suggests Anton over Roboto; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.lp[data-lp-style='poster'] {
+/* Poster's Type, wherever it is drawn: its own page, or another Style's that
+   borrows it (03 X73). Keyed on the page's Type, never on its Style, and it
+   declares no token the Style block below does. */
+.lp[data-lp-type-facet='poster'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(2.75rem, 0.4rem + 8.8cqi, 8.25rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(2.1rem, 0.7rem + 4.4cqi, 5.25rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.75rem, 0.4rem + 8.8cqi, 8.25rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(2.1rem, 0.7rem + 4.4cqi, 5.25rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.25rem, 0.95rem + 1.1cqi, 1.85rem) * var(--lp-scale));
   --lp-size-lead: calc(clamp(1.25rem, 1.05rem + 0.6cqi, 1.625rem) * var(--lp-scale));
   --lp-size-price: calc(clamp(3.5rem, 1.2rem + 7.5cqi, 8rem) * var(--lp-scale));
-  --lp-size-cta: calc(clamp(2.75rem, 0.4rem + 8cqi, 7.5rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.75rem, 0.4rem + 8cqi, 7.5rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 0.88;
   --lp-leading-heading: 0.92;
@@ -59,25 +62,31 @@
   --lp-case-display: uppercase;
   --lp-weight-label: var(--font-bold);
 
-  /* ── shape: the brand radius bent by 0.25, never past `--radius-sm` ───── */
-  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
-  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
-  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  /* ── the button's label: in capitals, tracked open, at the weight the org
+     gives its loudest call, its home hero's (semibold) ─────────────────── */
+  --lp-button-weight: var(--font-semibold);
+  --lp-button-tracking: 0.05em;
+
+  --lp-measure-lead: 38;
+}
+
+.lp[data-lp-style='poster'] {
+  /* ── shape: the org's corners bent by 0.25, never past `--radius-sm` ──── */
+  --lp-radius-card: clamp(0rem, calc(var(--radius-card) * 0.25), var(--radius-sm));
+  --lp-radius-media: clamp(0rem, calc(var(--radius-lg) * 0.25), var(--radius-sm));
+  --lp-radius-button: clamp(0rem, calc(var(--radius-button) * 0.25), var(--radius-sm));
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
   --lp-border: var(--border-width-thick);
   --lp-rule: var(--border-width-thick);
 
-  /* ── buttons: heavy, in capitals ──────────────────────────────────────── */
-  --lp-button-height: max(var(--tap-target-min), var(--space-14));
+  /* ── buttons: square-shouldered ───────────────────────────────────────── */
+  /* The org's button height (kit.css), wide (its label is the Type's). */
   --lp-button-pad: var(--space-8);
-  --lp-button-weight: var(--font-bold);
-  --lp-button-tracking: 0.05em;
 
   /* ── rhythm: dense sheets, a wide column the type can crowd ───────────── */
   --lp-pad-regular: clamp(var(--space-14), var(--space-6) + 6cqi, var(--space-24));
   --lp-pad-spacious: clamp(var(--space-20), var(--space-8) + 9cqi, var(--space-32));
   --lp-container: 80rem;
-  --lp-measure-lead: 38ch;
 
   /* ── surfaces ─────────────────────────────────────────────────────────── */
   --lp-edge: angle;
@@ -98,15 +107,26 @@
 
 /* ── capitals ────────────────────────────────────────────────────────────── */
 /* Section headings join the display line in capitals; titles, the reading
-   voice of cards and questions, stay in sentence case. */
-:is(.lp, #lp-style)[data-lp-style='poster'] .lp-heading[data-size='heading'] {
+   voice of cards and questions, stay in sentence case. A heading is drawn no
+   larger than its widest run fits, weighed as it is drawn, so here, where
+   the case is set, in capitals (`primitives/Heading.svelte`, 03 X62, X66). */
+:is(.lp, #lp-style)[data-lp-type-facet='poster'] .lp-heading[data-size='heading'] {
   text-transform: uppercase;
+  --lp-heading-face: var(--lp-face-caps);
+  --lp-heading-run: var(--lp-heading-run-caps, 0);
+}
+
+/* The display line is in capitals already (`--lp-case-display`, above), so
+   its run is weighed in them too (03 X71). */
+:is(.lp, #lp-style)[data-lp-type-facet='poster'] .lp-heading[data-size='display'] {
+  --lp-heading-face: var(--lp-face-caps);
+  --lp-heading-run: var(--lp-heading-run-caps, 0);
 }
 
 /* A phone column is narrow for a long word in capitals: break it where a
    dictionary would, never mid-letter, and only words of ten letters or more. */
 @container (width < 32rem) {
-  :is(.lp, #lp-style)[data-lp-style='poster']
+  :is(.lp, #lp-style)[data-lp-type-facet='poster']
     .lp-heading:is([data-size='display'], [data-size='heading']) {
     hyphens: auto;
     hyphenate-limit-chars: 10 4 4;
@@ -122,23 +142,23 @@
    widest face measured (Archivo Black). On the headline's parent, so the
    poster's picture, which drops by one headline line, steps with it. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-statement:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='poster'] .hero-statement:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.7;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-centered:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='poster'] .hero-centered:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.62;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-cover__copy:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='poster'] .hero-cover__copy:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.55;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-poster:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='poster'] .hero-poster:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.5;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-split__copy:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='poster'] .hero-split__copy:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.45;
   }
 }
@@ -150,19 +170,19 @@
    buttons with it, above a 1440 × 900 fold in Archivo Black with no word
    split — a step above the long one. The centred hero holds. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-statement:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='poster'] .hero-statement:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.95;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-cover__copy:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='poster'] .hero-cover__copy:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.75;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-poster:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='poster'] .hero-poster:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.6;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-split__copy:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='poster'] .hero-split__copy:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.55;
   }
 }
@@ -182,25 +202,82 @@
    as the longest the field takes. */
 @supports (line-height: pow(2, 0.5)) {
   @container (min-width: 56rem) {
-    :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='poster'] .lp-section[data-lp-type='hero']
       .hero-statement:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(54 / var(--lp-heading-chars, 120), 0.45));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='poster'] .lp-section[data-lp-type='hero']
       .hero-split__copy:has(> .hero__headline) {
       --lp-display-scale: calc(0.7 * min(1, pow(29 / var(--lp-heading-chars, 120), 0.28)));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='poster'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(27 / var(--lp-heading-chars, 120), 0.4));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='poster'] .lp-section[data-lp-type='hero']
       .hero-centered:has(> .hero__headline) {
       --lp-display-scale: calc(0.84 * min(1, pow(73 / var(--lp-heading-chars, 120), 0.83)));
     }
+  }
+}
+
+/* ── on another Style's page (03 X74) ─────────────────────────────────────── */
+/* Poster's hero was fitted to Poster's own column and spacing (above). On a
+   page that borrows the Type the line is the page's, so each pair and layout
+   that needs it draws the hero smaller by a factor: the largest at which it
+   ends no further past a 1440 × 900 fold, and cuts no word, that the page's
+   own Type does, at every length from 20 to 120 in four word families and two
+   faces, with the hero's eyebrow and without it, with 1% to spare
+   (`type-fit.spec.ts`). A pair that holds at full size has none, and a page's
+   own Type never has one. The page's Style sits inside `:where()`, so each
+   weighs what the Type's own rules weigh. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-type-facet='poster']:where([data-lp-style='bold'])
+    .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
+    --lp-type-fit: 0.92;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='poster']:where([data-lp-style='bold'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.92;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='poster']:where([data-lp-style='bold'])
+    .lp-section[data-lp-type='hero'] .hero-cover__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.88;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='poster']:where([data-lp-style='bold'])
+    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    --lp-type-fit: 0.86;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='poster']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
+    --lp-type-fit: 0.88;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='poster']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.91;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='poster']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-cover__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.96;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='poster']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    --lp-type-fit: 0.91;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='poster']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-poster:has(> .hero__headline) {
+    --lp-type-fit: 0.95;
   }
 }
 
@@ -245,7 +322,7 @@
 }
 
 /* ── buttons ─────────────────────────────────────────────────────────────── */
-:is(.lp, #lp-style)[data-lp-style='poster'] :is(.lp-button, .tf-toggle__tab, .tm-marquee__toggle) {
+:is(.lp, #lp-style)[data-lp-type-facet='poster'] :is(.lp-button, .tf-toggle__tab, .tm-marquee__toggle) {
   text-transform: uppercase;
 }
 
@@ -338,25 +415,29 @@
 }
 
 /* ── benefits bento: the lead sheet shouts ──────────────────────────────── */
-:is(.lp, #lp-style)[data-lp-style='poster'] .benefits-bento__tile[data-lead] .lp-heading {
+/* In capitals, so its run is weighed in them, as a heading's is (above). */
+:is(.lp, #lp-style)[data-lp-type-facet='poster'] .benefits-bento__tile[data-lead] .lp-heading {
   text-transform: uppercase;
   line-height: var(--lp-leading-heading);
+  --lp-heading-face: var(--lp-face-caps);
+  --lp-heading-run: var(--lp-heading-run-caps, 0);
 }
 
 /* ── the strip of praise: short quotes set like headlines ───────────────── */
-:is(.lp, #lp-style)[data-lp-style='poster']
+/* The size is the voice's own token, so the room the strip makes for the
+   hanging mark (Voice's `--lp-voice-room`) is a title's too, wherever this
+   Type is drawn: on a page that borrows it, as on Poster's own. */
+:is(.lp, #lp-style)[data-lp-type-facet='poster'] .tm-marquee .voice:not([data-length='long']) {
+  --lp-size-quote: var(--lp-size-title);
+}
+
+:is(.lp, #lp-style)[data-lp-type-facet='poster']
   .tm-marquee .voice:not([data-length='long']) .voice__quote p {
   font-family: var(--lp-font-display);
-  font-size: var(--lp-size-title);
   font-weight: var(--lp-weight-title);
   font-synthesis: none;
   line-height: var(--lp-leading-title);
   letter-spacing: var(--lp-tracking-title);
-}
-
-/* …so the room the strip makes for their hanging mark is a title's too. */
-:is(.lp, #lp-style)[data-lp-style='poster'] .tm-marquee__card > .voice:not([data-length='long']) {
-  padding-inline-start: calc(var(--lp-size-title) * 0.4);
 }
 
 /* ── story chapters: the step's number is the poster's big figure ───────── */
@@ -368,4 +449,13 @@
 /* ── the closing ask builds, as the headline did ────────────────────────── */
 :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='cta'] {
   --lp-build-heading: track;
+}
+
+/* ── the simple sections (03 X64) ────────────────────────────────────────── */
+/* A marked Break is a thick printed rule across the column, in the strong
+   tone every printed line here takes. */
+:is(.lp, #lp-style)[data-lp-style='poster'] .lp-break__mark {
+  inline-size: 100%;
+  block-size: calc(var(--lp-rule) * 2);
+  background: var(--lp-line);
 }

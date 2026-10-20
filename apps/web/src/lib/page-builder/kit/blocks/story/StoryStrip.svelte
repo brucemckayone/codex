@@ -13,6 +13,7 @@
   unpictured card keeps the row's rhythm with the kit's designed plate.
 -->
 <script lang="ts">
+  import { storedFocus } from '../../../page-images';
   import Media from '../../primitives/Media.svelte';
   import ScrollStrip from '../../primitives/ScrollStrip.svelte';
   import { STORY_COPY } from './copy';
@@ -53,7 +54,12 @@
     {#each steps as step, index (index)}
       <li class="story-strip__card">
         {#if pictured}
-          <Media image={images[index]} alt={step.image?.alt ?? ''} ratio="4 / 5" />
+          <Media
+            image={images[index]}
+            alt={step.image?.alt ?? ''}
+            ratio="4 / 5"
+            focus={storedFocus(step.image)}
+          />
         {/if}
         <StoryWords {step} {level} />
       </li>
@@ -62,9 +68,16 @@
 </div>
 
 <style>
+  /* The strip's item is the story's own (a Style may re-set it, as Clean
+     does), so a card names its title's room from it (03 X71). */
+  .story-strip {
+    --lp-strip-item: clamp(15rem, 26cqi, 21rem);
+  }
+
   /* The strip aligns its items to the top; a card stretches to the row's
      height instead, so a Style that frames the cards draws an even row. */
   .story-strip__card {
+    --lp-title-column: var(--lp-strip-item);
     display: grid;
     align-content: start;
     align-self: stretch;

@@ -36,6 +36,7 @@ describe('RECIPES — the starting pages a new page can begin with (03 §8)', ()
         'The full story',
         [
           'hero',
+          'inside',
           'problem',
           'transformation',
           'benefits',

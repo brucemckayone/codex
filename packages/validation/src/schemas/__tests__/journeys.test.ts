@@ -294,6 +294,79 @@ describe('pageSectionSchema', () => {
     }
   });
 
+  // 03 X64 (Codex-61zsk.53): a Button's action decides where a visitor is
+  // sent, so it is the one prop this schema shapes.
+  describe('a Button section’s action', () => {
+    const button = (action: unknown) =>
+      pageSectionSchema.safeParse({
+        ...SECTION,
+        type: 'button',
+        props: { ctaLabel: 'Go', action },
+      });
+
+    it.each([
+      [{ kind: 'join' }],
+      [{ kind: 'section', target: 'sec-curriculum' }],
+      [{ kind: 'preview' }],
+      [{ kind: 'link', href: 'https://example.com/retreat?ref=page#dates' }],
+    ])('accepts %j', (action) => {
+      expect(button(action).success).toBe(true);
+    });
+
+    it('accepts a Button with no action at all: it joins', () => {
+      expect(
+        pageSectionSchema.safeParse({
+          ...SECTION,
+          type: 'button',
+          props: { ctaLabel: 'Go' },
+        }).success
+      ).toBe(true);
+    });
+
+    it.each([
+      ['a script link', { kind: 'link', href: 'javascript:alert(1)' }],
+      ['a data link', { kind: 'link', href: 'data:text/html,<b>x</b>' }],
+      ['an http link', { kind: 'link', href: 'http://example.com' }],
+      ['a bare path', { kind: 'link', href: '/checkout' }],
+      ['a protocol-relative link', { kind: 'link', href: '//evil.example' }],
+      ['credentials', { kind: 'link', href: 'https://a:b@example.com' }],
+      ['a link with no address', { kind: 'link' }],
+      ['an action outside the set', { kind: 'script', code: 'x()' }],
+      ['a section with no target', { kind: 'section' }],
+      ['a stray key', { kind: 'join', href: 'https://example.com' }],
+      ['a bare string', 'https://example.com'],
+    ])('refuses %s, naming the action', (_label, action) => {
+      const result = button(action);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.path.slice(0, 2)).toEqual([
+          'props',
+          'action',
+        ]);
+      }
+    });
+
+    it('says what a link must be', () => {
+      const result = button({ kind: 'link', href: 'http://example.com' });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.message).toBe(
+          'A button link must be a full web address that starts with https://'
+        );
+      }
+    });
+
+    it('leaves every other type’s props alone, even one named action', () => {
+      expect(
+        pageSectionSchema.safeParse({
+          ...SECTION,
+          type: 'text',
+          props: { action: 'javascript:alert(1)' },
+        }).success
+      ).toBe(true);
+    });
+  });
+
   it('keeps `variant` an OPEN string', () => {
     // The seeded `studio-alpha` page stores `variant: "default"`, which is not a
     // declared variant of any type. An enum here would 400 a real page on save.
@@ -516,5 +589,38 @@ describe('saveJourneyPageBodySchema with structural sections', () => {
     expect(
       saveJourneyPageBodySchema.safeParse({ ...BODY, sections: [null] }).success
     ).toBe(false);
+  });
+});
+
+describe("sectionDesignSchema · the page's dials (03 X61)", () => {
+  // The schema wired to the save route: the dials reach the page's row, each
+  // degrading on its own, and the legacy axes stay stripped beside them.
+  it('persists the dials, degrading an unknown step and stripping an unknown dial', () => {
+    expect(
+      sectionDesignSchema.parse({
+        style: 'clean',
+        dials: {
+          colour: 'muted',
+          corners: 'square',
+          spacing: 'compact',
+          type: 'louder',
+        },
+        density: 'airy',
+      })
+    ).toEqual({
+      style: 'clean',
+      dials: { colour: 'muted', spacing: 'compact' },
+    });
+  });
+});
+
+describe("sectionDesignSchema · the page's Type (03 X73)", () => {
+  it('persists a Type, and degrades an unknown one to the Style’s own', () => {
+    expect(
+      sectionDesignSchema.parse({ style: 'clean', facets: { type: 'soft' } })
+    ).toEqual({ style: 'clean', facets: { type: 'soft' } });
+    expect(
+      sectionDesignSchema.parse({ style: 'clean', facets: { type: 'studio' } })
+    ).toEqual({ style: 'clean', facets: {} });
   });
 });

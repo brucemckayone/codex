@@ -2419,6 +2419,94 @@ export const content_detail_signin_free_cta = () => `Sign in to watch`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_unplayable_watch = () => `This video isn't ready to play yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_unplayable_listen = () => `This audio isn't ready to play yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_unplayable_description = () => `You have access. Check back soon.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_load_failed_watch = () => `We couldn't load this video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_load_failed_listen = () => `We couldn't load this audio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_access_check_failed_cta = () => `We couldn't check your access`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_refresh_description = () => `Refresh the page to try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_followers_watch_description = () => `It's free for followers. Follow to start watching.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_followers_listen_description = () => `It's free for followers. Follow to start listening.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_locked_cta = () => `Access required`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_locked_cta_description = () => `You don't have access to this yet.`
+
+
+/**
  * @param {{ creator: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -12663,22 +12751,6 @@ export const studio_builder_media_slot_guide_video_hint = () => `A talking-head 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_slot_signature = () => `Signature film`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_slot_signature_hint = () => `A film of the guide’s mark. With no signature image uploaded above, its still frame stands in as the signature. Video only — an audio item has no frame.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_media_cover = () => `Cover`
 
 
@@ -12807,7 +12879,7 @@ export const studio_builder_media_signature_image = () => `Signature image`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_signature_image_hint = () => `The mark the guide’s letter signs off with — a scan or photo of ink, painted small. Unset → the signature film’s frame stands in, and with neither the letter signs off with the typeset name alone. Use a PNG on transparency; a JPEG carries none, so it arrives as ink on a white rectangle.`
+export const studio_builder_media_signature_image_hint = () => `The mark the guide’s letter signs off with — a scan or photo of ink, painted small. Unset → the letter signs off with the typeset name alone. Use a PNG on transparency; a JPEG carries none, so it arrives as ink on a white rectangle.`
 
 
 /**
@@ -12847,7 +12919,7 @@ export const studio_builder_media_toast_signature_image_upload_failed = () => `S
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_toast_signature_image_removed = () => `Signature removed — the letter falls back to the signature film, if there is one`
+export const studio_builder_media_toast_signature_image_removed = () => `Signature removed — the letter signs off with the typeset name`
 
 
 /**
@@ -14295,7 +14367,7 @@ export const studio_page_editor_recovery_discarded = () => `Unsaved changes from
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_page_editor_stale_banner = () => `This page was saved in another tab. Reload to keep editing.`
+export const studio_page_editor_stale_banner = () => `This page was saved in another tab or on another device. Reload to keep editing.`
 
 
 /**
@@ -14703,6 +14775,14 @@ export const studio_page_editor_with_default = (params) => `${params.name} (the 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_layout_repeat = () => `Your What’s inside section already shows these practices as cards. Most pages need only one of the two.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_colour_title = () => `Colour`
 
 
@@ -14787,6 +14867,14 @@ export const studio_page_editor_spacing_default = (params) => `${params.size} is
 
 
 /**
+ * @param {{ size: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_spacing_from_page = (params) => `${params.size}, from the page.`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -14859,6 +14947,22 @@ export const studio_page_editor_row_add = () => `Add another`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_leads = () => `Leads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_leads_label = () => `, leads in this layout`
+
+
+/**
  * @param {{ item: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -14920,6 +15024,590 @@ export const studio_page_editor_gallery_add = (params) => `Add ${params.section}
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_style_in_use = () => `In use`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dials_title = (params) => `Adjust ${params.style}`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dials_body = (params) => `Each one moves a step either side of ${params.style}’s own. ${params.style}’s is where a page starts, and where each one goes back to.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_own = (params) => `${params.style}’s`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_own_hidden = () => `, the Style’s own`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_own_size_hidden = () => `, their own size`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour = () => `Colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_muted = () => `Less colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_vivid = () => `More colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_muted_note = () => `Every coloured band takes a soft tint of your brand.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_vivid_note = () => `Every soft tint takes your brand colour, unless it would touch another band.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_own_note = (params) => `${params.style}’s own bands.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_colour_after = () => `A colour you chose for a section stays as you chose it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners = () => `Corners`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners_brand = () => `Your brand’s`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners_rounder = () => `Rounder`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners_brand_note = () => `Cards, pictures and buttons take your organisation’s own corners.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners_rounder_note = () => `Softer cards and pictures, and pill buttons if your brand is rounded at all.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_corners_own_note = (params) => `${params.style}’s own corners.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing = () => `Spacing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_compact = () => `Small`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_spacious = () => `Large`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_compact_note = () => `Every section without spacing of its own sits closer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_spacious_note = () => `Every section without spacing of its own gets more room.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_own_note = (params) => `${params.style}’s own rhythm.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_spacing_after = () => `A section you gave its own spacing keeps it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_headlines = () => `Headlines`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_headlines_style = () => `Style`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_headlines_size = () => `Size`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_drama_calmer = () => `Calmer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_drama_louder = () => `Louder`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_drama_calmer_note = () => `Every headline a step smaller.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_drama_louder_note = () => `Section headings a step larger, as far as each one’s longest word fits. The opening headline is already as large as it fits.`
+
+
+/**
+ * @param {{ voice: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_drama_own_note = (params) => `${params.voice}’s own sizes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion = () => `Motion`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_still = () => `Still`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_gentle = () => `Gentle`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_still_note = () => `Nothing moves.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_gentle_note = () => `Things appear as visitors reach them. Nothing follows the scroll.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_own_note = (params) => `${params.style}’s own motion, all of it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_after = () => `Visitors who ask their device for less motion always get Still.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_canvas = () => `The canvas holds still while you edit.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_motion_shows = () => `shows the motion.`
+
+
+/**
+ * @param {{ step: NonNullable<unknown>, style: NonNullable<unknown>, why: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_one = (params) => `“${params.step}” changes nothing in ${params.style}: ${params.why}`
+
+
+/**
+ * @param {{ style: NonNullable<unknown>, why: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_both = (params) => `Neither step changes anything in ${params.style}: ${params.why}`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_no_tints = (params) => `${params.style} has no soft tints.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_no_coloured_bands = (params) => `${params.style} has no coloured bands to bring down.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_no_bands = (params) => `${params.style} draws no colour bands.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_own_rounder = (params) => `these are ${params.style}’s own corners.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dial_none_own_brand = (params) => `${params.style} already draws your brand’s own corners.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_own = (params) => `${params.style}’s own`
+
+
+/**
+ * @param {{ voice: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_voice = (params) => `${params.voice}’s`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_own_hidden = () => `, the Style’s default`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_bold = () => `The largest and tightest.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_poster = () => `Capitals, tight and crowding.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_soft = () => `Easy, open leading.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_quiet = () => `Light, with room to breathe.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_none = (params) => `${params.style} keeps its own headlines: its marks are measured against them.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown>, voice: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_facet_dropped = (params) => `${params.style} keeps its own headlines, so ${params.voice}’s headlines came off this page. Undo puts them back.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dials_reset = (params) => `Use ${params.style}’s own for all of these`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_dials_reset_done = (params) => `Back to ${params.style}’s own.`
+
+
+/**
+ * @param {{ list: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_page_adjusted = (params) => `Adjusted: ${params.list}.`
+
+
+/**
+ * @param {{ style: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_page_not_adjusted = (params) => `Not adjusted: ${params.style}’s own throughout.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_colour_muted = () => `Less colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_colour_vivid = () => `More colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_corners_brand = () => `Your brand’s corners`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_corners_rounder = () => `Rounder corners`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_spacing_compact = () => `Small spacing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_spacing_spacious = () => `Large spacing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_drama_calmer = () => `Calmer headlines`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_drama_louder = () => `Louder headlines`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_motion_still = () => `Still`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_motion_gentle = () => `Gentle motion`
+
+
+/**
+ * @param {{ voice: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_adjusted_facet = (params) => `${params.voice}’s headlines`
 
 
 /**
@@ -15144,3 +15832,875 @@ export const studio_page_editor_image_alt_missing = () => `Without a description
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_image_decorative = () => `Decorative — no description needed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_label = () => `Focal point`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_hint = () => `Tap the part of the picture that must stay in view. Arrow keys move it; hold Shift to move further.`
+
+
+/**
+ * @param {{ x: NonNullable<unknown>, y: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_readout = (params) => `Point at ${params.x}% across, ${params.y}% down`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_centre = () => `Use the centre`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_inactive = () => `The focal point only matters at full width, where the picture is cropped to fit the screen.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_crop_wide = () => `Wide screen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_crop_tablet = () => `Tablet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_crop_phone = () => `Phone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_join = () => `Join, with the page’s own price`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_section = () => `Go to a section on this page`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_preview = () => `Play the preview film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_link = () => `Open another website`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_join_hint = () => `The page’s own price and checkout, exactly as the closing ask shows them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_preview_missing = () => `To play a preview film, add one in the Media tab first.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_section_label = () => `Section`
+
+
+/**
+ * @param {{ section: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_section_hidden = (params) => `${params.section} (hidden)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_section_none = () => `There is no other section on this page to go to yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_pick = () => `Choose an option`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_none = () => `Set up a way in on your Offer tab first: its options appear here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_gone = () => `No longer one of your options`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_loading = () => `Loading your options…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_offer_unread = () => `Your options could not be loaded just now, so none can be chosen here. Nothing set here has changed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_link_label = () => `Web address`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_link_hint = () => `Opens in a new tab, away from your page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_link_invalid = () => `Use a full web address that starts with https://`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_colour_matches_above = () => `Matches the section above`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_colour_matches_below = () => `Matches the section below`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_colour_own = () => `This section’s own colour, set apart from the sections around it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_break_colour = () => `A pause has no colour of its own: it takes the colour of the section above.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_break_ground_change = () => `The colour change already makes a pause here. This one makes the section above run a step longer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_break_twice = () => `Two pauses in a row add up. One set to Large may read better.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_heading_fallback = () => `A heading reads best right above the section it introduces. Here it joins the section above.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_title = () => `Ownership`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_description = () => `The owner receives the organisation's share of every sale and is the only person who can transfer the organisation.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_owner_you = (params) => `${params.name} (you)`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_owner_since = (params) => `Owner since ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_payouts_ready = () => `Payouts set up`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_payouts_not_ready = () => `Payouts not set up`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_leave_hint = (params) => `To leave ${params.orgName} you first need to transfer ownership to an admin or creator.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_transfer_cta = () => `Transfer ownership…`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_pending = (params) => `Ownership offered to ${params.name} on ${params.date}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_waiting = (params) => `Waiting for ${params.name} to accept. The offer expires on ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_cancel = () => `Cancel offer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_cancelled = () => `Offer cancelled. Ownership is unchanged.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_sent = (params) => `Offer sent to ${params.name}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_outcome_declined = (params) => `${params.name} declined your offer on ${params.date}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_outcome_expired = (params) => `Your offer to ${params.name} expired on ${params.date}. You can send a new one.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_outcome_ineligible = (params) => `Your offer was withdrawn because ${params.name} is no longer an admin or creator.`
+
+
+/**
+ * @param {{ role: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_readonly = (params) => `Only the owner can transfer the organisation. Your role is ${params.role}.`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_accepted = (params) => `You're now the owner of ${params.orgName}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_payouts_prompt_title = () => `Set up payouts to receive the organisation's money`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_payouts_prompt_body = () => `Sales are already being credited to you and are held until your payouts are ready.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_payouts_prompt_cta = () => `Set up payouts`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_title = (params) => `Transfer ownership of ${params.orgName}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_description = () => `Choose an admin or creator. They'll need to accept.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_legend = () => `Who to offer ownership to`
+
+
+/**
+ * @param {{ role: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_meta = (params) => `${params.role} · joined ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_note = () => `Subscribers and members can't be offered ownership. To offer it to them, make them an admin or creator first on the Team page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_continue = () => `Continue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_empty_title = () => `There's no one to offer it to yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_empty_body = () => `Ownership can only go to an admin or creator. Invite someone or change a member's role on the Team page first.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_go_to_team = () => `Go to Team`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_title = (params) => `Offer ownership to ${params.name}?`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_lede = (params) => `${params.name} becomes the owner only when they accept. The offer expires on ${params.date}, and you can cancel it until then.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_money = (params) => `From the moment ${params.name} accepts, the organisation's share of every sale goes to ${params.name}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_earned = () => `Money already earned before then stays yours — including anything still waiting to be paid out.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_admin = () => `You'll become an admin: you can keep running the organisation, but can't transfer it or receive its money.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_subscription_title = () => `Your subscription income will stop.`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_subscription_body = (params) => `Subscription money isn't split by content: it's shared out by revenue-share agreements, and the rest goes to the owner. You don't have a subscription agreement with ${params.orgName}, so after the transfer you'd receive none of it. One-off sales of your own content still pay you.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_subscription_cta = () => `Set up an agreement first`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_payouts_title = (params) => `${params.name} hasn't set up payouts yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_payouts_body = () => `If they accept before setting them up, the organisation's money is held for them until they do.`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_type_label = (params) => `Type ${params.orgName} to confirm`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_email_note = (params) => `${params.name}, you and the organisation's other admins are emailed when ownership changes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_back = () => `Back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_send = () => `Send offer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_title = () => `Ownership offer`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_lede = (params) => `${params.name} has offered you ownership of ${params.orgName}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_point_owner = () => `You'll become the owner and receive the organisation's share of every sale from the moment you accept.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_point_previous = (params) => `${params.name} becomes an admin. Money earned before today stays with ${params.name}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_point_transfer = () => `Only you will be able to transfer the organisation in future, and you'll need to before you can leave it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_agreements_title = () => `Revenue-share agreements you'd take on`
+
+
+/**
+ * @param {{ share: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_agreement_subscription = (params) => `Subscriptions · ${params.share} of the pool · since ${params.date}`
+
+
+/**
+ * @param {{ share: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_agreement_purchase = (params) => `One-off sales · ${params.share} · since ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_agreements_note = () => `These keep paying after you accept. As owner you can end any of them from Agreements.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_agreements_none = () => `None — all subscription income after the platform's fee comes to you.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_payouts_title = () => `Your payouts aren't set up yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_payouts_body = () => `You can accept now — the organisation's money is held for you until you finish setting up payouts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_accept = () => `Accept ownership`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_decline = () => `Decline`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_expires = (params) => `This offer expires on ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_declined = () => `You declined the ownership offer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_closed = () => `This ownership offer is no longer open.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, orgName: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_banner = (params) => `${params.name} has offered you ownership of ${params.orgName}. Respond by ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_banner_cta = () => `Review offer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_load = () => `Ownership details couldn't be loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_generic = () => `That didn't work. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_confirm_name = () => `That doesn't match the organisation's name — check the spelling, or reload if it was just renamed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_validation = () => `That wasn't accepted. Check the details and try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_not_owner = () => `Only the owner can do that. Ownership may have changed — reload to see the latest.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_forbidden = () => `You don't have permission to do that. This offer may have been made to someone else.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_not_found = () => `This offer no longer exists.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_not_open = () => `This offer is no longer open — it was accepted, declined, cancelled or has expired.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_conflict = () => `There's already an open offer. Cancel it before sending a new one.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_transfer_required = () => `The owner can't be removed or have their role changed. Transfer ownership from Settings first.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_ineligible = () => `That person can't be offered ownership. Only active admins and creators can.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_rate_limited = () => `Too many attempts. Wait a minute and try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_owner_transfer = () => `Transfer ownership`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_owner_view_ownership = () => `Ownership settings`

@@ -41,12 +41,32 @@ describe('brandOverridesToCssVars', () => {
   });
 
   it('quotes font families that contain whitespace, leaves single tokens raw', () => {
+    // Faces the fallback table does not follow with a fallback of their own.
     const vars = brandOverridesToCssVars({
-      fontHeading: 'Playfair Display',
+      fontHeading: 'Comic Sans MS',
       fontBody: 'Inter',
     });
-    expect(vars['--brand-font-heading']).toBe('"Playfair Display"');
+    expect(vars['--brand-font-heading']).toBe('"Comic Sans MS"');
     expect(vars['--brand-font-body']).toBe('Inter');
+  });
+
+  it('quotes a face the fallback table knows, and follows it with its own fallback', () => {
+    const vars = brandOverridesToCssVars({
+      fontHeading: 'Playfair Display',
+      fontBody: 'Bitter',
+    });
+    expect(vars['--brand-font-heading']).toBe(
+      `"Playfair Display", 'Playfair Display-fallback'`
+    );
+    expect(vars['--brand-font-body']).toBe(`"Bitter", 'Bitter-fallback'`);
+  });
+
+  it('leaves a value it wrote, or one already quoted, as it is', () => {
+    const heading = (fontHeading: string) =>
+      brandOverridesToCssVars({ fontHeading })['--brand-font-heading'] ?? '';
+    for (const face of ['Playfair Display', 'Bitter', 'Inter', 'Comic Sans MS'])
+      expect(heading(heading(face)), face).toBe(heading(face));
+    expect(heading("'DM Sans'")).toBe("'DM Sans'");
   });
 
   it('carries a page brand colour into dark mode unless the page sets its own dark value', () => {
@@ -136,7 +156,7 @@ describe('brandOverridesToCssVars', () => {
         })
       ).toMatchObject({
         '--brand-color': 'oklch(0.62 0.19 35 / 90%)',
-        '--brand-font-heading': '"Playfair Display"',
+        '--brand-font-heading': `"Playfair Display", 'Playfair Display-fallback'`,
         '--brand-radius': '0.5rem',
       });
     });

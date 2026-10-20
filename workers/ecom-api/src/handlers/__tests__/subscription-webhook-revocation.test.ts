@@ -8,7 +8,7 @@
  * so `ContentAccessService.getStreamingUrl()` can reject already-minted
  * presigned R2 URLs within the revocation TTL window.
  *
- * Coverage matrix (docs/subscription-cache-audit/phase-2-followup.md + task brief):
+ * Coverage (rules: docs/payments/access.md, "Streaming revocation"):
  *
  * | Event                              | Positive | Negative | Fire-and-forget |
  * | ---------------------------------- | -------- | -------- | --------------- |
@@ -46,8 +46,11 @@ vi.mock('@codex/subscription', () => ({
   // doesn't throw; revocation tests don't care about sync-back behaviour.
   TierService: vi.fn().mockImplementation(() => ({
     applyStripeProductUpdate: vi.fn().mockResolvedValue(null),
-    applyStripePriceCreated: vi.fn().mockResolvedValue(null),
+    recordStripePriceDrift: vi.fn().mockResolvedValue(undefined),
   })),
+  // The renewal-time price swap (Codex-2hxff.3) — nothing pending here.
+  applyDuePendingPriceChange: vi.fn().mockResolvedValue(false),
+  PENDING_PRICE_ID_KEY: 'codex_pending_price_id',
   // invalidateForUser is exercised in the sibling invalidation test; here we
   // only care that it doesn't throw synchronously in revocation scenarios.
   invalidateForUser: vi.fn(),
@@ -95,8 +98,8 @@ vi.mock('@codex/purchase', () => ({
   FeeConfigService: vi.fn(),
 }));
 
-// `createWebhookDbClient` must remain a real export — it forwards to the
-// (mocked) `createPerRequestDbClient`, so use importOriginal + spread.
+// `createWebhookServices` must stay real: it builds the registry on the
+// (mocked) database client, so use importOriginal + spread.
 vi.mock('@codex/worker-utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/worker-utils')>();
   return {
@@ -1228,7 +1231,13 @@ describe('handlePaymentWebhook — access revocation on charge.refunded', () => 
     });
 
     (PurchaseService as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      () => ({ processRefund: mockProcessRefund })
+      () => ({
+        processRefund: mockProcessRefund,
+        // Codex-2hxff.8: charge.refunded records each refund and claims its
+        // email; these suites only check revocation and cache invalidation.
+        recordChargeRefunds: vi.fn().mockResolvedValue([]),
+        claimRefundEmails: vi.fn().mockResolvedValue([]),
+      })
     );
   });
 

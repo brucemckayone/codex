@@ -7,7 +7,7 @@ import {
   layout,
   noteField,
 } from '../../model/fields';
-import { compact, readText } from '../../model/read';
+import { compact, readOneOf, readText } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
 
 export type TextProps = {
@@ -18,6 +18,8 @@ export type TextProps = {
   note?: string;
   /** Beside the words in `columns`, above them otherwise (contract A5). */
   image?: ImageRef;
+  /** Outside `columns`, the picture follows the words (Codex-61zsk.58). */
+  imageAt?: 'after';
 };
 
 /** The canvas prompt where the text would be — shown only while editing. */
@@ -58,8 +60,35 @@ export const textDefinition: BlockDefinition<TextProps> = {
     {
       key: 'image',
       label: 'Image',
-      hint: 'Optional. Sits beside your text in two columns, and above it in the other layouts.',
+      hint: 'Optional. Sits beside your text in two columns, and above or below it in the other layouts.',
       control: 'image',
+      // Each layout's frame at 1440 and 390, in the Style that cuts it most.
+      focalLayouts: {
+        statement: [
+          { at: 'wide', ratio: '7 / 3' },
+          { at: 'phone', ratio: '3 / 2' },
+        ],
+        columns: [
+          { at: 'wide', ratio: '4 / 3' },
+          { at: 'phone', ratio: '3 / 2' },
+        ],
+        centered: [
+          { at: 'wide', ratio: '16 / 9' },
+          { at: 'phone', ratio: '3 / 2' },
+        ],
+      },
+    },
+    // Beside the words in two columns, the picture is neither before nor
+    // after them, so the choice is offered only where it moves.
+    {
+      key: 'imageAt',
+      label: 'Where the picture sits',
+      control: 'choice',
+      options: [
+        { value: 'before', label: 'Before the words' },
+        { value: 'after', label: 'After the words' },
+      ],
+      layouts: ['statement', 'centered'],
     },
   ],
   starter: ({ courseTitle }) => ({
@@ -78,5 +107,6 @@ export const textDefinition: BlockDefinition<TextProps> = {
       ctaLabel: readText(raw, 'ctaLabel', 40),
       note: readText(raw, 'note', 120),
       image: isImageRef(raw.image) ? raw.image : undefined,
+      imageAt: readOneOf(raw, 'imageAt', ['after'] as const),
     }),
 };

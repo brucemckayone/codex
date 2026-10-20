@@ -13,7 +13,9 @@
 <script lang="ts">
   import type { ColourSchemeId } from '../../model/ids';
   import Heading from '../../primitives/Heading.svelte';
+  import Mark from '../../primitives/Mark.svelte';
   import Media from '../../primitives/Media.svelte';
+  import { storedFocus } from '../../../page-images';
   import { bentoTiles } from './bento';
   import type { BenefitItem } from './definition';
 
@@ -44,14 +46,15 @@
         <div class="benefits-bento__picture">
           {#if index === 0}
             <div class="benefits-bento__drift" data-lp-parallax="1">
-              <Media image={images[index]} alt={item.image?.alt ?? ''} />
+              <Media image={images[index]} alt={item.image?.alt ?? ''} focus={storedFocus(item.image)} />
             </div>
           {:else}
-            <Media image={images[index]} alt={item.image?.alt ?? ''} />
+            <Media image={images[index]} alt={item.image?.alt ?? ''} focus={storedFocus(item.image)} />
           {/if}
         </div>
       {/if}
       <div class="benefits-bento__words">
+        {#if item.mark}<span class="benefits-bento__mark"><Mark mark={item.mark} /></span>{/if}
         <Heading {level} size="title" text={item.title} type="benefits" />
         {#if item.detail}<p class="benefits-bento__detail">{item.detail}</p>{/if}
       </div>
@@ -63,16 +66,27 @@
   .benefits-bento {
     --_gap: clamp(var(--space-3), 0.5rem + 1cqi, var(--space-5));
     --_row: clamp(9rem, 6rem + 5cqi, 12rem);
+    --_cols: 1;
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(var(--_cols), minmax(0, 1fr));
     gap: var(--_gap);
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
+  /* A tile spans `--_span` of the row's `--_cols`, so its name knows its
+     room (03 X71): those columns and the gaps between them, less its inset,
+     its padding and border (Bold opens every tile but the lead). */
   .benefits-bento__tile {
     --_pad: clamp(var(--space-5), var(--space-4) + 1cqi, var(--space-8));
+    --_span: 1;
+    --_inset: calc(var(--_pad) + var(--lp-border));
+    --lp-title-column: calc(
+      (var(--lp-column) - (var(--_cols) - 1) * var(--_gap)) / var(--_cols) * var(--_span) +
+        (var(--_span) - 1) * var(--_gap) - 2 * var(--_inset)
+    );
+    grid-column: span var(--_span);
     display: grid;
     align-content: end;
     gap: var(--space-4);
@@ -121,18 +135,35 @@
     gap: var(--space-2);
   }
 
-  /* The lead speaks a size up; single-weight display faces keep their weight. */
+  /* An item's mark above its name, its stroke in the mark ink, as in the
+     grid (BenefitsBlock). */
+  .benefits-bento__mark {
+    display: inline-flex;
+    justify-self: start;
+    margin-block-end: var(--space-1);
+    font-size: var(--space-7);
+    line-height: 1;
+  }
+
+  .benefits-bento__mark :global(svg) {
+    stroke: var(--lp-mark-ink);
+  }
+
+  /* The lead speaks a size up, in a heading's size, weight, leading and
+     tracking, through the title's own rule, so it is fitted to its tile as
+     every name is (03 X71). Single-weight display faces keep their weight. */
   .benefits-bento__tile[data-lead] :global(.lp-heading) {
-    max-inline-size: 18ch;
-    font-size: var(--lp-size-heading);
-    font-weight: var(--lp-weight-heading);
-    line-height: var(--lp-leading-heading);
-    letter-spacing: var(--lp-tracking-heading);
+    --lp-title-lift: 1;
+    --lp-weight-title: var(--lp-weight-heading);
+    --lp-leading-title: var(--lp-leading-heading);
+    --lp-tracking-title: var(--lp-tracking-heading);
+    --lp-measure-unit: var(--lp-zero-heading);
+    max-inline-size: calc(18 * var(--lp-measure-unit));
   }
 
   /* global.css caps every `p` at 65ch and spaces it; a tile sets its own. */
   .benefits-bento__detail {
-    max-inline-size: 48ch;
+    max-inline-size: calc(48 * var(--lp-measure-unit));
     margin: 0;
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-body);
@@ -143,12 +174,12 @@
   /* Two to a row: the lead across both, and a last tile left alone too. */
   @container (36rem <= width < 56rem) {
     .benefits-bento {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      --_cols: 2;
     }
 
     .benefits-bento__tile[data-lead],
     .benefits-bento__tile:last-child:nth-child(even) {
-      grid-column: span 2;
+      --_span: 2;
     }
   }
 
@@ -156,7 +187,7 @@
      a picture fills whatever its tile leaves above the words. */
   @container (min-width: 56rem) {
     .benefits-bento {
-      grid-template-columns: repeat(6, minmax(0, 1fr));
+      --_cols: 6;
       grid-auto-rows: minmax(var(--_row), auto);
     }
 
@@ -165,30 +196,30 @@
     }
 
     [data-tile='whole'] {
-      grid-column: span 6;
+      --_span: 6;
       grid-row: span 2;
     }
 
     [data-tile='lead'] {
-      grid-column: span 4;
+      --_span: 4;
       grid-row: span 2;
     }
 
     [data-tile='side'] {
-      grid-column: span 2;
+      --_span: 2;
       grid-row: span 2;
     }
 
     [data-tile='wide'] {
-      grid-column: span 4;
+      --_span: 4;
     }
 
     [data-tile='half'] {
-      grid-column: span 3;
+      --_span: 3;
     }
 
     [data-tile='small'] {
-      grid-column: span 2;
+      --_span: 2;
     }
   }
 </style>

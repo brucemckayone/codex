@@ -17,15 +17,12 @@ export {
   type CancelSubscriptionInput,
   type ChangeTierInput,
   type ConnectAccountStatus,
-  type ConnectOnboardInput,
   type CreateCourseSubscriptionCheckoutInput,
   type CreateSubscriptionCheckoutInput,
   type CreateTierInput,
   cancelSubscriptionSchema,
   changeTierSchema,
   connectAccountStatusEnum,
-  connectDashboardSchema,
-  connectOnboardSchema,
   connectStatusQuerySchema,
   createCourseSubscriptionCheckoutSchema,
   createSubscriptionCheckoutSchema,
@@ -77,6 +74,11 @@ export {
   CourseSubscriptionService,
   type CourseSubscriptionWebhookResult,
 } from './services/course-subscription-service';
+export {
+  applyDuePendingPriceChange,
+  PENDING_PRICE_FROM_KEY,
+  PENDING_PRICE_ID_KEY,
+} from './services/pending-price-change';
 export {
   calculateRevenueSplit,
   type RevenueSplit,

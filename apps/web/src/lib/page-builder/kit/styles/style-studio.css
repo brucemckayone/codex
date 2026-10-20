@@ -14,23 +14,25 @@
    brand and still reads as the brand. Never the text-grade accent, which
    darkens it as far as a line of text needs.
 
-   TYPE. Sentence case everywhere; a moderate display size with easy leading
-   (1.04 / 1.1) and a narrower, looser body (58ch, 1.68) — a notebook, not a
-   billboard. Emphasis is size and leading, never weight.
+   TYPE. Sentence case, labels in the org's case (`kit.css`); a moderate
+   display size with easy leading (1.04 / 1.1) and a narrower, looser body
+   (58ch, 1.68) — a notebook, not a billboard. Emphasis is size and leading,
+   never weight.
 
    LAYOUT. Words beside photographs, and every photograph a print: square
    corners, a plain border of lighter paper, a soft shadow, set at a slight
-   tilt (alternating on a wall of them). Cards stay open paper in the brand
-   radius bent by 0.5 (never past `--radius-md`); quotes and cards never
+   tilt (alternating on a wall of them). Cards stay open paper in the org's
+   corners bent by 0.5 (never past `--radius-md`); quotes and cards never
    tilt — only prints do.
 
    SURFACES. A fine paper grain over every sheet (`--lp-texture: paper`,
    X5); straight edges, no shapes.
 
    MOTION. The pen: each mark draws in a beat after the words it marks
-   arrive (`--lp-mark-draw`, X12/X13) — an underline under a section's
-   heading, a circle round each number, a scribbled frame round the guide's
-   portrait. The hero's print settles into its tilt as the page opens. The
+   arrive (`--lp-mark-draw`, X12/X13) — an underline under the opening's
+   headline and the closing ask's heading only, a circle round each number,
+   a scribbled frame round the guide's portrait. The hero's print settles
+   into its tilt as the page opens. The
    stage numbers and prices are circled too, still.
 
    SIGNATURE. The marks — the page annotated by hand.
@@ -38,12 +40,15 @@
    Fonts: suggests Bitter over Figtree; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.lp[data-lp-style='studio'] {
+/* Studio's Type, wherever it is drawn: its own page, or another Style's that
+   borrows it (03 X73). Keyed on the page's Type, never on its Style, and it
+   declares no token the Style block below does. */
+.lp[data-lp-type-facet='studio'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(2.6rem, 1rem + 5.2cqi, 5.75rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(1.9rem, 1.05rem + 2.9cqi, 3.5rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.6rem, 1rem + 5.2cqi, 5.75rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(1.9rem, 1.05rem + 2.9cqi, 3.5rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.2rem, 1rem + 0.8cqi, 1.55rem) * var(--lp-scale));
-  --lp-size-cta: calc(clamp(2.1rem, 1rem + 3.8cqi, 4.25rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.1rem, 1rem + 3.8cqi, 4.25rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 1.04;
   --lp-leading-heading: 1.1;
@@ -54,18 +59,21 @@
   --lp-tracking-heading: -0.012em;
   --lp-tracking-title: -0.005em;
 
-  /* ── shape: the brand radius bent by 0.5, never past `--radius-md` ────── */
-  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
-  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
-  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
+  --lp-measure: 58;
+  --lp-measure-lead: 40;
+}
+
+.lp[data-lp-style='studio'] {
+  /* ── shape: the org's corners bent by 0.5, never past `--radius-md` ───── */
+  --lp-radius-card: clamp(0rem, calc(var(--radius-card) * 0.5), var(--radius-md));
+  --lp-radius-media: clamp(0rem, calc(var(--radius-lg) * 0.5), var(--radius-md));
+  --lp-radius-button: clamp(0rem, calc(var(--radius-button) * 0.5), var(--radius-md));
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
   --lp-button-pad: var(--space-6);
 
   /* ── rhythm: a notebook column ────────────────────────────────────────── */
   --lp-container: 72rem;
-  --lp-measure: 58ch;
-  --lp-measure-lead: 40ch;
 
   /* ── surfaces ─────────────────────────────────────────────────────────── */
   --lp-texture: paper;
@@ -82,7 +90,9 @@
 
 /* ── prints: every photograph square, framed in lighter paper, tilted ───── */
 /* The frame is the sheet's own paper lifted toward white (a light sheet) or
-   a step lighter (a dark one), so it reads as a print on any ground. */
+   a step lighter (a dark one), so it reads as a print on any ground. A
+   print is a photograph's edge, the Style's texture, not a card: its shadow
+   is the print's own, never the org's card shadow. */
 :is(.lp, #lp-style)[data-lp-style='studio']
   :is(
     .hero-split__media,
@@ -92,7 +102,9 @@
     .guide__portrait:not([data-layout='quote']) .clip,
     .gallery-picture__frame,
     .benefits-grid .lp-media,
-    .story-strip__card > .lp-media
+    .story-strip__card > .lp-media,
+    .practice-card__picture,
+    .lp-section[data-lp-type='picture']:not([data-lp-layout='full']) .picture__shot
   ) {
   --_print-edge: clamp(var(--space-2), 0.8cqi, var(--space-3));
   --_print-paper: oklch(
@@ -113,7 +125,9 @@
     .hero-centered__media,
     .text__media,
     .guide__portrait .clip,
-    .gallery-picture__frame
+    .gallery-picture__frame,
+    .practice-card__picture,
+    .lp-section[data-lp-type='picture']:not([data-lp-layout='full']) .picture__shot
   )
   .lp-media {
   border-radius: 0;
@@ -181,12 +195,12 @@
    as the longest the field takes. */
 @supports (line-height: pow(2, 0.5)) {
   @container (min-width: 56rem) {
-    :is(.lp, #lp-style)[data-lp-style='studio'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='studio'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(68 / var(--lp-heading-chars, 120), 0.34));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='studio'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='studio'] .lp-section[data-lp-type='hero']
       .hero-poster:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(31 / var(--lp-heading-chars, 120), 0.21));
     }
@@ -194,16 +208,19 @@
 }
 
 /* ── the pen: marks drawn in the mark ink ───────────────────────────────── */
-/* An underline under a section's heading, a length of its own. Not where the
-   section carries a mark of its own (the numbers, the guide's portrait). */
+/* An underline under the closing ask's heading, a length of its own. The pen
+   underlines the opening and the ask, and nothing between them (3b round 1):
+   under every section's heading it marked nothing. A Heading section is the
+   one exception (03 X64): it is a chapter head, and the pen is what makes a
+   head read as this Style's. */
 :is(.lp, #lp-style)[data-lp-style='studio']
-  .lp-section:not([data-lp-type='hero'], [data-lp-type='stats'], [data-lp-type='instructor'])
+  .lp-section:is([data-lp-type='cta'], [data-lp-type='heading'])
   .lp-heading:is([data-size='heading'], [data-size='display']) {
   position: relative;
 }
 
 :is(.lp, #lp-style)[data-lp-style='studio']
-  .lp-section:not([data-lp-type='hero'], [data-lp-type='stats'], [data-lp-type='instructor'])
+  .lp-section:is([data-lp-type='cta'], [data-lp-type='heading'])
   .lp-heading:is([data-size='heading'], [data-size='display'])::after {
   content: '';
   position: absolute;
@@ -238,17 +255,8 @@
   pointer-events: none;
 }
 
-:is(.lp, #lp-style)[data-lp-style='studio']
-  :is(.hero-centered, .guide-centered, .text[data-layout='centered'])
-  .lp-heading::after {
-  inset-inline: 0;
-  margin-inline: auto;
-}
-
-/* Under a centred heading the stroke is centred too. */
-:is(.lp, #lp-style)[data-lp-style='studio']
-  :is(.guide-centered, .text[data-layout='centered'])
-  .lp-heading[data-size='heading']::after {
+/* Under a centred headline the stroke is centred too. */
+:is(.lp, #lp-style)[data-lp-style='studio'] .hero-centered .lp-heading::after {
   inset-inline: 0;
   margin-inline: auto;
 }
@@ -305,7 +313,7 @@
 /* A figure is drawn at three quarters of its cell, so the widest one and
    its circle together just fill it, and the label steps clear of the
    circle's foot (in the figure's own em). */
-:is(.lp, #lp-style)[data-lp-style='studio'] .stat__value {
+:is(.lp, #lp-style)[data-lp-type-facet='studio'] .stat__value {
   font-size: min(1em, 100cqi / (var(--_chars) * 0.62) * 0.74);
 }
 
@@ -375,16 +383,46 @@
   mask: var(--lp-mark-underline) center / 100% 100% no-repeat;
 }
 
+/* Wide, the list's signs stand beside its heading, large and in the
+   heading's face (3b round 1): the reader finds themselves in them before
+   the argument, and the band's right half is used. A join button stays
+   under the words. Narrow, the signs stay under the heading. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='studio'] .problem[data-layout='list'] {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    column-gap: calc(var(--lp-gap) * 1.5);
+    align-items: start;
+    /* The heading's room is its share (louder's fit, 03 X62). */
+    --lp-heading-column: calc((var(--lp-column) - var(--lp-gap) * 1.5) * 5 / 12);
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='studio'] .problem[data-layout='list'] > .problem__head {
+    grid-column: 1;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='studio']
+    .problem[data-layout='list']
+    > :is(.problem__lines, .problem__empty) {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='studio'] .problem[data-layout='list'] .problem__lines li {
+    font-size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1) * 0.68);
+    line-height: var(--lp-leading-heading);
+  }
+}
+
 /* Each mark draws a beat after the words it marks (motion.css stages the
    host; `--lp-mark-draw` exists only on a host it armed). */
 @media screen and (prefers-reduced-motion: no-preference) {
   :root[data-theme]
-    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='studio']
-    .lp-section:not([data-lp-type='hero'], [data-lp-type='stats'], [data-lp-type='instructor'])
+    .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='studio']
+    .lp-section:is([data-lp-type='cta'], [data-lp-type='heading'])
     .lp-heading:is([data-size='heading'], [data-size='display'])::after,
-  :root[data-theme] .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='studio'] .stat__value::after,
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='studio'] .stat__value::after,
   :root[data-theme]
-    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='studio']
+    .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='studio']
     .guide__portrait:not([data-layout='quote'])
     .clip::after {
     animation: var(--lp-mark-draw, none);
@@ -393,10 +431,55 @@
   /* The hero's underline, drawn once the headline has risen (in time, at
      load: the hero is never staged). */
   :root[data-theme]
-    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='studio']
+    .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='studio']
     .lp-section[data-lp-type='hero']
     .lp-heading[data-size='display']::after {
     animation: lp-wipe var(--duration-slowest) var(--ease-smooth)
       calc(var(--duration-slowest) + var(--lp-stagger) * 2) both;
   }
+}
+
+/* A Moving background in the tint of Studio's own cards (03 X33), where the
+   org's shader runs behind it: the shader through the plain ground reads as a
+   grey band. Now that an org's shader is on by default (03 X50,
+   Codex-61zsk.35), every Style but Poster's and Cinematic's panels takes it.
+   Without a shader the section draws its glow in the brand's hues, and the
+   plain ground stays exactly as it was. */
+.org-layout[data-hero-shader-active] .lp[data-lp-style='studio'] {
+  --lp-atmosphere-ground: tint;
+}
+
+/* ── the simple sections (03 X64) ────────────────────────────────────────── */
+/* A centred Heading's underline is centred under it. */
+:is(.lp, #lp-style)[data-lp-style='studio']
+  .lp-section[data-lp-type='heading'][data-lp-layout='center']
+  .lp-heading::after {
+  inset-inline: 0;
+  margin-inline: auto;
+}
+
+/* A Picture's caption in the display face's italic, like a note on a print.
+   Its measure counts that face's `0`s at the body's weight, which it keeps
+   (`styles/kit.css`): the org loads no italic, so it is the upright slanted. */
+:is(.lp, #lp-style)[data-lp-type-facet='studio'] .lp-section[data-lp-type='picture'] .picture__caption {
+  font-family: var(--lp-font-display);
+  font-style: italic;
+  --lp-measure-unit: calc(var(--lp-zero-display-400) + (var(--lp-zero-display-700) - var(--lp-zero-display-400)) * (clamp(400, var(--lp-weight-body), 700) - 400) / 300);
+}
+
+/* A Break's mark: a short stroke of the pen, centred, drawn on as it enters
+   (`data-lp-draw`, as the hero's underline is). */
+:is(.lp, #lp-style)[data-lp-style='studio'] .lp-break__mark {
+  inline-size: var(--space-24);
+  block-size: var(--space-3);
+  background: var(--lp-mark-ink);
+  mask: var(--lp-mark-underline) center / 100% 100% no-repeat;
+}
+
+/* ── the course's layered stages (03 X72) ────────────────────────────────── */
+/* A hairline over each stage's heading line (`StageLayers.svelte` draws the
+   row). */
+:is(.lp, #lp-style)[data-lp-style='studio'] .layers__stage::before {
+  content: '';
+  border-block-start: var(--border-width) var(--border-style) var(--lp-line);
 }

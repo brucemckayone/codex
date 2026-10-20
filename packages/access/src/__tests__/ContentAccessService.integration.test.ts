@@ -140,6 +140,31 @@ describe('ContentAccessService Integration', () => {
     await teardownTestDatabase();
   });
 
+  /**
+   * The test org's owner. An organisation has exactly one active owner
+   * (`uq_org_memberships_one_active_owner`, Codex-2hxff.2), so every test
+   * that needs one shares it: created on first use, reused after.
+   */
+  async function testOrgOwner(): Promise<string> {
+    const existing = await db.query.organizationMemberships.findFirst({
+      where: (m, { and, eq }) =>
+        and(
+          eq(m.organizationId, organizationId),
+          eq(m.role, 'owner'),
+          eq(m.status, 'active')
+        ),
+    });
+    if (existing) return existing.userId;
+    const [ownerUserId] = await seedTestUsers(db, 1);
+    await db.insert(organizationMemberships).values({
+      userId: ownerUserId,
+      organizationId,
+      role: 'owner',
+      status: 'active',
+    });
+    return ownerUserId;
+  }
+
   describe('getStreamingUrl', () => {
     it('should return streaming URL for free content without purchase', async () => {
       // Reset mock before test
@@ -1091,6 +1116,69 @@ describe('ContentAccessService Integration', () => {
         });
 
         expect(result.items.some((i) => i.content.id === item.id)).toBe(true);
+      });
+
+      it('excludes subscription content while the subscription is disputed (Codex-2hxff.9)', async () => {
+        const { creatorUserId, subscriberUserId, orgId, tierId } =
+          await seedOrgWithTierAndSubscriber();
+        const item = await createSubscriberContent(creatorUserId, orgId, {
+          slugPrefix: 'sub-disputed',
+          accessType: 'subscribers',
+          minimumTierId: tierId,
+          priceCents: 0,
+        });
+        await db
+          .update(subscriptions)
+          .set({ disputedAt: new Date() })
+          .where(eq(subscriptions.userId, subscriberUserId));
+
+        const result = await accessService.listUserLibrary(subscriberUserId, {
+          page: 1,
+          limit: 20,
+          filter: 'all',
+          sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
+        });
+
+        expect(result.items.some((i) => i.content.id === item.id)).toBe(false);
+      });
+
+      it('a disputed subscriber, not a follower, no longer sees followers-only content in the library (Codex-2hxff.9)', async () => {
+        const { creatorUserId, subscriberUserId, orgId } =
+          await seedOrgWithTierAndSubscriber();
+        const item = await createSubscriberContent(creatorUserId, orgId, {
+          slugPrefix: 'followers-disputed',
+          accessType: 'subscribers',
+          minimumTierId: null,
+          priceCents: 0,
+        });
+        await db
+          .update(content)
+          .set({ isFollowerGated: true })
+          .where(eq(content.id, item.id));
+        const listed = async () =>
+          (
+            await accessService.listUserLibrary(subscriberUserId, {
+              page: 1,
+              limit: 20,
+              filter: 'all',
+              sortBy: 'recent',
+              contentType: 'all',
+              accessType: 'all',
+              search: '',
+            })
+          ).items.some((i) => i.content.id === item.id);
+        // A subscription counts as following (Codex-xybr3).
+        expect(await listed()).toBe(true);
+
+        await db
+          .update(subscriptions)
+          .set({ disputedAt: new Date() })
+          .where(eq(subscriptions.userId, subscriberUserId));
+
+        expect(await listed()).toBe(false);
       });
 
       it('includes tier-gated paid content (accessType=paid + minimumTierId)', async () => {
@@ -2103,6 +2191,34 @@ describe('ContentAccessService Integration', () => {
         expect(result.contentType).toBe('video');
       });
 
+      it('should deny hybrid content to a subscriber whose subscription is disputed (Codex-2hxff.9)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const { org, proTier } =
+          await createHybridOrgWithTiers('hybrid-disputed');
+        const item = await createHybridContent(
+          org.id,
+          proTier.id,
+          'hybrid-disputed'
+        );
+        const [subUserId] = await seedTestUsers(db, 1);
+        // At the minimum tier, so only the dispute stands in the way.
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(subUserId, org.id, proTier.id, {
+            status: 'active',
+            disputedAt: new Date(),
+          })
+        );
+
+        await expect(
+          accessService.getStreamingUrl(subUserId, {
+            contentId: item.id,
+            expirySeconds: 3600,
+          })
+        ).rejects.toThrow(AccessDeniedError);
+      });
+
       it('should grant hybrid content to subscriber above minimum tier (subscription path)', async () => {
         mockPurchaseService.verifyPurchase.mockClear();
         mockPurchaseService.verifyPurchase.mockResolvedValue(false);
@@ -2270,13 +2386,7 @@ describe('ContentAccessService Integration', () => {
 
         const item = await createContentWithAccessType('team', 'team-owner');
 
-        const [ownerUser] = await seedTestUsers(db, 1);
-        await db.insert(organizationMemberships).values({
-          userId: ownerUser,
-          organizationId,
-          role: 'owner',
-          status: 'active',
-        });
+        const ownerUser = await testOrgOwner();
 
         const result = await accessService.getStreamingUrl(ownerUser, {
           contentId: item.id,
@@ -2529,14 +2639,7 @@ describe('ContentAccessService Integration', () => {
 
         await contentService.publish(content.id, userId);
 
-        // Create owner membership
-        const [ownerUserId] = await seedTestUsers(db, 1);
-        await db.insert(organizationMemberships).values({
-          userId: ownerUserId,
-          organizationId,
-          role: 'owner',
-          status: 'active',
-        });
+        const ownerUserId = await testOrgOwner();
 
         // Owner should bypass paid access check
         const result = await accessService.getStreamingUrl(ownerUserId, {

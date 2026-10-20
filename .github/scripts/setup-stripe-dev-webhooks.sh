@@ -31,13 +31,16 @@ fi
 DEV_BASE="https://ecom-api.dev.revelations.studio/webhooks/stripe"
 
 # Map endpoint URLs to the GitHub secret name that holds their signing secret.
+# MIRRORS PRODUCTION: keep these in step with the endpoint table in
+# docs/payments/operations.md ("Webhook endpoints (production)"). Fields:
+# secret | url | events | scope ("connect" = a connected-accounts endpoint,
+# which is the only kind that receives creators' account.updated).
 declare -a ENDPOINTS=(
-  "STRIPE_WEBHOOK_SECRET_PAYMENT|${DEV_BASE}/payment|payment_intent.succeeded payment_intent.payment_failed charge.refunded"
-  "STRIPE_WEBHOOK_SECRET_SUBSCRIPTION|${DEV_BASE}/subscription|checkout.session.completed customer.subscription.created customer.subscription.updated customer.subscription.deleted invoice.payment_succeeded invoice.payment_failed product.updated price.created price.updated"
-  "STRIPE_WEBHOOK_SECRET_CONNECT|${DEV_BASE}/connect|account.updated capability.updated person.created person.updated"
-  "STRIPE_WEBHOOK_SECRET_CUSTOMER|${DEV_BASE}/customer|customer.created customer.updated customer.deleted"
-  "STRIPE_WEBHOOK_SECRET_BOOKING|${DEV_BASE}/booking|checkout.session.completed"
-  "STRIPE_WEBHOOK_SECRET_DISPUTE|${DEV_BASE}/dispute|charge.dispute.created charge.dispute.updated charge.dispute.closed"
+  "STRIPE_WEBHOOK_SECRET_BOOKING|${DEV_BASE}/booking|checkout.session.completed|platform"
+  "STRIPE_WEBHOOK_SECRET_PAYMENT|${DEV_BASE}/payment|charge.refunded refund.updated refund.failed|platform"
+  "STRIPE_WEBHOOK_SECRET_DISPUTE|${DEV_BASE}/dispute|charge.dispute.created charge.dispute.updated charge.dispute.closed charge.dispute.funds_withdrawn charge.dispute.funds_reinstated radar.early_fraud_warning.created|platform"
+  "STRIPE_WEBHOOK_SECRET_SUBSCRIPTION|${DEV_BASE}/subscription|checkout.session.completed customer.subscription.updated customer.subscription.deleted customer.subscription.paused customer.subscription.resumed customer.subscription.trial_will_end invoice.payment_succeeded invoice.payment_failed product.updated price.created price.updated|platform"
+  "STRIPE_WEBHOOK_SECRET_CONNECT|${DEV_BASE}/connect|account.updated account.application.deauthorized|connect"
 )
 
 # Verify we're in test mode
@@ -51,13 +54,16 @@ echo "🚀 Creating Stripe TEST-mode webhook endpoints for dev environment..."
 echo ""
 
 for entry in "${ENDPOINTS[@]}"; do
-  IFS='|' read -r SECRET_NAME URL EVENTS <<< "$entry"
+  IFS='|' read -r SECRET_NAME URL EVENTS SCOPE <<< "$entry"
 
   # Build --enabled-events args
   EVENT_ARGS=""
   for evt in $EVENTS; do
     EVENT_ARGS="$EVENT_ARGS --enabled-events $evt"
   done
+  if [ "$SCOPE" = "connect" ]; then
+    EVENT_ARGS="$EVENT_ARGS -d connect=true"
+  fi
 
   echo "📍 Creating endpoint: $URL"
   # Stripe CLI returns JSON; jq extracts the signing secret

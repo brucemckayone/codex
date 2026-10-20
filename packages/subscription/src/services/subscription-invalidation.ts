@@ -6,8 +6,7 @@
  * KV version keys (`COLLECTION_USER_LIBRARY` and, when an org is involved,
  * `COLLECTION_USER_SUBSCRIPTION`).
  *
- * See `docs/subscription-cache-audit/phase-1-p0.md` for the motivating
- * invalidation-gap matrix. The rule is: every subscription state change
+ * See `docs/payments/access.md` ("Keeping caches in step"). The rule is: every subscription state change
  * invalidates BOTH the library cache (what content can I see) AND the
  * per-org subscription cache (what's my active tier). Invalidating only
  * one leads to split-brain UI across devices.

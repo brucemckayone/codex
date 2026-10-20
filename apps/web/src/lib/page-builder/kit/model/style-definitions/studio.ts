@@ -23,6 +23,7 @@ export const STUDIO: StyleDefinition = {
     curriculum: 'timeline',
     preview: 'split',
     gallery: 'mosaic',
+    inside: 'carousel',
     instructor: 'split',
     testimonials: 'wall',
     faq: 'columns',
@@ -30,6 +31,11 @@ export const STUDIO: StyleDefinition = {
     cta: 'split',
     stats: 'row',
     text: 'columns',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'start',
+    break: 'space',
+    button: 'stack',
   },
   // Paper and tinted paper in turn, whichever sections a page keeps: the
   // starter and every recipe alternate without a repeat to step back from.
@@ -44,12 +50,19 @@ export const STUDIO: StyleDefinition = {
     curriculum: 'base',
     preview: 'soft',
     gallery: 'base',
+    inside: 'base',
     instructor: 'soft',
     testimonials: 'base',
     stats: 'accent',
     pricing: 'soft',
     faq: 'base',
     cta: 'brand',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   // A card is a sheet of the other paper: tinted on the ground, plain on the
   // tint, plain on a colour field.
@@ -64,6 +77,7 @@ export const STUDIO: StyleDefinition = {
   order: STORY_ORDER,
   starter: [
     'hero',
+    'inside',
     'problem',
     'story',
     'benefits',
@@ -75,4 +89,7 @@ export const STUDIO: StyleDefinition = {
     'cta',
   ],
   fonts: { heading: 'Bitter', body: 'Figtree' },
+  // Hazy: the org's moving background through a third of the inner pages'
+  // blur, under the same veil, so it is seen moving (03 X53).
+  atmosphere: 'hazy',
 };

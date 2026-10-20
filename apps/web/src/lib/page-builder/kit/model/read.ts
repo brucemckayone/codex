@@ -75,6 +75,28 @@ export function readOneOf<T extends string>(
     : undefined;
 }
 
+/**
+ * The index in the stored `key` array of the first entry `keep` accepts, read
+ * as `readItems` reads them (a non-object is skipped), or `null` for none: the
+ * entry a layout draws first, for the editor to tag (`leadingItem`).
+ */
+export function firstItem(
+  raw: Raw,
+  key: string,
+  keep: (entry: Raw) => boolean
+): number | null {
+  const value = raw[key];
+  if (!Array.isArray(value)) return null;
+  const index = value.findIndex(
+    (entry) =>
+      entry !== null &&
+      typeof entry === 'object' &&
+      !Array.isArray(entry) &&
+      keep(entry as Raw)
+  );
+  return index === -1 ? null : index;
+}
+
 /** Drops `undefined` values so a coerced object carries only authored keys. */
 export function compact<T extends object>(value: T): T {
   const out: Record<string, unknown> = {};
@@ -91,4 +113,17 @@ export function paragraphs(text: string | undefined): string[] {
     .split(/\n\s*\n/)
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
+}
+
+/**
+ * Whether a section's props give its block a head: the eyebrow, heading and
+ * lead set over its content. The blocks that draw one (`HEADED_BY_WORDS` in
+ * `resolve.ts`) read it here, and so does the page, which spaces a section
+ * with none as the continuation of the band above it (03 X58). One reading,
+ * so the two can never disagree about which sections have words of their own.
+ */
+export function hasHead(props: object): boolean {
+  return (['eyebrow', 'heading', 'body'] as const).some(
+    (key) => readText(props as Raw, key) !== undefined
+  );
 }

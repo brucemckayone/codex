@@ -7,6 +7,11 @@
     focus — the recommended path large, the others listed beneath
     band  — one strip: price, button, and the other paths in a line
 
+  The small print beside a price is always that path's own billing line
+  (`derivedNote`), so it follows the offer when the recommended one changes.
+  The creator's note is the section's own words, under the lede, and only
+  while there is something to buy.
+
   And, in every layout, the states that are not "priced": an enrolled viewer
   gets a way back in, a course with no way in says so, and a failed offer read
   gets a price-less button — never an invented price.
@@ -31,6 +36,8 @@
   const page = getKitPage();
   const content = $derived(pricingDefinition.coerce(props));
   const view = $derived(pricingView(context, content));
+  // The note reassures a buyer: it has no place once there is nothing to buy.
+  const selling = $derived(view.state === 'priced' || view.state === 'unpriced');
   const featured = $derived(featuredScheme(page.style, section.scheme));
   const label = $derived(content.ctaLabel ?? COPY.cta.buy);
 </script>
@@ -49,6 +56,9 @@
     {/if}
     {#if content.body}
       <Text text={content.body} size="lead" type="pricing" field="body" {edit} />
+    {/if}
+    {#if content.note && selling}
+      <Text text={content.note} type="pricing" field="note" {edit} />
     {/if}
   </header>
 {/snippet}
@@ -80,13 +90,9 @@
     </div>
   {:else if view.state !== 'priced' || !view.featured}
     <div class="pricing__state">
-      <ButtonRow
-        {context}
-        section="pricing"
-        label={content.ctaLabel}
-        note={content.note ?? COPY.pricing.atCheckout}
-        {edit}
-      />
+      <ButtonRow {context} section="pricing" label={content.ctaLabel} {edit} />
+      <!-- The kit's own line, so never an editable field. -->
+      {#if view.state === 'unpriced'}<p class="pricing__note">{COPY.pricing.atCheckout}</p>{/if}
     </div>
   {:else if section.layout === 'focus'}
     <div class="pricing__focus">
@@ -94,7 +100,6 @@
         path={view.featured}
         {context}
         {label}
-        note={content.note ?? derivedNote(view.featured)}
         scheme={featured}
         badge={view.paths.length > 1}
         size="focus"
@@ -118,7 +123,7 @@
           field="ctaLabel"
           {edit}
         />
-        <p class="pricing__note">{content.note ?? derivedNote(view.featured)}</p>
+        <p class="pricing__note">{derivedNote(view.featured)}</p>
       </div>
     </div>
     {@render others()}
@@ -129,7 +134,6 @@
           {path}
           {context}
           {label}
-          note={derivedNote(path)}
           scheme={path.best ? featured : undefined}
           badge={view.paths.length > 1}
           editable={path.best}
@@ -137,7 +141,6 @@
         />
       {/each}
     </div>
-    {#if content.note}<p class="pricing__note">{content.note}</p>{/if}
   {/if}
 </div>
 
@@ -147,10 +150,12 @@
     gap: var(--lp-gap);
   }
 
+  /* The measure is its heading's room too (louder's fit, 03 X62). */
   .pricing__head {
     display: grid;
     gap: var(--lp-stack);
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
+    --lp-heading-column: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   /* Soft centres its cards' head, so the states that stand in for the cards
@@ -185,11 +190,19 @@
   }
 
   /* ── non-priced states ─────────────────────────────────────────────────── */
+  /* The state's own line keeps to its button, wherever the Style aligns it. */
+  .pricing__state {
+    display: grid;
+    gap: var(--space-3);
+    justify-items: var(--lp-actions-align, start);
+    text-align: var(--lp-actions-align, start);
+  }
+
   .pricing__panel {
     display: grid;
     gap: var(--space-3);
     justify-items: start;
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
     padding: var(--space-8);
     border-radius: var(--lp-radius-card);
     background: var(--lp-bg);
@@ -210,35 +223,45 @@
   }
 
   /* ── cards ─────────────────────────────────────────────────────────────── */
+  /* A card's width (`--_track`), which its name's room is read from
+     (03 X71): its share of the cards, `--_n` across, which draws the tracks
+     too. A lone card is held to the lead's measure, in the body's `0`s,
+     which a title's room reads as its box does (in `font-size` an `em` is
+     the parent's). */
   .pricing__cards {
+    --_n: 1;
+    --_track: calc((var(--lp-column) - (var(--_n) - 1) * var(--lp-gap)) / var(--_n));
     display: grid;
+    grid-template-columns: repeat(var(--_n), minmax(0, 1fr));
     gap: var(--lp-gap);
     align-items: stretch;
   }
 
   .pricing__cards[data-count='1'] {
-    max-inline-size: calc(var(--lp-measure-lead) + var(--space-16));
+    --_track: min(var(--lp-column), var(--lp-measure-lead) * var(--lp-measure-unit) + var(--space-16));
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit) + var(--space-16));
   }
 
   @container (min-width: 44rem) {
     .pricing__cards:not([data-count='1']) {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      --_n: 2;
     }
   }
 
   @container (min-width: 66rem) {
     .pricing__cards[data-count='3'],
     .pricing__cards[data-count='5'] {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      --_n: 3;
     }
 
     .pricing__cards[data-count='4'] {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      --_n: 4;
     }
   }
 
   /* ── focus ─────────────────────────────────────────────────────────────── */
   .pricing__focus {
+    --_track: var(--lp-column);
     display: grid;
     gap: var(--space-6);
   }
@@ -251,9 +274,14 @@
       column-gap: calc(var(--lp-gap) * 1.5);
     }
 
+    .pricing[data-layout='focus'] > .pricing__focus {
+      --_track: calc((var(--lp-column) - var(--lp-gap) * 1.5) * 7 / 12);
+    }
+
     .pricing[data-layout='focus'] > .pricing__head {
       position: sticky;
       top: var(--space-12);
+      --lp-heading-column: min(var(--lp-measure) * var(--lp-measure-unit), (var(--lp-column) - var(--lp-gap) * 1.5) * 5 / 12);
     }
   }
 
@@ -333,11 +361,28 @@
     gap: var(--space-2);
   }
 
+  /* The head beside its price wherever its widest word fits there, and over
+     it where it does not (03 X70). The head grows from nothing, so the
+     narrowest it can be is its own longest word (a flex item's automatic
+     minimum), at the size the fit draws it in its room, the measure: the row
+     wraps before that word could run into the price. On a row of its own the
+     head has that room, and on a shared row more than its word. The price
+     keeps the row's end, or its start alone.
+     The head stacks its words as a column, not a grid: a grid's narrowest
+     drops any child whose own minimum is 0 (a common cure for a grid
+     blowout), and the row would then keep a word that does not fit. */
   @container (min-width: 60rem) {
     .pricing[data-layout='band'] {
-      grid-template-columns: minmax(0, 1fr) auto;
+      display: flex;
+      flex-wrap: wrap;
       align-items: center;
-      column-gap: var(--lp-gap);
+      justify-content: space-between;
+    }
+
+    .pricing[data-layout='band'] > .pricing__head {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 0;
     }
 
     .pricing__band {
@@ -346,7 +391,7 @@
     }
 
     .pricing[data-layout='band'] .pricing__others {
-      grid-column: 1 / -1;
+      flex-basis: 100%;
     }
   }
 </style>

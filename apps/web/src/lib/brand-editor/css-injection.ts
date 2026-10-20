@@ -1,4 +1,5 @@
 import { browser } from '$app/environment';
+import { withFallback } from './font-fallbacks';
 import type { BrandEditorState, CssVarMapping } from './types';
 
 /**
@@ -347,11 +348,13 @@ const FONT_OVERRIDE_KEYS = new Set(['font-body', 'font-heading']);
 
 /**
  * Wrap a font-family name in single quotes for use as a CSS custom-property
- * value. Single source of quoting shared by the light path (CSS_VAR_MAPPINGS)
- * and the dark emit paths so the two can never drift apart.
+ * value, followed by the face's own fallback where the table has one
+ * (`font-fallbacks.ts`). Single source of quoting shared by the light path
+ * (CSS_VAR_MAPPINGS), the dark emit paths and the font preview, so they can
+ * never drift apart.
  */
 function quoteFamily(name: string): string {
-  return `'${name}'`;
+  return withFallback(name, `'${name}'`);
 }
 
 /** The CSS variable mappings from editor state to --brand-* properties. */
@@ -431,7 +434,7 @@ export function previewFont(mode: 'body' | 'heading', family: string): void {
     mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
   // Bare family name only — appending var(--font-sans) creates a cycle with
   // org-brand.css's --font-sans redeclaration and drops the font (Codex-eb00a.7).
-  el.style.setProperty(prop, `'${family}'`);
+  el.style.setProperty(prop, quoteFamily(family));
   loadGoogleFont(family);
 }
 
@@ -449,7 +452,7 @@ export function revertFontPreview(
     mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
   if (currentValue) {
     // Bare family name only (see previewFont) — no var(--font-sans) cycle.
-    el.style.setProperty(prop, `'${currentValue}'`);
+    el.style.setProperty(prop, quoteFamily(currentValue));
   } else {
     el.style.removeProperty(prop);
   }

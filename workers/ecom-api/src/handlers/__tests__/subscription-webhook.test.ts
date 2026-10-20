@@ -19,75 +19,57 @@ import {
   createMockStripeSubscription,
   type MockHonoContext,
 } from '@codex/test-utils';
+import type { WebhookServices } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StripeWebhookEnv } from '../../types';
 
 // Mock modules before imports
-vi.mock('@codex/database', () => ({
-  createPerRequestDbClient: vi.fn(),
-}));
-
 vi.mock('@codex/subscription', () => ({
-  SubscriptionService: vi.fn(),
-  // Dashboard sync-back path (Codex-s7h0y) goes through TierService.
-  // Mock the class so the handler's `new TierService(...)` returns our
-  // stub with controllable apply* method behaviour.
-  TierService: vi.fn(),
+  // The renewal-time price swap (Codex-2hxff.3).
+  applyDuePendingPriceChange: vi.fn().mockResolvedValue(false),
+  PENDING_PRICE_ID_KEY: 'codex_pending_price_id',
   // The handler also imports `invalidateForUser` — stub it so the module
   // mock is complete. Cache-invalidation contract is tested separately in
   // `subscription-webhook-invalidation.test.ts`.
   invalidateForUser: vi.fn(),
-  // Codex-4y8pt: the handler constructs CourseSubscriptionService for EVERY
-  // subscription event (course subs are mode=subscription on this same webhook,
-  // discriminated later by `type: 'course_subscription'` metadata). A vi.mock
-  // factory is a CLOSED namespace, so omitting this export made vitest throw on
-  // the ACCESS at subscription-webhook.ts:277 — before any test assertion ran.
-  // Stubbed rather than left bare so a future course-sub test gets a mock method
-  // instead of a TypeError; no test here routes through that branch.
-  // The handler ALSO calls the STATIC `isCourseSubscription` to discriminate
-  // (three sites), so the mock needs both halves: a constructor for the
-  // instance and the static on the mock function itself.
-  CourseSubscriptionService: Object.assign(
-    vi.fn().mockImplementation(() => ({
-      handleCourseSubscriptionCreated: vi.fn().mockResolvedValue(undefined),
-      handleCourseSubscriptionUpdated: vi.fn().mockResolvedValue(undefined),
-      handleCourseSubscriptionDeleted: vi.fn().mockResolvedValue(undefined),
-      handleCourseInvoicePaymentSucceeded: vi.fn().mockResolvedValue(undefined),
-    })),
-    {
-      // MIRRORS the real predicate rather than hardcoding `false`
-      // (course-subscription-service.ts:677 — metadata.type ===
-      // COURSE_SUBSCRIPTION_METADATA_TYPE). A constant `false` would pass today,
-      // because every fixture here is an ORG subscription, and would then
-      // silently mis-route the first test that does add course metadata. The
-      // literal is inlined because a vi.mock factory is hoisted above imports
-      // and so cannot reference the exported constant.
-      isCourseSubscription: vi.fn(
-        (sub: { metadata?: Record<string, string> | null }) =>
-          (sub?.metadata?.type ?? null) === 'course_subscription'
-      ),
-    }
-  ),
+  // The handler calls the STATIC `isCourseSubscription` to discriminate course
+  // subs (mode=subscription on this same webhook, `type: 'course_subscription'`
+  // metadata) at three sites. A vi.mock factory is a CLOSED namespace, so the
+  // class must be here even though its instance now comes from the registry
+  // (`services.courseSubscription`, Codex-2hxff.54).
+  CourseSubscriptionService: {
+    // MIRRORS the real predicate rather than hardcoding `false`
+    // (course-subscription-service.ts:677 — metadata.type ===
+    // COURSE_SUBSCRIPTION_METADATA_TYPE). A constant `false` would pass today,
+    // because every fixture here is an ORG subscription, and would then
+    // silently mis-route the first test that does add course metadata. The
+    // literal is inlined because a vi.mock factory is hoisted above imports
+    // and so cannot reference the exported constant.
+    isCourseSubscription: vi.fn(
+      (sub: { metadata?: Record<string, string> | null }) =>
+        (sub?.metadata?.type ?? null) === 'course_subscription'
+    ),
+  },
 }));
 
 // The subscription-webhook handler dispatches emails via `sendEmailToWorker`
 // from `@codex/worker-utils`. Mock it so no real fetch is attempted and so
-// the trial_will_end tests can assert on dispatch. `createWebhookDbClient`
-// must remain a real export — it forwards to the (mocked)
-// `createPerRequestDbClient`, so use importOriginal + spread.
+// the trial_will_end tests can assert on dispatch. The handler gets its
+// services from `createWebhookServices` (Codex-2hxff.54); mock that seam so
+// each test hands over its own stubs. Every other export stays real.
 vi.mock('@codex/worker-utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/worker-utils')>();
   return {
     ...actual,
+    createWebhookServices: vi.fn(),
     sendEmailToWorker: vi.fn(),
   };
 });
 
-import { createPerRequestDbClient } from '@codex/database';
-import { SubscriptionService, TierService } from '@codex/subscription';
-import { sendEmailToWorker } from '@codex/worker-utils';
+import { applyDuePendingPriceChange } from '@codex/subscription';
+import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import { handleSubscriptionWebhook } from '../subscription-webhook';
 
 function createContext(
@@ -100,10 +82,11 @@ function createContext(
     env: envOverrides,
   });
   // Attach executionCtx — createMockHonoContext omits it by default.
-  // The webhook handler (since Codex-esikl) reads `c.executionCtx.waitUntil`
-  // to wire the SubscriptionService orchestrator hook. Tests in this file
-  // mock SubscriptionService so the waitUntil is never actually invoked,
-  // but we still need the property to exist for `.bind(c.executionCtx)`.
+  // The handler hands it to `createWebhookServices` and reads
+  // `c.executionCtx.waitUntil` for its own invalidation helpers (course
+  // buyer, Dashboard sync-back), so the property must exist for
+  // `.bind(c.executionCtx)`. `release` is mocked, so every waitUntil call
+  // a test sees is the handler's own.
   (mock as unknown as Record<string, unknown>).executionCtx = {
     waitUntil: vi.fn(),
     passThroughOnException: vi.fn(),
@@ -116,8 +99,7 @@ function createContext(
 
 describe('handleSubscriptionWebhook', () => {
   let mockStripe: Stripe;
-  let mockCleanup: ReturnType<typeof vi.fn>;
-  let mockDb: Record<string, unknown>;
+  let mockRelease: ReturnType<typeof vi.fn>;
   let mockHandleCreated: ReturnType<typeof vi.fn>;
   let mockHandleUpdated: ReturnType<typeof vi.fn>;
   let mockHandleDeleted: ReturnType<typeof vi.fn>;
@@ -127,7 +109,7 @@ describe('handleSubscriptionWebhook', () => {
   let mockHandlePaused: ReturnType<typeof vi.fn>;
   let mockHandleResumed: ReturnType<typeof vi.fn>;
   let mockApplyProductUpdate: ReturnType<typeof vi.fn>;
-  let mockApplyPriceCreated: ReturnType<typeof vi.fn>;
+  let mockRecordPriceDrift: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -144,9 +126,8 @@ describe('handleSubscriptionWebhook', () => {
     // happy-path non-drift events exercise the non-changed branch without
     // surprising any unrelated test that fires a product/price event.
     mockApplyProductUpdate = vi.fn().mockResolvedValue(null);
-    mockApplyPriceCreated = vi.fn().mockResolvedValue(null);
-    mockCleanup = vi.fn();
-    mockDb = { mock: 'database' };
+    mockRecordPriceDrift = vi.fn().mockResolvedValue(undefined);
+    mockRelease = vi.fn();
 
     const mockSubRetrieve = vi.fn().mockResolvedValue(
       createMockStripeSubscription({
@@ -157,30 +138,39 @@ describe('handleSubscriptionWebhook', () => {
       subscriptions: { retrieve: mockSubRetrieve },
     } as unknown as Stripe;
 
-    (createPerRequestDbClient as ReturnType<typeof vi.fn>).mockReturnValue({
-      db: mockDb,
-      cleanup: mockCleanup,
+    // The registry's services, as the composition root hands them over.
+    vi.mocked(createWebhookServices).mockResolvedValue({
+      services: {
+        subscription: {
+          handleSubscriptionCreated: mockHandleCreated,
+          handleSubscriptionUpdated: mockHandleUpdated,
+          handleSubscriptionDeleted: mockHandleDeleted,
+          handleSubscriptionPaused: mockHandlePaused,
+          handleSubscriptionResumed: mockHandleResumed,
+          handleInvoicePaymentSucceeded: mockHandleInvoiceSuccess,
+          handleInvoicePaymentFailed: mockHandleInvoiceFailed,
+          handleTrialWillEnd: mockHandleTrialWillEnd,
+        },
+        // Dashboard sync-back path (Codex-s7h0y) goes through TierService,
+        // stubbed with controllable apply* method behaviour.
+        tier: {
+          applyStripeProductUpdate: mockApplyProductUpdate,
+          recordStripePriceDrift: mockRecordPriceDrift,
+        },
+        // Stubbed rather than left bare so a future course-sub test gets a
+        // mock method instead of a TypeError; no test here routes through it.
+        courseSubscription: {
+          handleCourseSubscriptionCreated: vi.fn().mockResolvedValue(undefined),
+          handleCourseSubscriptionUpdated: vi.fn().mockResolvedValue(undefined),
+          handleCourseSubscriptionDeleted: vi.fn().mockResolvedValue(undefined),
+          handleCourseInvoicePaymentSucceeded: vi
+            .fn()
+            .mockResolvedValue(undefined),
+        },
+      } as unknown as WebhookServices['services'],
+      background: (promise) => promise,
+      release: mockRelease,
     });
-
-    (
-      SubscriptionService as unknown as ReturnType<typeof vi.fn>
-    ).mockImplementation(() => ({
-      handleSubscriptionCreated: mockHandleCreated,
-      handleSubscriptionUpdated: mockHandleUpdated,
-      handleSubscriptionDeleted: mockHandleDeleted,
-      handleSubscriptionPaused: mockHandlePaused,
-      handleSubscriptionResumed: mockHandleResumed,
-      handleInvoicePaymentSucceeded: mockHandleInvoiceSuccess,
-      handleInvoicePaymentFailed: mockHandleInvoiceFailed,
-      handleTrialWillEnd: mockHandleTrialWillEnd,
-    }));
-
-    (TierService as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      () => ({
-        applyStripeProductUpdate: mockApplyProductUpdate,
-        applyStripePriceCreated: mockApplyPriceCreated,
-      })
-    );
   });
 
   function createEvent(
@@ -290,6 +280,72 @@ describe('handleSubscriptionWebhook', () => {
         'Subscription updated',
         expect.objectContaining({ subscriptionId: 'sub_update_789' })
       );
+    });
+
+    // Codex-2hxff.3: a renewal is a customer.subscription.updated — the moment
+    // a pending Studio price change becomes due.
+    it('offers the subscription to the pending-price swap AFTER the DB sync', async () => {
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_renewal_1',
+        status: 'active',
+      });
+      const { context } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      const swap = vi.mocked(applyDuePendingPriceChange);
+      expect(swap).toHaveBeenCalledWith(
+        mockStripe,
+        expect.objectContaining({ id: 'sub_renewal_1' })
+      );
+      const syncOrder = mockHandleUpdated.mock.invocationCallOrder[0] ?? 0;
+      const swapOrder = swap.mock.invocationCallOrder.at(-1) ?? 0;
+      expect(syncOrder).toBeGreaterThan(0);
+      expect(swapOrder).toBeGreaterThan(syncOrder);
+    });
+
+    // Codex-2hxff.3 review (H3): a swap Stripe refuses for good must not end
+    // as the generic "permanent error (acknowledged)" warning.
+    it('a permanent swap failure is acknowledged but logged at ERROR level with context', async () => {
+      const refused = Object.assign(new Error('No such price: price_gone'), {
+        type: 'StripeInvalidRequestError',
+        code: 'resource_missing',
+      });
+      vi.mocked(applyDuePendingPriceChange).mockRejectedValueOnce(refused);
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_swap_refused',
+        status: 'active',
+        metadata: { codex_pending_price_id: 'price_gone' },
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Pending price change could not be applied',
+        expect.objectContaining({
+          subscriptionId: 'sub_swap_refused',
+          pendingPriceId: 'price_gone',
+          errorType: 'StripeInvalidRequestError',
+          errorCode: 'resource_missing',
+        })
+      );
+    });
+
+    it('a transient swap failure is rethrown so Stripe redelivers', async () => {
+      const flaky = Object.assign(new Error('connection reset'), {
+        type: 'StripeConnectionError',
+      });
+      vi.mocked(applyDuePendingPriceChange).mockRejectedValueOnce(flaky);
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_swap_flaky',
+        status: 'active',
+      });
+      const { context } = createContext();
+
+      await expect(
+        handleSubscriptionWebhook(event, mockStripe, context)
+      ).rejects.toBe(flaky);
     });
   });
 
@@ -570,84 +626,34 @@ describe('handleSubscriptionWebhook', () => {
     });
   });
 
-  describe('price.created (Dashboard sync-back)', () => {
-    it('should adopt the new Price as canonical and invalidate the org cache', async () => {
-      mockApplyPriceCreated.mockResolvedValue({
-        tierId: 'tier-pc',
-        organizationId: 'org-pc',
-        changed: true,
-      });
+  // Studio is the only place a tier price is set (Codex-2hxff.3): a Price
+  // created in the Dashboard is handed to the drift log — never adopted, never
+  // propagated, no cache to bump.
+  describe('price.created (drift log only)', () => {
+    it('hands the Price to recordStripePriceDrift and changes nothing else', async () => {
       const fakeKV = {
         get: vi.fn(),
         put: vi.fn(),
         delete: vi.fn(),
       } as unknown as KVNamespace;
-      const { context, mock } = createContext({ CACHE_KV: fakeKV });
+      const { context } = createContext({ CACHE_KV: fakeKV });
 
       const event = createEvent(STRIPE_EVENTS.PRICE_CREATED, {
-        id: 'price_new_15_00',
+        id: 'price_dashboard_15_00',
         active: true,
         unit_amount: 1500,
         recurring: { interval: 'month' },
         product: 'prod_tier_pc',
-        metadata: { codex_organization_id: 'org-pc', interval: 'month' },
-      });
-
-      await handleSubscriptionWebhook(event, mockStripe, context);
-
-      expect(mockApplyPriceCreated).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'price_new_15_00' })
-      );
-      expect(mock._obs.info).toHaveBeenCalledWith(
-        'Adopted Stripe Dashboard-created Price as canonical',
-        expect.objectContaining({
-          tierId: 'tier-pc',
-          organizationId: 'org-pc',
-          stripePriceId: 'price_new_15_00',
-        })
-      );
-      expect(context.executionCtx.waitUntil).toHaveBeenCalledTimes(1);
-    });
-
-    it('should no-op when the service reports no change (replay on already-adopted price)', async () => {
-      mockApplyPriceCreated.mockResolvedValue({
-        tierId: 'tier-pc',
-        organizationId: 'org-pc',
-        changed: false,
-      });
-      const event = createEvent(STRIPE_EVENTS.PRICE_CREATED, {
-        id: 'price_replay',
-        active: true,
-        metadata: { codex_organization_id: 'org-pc' },
-      });
-      const { context, mock } = createContext();
-
-      await handleSubscriptionWebhook(event, mockStripe, context);
-
-      expect(mockApplyPriceCreated).toHaveBeenCalledOnce();
-      expect(mock._obs.info).not.toHaveBeenCalledWith(
-        'Adopted Stripe Dashboard-created Price as canonical',
-        expect.anything()
-      );
-      expect(context.executionCtx.waitUntil).not.toHaveBeenCalled();
-    });
-
-    it('should pass non-Codex prices through the service (which returns null)', async () => {
-      mockApplyPriceCreated.mockResolvedValue(null);
-      const event = createEvent(STRIPE_EVENTS.PRICE_CREATED, {
-        id: 'price_external',
-        active: true,
         metadata: {},
       });
-      const { context, mock } = createContext();
 
       await handleSubscriptionWebhook(event, mockStripe, context);
 
-      expect(mockApplyPriceCreated).toHaveBeenCalledOnce();
-      expect(mock._obs.info).not.toHaveBeenCalledWith(
-        'Adopted Stripe Dashboard-created Price as canonical',
-        expect.anything()
+      expect(mockRecordPriceDrift).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'price_dashboard_15_00' })
       );
+      // No org-cache invalidation and no subscriber fan-out.
+      expect(context.executionCtx.waitUntil).not.toHaveBeenCalled();
     });
   });
 
@@ -731,7 +737,7 @@ describe('handleSubscriptionWebhook', () => {
 
       await handleSubscriptionWebhook(event, mockStripe, context);
 
-      expect(mockCleanup).toHaveBeenCalled();
+      expect(mockRelease).toHaveBeenCalledOnce();
     });
 
     it('should always cleanup database connection on error', async () => {
@@ -748,14 +754,18 @@ describe('handleSubscriptionWebhook', () => {
         // Expected to throw
       }
 
-      expect(mockCleanup).toHaveBeenCalled();
+      expect(mockRelease).toHaveBeenCalledOnce();
     });
   });
 
   // ─── Service initialisation ─────────────────────────────────────────────────
+  //
+  // Codex-2hxff.54: the handler no longer builds its DB client or services;
+  // the registry does, from the bindings and Stripe client the handler passes
+  // to createWebhookServices. These assert that hand-off.
 
   describe('service initialisation', () => {
-    it('should pass correct config to createPerRequestDbClient', async () => {
+    it('should pass the database bindings to createWebhookServices', async () => {
       const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
         id: 'sub_init',
       });
@@ -766,15 +776,18 @@ describe('handleSubscriptionWebhook', () => {
 
       await handleSubscriptionWebhook(event, mockStripe, context);
 
-      expect(createPerRequestDbClient).toHaveBeenCalledWith(
+      // The per-request DB client is now built by the registry from these.
+      expect(createWebhookServices).toHaveBeenCalledWith(
         expect.objectContaining({
           DATABASE_URL: 'postgresql://test-sub-db',
           DB_METHOD: 'NEON',
-        })
+        }),
+        context.executionCtx,
+        expect.anything()
       );
     });
 
-    it('should default environment to development when not set', async () => {
+    it('should leave the environment default to the registry', async () => {
       const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
         id: 'sub_env',
       });
@@ -782,23 +795,30 @@ describe('handleSubscriptionWebhook', () => {
 
       await handleSubscriptionWebhook(event, mockStripe, context);
 
-      expect(SubscriptionService).toHaveBeenCalledWith(
-        expect.objectContaining({ environment: 'development' }),
-        mockStripe
+      // The 'development' default moved into the registry's getEnvironment().
+      expect(createWebhookServices).toHaveBeenCalledWith(
+        context.env,
+        context.executionCtx,
+        expect.objectContaining({ stripe: mockStripe })
       );
+      const [env] = vi.mocked(createWebhookServices).mock.calls[0] ?? [];
+      expect(env?.ENVIRONMENT).toBeUndefined();
     });
 
-    it('should pass stripe client to SubscriptionService', async () => {
+    it('should pass stripe client to createWebhookServices', async () => {
       const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
         id: 'sub_stripe',
       });
-      const { context } = createContext();
+      const { context, mock } = createContext();
 
       await handleSubscriptionWebhook(event, mockStripe, context);
 
-      expect(SubscriptionService).toHaveBeenCalledWith(
-        expect.anything(),
-        mockStripe
+      // The webhook's verified Stripe client; the registry shares it with
+      // every Stripe-backed service it builds.
+      expect(createWebhookServices).toHaveBeenCalledWith(
+        context.env,
+        context.executionCtx,
+        expect.objectContaining({ obs: mock._obs, stripe: mockStripe })
       );
     });
   });

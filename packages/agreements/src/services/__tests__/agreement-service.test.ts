@@ -1008,6 +1008,14 @@ describe('AgreementService', () => {
 
   // ── getActiveAgreements / getActiveAgreementsForCreator ───────────────
 
+  /**
+   * An effective_from safely in the past for a row a test reads straight
+   * back. Left to its DEFAULT now() (the database's clock), it can be a few
+   * milliseconds AFTER the client's new Date() that the read compares it to
+   * (effective_from <= activeAt), and the row is excluded (Codex-t681d).
+   */
+  const settledEffectiveFrom = () => new Date(Date.now() - 60_000);
+
   describe('read queries', () => {
     it('getActiveAgreements returns only active rows', async () => {
       const fx = await seedOrgFixture(db);
@@ -1018,6 +1026,7 @@ describe('AgreementService', () => {
         organizationFeePercentage: 6000,
         revenueType: 'subscription',
         status: 'active',
+        effectiveFrom: settledEffectiveFrom(),
       });
       await db.insert(schema.creatorOrganizationAgreements).values({
         organizationId: fx.orgId,
@@ -1047,6 +1056,7 @@ describe('AgreementService', () => {
           organizationFeePercentage: 6000,
           revenueType: 'subscription',
           status: 'active',
+          effectiveFrom: settledEffectiveFrom(),
         },
         {
           organizationId: fx2.orgId,
@@ -1058,6 +1068,7 @@ describe('AgreementService', () => {
           organizationFeePercentage: 7000,
           revenueType: 'subscription',
           status: 'active',
+          effectiveFrom: settledEffectiveFrom(),
         },
       ]);
       const results = await service.getActiveAgreementsForCreator({
@@ -1446,6 +1457,7 @@ describe('AgreementService', () => {
           organizationFeePercentage: 7000,
           revenueType: 'subscription',
           status: 'active',
+          effectiveFrom: settledEffectiveFrom(),
         },
         {
           organizationId: fx.orgId,
@@ -1453,6 +1465,7 @@ describe('AgreementService', () => {
           organizationFeePercentage: 5000,
           revenueType: 'content_purchase',
           status: 'active',
+          effectiveFrom: settledEffectiveFrom(),
         },
       ]);
       const subOnly = await service.getActiveAgreements({

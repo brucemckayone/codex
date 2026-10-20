@@ -42,7 +42,8 @@ const PERSIST_PATH = path.join(PROJECT_ROOT, '.wrangler/state');
 const DEV_CDN_DIR = path.join(PROJECT_ROOT, 'workers/dev-cdn');
 
 // Committed offline source images (img1.jpg…img6.jpg) used for category
-// covers and expanded-catalogue content thumbnails — no external fetch.
+// covers, expanded-catalogue content thumbnails and the page-kit gallery's
+// sample photographs — no external fetch.
 const MOCKUP_ASSETS_DIR = path.join(PROJECT_ROOT, 'docs/design/mockup-assets');
 
 /** Load the six committed mockup images as buffers, cycled by callers. */
@@ -56,11 +57,28 @@ function loadMockupImages(): Buffer[] {
 const MEDIA_BUCKET_NAME = 'codex-media-test';
 const ASSETS_BUCKET_NAME = 'codex-assets-test';
 
-interface R2File {
+export interface R2File {
   bucket: typeof MEDIA_BUCKET_NAME | typeof ASSETS_BUCKET_NAME;
   key: string;
   data: Buffer | string;
   contentType: string;
+}
+
+/**
+ * The page-kit gallery's six sample photographs (Codex-rlrct). The gallery at
+ * `/studio/page-kit` asks the dev-cdn for `page-kit/img1.jpg` … `img6.jpg`,
+ * which it serves from the assets bucket; these are the committed mockup
+ * images under those keys. Without them every picture in a fresh checkout's
+ * gallery 404s and its block draws its designed empty state, which reads as a
+ * regression and is not one.
+ */
+export function pageKitSamplePhotos(): R2File[] {
+  return loadMockupImages().map((data, i) => ({
+    bucket: ASSETS_BUCKET_NAME,
+    key: `page-kit/img${i + 1}.jpg`,
+    data,
+    contentType: 'image/jpeg',
+  }));
 }
 
 /**
@@ -328,10 +346,11 @@ async function collectMediaFiles(): Promise<R2File[]> {
 }
 
 /**
- * Collect user avatar and org logo files.
+ * Collect user avatar and org logo files, and the other assets-bucket images.
  * Avatars use real portrait photos from i.pravatar.cc (cached locally).
+ * Exported for its test, which mocks the fetchers.
  */
-async function collectAssetFiles(): Promise<R2File[]> {
+export async function collectAssetFiles(): Promise<R2File[]> {
   const files: R2File[] = [];
 
   // Fetch real portrait photos for avatars
@@ -479,6 +498,8 @@ async function collectAssetFiles(): Promise<R2File[]> {
       });
     }
   }
+
+  files.push(...pageKitSamplePhotos());
 
   return files;
 }

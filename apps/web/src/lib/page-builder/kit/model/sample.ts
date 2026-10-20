@@ -68,11 +68,12 @@ export function sampleStages(): JourneyStageView[] {
     gloss,
     sortOrder: stageIndex,
     practices: STAGE_PRACTICES[stageIndex].map(
-      ([title, contentType], practiceIndex) => ({
+      ([title, contentType, durationSeconds], practiceIndex) => ({
         contentId: `sample-practice-${stageIndex + 1}-${practiceIndex + 1}`,
         slug: null,
         title,
         contentType,
+        durationSeconds,
         sortOrder: stageIndex * 4 + practiceIndex,
       })
     ),
@@ -81,46 +82,54 @@ export function sampleStages(): JourneyStageView[] {
 
 type PracticeType = JourneyStageView['practices'][number]['contentType'];
 
-/** Believable practices per stage (one film each) — thumbnails show them. */
+/**
+ * Believable practices per stage (one film each) — thumbnails show them —
+ * each with its length in seconds, null for a reading, as the course sends
+ * them. None carries a picture (`thumbnailUrl`): a sample never points at a
+ * made-up URL, so "What's inside" previews its cards as their kinds' tiles,
+ * which is what a course with no thumbnails really shows (03 X63). A caller
+ * whose pictures really exist deals some in (`practicePictures`).
+ */
 const STAGE_PRACTICES: readonly (readonly (readonly [
   string,
   PracticeType,
+  number | null,
 ])[])[] = [
   [
-    ['Welcome, and how to use the course', 'video'],
-    ['A first quiet twenty minutes', 'audio'],
-    ['Setting up your morning corner', 'written'],
-    ['The notebook page', 'written'],
+    ['Welcome, and how to use the course', 'video', 360],
+    ['A first quiet twenty minutes', 'audio', 1200],
+    ['Setting up your morning corner', 'written', null],
+    ['The notebook page', 'written', null],
   ],
   [
-    ['The long exhale', 'video'],
-    ['Box breathing for busy heads', 'audio'],
-    ['Breath before the phone', 'audio'],
-    ['Why slow breathing works', 'written'],
+    ['The long exhale', 'video', 540],
+    ['Box breathing for busy heads', 'audio', 420],
+    ['Breath before the phone', 'audio', 240],
+    ['Why slow breathing works', 'written', null],
   ],
   [
-    ['Waking the spine', 'video'],
-    ['Five stretches before coffee', 'video'],
-    ['A body scan in bed', 'audio'],
-    ['Listening to stiffness', 'written'],
+    ['Waking the spine', 'video', 720],
+    ['Five stretches before coffee', 'video', 480],
+    ['A body scan in bed', 'audio', 900],
+    ['Listening to stiffness', 'written', null],
   ],
   [
-    ['Anchoring the habit', 'video'],
-    ['The two-minute version', 'audio'],
-    ['When the week goes wrong', 'written'],
-    ['Your rhythm check-in', 'written'],
+    ['Anchoring the habit', 'video', 600],
+    ['The two-minute version', 'audio', 120],
+    ['When the week goes wrong', 'written', null],
+    ['Your rhythm check-in', 'written', null],
   ],
   [
-    ['Unwinding the day', 'video'],
-    ['Evening breath', 'audio'],
-    ['A sleep-ready body scan', 'audio'],
-    ['Closing the notebook', 'written'],
+    ['Unwinding the day', 'video', 660],
+    ['Evening breath', 'audio', 360],
+    ['A sleep-ready body scan', 'audio', 1080],
+    ['Closing the notebook', 'written', null],
   ],
   [
-    ['Carrying it forward', 'video'],
-    ['Your own twenty minutes', 'audio'],
-    ['Practising without the course', 'written'],
-    ['A letter to week one', 'written'],
+    ['Carrying it forward', 'video', 780],
+    ['Your own twenty minutes', 'audio', 1200],
+    ['Practising without the course', 'written', null],
+    ['A letter to week one', 'written', null],
   ],
 ];
 
@@ -228,6 +237,34 @@ export interface SampleContextOptions {
    * configured `R2_PUBLIC_URL_BASE`.
    */
   mediaBaseUrl?: string | null;
+  /**
+   * Pictures that really exist (the dev gallery's), as full URLs, for the
+   * practices: see `withPracticePictures`. None (the default) leaves every
+   * card its kind's tile.
+   */
+  practicePictures?: readonly string[];
+}
+
+/**
+ * The stages with a picture on two practices in every three, dealt in turn,
+ * and every third left without: one view of "What's inside" then shows a
+ * pictured card beside its kind's tile in every Style (03 X63).
+ */
+function withPracticePictures(
+  stages: JourneyStageView[],
+  pictures: readonly string[]
+): JourneyStageView[] {
+  if (pictures.length === 0) return stages;
+  let seen = 0;
+  let dealt = 0;
+  return stages.map((stage) => ({
+    ...stage,
+    practices: stage.practices.map((practice) =>
+      seen++ % 3 === 2
+        ? practice
+        : { ...practice, thumbnailUrl: pictures[dealt++ % pictures.length] }
+    ),
+  }));
 }
 
 export function sampleContext(
@@ -246,7 +283,10 @@ export function sampleContext(
   };
   return {
     course,
-    stages: sampleStages(),
+    stages: withPracticePictures(
+      sampleStages(),
+      options.practicePictures ?? []
+    ),
     testimonials: SAMPLE_TESTIMONIALS.map((testimonial) => ({
       ...testimonial,
     })),
@@ -301,7 +341,8 @@ function eachEntry(value: unknown, remake: (entry: Entry) => Entry): unknown {
 
 /**
  * The page with a picture in every picture field — each moment of a story,
- * each benefit, the text's image, and a gallery holding every picture — so a
+ * each benefit, the text's image, a Picture section's own (03 X64), and a
+ * gallery holding every picture — so a
  * Style's frames, mosaics and strips can be judged on real photographs. The
  * pictures are dealt in turn down the page, so no section repeats one while
  * another goes unused. Only a caller whose pictures really exist passes any
@@ -343,6 +384,7 @@ export function withSamplePictures(
             },
           };
         case 'text':
+        case 'picture':
           return { ...section, props: { ...props, image: next().image } };
         case 'gallery':
           return {

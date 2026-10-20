@@ -1,0 +1,7 @@
+ALTER TABLE "payouts" DROP CONSTRAINT "check_payouts_reason";--> statement-breakpoint
+ALTER TABLE "payouts" DROP CONSTRAINT "check_payouts_user_required";--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_payouts_org_slice_per_charge" ON "payouts" USING btree ("stripe_charge_id","payout_type") WHERE "payouts"."stripe_charge_id" IS NOT NULL AND "payouts"."payout_type" IN ('organization_fee', 'creator_payout_to_owner');--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_payouts_creator_slice_per_charge" ON "payouts" USING btree ("stripe_charge_id","user_id") WHERE "payouts"."stripe_charge_id" IS NOT NULL AND "payouts"."payout_type" = 'creator_payout';--> statement-breakpoint
+CREATE INDEX "idx_payouts_unresolved" ON "payouts" USING btree ("user_id","organization_id","attempted_at") WHERE "payouts"."status" IN ('pending', 'failed');--> statement-breakpoint
+ALTER TABLE "payouts" ADD CONSTRAINT "check_payouts_reason" CHECK ("payouts"."reason" IS NULL OR "payouts"."reason" IN ('connect_not_ready', 'connect_restricted', 'transfer_failed', 'min_transfer_floor', 'no_owner'));--> statement-breakpoint
+ALTER TABLE "payouts" ADD CONSTRAINT "check_payouts_user_required" CHECK (("payouts"."payout_type" = 'platform_fee') OR ("payouts"."user_id" IS NOT NULL) OR (COALESCE("payouts"."reason" = 'no_owner', false) AND "payouts"."status" IN ('pending', 'cancelled_by_refund') AND "payouts"."payout_type" IN ('organization_fee', 'creator_payout_to_owner')));

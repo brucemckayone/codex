@@ -87,9 +87,15 @@ describe('Canvas', () => {
     const pricing = document.querySelector<HTMLElement>(
       '[data-lp-type="pricing"]'
     );
-    pricing?.querySelector('h2')?.click();
+    // On the section itself, not into its words: the shell inspects it.
+    // (A click into the words cannot be drawn here: jsdom has no
+    // isContentEditable. e2e/page-kit/editor-tablet.spec.ts holds it.)
+    pricing?.click();
     flushSync();
-    expect(props.onSelect).toHaveBeenLastCalledWith(pricing?.dataset.lpSection);
+    expect(props.onSelect).toHaveBeenLastCalledWith(
+      pricing?.dataset.lpSection,
+      'section'
+    );
     const toolbar = document.querySelector('[role="toolbar"]');
     expect(toolbar?.getAttribute('aria-label')).toBe('Pricing actions');
     toolbar

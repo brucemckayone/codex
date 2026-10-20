@@ -366,7 +366,12 @@ app.get(
       );
       if (!canEnter) return null;
 
-      return ctx.services.courseJourney.getCourseDashboard(userId, courseId);
+      return ctx.services.courseJourney.getCourseDashboard(
+        userId,
+        courseId,
+        // Resolves each practice's picture to a CDN URL (Codex-e140e).
+        ctx.env.R2_PUBLIC_URL_BASE
+      );
     },
   })
 );
@@ -440,7 +445,8 @@ app.get(
       const data = await ctx.services.courseJourney.getInCoursePractice(
         userId,
         courseId,
-        contentSlug
+        contentSlug,
+        ctx.env.R2_PUBLIC_URL_BASE
       );
       if (!data) return null;
 
@@ -740,8 +746,10 @@ app.get(
 /**
  * PUT /api/journeys/studio/journeys/:pageId?organizationId=  { ...record }
  * Persist the builder's draft (sections/brand/title/slug/status). Publishing a
- * course page publishes its subject course too. 204 on success.
- * @returns {null}
+ * course page publishes its subject course too. 200 with the page's revision
+ * after the save, for the next save to name; 412 when the body names a
+ * revision the stored page has moved on from (Codex-61zsk.18).
+ * @returns {{ revision: string }}
  */
 app.put(
   '/studio/journeys/:pageId',
@@ -756,7 +764,7 @@ app.put(
       query: journeyOrgQuerySchema,
       body: saveJourneyPageBodySchema,
     },
-    handler: async (ctx): Promise<null> => {
+    handler: async (ctx): Promise<{ revision: string }> => {
       // The URL id and the body id must identify the SAME page — else the URL
       // names a different resource than the one mutated (audit/caching/least-
       // surprise; review L1). Not an IDOR — both are org-scoped by the service —
@@ -766,7 +774,7 @@ app.put(
           'Path id does not match the page id in the body'
         );
       }
-      await ctx.services.courseJourney.saveJourneyPage(
+      const saved = await ctx.services.courseJourney.saveJourneyPage(
         ctx.organizationId,
         ctx.input.body
       );
@@ -778,7 +786,7 @@ app.put(
         ctx.organizationId,
         ctx.obs
       );
-      return null;
+      return saved;
     },
   })
 );
@@ -1427,9 +1435,9 @@ app.post(
  *
  * Clear the course's uploaded signature.
  *
- * As with the hero, this does NOT leave the slot blank: it drops back to A32's
- * next link (`courses.signatureMediaId`'s poster still) and then to whatever the
- * guide composition draws without one. That degradation is why the uploaded image
+ * Unlike the hero, nothing stands in: the upload is the signature's only source
+ * (Codex-61zsk.47), so the guide signs off with the typeset name. The
+ * `courses.signatureMediaId` poster still used to, which is why the uploaded image
  * is its own column rather than a replacement for the media ref.
  *
  * Clears the DB key only; the R2 variants are left in place. The key is
@@ -1496,7 +1504,7 @@ app.delete(
  * a fresh uuid rather than a slot-deterministic key, so two uploads for the
  * same page never collide and neither ever overwrites the other (see
  * `ImageProcessingService.processPageImage`).
- * @returns {{ key: string; url: string }}
+ * @returns {{ key: string; url: string; width: number; height: number }}
  */
 app.post(
   '/studio/journeys/:pageId/images',
@@ -1517,7 +1525,14 @@ app.post(
         allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
       },
     },
-    handler: async (ctx): Promise<{ key: string; url: string }> => {
+    handler: async (
+      ctx
+    ): Promise<{
+      key: string;
+      url: string;
+      width: number;
+      height: number;
+    }> => {
       // Resolve (and org-scope) the page FIRST — a foreign or missing page
       // must 404 before any R2 object exists (Codex-29fs0's ordering rule).
       await ctx.services.courseJourney.assertJourneyPageInOrg(
@@ -1533,7 +1548,14 @@ app.post(
         })
       );
 
-      return { key: processed.key, url: processed.url };
+      // The picture's own size rides back so the page can store it on the
+      // `ImageRef` (`w`/`h`): its shape, and the sign that it has an `xl`.
+      return {
+        key: processed.key,
+        url: processed.url,
+        width: processed.width,
+        height: processed.height,
+      };
     },
   })
 );
@@ -1569,7 +1591,9 @@ app.get(
       );
       return ctx.services.courseJourney.getCourseCurriculumForEditor(
         ctx.organizationId,
-        courseId
+        courseId,
+        // The canvas draws each practice's picture (Codex-e140e, -61zsk.52).
+        ctx.env.R2_PUBLIC_URL_BASE
       );
     },
   })

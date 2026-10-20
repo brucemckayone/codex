@@ -19,7 +19,7 @@ services, and the service registry.
 |---|---|---|
 | REG-001 | critical | Handlers use `ctx.services.*` ONLY — never `new XService(...)` or `createDbClient(env)` in a route file. |
 | REG-002 | high | New service registered in `service-registry.ts` as a lazy getter. |
-| REG-003 | medium | Webhook handlers are the ONLY place a per-request client is allowed (`createPerRequestDbClient` + `waitUntil(cleanup())`). |
+| REG-003 | medium | Stripe webhooks and crons get services from `createWebhookServices(env, executionCtx, { obs, stripe })`, call `release()` in `finally`, and run post-response DB work through its `background()`, never plain `waitUntil` (Codex-2hxff.54). A hand-built service there is a finding. |
 | ENV-001 | high | Single item: handler returns a plain object → `{ data: T }` (201 on POST-create, 200 otherwise). |
 | ENV-002 | high | Lists: handler returns `new PaginatedResult(items, pagination)` → `{ items, pagination }`. Uses `withPagination()`. |
 | ENV-003 | medium | No-content: handler returns `null` → 204, empty body. |

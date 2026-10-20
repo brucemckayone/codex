@@ -4,18 +4,27 @@
   The guide, with their portrait as the emotional centre. Three layouts:
     split    — portrait beside the story; Bold crops it hard to the band's
                full height, Soft arches it, Cinematic dissolves it into the
-               dark; signed off with the signature, name and role
+               dark; signed off with a round portrait (or the guide's
+               initials), name and role, as centred is (03 X57)
     quote    — the guide's own line, large, signed with a small portrait (in
                Cinematic the portrait becomes the room's backdrop instead)
     centered — portrait, story and credentials down the middle
 
   Portrait, clip and signature stream on `sellPreview`; the portrait holds
-  its space while they load, and a clip adds a play button. No portrait: the
-  public page drops it, the canvas asks for one. Every field the creator
-  filled shows in every layout.
+  its space while they load, and a clip adds a play button. Every field the
+  creator filled shows in every layout.
+
+  NO PORTRAIT (Codex-61zsk.37): split and centered hold its place with a
+  medallion, public and canvas alike — the guide's initials in the display
+  face, on the section's filled scheme, in the frame every Style already
+  shapes as the portrait — and the canvas asks for the photo over it. The
+  quote's small sign-off portrait simply goes. With no name to draw either,
+  the public page drops the portrait; where the page is looked at, its plate
+  stays.
 -->
 <script lang="ts">
   import type { SellPreview } from '../../../render/types';
+  import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -28,6 +37,7 @@
   import Credentials from './Credentials.svelte';
   import { INSTRUCTOR_PROMPT, instructorDefinition } from './definition';
   import GuideQuote from './GuideQuote.svelte';
+  import { initials } from '../../model/initials';
   import Signoff from './Signoff.svelte';
 
   const { props, section, context, edit }: BlockProps = $props();
@@ -41,6 +51,9 @@
   const watchLabel = $derived(INSTRUCTOR_COPY.watch(content.name));
   const title = $derived(content.name ?? content.heading ?? context.course.title);
   const hasCta = $derived(Boolean(content.ctaLabel || content.note));
+  // What holds a missing portrait's place in split and centred.
+  const monogram = $derived(layout === 'quote' ? '' : initials(content.name));
+  const filled = $derived(featuredScheme(page.style, section.scheme));
 
   const still = (preview: SellPreview | null) =>
     preview?.guidePortraitUrl ?? preview?.guideClip?.posterUrl ?? null;
@@ -98,9 +111,19 @@
           <ClipFrame still={still(preview)} ratio="var(--_ratio)" {alt} />
         {/if}
       </div>
-    {:else if edit}
+    {:else if monogram}
+      <div class="guide__portrait" data-layout={layout}>
+        <span class="lp-atmos guide__glow" aria-hidden="true"></span>
+        <ClipFrame
+          ratio="var(--_ratio)"
+          mark={monogram}
+          scheme={filled}
+          prompt={edit && play ? INSTRUCTOR_PROMPT : undefined}
+        />
+      </div>
+    {:else if page.still || edit}
       <div class="guide__portrait" data-layout={layout} data-lp-edit-only>
-        <ClipFrame ratio="var(--_ratio)" prompt={play ? INSTRUCTOR_PROMPT : undefined} />
+        <ClipFrame ratio="var(--_ratio)" prompt={edit && play ? INSTRUCTOR_PROMPT : undefined} />
       </div>
     {/if}
   {/await}
@@ -149,7 +172,8 @@
       {#if content.credentials}
         <Credentials items={content.credentials} variant={centred ? 'chips' : 'ledger'} />
       {/if}
-      <Signoff {context} name={content.name} role={content.role} {edit} />
+      <!-- Signed with a round portrait, not the mark (03 X57). -->
+      <Signoff {context} name={content.name} role={content.role} {edit} face />
       {@render actions()}
     </div>
   </div>
@@ -201,6 +225,8 @@
     .guide-split:has(> .guide__portrait) {
       grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
       column-gap: calc(var(--lp-gap) * 1.5);
+      /* The words' share is the heading's room (louder's fit, 03 X62). */
+      --lp-heading-column: calc((var(--lp-column) - var(--lp-gap) * 1.5) * 7 / 12);
     }
 
     /* The face stays in view while a long story scrolls past it. */
@@ -249,6 +275,8 @@
       align-items: stretch;
       margin-block: calc(-1 * var(--lp-pad));
       padding-inline-end: var(--_edge);
+      /* Across the band, less its end edge. */
+      --lp-heading-column: calc((100cqi - var(--_edge) - var(--lp-gap) * 1.5) * 7 / 12);
     }
 
     :global(.lp:is([data-lp-style='bold'], [data-lp-style='cinematic']))
@@ -371,6 +399,8 @@
       grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
       grid-template-areas: 'head portrait' 'line portrait' 'by portrait' 'more portrait';
       column-gap: 0;
+      /* The heading's room is its share (louder's fit, 03 X62). */
+      --lp-heading-column: calc(var(--lp-column) * 7 / 12);
     }
 
     :global(.lp[data-lp-style='cinematic']) .guide-quote > .guide__portrait {

@@ -14,17 +14,18 @@
    neutral (studio-alpha's is grey), and a grey pebble on a warm tint reads
    as switched off. A creator can still give any band the second colour.
 
-   TYPE. Sentence case everywhere, never tight: easy leading (1.08 display,
-   1.12 heading, 1.65 body), tracking near zero, a moderate display size.
-   Heads gather to the centre where a section gathers (grids, the course,
-   the numbers, the offer); reading columns stay left. Emphasis is size and
-   leading only — the brand's own heavy face is never pushed further.
+   TYPE. Sentence case (labels in the org's, `kit.css`), never tight: easy
+   leading (1.08 display, 1.12 heading, 1.65 body), tracking near zero, a
+   moderate display size. Heads gather to the centre where a section gathers
+   (grids, the course, the numbers, the offer); reading columns stay left.
+   Emphasis is size and leading only — the brand's own heavy face is never
+   pushed further.
 
    LAYOUT. Every corner rounded within the bend (03 §4.2): cards and
-   pictures twice the brand radius, from a gentle floor to 2rem; buttons,
+   pictures twice the org's corners, from a gentle floor to 2rem; buttons,
    labels and chips pills whenever the brand is rounded at all. Cards are
    open pebbles — a soft line, no fill; the one filled card of a section
-   rests a hair above the page on a shadow of its own colour. Even a story's
+   rests a hair above the page on the org's card shadow. Even a story's
    full-width scenes are rounded, inset pebbles, never slabs.
 
    SURFACES. Three soft shapes behind every band (`--lp-shapes: blobs`) and
@@ -40,16 +41,15 @@
    Fonts: suggests Nunito over Outfit; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.lp[data-lp-style='soft'] {
-  /* ── tint ─────────────────────────────────────────────────────────────── */
-  --lp-tint-soft: 16%;
-  --lp-tint-panel: 22%;
-
+/* Soft's Type, wherever it is drawn: its own page, or another Style's that
+   borrows it (03 X73). Keyed on the page's Type, never on its Style, and it
+   declares no token the Style block below does. */
+.lp[data-lp-type-facet='soft'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(2.5rem, 1rem + 4.8cqi, 5rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(1.9rem, 1rem + 2.7cqi, 3.2rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.5rem, 1rem + 4.8cqi, 5rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(1.9rem, 1rem + 2.7cqi, 3.2rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.2rem, 1rem + 0.7cqi, 1.5rem) * var(--lp-scale));
-  --lp-size-cta: calc(clamp(2.2rem, 1rem + 3.9cqi, 4.25rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.2rem, 1rem + 3.9cqi, 4.25rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 1.08;
   --lp-leading-heading: 1.12;
@@ -65,12 +65,20 @@
   --lp-weight-heading: var(--heading-weight, var(--font-semibold));
   --lp-weight-label: var(--font-medium);
 
-  /* ── shape: twice the brand radius, from a gentle floor to 2rem ─────────
+  --lp-measure-lead: 40;
+}
+
+.lp[data-lp-style='soft'] {
+  /* ── tint ─────────────────────────────────────────────────────────────── */
+  --lp-tint-soft: 16%;
+  --lp-tint-panel: 22%;
+
+  /* ── shape: twice the org's corners, from a gentle floor to 2rem ────────
      The floor is the design system's md step AS A LENGTH: inside an org
      `--radius-md` is the brand's own radius, which is 0 for a square brand —
      and Soft is the one Style that rounds a square brand up (03 §4.2). */
-  --lp-radius-card: clamp(var(--space-2), calc(var(--lp-brand-radius) * 2), var(--space-8));
-  --lp-radius-media: clamp(var(--space-2), calc(var(--lp-brand-radius) * 2), var(--space-8));
+  --lp-radius-card: clamp(var(--space-2), calc(var(--radius-card) * 2), var(--space-8));
+  --lp-radius-media: clamp(var(--space-2), calc(var(--radius-lg) * 2), var(--space-8));
   --lp-radius-button: var(--lp-radius-pill-if-rounded);
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
@@ -82,7 +90,6 @@
 
   /* ── rhythm: an intimate column, air above and below ─────────────────── */
   --lp-container: 68rem;
-  --lp-measure-lead: 40ch;
   --lp-pad-regular: clamp(var(--space-16), var(--space-8) + 5.5cqi, calc(var(--space-24) * 1.1));
 
   /* ── surfaces ─────────────────────────────────────────────────────────── */
@@ -117,15 +124,67 @@
    any value. An unset length counts as the longest the field takes. */
 @supports (line-height: pow(2, 0.5)) {
   @container (min-width: 56rem) {
-    :is(.lp, #lp-style)[data-lp-style='soft'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='soft'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(110 / var(--lp-heading-chars, 120), 1.34));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='soft'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='soft'] .lp-section[data-lp-type='hero']
       .hero-poster:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(39 / var(--lp-heading-chars, 120), 0.2));
     }
+  }
+}
+
+/* ── on another Style's page (03 X74) ─────────────────────────────────────── */
+/* Soft's hero was fitted to Soft's own column and spacing (above). On a page
+   that borrows the Type the line is the page's, so each pair and layout that
+   needs it draws the hero smaller by a factor: the largest at which it ends
+   no further past a 1440 × 900 fold, and cuts no word, that the page's own
+   Type does, at every length from 20 to 120 in four word families and two
+   faces, with the hero's eyebrow and without it, with 1% to spare
+   (`type-fit.spec.ts`). A pair that holds at full size has none, and a page's
+   own Type never has one. The page's Style sits inside `:where()`, so each
+   weighs what the Type's own rules weigh. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-type-facet='soft']:where([data-lp-style='bold'])
+    .lp-section[data-lp-type='hero'] .hero-cover__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.89;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='soft']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.98;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='soft']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-cover__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.88;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='soft']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-cover__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.96;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='soft']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-cover__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.94;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='soft']:where([data-lp-style='quiet'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.93;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='soft']:where([data-lp-style='quiet'])
+    .lp-section[data-lp-type='hero'] .hero-cover__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.88;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='soft']:where([data-lp-style='quiet'])
+    .lp-section[data-lp-type='hero'] .hero-poster:has(> .hero__headline) {
+    --lp-type-fit: 0.92;
   }
 }
 
@@ -172,15 +231,10 @@
 
 /* ── the pebbles: the one filled card rests a hair above the page ────────── */
 /* A scheme nested in a band is that band's one filled card — the featured
-   offer, the lead voice, the "after", a panel. Its shadow is its own ground
-   deepened, so it reads as the card's colour on any band, never a grey
-   smudge; on a dark page it simply disappears. */
+   offer, the lead voice, the "after", a panel. It rests on the org's own
+   card shadow, the one the org's cards rest on (`--lp-shadow-card`). */
 :is(.lp, #lp-style)[data-lp-style='soft'] .lp-section[data-lp-type] [data-lp-scheme] {
-  box-shadow:
-    0 var(--space-5) var(--space-12) calc(-1 * var(--space-6))
-      oklch(from var(--lp-bg) calc(l * 0.5) c h / 0.5),
-    0 var(--space-1) var(--space-3) calc(-1 * var(--space-1))
-      oklch(from var(--lp-bg) calc(l * 0.6) c h / 0.22);
+  box-shadow: var(--lp-shadow-card);
 }
 
 /* ── story chapters: scenes as pebbles, not slabs ────────────────────────── */
@@ -224,7 +278,7 @@
 
 @media screen and (prefers-reduced-motion: no-preference) {
   :root[data-theme]
-    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='soft']
+    .lp:not([data-lp-still], [data-lp-motion]):is(.lp, #lp-style)[data-lp-style='soft']
     .lp-section[data-lp-type]:not([data-lp-scheme='atmosphere'], [data-lp-on-media])
     > .lp-surface::after {
     animation: lp-soft-drift calc(var(--duration-slowest) * 40) var(--ease-in-out) infinite
@@ -232,10 +286,30 @@
   }
 
   :root[data-theme]
-    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='soft']
+    .lp:not([data-lp-still], [data-lp-motion]):is(.lp, #lp-style)[data-lp-style='soft']
     .lp-section[data-lp-type]:nth-child(even):not([data-lp-scheme='atmosphere'], [data-lp-on-media])
     > .lp-surface::after {
     animation-duration: calc(var(--duration-slowest) * 52);
     animation-direction: alternate-reverse;
   }
+}
+
+/* ── the simple sections (03 X64) ────────────────────────────────────────── */
+/* A Button reads down the middle, as Soft's asks do. */
+:is(.lp, #lp-style)[data-lp-style='soft'] .lp-section[data-lp-type='button'] {
+  --lp-actions-align: center;
+}
+
+/* A marked Break: three small pebbles in the mark ink, a pebble's width
+   apart (one tile of two widths each, the pebble at its start). */
+:is(.lp, #lp-style)[data-lp-style='soft'] .lp-break__mark {
+  --_soft-pebble: var(--space-3);
+  inline-size: calc(var(--_soft-pebble) * 5);
+  block-size: calc(var(--_soft-pebble) * 0.8);
+  background: radial-gradient(
+      ellipse calc(var(--_soft-pebble) / 2) calc(var(--_soft-pebble) * 0.4) at calc(var(--_soft-pebble) / 2) 50%,
+      var(--lp-mark-ink) 92%,
+      transparent
+    )
+    0 0 / calc(var(--_soft-pebble) * 2) 100% repeat-x;
 }

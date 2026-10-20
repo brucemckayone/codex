@@ -31,10 +31,10 @@ import type { CreateOrganizationInput } from '@codex/validation';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   ConflictError,
-  LastOwnerError,
   MemberNotFoundError,
   NotFoundError,
   OrganizationNotFoundError,
+  OwnershipTransferRequiredError,
 } from '../../errors';
 import { OrganizationService } from '../organization-service';
 
@@ -138,6 +138,28 @@ describe('OrganizationService', () => {
 
       expect(membership.role).toBe('owner');
       expect(membership.joinedAt).not.toBeNull();
+      expect(membership.pendingOwnershipOffer).toBeNull();
+    });
+
+    // Codex-2hxff.2: the owner membership and the ownership period that the
+    // money follows are written together, starting when the org does.
+    it("opens the creator's ownership period at the org's creation", async () => {
+      const org = await service.create(
+        { name: 'Period Test Org', slug: createUniqueSlug('period-test') },
+        defaultTestUserId
+      );
+
+      const periods = await db.query.organizationOwnershipPeriods.findMany({
+        where: (p, { eq }) => eq(p.organizationId, org.id),
+      });
+
+      expect(periods).toHaveLength(1);
+      expect(periods[0]).toMatchObject({
+        userId: defaultTestUserId,
+        source: 'created',
+        endedAt: null,
+      });
+      expect(periods[0]?.startedAt.getTime()).toBe(org.createdAt.getTime());
     });
 
     it('should throw ConflictError for duplicate slug', async () => {
@@ -924,14 +946,15 @@ describe('OrganizationService', () => {
         expect(result.status).toBe('active');
       });
 
-      it('should promote member to owner', async () => {
-        const result = await service.updateMemberRole(
-          memberMgmtTestOrgId,
-          memberMgmtTestUserIds[1],
-          'owner'
-        );
-
-        expect(result.role).toBe('owner');
+      // Codex-2hxff.2: one owner; ownership moves only by transfer.
+      it('refuses to make anyone owner', async () => {
+        await expect(
+          service.updateMemberRole(
+            memberMgmtTestOrgId,
+            memberMgmtTestUserIds[1],
+            'owner'
+          )
+        ).rejects.toThrow(OwnershipTransferRequiredError);
       });
 
       it('should throw MemberNotFoundError for non-existent member', async () => {
@@ -944,35 +967,36 @@ describe('OrganizationService', () => {
         ).rejects.toThrow(MemberNotFoundError);
       });
 
-      it('should throw LastOwnerError when demoting last owner', async () => {
-        // Try to demote the only owner
+      it("refuses to change the owner's role", async () => {
         await expect(
           service.updateMemberRole(
             memberMgmtTestOrgId,
             memberMgmtInviterUserId,
             'admin'
           )
-        ).rejects.toThrow(LastOwnerError);
+        ).rejects.toThrow(OwnershipTransferRequiredError);
       });
 
-      it('should allow demotion when multiple owners exist', async () => {
-        // Promote another user to owner first
+      // uq_org_memberships_one_active_owner: a second ACTIVE owner is
+      // rejected by the database itself; a removed owner's tombstone is not.
+      it('the database rejects a second active owner', async () => {
+        await expect(
+          db.insert(schema.organizationMemberships).values({
+            organizationId: memberMgmtTestOrgId,
+            userId: memberMgmtTestUserIds[2],
+            role: 'owner',
+            status: 'active',
+            invitedBy: memberMgmtInviterUserId,
+          })
+        ).rejects.toThrow();
+
         await db.insert(schema.organizationMemberships).values({
           organizationId: memberMgmtTestOrgId,
           userId: memberMgmtTestUserIds[2],
           role: 'owner',
-          status: 'active',
+          status: 'inactive',
           invitedBy: memberMgmtInviterUserId,
         });
-
-        // Now we can demote the first owner
-        const result = await service.updateMemberRole(
-          memberMgmtTestOrgId,
-          memberMgmtInviterUserId,
-          'admin'
-        );
-
-        expect(result.role).toBe('admin');
       });
     });
 
@@ -1021,37 +1045,11 @@ describe('OrganizationService', () => {
         ).rejects.toThrow(MemberNotFoundError);
       });
 
-      it('should throw LastOwnerError when removing last owner', async () => {
+      // The owner transfers ownership before they can leave (Codex-2hxff.2).
+      it('refuses to remove the owner', async () => {
         await expect(
           service.removeMember(memberMgmtTestOrgId, memberMgmtInviterUserId)
-        ).rejects.toThrow(LastOwnerError);
-      });
-
-      it('should allow removing owner when multiple owners exist', async () => {
-        // Add another owner using user [3] which isn't already a member
-        await db.insert(schema.organizationMemberships).values({
-          organizationId: memberMgmtTestOrgId,
-          userId: memberMgmtTestUserIds[3],
-          role: 'owner',
-          status: 'active',
-          invitedBy: memberMgmtInviterUserId,
-        });
-
-        // Now we can remove the first owner
-        await service.removeMember(
-          memberMgmtTestOrgId,
-          memberMgmtInviterUserId
-        );
-
-        const membership = await db.query.organizationMemberships.findFirst({
-          where: (memberships, { and, eq }) =>
-            and(
-              eq(memberships.organizationId, memberMgmtTestOrgId),
-              eq(memberships.userId, memberMgmtInviterUserId)
-            ),
-        });
-
-        expect(membership?.status).toBe('inactive');
+        ).rejects.toThrow(OwnershipTransferRequiredError);
       });
 
       it('should allow removing non-owner members', async () => {

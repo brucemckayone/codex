@@ -4,7 +4,7 @@ import { loginAsSeedViewer, SEED_VIEWER_2 } from './helpers/seed-auth';
 /**
  * Cross-Device Subscription Visibility-Change E2E Tests
  *
- * Covers the PR 1 cross-device row in docs/subscription-cache-audit/testing-matrix.md:
+ * Covers the cross-device rule in docs/payments/access.md ("Keeping caches in step"):
  *   "cancel A, state visible on B after visibility change"
  *
  * Flow:

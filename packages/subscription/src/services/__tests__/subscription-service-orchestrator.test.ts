@@ -117,7 +117,7 @@ function makeDb(overrides: Record<string, unknown> = {}): DbSpy {
         catch: (j: (e: unknown) => void) => Promise<unknown>;
       } => ({
         limit: vi.fn(() => Promise.resolve(result)),
-        // resolvePrimaryConnect's owner fallback (Codex-rjwdm) chains
+        // resolveOrganisationPayee's period lookups (Codex-2hxff.2) chain
         // `.where().orderBy().limit()`; return the same shape so the deterministic
         // ordering passes through the mock (still resolves to the same array).
         orderBy: vi.fn(() => makeWhereReturn()),
@@ -153,7 +153,15 @@ function makeDb(overrides: Record<string, unknown> = {}): DbSpy {
       calls.push('insert');
       return {
         values: vi.fn(() => ({
-          onConflictDoNothing: vi.fn(() => Promise.resolve()),
+          // Awaitable directly, or with `.returning()` — the payouts ledger
+          // reserves a row with ON CONFLICT DO NOTHING … RETURNING
+          // (Codex-2hxff.11). No row back = "already recorded", so no
+          // transfer is attempted from this mock.
+          onConflictDoNothing: vi.fn(() =>
+            Object.assign(Promise.resolve(), {
+              returning: vi.fn(() => Promise.resolve([])),
+            })
+          ),
           onConflictDoUpdate: vi.fn(() => Promise.resolve()),
           // biome-ignore lint/suspicious/noThenProperty: Drizzle's .values() is awaitable directly — mock mirrors that thenable surface
           then: (resolve: (v: unknown) => void) => resolve(undefined),

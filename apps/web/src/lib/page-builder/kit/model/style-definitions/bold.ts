@@ -16,6 +16,7 @@ export const BOLD: StyleDefinition = {
     curriculum: 'timeline',
     preview: 'feature',
     gallery: 'mosaic',
+    inside: 'carousel',
     instructor: 'split',
     testimonials: 'featured',
     faq: 'columns',
@@ -23,6 +24,11 @@ export const BOLD: StyleDefinition = {
     cta: 'band',
     stats: 'row',
     text: 'statement',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'start',
+    break: 'space',
+    button: 'stack',
   },
   // Slabs, not stripes. The brand colour where the page makes its three
   // loudest claims — the promise, the proof (the numbers), the ask — and its
@@ -43,12 +49,19 @@ export const BOLD: StyleDefinition = {
     curriculum: 'contrast',
     preview: 'base',
     gallery: 'base',
+    inside: 'base',
     instructor: 'base',
     testimonials: 'base',
     stats: 'brand',
     pricing: 'base',
     faq: 'base',
     cta: 'brand',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   // The one filled card is a slab of the other pole: the inverse on the
   // ground, the ground on the inverse (a brand card there vanishes for a very
@@ -66,6 +79,7 @@ export const BOLD: StyleDefinition = {
   // The numbers are half the signature, so a new page counts something.
   starter: [
     'hero',
+    'inside',
     'problem',
     'transformation',
     'benefits',
@@ -77,4 +91,7 @@ export const BOLD: StyleDefinition = {
     'faq',
     'cta',
   ],
+  // Hazy, as Studio: the org's moving background through a third of the
+  // inner pages' blur and a thinner veil, so it is seen moving (03 X53, X59).
+  atmosphere: 'hazy',
 };

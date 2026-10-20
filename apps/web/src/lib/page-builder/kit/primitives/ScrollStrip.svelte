@@ -17,11 +17,23 @@
   `--lp-strip-item` (a grid column size) and `--lp-strip-gap`. A block whose
   Styles already style its strip by the block's own names passes them as
   `parts`: they are added beside the strip's own, which still do the work.
+
+  A long row can say where the visitor is in it (`position`): the items wholly
+  in view, "4–6 of 18", at the start of the buttons' row. It is the eye's
+  shortcut only, hidden from a screen reader, which already hears the list's
+  length and walks it item by item.
+
+  A row with a heading of its own (`head`) carries its buttons in that
+  heading's line, above the row, so a row that fits pays no empty line under
+  it. The heading stays when there is nothing to scroll and without
+  JavaScript; only the buttons step aside. Without `head` the strip is drawn
+  exactly as before.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { ChevronLeftIcon, ChevronRightIcon } from '$lib/components/ui/Icon';
+  import { NOTHING_MOVES } from '../motion/attributes';
 
   /** Extra class names for the strip's own parts. */
   interface Parts {
@@ -42,6 +54,15 @@
     count: number;
     /** An ordered list for a real sequence, a plain one otherwise. */
     ordered?: boolean;
+    /** Words for the items in view, counted from 1: "4–6 of 18". */
+    position?: (first: number, last: number, count: number) => string;
+    /**
+     * The row's own heading, drawn in the buttons' line above the row. Its
+     * room is that line less the buttons, so a row with a heading draws no
+     * `position`: the readout is as wide as its words, which no rule can take
+     * from the heading's room.
+     */
+    head?: Snippet;
     class?: string;
     parts?: Parts;
     children: Snippet;
@@ -54,6 +75,8 @@
     nextLabel,
     count,
     ordered = false,
+    position,
+    head,
     class: className,
     parts = {},
     children,
@@ -62,6 +85,18 @@
   let atStart = $state(true);
   let atEnd = $state(true);
   let track = $state<HTMLElement>();
+  /** The first and last item wholly in view, from 0; unknown until measured. */
+  let inView = $state<readonly [number, number] | null>(null);
+  // A boolean, so a consumer passing a fresh function never re-measures the row.
+  const reads = $derived(Boolean(position));
+  const readout = $derived(
+    position && inView ? position(inView[0] + 1, inView[1] + 1, count) : ''
+  );
+
+  /** The row's items, in order. */
+  function itemsOf(row: HTMLElement): HTMLElement[] {
+    return [...row.querySelectorAll<HTMLElement>(':scope > .lp-strip__items > li')];
+  }
 
   /** Keeps the buttons' resting state true to the row's scroll position. */
   function measure(items: number): Attachment<HTMLElement> {
@@ -71,6 +106,7 @@
       const update = () => {
         atStart = node.scrollLeft <= 1;
         atEnd = node.scrollLeft + node.clientWidth >= node.scrollWidth - 1;
+        if (reads) inView = seen(node);
       };
       update();
       node.addEventListener('scroll', update, { passive: true });
@@ -92,10 +128,32 @@
    * item is exactly the scroll position that snaps it.
    */
   function stops(row: HTMLElement): number[] {
-    const items = [...row.querySelectorAll<HTMLElement>(':scope > .lp-strip__items > li')];
+    const items = itemsOf(row);
     if (items.length === 0) return [];
     const origin = items[0].getBoundingClientRect().left;
     return items.map((item) => item.getBoundingClientRect().left - origin);
+  }
+
+  /**
+   * The first and last item wholly inside the row's window. An item wider
+   * than the window is never wholly in it: then the one nearest the snap line.
+   */
+  function seen(row: HTMLElement): readonly [number, number] | null {
+    const items = itemsOf(row);
+    if (items.length === 0) return null;
+    const view = row.getBoundingClientRect();
+    const whole = items.map((item) => {
+      const box = item.getBoundingClientRect();
+      return box.left >= view.left - 1 && box.left + box.width <= view.left + view.width + 1;
+    });
+    const first = whole.indexOf(true);
+    if (first >= 0) return [first, whole.lastIndexOf(true)];
+    const at = row.scrollLeft;
+    const nearest = stops(row).reduce(
+      (best, stop, index, all) => (Math.abs(stop - at) < Math.abs(all[best] - at) ? index : best),
+      0
+    );
+    return [nearest, nearest];
   }
 
   /** One item along, to the next item's own start. */
@@ -111,12 +169,47 @@
       if (direction === -1 && stop < at - 1) target = stop;
     }
     if (target === undefined) return;
-    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const still =
+      matchMedia('(prefers-reduced-motion: reduce)').matches ||
+      track.closest(NOTHING_MOVES) !== null;
     track.scrollTo({ left: target, behavior: still ? 'auto' : 'smooth' });
   }
 </script>
 
+{#snippet buttons()}
+  {#if position && !head}<p class="lp-strip__position" aria-hidden="true">{readout}</p>{/if}
+  <button
+    type="button"
+    class="lp-strip__move {parts.move ?? ''}"
+    aria-label={previousLabel}
+    aria-controls={id}
+    aria-disabled={atStart}
+    onclick={() => move(-1)}
+  >
+    <ChevronLeftIcon size="1.25em" />
+  </button>
+  <button
+    type="button"
+    class="lp-strip__move {parts.move ?? ''}"
+    aria-label={nextLabel}
+    aria-controls={id}
+    aria-disabled={atEnd}
+    onclick={() => move(1)}
+  >
+    <ChevronRightIcon size="1.25em" />
+  </button>
+{/snippet}
+
 <div class="lp-strip {className ?? ''}">
+  {#if head}
+    <div
+      class="lp-strip__nav lp-strip__nav--head {parts.nav ?? ''}"
+      data-idle={atStart && atEnd ? '' : undefined}
+    >
+      <div class="lp-strip__head">{@render head()}</div>
+      {@render buttons()}
+    </div>
+  {/if}
   <!-- A scrolling region must take focus, or a keyboard cannot scroll it. -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
@@ -131,28 +224,11 @@
       {@render children()}
     </svelte:element>
   </div>
-  <div class="lp-strip__nav {parts.nav ?? ''}" data-idle={atStart && atEnd ? '' : undefined}>
-    <button
-      type="button"
-      class="lp-strip__move {parts.move ?? ''}"
-      aria-label={previousLabel}
-      aria-controls={id}
-      aria-disabled={atStart}
-      onclick={() => move(-1)}
-    >
-      <ChevronLeftIcon size="1.25em" />
-    </button>
-    <button
-      type="button"
-      class="lp-strip__move {parts.move ?? ''}"
-      aria-label={nextLabel}
-      aria-controls={id}
-      aria-disabled={atEnd}
-      onclick={() => move(1)}
-    >
-      <ChevronRightIcon size="1.25em" />
-    </button>
-  </div>
+  {#if !head}
+    <div class="lp-strip__nav {parts.nav ?? ''}" data-idle={atStart && atEnd ? '' : undefined}>
+      {@render buttons()}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -202,9 +278,47 @@
     padding-inline: var(--_inset);
   }
 
-  /* Nothing to scroll: the buttons step aside but keep their room. */
-  .lp-strip__nav[data-idle] {
+  /* The position leads the row; the buttons keep the end. global.css caps
+     every `p` at 65ch and spaces it. */
+  .lp-strip__position {
+    align-self: center;
+    margin-block: 0;
+    margin-inline: 0 auto;
+    color: var(--lp-ink-soft);
+    font-size: var(--lp-size-small);
+    font-variant-numeric: lining-nums tabular-nums;
+    line-height: var(--lp-leading-body);
+  }
+
+  /* Nothing to scroll: the buttons step aside but keep their room; a row's
+     own heading stays. */
+  .lp-strip__nav[data-idle] > :not(.lp-strip__head) {
     visibility: hidden;
+  }
+
+  /* A row's own heading leads the buttons' line, above the row; the buttons
+     keep its end, level with its last line. */
+  .lp-strip__nav--head {
+    align-items: end;
+  }
+
+  .lp-strip__nav--head > :not(.lp-strip__head) {
+    flex: none;
+  }
+
+  /* Its room is the line's (the column: the line is padded in by the same
+     inset) less the two buttons, the gaps beside them and its own margin,
+     so a title in it is fitted beside the buttons (03 X71). With no script
+     the buttons are gone and the room is understated: drawn a little small,
+     never cut. */
+  .lp-strip__head {
+    --lp-heading-column: calc(
+      var(--lp-column) - 2 * var(--tap-target-min) - 2 * var(--space-2) -
+        (var(--space-4) - var(--space-2))
+    );
+    flex: 1 1 0;
+    min-inline-size: 0;
+    margin-inline-end: calc(var(--space-4) - var(--space-2));
   }
 
   .lp-strip__move {
@@ -231,7 +345,8 @@
   }
 
   @media (scripting: none) {
-    .lp-strip__nav {
+    .lp-strip__nav:not(.lp-strip__nav--head),
+    .lp-strip__nav--head > :not(.lp-strip__head) {
       display: none;
     }
   }

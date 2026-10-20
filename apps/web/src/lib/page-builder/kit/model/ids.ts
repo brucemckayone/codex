@@ -44,6 +44,68 @@ export type SectionSpacingId = (typeof SECTION_SPACING_IDS)[number];
 export const DEFAULT_SECTION_SPACING: SectionSpacingId = 'regular';
 
 /**
+ * A page's dials (03 X61): each moves one thing the Style sets, by one
+ * curated step either side of the Style's own. A dial left unset IS the
+ * Style's, so its reset deletes the key, and a page with no dials renders
+ * exactly as its Style.
+ *
+ *   colour   muted: the Style's coloured bands take the org's soft tint
+ *            vivid: the Style's soft tints take the brand colour
+ *   corners  brand: the org's own corners, unbent by the Style
+ *            rounder: Soft's corners, on any Style
+ *   spacing  the rhythm a section takes when it picks none of its own
+ *   drama    calmer: every headline a step smaller
+ *            louder: section headings a step larger (the opening and the
+ *            closing ask are drawn as large as they fit already)
+ *   motion   still: nothing moves; gentle: entrances play, nothing follows
+ *            the scroll (the Style's own is all of it)
+ */
+export const PAGE_DIALS = {
+  colour: ['muted', 'vivid'],
+  corners: ['brand', 'rounder'],
+  spacing: ['compact', 'spacious'],
+  drama: ['calmer', 'louder'],
+  motion: ['still', 'gentle'],
+} as const satisfies Record<string, readonly [string, string]>;
+export type PageDialId = keyof typeof PAGE_DIALS;
+export type PageDialStep<D extends PageDialId> = (typeof PAGE_DIALS)[D][number];
+export type PageDials = { [D in PageDialId]?: PageDialStep<D> };
+const PAGE_DIAL_IDS = Object.keys(PAGE_DIALS) as PageDialId[];
+
+/**
+ * The Type facet (03 X73): a Style's headline type on another Style's page,
+ * its sizes, weights, case, tracking and leading, and its fitted hero, in
+ * the page's own faces. The page keeps its own surfaces, marks, motion,
+ * spacing and order. The page's own Type is the absent key, so its reset
+ * deletes it.
+ */
+export const TYPE_FACETS = ['bold', 'poster', 'soft', 'quiet'] as const;
+export type TypeFacet = (typeof TYPE_FACETS)[number];
+export type PageFacets = { type?: TypeFacet };
+
+/**
+ * The Types each Style may take: the allow-list (03 X73), as measured (X74).
+ * A pair is listed only once it is proven (its hero fit, its entrance's clip,
+ * the louder sweep), so a pair not listed is never offered and never drawn.
+ * Off it, as their heroes would need a factor under 0.85 (with the hero's
+ * eyebrow or without it): Poster's Type on Clean's page and on Soft's, Bold's
+ * on Soft's, and Bold's and Poster's on Quiet's. Path and Studio take none,
+ * their marks reading their own Type's numbers.
+ */
+export const TYPE_FACET_BASES: Readonly<
+  Record<PageStyleId, readonly TypeFacet[]>
+> = {
+  bold: ['poster', 'soft', 'quiet'],
+  clean: ['bold', 'soft', 'quiet'],
+  soft: ['quiet'],
+  cinematic: ['bold', 'poster', 'soft', 'quiet'],
+  path: [],
+  poster: ['bold', 'soft', 'quiet'],
+  studio: [],
+  quiet: ['soft'],
+};
+
+/**
  * Every section type and its hand-designed layouts. The FIRST layout of each
  * type is its fallback when neither the section nor the Style names one.
  */
@@ -53,7 +115,7 @@ export const SECTION_LAYOUTS = {
   problem: ['statement', 'list', 'split'],
   transformation: ['columns', 'steps', 'statement', 'toggle'],
   benefits: ['grid', 'checklist', 'split', 'bento'],
-  curriculum: ['timeline', 'accordion', 'cards', 'map'],
+  curriculum: ['timeline', 'accordion', 'cards', 'map', 'layered'],
   preview: ['feature', 'split'],
   instructor: ['split', 'quote', 'centered'],
   testimonials: ['grid', 'featured', 'quote', 'marquee', 'wall'],
@@ -64,9 +126,31 @@ export const SECTION_LAYOUTS = {
   text: ['statement', 'columns', 'centered'],
   story: ['scroll', 'chapters', 'strip'],
   gallery: ['mosaic', 'strip', 'grid'],
+  // "What's inside": every practice as a card to swipe through (Codex-61zsk.52).
+  inside: ['carousel'],
+  // The simple one-job sections (Codex-61zsk.53, 03 X64): each joins the
+  // neighbour it serves rather than starting a band of its own.
+  picture: ['contained', 'full', 'beside'],
+  heading: ['start', 'center'],
+  break: ['space'],
+  button: ['stack', 'row'],
 } as const satisfies Record<string, readonly [string, ...string[]]>;
 
 export type SectionTypeId = keyof typeof SECTION_LAYOUTS;
+
+/**
+ * Where a Button section goes (03 X64): the closing ask's own path (`join`,
+ * the default, priced), a section on the same page, the page's preview film,
+ * or an https link. A proven set rather than a free URL, so the price never
+ * sits beside a link that leaves the page.
+ */
+export const BUTTON_ACTION_IDS = [
+  'join',
+  'section',
+  'preview',
+  'link',
+] as const;
+export type ButtonActionId = (typeof BUTTON_ACTION_IDS)[number];
 export type LayoutId<T extends SectionTypeId = SectionTypeId> =
   (typeof SECTION_LAYOUTS)[T][number];
 
@@ -105,4 +189,50 @@ export function isSectionSpacingId(value: unknown): value is SectionSpacingId {
     typeof value === 'string' &&
     (SECTION_SPACING_IDS as readonly string[]).includes(value)
   );
+}
+
+/** A step the dial has; the Style's own is no step, the absent key. */
+export function isPageDialStep<D extends PageDialId>(
+  dial: D,
+  value: unknown
+): value is PageDialStep<D> {
+  return (
+    typeof value === 'string' &&
+    (PAGE_DIALS[dial] as readonly string[]).includes(value)
+  );
+}
+
+/** A stored dials bag, keeping only known dials at known steps; none → undefined. */
+export function readPageDials(value: unknown): PageDials | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const dials: Record<string, string> = {};
+  for (const dial of PAGE_DIAL_IDS) {
+    const step = (value as Record<string, unknown>)[dial];
+    if (isPageDialStep(dial, step)) dials[dial] = step;
+  }
+  return Object.keys(dials).length > 0 ? (dials as PageDials) : undefined;
+}
+
+export function isTypeFacet(value: unknown): value is TypeFacet {
+  return (
+    typeof value === 'string' &&
+    (TYPE_FACETS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * A stored facets bag, keeping a Type only where `style` may take it; none →
+ * undefined. A Style change that leaves the Type off the new Style's list
+ * drops it here, on read, and the editor saves what `upgradePage` returns.
+ */
+export function readPageFacets(
+  value: unknown,
+  style: PageStyleId,
+  bases: Readonly<Record<PageStyleId, readonly TypeFacet[]>> = TYPE_FACET_BASES
+): PageFacets | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const type = (value as Record<string, unknown>).type;
+  return isTypeFacet(type) && bases[style].includes(type)
+    ? { type }
+    : undefined;
 }

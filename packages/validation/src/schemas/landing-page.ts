@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { urlSchema } from '../primitives';
 
 /**
  * The page kit's v2 vocabulary — the zod TWIN of
@@ -48,6 +49,24 @@ export type ColourSchemeId = (typeof COLOUR_SCHEME_IDS)[number];
 export const SECTION_SPACING_IDS = ['compact', 'regular', 'spacious'] as const;
 export type SectionSpacingId = (typeof SECTION_SPACING_IDS)[number];
 
+/** A page's dials and the two steps of each (03 X61); unset is the Style's. */
+export const PAGE_DIALS = {
+  colour: ['muted', 'vivid'],
+  corners: ['brand', 'rounder'],
+  spacing: ['compact', 'spacious'],
+  drama: ['calmer', 'louder'],
+  motion: ['still', 'gentle'],
+} as const satisfies Record<string, readonly [string, string]>;
+
+/**
+ * The Types a page may borrow from another Style (03 X73); unset is the
+ * Style's own. Which Style may take which Type is `ids.ts`'s
+ * `TYPE_FACET_BASES`, checked where a page is READ (`readPageFacets`), not
+ * here: a pair taken off that list later must stop drawing on pages saved
+ * before, and the read is the one place that sees both.
+ */
+export const TYPE_FACETS = ['bold', 'poster', 'soft', 'quiet'] as const;
+
 /**
  * Every section type and its hand-designed layouts. The FIRST layout of each
  * type is its fallback when neither the section nor the Style names one.
@@ -59,7 +78,7 @@ export const SECTION_LAYOUTS = {
   problem: ['statement', 'list', 'split'],
   transformation: ['columns', 'steps', 'statement', 'toggle'],
   benefits: ['grid', 'checklist', 'split', 'bento'],
-  curriculum: ['timeline', 'accordion', 'cards', 'map'],
+  curriculum: ['timeline', 'accordion', 'cards', 'map', 'layered'],
   preview: ['feature', 'split'],
   instructor: ['split', 'quote', 'centered'],
   testimonials: ['grid', 'featured', 'quote', 'marquee', 'wall'],
@@ -70,10 +89,80 @@ export const SECTION_LAYOUTS = {
   text: ['statement', 'columns', 'centered'],
   story: ['scroll', 'chapters', 'strip'],
   gallery: ['mosaic', 'strip', 'grid'],
+  // "What's inside": every practice as a card to swipe through (Codex-61zsk.52).
+  inside: ['carousel'],
+  // The simple one-job sections (Codex-61zsk.53, 03 X64): each joins the
+  // neighbour it serves rather than starting a band of its own.
+  picture: ['contained', 'full', 'beside'],
+  heading: ['start', 'center'],
+  break: ['space'],
+  button: ['stack', 'row'],
 } as const satisfies Record<string, readonly [string, ...string[]]>;
 
 export type SectionTypeId = keyof typeof SECTION_LAYOUTS;
 export const SECTION_TYPE_IDS = Object.keys(SECTION_LAYOUTS) as SectionTypeId[];
+
+/**
+ * Where a Button section goes (03 X64). Twin of `ids.ts` `BUTTON_ACTION_IDS`.
+ * Validated at the write boundary by {@link buttonActionSchema}.
+ */
+export const BUTTON_ACTION_IDS = [
+  'join',
+  'section',
+  'preview',
+  'link',
+] as const;
+export type ButtonActionId = (typeof BUTTON_ACTION_IDS)[number];
+
+/** The longest link a Button may hold. */
+export const BUTTON_HREF_MAX = 2000;
+
+/**
+ * The one rule for a Button's link (03 X64): a full https address with a
+ * host and no credentials. Never `http:`, `javascript:`, `data:` or a bare
+ * path. The renderer's `isButtonHref` (web, no zod) applies the same rule to
+ * what it reads, and a parity test holds the two together.
+ */
+export function isButtonHref(value: string): boolean {
+  if (value.length > BUTTON_HREF_MAX) return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      url.hostname.length > 0 &&
+      url.username === '' &&
+      url.password === ''
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A Button section's action (`props.action`, 03 X64), checked where it is
+ * written. A link must pass {@link isButtonHref}; a section target is a
+ * section id on the same page (the renderer checks it still exists, and
+ * hides the button on the live page when it does not).
+ */
+export const buttonActionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('join') }).strict(),
+  z
+    .object({ kind: z.literal('section'), target: z.string().min(1).max(100) })
+    .strict(),
+  z.object({ kind: z.literal('preview') }).strict(),
+  z
+    .object({
+      kind: z.literal('link'),
+      // `urlSchema` (http/https, no script or data URLs), narrowed to the
+      // Button's own rule.
+      href: urlSchema.refine(
+        isButtonHref,
+        'A button link must be a full web address that starts with https://'
+      ),
+    })
+    .strict(),
+]);
+export type ButtonActionBody = z.infer<typeof buttonActionSchema>;
 
 // ─── Write-boundary schemas ─────────────────────────────────────────────────
 
@@ -112,6 +201,35 @@ export const sectionStyleSchema = z.object({
 export type SectionStyleBody = z.infer<typeof sectionStyleSchema>;
 
 /**
+ * A PAGE's dials (03 X61), shared by {@link pageDesignSchema} and
+ * `journeys.ts`'s `sectionDesignSchema`. Each dial DEGRADES like a section's
+ * scheme: a step this build doesn't know reads as the Style's, which is the
+ * dial's reset, never a different look; a value that is not an object
+ * degrades whole. Unknown dials are stripped.
+ */
+export const pageDialsSchema = z
+  .object({
+    colour: closedEnum(PAGE_DIALS.colour),
+    corners: closedEnum(PAGE_DIALS.corners),
+    spacing: closedEnum(PAGE_DIALS.spacing),
+    drama: closedEnum(PAGE_DIALS.drama),
+    motion: closedEnum(PAGE_DIALS.motion),
+  })
+  .optional()
+  .catch(undefined);
+
+/**
+ * A PAGE's facets (03 X73), shared like {@link pageDialsSchema}. An unknown
+ * Type DEGRADES to the Style's own, never a failed save; a Type the page's
+ * Style may not take is stored and reads as the Style's own (see
+ * {@link TYPE_FACETS}).
+ */
+export const pageFacetsSchema = z
+  .object({ type: closedEnum(TYPE_FACETS) })
+  .optional()
+  .catch(undefined);
+
+/**
  * A PAGE's v2 look (`landing_pages.design`, contract §2/§3). See note above.
  *
  * `style` REJECTS an unrecognised value instead of degrading — same
@@ -125,5 +243,7 @@ export const pageDesignSchema = z.object({
       error: 'Unknown page Style. Refresh and choose a Style again.',
     })
     .optional(),
+  dials: pageDialsSchema,
+  facets: pageFacetsSchema,
 });
 export type PageDesignBody = z.infer<typeof pageDesignSchema>;

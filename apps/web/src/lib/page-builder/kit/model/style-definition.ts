@@ -38,30 +38,45 @@ export interface StyleDefinition {
   fonts?: { heading: string; body: string };
   /**
    * How the org's shader shows through an `atmosphere` section: blurred, as on
-   * the org's other pages, or sharp (03 §5.1). Absent = blurred.
+   * the org's other pages; hazy, a third of that blur, so it is seen moving;
+   * or sharp (03 §5.1, X53). Absent = blurred. The veil is the same in all three.
    */
-  atmosphere?: 'soft' | 'sharp';
+  atmosphere?: 'soft' | 'hazy' | 'sharp';
   /**
    * The scheme the floating call to action is drawn in — its own small band
    * over whatever section it passes, so never `atmosphere` (there is no veil
-   * to see through). Absent = `contrast`.
+   * to see through). Absent = `base` (`PageRenderer`): the org's own
+   * surface, where the bar is a raised card in the org's card colour holding
+   * the org's button (owner, D9).
    */
   sticky?: Exclude<ColourSchemeId, 'atmosphere'>;
 }
 
-/** The sales narrative: promise, pain, the journey, shift, proof, offer, objections, ask. */
+/**
+ * The sales narrative: promise, pain, the journey, shift, proof, offer,
+ * objections, ask. What the course holds comes straight after its promise
+ * (03 X63): a visitor sees what they would be buying before being sold it.
+ * The simple sections sit where a full page shows each at work (03 X64): a
+ * Picture after the pain, a Heading announcing the curriculum and a Button
+ * closing it, and a Break before the proof. No starter takes them.
+ */
 export const STORY_ORDER = [
   'hero',
+  'inside',
   'video',
   'problem',
+  'picture',
   'story',
   'text',
   'transformation',
   'benefits',
+  'heading',
   'curriculum',
+  'button',
   'preview',
   'gallery',
   'instructor',
+  'break',
   'testimonials',
   'stats',
   'pricing',

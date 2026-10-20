@@ -12,9 +12,14 @@ import {
 import type { JourneySalesContext, SellPreview } from '../../../render/types';
 import { COPY } from '../../model/copy';
 import { type ColourSchemeId, SECTION_LAYOUTS } from '../../model/ids';
-import { isLongHeading } from '../../model/long-heading';
+import {
+  headingRuns,
+  isLongHeading,
+  widestRun,
+} from '../../model/long-heading';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
-import type { BlockEdit, ResolvedSection } from '../../model/types';
+import type { BlockEdit, KitPage, ResolvedSection } from '../../model/types';
+import PageRenderer from '../../PageRenderer.svelte';
 import HeroBlock from './HeroBlock.svelte';
 
 let app: ReturnType<typeof mount> | null = null;
@@ -79,6 +84,47 @@ async function render(
 }
 
 const links = () => [...document.body.querySelectorAll('a')];
+
+/** A component's own style rules, by selector as written (comments and runs
+ *  of space squashed); a selector that recurs (inside a container query) has
+ *  its declarations merged. */
+function cssRules(file: string): Map<string, Map<string, string>> {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), file),
+    'utf8'
+  );
+  const rules = new Map<string, Map<string, string>>();
+  type Node = {
+    type: string;
+    property?: string;
+    value?: string;
+    prelude?: { start: number; end: number };
+    block?: { children: Node[] } | null;
+  };
+  const squash = (s: string) =>
+    s
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const visit = (nodes: Node[]) => {
+    for (const node of nodes) {
+      const children = node.block?.children ?? [];
+      if (node.type === 'Rule' && node.prelude) {
+        const selector = squash(
+          source.slice(node.prelude.start, node.prelude.end)
+        );
+        const own = rules.get(selector) ?? new Map<string, string>();
+        for (const d of children)
+          if (d.type === 'Declaration')
+            own.set(d.property ?? '', squash(d.value ?? ''));
+        rules.set(selector, own);
+      }
+      visit(children);
+    }
+  };
+  visit((parse(source, { modern: true }).css?.children ?? []) as Node[]);
+  return rules;
+}
 
 describe('HeroBlock', () => {
   it.each(
@@ -232,6 +278,70 @@ describe('HeroBlock', () => {
       expect(document.body.querySelector('img, video')).toBeNull();
     });
 
+    // Codex-61zsk.13: one 800px image across a cover band upscales.
+    const DRAWN_AT: Record<string, string> = {
+      statement: '100vw',
+      split: '(min-width: 50rem) 50vw, 100vw',
+      cover: '100vw',
+      centered: '100vw',
+      poster: '(min-width: 56rem) 46vw, 100vw',
+    };
+
+    it.each(
+      SECTION_LAYOUTS.hero
+    )('%s: offers every size it has, at the width it is drawn', async (layout) => {
+      const context = {
+        ...sampleContext({
+          course: { heroImageUrl: '/uploaded.jpg' },
+          mediaBaseUrl: CDN,
+        }),
+        sellPreview: new Promise<never>(() => {}),
+      };
+      await render(
+        { heading: 'H', image: { ...image, w: 2400, h: 1600 } },
+        { layout, context }
+      );
+      const img = document.body.querySelector('img');
+      expect(img?.getAttribute('srcset')).toBe(
+        ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w', 'xl.webp 1600w']
+          .map((size) => `${CDN}/${image.key}/${size}`)
+          .join(', ')
+      );
+      expect(DRAWN_AT[layout], layout).toBeDefined();
+      expect(img?.getAttribute('sizes')).toBe(DRAWN_AT[layout]);
+    });
+
+    it('offers no xl for an image uploaded before there was one', async () => {
+      await render(
+        { heading: 'H', image },
+        {
+          layout: 'cover',
+          context: sampleContext({ mediaBaseUrl: CDN }),
+        }
+      );
+      expect(document.body.querySelector('img')?.getAttribute('srcset')).toBe(
+        ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w']
+          .map((size) => `${CDN}/${image.key}/${size}`)
+          .join(', ')
+      );
+    });
+
+    it('offers no sizes for the course still, which is not a page image', async () => {
+      await render(
+        { heading: 'H' },
+        {
+          layout: 'cover',
+          context: sampleContext({
+            media: { heroImageUrl: '/hero.jpg' },
+            mediaBaseUrl: CDN,
+          }),
+        }
+      );
+      const img = document.body.querySelector('img');
+      expect(img?.getAttribute('src')).toBe('/hero.jpg');
+      expect(img?.hasAttribute('srcset')).toBe(false);
+    });
+
     it('without a CDN base, keeps the course still and builds no broken URL', async () => {
       await render(
         { heading: 'H', image },
@@ -343,12 +453,13 @@ describe('HeroBlock', () => {
     };
 
     // Where each layout carries it: on its own root, and nowhere else. The
-    // poster's root is HeroPoster's, so a plain box round it carries it.
+    // poster's root is HeroPoster's, which takes it as a prop (Codex-61zsk.36).
     const ROOT: Record<string, string> = {
       statement: 'hero-statement',
       split: 'hero-split',
       cover: 'hero-cover__copy',
       centered: 'hero-centered',
+      poster: 'hero-poster',
     };
 
     it.each(
@@ -366,11 +477,65 @@ describe('HeroBlock', () => {
           ...document.body.querySelectorAll<HTMLElement>('*'),
         ].filter((node) => node.style.getPropertyValue('--lp-heading-chars'));
         expect(carriers).toHaveLength(1);
-        if (layout === 'poster')
+        expect(carriers[0].classList.contains(ROOT[layout])).toBe(true);
+      }
+    });
+
+    it('poster: gives the poster how wide its headline’s words are, which sets how large it can be beside the picture (Codex-61zsk.33)', async () => {
+      for (const heading of [
+        'Your mornings, calmer',
+        'Self-compassion for the long haul',
+        LONG,
+      ]) {
+        if (app) unmount(app);
+        await render({ heading }, { layout: 'poster' });
+        const { first, widest } = headingRuns(heading);
+        const expected: Record<string, number> = {
+          '--lp-heading-first-caps': first.caps,
+          '--lp-heading-first-text': first.text,
+          '--lp-heading-first-chars': first.chars,
+          '--lp-heading-widest-caps': widest.caps,
+          '--lp-heading-widest-text': widest.text,
+          '--lp-heading-widest-chars': widest.chars,
+        };
+        for (const [name, value] of Object.entries(expected)) {
+          const carriers = [
+            ...document.body.querySelectorAll<HTMLElement>('*'),
+          ].filter((node) => node.style.getPropertyValue(name));
+          expect(carriers, name).toHaveLength(1);
+          expect(carriers[0].classList.contains('hero-poster'), name).toBe(
+            true
+          );
           expect(
-            carriers[0].firstElementChild?.classList.contains('hero-poster')
-          ).toBe(true);
-        else expect(carriers[0].classList.contains(ROOT[layout])).toBe(true);
+            carriers[0].style.getPropertyValue(name),
+            `${heading}: ${name}`
+          ).toBe(String(value));
+        }
+        expect(widest.text, heading).toBeGreaterThan(0);
+      }
+    });
+
+    // Narrower than its layouts size it, the headline is fitted to its column
+    // by its widest run, as every heading is: unweighed, Bold's and Poster's
+    // display drew "Transformation" off a phone's screen (03 X74). Where it is
+    // wide, HeroBlock holds it (heading-fit.test.ts counts the hold).
+    it.each(
+      SECTION_LAYOUTS.hero
+    )('%s: weighs its headline’s widest run on the headline itself', async (layout) => {
+      for (const heading of ['Transformation and the calm sea', LONG]) {
+        if (app) unmount(app);
+        await render({ heading }, { layout });
+        const h1 = document.body.querySelector<HTMLElement>('h1.lp-heading');
+        const run = widestRun(heading);
+        expect(
+          [
+            h1?.style.getPropertyValue('--lp-heading-run-text'),
+            h1?.style.getPropertyValue('--lp-heading-run-caps'),
+            h1?.style.getPropertyValue('--lp-heading-run-chars'),
+          ],
+          heading
+        ).toEqual([String(run.text), String(run.caps), String(run.chars)]);
+        expect(run.text, heading).toBeGreaterThan(0);
       }
     });
 
@@ -504,6 +669,186 @@ describe('HeroBlock', () => {
     sellPreview: Promise.resolve(null),
   });
 
+  // Codex-61zsk.40: the awaited course view says a hero video is attached, so
+  // the public page frames the hero from the first paint. When the video
+  // arrives it lands in that frame, and nothing above the fold moves.
+  describe('with a hero video attached and still on its way', () => {
+    const attached = (
+      sellPreview: Promise<SellPreview | null>,
+      hero = true
+    ): JourneySalesContext => ({
+      ...sampleContext({
+        course: {
+          heroImageUrl: null,
+          filmsAttached: { intro: false, reel: false, hero },
+        },
+      }),
+      sellPreview,
+    });
+    const arrived: SellPreview = {
+      intro: null,
+      reel: null,
+      heroImageUrl: '/hero-poster.jpg',
+      heroClip: {
+        playlistUrl: '/hero.m3u8',
+        posterUrl: '/hero-poster.jpg',
+        durationSeconds: 30,
+      },
+      guidePortraitUrl: null,
+    };
+    async function land(
+      settle: (v: SellPreview | null) => void,
+      v: SellPreview | null
+    ) {
+      settle(v);
+      await tick();
+      await Promise.resolve();
+      flushSync();
+    }
+
+    it('split is framed at first paint, and the video lands in that frame', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'split', context: attached(promise) }
+      );
+      const media = document.body.querySelector('.hero-split__media');
+      const headline = document.body.querySelector('h1');
+      expect(
+        media?.querySelector('.lp-media')?.hasAttribute('data-pending')
+      ).toBe(true);
+      await land(settle, arrived);
+      expect(document.body.querySelector('.hero-split__media')).toBe(media);
+      expect(document.body.querySelector('h1')).toBe(headline);
+      expect(media?.textContent).toContain(COPY.hero.watch);
+    });
+
+    it('centered holds the picture’s slot at first paint', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'centered', context: attached(promise) }
+      );
+      expect(
+        document.body.querySelector('.hero-centered__media .lp-media')
+      ).not.toBeNull();
+    });
+
+    it('the statement holds the picture’s slot under its words at first paint', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'statement', context: attached(promise) }
+      );
+      expect(
+        document.body.querySelector('.hero-statement__media .lp-media')
+      ).not.toBeNull();
+    });
+
+    it('the poster sets its words round the picture’s place at first paint', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'poster', context: attached(promise) }
+      );
+      const poster = document.body.querySelector('.hero-poster');
+      expect(poster?.hasAttribute('data-pictured')).toBe(true);
+      expect(poster?.querySelector('.hero-poster__media')).not.toBeNull();
+    });
+
+    it('a cover on a Moving background takes its band at first paint', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'cover', scheme: 'atmosphere', context: attached(promise) }
+      );
+      expect(document.body.querySelector('.hero-cover__media')).not.toBeNull();
+    });
+
+    // The cover's play button sits in the words' column, which ends at its
+    // foot (`align-content: end`): drawn only once the video landed, it lifted
+    // the words at 1440 and made the band 107px taller at 390 (CLS 0.127).
+    it('a cover holds its play button’s place at first paint, and the button lands in that box', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'cover', context: attached(promise) }
+      );
+      const held = document.body.querySelector<HTMLElement>(
+        '.hero-cover__copy > .hero-cover__watch'
+      );
+      expect(held?.hasAttribute('data-held')).toBe(true);
+      // Svelte sets `inert` as the property, which a browser reflects.
+      expect(held?.inert).toBe(true);
+      expect(held?.textContent).toContain(COPY.hero.watch);
+      await land(settle, arrived);
+      const live =
+        document.body.querySelector<HTMLElement>('.hero-cover__watch');
+      expect(live).toBe(held);
+      expect(live?.hasAttribute('data-held')).toBe(false);
+      expect(live?.inert).toBe(false);
+    });
+
+    it('a cover whose video fails to resolve keeps no place for a play button', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'cover', context: attached(promise) }
+      );
+      await land(settle, null);
+      expect(document.body.querySelector('.hero-cover__watch')).toBeNull();
+    });
+
+    it('a cover with no hero video attached holds no play button', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'cover', context: attached(promise, false) }
+      );
+      expect(document.body.querySelector('.hero-cover__watch')).toBeNull();
+    });
+
+    it('a held play button is its place only: hidden, not yet the button', () => {
+      expect(
+        cssRules('HeroBlock.svelte')
+          .get('.hero-cover__watch[data-held]')
+          ?.get('visibility')
+      ).toBe('hidden');
+    });
+
+    it('a video that fails to resolve leaves the words alone', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'split', context: attached(promise) }
+      );
+      await land(settle, null);
+      expect(document.body.querySelector('.hero-split')).toBeNull();
+      expect(
+        document.body.querySelector('.hero-statement h1')?.textContent
+      ).toBe('H');
+    });
+
+    it('with no hero video attached, split is its words alone from the first paint', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'split', context: attached(promise, false) }
+      );
+      expect(document.body.querySelector('.hero-split')).toBeNull();
+      expect(document.body.querySelector('.lp-media')).toBeNull();
+    });
+
+    it('a hero set to show no media is never framed for it', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H', media: 'none' },
+        { layout: 'split', context: attached(promise) }
+      );
+      expect(document.body.querySelector('.hero-split')).toBeNull();
+    });
+  });
+
   describe('cover on a Moving background (03 §5.1, X10)', () => {
     it('with nothing to show, leaves the band to the section: no paint, no glow, no media colours', async () => {
       await render(
@@ -612,7 +957,46 @@ describe('HeroBlock', () => {
       expect(poster?.querySelector('h1')?.textContent).toBe('H');
     });
 
-    it('with no still known as it draws, holds the picture’s place, and the streamed clip lands in it', async () => {
+    const clipOnly: SellPreview = {
+      intro: null,
+      reel: null,
+      heroImageUrl: null,
+      heroClip: { playlistUrl: '/clip.m3u8' },
+      guidePortraitUrl: null,
+    };
+
+    it('on the canvas, with no still known as it draws, holds the picture’s place, and the streamed clip lands in it', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        {
+          layout: 'poster',
+          context: {
+            ...sampleContext({ course: { heroImageUrl: null } }),
+            sellPreview: promise,
+          },
+          edit: { commit: () => {} },
+        }
+      );
+      const poster = document.body.querySelector('.hero-poster');
+      // Before the stream settles: already set round the picture, the plate
+      // in its place, so the caret never loses its words.
+      expect(poster?.hasAttribute('data-pictured')).toBe(true);
+      const box = poster?.querySelector('.hero-poster__media');
+      const headline = poster?.querySelector('h1');
+      expect(box?.querySelector('.lp-media__plate')).not.toBeNull();
+      settle(clipOnly);
+      await tick();
+      await Promise.resolve();
+      flushSync();
+      // The clip lands in that same box; the words were never re-set.
+      expect(poster?.querySelector('.hero-poster__media')).toBe(box);
+      expect(poster?.querySelector('h1')).toBe(headline);
+      expect(box?.querySelector('.lp-media__plate')).toBeNull();
+      expect(box?.textContent).toContain(COPY.hero.watch);
+    });
+
+    it('on the public page, is its words alone until a picture arrives, then sets them round it without re-setting them', async () => {
       const { promise, settle } = deferred();
       await render(
         { heading: 'H' },
@@ -625,37 +1009,35 @@ describe('HeroBlock', () => {
         }
       );
       const poster = document.body.querySelector('.hero-poster');
-      // Before the stream settles: already set round the picture, the plate
-      // in its place (the server's HTML is this).
-      expect(poster?.hasAttribute('data-pictured')).toBe(true);
-      const box = poster?.querySelector('.hero-poster__media');
+      // The server's HTML is this: no picture known, so no plate for it.
+      expect(poster?.hasAttribute('data-pictured')).toBe(false);
+      expect(poster?.querySelector('.hero-poster__media')).toBeNull();
       const headline = poster?.querySelector('h1');
-      expect(box?.querySelector('.lp-media__plate')).not.toBeNull();
-      settle({
-        intro: null,
-        reel: null,
-        heroImageUrl: null,
-        heroClip: { playlistUrl: '/clip.m3u8' },
-        guidePortraitUrl: null,
-      });
+      settle(clipOnly);
       await tick();
       await Promise.resolve();
       flushSync();
-      // The clip lands in that same box; the words were never re-set.
-      expect(poster?.querySelector('.hero-poster__media')).toBe(box);
+      expect(poster?.hasAttribute('data-pictured')).toBe(true);
       expect(poster?.querySelector('h1')).toBe(headline);
-      expect(box?.querySelector('.lp-media__plate')).toBeNull();
-      expect(box?.textContent).toContain(COPY.hero.watch);
+      expect(poster?.querySelector('.lp-media__plate')).toBeNull();
+      expect(poster?.textContent).toContain(COPY.hero.watch);
     });
 
-    it('settled with no media at all, keeps that arrangement with the plate as its picture', async () => {
+    it('settled with no media at all, is a type-only poster in public and keeps the plate on the canvas', async () => {
       await render({ heading: 'H' }, { layout: 'poster', context: noMedia() });
-      const poster = document.body.querySelector('.hero-poster');
-      expect(poster?.hasAttribute('data-pictured')).toBe(true);
-      const media = poster?.querySelector('.hero-poster__media .lp-media');
+      const poster = () => document.body.querySelector('.hero-poster');
+      expect(poster()?.hasAttribute('data-pictured')).toBe(false);
+      expect(poster()?.querySelector('.lp-media')).toBeNull();
+      unmount(app);
+      await render(
+        { heading: 'H' },
+        { layout: 'poster', context: noMedia(), edit: { commit: () => {} } }
+      );
+      expect(poster()?.hasAttribute('data-pictured')).toBe(true);
+      const media = poster()?.querySelector('.hero-poster__media .lp-media');
       expect(media?.hasAttribute('data-empty')).toBe(true);
       expect(media?.querySelector('.lp-media__plate')).not.toBeNull();
-      expect(poster?.querySelector('img, video')).toBeNull();
+      expect(poster()?.querySelector('img, video')).toBeNull();
     });
 
     it('gives that plate a sheet of its own — the panel tinted with the brand and lifted toward its ink — computed a step up (no cycle)', () => {
@@ -663,41 +1045,7 @@ describe('HeroBlock', () => {
       // runs off the band's foot into the next section's ground: untinted, it
       // had no edge. Redeclaring `--lp-panel` from itself on one element
       // would be a cycle, voiding the plate's whole background.
-      const source = readFileSync(
-        join(dirname(fileURLToPath(import.meta.url)), 'HeroPoster.svelte'),
-        'utf8'
-      );
-      const rules = new Map<string, Map<string, string>>();
-      type Node = {
-        type: string;
-        property?: string;
-        value?: string;
-        prelude?: { start: number; end: number };
-        block?: { children: Node[] } | null;
-      };
-      const squash = (s: string) =>
-        s
-          .replace(/\/\*[\s\S]*?\*\//g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-      // A selector can recur (inside a container query): merge its rules.
-      const visit = (nodes: Node[]) => {
-        for (const node of nodes) {
-          const children = node.block?.children ?? [];
-          if (node.type === 'Rule' && node.prelude) {
-            const selector = squash(
-              source.slice(node.prelude.start, node.prelude.end)
-            );
-            const own = rules.get(selector) ?? new Map<string, string>();
-            for (const d of children)
-              if (d.type === 'Declaration')
-                own.set(d.property ?? '', squash(d.value ?? ''));
-            rules.set(selector, own);
-          }
-          visit(children);
-        }
-      };
-      visit((parse(source, { modern: true }).css?.children ?? []) as Node[]);
+      const rules = cssRules('HeroPoster.svelte');
       expect(rules.get('.hero-poster__reveal')?.get('--_plate')).toBe(
         'color-mix( in oklab, color-mix(in oklab, var(--lp-panel), var(--lp-brand) var(--lp-tint-panel)), var(--lp-panel-ink) 5% )'
       );
@@ -720,6 +1068,77 @@ describe('HeroBlock', () => {
       expect(
         document.body.querySelector('.hero-poster__media')?.textContent
       ).toContain(COPY.hero.watch);
+    });
+  });
+
+  // Codex-61zsk.37 (C1): Tending the Grief's live first screen was a 1024×448
+  // plate. With no picture, the public page draws the hero's words alone; the
+  // plate stands in only where the page is looked at.
+  describe('with no picture', () => {
+    const FRAMED = ['split', 'centered', 'poster'] as const;
+
+    it.each(
+      FRAMED
+    )('%s: the public page draws the words alone — no frame, no plate', async (layout) => {
+      await render(
+        { heading: 'H', body: 'Six calm weeks.' },
+        { layout, context: noMedia() }
+      );
+      expect(document.body.querySelector('h1')?.textContent).toBe('H');
+      expect(document.body.textContent).toContain('Six calm weeks.');
+      expect(document.body.querySelector('.lp-media')).toBeNull();
+    });
+
+    it('split re-composes as the statement does, the words across the band', async () => {
+      await render({ heading: 'H' }, { layout: 'split', context: noMedia() });
+      expect(document.body.querySelector('.hero-split')).toBeNull();
+      expect(
+        document.body.querySelector('.hero-statement h1')?.textContent
+      ).toBe('H');
+    });
+
+    it.each(
+      FRAMED
+    )('%s: the canvas keeps the plate in the picture’s place', async (layout) => {
+      await render(
+        { heading: 'H' },
+        { layout, context: noMedia(), edit: { commit: () => {} } }
+      );
+      expect(document.body.querySelector('.lp-media__plate')).not.toBeNull();
+    });
+
+    it.each(
+      FRAMED
+    )('%s: a still thumbnail keeps the plate too; the public page beside it has none', async (layout) => {
+      const page: KitPage = {
+        design: { style: 'bold' },
+        sections: [
+          {
+            id: 'hero-1',
+            type: 'hero',
+            enabled: true,
+            variant: layout,
+            props: { heading: 'H' },
+          },
+        ],
+      };
+      const draw = async (still: boolean) => {
+        app = mount(PageRenderer, {
+          target: document.body,
+          props: { page, context: noMedia(), still, sticky: false },
+        });
+        flushSync();
+        await tick();
+        await Promise.resolve();
+        flushSync();
+        const plates =
+          document.body.querySelectorAll('.lp-media__plate').length;
+        unmount(app);
+        app = null;
+        return plates;
+      };
+      expect(await draw(true)).toBe(1);
+      expect(await draw(false)).toBe(0);
     });
   });
 });

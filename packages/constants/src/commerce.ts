@@ -16,9 +16,22 @@ export const STRIPE_EVENTS = {
   ACCOUNT_DEAUTHORIZED: 'account.application.deauthorized',
   // Refunds
   CHARGE_REFUNDED: 'charge.refunded',
+  // A refund's status changed. A refund still pending when charge.refunded
+  // arrived is clawed back once this reports it succeeded or failed
+  // (Codex-2hxff.8).
+  REFUND_UPDATED: 'refund.updated',
+  // A refund failed, possibly after it succeeded. Handled with refund.updated:
+  // the clawback stands and the failure is recorded for support.
+  REFUND_FAILED: 'refund.failed',
   // Disputes (treated as refunds for access purposes — purchase.disputedAt
   // is set and contentAccess is soft-deleted via processDispute)
   CHARGE_DISPUTE_CREATED: 'charge.dispute.created',
+  // The rest of a dispute's life (Codex-2hxff.9): each records the dispute's
+  // status, and a won or lost one is acted on once.
+  CHARGE_DISPUTE_UPDATED: 'charge.dispute.updated',
+  CHARGE_DISPUTE_CLOSED: 'charge.dispute.closed',
+  CHARGE_DISPUTE_FUNDS_WITHDRAWN: 'charge.dispute.funds_withdrawn',
+  CHARGE_DISPUTE_FUNDS_REINSTATED: 'charge.dispute.funds_reinstated',
   // Dashboard-drift detection + sync-back: tier metadata edited outside
   // Codex (e.g. in Stripe Dashboard) mirrors back into subscriptionTiers.
   // product.updated → mirror name/description.
@@ -29,6 +42,64 @@ export const STRIPE_EVENTS = {
   PRICE_CREATED: 'price.created',
   PRICE_UPDATED: 'price.updated',
 } as const;
+
+/**
+ * Stripe dispute statuses, grouped by what they mean here (Codex-2hxff.9;
+ * docs/payments/dispute-record.md).
+ *
+ * - An INQUIRY takes no money: it holds the sale's unpaid payouts, nothing more
+ *   (owner decision Q1).
+ * - An open CHARGEBACK has taken the disputed amount: paid slices are reversed
+ *   by its share, unpaid ones held.
+ * - CLOSED is final. `won` is paid back, `lost` keeps the reversals and
+ *   cancels the held slices; an inquiry that closed or was prevented took
+ *   nothing.
+ */
+export const DISPUTE_INQUIRY_STATUSES = [
+  'warning_needs_response',
+  'warning_under_review',
+] as const;
+export const DISPUTE_CHARGEBACK_OPEN_STATUSES = [
+  'needs_response',
+  'under_review',
+] as const;
+export const DISPUTE_CLOSED_STATUSES = [
+  'won',
+  'lost',
+  'warning_closed',
+  'prevented',
+] as const;
+
+/**
+ * The Stripe metadata key naming the environment that created an object — the
+ * worker's `ENVIRONMENT` (`production`, `development`, `test`).
+ *
+ * Production and local development share ONE Stripe sandbox, so both receive
+ * every event. Each environment tags what it creates and ignores events about
+ * what another environment created (docs/payments/operations.md → Environments
+ * and Stripe accounts; Codex-2hxff.5).
+ */
+export const STRIPE_ENV_METADATA_KEY = 'codex_env';
+
+/** `{ codex_env: environment }` — spread into the metadata of every Stripe object we create. */
+export function stripeEnvMetadata(environment: string): Record<string, string> {
+  return { [STRIPE_ENV_METADATA_KEY]: environment };
+}
+
+/**
+ * True only when `metadata` names a DIFFERENT environment.
+ *
+ * Untagged is NOT foreign: every object created before tagging began — every
+ * existing subscription among them — carries no tag, and treating it as foreign
+ * would silently stop production renewals. So: tagged AND different.
+ */
+export function isForeignStripeEnvironment(
+  metadata: Readonly<Record<string, string>> | null | undefined,
+  environment: string
+): boolean {
+  const tag = metadata?.[STRIPE_ENV_METADATA_KEY];
+  return typeof tag === 'string' && tag !== '' && tag !== environment;
+}
 
 export const PURCHASE_STATUS = {
   PENDING: 'pending',
@@ -92,6 +163,12 @@ export const FEES = {
   // org's Connect account. Override per-org via the `fee_config_org` table.
   ORG_PERCENT: 1000,
   SUBSCRIPTION_ORG_PERCENT: 1500, // 15.00% of post-platform-fee for subscriptions
+  // The platform never takes less than this from a sale (owner decision
+  // 2026-10-13: a £1 sale earns 10p at 10%, but Stripe charges about 21p).
+  // The code default, so every environment and every fresh database applies
+  // it; fee_config_platform.min_platform_fee_cents overrides it when a row
+  // exists. docs/payments/fees-and-splits.md.
+  MIN_PLATFORM_FEE_CENTS: 25,
 } as const;
 
 export const CURRENCY = {

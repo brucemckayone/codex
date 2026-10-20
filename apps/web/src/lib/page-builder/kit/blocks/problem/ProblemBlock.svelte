@@ -168,7 +168,7 @@
   }
 
   .problem__statement :global(.lp-heading) {
-    max-inline-size: 17ch;
+    max-inline-size: calc(17 * var(--lp-measure-unit));
   }
 
   .problem__statement[data-long] {
@@ -176,7 +176,7 @@
   }
 
   .problem__statement[data-long] :global(.lp-heading) {
-    max-inline-size: 24ch;
+    max-inline-size: calc(24 * var(--lp-measure-unit));
   }
 
   .problem__strip {
@@ -226,9 +226,9 @@
   }
 
   /* ── list ──────────────────────────────────────────────────────────────── */
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .problem__head :global(.lp-heading) {
-    max-inline-size: 22ch;
+    max-inline-size: calc(22 * var(--lp-measure-unit));
   }
 
   .problem__lines {
@@ -298,6 +298,8 @@
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       align-items: center;
       column-gap: calc(var(--lp-gap) * 1.5);
+      /* The heading's room is its half (louder's fit, 03 X62). */
+      --lp-heading-column: calc((var(--lp-column) - var(--lp-gap) * 1.5) / 2);
     }
   }
 

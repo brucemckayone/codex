@@ -6,6 +6,8 @@ Org management dashboard: analytics, content management, and customer support. A
 
 All endpoints EXCEPT `/api/admin/fees/*` require `auth: 'required'` + `requireOrgMembership: true` + `requireOrgManagement: true`, scoped by `ctx.organizationId` (resolved from org membership). The 9 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer) instead require `policy: { auth: 'platform_owner' }` with no org policy. Rate limited via `api` preset (100/min) on `/api/*`.
 
+`POST /api/admin/organizations/:orgId/owner` `{ userId, reason }` (Codex-2hxff.2) is also `platform_owner`-only, on the `strict` preset (`RATE_LIMIT_STRICT`, namespaces 1051/2051/3051): platform support assigns a new owner when a transfer is impossible. It withdraws any open offer, busts both users' membership caches, and logs `reason`. No screen yet (Codex-xyb7v).
+
 ### Analytics
 
 | Method | Path | Input | Response |

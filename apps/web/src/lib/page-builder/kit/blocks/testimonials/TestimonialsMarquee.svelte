@@ -24,9 +24,12 @@
 
   interface Props {
     voices: readonly Testimonial[];
+    /** The section draws faces (Voice). */
+    faces?: boolean;
+    mediaBaseUrl?: string | null;
   }
 
-  const { voices }: Props = $props();
+  const { voices, faces = false, mediaBaseUrl = null }: Props = $props();
 
   let paused = $state(false);
   const copies = $derived(marqueeCopies(voices.length));
@@ -35,7 +38,7 @@
 {#snippet cards(copy: boolean)}
   <ul class="tm-marquee__lane" data-copy={copy ? '' : undefined} aria-hidden={copy ? 'true' : undefined} inert={copy}>
     {#each voices as voice (voice.key)}
-      <li class="tm-marquee__card"><Voice {voice} /></li>
+      <li class="tm-marquee__card"><Voice {voice} {faces} {mediaBaseUrl} /></li>
     {/each}
   </ul>
 {/snippet}
@@ -106,7 +109,7 @@
   }
 
   .tm-marquee__lane:has(> :only-child) {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   .tm-marquee__lane[data-copy] {
@@ -125,15 +128,10 @@
      wall, its room is made on the voice, on top of whatever padding a Style
      gives the card: the mark clears the card's edge by that whole padding —
      an open card (a rule, no sides) starts it on the rule — and the words and
-     the name keep one edge. Voice's own sizes, pinned by the block's test. */
+     the name keep one edge. The room is Voice's own (`--lp-voice-room`), so
+     it follows every size Voice or a Type sets. */
   .tm-marquee__card > :global(.voice) {
-    --_quote: var(--lp-size-lead);
-    --_hang: 0.4;
-    padding-inline-start: calc(var(--_quote) * var(--_hang));
-  }
-
-  .tm-marquee__card > :global(.voice[data-length='long']) {
-    --_quote: var(--lp-size-body);
+    padding-inline-start: var(--lp-voice-room);
   }
 
   .tm-marquee__toggle {
@@ -163,11 +161,11 @@
 
   /* ── moving: motion welcome, JavaScript running, a live page ─────────────── */
   @media screen and (prefers-reduced-motion: no-preference) {
-    :global(:root[data-theme] .lp:not([data-lp-still])) .tm-marquee[data-moving] {
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion])) .tm-marquee[data-moving] {
       --_fade: clamp(var(--space-6), 6cqi, var(--space-24));
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still]))
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion]))
       .tm-marquee[data-moving]
       .tm-marquee__controls {
       display: flex;
@@ -175,7 +173,7 @@
 
     /* The sets start at the window's own edge, so one cycle ends exactly
        where it began. The edges fade, so no card is cut by a hard line. */
-    :global(:root[data-theme] .lp:not([data-lp-still]))
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion]))
       .tm-marquee[data-moving]
       .tm-marquee__window {
       display: flex;
@@ -190,7 +188,7 @@
       );
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still]))
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion]))
       .tm-marquee[data-moving]
       .tm-marquee__lane {
       display: flex;
@@ -202,14 +200,14 @@
         linear infinite;
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still]))
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion]))
       .tm-marquee[data-moving]
       .tm-marquee__card {
       flex: none;
       inline-size: var(--_card);
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still]))
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion]))
       .tm-marquee[data-moving]:is(:hover, :focus-within, [data-paused])
       .tm-marquee__lane {
       animation-play-state: paused;

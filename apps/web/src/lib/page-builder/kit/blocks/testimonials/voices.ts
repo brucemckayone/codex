@@ -4,6 +4,7 @@
  * layout arranges every voice and drops none.
  */
 import type { JourneyTestimonialView } from '$lib/page-builder';
+import type { ImageRef } from '../../../page-images';
 import type { TestimonialItem } from './definition';
 
 export interface Testimonial {
@@ -11,6 +12,8 @@ export interface Testimonial {
   quote: string;
   name?: string;
   detail?: string;
+  /** The creator's photo of them; a course testimonial has none. */
+  photo?: ImageRef;
   /** How much room the words need: the big layouts size by it. */
   length: 'short' | 'medium' | 'long';
 }
@@ -33,7 +36,8 @@ function voice(
   key: string,
   text: string,
   name?: string | null,
-  detail?: string | null
+  detail?: string | null,
+  photo?: ImageRef
 ): Testimonial | null {
   const quote = unwrapQuote(text);
   if (!quote) return null;
@@ -42,6 +46,7 @@ function voice(
     quote,
     name: name?.trim() || undefined,
     detail: detail?.trim() || undefined,
+    ...(photo ? { photo } : {}),
     length: lengthOf(quote),
   };
 }
@@ -56,7 +61,7 @@ export function voices(
       voice(`course-${t.id}`, t.quote, t.authorName, t.authorContext)
     );
   const own = items.map((item, index) =>
-    voice(`own-${index}`, item.quote, item.name, item.detail)
+    voice(`own-${index}`, item.quote, item.name, item.detail, item.photo)
   );
   return [...course, ...own].filter(
     (entry): entry is Testimonial => entry !== null

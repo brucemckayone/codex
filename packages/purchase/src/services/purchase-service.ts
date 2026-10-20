@@ -25,22 +25,40 @@ import {
   ACCESS_TYPES,
   CONTENT_STATUS,
   CURRENCY,
+  FEES,
   PURCHASE_STATUS,
+  stripeEnvMetadata,
 } from '@codex/constants';
-import { getConstraintName, isUniqueViolation, toIso } from '@codex/database';
+import { isUniqueViolation, toIso } from '@codex/database';
 import {
   content,
   contentAccess,
   courses,
+  type Dispute,
+  disputes,
   entitlements,
-  organizationMemberships,
-  payouts,
   purchases,
-  refundReviews,
+  type RefundStatus,
+  refunds,
   stripeConnectAccounts,
   users,
 } from '@codex/database/schema';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import {
+  type ClawbackCharge,
+  type LedgerDeps,
+  listChargeRefunds,
+  listClawableRefunds,
+  recordPlatformFee,
+  recordSlice,
+  repayDispute,
+  resolveOrganisationPayee,
+  reverseCharge,
+} from '@codex/payments';
+import {
+  BaseService,
+  type ServiceConfig,
+  StripeNotConfiguredError,
+} from '@codex/service-errors';
 import type {
   CreateCheckoutInput,
   CreateCourseCheckoutInput,
@@ -65,8 +83,10 @@ import {
   desc,
   eq,
   gte,
+  inArray,
   isNotNull,
   isNull,
+  lt,
   lte,
   or,
   type SQL,
@@ -83,7 +103,6 @@ import {
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
-import { resolvePrimaryConnect } from '../utils/resolve-primary-connect';
 import { findActiveCreatorAgreementShare } from './agreement-share';
 import {
   writeContentPurchaseEntitlement,
@@ -102,6 +121,44 @@ function isStripeError(error: unknown): error is Error & { type: string } {
     typeof error.type === 'string' &&
     error.type.startsWith('Stripe')
   );
+}
+
+const REFUND_STATUSES: ReadonlySet<string> = new Set<RefundStatus>([
+  'pending',
+  'requires_action',
+  'succeeded',
+  'failed',
+  'canceled',
+]);
+
+/** A status the `refunds` table admits (its CHECK). */
+function isRefundStatus(status: string | null): status is RefundStatus {
+  return status !== null && REFUND_STATUSES.has(status);
+}
+
+/**
+ * How far along a dispute is: an inquiry, then a chargeback, then final. A
+ * dispute's row only moves to a higher rank (`recordDispute`).
+ */
+const DISPUTE_STATUS_RANK: ReadonlyMap<string, number> = new Map([
+  ['warning_needs_response', 0],
+  ['warning_under_review', 1],
+  ['needs_response', 2],
+  ['under_review', 3],
+  ['won', 4],
+  ['lost', 4],
+  ['warning_closed', 4],
+  ['prevented', 4],
+]);
+const FINAL_DISPUTE_RANK = 4;
+
+/** `DISPUTE_STATUS_RANK` in SQL, for the upsert's guard. */
+function disputeRank(status: SQL): SQL {
+  // The ranks are literals: a bound THEN parameter would be typed text.
+  const cases = [...DISPUTE_STATUS_RANK].map(
+    ([name, rank]) => sql`WHEN ${name} THEN ${sql.raw(String(rank))}`
+  );
+  return sql`(CASE ${status} ${sql.join(cases, sql` `)} END)`;
 }
 
 import type { PaginatedListResponse } from '@codex/shared-types';
@@ -162,6 +219,15 @@ interface PurchaseServiceConfig extends ServiceConfig {
   feeConfig?: FeeConfigService;
   mailer?: PurchaseMailer;
   webAppUrl?: string;
+  /**
+   * The locked Billing Portal configuration (`bpc_...`, from
+   * `STRIPE_PORTAL_CONFIGURATION_ID`): payment methods and invoices only, with
+   * cancelling, plan switching and pausing off. Optional so a worker that never
+   * opens a portal still boots; `createPortalSession` refuses without it rather
+   * than fall back to the account default, which allows cancelling
+   * (Codex-2hxff.4).
+   */
+  portalConfigurationId?: string;
 }
 
 /**
@@ -226,6 +292,7 @@ export class PurchaseService extends BaseService {
   private readonly feeConfig: FeeConfigService | undefined;
   private readonly mailer: PurchaseMailer | undefined;
   private readonly webAppUrl: string | undefined;
+  private readonly portalConfigurationId: string | undefined;
 
   /**
    * Initialize purchase service
@@ -239,6 +306,7 @@ export class PurchaseService extends BaseService {
     this.feeConfig = config.feeConfig;
     this.mailer = config.mailer;
     this.webAppUrl = config.webAppUrl;
+    this.portalConfigurationId = config.portalConfigurationId;
   }
 
   /**
@@ -402,7 +470,11 @@ export class PurchaseService extends BaseService {
       // as `SubscriptionService.createCheckoutSession`.
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId: customerId, email: user.email },
+        {
+          userId: customerId,
+          email: user.email,
+          environment: this.environment,
+        },
         (resolvedCustomerId) =>
           this.stripe.checkout.sessions.create({
             mode: 'payment',
@@ -445,6 +517,12 @@ export class PurchaseService extends BaseService {
               ...(organizationId !== null ? { organizationId } : {}),
               creatorId: contentRecord.creatorId,
               contentTitle: contentRecord.title,
+              ...stripeEnvMetadata(this.environment),
+            },
+            // Onto the PaymentIntent, from which Stripe snapshots it onto the
+            // Charge — so charge.refunded and friends carry the tag too.
+            payment_intent_data: {
+              metadata: stripeEnvMetadata(this.environment),
             },
             client_reference_id: customerId,
           }),
@@ -499,7 +577,8 @@ export class PurchaseService extends BaseService {
    * - Calculates revenue split from fee agreements or defaults
    * - Creates purchase record with immutable revenue snapshot
    * - Grants content access atomically in same transaction
-   * - Sets status='completed' and purchasedAt=now
+   * - Sets status='completed' and purchasedAt = the payment time
+   *   (metadata.paidAt — the webhook event's created — else now)
    *
    * Transaction Safety:
    * - Purchase + contentAccess created atomically
@@ -535,9 +614,9 @@ export class PurchaseService extends BaseService {
         });
 
         if (existing) {
-          // Already processed - return existing; skip payouts work since the
-          // first-write path already attempted it (idempotency on transfers
-          // is provided by the deterministic `${chargeId}_org_fee` key).
+          // Already processed - return existing. Its slices are re-recorded
+          // after the transaction (repairPurchasePayouts): the ledger skips
+          // the ones already there, so a replay never transfers twice.
           return { purchase: existing, isNew: false } as const;
         }
 
@@ -588,7 +667,7 @@ export class PurchaseService extends BaseService {
           : {
               platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
               orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
-              minPlatformFeeCents: 0,
+              minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
               minTransferCents: 0,
             };
 
@@ -621,7 +700,7 @@ export class PurchaseService extends BaseService {
         // no organization and therefore no `creator_organization_agreements`
         // row — skip the query entirely (it would also fail to typecheck
         // against the nullable `organizationId`).
-        const purchasedAt = new Date();
+        const purchasedAt = metadata.paidAt ?? new Date();
         // Codex-2pryk WP-6: agreement lookup hoisted to the shared
         // `findActiveCreatorAgreementShare` (reused by the course-purchase +
         // course-subscription payout paths so all three apply IDENTICAL
@@ -730,7 +809,7 @@ export class PurchaseService extends BaseService {
             currency: metadata.currency || CURRENCY.GBP,
             stripePaymentIntentId,
             status: PURCHASE_STATUS.COMPLETED,
-            purchasedAt: new Date(),
+            purchasedAt,
             platformFeeCents: revenueSplit.platformFeeCents,
             organizationFeeCents: revenueSplit.organizationFeeCents,
             creatorPayoutCents: revenueSplit.creatorPayoutCents,
@@ -788,19 +867,31 @@ export class PurchaseService extends BaseService {
         } as const;
       });
 
-      // Step 6 (post-commit): write tri-party payouts ledger rows and execute
-      // the secondary org-fee transfer. Out-of-transaction so a Stripe API
-      // failure can't roll back the purchase + access grant. On a webhook
-      // replay (`isNew: false`) we skip — the first-write path already ran,
-      // and Stripe idempotency keys protect the transfer side either way.
-      if (txResult.isNew && metadata.stripeChargeId) {
-        await this.writePurchasePayouts({
-          purchase: txResult.purchase,
-          revenueSplit: txResult.revenueSplit,
-          creatorId: txResult.creatorId,
-          organizationId: txResult.organizationId,
-          stripeChargeId: metadata.stripeChargeId,
-        });
+      // Step 6 (post-commit): record the slices in the payouts ledger and
+      // transfer the payable ones. Out-of-transaction so a Stripe API failure
+      // can't roll back the purchase + access grant. On a webhook replay
+      // (`isNew: false`) the slices are re-recorded from the purchase's stored
+      // split — the ledger skips the ones already there (Codex-2hxff.11).
+      const { stripeChargeId } = metadata;
+      if (txResult.isNew && stripeChargeId) {
+        await this.recordPayoutsAfterCommit(
+          txResult.purchase,
+          stripeChargeId,
+          () =>
+            this.writePurchasePayouts({
+              purchase: txResult.purchase,
+              revenueSplit: txResult.revenueSplit,
+              creatorId: txResult.creatorId,
+              organizationId: txResult.organizationId,
+              stripeChargeId,
+            })
+        );
+      } else if (stripeChargeId) {
+        await this.recordPayoutsAfterCommit(
+          txResult.purchase,
+          stripeChargeId,
+          () => this.repairPurchasePayouts(txResult.purchase, stripeChargeId)
+        );
       } else if (txResult.isNew && !metadata.stripeChargeId) {
         // Codex-69t7c WP5 hardening (a): a completed purchase with no
         // stripeChargeId means writePurchasePayouts is skipped entirely, so
@@ -911,7 +1002,11 @@ export class PurchaseService extends BaseService {
 
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId: customerId, email: user.email },
+        {
+          userId: customerId,
+          email: user.email,
+          environment: this.environment,
+        },
         (resolvedCustomerId) =>
           this.stripe.checkout.sessions.create({
             mode: 'payment',
@@ -942,6 +1037,10 @@ export class PurchaseService extends BaseService {
               courseId: validated.courseId,
               customerId,
               courseTitle: course.title,
+              ...stripeEnvMetadata(this.environment),
+            },
+            payment_intent_data: {
+              metadata: stripeEnvMetadata(this.environment),
             },
             client_reference_id: customerId,
           }),
@@ -1032,13 +1131,13 @@ export class PurchaseService extends BaseService {
           : {
               platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
               orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
-              minPlatformFeeCents: 0,
+              minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
               minTransferCents: 0,
             };
 
         // HARDENING §H4(a): course purchases reuse the creator's
         // `content_purchase` revenue-share agreement terms.
-        const purchasedAt = new Date();
+        const purchasedAt = metadata.paidAt ?? new Date();
         const agreementSharePercent = await findActiveCreatorAgreementShare(
           tx,
           {
@@ -1140,14 +1239,28 @@ export class PurchaseService extends BaseService {
       // Post-commit payouts — REUSE the Option-B fan-out verbatim. A course
       // purchase row carries a `courseId` target; `writePurchasePayouts` only
       // reads `purchase.id` + the split, so it splits the charge identically.
-      if (txResult.isNew && metadata.stripeChargeId) {
-        await this.writePurchasePayouts({
-          purchase: txResult.purchase,
-          revenueSplit: txResult.revenueSplit,
-          creatorId: txResult.creatorId,
-          organizationId: txResult.organizationId,
-          stripeChargeId: metadata.stripeChargeId,
-        });
+      const { stripeChargeId } = metadata;
+      if (txResult.isNew && stripeChargeId) {
+        await this.recordPayoutsAfterCommit(
+          txResult.purchase,
+          stripeChargeId,
+          () =>
+            this.writePurchasePayouts({
+              purchase: txResult.purchase,
+              revenueSplit: txResult.revenueSplit,
+              creatorId: txResult.creatorId,
+              organizationId: txResult.organizationId,
+              stripeChargeId,
+            })
+        );
+      } else if (stripeChargeId) {
+        // A replay re-records the slices; the ledger skips the ones already
+        // there (Codex-2hxff.11).
+        await this.recordPayoutsAfterCommit(
+          txResult.purchase,
+          stripeChargeId,
+          () => this.repairPurchasePayouts(txResult.purchase, stripeChargeId)
+        );
       } else if (txResult.isNew && !metadata.stripeChargeId) {
         const errorId = crypto.randomUUID();
         this.obs.error(
@@ -1176,29 +1289,26 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Write tri-party payouts ledger rows for a freshly-completed purchase and
-   * execute the secondary creator + organization transfers (Option B platform
-   * charge model — Codex-h69cg).
+   * Record a purchase's slices in the payouts ledger and pay the ones whose
+   * payee can be paid (Option B platform charge model — Codex-h69cg): the
+   * charge lands on the platform balance and secondary transfers, linked by
+   * `source_transaction`, carve out the creator and organisation slices.
    *
-   * Charge lands fully on the platform's balance. Two secondary transfers
-   * carve out the creator + org slices, both linked to the source charge via
-   * `source_transaction` (sum is bounded by the charge amount — see Stripe
-   * docs on multiple transfers from one source_transaction).
+   * Every slice goes through `recordSlice` (Codex-2hxff.11): its row is
+   * reserved by a unique key BEFORE any transfer, so calling this again for
+   * the same charge — a webhook replay, at any age — adds only a slice that
+   * is missing and never transfers twice.
    *
-   * - `platform_fee`: status='paid', retained on platform balance — no
-   *   transfer call. `stripeChargeId` satisfies the paid invariant.
-   * - `creator_payout`: `transfers.create` with `source_transaction=chargeId`
-   *   to the creator's Connect account. On success: status='paid' with
-   *   `stripeTransferId`. On Connect-not-ready: status='pending' with
-   *   reason='connect_not_ready'. On Stripe failure: status='failed' with
-   *   reason='transfer_failed'.
-   * - `organization_fee`: same shape as `creator_payout` but to the org's
-   *   Connect account. Same pending/failed branches.
+   * - `platform_fee`: paid, retained on the platform balance, no transfer.
+   * - `creator_payout`: transferred to the creator, or pending in their name
+   *   until their payouts are set up (they are emailed to finish).
+   * - `organization_fee`: transferred to whoever owned the organisation at
+   *   the payment time; pending in their name until they can be paid; held as
+   *   `no_owner` if it had no owner (Codex-2hxff.37).
    *
-   * Per-row error isolation: a failure in any one branch logs + continues so
-   * one bad transfer or insert never poisons the rest of the ledger writes.
-   * Mirrors the pattern enforced for subscription executeTransfers
-   * (Codex-vv77x).
+   * A failed transfer is recorded as `failed` and retried by the drains. A
+   * failed INSERT is thrown: the webhook answers by its cause and Stripe
+   * retries, and this runs again on the redelivery.
    */
   private async writePurchasePayouts(params: {
     purchase: Purchase;
@@ -1222,407 +1332,235 @@ export class PurchaseService extends BaseService {
       organizationId,
       stripeChargeId,
     } = params;
+    const ledger = this.ledger();
+    const source = { sourceType: 'purchase', purchaseId: purchase.id } as const;
     const transferGroup = `purchase_${purchase.id}`;
-    const now = new Date();
 
-    // 1. Platform fee — retained on platform balance, no transfer call.
-    // Codex-g9owu: ON CONFLICT against the partial unique index
-    // uq_payouts_platform_fee_per_charge so concurrent webhook
-    // redeliveries don't double-insert.
-    if (revenueSplit.platformFeeCents > 0) {
-      try {
-        await this.db
-          .insert(payouts)
-          .values({
-            userId: null,
-            organizationId,
-            purchaseId: purchase.id,
-            amountCents: revenueSplit.platformFeeCents,
-            payoutType: 'platform_fee',
-            status: 'paid',
-            sourceType: 'purchase',
-            stripeChargeId,
-            transferGroup,
-            resolvedAt: now,
-          })
-          .onConflictDoNothing({
-            target: payouts.stripeChargeId,
-            where: sql`${payouts.payoutType} = 'platform_fee'`,
-          });
-      } catch (err) {
-        this.obs.error('Failed to insert platform_fee payout row', {
-          purchaseId: purchase.id,
-          stripeChargeId,
-          amountCents: revenueSplit.platformFeeCents,
-          error: err instanceof Error ? err.message : String(err),
-        });
+    await recordPlatformFee(ledger, {
+      amountCents: revenueSplit.platformFeeCents,
+      organizationId,
+      source,
+      stripeChargeId,
+      transferGroup,
+    });
+
+    // The creator's single account (one per user, Codex-69t7c).
+    if (revenueSplit.creatorPayoutCents > 0) {
+      const [creatorConnect] = await this.db
+        .select()
+        .from(stripeConnectAccounts)
+        .where(eq(stripeConnectAccounts.userId, creatorId))
+        .limit(1);
+      const outcome = await recordSlice(ledger, {
+        payoutType: 'creator_payout',
+        amountCents: revenueSplit.creatorPayoutCents,
+        organizationId,
+        source,
+        stripeChargeId,
+        transferGroup,
+        // The purchase charge already has a transfer group; Stripe rejects a
+        // second one alongside source_transaction.
+        sendTransferGroup: false,
+        payee: { userId: creatorId, account: creatorConnect },
+        idempotencyKey: `${stripeChargeId}_creator`,
+        metadata: { purchase_id: purchase.id },
+      });
+      // Only a freshly reserved row: a replay ('exists') never re-sends it.
+      if (outcome?.kind === 'pending') {
+        await this.notifyCreatorConnectNeeded(
+          creatorId,
+          organizationId,
+          revenueSplit.creatorPayoutCents
+        );
       }
     }
 
-    // Look up Connect accounts up front: the creator's single account (by
-    // userId — one account per user, Codex-69t7c) and the org's canonical
-    // account (resolved via primaryConnectAccountUserId below).
-    const [creatorConnect] =
-      revenueSplit.creatorPayoutCents > 0
-        ? await this.db
-            .select()
-            .from(stripeConnectAccounts)
-            .where(eq(stripeConnectAccounts.userId, creatorId))
-            .limit(1)
-        : [undefined];
+    // Codex-2hxff.2: the org slice goes to whoever owned the org at the
+    // payment time — the same instant the agreement lookup used. Orgless
+    // purchases never carve an org slice (forced to 0 upstream).
+    if (organizationId !== null && revenueSplit.organizationFeeCents > 0) {
+      const orgPayee = await resolveOrganisationPayee(
+        this.db,
+        organizationId,
+        purchase.purchasedAt ?? purchase.createdAt,
+        this.obs
+      );
+      await recordSlice(ledger, {
+        payoutType: 'organization_fee',
+        amountCents: revenueSplit.organizationFeeCents,
+        organizationId,
+        source,
+        stripeChargeId,
+        transferGroup,
+        sendTransferGroup: false,
+        payee: orgPayee
+          ? { userId: orgPayee.userId, account: orgPayee.account }
+          : null,
+        idempotencyKey: `${stripeChargeId}_org_fee`,
+        metadata: { purchase_id: purchase.id },
+      });
+    }
+  }
 
-    // WP-10 (Codex-69t7c.10): resolve creator email for connect-needed
-    // notification. Only fetched when we will attempt a creator_payout and
-    // the Connect account is not ready — avoids a DB round-trip on the hot
-    // paid path. Null is safe: notification is best-effort.
-    let creatorEmail: string | null = null;
+  /**
+   * Run a purchase's post-commit ledger write. The purchase and its access
+   * grant have committed by now, so a failure is logged as exactly that —
+   * not as a purchase that failed — with an errorId, and rethrown: the
+   * webhook answers by its cause, and a redelivery's replay re-records the
+   * missing slices. Acknowledged (a permanent cause), the slices stay
+   * missing until someone replays the event, so the errorId is the handle.
+   */
+  private async recordPayoutsAfterCommit(
+    purchase: Purchase,
+    stripeChargeId: string,
+    write: () => Promise<void>
+  ): Promise<void> {
+    try {
+      await write();
+    } catch (error) {
+      this.obs.error(
+        'Purchase committed but its payout slices were not all recorded; a redelivery re-records them',
+        {
+          errorId: crypto.randomUUID(),
+          purchaseId: purchase.id,
+          stripeChargeId,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      throw error;
+    }
+  }
+
+  private ledger(): LedgerDeps {
+    return {
+      db: this.db,
+      stripe: this.stripe,
+      obs: this.obs,
+      environment: this.environment,
+    };
+  }
+
+  /**
+   * A replayed webhook re-records an existing purchase's slices from the split
+   * stored on it. The ledger skips every slice already there, so this only
+   * adds one the first delivery never wrote — the worker died between
+   * committing the purchase and writing its slices, or an insert failed and
+   * the webhook was retried (Codex-2hxff.11). Until this, a replay skipped the
+   * ledger entirely and such a slice was never paid.
+   *
+   * A purchase refunded or disputed since is left alone: adding a slice now
+   * would pay out money the buyer has been given back.
+   */
+  private async repairPurchasePayouts(
+    purchase: Purchase,
+    stripeChargeId: string
+  ): Promise<void> {
     if (
-      revenueSplit.creatorPayoutCents > 0 &&
-      !creatorConnect?.chargesEnabled &&
-      this.mailer
+      purchase.status !== PURCHASE_STATUS.COMPLETED ||
+      purchase.refundedAt ||
+      // A partial refund keeps the purchase completed (P-1), so its amount,
+      // not its status, says it was refunded.
+      (purchase.refundAmountCents ?? 0) > 0 ||
+      purchase.disputedAt
     ) {
+      // Said out loud: if the first delivery lost a slice, a PARTIAL refund
+      // leaves part of it owed, and only a person can settle that.
+      this.obs.warn('Replay left a refunded or disputed purchase unrepaired', {
+        purchaseId: purchase.id,
+        status: purchase.status,
+        refundedAt: purchase.refundedAt?.toISOString() ?? null,
+        refundAmountCents: purchase.refundAmountCents,
+        disputedAt: purchase.disputedAt?.toISOString() ?? null,
+      });
+      return;
+    }
+    const creatorId = await this.findPurchaseCreator(purchase);
+    if (!creatorId) {
+      this.obs.error('Cannot re-record a purchase: its creator is unknown', {
+        purchaseId: purchase.id,
+        contentId: purchase.contentId,
+        courseId: purchase.courseId,
+      });
+      return;
+    }
+    await this.writePurchasePayouts({
+      purchase,
+      revenueSplit: {
+        platformFeeCents: purchase.platformFeeCents,
+        organizationFeeCents: purchase.organizationFeeCents,
+        creatorPayoutCents: purchase.creatorPayoutCents,
+      },
+      creatorId,
+      organizationId: purchase.organizationId,
+      stripeChargeId,
+    });
+  }
+
+  /**
+   * The creator paid for a purchase: its content's, or its course's. Read by
+   * id alone, soft-deleted rows included, on purpose: the id comes from the
+   * purchase, the result never leaves the server, and the creator of content
+   * deleted since must still be paid.
+   */
+  private async findPurchaseCreator(
+    purchase: Purchase
+  ): Promise<string | undefined> {
+    if (purchase.contentId) {
+      const row = await this.db.query.content.findFirst({
+        where: eq(content.id, purchase.contentId),
+        columns: { creatorId: true },
+      });
+      return row?.creatorId;
+    }
+    if (purchase.courseId) {
+      const row = await this.db.query.courses.findFirst({
+        where: eq(courses.id, purchase.courseId),
+        columns: { creatorId: true },
+      });
+      return row?.creatorId;
+    }
+    return undefined;
+  }
+
+  /**
+   * WP-10 (Codex-69t7c.10): tell a creator money is waiting for them to set
+   * up payouts. Best-effort and fire-and-forget: a notification miss must
+   * never block or reverse the payout.
+   */
+  private async notifyCreatorConnectNeeded(
+    creatorId: string,
+    organizationId: string | null,
+    amountCents: number
+  ): Promise<void> {
+    if (!this.mailer) return;
+    try {
       const [creatorRow] = await this.db
         .select({ email: users.email })
         .from(users)
         .where(eq(users.id, creatorId))
         .limit(1);
-      creatorEmail = creatorRow?.email ?? null;
-    }
-
-    // Codex-sec7i: org slice routes to the pinned Connect account.
-    // Codex-69t7c WP5: only resolve when there IS an org — orgless purchases
-    // never carve an org slice (organizationFeeCents is forced to 0 upstream),
-    // so this stays undefined and the org-fee branch below is skipped.
-    const orgConnect =
-      organizationId !== null && revenueSplit.organizationFeeCents > 0
-        ? await resolvePrimaryConnect(this.db, organizationId)
-        : undefined;
-
-    // 2. Creator payout — secondary transfer with source_transaction.
-    if (revenueSplit.creatorPayoutCents > 0) {
-      await this.executePurchaseTransfer({
-        purchase,
+      if (!creatorRow?.email) return;
+      const dashboardUrl = this.webAppUrl
+        ? `${this.webAppUrl}/studio/earnings`
+        : '/studio/earnings';
+      void this.mailer({
+        to: creatorRow.email,
+        templateName: 'creator-connect-needed',
+        category: 'transactional',
+        userId: creatorId,
         organizationId,
-        amountCents: revenueSplit.creatorPayoutCents,
-        payoutType: 'creator_payout',
-        rowUserId: creatorId,
-        connect: creatorConnect,
-        stripeChargeId,
-        transferGroup,
-        idempotencyKey: `${stripeChargeId}_creator`,
-        now,
-        creatorEmail,
-      });
-    }
-
-    // 3. Organization fee — secondary transfer with source_transaction.
-    // Codex-69t7c WP5: `organizationId !== null` is part of the guard. Orgless
-    // (bi-party) purchases force organizationFeeCents to 0 upstream, so this
-    // branch is unreachable for them; the null-check also narrows
-    // `organizationId` to `string` for the resolvers below.
-    if (organizationId !== null && revenueSplit.organizationFeeCents > 0) {
-      // Codex-ed446: the org-fee payout row's recipient userId MUST be
-      // non-null (check_payouts_user_required). Prefer the resolved Connect
-      // account's user; when the org owner has not onboarded a Connect
-      // account, orgConnect is undefined — fall back to the org owner so a
-      // pending organization_fee row still persists and is swept (mirrors the
-      // subscription path) instead of stranding the slice via a 23514
-      // violation that the per-row catch would silently swallow.
-      const orgRowUserId =
-        orgConnect?.userId ?? (await this.resolveOrgOwnerId(organizationId));
-      if (orgRowUserId) {
-        await this.executePurchaseTransfer({
-          purchase,
-          organizationId,
-          amountCents: revenueSplit.organizationFeeCents,
-          payoutType: 'organization_fee',
-          rowUserId: orgRowUserId,
-          connect: orgConnect,
-          stripeChargeId,
-          transferGroup,
-          idempotencyKey: `${stripeChargeId}_org_fee`,
-          now,
-        });
-      } else {
-        // No Connect account AND no resolvable org owner — cannot attribute
-        // the slice to any user, so a ledger row is impossible. Surface loudly
-        // (data-integrity event) rather than emit a 23514-bound insert.
-        this.obs.error(
-          'Cannot record organization_fee payout: no Connect account and no org owner found',
-          {
-            purchaseId: purchase.id,
-            organizationId,
-            amountCents: revenueSplit.organizationFeeCents,
-          }
-        );
-      }
-    }
-  }
-
-  /**
-   * Resolve an org's owner userId (Codex-ed446). The org-fee payout row MUST
-   * carry a non-null userId (check_payouts_user_required); when the org owner
-   * has not onboarded a Connect account, `resolvePrimaryConnect` returns
-   * undefined, so we fall back to the owner here rather than writing a
-   * null-userId row that violates 23514 and strands the org slice in the
-   * platform balance. Mirrors `SubscriptionService.resolveOrgOwnerId`. No
-   * ORDER BY — matches that resolver's shape; deterministic-owner ordering
-   * across multi-owner orgs is tracked separately in Codex-rjwdm.
-   */
-  private async resolveOrgOwnerId(orgId: string): Promise<string | null> {
-    const [owner] = await this.db
-      .select({ userId: organizationMemberships.userId })
-      .from(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.organizationId, orgId),
-          eq(organizationMemberships.role, 'owner'),
-          // A removed owner keeps role='owner' with status='inactive', and the
-          // pending-payout sweep resolves its destination by payouts.userId
-          // alone — so a removed founder who later onboards Connect would
-          // receive the org fee.
-          eq(organizationMemberships.status, 'active')
-        )
-      )
-      .limit(1);
-
-    return owner?.userId ?? null;
-  }
-
-  /**
-   * Execute a single secondary transfer (creator or organization slice) and
-   * write the corresponding payouts ledger row.
-   *
-   * Per-row error isolation: success → paid+stripeTransferId; Connect not
-   * ready → pending+connect_not_ready; Stripe failure → failed+transfer_failed.
-   * NEVER throws — the caller relies on this method's branches to keep going.
-   */
-  private async executePurchaseTransfer(params: {
-    purchase: Purchase;
-    // Codex-69t7c WP5: nullable for orgless (bi-party) creator_payout rows.
-    // Written verbatim onto the payouts row (payouts.organization_id is
-    // nullable). The org-fee path always passes a non-null org.
-    organizationId: string | null;
-    amountCents: number;
-    payoutType: 'creator_payout' | 'organization_fee';
-    rowUserId: string | null;
-    connect:
-      | {
-          userId: string;
-          stripeAccountId: string;
-          chargesEnabled: boolean;
-        }
-      | undefined;
-    stripeChargeId: string;
-    transferGroup: string;
-    idempotencyKey: string;
-    now: Date;
-    /** WP-10: creator email for connect-needed notification (creator_payout only). */
-    creatorEmail?: string | null;
-  }): Promise<void> {
-    const {
-      purchase,
-      organizationId,
-      amountCents,
-      payoutType,
-      rowUserId,
-      connect,
-      stripeChargeId,
-      transferGroup,
-      idempotencyKey,
-      now,
-      creatorEmail,
-    } = params;
-
-    if (!connect?.chargesEnabled) {
-      // Track whether the ledger row was freshly inserted so the notification
-      // is not re-fired on idempotent replay (webhook redelivery).
-      let freshInsert = false;
-      try {
-        await this.db.insert(payouts).values({
-          userId: rowUserId,
-          organizationId,
-          purchaseId: purchase.id,
-          amountCents,
-          payoutType,
-          status: 'pending',
-          sourceType: 'purchase',
-          reason: 'connect_not_ready',
-          stripeChargeId,
-          transferGroup,
-        });
-        freshInsert = true;
-      } catch (err) {
-        if (!isUniqueViolation(err)) {
-          this.obs.error(
-            `Failed to record pending ${payoutType} payout (connect_not_ready)`,
-            {
-              purchaseId: purchase.id,
-              organizationId,
-              amountCents,
-              // Codex-ed446: surface the constraint so a CHECK violation
-              // (e.g. check_payouts_user_required, 23514) on this money-ledger
-              // insert is logged distinctly from the suppressed 23505 dup.
-              constraint: getConstraintName(err),
-              error: err instanceof Error ? err.message : String(err),
-            }
-          );
-        }
-        // freshInsert stays false for two distinct cases:
-        // 1. isUniqueViolation: idempotent replay — row already exists (skip notification).
-        // 2. Other insert error: insert failed for a non-dup reason (also skip notification).
-        // Both leave freshInsert=false and correctly suppress the mailer.
-      }
-
-      // WP-10 (Codex-69t7c.10): fire creator-connect-needed notification
-      // fire-and-forget AFTER the ledger write. Only fires on FRESH insert
-      // (idempotency: if the row already existed this was a replay, not a new
-      // park). Only for creator_payout rows (not organization_fee). Failure is
-      // swallowed — a notification miss must NEVER block or reverse the payout.
-      if (
-        freshInsert &&
-        payoutType === 'creator_payout' &&
-        creatorEmail &&
-        rowUserId &&
-        this.mailer
-      ) {
-        try {
-          const amountFormatted = `£${(amountCents / 100).toFixed(2)}`;
-          const dashboardUrl = this.webAppUrl
-            ? `${this.webAppUrl}/studio/earnings`
-            : '/studio/earnings';
-          void this.mailer({
-            to: creatorEmail,
-            templateName: 'creator-connect-needed',
-            category: 'transactional',
-            userId: rowUserId,
-            organizationId,
-            data: {
-              creatorName: creatorEmail, // fallback; template can resolve display name
-              amountFormatted,
-              dashboardUrl,
-            },
-          });
-        } catch (err) {
-          // Swallow — notification failure must not surface in the payout path.
-          this.obs.warn('creator-connect-needed notification dispatch failed', {
-            purchaseId: purchase.id,
-            organizationId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-
-      return;
-    }
-
-    try {
-      // `source_transaction` links this transfer to the platform charge.
-      // Stripe permits multiple transfers from the same source_transaction
-      // as long as their sum does not exceed charge.amount, AND bypasses
-      // the T+2 available_on wait by tracking funds against the source.
-      //
-      // `transfer_group` is OMITTED here. Multiple transfers from the same
-      // source_transaction inherit Stripe's auto-generated transfer group;
-      // passing a custom one alongside source_transaction is rejected with
-      // "You cannot use transfer_group if the source_transaction already
-      // has one set." (Same constraint as Option A.) Charge traceability
-      // is preserved via metadata.stripe_charge_id and the row's own
-      // stripeChargeId column.
-      const transfer = await this.stripe.transfers.create(
-        {
-          amount: amountCents,
-          currency: CURRENCY.GBP,
-          destination: connect.stripeAccountId,
-          source_transaction: stripeChargeId,
-          metadata: {
-            purchase_id: purchase.id,
-            type: payoutType,
-            stripe_charge_id: stripeChargeId,
-          },
+        data: {
+          creatorName: creatorRow.email, // fallback; template can resolve display name
+          amountFormatted: `£${(amountCents / 100).toFixed(2)}`,
+          dashboardUrl,
         },
-        { idempotencyKey }
-      );
-      try {
-        await this.db.insert(payouts).values({
-          userId: rowUserId,
-          organizationId,
-          purchaseId: purchase.id,
-          amountCents,
-          payoutType,
-          status: 'paid',
-          sourceType: 'purchase',
-          stripeTransferId: transfer.id,
-          stripeChargeId,
-          transferGroup,
-          resolvedAt: now,
-        });
-      } catch (insertErr) {
-        if (!isUniqueViolation(insertErr)) {
-          // Codex-69t7c WP5 hardening (b): the Stripe transfer ALREADY fired
-          // (real money moved to the Connect account) but the ledger row
-          // failed on a non-dup DB error — the ledger is now silently out of
-          // sync with Stripe. Emit a correlatable errorId so this money-moved
-          // / ledger-silent state is loud and reconcilable.
-          const errorId = crypto.randomUUID();
-          this.obs.error(
-            `${payoutType} transfer succeeded but payouts ledger insert failed`,
-            {
-              errorId,
-              purchaseId: purchase.id,
-              organizationId,
-              stripeTransferId: transfer.id,
-              destination: connect.stripeAccountId,
-              idempotencyKey,
-              amountCents,
-              constraint: getConstraintName(insertErr),
-              error:
-                insertErr instanceof Error
-                  ? insertErr.message
-                  : String(insertErr),
-            }
-          );
-        }
-      }
-    } catch (transferErr) {
-      // Codex-69t7c WP5 hardening (c): include idempotencyKey + destination
-      // (Connect account id) so a failed transfer can be traced to the exact
-      // Stripe idempotent request and recipient during reconciliation.
-      this.obs.error(`${payoutType} transfer failed`, {
-        purchaseId: purchase.id,
-        organizationId,
-        amountCents,
-        idempotencyKey,
-        destination: connect.stripeAccountId,
-        error:
-          transferErr instanceof Error
-            ? transferErr.message
-            : String(transferErr),
       });
-      try {
-        await this.db.insert(payouts).values({
-          userId: rowUserId,
-          organizationId,
-          purchaseId: purchase.id,
-          amountCents,
-          payoutType,
-          status: 'failed',
-          sourceType: 'purchase',
-          reason: 'transfer_failed',
-        });
-      } catch (insertErr) {
-        if (!isUniqueViolation(insertErr)) {
-          this.obs.error(`Failed to record failed ${payoutType} payout row`, {
-            purchaseId: purchase.id,
-            organizationId,
-            amountCents,
-            error:
-              insertErr instanceof Error
-                ? insertErr.message
-                : String(insertErr),
-          });
-        }
-      }
+    } catch (err) {
+      this.obs.warn('creator-connect-needed notification dispatch failed', {
+        creatorId,
+        organizationId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -1947,23 +1885,39 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Process a refund from a charge.refunded webhook event.
+   * Process a refund of a purchase's charge (`charge.refunded`; and
+   * `refund.updated`, which re-runs the clawback).
    *
    * Flow:
    * 1. Ensure the purchase row exists (self-heal ordering race #4, Codex-aa08z)
-   * 2. Update purchase status to 'refunded'
-   * 3. Revoke content access (soft delete)
+   * 2. Record the refund on the purchase:
+   *    - a FULL refund (the charge refunded in full) makes it `refunded` and
+   *      ends access: content access soft-deleted, its entitlement revoked;
+   *    - a PARTIAL refund keeps access (owner decision P-1, "Keep access"):
+   *      the purchase stays `completed`, with the amount refunded so far.
+   *    Each refund itself is a `refunds` row (`recordChargeRefunds`).
+   * 3. Claw back each refund's share of the payout slices
    *
-   * Idempotent: If purchase is already refunded, this is a no-op.
+   * Idempotent. An already-refunded purchase skips step 2 but still runs
+   * step 3: what each refund did is recorded per slice (payout_reversals), so
+   * a redelivery does only what is left (Codex-2hxff.8).
    */
   async processRefund(
     paymentIntentId: string,
-    refundDetails?: {
+    refundDetails: {
+      /** The refunded charge: its id and amount, the clawback's denominator. */
+      charge: ClawbackCharge;
+      /** The newest refund of the charge. */
       stripeRefundId?: string;
+      /**
+       * How much of the charge is refunded so far: Stripe's cumulative
+       * `charge.amount_refunded`. At least the charge's amount is a full
+       * refund. Absent, the refund is taken to be full.
+       */
       refundAmountCents?: number;
       refundReason?: string;
     }
-  ): Promise<{ userId: string } | undefined> {
+  ): Promise<{ userId: string; accessEnded: boolean } | undefined> {
     try {
       // Self-heal ordering race #4 (Codex-aa08z): if charge.refunded beat
       // checkout.session.completed, the row won't exist yet — rebuild it from
@@ -1983,304 +1937,261 @@ export class PurchaseService extends BaseService {
           purchaseId: purchase.id,
           paymentIntentId,
         });
-        return { userId: purchase.customerId };
+        // The purchase is recorded; the clawback is not gated by it.
+        await this.clawBackRefunds(purchase.id, refundDetails.charge);
+        return { userId: purchase.customerId, accessEnded: true };
       }
 
-      // Atomically update purchase status AND revoke content access
-      await this.db.transaction(async (tx) => {
-        // Update purchase status to refunded with tracking fields
-        await tx
+      const refundedCents =
+        refundDetails.refundAmountCents ?? refundDetails.charge.amountCents;
+      const isFull = refundedCents >= refundDetails.charge.amountCents;
+      const refundFields = {
+        updatedAt: new Date(),
+        refundAmountCents: refundedCents,
+        stripeRefundId: refundDetails.stripeRefundId ?? null,
+        refundReason: refundDetails.refundReason ?? null,
+      };
+
+      if (!isFull) {
+        // P-1: the buyer keeps access. The amount only grows, so a stale
+        // redelivery never lowers it.
+        await this.db
           .update(purchases)
-          .set({
-            status: PURCHASE_STATUS.REFUNDED,
-            updatedAt: new Date(),
-            refundedAt: new Date(),
-            refundAmountCents: refundDetails?.refundAmountCents ?? null,
-            stripeRefundId: refundDetails?.stripeRefundId ?? null,
-            refundReason: refundDetails?.refundReason ?? null,
-          })
-          .where(eq(purchases.id, purchase.id));
-
-        // Revoke content access (soft delete) — content purchases only. Course
-        // purchases grant no contentAccess row (they use entitlements).
-        if (purchase.contentId) {
-          await tx
-            .update(contentAccess)
-            .set({ deletedAt: new Date() })
-            .where(
-              and(
-                eq(contentAccess.userId, purchase.customerId),
-                eq(contentAccess.contentId, purchase.contentId),
-                isNull(contentAccess.deletedAt)
-              )
-            );
-        }
-
-        // Codex-2pryk WP-6: revoke the entitlement this purchase granted
-        // (content_purchase OR course_purchase — both carry sourceRef=purchase.id).
-        // Without this a refund would leave a LIVE grant the resolver still
-        // honours (access-integrity bug). Keyed on sourceRef so one statement
-        // covers either target. Idempotent (no-op if already revoked / absent).
-        await tx
-          .update(entitlements)
-          .set({ revokedAt: new Date() })
+          .set(refundFields)
           .where(
             and(
-              eq(entitlements.sourceRef, purchase.id),
-              isNull(entitlements.revokedAt)
+              eq(purchases.id, purchase.id),
+              eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+              or(
+                isNull(purchases.refundAmountCents),
+                lt(purchases.refundAmountCents, refundedCents)
+              )
             )
           );
-      });
+      } else {
+        // Atomically update purchase status AND revoke content access
+        await this.db.transaction(async (tx) => {
+          // Update purchase status to refunded with tracking fields
+          await tx
+            .update(purchases)
+            .set({
+              ...refundFields,
+              status: PURCHASE_STATUS.REFUNDED,
+              refundedAt: new Date(),
+            })
+            .where(eq(purchases.id, purchase.id));
 
-      // Step: reverse payouts ledger rows + the org-fee transfer (Codex-h69cg).
-      // Out-of-transaction because it talks to Stripe; per-row error isolation
-      // so one bad reversal can never block the refund acknowledgement (Stripe
-      // would retry the webhook, but the refund itself has already been
-      // recorded on the purchases row above).
-      //
-      // Codex-d9t5r / DQ-7: refundAmountCents drives proportional reversal;
-      // stripeRefundId keys the Stripe idempotency suffix so two separate
-      // refund events of equal pence value don't collide.
-      await this.reversePayoutsForPurchase(purchase, {
-        refundAmountCents: refundDetails?.refundAmountCents ?? null,
-        stripeRefundId: refundDetails?.stripeRefundId ?? null,
-      });
+          // Revoke content access (soft delete) — content purchases only. Course
+          // purchases grant no contentAccess row (they use entitlements).
+          if (purchase.contentId) {
+            await tx
+              .update(contentAccess)
+              .set({ deletedAt: new Date() })
+              .where(
+                and(
+                  eq(contentAccess.userId, purchase.customerId),
+                  eq(contentAccess.contentId, purchase.contentId),
+                  isNull(contentAccess.deletedAt)
+                )
+              );
+          }
+
+          // Codex-2pryk WP-6: revoke the entitlement this purchase granted
+          // (content_purchase OR course_purchase — both carry sourceRef=purchase.id).
+          // Without this a refund would leave a LIVE grant the resolver still
+          // honours (access-integrity bug). Keyed on sourceRef so one statement
+          // covers either target. Idempotent (no-op if already revoked / absent).
+          await tx
+            .update(entitlements)
+            .set({ revokedAt: new Date() })
+            .where(
+              and(
+                eq(entitlements.sourceRef, purchase.id),
+                isNull(entitlements.revokedAt)
+              )
+            );
+        });
+      }
+
+      // Step: claw back the payout slices (Codex-h69cg), out of the
+      // transaction because it talks to Stripe. The purchase is already
+      // recorded above; a clawback step that must be retried rejects after
+      // every other step, and the webhook's 500 has Stripe redeliver.
+      await this.clawBackRefunds(purchase.id, refundDetails.charge);
 
       this.obs.info('Refund processed', {
         purchaseId: purchase.id,
         contentId: purchase.contentId,
         customerId: purchase.customerId,
         paymentIntentId,
+        refundedCents,
+        accessEnded: isFull,
       });
 
       // Return the purchaser's userId so the webhook route can bump
       // COLLECTION_USER_LIBRARY — refunded content disappears from the
       // user's library on their next fetch. No orgId: one-time purchases
       // are content-scoped, not org-scoped, so only the library cache bumps.
-      return { userId: purchase.customerId };
+      return { userId: purchase.customerId, accessEnded: isFull };
     } catch (error) {
       this.handleError(error, 'processRefund');
     }
   }
 
   /**
-   * Reverse the payouts ledger rows + secondary transfers for a refunded
-   * purchase (Option B platform-charge model — Codex-h69cg).
-   *
-   * - `platform_fee`: no transfer existed; the platform retained the slice
-   *   on its balance. Marking the row `status='reversed'` is sufficient —
-   *   the refund itself returns money from the platform balance.
-   * - `creator_payout` AND `organization_fee`: each had a secondary
-   *   `transfers.create` call against the source charge. Both must be
-   *   reversed via `transfers.createReversal` with a deterministic
-   *   idempotency key so webhook replays are safe. Stripe does NOT
-   *   auto-reverse these for us — they're separate transfers.
-   *
-   * Codex-d9t5r / DQ-7: when `refundAmountCents` is set and less than
-   * the purchase's `amountPaidCents`, each transfer is reversed
-   * proportionally — `floor(row.amountCents * refundAmountCents / amountPaidCents)`.
-   * Integer math: residual rounding stays on the platform balance.
-   * Idempotency suffix `_${refundAmountCents}` prevents the second
-   * partial refund from replaying the first's reversal amount.
-   *
-   * Insufficient-funds sentinel: if Stripe rejects the reversal with
-   * `insufficient_funds` (creator already withdrew their slice),
-   * the payouts row stays `status='paid'` and a `refund_reviews` row
-   * captures the clawback obligation for ops to resolve.
-   *
-   * Idempotent: rows already at `status='reversed'` or
-   * `'cancelled_by_refund'` are no-ops.
+   * Claw back each refund of the charge from this purchase's payout slices
+   * (@codex/payments `reverseCharge`, Codex-2hxff.56, .8). Only a refund that
+   * succeeded or failed is clawed back; one still pending is clawed back when
+   * `refund.updated` re-runs processRefund (owner decision Q1).
    */
-  private async reversePayoutsForPurchase(
-    purchase: Purchase,
-    refund: { refundAmountCents: number | null; stripeRefundId: string | null }
+  private async clawBackRefunds(
+    purchaseId: string,
+    charge: ClawbackCharge
   ): Promise<void> {
-    const rows = await this.db
-      .select()
-      .from(payouts)
-      .where(eq(payouts.purchaseId, purchase.id));
-
-    if (rows.length === 0) return;
-
-    const { refundAmountCents, stripeRefundId } = refund;
-    const isPartial =
-      refundAmountCents !== null &&
-      refundAmountCents > 0 &&
-      refundAmountCents < purchase.amountPaidCents;
-    // Capture the partial ratio's numerator once so we can narrow without
-    // re-asserting `refundAmountCents !== null` inside the per-row closure.
-    const partialRatioNumerator = isPartial ? refundAmountCents : null;
-    const reversalAmount = (rowAmountCents: number): number =>
-      partialRatioNumerator !== null
-        ? Math.floor(
-            (rowAmountCents * partialRatioNumerator) / purchase.amountPaidCents
-          )
-        : rowAmountCents;
-    // Prefer the Stripe refund ID for the idempotency suffix — it is the
-    // unique-per-refund identifier, so two distinct refund events of equal
-    // pence value get distinct keys. Fall back to the cents value for
-    // legacy paths that don't propagate the ID.
-    const idempotencySuffix = stripeRefundId
-      ? `_${stripeRefundId}`
-      : refundAmountCents !== null
-        ? `_${refundAmountCents}`
-        : '';
-
-    for (const row of rows) {
-      if (row.status === 'reversed' || row.status === 'cancelled_by_refund') {
-        continue;
+    await reverseCharge(
+      { ...this.ledger(), obs: this.obs },
+      {
+        charge,
+        source: { sourceType: 'purchase', purchaseId },
+        refunds: () => listClawableRefunds(this.stripe, charge.id),
       }
+    );
+  }
 
-      // Reverse the Stripe transfer when one exists. Under Option B both
-      // `creator_payout` AND `organization_fee` rows carry a
-      // `stripeTransferId` — each had a separate `transfers.create` against
-      // the source charge. `platform_fee` never carries one.
-      //
-      // Codex-d9t5r: skip the status flip in two cases — the Stripe
-      // reversal failed with insufficient_funds (refund_reviews captures
-      // the clawback obligation) or the partial-refund ratio floored the
-      // slice to zero (platform absorbs the sub-penny). In both cases the
-      // ledger stays truthful: status='paid' because the original transfer
-      // really did succeed.
-      let skipStatusFlip = false;
-      if (row.stripeTransferId) {
-        const amount = reversalAmount(row.amountCents);
-        if (amount === 0) {
-          skipStatusFlip = true;
-          this.obs.info('Reversal amount floored to zero, platform absorbs', {
-            purchaseId: purchase.id,
-            payoutId: row.id,
-            rowAmountCents: row.amountCents,
-            refundAmountCents,
-          });
-        } else {
-          try {
-            await this.stripe.transfers.createReversal(
-              row.stripeTransferId,
-              {
-                amount,
-                metadata: {
-                  purchase_id: purchase.id,
-                  payout_id: row.id,
-                  type: 'refund_reversal',
-                },
-              },
-              {
-                idempotencyKey: `${row.stripeTransferId}_reversal${idempotencySuffix}`,
-              }
-            );
-          } catch (reverseErr) {
-            const code = (reverseErr as { code?: string } | null)?.code;
-            this.obs.error('Failed to reverse Stripe transfer for refund', {
-              purchaseId: purchase.id,
-              payoutId: row.id,
-              stripeTransferId: row.stripeTransferId,
-              attemptedReversalCents: amount,
-              code: code ?? null,
-              error:
-                reverseErr instanceof Error
-                  ? reverseErr.message
-                  : String(reverseErr),
-            });
-            if (code === 'insufficient_funds' && row.userId) {
-              await this.recordRefundReview({
-                purchaseId: purchase.id,
-                payoutId: row.id,
-                creatorUserId: row.userId,
-                attemptedReversalCents: amount,
-                errorCode: code,
-                errorMessage:
-                  reverseErr instanceof Error ? reverseErr.message : null,
-              });
-              skipStatusFlip = true;
-            }
-            // Continue — per-row error isolation.
-          }
-        }
-      }
-
-      if (skipStatusFlip) continue;
-
-      // Codex-92ej7 / DQ-9: pending/failed rows (transfer never happened)
-      // become 'cancelled_by_refund' — explicitly cancels the obligation
-      // without claiming a transfer existed, and keeps them out of the
-      // sweep cron's pending-row scan. Paid rows (creator/org transfers
-      // AND platform_fee retention) become 'reversed' — money moved
-      // (either to Connect or onto the platform balance) and is now
-      // being undone.
-      const nextStatus =
-        row.status === 'pending' || row.status === 'failed'
-          ? ('cancelled_by_refund' as const)
-          : ('reversed' as const);
-
-      try {
-        await this.db
-          .update(payouts)
-          .set({
-            status: nextStatus,
-            resolvedAt: row.resolvedAt ?? new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(payouts.id, row.id));
-      } catch (updateErr) {
-        this.obs.error('Failed to update payouts row after refund', {
-          purchaseId: purchase.id,
-          payoutId: row.id,
-          nextStatus,
-          error:
-            updateErr instanceof Error ? updateErr.message : String(updateErr),
+  /**
+   * Record a refund as Stripe reports it (`refunds`; owner decisions
+   * 2026-10-19). One row per Stripe refund, for any source; `purchaseId` is
+   * set when the charge is a purchase's. A failed row is support's to settle,
+   * and the clawback is left standing (see the table).
+   *
+   * A stale event never moves a row backwards: `failed` and `canceled` are
+   * final, and `succeeded` does not return to pending. Returns true when this
+   * call wrote the refund's status (a new row, or a newer status), so a
+   * redelivered event does not raise an alert again. A status Stripe has
+   * added since is logged and not written.
+   */
+  async recordRefund(refund: {
+    stripeRefundId: string;
+    stripeChargeId: string;
+    /** The charge's PaymentIntent, which finds the purchase if it is one. */
+    paymentIntentId: string | null;
+    amountCents: number;
+    currency: string;
+    status: string | null;
+    reason: string | null;
+    failureReason: string | null;
+    stripeCreatedAt: Date;
+  }): Promise<boolean> {
+    try {
+      const { status } = refund;
+      if (!isRefundStatus(status)) {
+        this.obs.warn('Refund has a status the refunds table does not know', {
+          refundId: refund.stripeRefundId,
+          status,
         });
+        return false;
       }
+      const [purchase] = refund.paymentIntentId
+        ? await this.db
+            .select({ id: purchases.id })
+            .from(purchases)
+            .where(eq(purchases.stripePaymentIntentId, refund.paymentIntentId))
+            .limit(1)
+        : [];
+      const written = await this.db
+        .insert(refunds)
+        .values({
+          stripeRefundId: refund.stripeRefundId,
+          stripeChargeId: refund.stripeChargeId,
+          purchaseId: purchase?.id ?? null,
+          amountCents: refund.amountCents,
+          currency: refund.currency,
+          status,
+          reason: refund.reason,
+          failureReason: refund.failureReason,
+          stripeCreatedAt: refund.stripeCreatedAt,
+        })
+        .onConflictDoUpdate({
+          target: refunds.stripeRefundId,
+          set: { status, failureReason: refund.failureReason },
+          // Forward only: Stripe does not deliver events in order.
+          setWhere: sql`${refunds.status} <> excluded.status AND ${refunds.status} NOT IN ('failed', 'canceled') AND NOT (${refunds.status} = 'succeeded' AND excluded.status IN ('pending', 'requires_action'))`,
+        })
+        .returning();
+      return written.length > 0;
+    } catch (error) {
+      this.handleError(error, 'recordRefund');
     }
   }
 
   /**
-   * Codex-d9t5r / DQ-7 sentinel: record an ops-resolution row when a
-   * Stripe reversal fails with `insufficient_funds`. The payouts row
-   * stays `status='paid'` because the original transfer succeeded —
-   * this row tracks the clawback obligation separately so ops can
-   * decide between creator-absorbed / platform-absorbed / manual.
+   * Record every refund of a charge, as Stripe lists them, in `refunds`
+   * (`charge.refunded`; owner decision 2026-10-19, "One refunds table"). The
+   * event names no refund: `charge.refunds` is no longer sent. Returns them
+   * newest first, so the caller can name the newest on the purchase.
    */
-  private async recordRefundReview(input: {
-    purchaseId: string;
-    payoutId: string;
-    creatorUserId: string;
-    attemptedReversalCents: number;
-    errorCode: string;
-    errorMessage: string | null;
-  }): Promise<void> {
+  async recordChargeRefunds(charge: {
+    id: string;
+    paymentIntentId: string | null;
+  }): Promise<Stripe.Refund[]> {
     try {
-      await this.db
-        .insert(refundReviews)
-        .values({
-          purchaseId: input.purchaseId,
-          payoutId: input.payoutId,
-          creatorUserId: input.creatorUserId,
-          attemptedReversalCents: input.attemptedReversalCents,
-          errorCode: input.errorCode,
-          errorMessage: input.errorMessage,
-        })
-        // Webhook replay safety: targets the partial unique index
-        // `uq_refund_reviews_open_per_payout` so the second delivery
-        // collapses while resolved history rows remain insertable.
-        .onConflictDoNothing({
-          target: refundReviews.payoutId,
-          where: sql`${refundReviews.resolvedAt} IS NULL`,
+      const listed = await listChargeRefunds(this.stripe, charge.id);
+      for (const refund of listed) {
+        await this.recordRefund({
+          stripeRefundId: refund.id,
+          stripeChargeId: charge.id,
+          paymentIntentId: charge.paymentIntentId,
+          amountCents: refund.amount,
+          currency: refund.currency,
+          status: refund.status,
+          reason: refund.reason ?? null,
+          failureReason: refund.failure_reason ?? null,
+          stripeCreatedAt: new Date(refund.created * 1000),
         });
-      this.obs.warn('Refund review queued for ops resolution', {
-        purchaseId: input.purchaseId,
-        payoutId: input.payoutId,
-        creatorUserId: input.creatorUserId,
-        attemptedReversalCents: input.attemptedReversalCents,
-        errorCode: input.errorCode,
-      });
-    } catch (insertErr) {
-      this.obs.error('Failed to write refund_reviews row', {
-        purchaseId: input.purchaseId,
-        payoutId: input.payoutId,
-        error:
-          insertErr instanceof Error ? insertErr.message : String(insertErr),
-      });
+      }
+      return [...listed].sort(
+        (a, b) => b.created - a.created || b.id.localeCompare(a.id)
+      );
+    } catch (error) {
+      this.handleError(error, 'recordChargeRefunds');
+    }
+  }
+
+  /**
+   * Claim the charge's refunds not yet emailed to the buyer, oldest first, so
+   * each refund is emailed once (owner decision 2026-10-19, "One per refund").
+   * The claim sets `notified_at` before the email is sent, so a redelivery
+   * finds nothing; an email that then fails to send is not retried. A refund
+   * that failed or was canceled is never emailed, nor one still waiting on the
+   * customer (`requires_action`).
+   */
+  async claimRefundEmails(
+    chargeId: string
+  ): Promise<Array<{ stripeRefundId: string; amountCents: number }>> {
+    try {
+      const claimed = await this.db
+        .update(refunds)
+        .set({ notifiedAt: new Date() })
+        .where(
+          and(
+            eq(refunds.stripeChargeId, chargeId),
+            isNull(refunds.notifiedAt),
+            inArray(refunds.status, ['pending', 'succeeded'])
+          )
+        )
+        .returning();
+      return claimed
+        .sort(
+          (a, b) =>
+            a.stripeCreatedAt.getTime() - b.stripeCreatedAt.getTime() ||
+            a.stripeRefundId.localeCompare(b.stripeRefundId)
+        )
+        .map((row) => ({
+          stripeRefundId: row.stripeRefundId,
+          amountCents: row.amountCents,
+        }));
+    } catch (error) {
+      this.handleError(error, 'claimRefundEmails');
     }
   }
 
@@ -2398,6 +2309,257 @@ export class PurchaseService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'processDispute');
+    }
+  }
+
+  /**
+   * Record a dispute as Stripe reports it (`disputes`; Codex-2hxff.9, design
+   * in docs/payments/dispute-record.md). One row per Stripe dispute, for any
+   * source; `purchaseId` is set when the charge is a purchase's. An open row
+   * holds the charge's unpaid payouts (`isDrainablePayout`).
+   *
+   * Forward only, because Stripe does not deliver events in order: an inquiry
+   * may become a chargeback, and a final status (`won`, `lost`,
+   * `warning_closed`, `prevented`) never changes. Returns the row as it now
+   * stands, which is what the caller acts on, not the event's snapshot. A
+   * status Stripe adds later is logged and not written.
+   */
+  async recordDispute(dispute: {
+    stripeDisputeId: string;
+    stripeChargeId: string;
+    paymentIntentId: string | null;
+    amountCents: number;
+    currency: string;
+    status: string;
+    reason: string | null;
+    stripeCreatedAt: Date;
+  }): Promise<Dispute | undefined> {
+    try {
+      const { status } = dispute;
+      if (!DISPUTE_STATUS_RANK.has(status)) {
+        this.obs.warn('Dispute has a status the disputes table does not know', {
+          disputeId: dispute.stripeDisputeId,
+          status,
+        });
+        return undefined;
+      }
+      const [purchase] = dispute.paymentIntentId
+        ? await this.db
+            .select({ id: purchases.id })
+            .from(purchases)
+            .where(eq(purchases.stripePaymentIntentId, dispute.paymentIntentId))
+            .limit(1)
+        : [];
+      await this.db
+        .insert(disputes)
+        .values({
+          stripeDisputeId: dispute.stripeDisputeId,
+          stripeChargeId: dispute.stripeChargeId,
+          purchaseId: purchase?.id ?? null,
+          amountCents: dispute.amountCents,
+          currency: dispute.currency,
+          status,
+          reason: dispute.reason,
+          stripeCreatedAt: dispute.stripeCreatedAt,
+        })
+        .onConflictDoUpdate({
+          target: disputes.stripeDisputeId,
+          set: { status, amountCents: dispute.amountCents },
+          // Forward only; the amount may still be corrected until it closes.
+          setWhere: sql`${disputeRank(sql`${disputes.status}`)} < ${disputeRank(sql`excluded.status`)} OR (${disputeRank(sql`${disputes.status}`)} < ${sql.raw(String(FINAL_DISPUTE_RANK))} AND ${disputes.status} = excluded.status AND ${disputes.amountCents} <> excluded.amount_cents)`,
+        });
+      const [current] = await this.db
+        .select()
+        .from(disputes)
+        .where(eq(disputes.stripeDisputeId, dispute.stripeDisputeId))
+        .limit(1);
+      return current;
+    } catch (error) {
+      this.handleError(error, 'recordDispute');
+    }
+  }
+
+  /**
+   * Claw back this purchase's slices for every cause on the charge: its
+   * refunds, and the chargebacks recorded in `disputes` (the dispute webhook).
+   * No purchase for the PaymentIntent (a subscription's charge): nothing.
+   */
+  async clawBackPurchaseCharge(
+    paymentIntentId: string,
+    charge: ClawbackCharge
+  ): Promise<void> {
+    try {
+      const [purchase] = await this.db
+        .select({ id: purchases.id })
+        .from(purchases)
+        .where(eq(purchases.stripePaymentIntentId, paymentIntentId))
+        .limit(1);
+      if (!purchase) return;
+      await this.clawBackRefunds(purchase.id, charge);
+    } catch (error) {
+      this.handleError(error, 'clawBackPurchaseCharge');
+    }
+  }
+
+  /**
+   * A WON dispute restores the buyer's access (owner decision P-2): the
+   * disputed mark is cleared, and the content access and entitlement it
+   * revoked are restored. A purchase refunded since keeps its access ended.
+   * Idempotent. Returns the buyer, for the library cache.
+   */
+  async restoreDisputedPurchase(
+    paymentIntentId: string
+  ): Promise<{ userId: string; orgId: string | null } | undefined> {
+    try {
+      const purchase = await this.db.query.purchases.findFirst({
+        where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+      });
+      if (!purchase) return undefined;
+      const scope = {
+        userId: purchase.customerId,
+        orgId: purchase.organizationId,
+      };
+      if (!purchase.disputedAt) return scope;
+
+      await this.db.transaction(async (tx) => {
+        await tx
+          .update(purchases)
+          .set({ disputedAt: null, updatedAt: new Date() })
+          .where(eq(purchases.id, purchase.id));
+        if (purchase.status !== PURCHASE_STATUS.COMPLETED) return;
+        if (purchase.contentId) {
+          await tx
+            .update(contentAccess)
+            .set({ deletedAt: null })
+            .where(
+              and(
+                eq(contentAccess.userId, purchase.customerId),
+                eq(contentAccess.contentId, purchase.contentId),
+                isNotNull(contentAccess.deletedAt)
+              )
+            );
+        }
+        await tx
+          .update(entitlements)
+          .set({ revokedAt: null })
+          .where(
+            and(
+              eq(entitlements.sourceRef, purchase.id),
+              isNotNull(entitlements.revokedAt)
+            )
+          );
+      });
+      this.obs.info('Won dispute restored access', {
+        purchaseId: purchase.id,
+        paymentIntentId,
+      });
+      return scope;
+    } catch (error) {
+      this.handleError(error, 'restoreDisputedPurchase');
+    }
+  }
+
+  /**
+   * A LOST dispute: the buyer keeps the money, so the purchase becomes
+   * `refunded` and its access stays ended (owner decision Q3). The amount
+   * refunded so far gains the disputed amount, capped at what was paid.
+   * Idempotent. Returns the buyer, for the library cache.
+   */
+  async processLostDispute(
+    paymentIntentId: string,
+    disputedCents: number
+  ): Promise<{ userId: string; orgId: string | null } | undefined> {
+    try {
+      const purchase = await this.db.query.purchases.findFirst({
+        where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+      });
+      if (!purchase) return undefined;
+      const scope = {
+        userId: purchase.customerId,
+        orgId: purchase.organizationId,
+      };
+      if (purchase.status === PURCHASE_STATUS.REFUNDED) return scope;
+
+      const now = new Date();
+      await this.db.transaction(async (tx) => {
+        await tx
+          .update(purchases)
+          .set({
+            status: PURCHASE_STATUS.REFUNDED,
+            refundedAt: now,
+            refundAmountCents: Math.min(
+              purchase.amountPaidCents,
+              (purchase.refundAmountCents ?? 0) + disputedCents
+            ),
+            updatedAt: now,
+          })
+          .where(eq(purchases.id, purchase.id));
+        // Revoked when the dispute opened; again here, in case it never was.
+        if (purchase.contentId) {
+          await tx
+            .update(contentAccess)
+            .set({ deletedAt: now })
+            .where(
+              and(
+                eq(contentAccess.userId, purchase.customerId),
+                eq(contentAccess.contentId, purchase.contentId),
+                isNull(contentAccess.deletedAt)
+              )
+            );
+        }
+        await tx
+          .update(entitlements)
+          .set({ revokedAt: now })
+          .where(
+            and(
+              eq(entitlements.sourceRef, purchase.id),
+              isNull(entitlements.revokedAt)
+            )
+          );
+      });
+      this.obs.info('Lost dispute recorded the purchase as refunded', {
+        purchaseId: purchase.id,
+        paymentIntentId,
+        disputedCents,
+      });
+      return scope;
+    } catch (error) {
+      this.handleError(error, 'processLostDispute');
+    }
+  }
+
+  /**
+   * A WON dispute's money (owner decision Q2): what it clawed back from every
+   * source's slices is paid back by new pending payout rows the next sweep
+   * pays (@codex/payments `repayDispute`). The held slices are released by
+   * the dispute closing. Then the outcome is marked applied.
+   */
+  async settleWonDispute(stripeDisputeId: string): Promise<void> {
+    try {
+      await repayDispute(
+        { ...this.ledger(), obs: this.obs },
+        { disputeId: stripeDisputeId }
+      );
+      await this.markDisputeOutcomeApplied(stripeDisputeId);
+    } catch (error) {
+      this.handleError(error, 'settleWonDispute');
+    }
+  }
+
+  /** A final status has been acted on: a redelivery stops at the record. */
+  async markDisputeOutcomeApplied(stripeDisputeId: string): Promise<void> {
+    try {
+      await this.db
+        .update(disputes)
+        .set({ outcomeAppliedAt: new Date() })
+        .where(
+          and(
+            eq(disputes.stripeDisputeId, stripeDisputeId),
+            isNull(disputes.outcomeAppliedAt)
+          )
+        );
+    } catch (error) {
+      this.handleError(error, 'markDisputeOutcomeApplied');
     }
   }
 
@@ -2541,7 +2703,10 @@ export class PurchaseService extends BaseService {
    * Create Stripe Billing Portal session
    *
    * Allows customers to manage their billing (view invoices, update payment
-   * methods). Delegates Customer resolution to `resolveOrCreateCustomer`
+   * methods) — and nothing else. Every session passes the locked portal
+   * configuration, so a subscription can only be cancelled, switched or paused
+   * in our own UI and our database and Stripe never disagree about it
+   * (docs/payments/subscriptions.md → Billing portal). Delegates Customer resolution to `resolveOrCreateCustomer`
    * (Codex-49gev) so portal sessions open the SAME `cus_...` the user's
    * checkout sessions use — one Stripe Customer per Codex user across every
    * org (Codex-pkqxd / Codex-ssfes).
@@ -2551,6 +2716,8 @@ export class PurchaseService extends BaseService {
    * @param userId - Codex user ID (used for lookup + idempotency key)
    * @param returnUrl - URL to redirect to after portal session
    * @returns Portal session URL
+   * @throws {StripeNotConfiguredError} If no portal configuration is set —
+   *   never open the account-default portal, which allows cancelling.
    * @throws {NotFoundError} If the Codex user row is missing/soft-deleted.
    * @throws {PaymentProcessingError} If Stripe portal session creation fails.
    */
@@ -2561,6 +2728,17 @@ export class PurchaseService extends BaseService {
   ): Promise<{ url: string }> {
     const validated = createPortalSessionSchema.parse({ returnUrl });
 
+    const configuration = this.portalConfigurationId;
+    if (!configuration) {
+      // The client gets the generic STRIPE_NOT_CONFIGURED message; the operator
+      // gets the binding name here.
+      this.obs.error(
+        'STRIPE_PORTAL_CONFIGURATION_ID is not set; refusing to open the default (unlocked) billing portal',
+        { userId }
+      );
+      throw new StripeNotConfiguredError();
+    }
+
     try {
       // Resolve the unified Customer id (cached on the user row, reused by
       // every checkout + portal across every org) and self-heal if the cache
@@ -2569,11 +2747,12 @@ export class PurchaseService extends BaseService {
       // raw Stripe errors from billingPortal.sessions.create.
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId, email },
+        { userId, email, environment: this.environment },
         (stripeCustomerId) =>
           this.stripe.billingPortal.sessions.create({
             customer: stripeCustomerId,
             return_url: validated.returnUrl,
+            configuration,
           }),
         {
           onStaleRecovery: (info) =>
@@ -2773,7 +2952,8 @@ export class PurchaseService extends BaseService {
           // Net to org: their share on completed rows only. Refunded rows
           // already returned the customer's money so they zero out for net.
           netCents: sql<number>`COALESCE(SUM(${purchases.creatorPayoutCents} + ${purchases.organizationFeeCents}) FILTER (WHERE ${purchases.status} = 'completed'), 0)::int`,
-          refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}) FILTER (WHERE ${purchases.status} = 'refunded'), 0)::int`,
+          // Partial refunds too: they leave the purchase completed (P-1).
+          refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}), 0)::int`,
           count: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'completed')::int`,
         })
         .from(purchases)

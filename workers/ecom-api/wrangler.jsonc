@@ -21,12 +21,11 @@
     "enabled": true
   },
 
-  // No `ratelimits` binding: this worker mounts no rate limiter. The webhook
-  // cap was deleted (Codex-kgrdp.17) — Stripe webhooks authenticate with an
-  // HMAC signature, so a per-caller cap adds no security and can only reject a
-  // legitimate retry burst. The `rateLimit: 'strict'` annotations on the
-  // procedure() routes here are not enforced by procedure() (Codex-4fsfd); if
-  // that changes, this worker needs a RATE_LIMIT_STRICT entry.
+  // Stripe webhooks carry no rate limit. Their cap was deleted
+  // (Codex-kgrdp.17): they authenticate with an HMAC signature, so a
+  // per-caller cap adds no security and can only reject a legitimate retry
+  // burst. The procedure() routes ARE limited; their bindings are under
+  // `ratelimits` below.
 
   // KV Namespaces
   //
@@ -194,7 +193,7 @@
       //
       // Safe because the cron is INSURANCE, not the primary path: the
       // account.updated webhook resolves these rows first and Stripe retries
-      // it for 3 days (see docs/payouts/payout-pipeline.md stage 5). The
+      // it for 3 days (see docs/payments/connect-and-payouts.md, "Releasing pending money"). The
       // sweep's own DEFAULT_OLDER_THAN_MINUTES=15 age threshold is unchanged,
       // so this only widens the detection window for a DROPPED webhook from
       // ~15 min to ~1 h.

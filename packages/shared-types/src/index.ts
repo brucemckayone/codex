@@ -66,6 +66,7 @@ export type {
   JourneyCourseSummary,
   JourneyCourseView,
   JourneyEnrollment,
+  JourneyFilmsAttached,
   JourneyListItem,
   JourneyPageRecord,
   JourneyPractice,

@@ -12,16 +12,24 @@
   so public and editing markup stay identical. A background image
   (`props.background`) puts the whole section on the on-media colours over a
   uniform scrim. `hero` has its own media and `cta` its own backdrop (01 A5),
-  so neither takes one here. An image that fails to load leaves the section in
-  its own scheme, as if none were set.
+  so neither takes one here, and nor does a simple section (a Picture,
+  Heading, Break or Button, 03 X64), which takes its neighbour's ground. An image that fails to load leaves the section in
+  its own scheme, as if none were set. The image runs edge to edge, so it
+  offers every size it has (`pageImageSrcset`), drawn at the viewport's width:
+  one 800px image across a 1440px band upscales (Codex-61zsk.13).
+
+  CONTINUES (03 X58): `data-lp-continues` marks a section with no words of
+  its own on the ground of the one above (`continuingSections`). It gives up
+  its top padding (`--lp-pad-start`), and the Styles that mark a new section
+  leave it unmarked.
 
   `editing` adds the canvas's hooks — the section id and the selection mark —
   and nothing else, so public markup is untouched by the editor.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { resolvePageImageUrl } from '../page-images';
-  import type { SectionTypeId } from './model/ids';
+  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../page-images';
+  import { OWN_BACKDROP, SIMPLE_SECTIONS } from './model/resolve';
   import type { ResolvedSection } from './model/types';
 
   interface Props {
@@ -30,18 +38,18 @@
     background?: unknown;
     /** The page-image CDN base (`context.mediaBaseUrl`). */
     mediaBaseUrl?: string | null;
+    /** No words of its own, on the ground of the section above (03 X58). */
+    continues?: boolean;
     editing?: boolean;
     selected?: boolean;
     children: Snippet;
   }
 
-  /** Types that draw their own backdrop, so the shell never adds a second. */
-  const OWN_BACKDROP: readonly SectionTypeId[] = ['hero', 'cta'];
-
   const {
     section,
     background,
     mediaBaseUrl = null,
+    continues = false,
     editing = false,
     selected = false,
     children,
@@ -49,10 +57,18 @@
 
   let failed = $state<string | null>(null);
   const backdrop = $derived.by(() => {
-    if (OWN_BACKDROP.includes(section.type)) return null;
+    // A simple section takes its neighbour's ground (03 X64): a picture
+    // behind it would make it a band of its own.
+    if (OWN_BACKDROP.has(section.type) || SIMPLE_SECTIONS.has(section.type)) return null;
     const url = resolvePageImageUrl(background, 'lg', mediaBaseUrl);
     return url && url !== failed ? url : null;
   });
+  const backdropSrcset = $derived(
+    backdrop ? pageImageSrcset(background, mediaBaseUrl) : ''
+  );
+  // Where the creator placed the picture's subject (Codex-61zsk.58): the band
+  // crops it to its height, so this keeps it in view.
+  const backdropFocus = $derived(backdrop ? storedFocus(background) : undefined);
 </script>
 
 <section
@@ -63,6 +79,7 @@
   data-lp-scheme={section.scheme}
   data-lp-spacing={section.spacing}
   data-lp-on-media={backdrop ? '' : undefined}
+  data-lp-continues={continues ? '' : undefined}
   data-lp-section={editing ? section.id : undefined}
   data-lp-selected={editing && selected ? '' : undefined}
 >
@@ -71,6 +88,11 @@
       <img
         class="lp-surface__image"
         src={backdrop}
+        srcset={backdropSrcset || undefined}
+        sizes={backdropSrcset ? '100vw' : undefined}
+        style:object-position={backdropFocus
+          ? `${backdropFocus.x}% ${backdropFocus.y}%`
+          : undefined}
         alt=""
         loading="lazy"
         decoding="async"

@@ -64,19 +64,21 @@
   }
 
   .quote[data-size='pull'] p {
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
     font-size: var(--lp-size-title);
     font-weight: var(--lp-weight-title);
     line-height: var(--lp-leading-title);
     letter-spacing: var(--lp-tracking-title);
+    --lp-measure-unit: var(--lp-zero-title);
   }
 
   .quote[data-size='large'] p {
-    max-inline-size: 24ch;
-    font-size: var(--lp-size-heading);
+    max-inline-size: calc(24 * var(--lp-measure-unit));
+    font-size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1));
     font-weight: var(--lp-weight-heading);
     line-height: var(--lp-leading-heading);
     letter-spacing: var(--lp-tracking-heading);
+    --lp-measure-unit: var(--lp-zero-heading);
     text-indent: -0.42em;
   }
 

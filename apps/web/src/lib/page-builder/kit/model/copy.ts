@@ -30,8 +30,20 @@ export const COPY = {
     otherWays: 'Other ways to join',
     from: 'From',
   },
+  /** A course's shape, counted: "3 stages", "1 practice". */
+  course: {
+    stages: (count: number) => `${count} ${count === 1 ? 'stage' : 'stages'}`,
+    practices: (count: number) =>
+      `${count} ${count === 1 ? 'practice' : 'practices'}`,
+  },
   hero: {
     watch: 'Watch the film',
+    /** The facts line's price when there are several (`model/facts.ts`). */
+    from: (price: string) => `from ${price}`,
+  },
+  faq: {
+    /** Opens the list's closing row, before the creator's own contact link. */
+    stillWondering: 'Still wondering?',
   },
   media: {
     play: 'Play video',

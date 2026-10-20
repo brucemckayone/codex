@@ -21,9 +21,11 @@ export type ErrorStatusCode =
   | 403
   | 404
   | 409
+  | 412
   | 422
   | 429
-  | 500;
+  | 500
+  | 503;
 
 /**
  * Base error class for all service errors
@@ -43,13 +45,21 @@ export abstract class ServiceError extends Error {
   public readonly context?: Record<string, unknown>;
   public readonly statusCode: ErrorStatusCode;
 
+  /**
+   * `options.cause` keeps the error this one replaced. It is never part of an
+   * API response (`mapErrorToResponse` sends only code, message and
+   * `context`), so it may hold anything, but it lets a caller judge the
+   * failure by what actually went wrong: a webhook must answer 500 for a
+   * database outage that a service wrapped (Codex-2hxff.6).
+   */
   constructor(
     message: string,
     code: string,
     statusCode: ErrorStatusCode,
-    context?: Record<string, unknown>
+    context?: Record<string, unknown>,
+    options?: ErrorOptions
   ) {
-    super(message);
+    super(message, options);
     this.name = this.constructor.name;
     this.code = code;
     this.statusCode = statusCode;
@@ -109,8 +119,26 @@ export class ForbiddenError extends ServiceError {
  * Thrown when operation conflicts with existing state (e.g., duplicate slug)
  */
 export class ConflictError extends ServiceError {
+  constructor(
+    message: string,
+    context?: Record<string, unknown>,
+    options?: ErrorOptions
+  ) {
+    super(message, 'CONFLICT', 409, context, options);
+  }
+}
+
+/**
+ * Precondition failed error (412)
+ * Thrown when a write names the revision it was made from and the stored row
+ * has moved on since (optimistic concurrency): the caller's copy is out of
+ * date. Distinct from {@link ConflictError}, which a write can also meet (a
+ * slug in use), because the caller must tell them apart by status alone: one
+ * is fixed by changing the input, the other by reloading.
+ */
+export class PreconditionFailedError extends ServiceError {
   constructor(message: string, context?: Record<string, unknown>) {
-    super(message, 'CONFLICT', 409, context);
+    super(message, 'PRECONDITION_FAILED', 412, context);
   }
 }
 
@@ -150,8 +178,25 @@ export class BusinessLogicError extends ServiceError {
  * Should be logged and wrapped to prevent detail exposure
  */
 export class InternalServiceError extends ServiceError {
+  constructor(
+    message: string,
+    context?: Record<string, unknown>,
+    options?: ErrorOptions
+  ) {
+    super(message, 'INTERNAL_ERROR', 500, context, options);
+  }
+}
+
+/**
+ * Service unavailable (503)
+ * Thrown on purpose when the work could not be done YET and a retry will
+ * succeed: another worker holds the row, say. Unlike a ServiceError thrown on
+ * purpose, it is transient, so a Stripe webhook gets a 500 and redelivers
+ * (Codex-2hxff.8).
+ */
+export class ServiceUnavailableError extends ServiceError {
   constructor(message: string, context?: Record<string, unknown>) {
-    super(message, 'INTERNAL_ERROR', 500, context);
+    super(message, 'SERVICE_UNAVAILABLE', 503, context);
   }
 }
 
@@ -255,9 +300,14 @@ export function wrapError(
 
   // Database unique constraint violation
   if (error instanceof Error && error.message.includes('unique constraint')) {
-    return new ConflictError('Resource already exists', context);
+    return new ConflictError('Resource already exists', context, {
+      cause: error,
+    });
   }
 
-  // Generic fallback - never expose internal details
-  return new InternalServiceError('An unexpected error occurred', context);
+  // Generic fallback - never expose internal details. The original stays on
+  // `cause` (never serialised) so a caller can still tell an outage from a bug.
+  return new InternalServiceError('An unexpected error occurred', context, {
+    cause: error,
+  });
 }

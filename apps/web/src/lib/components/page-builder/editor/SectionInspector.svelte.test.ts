@@ -13,9 +13,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFINITIONS,
   PageRenderer,
+  type SampleOfferState,
   SECTION_TYPE_IDS,
   sampleContext,
 } from '$lib/page-builder/kit';
+import { STYLES } from '$lib/page-builder/kit/model/styles';
 import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 import {
@@ -78,6 +80,16 @@ vi.mock('$lib/remote/page-images.remote', () => {
   return { uploadPageImageForm: { for: () => instance } };
 });
 
+/** The org the layout loaded: its shader preset and its backgrounds. */
+const layout = vi.hoisted(() => ({ org: null as unknown }));
+vi.mock('$app/state', () => ({
+  page: {
+    get data() {
+      return { org: layout.org };
+    },
+  },
+}));
+
 class OnScreen {
   constructor(private readonly callback: IntersectionObserverCallback) {}
   observe(target: Element): void {
@@ -96,6 +108,7 @@ beforeEach(() => {
   vi.stubGlobal('IntersectionObserver', OnScreen);
   remote.result = undefined;
   remote.finish = null;
+  layout.org = null;
 });
 
 afterEach(() => {
@@ -111,7 +124,14 @@ function hero(id: string): PageSection {
   return { id, type: 'hero', enabled: true, props: { heading: id } };
 }
 
-function render(sections: PageSection[], selectedId: string) {
+function render(
+  sections: PageSection[],
+  selectedId: string,
+  style: string = 'bold',
+  mediaBaseUrl: string | null = null,
+  offer: SampleOfferState = 'buy',
+  offerRead: 'read' | 'loading' | 'failed' = 'read'
+) {
   pageBuilder.open(PAGE_ID, {
     pageType: 'course',
     slug: 'quiet-hours',
@@ -120,7 +140,7 @@ function render(sections: PageSection[], selectedId: string) {
     subjectType: 'course',
     subjectId: 'course-1',
     brandOverrides: null,
-    design: { style: 'bold' },
+    design: { style },
     sections,
   } as PageBuilderState);
   pageBuilder.selectSection(selectedId);
@@ -137,7 +157,8 @@ function render(sections: PageSection[], selectedId: string) {
       get selectedId() {
         return pageBuilder.selectedSectionId;
       },
-      context: sampleContext(),
+      context: sampleContext({ mediaBaseUrl, offer }),
+      offerRead,
       onDuplicate: vi.fn(),
       onToggle: vi.fn(),
       onDelete: vi.fn(),
@@ -197,7 +218,7 @@ describe('the background image, a control every section shares', () => {
   const backgroundControl = () =>
     document.body.querySelector<HTMLElement>('[data-control="background"]');
 
-  it('is offered exactly where the page draws one: every type but the hero and the call to action', () => {
+  it('is offered exactly where the page draws one: every type but the hero, the call to action and the four simple sections', () => {
     // Nothing here needs the layout thumbnails, so they never come on screen.
     vi.stubGlobal(
       'IntersectionObserver',
@@ -236,8 +257,12 @@ describe('the background image, a control every section shares', () => {
       app = null;
       document.body.innerHTML = '';
     }
+    // A simple section takes its neighbour's ground (03 X64): no picture of its own.
+    const simple = ['picture', 'heading', 'break', 'button'];
     expect(offered).toEqual(
-      SECTION_TYPE_IDS.filter((t) => t !== 'hero' && t !== 'cta')
+      SECTION_TYPE_IDS.filter(
+        (t) => t !== 'hero' && t !== 'cta' && !simple.includes(t)
+      )
     );
     expect(offered).toEqual(drawn);
   });
@@ -260,5 +285,604 @@ describe('the background image, a control every section shares', () => {
     control?.querySelector<HTMLButtonElement>('.image__btn--quiet')?.click();
     flushSync();
     expect(stored('f')?.props).not.toHaveProperty('background');
+  });
+});
+
+// B2 (03 X50, X51): the canvas draws an org's hero on its moving background
+// when the org has a shader, and as base on a band a moving background is
+// not proven on. The colour swatches show what the canvas draws: the
+// section's colour, and which one is its default.
+describe('the colour the canvas draws for the hero', () => {
+  const org = (tokenOverrides: object, background?: string) => ({
+    brandColors: { background },
+    brandFineTune: { tokenOverrides: JSON.stringify(tokenOverrides) },
+  });
+  const swatches = () => {
+    const pressed = document.body.querySelectorAll<HTMLElement>(
+      ".swatch[aria-pressed='true']"
+    );
+    const defaults = [
+      ...document.body.querySelectorAll<HTMLElement>('.swatch'),
+    ].filter((b) => b.querySelector('.swatch__default')?.textContent?.trim());
+    return {
+      value: [...pressed].map((b) => b.dataset.scheme),
+      default: defaults.map((b) => b.dataset.scheme),
+    };
+  };
+
+  it('is the moving background, by default, in an org with a shader', () => {
+    layout.org = org({ 'shader-preset': 'glow' });
+    render([hero('h')], 'h');
+    expect(swatches()).toEqual({
+      value: ['atmosphere'],
+      default: ['atmosphere'],
+    });
+  });
+
+  it('is the Style’s own without one', () => {
+    layout.org = org({ 'shader-preset': 'none' });
+    render([hero('h')], 'h');
+    const own = STYLES.bold.schemes.hero ?? 'base';
+    expect(own).not.toBe('atmosphere');
+    expect(swatches()).toEqual({ value: [own], default: [own] });
+  });
+
+  it('is base where the org’s ground is on a band a moving background is not drawn on', () => {
+    // #D2C3A8 is L 0.82: band l80, where PageRenderer draws base.
+    layout.org = org({ 'shader-preset': 'glow' }, '#D2C3A8');
+    render([hero('h')], 'h');
+    expect(swatches()).toEqual({ value: ['base'], default: ['base'] });
+  });
+});
+
+// ── The simple sections (03 X64, Codex-61zsk.53) ───────────────────────────
+
+describe('the inspector for a simple section', () => {
+  const section = (
+    id: string,
+    type: PageSection['type'],
+    props: Record<string, unknown> = {},
+    extra: Partial<PageSection> = {}
+  ): PageSection => ({ id, type, enabled: true, props, ...extra });
+  const problem = section('a', 'problem', { heading: 'Stuck?' });
+  const curriculum = section('b', 'curriculum', { heading: 'Six weeks' });
+  const note = (kind: string) =>
+    document.body
+      .querySelector<HTMLElement>(`[data-note="${kind}"]`)
+      ?.textContent?.trim();
+  const swatches = () => document.body.querySelectorAll('[data-scheme]').length;
+
+  it('says a Picture matches the section above, and offers it no background picture', () => {
+    render([problem, section('p', 'picture'), curriculum], 'p');
+    expect(note('join')).toBe('Matches the section above');
+    expect(swatches()).toBeGreaterThan(0);
+    expect(
+      document.body.querySelector('[data-control="background"]')
+    ).toBeNull();
+  });
+
+  it('says a Heading matches the section below, and with nothing below, why it joins the one above', () => {
+    render(
+      [problem, section('h', 'heading', { heading: 'Part two' }), curriculum],
+      'h'
+    );
+    expect(note('join')).toBe('Matches the section below');
+    expect(note('heading')).toBeUndefined();
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+    render([problem, section('h', 'heading', { heading: 'Part two' })], 'h');
+    expect(note('join')).toBe('Matches the section above');
+    expect(note('heading')).toContain(
+      'reads best right above the section it introduces'
+    );
+  });
+
+  it('a colour the creator picked is the section’s own', () => {
+    render(
+      [
+        problem,
+        section('p', 'picture', {}, { design: { scheme: 'accent' } }),
+        curriculum,
+      ],
+      'p'
+    );
+    expect(note('join')).toBeUndefined();
+    expect(note('own')).toContain('own colour');
+  });
+
+  it('a Break has no colour to pick, and says when the colour already changes or two pauses add up', () => {
+    render([problem, section('k', 'break'), curriculum], 'k');
+    expect(swatches()).toBe(0);
+    expect(document.body.textContent).toContain(
+      'A pause has no colour of its own'
+    );
+    // Bold: the problem is a contrast band, the curriculum the page.
+    const breakNotes = () =>
+      [...document.body.querySelectorAll('[data-note="break"]')].map(
+        (n) => n.textContent
+      );
+    expect(
+      breakNotes().some((t) =>
+        t?.includes('colour change already makes a pause')
+      )
+    ).toBe(true);
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+    render(
+      [problem, section('k', 'break'), section('k2', 'break'), curriculum],
+      'k'
+    );
+    expect(breakNotes().some((t) => t?.includes('Two pauses in a row'))).toBe(
+      true
+    );
+  });
+
+  it('offers a Break’s mark only in a Style that draws one', () => {
+    const markSwitch = () =>
+      [...document.body.querySelectorAll('.field__label')].some(
+        (label) => label.textContent === 'Show a small mark in the middle'
+      );
+    render([problem, section('k', 'break'), curriculum], 'k', 'bold');
+    expect(markSwitch()).toBe(true);
+    for (const style of ['clean', 'path']) {
+      unmount(app);
+      app = null;
+      pageBuilder.close();
+      render([problem, section('k', 'break'), curriculum], 'k', style);
+      expect(markSwitch(), style).toBe(false);
+    }
+  });
+
+  it('offers a picture’s focal point at full width, and explains it elsewhere', () => {
+    const image = { key: KEY, w: 1600, h: 1067 };
+    render(
+      [
+        problem,
+        section('p', 'picture', { image }, { variant: 'full' }),
+        curriculum,
+      ],
+      'p',
+      'bold',
+      'https://cdn.test'
+    );
+    const pad = document.body.querySelector<HTMLButtonElement>('.focus__pad');
+    expect(pad).not.toBeNull();
+    expect(
+      document.body.querySelector('.focus__readout')?.textContent
+    ).toContain('Point at 50% across, 50% down');
+    pad?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })
+    );
+    flushSync();
+    expect(stored('p')?.props.image).toEqual({
+      ...image,
+      focus: { x: 52, y: 50 },
+    });
+    pad?.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        shiftKey: true,
+        bubbles: true,
+      })
+    );
+    flushSync();
+    expect(stored('p')?.props.image).toEqual({
+      ...image,
+      focus: { x: 52, y: 60 },
+    });
+    document.body.querySelector<HTMLButtonElement>('.focus__centre')?.click();
+    flushSync();
+    // The centre is the default: never stored, and the rest of the reference kept.
+    expect(stored('p')?.props.image).toEqual(image);
+
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+    render(
+      [
+        problem,
+        section('p', 'picture', { image }, { variant: 'contained' }),
+        curriculum,
+      ],
+      'p',
+      'bold',
+      'https://cdn.test'
+    );
+    expect(document.body.querySelector('.focus__pad')).toBeNull();
+    expect(document.body.textContent).toContain('only matters at full width');
+  });
+
+  it('keeps a half-typed link out of the page, and writes it once it is a full https address', () => {
+    const link = { kind: 'link', href: 'https://example.com/a' };
+    render(
+      [problem, section('u', 'button', { action: link }), curriculum],
+      'u'
+    );
+    const input =
+      document.body.querySelector<HTMLInputElement>('input[type="url"]');
+    expect(input?.value).toBe(link.href);
+    const type = (value: string) => {
+      if (!input) return;
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+    };
+    type('http://example.com');
+    expect(stored('u')?.props.action).toEqual(link);
+    expect(input?.getAttribute('aria-invalid')).toBe('true');
+    expect(document.body.textContent).toContain('starts with https://');
+    type('https://example.com/b');
+    expect(stored('u')?.props.action).toEqual({
+      kind: 'link',
+      href: 'https://example.com/b',
+    });
+    expect(input?.hasAttribute('aria-invalid')).toBe(false);
+  });
+});
+
+// ── The pricing section's options, picked from the offer (Codex-61zsk.14) ──
+
+/**
+ * A pricing section describes each option by its id, and the id was a text
+ * box: a creator could not know `tier:<uuid>`, so what they wrote matched no
+ * option and showed nothing. It is picked from the page's live ways in.
+ */
+describe('the pricing section’s options', () => {
+  function pricing(offers: Record<string, unknown>[]): PageSection {
+    return {
+      id: 'sec-price',
+      type: 'pricing',
+      enabled: true,
+      props: { offers },
+    };
+  }
+
+  /** The first option's fields, its row opened. */
+  function firstOption(): HTMLElement | null {
+    document.body.querySelector<HTMLButtonElement>('.item__toggle')?.click();
+    flushSync();
+    return document.body.querySelector('.item__fields');
+  }
+
+  it('picks one of the page’s ways in, named by its name and price', () => {
+    render(
+      [pricing([{ id: 'tier:studio', name: 'Studio' }])],
+      'sec-price',
+      'bold',
+      null,
+      'tiers'
+    );
+
+    const trigger = firstOption()?.querySelector('.select-trigger');
+    expect(trigger?.textContent?.trim()).toBe(
+      'Studio membership · £15 per month'
+    );
+  });
+
+  it('says where to set one up when the page has no way in', () => {
+    render(
+      [pricing([{ name: 'Studio' }])],
+      'sec-price',
+      'bold',
+      null,
+      'unavailable'
+    );
+
+    const fields = firstOption();
+    expect(fields?.querySelector('.select-trigger')).toBeNull();
+    expect(fields?.textContent).toContain(
+      'Set up a way in on your Offer tab first'
+    );
+  });
+
+  it('keeps an option the offer no longer has, and says so', () => {
+    render(
+      [pricing([{ id: 'subscription-monthly', name: 'Monthly' }])],
+      'sec-price'
+    );
+
+    const trigger = firstOption()?.querySelector('.select-trigger');
+    expect(trigger?.textContent?.trim()).toBe('No longer one of your options');
+  });
+
+  // An unread offer is null, as no offer is (codex-review): until it has
+  // answered, the picker can say neither that an option is gone nor that
+  // there is no way in, and a creator acting on either would undo good work.
+  it('says the options are loading, not that a stored one has gone', () => {
+    render(
+      [pricing([{ id: 'subscription-monthly', name: 'Monthly' }])],
+      'sec-price',
+      'bold',
+      null,
+      'unavailable',
+      'loading'
+    );
+
+    const fields = firstOption();
+    expect(fields?.querySelector('.select-trigger')).toBeNull();
+    expect(fields?.textContent).toContain('Loading your options');
+    expect(fields?.textContent).not.toContain('No longer one of your options');
+  });
+
+  it('says the options could not be loaded, not that there is no way in', () => {
+    render(
+      [pricing([{ name: 'Monthly' }])],
+      'sec-price',
+      'bold',
+      null,
+      'unavailable',
+      'failed'
+    );
+
+    const fields = firstOption();
+    expect(fields?.textContent).toContain('Your options could not be loaded');
+    expect(fields?.textContent).not.toContain('Set up a way in');
+  });
+});
+
+// ── Layered stages beside What's inside (Codex-61zsk.55) ───────────────────
+
+describe('the curriculum’s layered stages beside What’s inside', () => {
+  const REPEAT =
+    'Your What’s inside section already shows these practices as cards. Most pages need only one of the two.';
+  const curriculum = (variant?: string): PageSection => ({
+    id: 'c',
+    type: 'curriculum',
+    enabled: true,
+    props: { heading: 'Six weeks' },
+    ...(variant ? { variant } : {}),
+  });
+  const inside = (enabled = true): PageSection => ({
+    id: 'i',
+    type: 'inside',
+    enabled,
+    props: { heading: 'Inside' },
+  });
+  const note = () =>
+    document.body
+      .querySelector<HTMLElement>('[data-note="repeat"]')
+      ?.textContent?.trim();
+
+  it('says the cards are shown twice when the page has a What’s inside section', () => {
+    render([hero('h'), inside(), curriculum('layered')], 'c');
+    expect(note()).toBe(REPEAT);
+  });
+
+  it('says it the moment the layout is chosen', () => {
+    render([hero('h'), inside(), curriculum('timeline')], 'c');
+    expect(note()).toBeUndefined();
+    pageBuilder.setSectionLayout('c', 'layered');
+    flushSync();
+    expect(note()).toBe(REPEAT);
+  });
+
+  it.each([
+    ['a hidden What’s inside', [inside(false), curriculum('layered')]],
+    ['no What’s inside', [curriculum('layered')]],
+    ['another layout', [inside(), curriculum('cards')]],
+  ])('says nothing for %s', (_, sections) => {
+    render([hero('h'), ...sections], 'c');
+    expect(document.body.textContent).toContain('Layout');
+    expect(note()).toBeUndefined();
+  });
+});
+
+// ── The section controls (04 §3.4, Codex-61zsk.58) ─────────────────────────
+
+describe('the controls inside a section', () => {
+  const image = { key: KEY, w: 1600, h: 1067 };
+  const section = (
+    id: string,
+    type: PageSection['type'],
+    props: Record<string, unknown> = {},
+    variant?: string
+  ): PageSection => ({
+    id,
+    type,
+    enabled: true,
+    props,
+    ...(variant ? { variant } : {}),
+  });
+  const button = (label: string) =>
+    [
+      ...document.body.querySelectorAll<HTMLButtonElement>('.field__choice'),
+    ].find((candidate) => candidate.textContent?.trim() === label);
+
+  it('places Text’s picture before or after the words, storing only “after”', () => {
+    render(
+      [hero('h'), section('t', 'text', { heading: 'Why', image }, 'statement')],
+      't'
+    );
+    expect(button('Before the words')?.getAttribute('aria-pressed')).toBe(
+      'true'
+    );
+    button('After the words')?.click();
+    flushSync();
+    expect(stored('t')?.props.imageAt).toBe('after');
+    expect(button('After the words')?.getAttribute('aria-pressed')).toBe(
+      'true'
+    );
+    button('Before the words')?.click();
+    flushSync();
+    expect(stored('t')?.props).not.toHaveProperty('imageAt');
+  });
+
+  it('offers no place for Text’s picture beside the words, in two columns', () => {
+    render(
+      [hero('h'), section('t', 'text', { heading: 'Why', image }, 'columns')],
+      't'
+    );
+    expect(button('After the words')).toBeUndefined();
+  });
+
+  it('offers to open the first question in the expandable list only', () => {
+    const label = () =>
+      [...document.body.querySelectorAll('.field__label')].some(
+        (candidate) => candidate.textContent === 'Open the first question'
+      );
+    render([hero('h'), section('f', 'faq', {}, 'accordion')], 'f');
+    expect(label()).toBe(true);
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+    render([hero('h'), section('f', 'faq', {}, 'columns')], 'f');
+    expect(label()).toBe(false);
+  });
+
+  it('steers a section’s background picture, keeping the rest of it', () => {
+    render(
+      [
+        hero('h'),
+        section('p', 'problem', { heading: 'Stuck?', background: image }),
+      ],
+      'p',
+      'bold',
+      'https://cdn.test'
+    );
+    const pads =
+      document.body.querySelectorAll<HTMLButtonElement>('.focus__pad');
+    expect(pads).toHaveLength(1);
+    expect(document.body.querySelectorAll('.focus__crop')).toHaveLength(2);
+    pads[0].dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })
+    );
+    flushSync();
+    expect(stored('p')?.props.background).toEqual({
+      ...image,
+      focus: { x: 48, y: 50 },
+    });
+  });
+
+  it('steers a benefit’s picture where the layout draws it, from the item’s own row', () => {
+    const items = [{ title: 'Calm', image }];
+    render(
+      [hero('h'), section('b', 'benefits', { items }, 'grid')],
+      'b',
+      'bold',
+      'https://cdn.test'
+    );
+    document.body.querySelector<HTMLButtonElement>('.item__toggle')?.click();
+    flushSync();
+    const pad = document.body.querySelector<HTMLButtonElement>('.focus__pad');
+    expect(pad).not.toBeNull();
+    pad?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })
+    );
+    flushSync();
+    expect((stored('b')?.props.items as { image: unknown }[])[0].image).toEqual(
+      {
+        ...image,
+        focus: { x: 50, y: 48 },
+      }
+    );
+  });
+});
+
+describe('faces, marks and the row that leads (Codex-61zsk.58)', () => {
+  const image = { key: KEY, w: 1600, h: 1067 };
+  const section = (
+    id: string,
+    type: PageSection['type'],
+    props: Record<string, unknown>,
+    variant: string
+  ): PageSection => ({ id, type, enabled: true, props, variant });
+  const openRow = (index = 0) => {
+    document.body
+      .querySelectorAll<HTMLButtonElement>('.item__toggle')
+      [index]?.click();
+    flushSync();
+  };
+  const markButton = (label: string) =>
+    [...document.body.querySelectorAll<HTMLButtonElement>('.field__mark')].find(
+      (candidate) => candidate.getAttribute('aria-label') === label
+    );
+  const rows = () =>
+    [...document.body.querySelectorAll<HTMLButtonElement>('.item__toggle')].map(
+      (toggle) => toggle.textContent?.replace(/\s+/g, ' ').trim()
+    );
+
+  it('picks a benefit’s mark from its row, and takes it away when it is chosen again', () => {
+    render(
+      [
+        hero('h'),
+        section('b', 'benefits', { items: [{ title: 'Calm' }] }, 'checklist'),
+      ],
+      'b'
+    );
+    openRow();
+    expect(document.body.querySelectorAll('.field__mark')).toHaveLength(12);
+    markButton('Heart')?.click();
+    flushSync();
+    expect(
+      (stored('b')?.props.items as Record<string, unknown>[])[0].mark
+    ).toBe('heart');
+    expect(markButton('Heart')?.getAttribute('aria-pressed')).toBe('true');
+    markButton('Moon')?.click();
+    flushSync();
+    expect(
+      (stored('b')?.props.items as Record<string, unknown>[])[0].mark
+    ).toBe('moon');
+    markButton('Moon')?.click();
+    flushSync();
+    expect(
+      (stored('b')?.props.items as Record<string, unknown>[])[0]
+    ).not.toHaveProperty('mark');
+  });
+
+  it.each([
+    [
+      'benefits',
+      'bento',
+      { items: [{ title: 'Calm' }, { title: 'Clear' }] },
+      true,
+    ],
+    [
+      'benefits',
+      'grid',
+      { items: [{ title: 'Calm' }, { title: 'Clear' }] },
+      false,
+    ],
+    ['gallery', 'mosaic', { items: [{ image }, { image }] }, true],
+    ['gallery', 'grid', { items: [{ image }, { image }] }, false],
+  ] as const)('%s %s: the row the layout draws larger is tagged “Leads”', (type, layout, props, leads) => {
+    render([hero('h'), section('s', type, { ...props }, layout)], 's');
+    const [first, second] = rows();
+    expect(first?.includes('Leads'), first).toBe(leads);
+    expect(second?.includes('Leads'), second).toBe(false);
+    if (leads) expect(first).toContain(', leads in this layout');
+  });
+
+  it('tags none of the creator’s quotes while the course’s own come first', () => {
+    render(
+      [
+        hero('h'),
+        section(
+          't',
+          'testimonials',
+          { items: [{ quote: 'Quiet at last.' }] },
+          'featured'
+        ),
+      ],
+      't'
+    );
+    expect(rows()[0]).not.toContain('Leads');
+  });
+
+  it('steers a quote’s photo as the round face it is drawn in', () => {
+    const items = [{ quote: 'Quiet at last.', name: 'Tom W.', photo: image }];
+    render(
+      [hero('h'), section('t', 'testimonials', { items }, 'grid')],
+      't',
+      'bold',
+      'https://cdn.test'
+    );
+    openRow();
+    const crops = [
+      ...document.body.querySelectorAll<HTMLElement>('.focus__crop'),
+    ];
+    expect(crops).toHaveLength(2);
+    expect(document.body.querySelector('.focus__pad')).not.toBeNull();
   });
 });

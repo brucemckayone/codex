@@ -5,10 +5,10 @@ import {
   eyebrowField,
   headingField,
   layout,
-  noteField,
 } from '../../model/fields';
 import { compact, readText } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
+import { offerNoteField } from '../pricing/definition';
 
 export type CtaProps = {
   eyebrow?: string;
@@ -40,7 +40,7 @@ export const ctaDefinition: BlockDefinition<CtaProps> = {
     layout(
       'compact',
       'Slim strip',
-      'One line and a button, to sit between other sections.'
+      'A band of its own: one line and a button.'
     ),
   ],
   fields: [
@@ -48,7 +48,7 @@ export const ctaDefinition: BlockDefinition<CtaProps> = {
     headingField(100),
     { ...bodyField, maxLength: 300 },
     ctaLabelField,
-    noteField,
+    offerNoteField,
     {
       key: 'background',
       label: 'Background image',
@@ -56,6 +56,13 @@ export const ctaDefinition: BlockDefinition<CtaProps> = {
       control: 'image',
       layouts: ['band'],
       decorative: true,
+      // The band at 1440 and 390, in the Style that cuts it most.
+      focalLayouts: {
+        band: [
+          { at: 'wide', ratio: '11 / 5' },
+          { at: 'phone', ratio: '1 / 2' },
+        ],
+      },
     },
   ],
   starter: ({ courseTitle }) => ({

@@ -40,15 +40,15 @@
   import { onMount, tick } from 'svelte';
   import {
     listTiers,
-    getConnectStatus,
+    getMyConnectStatus,
     getSubscriptionStats,
     createTier,
     updateTier,
     deleteTier,
-    connectOnboard,
-    getConnectDashboardLink,
+    connectMeOnboard,
+    getMyConnectDashboard,
     updateSubscriptionFeature,
-    syncConnectStatus,
+    syncMyConnect,
   } from '$lib/remote/subscription.remote';
   import { getOrgSettings } from '$lib/remote/org.remote';
   import { formatDate, formatPrice } from '$lib/utils/format';
@@ -84,7 +84,10 @@
   // Page renders instantly with skeletons, data streams in.
 
   const tiersQuery = $derived(orgId ? listTiers(orgId) : null);
-  const connectQuery = $derived(orgId ? getConnectStatus(orgId) : null);
+  // The owner's OWN payout account — the account this org's money is paid to.
+  // Set-up, re-check and the Stripe dashboard all go through the self-scoped
+  // /connect/me routes: nobody acts on another person's account (Codex-2hxff.1).
+  const connectQuery = $derived(getMyConnectStatus());
   const settingsQuery = $derived(orgId ? getOrgSettings(orgId) : null);
   const statsQuery = $derived(orgId ? getSubscriptionStats(orgId) : null);
 
@@ -300,8 +303,8 @@
     if (connectParam !== 'success') return;
 
     connectSyncing = true;
-    syncConnectStatus({ organizationId: orgId })
-      .then(() => getConnectStatus(orgId).refresh())
+    syncMyConnect()
+      .then(() => getMyConnectStatus().refresh())
       .then(() => {
         // Read the freshly-synced status, not the pre-sync snapshot.
         if (isConnectReady(connectStatus) && tiers.length === 0) {
@@ -348,8 +351,8 @@
     recheckingStatus = true;
     recheckOutcome = null;
     try {
-      await syncConnectStatus({ organizationId: orgId });
-      await getConnectStatus(orgId).refresh();
+      await syncMyConnect();
+      await getMyConnectStatus().refresh();
       recheckOutcome = 'ok';
     } catch (error) {
       recheckOutcome = 'failed';
@@ -527,11 +530,7 @@
     try {
       const returnUrl = `${page.url.origin}/studio/monetisation?connect=success`;
       const refreshUrl = `${page.url.origin}/studio/monetisation?connect=refresh`;
-      const result = await connectOnboard({
-        organizationId: orgId,
-        returnUrl,
-        refreshUrl,
-      });
+      const result = await connectMeOnboard({ returnUrl, refreshUrl });
       window.location.href = result.onboardingUrl;
     } catch (error) {
       connectError = m.monetisation_connect_onboard_error();
@@ -544,7 +543,7 @@
     connectLoading = true;
     connectError = '';
     try {
-      const result = await getConnectDashboardLink({ organizationId: orgId });
+      const result = await getMyConnectDashboard();
       window.location.href = result.url;
     } catch (error) {
       // The seed-account branch stays — it maps a KNOWN condition to fixed

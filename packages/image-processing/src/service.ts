@@ -20,8 +20,12 @@ import {
   validateImageSignature,
 } from '@codex/validation';
 import type { OrphanedFileService } from './orphaned-file-service';
-import { pageImageKey, pageImageObjectKeys } from './page-image-keys';
-import { processImageVariants } from './processor';
+import {
+  pageImageKey,
+  pageImageObjectKeys,
+  pageImageVariantKeys,
+} from './page-image-keys';
+import { processImageVariants, processPageImageVariants } from './processor';
 import {
   recordOrphansOrLog,
   stillVariantKeys,
@@ -761,7 +765,7 @@ export class ImageProcessingService extends BaseService {
    *
    * Consequently this method has no `persistWithOrphanCleanup` counterpart:
    * there is no column to write, so nothing a DB failure could roll back.
-   * Instead the three objects are recorded as PENDING `page_image` orphans
+   * Instead its objects are recorded as PENDING `page_image` orphans
    * the moment they land. That is what reclaims an upload no page ever
    * references (the creator picked an image and then left): the sweep acts
    * on a page image only after `PAGE_IMAGE_GRACE_MS`, and only if no page in
@@ -780,10 +784,17 @@ export class ImageProcessingService extends BaseService {
    * @param imageId - Caller-minted uuid; unique per upload, never reused or
    *   overwritten
    * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
-   * @returns The base R2 key plus the md CDN URL, size, and mime type. Append
-   *   `/{sm|md|lg}.webp` to `key` to address a specific variant — the same
-   *   convention `lib/page-builder/page-images.ts`'s `resolvePageImageUrl`
-   *   reproduces on the web side.
+   * FOUR variants, not three: `xl` (`min(1600, width)`, Codex-61zsk.13) is
+   * written for page images alone, so a picture drawn across the band is
+   * never an 800px file stretched. Every object is in `pageImageObjectKeys`,
+   * so the upload records all four and the sweep can delete all four.
+   *
+   * @returns The base R2 key plus the md CDN URL, size, mime type, and the
+   *   source picture's own `width` and `height`, which the page stores on its
+   *   `ImageRef` (`w`/`h`). Append `/{sm|md|lg|xl}.webp` to `key` to address
+   *   a specific variant — the same convention
+   *   `lib/page-builder/page-images.ts`'s `resolvePageImageUrl` reproduces on
+   *   the web side.
    */
   async processPageImage(
     pageId: string,
@@ -794,17 +805,19 @@ export class ImageProcessingService extends BaseService {
     url: string;
     size: number;
     mimeType: string;
+    width: number;
+    height: number;
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only),
-    // same posture and same reason as every still above: `processImageVariants`
+    // same posture and same reason as every still above: the processor
     // decodes via Photon, which cannot rasterise SVG.
     const { buffer } = await validateImageFile(file);
 
     const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
+    const { variants, width, height } = processPageImageVariants(inputBuffer);
 
     const key = pageImageKey(pageId, imageId);
-    const keys = stillVariantKeys(key);
+    const keys = pageImageVariantKeys(key);
     const objectKeys = pageImageObjectKeys(key);
 
     try {
@@ -817,7 +830,7 @@ export class ImageProcessingService extends BaseService {
       });
     } catch (error) {
       // `uploadImageVariants` deletes nothing on a partial failure, which is
-      // right for a deterministic key: a retry re-puts the same three and
+      // right for a deterministic key: a retry re-puts the same objects and
       // converges. This key never converges. It is a fresh uuid nothing
       // references, and a retry mints another, so whatever did land is
       // removed here and anything that cannot be removed is queued.
@@ -836,6 +849,8 @@ export class ImageProcessingService extends BaseService {
       url: `${this.r2PublicUrlBase}/${keys.md}`,
       size: variants.md.byteLength,
       mimeType: 'image/webp',
+      width,
+      height,
     };
   }
 

@@ -95,7 +95,26 @@ const createMockDb = () =>
 // Mock processor
 vi.mock('../processor', () => ({
   processImageVariants: vi.fn(),
+  processPageImageVariants: vi.fn(),
 }));
+
+/** A page image's four variants, as `processPageImageVariants` returns them. */
+function pageVariants(
+  sizes: { sm?: number[]; md?: number[]; lg?: number[]; xl?: number[] } = {},
+  width = 2400,
+  height = 1600
+) {
+  return {
+    variants: {
+      sm: new Uint8Array(sizes.sm ?? [1]),
+      md: new Uint8Array(sizes.md ?? [2]),
+      lg: new Uint8Array(sizes.lg ?? [3]),
+      xl: new Uint8Array(sizes.xl ?? [4]),
+    },
+    width,
+    height,
+  };
+}
 
 describe('ImageProcessingService', () => {
   let service: ImageProcessingService;
@@ -303,18 +322,20 @@ describe('ImageProcessingService', () => {
   });
 
   describe('processPageImage', () => {
-    it('uploads three variants under the (pageId, imageId)-namespaced base key and returns it', async () => {
+    it('uploads four variants, xl included, under the (pageId, imageId)-namespaced base key and returns it', async () => {
       const file = createTestImageFile('image/png', 'section.png');
 
-      vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-        sm: new Uint8Array([1]),
-        md: new Uint8Array([2, 2]),
-        lg: new Uint8Array([3, 3, 3]),
-      });
+      vi.mocked(processor.processPageImageVariants).mockReturnValueOnce(
+        pageVariants(
+          { md: [2, 2], lg: [3, 3, 3], xl: [4, 4, 4, 4] },
+          3000,
+          2000
+        )
+      );
 
       const result = await service.processPageImage('page-1', 'image-1', file);
 
-      expect(processor.processImageVariants).toHaveBeenCalled();
+      expect(processor.processPageImageVariants).toHaveBeenCalled();
       // Returns the BASE key (no variant suffix) — contract amendment A3's
       // `landing-pages/{pageId}/images/{imageId}` convention.
       expect(result.key).toBe('landing-pages/page-1/images/image-1');
@@ -325,26 +346,29 @@ describe('ImageProcessingService', () => {
       );
       expect(result.size).toBe(2);
       expect(result.mimeType).toBe('image/webp');
-      expect(testMockR2Service.put).toHaveBeenCalledTimes(3);
-      expect(testMockR2Service.put).toHaveBeenCalledWith(
-        'landing-pages/page-1/images/image-1/sm.webp',
-        expect.any(Uint8Array),
-        {},
-        {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=3600, must-revalidate',
-        }
-      );
+      // The picture's own size, which the page stores on its ImageRef.
+      expect(result.width).toBe(3000);
+      expect(result.height).toBe(2000);
+      expect(testMockR2Service.put).toHaveBeenCalledTimes(4);
+      for (const size of ['sm', 'md', 'lg', 'xl']) {
+        expect(testMockR2Service.put).toHaveBeenCalledWith(
+          `landing-pages/page-1/images/image-1/${size}.webp`,
+          expect.any(Uint8Array),
+          {},
+          {
+            contentType: 'image/webp',
+            cacheControl: 'public, max-age=3600, must-revalidate',
+          }
+        );
+      }
     });
 
     it('does NOT write to the database — there is no column, only a jsonb reference the save path owns', async () => {
       const file = createTestImageFile('image/jpeg', 'section.jpg');
 
-      vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-        sm: new Uint8Array([1]),
-        md: new Uint8Array([2]),
-        lg: new Uint8Array([3]),
-      });
+      vi.mocked(processor.processPageImageVariants).mockReturnValueOnce(
+        pageVariants()
+      );
 
       await service.processPageImage('page-1', 'image-1', file);
 
@@ -359,11 +383,9 @@ describe('ImageProcessingService', () => {
       // `(pageId)`-only key, which would silently start overwriting one
       // page's images at random.
       const put = vi.mocked(testMockR2Service.put);
-      vi.mocked(processor.processImageVariants).mockReturnValue({
-        sm: new Uint8Array([1]),
-        md: new Uint8Array([2]),
-        lg: new Uint8Array([3]),
-      });
+      vi.mocked(processor.processPageImageVariants).mockReturnValue(
+        pageVariants()
+      );
 
       await service.processPageImage(
         'page-1',
@@ -381,8 +403,8 @@ describe('ImageProcessingService', () => {
       );
       const secondKeys = put.mock.calls.map((call) => call[0]);
 
-      expect(firstKeys).toHaveLength(3);
-      expect(secondKeys).toHaveLength(3);
+      expect(firstKeys).toHaveLength(4);
+      expect(secondKeys).toHaveLength(4);
       for (const key of secondKeys) {
         expect(firstKeys).not.toContain(key);
       }
@@ -390,7 +412,12 @@ describe('ImageProcessingService', () => {
 
     describe('cleanup tracking (Codex-61zsk.10)', () => {
       const base = 'landing-pages/page-1/images/image-1';
-      const objects = [`${base}/sm.webp`, `${base}/md.webp`, `${base}/lg.webp`];
+      const objects = [
+        `${base}/sm.webp`,
+        `${base}/md.webp`,
+        `${base}/lg.webp`,
+        `${base}/xl.webp`,
+      ];
 
       function trackedService(r2: Partial<Record<'put' | 'delete', unknown>>) {
         const orphans = { recordOrphanedFiles: vi.fn().mockResolvedValue([]) };
@@ -414,18 +441,17 @@ describe('ImageProcessingService', () => {
           .fn()
           .mockResolvedValueOnce(undefined)
           .mockRejectedValueOnce(new Error('R2 unavailable'))
+          .mockResolvedValueOnce(undefined)
           .mockResolvedValueOnce(undefined);
       }
 
       beforeEach(() => {
-        vi.mocked(processor.processImageVariants).mockReturnValue({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processPageImageVariants).mockReturnValue(
+          pageVariants()
+        );
       });
 
-      it('queues its three OBJECTS at upload, so an image no page uses is reclaimed', async () => {
+      it('queues its four OBJECTS at upload, xl included, so an image no page uses is reclaimed', async () => {
         const { tracked, orphans } = trackedService({});
 
         await tracked.processPageImage(

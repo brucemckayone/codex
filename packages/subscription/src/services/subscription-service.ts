@@ -34,6 +34,7 @@ import {
   CURRENCY,
   FEES,
   SUBSCRIPTION_STATUS,
+  stripeEnvMetadata,
 } from '@codex/constants';
 import { dateWindow, isUniqueViolation, toIso } from '@codex/database';
 import {
@@ -49,11 +50,30 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  type ClawbackCharge,
+  claimPayoutAttempts,
+  findTransfersForPayouts,
+  isDrainablePayout,
+  type LedgerDeps,
+  listClawableRefunds,
+  markPayoutFailed,
+  type OrganisationPayee,
+  pendingReductionsFor,
+  recordPlatformFee,
+  recordSlice,
+  renewPayoutAttempt,
+  resolveInvoiceCharge,
+  resolveOrganisationPayee,
+  retryFailedClawbacks,
+  reverseCharge,
+  settlePayoutPaid,
+  settleTransfer,
+} from '@codex/payments';
+import {
   applyMinPlatformFeeFloor,
   type FeeConfig,
   type FeeConfigService,
   type FeeContext,
-  resolvePrimaryConnect,
   withStaleCustomerRecovery,
 } from '@codex/purchase';
 import {
@@ -88,8 +108,20 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../errors';
+import {
+  CLEAR_PENDING_PRICE_METADATA,
+  schedulePriceChange,
+} from './pending-price-change';
 import { calculateRevenueSplit } from './revenue-split';
 import { mapStripeSubscriptionStatus } from './stripe-status-mapper';
+import {
+  cancelLostDisputeSubscription,
+  type DisputedSubscription,
+  type DisputeInput,
+  pauseBilling,
+  pauseDisputedSubscription,
+  restoreDisputedSubscription,
+} from './subscription-dispute';
 import {
   type InvalidationReason,
   invalidateForUser,
@@ -136,7 +168,8 @@ export type PayoutDisplayStatus =
   | 'resolved'
   | 'failed'
   | 'reversed'
-  | 'cancelled_by_refund';
+  | 'cancelled_by_refund'
+  | 'cancelled_by_dispute';
 
 /**
  * Read-model returned by `SubscriptionService.listSubscribers` (studio
@@ -271,6 +304,7 @@ type PayoutFilterOptions = {
     | 'failed'
     | 'reversed'
     | 'cancelled_by_refund'
+    | 'cancelled_by_dispute'
     | 'needs_attention';
   sourceType?: 'all' | 'purchase' | 'subscription';
   fromDate?: string;
@@ -360,27 +394,23 @@ function derivePayoutStatus(status: string): PayoutDisplayStatus {
   if (status === 'failed') return 'failed';
   if (status === 'reversed') return 'reversed';
   if (status === 'cancelled_by_refund') return 'cancelled_by_refund';
+  if (status === 'cancelled_by_dispute') return 'cancelled_by_dispute';
   return 'pending';
 }
 
 /**
  * Options for `SubscriptionService.propagateTierPriceToActiveSubscriptions`.
  *
- * All fields are optional — sensible defaults apply when omitted. The
- * proration policy is surfaced as a named parameter because Q1 product
- * may overturn the `create_prorations` default at any time (see bead
- * Codex-3xyyb and the separate follow-up for the policy decision).
+ * `interval` is required: a price change reaches only the subscribers on the
+ * interval whose Price changed (Codex-2hxff.3). The batching knobs are optional.
  */
 export interface PropagateTierPriceOptions {
   /**
-   * Stripe proration behaviour for the mid-cycle Price swap. Defaults to
-   * `'create_prorations'` — matches Stripe's default, charges the
-   * difference on the next invoice. `'none'` defers the new amount to
-   * the next billing cycle without any immediate adjustment.
-   * `'always_invoice'` invoices the proration amount immediately rather
-   * than adding it to the next invoice.
+   * The billing interval whose Price changed. Subscribers on the other interval
+   * are never touched — moving a monthly subscriber onto an annual Price resets
+   * the billing cycle and charges a year at once.
    */
-  prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
+  interval: 'month' | 'year';
   /**
    * Upper bound on concurrent Stripe API calls per batch. Stripe's
    * per-account rate limit is 25 req/sec (test) / 100 req/sec (live) —
@@ -407,18 +437,17 @@ export interface PropagateTierPriceOptions {
 /**
  * Result shape returned by
  * `SubscriptionService.propagateTierPriceToActiveSubscriptions`.
- *
- * Informational only — DB state for the per-subscription amount is
- * reconciled by the existing `customer.subscription.updated` webhook
- * that Stripe emits for each updated subscription. Callers should not
- * branch on these counts for correctness; they exist for observability.
  */
 export interface PropagateTierPriceResult {
-  /** Number of active/cancelling subscriptions discovered for the tier. */
+  /** Subscriptions on the tier and interval that were considered. */
   total: number;
-  /** Subscriptions whose Stripe Price was successfully swapped. */
+  /** Swapped now or marked pending — every subscriber who was emailed. */
   updated: number;
-  /** Subscriptions whose swap failed (logged individually via obs.error). */
+  /** Of `updated`: swapped now (next renewal already ≥ 30 days away). */
+  applied: number;
+  /** Of `updated`: marked pending, swapped at a later renewal. */
+  pending: number;
+  /** Subscriptions whose scheduling failed (logged individually via obs.error). */
   failed: number;
 }
 
@@ -443,7 +472,7 @@ export interface WebhookEmailPayload {
  * `userId` + `orgId` feed the shared `invalidateForUser` helper so each
  * subscription lifecycle event bumps both COLLECTION_USER_LIBRARY and,
  * when an org is involved, COLLECTION_USER_SUBSCRIPTION. See
- * docs/subscription-cache-audit/phase-1-p0.md for the gap matrix.
+ * docs/payments/access.md ("Keeping caches in step").
  */
 export interface WebhookHandlerResult {
   /** User ID for cache invalidation (COLLECTION_USER_LIBRARY) */
@@ -567,7 +596,7 @@ interface SubscriptionServiceConfig extends ServiceConfig {
  * into this slot. Returns `void` — failures are the mailer's concern
  * (notifications-api audit log on the remote side).
  */
-type TierPriceChangeMailer = (params: {
+export type TierPriceChangeMailer = (params: {
   to: string;
   toName?: string;
   templateName: 'subscription-tier-price-change';
@@ -592,23 +621,6 @@ export type PayoutReleasedMailer = (params: {
   organizationId?: string | null;
   data: Record<string, string | number | boolean>;
 }) => void;
-
-/**
- * Read the source-charge id from an invoice's inline `payments.data[0]`.
- * Returns null when payments are not expanded — see resolveInvoiceCharge
- * for the full fallback chain to recover the charge in that case.
- */
-function extractInvoiceCharge(invoice: Stripe.Invoice): string | null {
-  const payment = invoice.payments?.data?.[0];
-  const charge = payment?.payment?.charge;
-  return typeof charge === 'string' ? charge : null;
-}
-
-function extractInvoicePaymentIntent(invoice: Stripe.Invoice): string | null {
-  const payment = invoice.payments?.data?.[0];
-  const pi = payment?.payment?.payment_intent;
-  return typeof pi === 'string' ? pi : null;
-}
 
 export class SubscriptionService extends BaseService {
   private readonly stripe: Stripe;
@@ -663,7 +675,7 @@ export class SubscriptionService extends BaseService {
             : ctx === 'subscription'
               ? FEES.SUBSCRIPTION_ORG_PERCENT
               : FEES.ORG_PERCENT,
-        minPlatformFeeCents: 0,
+        minPlatformFeeCents: FEES.MIN_PLATFORM_FEE_CENTS,
         minTransferCents: 0,
       };
     }
@@ -817,11 +829,10 @@ export class SubscriptionService extends BaseService {
         throw new AlreadySubscribedError(userId, orgId);
       }
 
-      // Validate Connect account — resolved through the canonical
-      // organizations.primary_connect_account_user_id so orgs with
-      // multiple Connect accounts (one per user) route to the same
-      // account for every tier op and revenue transfer.
-      const connectAccount = await resolvePrimaryConnect(this.db, orgId);
+      // Validate Connect account — the current owner's, the account every
+      // tier op and revenue transfer for this org routes to (Codex-2hxff.2).
+      const connectAccount = (await resolveOrganisationPayee(this.db, orgId))
+        ?.account;
 
       if (!connectAccount?.chargesEnabled || !connectAccount?.payoutsEnabled) {
         throw new ConnectAccountNotReadyError(orgId);
@@ -870,7 +881,7 @@ export class SubscriptionService extends BaseService {
       // session create exactly once. A second `resource_missing` propagates.
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId, email: user.email },
+        { userId, email: user.email, environment: this.environment },
         (stripeCustomerId) =>
           this.stripe.checkout.sessions.create({
             mode: 'subscription',
@@ -883,12 +894,17 @@ export class SubscriptionService extends BaseService {
               codex_organization_id: orgId,
               codex_tier_id: tierId,
               codex_billing_interval: billingInterval,
+              ...stripeEnvMetadata(this.environment),
             },
+            // Every invoice snapshots these into
+            // parent.subscription_details.metadata — the tag the webhook guard
+            // reads on renewals (Codex-2hxff.5).
             subscription_data: {
               metadata: {
                 codex_user_id: userId,
                 codex_organization_id: orgId,
                 codex_tier_id: tierId,
+                ...stripeEnvMetadata(this.environment),
               },
             },
           }),
@@ -1175,7 +1191,13 @@ export class SubscriptionService extends BaseService {
             .onConflictDoNothing();
 
           // BUG-016: Upsert membership with role=subscriber (backward compat).
-          // Preserve higher roles (owner/admin/creator) on conflict.
+          // Preserve higher roles (owner/admin/creator) on conflict — but
+          // only on a row that is ACTIVE. A removed member's inactive row
+          // re-enters as a subscriber: re-activating a removed owner would
+          // break uq_org_memberships_one_active_owner (aborting this insert
+          // after the customer has paid) or, in an org with no active owner,
+          // hand them ownership and its money (Codex-2hxff.2). Both column
+          // refs read the EXISTING row; SET expressions never see each other.
           await tx
             .insert(organizationMemberships)
             .values({
@@ -1191,7 +1213,7 @@ export class SubscriptionService extends BaseService {
               ],
               set: {
                 status: 'active',
-                role: sql`CASE WHEN ${organizationMemberships.role} IN ('owner', 'admin', 'creator') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
+                role: sql`CASE WHEN ${organizationMemberships.status} = 'active' AND ${organizationMemberships.role} IN ('owner', 'admin', 'creator') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
                 updatedAt: new Date(),
               },
             });
@@ -1384,54 +1406,6 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Resolve the source charge id for a paid invoice.
-   *
-   * Why: Stripe 2024+ invoice payloads omit `payments.data` unless the
-   * invoice is retrieved with `expand: ['payments']`. The raw webhook
-   * event is an immutable snapshot, so the inline shape is almost always
-   * empty in production. Without this fallback chain, executeTransfers
-   * never runs (Codex-zdbhg).
-   *
-   * Order of resolution:
-   *   1. Inline `payments.data[0]` on the supplied invoice (test fixtures + cache hits)
-   *   2. Retrieve the invoice with `expand: ['payments']` (canonical Stripe 2024+ path)
-   *   3. If we have a payment_intent but no charge, `paymentIntents.retrieve → latest_charge`
-   *   4. Final fallback: `charges.list({ payment_intent })` — rare race after PI confirmation
-   */
-  private async resolveInvoiceCharge(
-    stripeInvoice: Stripe.Invoice
-  ): Promise<string | null> {
-    let chargeId = extractInvoiceCharge(stripeInvoice);
-    let piId = extractInvoicePaymentIntent(stripeInvoice);
-
-    if (!chargeId && !piId && stripeInvoice.id) {
-      const expanded = await this.stripe.invoices.retrieve(stripeInvoice.id, {
-        expand: ['payments'],
-      });
-      chargeId = extractInvoiceCharge(expanded);
-      piId = extractInvoicePaymentIntent(expanded);
-    }
-
-    if (chargeId) return chargeId;
-    if (!piId) return null;
-
-    const pi = await this.stripe.paymentIntents.retrieve(piId);
-    if (typeof pi.latest_charge === 'string') return pi.latest_charge;
-
-    // Idempotency-drift invariant: charges.list returns the most recent
-    // charge for this PI. We assume Stripe sets pi.latest_charge once and
-    // never reassigns. If that invariant breaks (e.g., PI re-charge after
-    // a failure), the chargeId resolved here could differ across webhook
-    // retries → idempotency keys diverge → executeTransfers may double-pay.
-    const charges = await this.stripe.charges.list({
-      payment_intent: piId,
-      limit: 1,
-    });
-    const first = charges.data?.[0];
-    return typeof first?.id === 'string' ? first.id : null;
-  }
-
-  /**
    * Handle invoice.payment_succeeded for subscription renewals.
    * Extends subscription period and creates revenue transfers.
    *
@@ -1453,12 +1427,27 @@ export class SubscriptionService extends BaseService {
         : (subDetails?.subscription?.id ?? null);
     if (!stripeSubId) return;
 
+    // GBP-only enforcement (Codex-yv18n): reject a non-GBP invoice BEFORE
+    // anything is written. executeTransfers and stripe.transfers.create() are
+    // hardcoded to CURRENCY.GBP, so letting one through would mismatch the
+    // source charge at Stripe; and checking it after the self-heal and the
+    // period UPDATE (as this did until Codex-2hxff.6) left a rewritten row with
+    // no transfer or ledger row to match. Cross-currency support is a tracked
+    // future feature.
+    this.assertGbpOnly(stripeInvoice.currency, {
+      invoiceId: stripeInvoice.id,
+      stripeSubscriptionId: stripeSubId,
+    });
+
     // Resolve the source charge for transfers. Webhook payloads in Stripe
     // 2024+ do NOT include expanded `payments.data` by default — the field
     // is only populated when explicitly expanded on retrieve. Without the
     // expand-fallback chain below, every real invoice.payment_succeeded
     // event silently skipped transfers (Codex-zdbhg).
-    const sourceTransaction = await this.resolveInvoiceCharge(stripeInvoice);
+    const sourceTransaction = await resolveInvoiceCharge(
+      this.stripe,
+      stripeInvoice
+    );
     if (!sourceTransaction) {
       this.obs.warn(
         'Invoice has no charge or payment intent, skipping transfers',
@@ -1505,17 +1494,6 @@ export class SubscriptionService extends BaseService {
         updatedAt: new Date(),
       })
       .where(eq(subscriptions.id, sub.id));
-
-    // GBP-only enforcement (Codex-yv18n): explicitly reject non-GBP charges
-    // before triggering transfers. executeTransfers and downstream
-    // stripe.transfers.create() are hardcoded to CURRENCY.GBP — silently
-    // letting a non-GBP invoice through would cause a currency mismatch at
-    // Stripe. Cross-currency support is a tracked future feature.
-    this.assertGbpOnly(stripeInvoice.currency, {
-      invoiceId: stripeInvoice.id,
-      subscriptionId: sub.id,
-      stripeSubscriptionId: stripeSubId,
-    });
 
     // Execute revenue transfers.
     //
@@ -2344,6 +2322,9 @@ export class SubscriptionService extends BaseService {
               codex_tier_id: newTierId,
               codex_user_id: userId,
               codex_organization_id: orgId,
+              // A pending price change belonged to the OLD tier's Price; the
+              // new tier's Price supersedes it (Codex-2hxff.3).
+              ...CLEAR_PENDING_PRICE_METADATA,
             },
           },
           isUpgrade
@@ -2958,6 +2939,8 @@ export class SubscriptionService extends BaseService {
       conditions.push(eq(payouts.status, 'reversed'));
     } else if (status === 'cancelled_by_refund') {
       conditions.push(eq(payouts.status, 'cancelled_by_refund'));
+    } else if (status === 'cancelled_by_dispute') {
+      conditions.push(eq(payouts.status, 'cancelled_by_dispute'));
     } else if (status === 'needs_attention') {
       conditions.push(inArray(payouts.status, ['pending', 'failed']));
     }
@@ -3562,7 +3545,10 @@ export class SubscriptionService extends BaseService {
       .where(
         and(
           eq(payouts.userId, connectAccount.userId),
-          eq(payouts.status, 'pending'),
+          // Failed transfers are retried too (Codex-2hxff.11): a `failed` row
+          // keeps its charge id and stays payable — unless an old write path
+          // failed it (see isDrainablePayout).
+          isDrainablePayout(),
           // A non-null orgId resolves BOTH that org's rows AND the creator's
           // orgless rows in one pass; a null orgId (orgless-only caller, e.g.
           // the sweep's orgless group) resolves ONLY the orgless rows. `eq`
@@ -3623,13 +3609,29 @@ export class SubscriptionService extends BaseService {
       const sourceType: 'purchase' | 'subscription' = key.endsWith('purchase')
         ? 'purchase'
         : 'subscription';
+      // One group's failure (a Stripe lookup, a fee read) never blocks the
+      // next. Its claimed rows come free when the lease runs out.
       const groupResult = await this.transferPendingGroup(
         rows,
         sourceType,
         groupOrgId,
         stripeAccountId,
         connectAccount.userId
-      );
+      ).catch((error: unknown) => {
+        this.obs.error('resolvePendingPayouts: group failed', {
+          errorId: crypto.randomUUID(),
+          organizationId: groupOrgId,
+          userId: connectAccount.userId,
+          group: key,
+          rowCount: rows.length,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      });
+      if (!groupResult) {
+        failed += rows.length;
+        continue;
+      }
       resolved += groupResult.resolved;
       failed += groupResult.failed;
       creatorPaidCents += groupResult.creatorPaidCents;
@@ -3739,7 +3741,17 @@ export class SubscriptionService extends BaseService {
       sourceType === 'purchase' ? 'one_off' : 'subscription',
       userId
     );
-    const totalCents = group.reduce((sum, row) => sum + row.amountCents, 0);
+    // Partial refunds reduce an unpaid slice before it is paid (Codex-2hxff.8).
+    // This read only gates the group; the amounts sent are re-read below,
+    // after the claim, when no reduction can change under the transfer.
+    const gateReductions = await pendingReductionsFor(
+      this.db,
+      group.map((row) => row.id)
+    );
+    const totalCents = group.reduce(
+      (sum, row) => sum + row.amountCents - (gateReductions.get(row.id) ?? 0),
+      0
+    );
 
     if (totalCents < payoutFees.minTransferCents) {
       this.obs.info(
@@ -3761,7 +3773,90 @@ export class SubscriptionService extends BaseService {
       };
     }
 
-    for (const payout of group) {
+    // Codex-2hxff.11: claim each row for one attempt (a 10-minute lease —
+    // a second drain, or a write-time transfer still in flight, holds it off),
+    // then ask Stripe for any transfer an EARLIER attempt already made for a
+    // claimed row: its update may have failed after the money moved. Such a
+    // row is settled, never sent again. The rest are sent with a key per
+    // attempt — see claimPayoutAttempt for why one stable key is not enough.
+    const attempts = await claimPayoutAttempts(
+      this.db,
+      group.map((payout) => payout.id)
+    );
+    const claimed = group.filter((payout) => attempts.has(payout.id));
+    const reductions = await pendingReductionsFor(
+      this.db,
+      claimed.map((payout) => payout.id)
+    );
+    const payable = (payout: (typeof group)[number]) =>
+      payout.amountCents - (reductions.get(payout.id) ?? 0);
+    const alreadySent = await findTransfersForPayouts(
+      this.stripe,
+      stripeAccountId,
+      claimed,
+      this.obs
+    );
+
+    const paid = (payout: (typeof group)[number]) => {
+      resolved++;
+      if (payout.payoutType === 'creator_payout') {
+        creatorPaidCents += payable(payout);
+        creatorPaidCount++;
+      }
+    };
+
+    for (const payout of claimed) {
+      const earlier = alreadySent.get(payout.id);
+      if (earlier) {
+        this.obs.info('Pending payout already transferred; settling it', {
+          pendingPayoutId: payout.id,
+          stripeTransferId: earlier,
+        });
+        try {
+          if (await settlePayoutPaid(this.db, payout.id, earlier)) {
+            paid(payout);
+          }
+        } catch (error) {
+          // Still pending with its lease: the next drain finds the same
+          // transfer and settles it.
+          failed++;
+          this.obs.error('Could not settle a payout already transferred', {
+            errorId: crypto.randomUUID(),
+            pendingPayoutId: payout.id,
+            stripeTransferId: earlier,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        continue;
+      }
+
+      // The lease was taken for the whole group; renew it for this row
+      // before sending. If the group outlived it and another drain has
+      // claimed the row since, that drain sends it, not this one.
+      const attempt = attempts.get(payout.id) ?? 0;
+      if (!(await renewPayoutAttempt(this.db, payout.id, attempt))) {
+        this.obs.info('Pending payout claimed by another drain; skipping', {
+          pendingPayoutId: payout.id,
+          attempt,
+        });
+        continue;
+      }
+
+      const amountCents = payable(payout);
+      if (amountCents <= 0) {
+        // Reduced to nothing: only a refund of the whole charge does that, and
+        // it cancels the row instead, so this is a ledger inconsistency.
+        failed++;
+        this.obs.error('A pending payout was reduced to nothing; not sent', {
+          errorId: crypto.randomUUID(),
+          pendingPayoutId: payout.id,
+          grossCents: payout.amountCents,
+          reducedCents: reductions.get(payout.id) ?? 0,
+        });
+        continue;
+      }
+
+      let transfer: Stripe.Transfer;
       try {
         // GBP-only enforcement (Codex-yv18n) lives INSIDE the per-row
         // try/catch so a non-GBP row counts as a per-row failure (not a
@@ -3775,50 +3870,69 @@ export class SubscriptionService extends BaseService {
         // Codex-dbzkg: pass source_transaction when the row was funded
         // by a tracked platform charge so the retry pulls from THAT
         // charge's source-linked balance, not general platform balance.
-        const transfer = await this.stripe.transfers.create(
+        transfer = await this.stripe.transfers.create(
           {
-            amount: payout.amountCents,
+            amount: amountCents,
             currency: payoutCurrency,
             destination: stripeAccountId,
             ...(payout.stripeChargeId
               ? { source_transaction: payout.stripeChargeId }
               : {}),
             metadata: {
-              pending_payout_id: payout.id,
+              payout_id: payout.id,
               subscription_id: payout.subscriptionId,
               purchase_id: payout.purchaseId,
               source_type: payout.sourceType,
               type: 'pending_payout_resolution',
+              ...stripeEnvMetadata(this.environment),
             },
           },
-          { idempotencyKey: `payout_${payout.id}` }
+          { idempotencyKey: `payout_${payout.id}_${attempt}` }
         );
-
-        await this.db
-          .update(payouts)
-          .set({
-            status: 'paid',
-            resolvedAt: new Date(),
-            stripeTransferId: transfer.id,
-          })
-          .where(eq(payouts.id, payout.id));
-
-        resolved++;
-        if (payout.payoutType === 'creator_payout') {
-          creatorPaidCents += payout.amountCents;
-          creatorPaidCount++;
-        }
       } catch (error) {
         failed++;
         this.obs.error('Failed to resolve pending payout', {
           pendingPayoutId: payout.id,
           subscriptionId: payout.subscriptionId,
-          amountCents: payout.amountCents,
+          amountCents,
           sourceType,
           error: (error as Error).message,
         });
-        // Codex-vv77x: per-row error isolation — one Stripe failure
-        // never blocks the remaining rows in the group.
+        // Codex-vv77x: per-row error isolation — one Stripe failure never
+        // blocks the remaining rows. The row stays payable for the next drain.
+        await markPayoutFailed(this.db, payout.id).catch((updateError) => {
+          this.obs.error('Could not mark the payout failed', {
+            pendingPayoutId: payout.id,
+            error: (updateError as Error).message,
+          });
+        });
+        continue;
+      }
+
+      try {
+        // A refund may have cancelled the row while the transfer was in
+        // flight: settleTransfer then reverses it rather than leave it paid.
+        const settled = await settleTransfer(
+          this.ledger(),
+          payout.id,
+          transfer.id
+        );
+        if (settled === 'settled' || settled === 'already_settled') {
+          paid(payout);
+        }
+      } catch (error) {
+        // The money moved; only the row is behind. The next drain finds the
+        // transfer by its payout_id and settles the row.
+        failed++;
+        this.obs.error(
+          'Pending payout transferred but its row was not marked paid; the next drain settles it',
+          {
+            errorId: crypto.randomUUID(),
+            pendingPayoutId: payout.id,
+            stripeTransferId: transfer.id,
+            error: (error as Error).message,
+          }
+        );
       }
     }
 
@@ -3878,86 +3992,50 @@ export class SubscriptionService extends BaseService {
     return sub;
   }
 
-  // ─── Tier Price Propagation (Q1.2 — Codex-3xyyb) ───────────────────────────
+  // ─── Tier Price Propagation (Codex-2hxff.3) ────────────────────────────────
 
   /**
-   * Propagate a tier's new Stripe Price ID to EVERY active/cancelling
-   * subscription currently on that tier. Q1.2 of the subscription audit
-   * epic (Codex-kqmvd) closes the gap where Q1.1's sync-back (and the
-   * existing Codex-UI `updateTier` flow) updated the tier record but left
-   * in-flight subscriptions billing on the superseded Price.
+   * Move a tier's existing subscribers on ONE interval to that interval's new
+   * Price, under the 30-day rule (docs/payments/subscriptions.md → Price
+   * changes; mechanism in `./pending-price-change.ts`).
    *
-   * Design contract:
-   * - Scope: subscriptions with `tierId = tierId` AND status IN
-   *   ('active', 'cancelling'). `paused`, `past_due`, `cancelled`,
-   *   `incomplete` are deliberately SKIPPED — swapping a Price under a
-   *   paused subscription triggers an unwanted reactivation path, and a
-   *   cancelled sub has no ongoing billing to reprice. The status list
-   *   mirrors the PR #5 filter (`getSubscriptionOrThrow`) minus
-   *   `past_due` (past-due subs are awaiting retry; changing their Price
-   *   mid-flight creates Stripe edge cases — they'll re-sync on the next
-   *   invoice attempt).
-   * - For each subscription: retrieve the live Stripe sub to get its
-   *   item id, then call `stripe.subscriptions.update` with the new
-   *   Price and the caller's proration policy (default
-   *   `create_prorations`). Stripe emits `customer.subscription.updated`
-   *   which flows through the existing `handleSubscriptionUpdated`
-   *   webhook → shared status mapper → our DB `amountCents` update.
-   *   We do NOT write the DB directly from this path — one write path
-   *   for subscription price changes keeps webhook-reconciliation
-   *   semantics intact.
-   * - Idempotency: each Stripe call uses a deterministic idempotency key
-   *   `tier-price-propagate:${subId}:${newPriceId}`, so retries on
-   *   partial batch failure reissue the same mutation safely. If a
-   *   subscription already carries the new Price (e.g. prior run
-   *   succeeded before the failure point), Stripe treats the replay as
-   *   a no-op — the idempotency key protects us without requiring a
-   *   pre-check round trip.
-   * - Batching: subscriptions are processed in parallel batches of
-   *   `batchSize` (default 8) with `interBatchDelayMs` (default 50ms)
-   *   between batches to respect Stripe's per-account rate limit (25
-   *   req/sec test, 100 req/sec live). A tier with 500 subs completes
-   *   in ~2.5s at the default settings — well within a `waitUntil`
-   *   fire-and-forget budget.
-   * - Per-sub error handling: one failed update MUST NOT abort the
-   *   batch. Failures are logged via `this.obs.error` with the offending
-   *   subscriptionId + error, and we continue. After all batches, an
-   *   aggregate error log fires if `failed > 0`. Callers (webhook
-   *   handler, UI-driven tier update) treat this method as
-   *   fire-and-forget — they never surface individual failures.
+   * - Scope: `tierId`, the changed `interval`, and status active, cancelling,
+   *   past_due or paused. Past-due and paused subscribers get the pending
+   *   marker only and move once Stripe reports them active; cancelled and
+   *   incomplete ones have no renewal to reprice.
+   * - Each subscriber is emailed (`subscription-tier-price-change`) with the
+   *   renewal that first bills the new price. One `noticeAt` for the whole
+   *   fan-out, so every subscriber gets the same 30 days.
+   * - Nothing is charged now and nothing is prorated: a same-interval swap
+   *   with `proration_behavior: 'none'` only changes what the NEXT renewal
+   *   bills. Stripe's `customer.subscription.updated` then re-syncs our
+   *   `amountCents` through the existing webhook path — we never write the DB
+   *   here.
+   * - One failed subscriber never aborts the batch; failures are logged and
+   *   counted. Callers run this fire-and-forget after the tier's DB commit.
    *
-   * Called from:
-   * - `TierService.applyStripePriceCreated` (Dashboard sync-back)
-   * - `TierService.updateTier` (Codex-UI price change)
-   *
-   * Both call sites invoke AFTER the DB persist + cache bump succeeds,
-   * so a propagation failure does not roll back the tier price change —
-   * the canonical Price lives on the tier; this method just fans out
-   * the billing effect. An operator can re-run propagation manually by
-   * re-adopting the same Price (no-op on the tier, re-runs against
-   * current active subs).
-   *
-   * @param tierId — subscription tier whose price changed
-   * @param newStripePriceId — canonical Stripe Price id the tier now points at
-   * @param options — see `PropagateTierPriceOptions`
-   * @returns `{ total, updated, failed }` counts — informational only;
-   *          the webhook path is authoritative for DB state.
+   * Called from `TierService.updateTier` (Studio — the only place a price is
+   * set). A Price created in the Stripe Dashboard is never propagated.
    */
   async propagateTierPriceToActiveSubscriptions(
     tierId: string,
     newStripePriceId: string,
-    options: PropagateTierPriceOptions = {}
+    options: PropagateTierPriceOptions
   ): Promise<PropagateTierPriceResult> {
-    const prorationBehavior = options.prorationBehavior ?? 'create_prorations';
+    const { interval } = options;
     const batchSize = Math.max(1, options.batchSize ?? 8);
     const interBatchDelayMs = Math.max(0, options.interBatchDelayMs ?? 50);
+    const noticeAt = new Date();
 
     try {
       const conditions = [
         eq(subscriptions.tierId, tierId),
+        eq(subscriptions.billingInterval, interval),
         inArray(subscriptions.status, [
           SUBSCRIPTION_STATUS.ACTIVE,
           SUBSCRIPTION_STATUS.CANCELLING,
+          SUBSCRIPTION_STATUS.PAST_DUE,
+          SUBSCRIPTION_STATUS.PAUSED,
         ]),
       ];
       if (options.organizationId) {
@@ -3966,14 +4044,9 @@ export class SubscriptionService extends BaseService {
         );
       }
 
-      // Left-join users + tiers so the per-sub success branch can dispatch
-      // the price-change notice email (Codex-7kc83) without a second round
-      // trip per subscription. Tiers are LEFT-joined because the tier could
-      // be soft-deleted between propagation runs and the archived-tier
-      // semantic lets reads still resolve (see subscription CLAUDE.md).
-      // Users LEFT-join preserves the propagation path even when a user
-      // somehow has no email (shouldn't happen — email is the BetterAuth
-      // primary key material — but we skip the email not the Stripe swap).
+      // Left-join users + tiers so each subscriber's notice email needs no
+      // second round trip. Tiers are LEFT-joined because the tier could be
+      // soft-deleted between runs (archived tiers still resolve on reads).
       const rows = await this.db
         .select({
           id: subscriptions.id,
@@ -3982,7 +4055,6 @@ export class SubscriptionService extends BaseService {
           userId: subscriptions.userId,
           billingInterval: subscriptions.billingInterval,
           amountCents: subscriptions.amountCents,
-          currentPeriodEnd: subscriptions.currentPeriodEnd,
           userEmail: users.email,
           userName: users.name,
           tierName: subscriptionTiers.name,
@@ -3997,16 +4069,27 @@ export class SubscriptionService extends BaseService {
         )
         .where(and(...conditions));
 
+      const empty = { total: 0, updated: 0, applied: 0, pending: 0, failed: 0 };
       if (rows.length === 0) {
-        this.obs.info('Tier price propagation: no active subscriptions', {
+        this.obs.info('Tier price propagation: no subscribers on interval', {
           tierId,
+          interval,
           newStripePriceId,
         });
-        return { total: 0, updated: 0, failed: 0 };
+        return empty;
       }
 
-      let updated = 0;
-      let failed = 0;
+      const newAmountCents =
+        interval === 'year'
+          ? rows[0]?.tierPriceAnnual
+          : rows[0]?.tierPriceMonthly;
+      if (newAmountCents === null || newAmountCents === undefined) {
+        throw new InternalServiceError(
+          'Tier price propagation: the tier has no price for the interval'
+        );
+      }
+
+      const counts = { ...empty, total: rows.length };
       const errors: Array<{
         subscriptionId: string;
         stripeSubscriptionId: string;
@@ -4016,51 +4099,41 @@ export class SubscriptionService extends BaseService {
       for (let i = 0; i < rows.length; i += batchSize) {
         const batch = rows.slice(i, i + batchSize);
         const results = await Promise.allSettled(
-          batch.map(async (row) => {
-            const stripeSub = await this.stripe.subscriptions.retrieve(
-              row.stripeSubscriptionId
-            );
-            const itemId = stripeSub.items.data[0]?.id;
-            if (!itemId) {
-              throw new InternalServiceError(
-                'Stripe subscription has no items to update'
-              );
-            }
-
-            await this.stripe.subscriptions.update(
-              row.stripeSubscriptionId,
-              {
-                items: [{ id: itemId, price: newStripePriceId }],
-                proration_behavior: prorationBehavior,
-              },
-              {
-                idempotencyKey: `tier-price-propagate:${row.id}:${newStripePriceId}`,
-              }
-            );
-          })
+          batch.map((row) =>
+            schedulePriceChange(this.stripe, {
+              stripeSubscriptionId: row.stripeSubscriptionId,
+              newPriceId: newStripePriceId,
+              newAmountCents,
+              interval,
+              noticeAt,
+            })
+          )
         );
 
         for (const [idx, result] of results.entries()) {
           const row = batch[idx];
-          // `batch[idx]` is always defined inside a `results.entries()`
-          // loop — `Promise.allSettled` returns an array of the same
-          // length as the input. The guard is strictly to satisfy
-          // `noUncheckedIndexedAccess`; in practice it cannot fire.
+          // `Promise.allSettled` returns one result per input; the guard only
+          // satisfies `noUncheckedIndexedAccess`.
           if (!row) continue;
           if (result.status === 'fulfilled') {
-            updated++;
-            // Q1.3 (Codex-7kc83): notify the subscriber that their
-            // Stripe Price is changing. Fire-and-forget — mailer is
-            // already inside the background `waitUntil` tail that
-            // wraps the propagator, so we don't add our own. A failed
-            // email MUST NOT fail the propagation; the mailer handles
-            // its own error suppression (see `sendEmailToWorker`).
-            this.dispatchTierPriceChangeEmail(row, newStripePriceId, {
-              tierId,
-              prorationBehavior,
-            });
+            const outcome = result.value;
+            if (outcome.kind === 'applied' || outcome.kind === 'pending') {
+              counts.updated++;
+              counts[outcome.kind]++;
+              this.dispatchTierPriceChangeEmail(row, newAmountCents, {
+                tierId,
+                newStripePriceId,
+                effectiveAt: outcome.effectiveAt,
+              });
+            } else if (outcome.kind === 'skipped') {
+              this.obs.warn('Tier price propagation: subscription skipped', {
+                tierId,
+                subscriptionId: row.id,
+                reason: outcome.reason,
+              });
+            }
           } else {
-            failed++;
+            counts.failed++;
             const message =
               result.reason instanceof Error
                 ? result.reason.message
@@ -4071,7 +4144,7 @@ export class SubscriptionService extends BaseService {
               error: message,
             });
             this.obs.error(
-              'Tier price propagation: subscription update failed',
+              'Tier price propagation: scheduling the change failed',
               {
                 tierId,
                 newStripePriceId,
@@ -4084,9 +4157,7 @@ export class SubscriptionService extends BaseService {
           }
         }
 
-        // Inter-batch delay to stay under Stripe's per-account rate
-        // limit. Only sleep when another batch follows — avoids a
-        // trailing delay after the last batch.
+        // Stay under Stripe's per-account rate limit; no trailing delay.
         if (i + batchSize < rows.length && interBatchDelayMs > 0) {
           await new Promise((resolve) =>
             setTimeout(resolve, interBatchDelayMs)
@@ -4094,100 +4165,65 @@ export class SubscriptionService extends BaseService {
         }
       }
 
-      if (failed > 0) {
+      if (counts.failed > 0) {
         this.obs.error(
           'Tier price propagation completed with failures (operator review required)',
           {
             tierId,
+            interval,
             newStripePriceId,
-            total: rows.length,
-            updated,
-            failed,
+            ...counts,
             sampleErrors: errors.slice(0, 5),
           }
         );
       } else {
         this.obs.info('Tier price propagation complete', {
           tierId,
+          interval,
           newStripePriceId,
-          total: rows.length,
-          updated,
-          prorationBehavior,
+          ...counts,
         });
       }
 
-      return { total: rows.length, updated, failed };
+      return counts;
     } catch (error) {
       this.handleError(error, 'propagateTierPriceToActiveSubscriptions');
     }
   }
 
   /**
-   * Dispatch the `subscription-tier-price-change` email for a single
-   * subscription that was just successfully swapped by
-   * `propagateTierPriceToActiveSubscriptions` (Q1.3 — Codex-7kc83).
+   * Email one subscriber about a scheduled price change
+   * (`subscription-tier-price-change`).
    *
-   * Design contract:
-   * - Called ONLY in the per-sub fulfilled branch — a failed Stripe
-   *   update does not trigger an email (the subscription is still on
-   *   the old Price; nothing to notify). A failed email MUST NOT fail
-   *   the propagation loop.
-   * - Copy is neutral regarding direction: reads correctly whether the
-   *   new price is higher, lower, or equal to the old price. The
-   *   template surfaces both values plus the effective date + a
-   *   manage-subscription URL for cancellation before the change
-   *   takes effect.
-   * - Amounts are GBP pence; we format using the same `£X.XX` helper
-   *   the other subscription lifecycle emails use (see
-   *   `buildSubscriptionCreatedEmail`).
-   * - Effective date = the next billing cycle. Stripe's
-   *   `create_prorations` invoices the delta on the NEXT invoice — so
-   *   "effective from the next billing cycle" is the correct framing
-   *   regardless of proration override. We use the subscription's
-   *   `currentPeriodEnd` as the effective date; that's the boundary
-   *   between the old-price period and the new-price period.
-   * - Category is `transactional` — billing lifecycle emails are
-   *   legally required in many jurisdictions (UK/EU typically 30 days
-   *   notice for increases) and bypass the notification-preferences
-   *   opt-out per `NotificationsService.sendEmail`.
-   *
-   * Missing email / missing tier (defensive — BetterAuth enforces
-   * email on users and propagation already filtered by active status
-   * scoped to the tier) is logged at warn level and skipped without
-   * affecting the propagation result counts.
+   * - `effectiveAt` is the renewal that first bills the new price — at least
+   *   30 days after this email (Codex-2hxff.3).
+   * - Copy is neutral on direction: increases and decreases read the same.
+   * - Category `transactional`: billing notices bypass the opt-out.
+   * - A missing mailer (unit tests), email or price is logged and skipped; a
+   *   mailer that throws never breaks the fan-out.
    */
   private dispatchTierPriceChangeEmail(
     row: {
       id: string;
-      stripeSubscriptionId: string;
       organizationId: string;
       userId: string;
       billingInterval: string;
       amountCents: number;
-      currentPeriodEnd: Date;
       userEmail: string | null;
       userName: string | null;
       tierName: string | null;
-      tierPriceMonthly: number | null;
-      tierPriceAnnual: number | null;
     },
-    newStripePriceId: string,
-    context: { tierId: string; prorationBehavior: string }
+    newPriceCents: number,
+    context: { tierId: string; newStripePriceId: string; effectiveAt: Date }
   ): void {
-    if (!this.mailer) {
-      // No mailer wired (unit test harness). Propagation succeeds
-      // without side-effect — silent no-op to match the `cache` /
-      // `waitUntil` graceful-degrade semantics elsewhere on the
-      // service.
-      return;
-    }
+    if (!this.mailer) return;
 
     if (!row.userEmail) {
       this.obs.warn(
         'Tier price propagation: subscriber has no email; skipping notice',
         {
           tierId: context.tierId,
-          newStripePriceId,
+          newStripePriceId: context.newStripePriceId,
           subscriptionId: row.id,
           userId: row.userId,
           organizationId: row.organizationId,
@@ -4195,44 +4231,6 @@ export class SubscriptionService extends BaseService {
       );
       return;
     }
-
-    // Old price = the subscription's current `amountCents` snapshot
-    // (this is the amount that was billing immediately before the
-    // swap). New price = the tier's now-authoritative pence amount
-    // for the subscription's billing interval. Annual subscribers
-    // see the annual column; monthly subscribers see the monthly
-    // column.
-    const newPriceCents =
-      row.billingInterval === 'year'
-        ? row.tierPriceAnnual
-        : row.tierPriceMonthly;
-
-    if (newPriceCents === null || newPriceCents === undefined) {
-      this.obs.warn(
-        'Tier price propagation: could not resolve new price amount; skipping notice',
-        {
-          tierId: context.tierId,
-          newStripePriceId,
-          subscriptionId: row.id,
-          billingInterval: row.billingInterval,
-        }
-      );
-      return;
-    }
-
-    const oldPriceFormatted = `£${(row.amountCents / 100).toFixed(2)}`;
-    const newPriceFormatted = `£${(newPriceCents / 100).toFixed(2)}`;
-
-    // Effective date = the end of the CURRENT billing period
-    // (== start of the first period that bills at the new price).
-    // Matches "effective from the next billing cycle" regardless of
-    // the caller's proration override: Stripe always respects period
-    // boundaries for the actual Price swap, `create_prorations` only
-    // governs whether the mid-cycle delta is invoiced now or rolled
-    // into the next invoice.
-    const effectiveDate = row.currentPeriodEnd
-      ? row.currentPeriodEnd.toLocaleDateString('en-GB')
-      : 'your next billing cycle';
 
     try {
       this.mailer({
@@ -4245,22 +4243,22 @@ export class SubscriptionService extends BaseService {
         data: {
           userName: row.userName || 'there',
           planName: row.tierName || 'your subscription',
-          oldPriceFormatted,
-          newPriceFormatted,
+          // The amount billing today, from the subscription's own snapshot.
+          oldPriceFormatted: `£${(row.amountCents / 100).toFixed(2)}`,
+          newPriceFormatted: `£${(newPriceCents / 100).toFixed(2)}`,
           billingInterval: row.billingInterval,
-          effectiveDate,
+          effectiveDate: context.effectiveAt.toLocaleDateString('en-GB', {
+            timeZone: 'UTC',
+          }),
           manageUrl: `${this.webAppUrl ?? ''}/account/subscriptions`,
         },
       });
     } catch (error) {
-      // The mailer itself is expected to be fire-and-forget and not
-      // throw — but catch synchronously anyway so a mis-wired
-      // implementation can never take down the propagation loop.
       this.obs.warn(
         'Tier price propagation: mailer threw synchronously; notice skipped',
         {
           tierId: context.tierId,
-          newStripePriceId,
+          newStripePriceId: context.newStripePriceId,
           subscriptionId: row.id,
           error: error instanceof Error ? error.message : String(error),
         }
@@ -4269,49 +4267,30 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Resolve the org owner's userId from organization_memberships.
-   * Returns null if no owner membership is found.
+   * The payouts-ledger dependencies for `recordSlice` / `recordPlatformFee`
+   * (Codex-2hxff.11).
    */
-  private async resolveOrgOwnerId(orgId: string): Promise<string | null> {
-    const [owner] = await this.db
-      .select({ userId: organizationMemberships.userId })
-      .from(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.organizationId, orgId),
-          eq(organizationMemberships.role, 'owner'),
-          // A removed owner keeps role='owner' with status='inactive', so
-          // without this the org's revenue slice can settle on someone who is
-          // no longer a member.
-          eq(organizationMemberships.status, 'active')
-        )
-      )
-      .limit(1);
-
-    return owner?.userId ?? null;
+  private ledger(): LedgerDeps {
+    return {
+      db: this.db,
+      stripe: this.stripe,
+      obs: this.obs,
+      environment: this.environment,
+    };
   }
 
   /**
-   * Codex-xz61z (I2): shared owner-fallback for the two zero-creator-payout
-   * branches in `executeTransfers`:
+   * Codex-xz61z (I2): the organisation owner receives the whole creator pool
+   * when an invoice pays no creator — no agreement matched the Q3 filter, or
+   * every one carries a zero share. One `creator_payout_to_owner` slice per
+   * charge, whichever branch fires, under one idempotency key
+   * (`${chargeId}_creator_pool_owner`).
    *
-   *   1. The "empty agreements" branch (no rows matched the Q3 filter).
-   *   2. The "all zero-share" branch (rows matched but `totalShareBps == 0`).
-   *
-   * Both routes the entire creator pool to the org owner via a single
-   * `creator_payout_to_owner` transfer + ledger row. They share an
-   * idempotency key (`${chargeId}_creator_pool_owner`) so a webhook
-   * replay collapses to one Stripe transfer regardless of which branch
-   * fires on the replay.
-   *
-   * `logContext` is appended to ledger-error log messages so the
-   * branch is identifiable in observability without duplicating the
-   * code path.
-   *
-   * If `orgConnect` is missing or `chargesEnabled === false`, the
-   * helper exits silently — the upstream org-fee transfer block above
-   * already accumulated a pending payout for the same Connect account,
-   * which is the correct end state.
+   * Through `recordSlice` (Codex-2hxff.11): pending in the payee's name until
+   * they can be paid (Codex-2hxff.2 review — an ownership transfer may land
+   * on someone who has not onboarded), and held as `no_owner` when the
+   * organisation had no owner at the invoice's time (Codex-2hxff.37; it used
+   * to be logged and dropped).
    */
   private async transferCreatorPoolToOwner(
     subscriptionId: string,
@@ -4319,273 +4298,134 @@ export class SubscriptionService extends BaseService {
     chargeId: string,
     transferGroup: string,
     creatorPayoutCents: number,
-    orgConnect:
-      | { userId: string; stripeAccountId: string; chargesEnabled: boolean }
-      | null
-      | undefined,
-    logContext: string
+    orgPayee: OrganisationPayee | undefined
   ): Promise<void> {
-    if (!orgConnect?.chargesEnabled || creatorPayoutCents <= 0) {
-      return;
-    }
-    try {
-      const transfer = await this.stripe.transfers.create(
-        {
-          amount: creatorPayoutCents,
-          currency: CURRENCY.GBP,
-          destination: orgConnect.stripeAccountId,
-          source_transaction: chargeId,
-          transfer_group: transferGroup,
-          metadata: {
-            subscription_id: subscriptionId,
-            type: 'creator_payout_to_owner',
-          },
-        },
-        { idempotencyKey: `${chargeId}_creator_pool_owner` }
-      );
-      try {
-        await this.db.insert(payouts).values({
-          userId: orgConnect.userId,
-          organizationId: orgId,
-          subscriptionId,
-          amountCents: creatorPayoutCents,
-          payoutType: 'creator_payout_to_owner',
-          status: 'paid',
-          stripeTransferId: transfer.id,
-          stripeChargeId: chargeId,
-          transferGroup,
-          resolvedAt: new Date(),
-        });
-      } catch (insertError) {
-        if (!isUniqueViolation(insertError)) {
-          this.obs.error(
-            `Creator-pool transfer to owner succeeded but payouts ledger insert failed (${logContext})`,
-            {
-              subscriptionId,
-              organizationId: orgId,
-              stripeTransferId: transfer.id,
-              amountCents: creatorPayoutCents,
-              error: (insertError as Error).message,
-            }
-          );
-        }
-      }
-    } catch (transferError) {
-      this.obs.error(
-        `Creator pool transfer to owner failed (${logContext}), accumulating`,
-        {
-          subscriptionId,
-          organizationId: orgId,
-          amountCents: creatorPayoutCents,
-          error: (transferError as Error).message,
-        }
-      );
-      // BUG-036: Wrap pending payout insert in try/catch so a DB failure
-      // doesn't crash the entire transfer flow.
-      try {
-        await this.db.insert(payouts).values({
-          userId: orgConnect.userId,
-          organizationId: orgId,
-          subscriptionId,
-          amountCents: creatorPayoutCents,
-          payoutType: 'creator_payout_to_owner',
-          status: 'failed',
-          reason: 'transfer_failed',
-          // Correlation is what makes a row visible to
-          // reverseSubscriptionPayoutsForCharge (selects by stripeChargeId) —
-          // without it a refunded charge can never claw back this obligation.
-          stripeChargeId: chargeId,
-          transferGroup,
-        });
-      } catch (insertError) {
-        this.obs.error(
-          `Failed to record pending payout for creator pool to owner (${logContext})`,
-          {
-            subscriptionId,
-            organizationId: orgId,
-            amountCents: creatorPayoutCents,
-            error: (insertError as Error).message,
-          }
-        );
-      }
-    }
+    await recordSlice(this.ledger(), {
+      payoutType: 'creator_payout_to_owner',
+      amountCents: creatorPayoutCents,
+      organizationId: orgId,
+      source: { sourceType: 'subscription', subscriptionId },
+      stripeChargeId: chargeId,
+      transferGroup,
+      sendTransferGroup: true,
+      payee: orgPayee
+        ? { userId: orgPayee.userId, account: orgPayee.account }
+        : null,
+      idempotencyKey: `${chargeId}_creator_pool_owner`,
+      metadata: { subscription_id: subscriptionId },
+    });
   }
 
   /**
-   * Reverse the subscription payout transfers for a refunded invoice charge
-   * (Codex-13v21). Mirror of `PurchaseService.reversePayoutsForPurchase` for the
-   * subscription pipeline: when a subscription invoice charge is refunded, the
-   * creator/org transfers made at invoice.payment_succeeded must be clawed back —
-   * Stripe does NOT auto-reverse separate `transfers.create` calls, so without
-   * this the platform absorbs the full gross while creators keep their slice.
+   * Claw back the subscription payout slices of a refunded invoice charge
+   * (Codex-13v21) through the shared engine (@codex/payments `reverseCharge`,
+   * Codex-2hxff.56). Stripe does NOT reverse separate `transfers.create`
+   * calls, so without this the platform pays the whole refund while
+   * creators keep their slices.
    *
-   * Scopes to `sourceType='subscription'` rows for the charge. One-time purchase
-   * rows carry `sourceType='purchase'` (handled by PurchaseService.processRefund),
-   * so calling BOTH on every `charge.refunded` never double-reverses the same
-   * transfer.
+   * Only `sourceType='subscription'` rows on the charge are reversed;
+   * one-time purchase rows are PurchaseService.processRefund's, so running
+   * both on every `charge.refunded` never reverses a transfer twice.
    *
-   * Partial refunds reverse each slice proportionally
-   * (`floor(row.amountCents * refundAmountCents / grossCents)`); residual rounding
-   * stays on the platform balance. Idempotency key `${transferId}_reversal_<suffix>`
-   * makes webhook replays and repeated partial refunds safe.
-   *
-   * Idempotent: rows already `reversed`/`cancelled_by_refund` are skipped.
-   *
-   * insufficient_funds (creator already withdrew their slice): logged loudly with
-   * a correlatable errorId, leaving the row `paid` (the original transfer really
-   * succeeded). NOTE: the purchase path records a `refund_reviews` ops-queue row
-   * here, but `refund_reviews.purchaseId` is NOT NULL and cannot yet represent a
-   * subscription obligation — generalising that table is a tracked follow-up
-   * (Codex-13v21 design). Until then the obligation is visible in logs only.
+   * Each refund's share is recorded per slice (payout_reversals),
+   * so a redelivery does only what is left and a second partial refund is
+   * clawed back too. A balance too low to cover it is a `refund_reviews` debt,
+   * as for purchases (Codex-2hxff.8, D5).
    */
   async reverseSubscriptionPayoutsForCharge(
-    chargeId: string,
-    refund: { refundAmountCents: number | null; stripeRefundId: string | null }
+    charge: ClawbackCharge
   ): Promise<void> {
-    const rows = await this.db
-      .select()
-      .from(payouts)
-      .where(
-        and(
-          eq(payouts.stripeChargeId, chargeId),
-          eq(payouts.sourceType, 'subscription')
-        )
+    await reverseCharge(
+      { ...this.ledger(), obs: this.obs },
+      {
+        charge,
+        source: { sourceType: 'subscription' },
+        refunds: () => listClawableRefunds(this.stripe, charge.id),
+      }
+    );
+  }
+
+  /**
+   * The hourly retry of clawback steps left `failed`, for every source: a
+   * step Stripe refused does not make the webhook retry (Codex-2hxff.8).
+   */
+  async retryFailedClawbacks(olderThanMinutes = 15): Promise<{
+    charges: number;
+    retried: number;
+    stillFailing: number;
+    lostDisputesApplied: number;
+  }> {
+    return retryFailedClawbacks(
+      { ...this.ledger(), obs: this.obs },
+      { olderThanMinutes }
+    );
+  }
+
+  // ── Disputes (Codex-2hxff.9; docs/payments/subscription-disputes.md) ──
+
+  /**
+   * A chargeback opened on one of its invoices: access paused. Undefined for
+   * a purchase's dispute. Billing is paused separately, after the clawback.
+   */
+  async pauseForDispute(
+    input: DisputeInput
+  ): Promise<DisputedSubscription | undefined> {
+    const paused = await pauseDisputedSubscription(this.disputeDeps(), input);
+    if (paused) {
+      this.invalidateIfConfigured(
+        paused.userId,
+        paused.organizationId ?? undefined,
+        'subscription_paused'
       );
-
-    // Common case for a one-time-purchase charge (or an already-swept charge):
-    // no subscription rows → no-op.
-    if (rows.length === 0) return;
-
-    // Gross = the charged amount, reconstructed as the sum of the recorded
-    // slices (platform + org + creator). Denominator for a proportional refund.
-    const grossCents = rows.reduce((sum, r) => sum + r.amountCents, 0);
-
-    const { refundAmountCents, stripeRefundId } = refund;
-    const isPartial =
-      refundAmountCents !== null &&
-      refundAmountCents > 0 &&
-      grossCents > 0 &&
-      refundAmountCents < grossCents;
-    const partialRatioNumerator = isPartial ? refundAmountCents : null;
-    const reversalAmount = (rowAmountCents: number): number =>
-      partialRatioNumerator !== null
-        ? Math.floor((rowAmountCents * partialRatioNumerator) / grossCents)
-        : rowAmountCents;
-    const idempotencySuffix = stripeRefundId
-      ? `_${stripeRefundId}`
-      : refundAmountCents !== null
-        ? `_${refundAmountCents}`
-        : '';
-
-    for (const row of rows) {
-      if (row.status === 'reversed' || row.status === 'cancelled_by_refund') {
-        continue;
-      }
-
-      let skipStatusFlip = false;
-      if (row.stripeTransferId) {
-        const amount = reversalAmount(row.amountCents);
-        if (amount === 0) {
-          skipStatusFlip = true;
-          this.obs.info(
-            'Subscription reversal amount floored to zero, platform absorbs',
-            {
-              chargeId,
-              payoutId: row.id,
-              rowAmountCents: row.amountCents,
-              refundAmountCents,
-            }
-          );
-        } else {
-          try {
-            await this.stripe.transfers.createReversal(
-              row.stripeTransferId,
-              {
-                amount,
-                metadata: {
-                  subscription_id: row.subscriptionId ?? '',
-                  charge_id: chargeId,
-                  payout_id: row.id,
-                  type: 'refund_reversal',
-                },
-              },
-              {
-                idempotencyKey: `${row.stripeTransferId}_reversal${idempotencySuffix}`,
-              }
-            );
-          } catch (reverseErr) {
-            const code = (reverseErr as { code?: string } | null)?.code;
-            const errorId = crypto.randomUUID();
-            this.obs.error(
-              'Failed to reverse subscription transfer for refund',
-              {
-                errorId,
-                chargeId,
-                payoutId: row.id,
-                stripeTransferId: row.stripeTransferId,
-                attemptedReversalCents: amount,
-                code: code ?? null,
-                error:
-                  reverseErr instanceof Error
-                    ? reverseErr.message
-                    : String(reverseErr),
-              }
-            );
-            if (code === 'insufficient_funds') {
-              // Creator already withdrew their slice; the customer refund still
-              // completed from the platform balance, so the platform now holds
-              // an unresolved clawback obligation. Leave the row 'paid'.
-              // NOTE (Codex-13v21): no refund_reviews row yet — that table's
-              // purchaseId is NOT NULL; subscription support is a tracked
-              // schema follow-up. Surfaced loudly meanwhile.
-              this.obs.error(
-                'Subscription clawback obligation unresolved (insufficient_funds) — NOT yet queued in refund_reviews',
-                {
-                  errorId,
-                  chargeId,
-                  payoutId: row.id,
-                  creatorUserId: row.userId,
-                  attemptedReversalCents: amount,
-                }
-              );
-              skipStatusFlip = true;
-            }
-            // Per-row error isolation — continue with remaining slices.
-          }
-        }
-      }
-
-      if (skipStatusFlip) continue;
-
-      const nextStatus =
-        row.status === 'pending' || row.status === 'failed'
-          ? ('cancelled_by_refund' as const)
-          : ('reversed' as const);
-
-      try {
-        await this.db
-          .update(payouts)
-          .set({
-            status: nextStatus,
-            resolvedAt: row.resolvedAt ?? new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(payouts.id, row.id));
-      } catch (updateErr) {
-        this.obs.error(
-          'Failed to update subscription payouts row after refund',
-          {
-            chargeId,
-            payoutId: row.id,
-            nextStatus,
-            error:
-              updateErr instanceof Error
-                ? updateErr.message
-                : String(updateErr),
-          }
-        );
-      }
     }
+    return paused;
+  }
+
+  /** Billing paused while the chargeback is open (owner decision Q-A). */
+  async pauseBillingForDispute(
+    subscription: DisputedSubscription,
+    stripeDisputeId: string
+  ): Promise<void> {
+    await pauseBilling(this.disputeDeps(), subscription, stripeDisputeId);
+  }
+
+  /** A won dispute: access and billing restored, unless another chargeback is open. */
+  async restoreAfterDispute(
+    input: DisputeInput
+  ): Promise<
+    { subscription: DisputedSubscription; restored: boolean } | undefined
+  > {
+    const result = await restoreDisputedSubscription(this.disputeDeps(), input);
+    if (result?.restored) {
+      this.invalidateIfConfigured(
+        result.subscription.userId,
+        result.subscription.organizationId ?? undefined,
+        'subscription_resumed'
+      );
+    }
+    return result;
+  }
+
+  /** A lost dispute: access ended, and the subscription cancelled at Stripe. */
+  async cancelForLostDispute(
+    input: DisputeInput
+  ): Promise<DisputedSubscription | undefined> {
+    const ended = await cancelLostDisputeSubscription(
+      this.disputeDeps(),
+      input
+    );
+    if (ended) {
+      this.invalidateIfConfigured(
+        ended.userId,
+        ended.organizationId ?? undefined,
+        'cancel'
+      );
+    }
+    return ended;
+  }
+
+  private disputeDeps() {
+    return { db: this.db, stripe: this.stripe, obs: this.obs };
   }
 
   /**
@@ -4613,59 +4453,41 @@ export class SubscriptionService extends BaseService {
   ): Promise<void> {
     const transferGroup = `sub_${subscriptionId}`;
 
+    // Every slice goes through the payouts ledger (Codex-2hxff.11): its row is
+    // reserved by a per-charge unique key BEFORE any transfer, so a redelivered
+    // invoice.payment_succeeded re-runs this safely — slices already recorded
+    // are skipped, a missing one is added, nothing is transferred twice.
+    const ledger = this.ledger();
+    const source = { sourceType: 'subscription', subscriptionId } as const;
+
     // Platform fee — retained in the platform Stripe balance at charge time;
-    // no transfer call needed. Tri-party ledger parity (Codex-h69cg): one
-    // platform_fee row per invoice so /studio/payouts can attribute platform
-    // revenue alongside org_fee + creator_payout. status='paid' is satisfied
-    // by stripeChargeId per the OR-allow paid invariant.
-    //
-    // Codex-g9owu: exactly one platform_fee row per charge. The partial
-    // unique index uq_payouts_platform_fee_per_charge enforces it; the
-    // ON CONFLICT clause collapses the second concurrent webhook delivery
-    // without raising. No SELECT pre-check — that pattern races between
-    // two concurrent workers (both see "no row", both INSERT).
-    if (platformFeeCents > 0) {
-      try {
-        await this.db
-          .insert(payouts)
-          .values({
-            userId: null,
-            organizationId: orgId,
-            subscriptionId,
-            amountCents: platformFeeCents,
-            payoutType: 'platform_fee',
-            status: 'paid',
-            sourceType: 'subscription',
-            stripeChargeId: chargeId,
-            transferGroup,
-            resolvedAt: new Date(),
-          })
-          .onConflictDoNothing({
-            target: payouts.stripeChargeId,
-            where: sql`${payouts.payoutType} = 'platform_fee'`,
-          });
-      } catch (insertError) {
-        this.obs.error('Failed to insert platform_fee payout row', {
-          subscriptionId,
-          organizationId: orgId,
-          chargeId,
-          amountCents: platformFeeCents,
-          error: (insertError as Error).message,
-        });
-      }
-    }
+    // no transfer. One paid row per charge (Codex-h69cg, Codex-g9owu).
+    await recordPlatformFee(ledger, {
+      amountCents: platformFeeCents,
+      organizationId: orgId,
+      source,
+      stripeChargeId: chargeId,
+      transferGroup,
+    });
 
-    // Get org's Connect account via the canonical primary user FK so
-    // transfers route to the same account checkout validated against.
-    const orgConnect = await resolvePrimaryConnect(this.db, orgId);
+    // Codex-2hxff.2: the org slice and the no-agreement creator pool go to
+    // whoever owned the org when the invoice was created — the same instant
+    // the agreement lookup below uses — not the owner at processing time.
+    const orgPayee = await resolveOrganisationPayee(
+      this.db,
+      orgId,
+      invoiceCreatedAt,
+      this.obs
+    );
 
-    // Codex-ez3tl (C1): query agreements BEFORE the org transfer so the
-    // org's transfer amount reflects the post-platform residual when
-    // creator agreements exist. Per the agreement-math.ts ADR header,
+    // Codex-ez3tl (C1): query agreements BEFORE the org slice so the org's
+    // amount reflects the post-platform residual when creator agreements
+    // exist. Per the agreement-math.ts ADR header,
     // `proposed_creator_share_percent` is the creator's absolute fraction
     // of the POST-PLATFORM pool — NOT a relative weight. When agreements
-    // exist the fee-config's static `orgFeePercent` is overridden by
-    // `effectiveOrgFeePercent = max(0, 10000 - totalShareBps)`.
+    // exist the fee-config's static `orgFeePercent` is overridden: the org
+    // gets the post-platform pool minus what the creators take, rounding
+    // pennies included (Codex-2hxff.12).
     //
     // Codex-rzfjw (WP-4): query the agreements model with all four
     // WP-1 filters pinned at invoice fire time, and JOIN to the
@@ -4736,6 +4558,23 @@ export class SubscriptionService extends BaseService {
       sharePercent: number;
     }> = [];
     for (const row of creatorAgreementsRaw) {
+      // A creator has one slice per charge (uq_payouts_creator_slice_per_charge).
+      // Two agreements matching the same instant — corrupted data — would
+      // take two shares off the organisation's slice and record only one,
+      // so the second share would go nowhere. Count the first; flag the rest.
+      if (creatorAgreements.some((a) => a.creatorId === row.creatorId)) {
+        this.obs.error(
+          'payout: creator matches more than one agreement; using the first',
+          {
+            errorId: crypto.randomUUID(),
+            agreementId: row.agreementId,
+            organizationId: orgId,
+            creatorId: row.creatorId,
+            subscriptionId,
+          }
+        );
+        continue;
+      }
       if (row.sharePercent === null) {
         this.obs.warn(
           'payout: agreement has no current_proposal_id; skipping',
@@ -4754,469 +4593,169 @@ export class SubscriptionService extends BaseService {
       });
     }
 
-    // Codex-ez3tl (C1): compute the effective splits. When agreements
-    // exist with a positive totalShareBps, the org's fee is the
-    // post-platform residual (not the fee-config's static slice). When
-    // no agreements exist (or all are zero-share), the inputs from
-    // `computeSubscriptionSplit` are honoured unchanged — the org gets
-    // its fee-config slice and the org owner receives the creator pool
-    // via the fallback transfer below.
-    //
-    // `postPlatformCents` is the gross minus platform fee; reconstructed
-    // from the inputs since `calculateRevenueSplit` produced
-    // (platform + org + creator_pool == gross) and we have all three.
     const postPlatformCents = orgFeeCents + creatorPayoutCents;
     const totalShareBps = creatorAgreements.reduce(
       (sum, a) => sum + a.sharePercent,
       0
     );
+    const orgSlice = (amountCents: number) =>
+      recordSlice(ledger, {
+        payoutType: 'organization_fee',
+        amountCents,
+        organizationId: orgId,
+        source,
+        stripeChargeId: chargeId,
+        transferGroup,
+        sendTransferGroup: true,
+        // Pending in the payee's name until they can be paid, so it drains
+        // to them even if ownership changes before they onboard; `no_owner`
+        // if the organisation had none (Codex-2hxff.37).
+        payee: orgPayee
+          ? { userId: orgPayee.userId, account: orgPayee.account }
+          : null,
+        idempotencyKey: `${chargeId}_org_fee`,
+        metadata: { subscription_id: subscriptionId },
+      });
 
-    // When totalShareBps > 0, override the fee-config org slice with the
-    // post-platform residual. When totalShareBps == 0 (no agreements or
-    // all zero-share), keep the original orgFeeCents — the empty-agreements
-    // branch below will route the creator pool to the org owner.
+    // No creator is paid — no agreement matched, or every one carries a zero
+    // share (e.g. legacy rows backfilled with org_fee=10000): the org keeps
+    // its fee-config slice and its owner receives the creator pool.
+    if (totalShareBps <= 0) {
+      if (creatorAgreements.length > 0) {
+        this.obs.info(
+          'All active subscription agreements have zero creator share; routing pool to org owner',
+          {
+            organizationId: orgId,
+            subscriptionId,
+            agreementCount: creatorAgreements.length,
+          }
+        );
+      }
+      await orgSlice(orgFeeCents);
+      await this.transferCreatorPoolToOwner(
+        subscriptionId,
+        orgId,
+        chargeId,
+        transferGroup,
+        creatorPayoutCents,
+        orgPayee
+      );
+      return;
+    }
+
+    // Distribute the post-platform pool by per-creator share basis points
+    // (Codex-rzfjw, WP-4 of Codex-nk4km): `sharePercent` is the creator's
+    // absolute slice of the POST-PLATFORM pool, per the agreement-math.ts ADR
+    // header. The divisor is `max(totalShareBps, 10000)`: a well-formed config
+    // (sum ≤ 10000, bounded by validateProposedShare) divides by 10000; an
+    // oversum divides by the actual sum, so creators jointly never exceed the
+    // pool.
+    const shareDivisor = Math.max(totalShareBps, 10_000);
+    const creatorShares = creatorAgreements.map((agreement) => ({
+      ...agreement,
+      amountCents: Math.floor(
+        (postPlatformCents * agreement.sharePercent) / shareDivisor
+      ),
+    }));
+    // The organisation's slice is what the creators do not take — INCLUDING
+    // the pennies their floor()s leave behind. Owner decision 2026-10-13
+    // (Codex-2hxff.12): rounding remainders go to the organisation and are
+    // recorded, never left unrecorded on the platform balance. (It was
+    // floor()ed separately, so up to a penny per creator went nowhere.)
     const effectiveOrgFeeCents =
-      totalShareBps > 0
-        ? Math.floor(
-            (postPlatformCents * Math.max(0, 10_000 - totalShareBps)) / 10_000
-          )
-        : orgFeeCents;
+      postPlatformCents -
+      creatorShares.reduce((sum, c) => sum + c.amountCents, 0);
     const effectiveCreatorPoolCents = postPlatformCents - effectiveOrgFeeCents;
 
-    // Transfer org fee (now using the effective amount).
-    if (orgConnect?.chargesEnabled && effectiveOrgFeeCents > 0) {
-      try {
-        const transfer = await this.stripe.transfers.create(
-          {
-            amount: effectiveOrgFeeCents,
-            currency: CURRENCY.GBP,
-            destination: orgConnect.stripeAccountId,
-            source_transaction: chargeId,
-            transfer_group: transferGroup,
-            metadata: {
-              subscription_id: subscriptionId,
-              type: 'organization_fee',
-            },
-          },
-          { idempotencyKey: `${chargeId}_org_fee` }
-        );
-        // Record success in the ledger. The unique partial index on
-        // stripe_transfer_id collapses webhook double-fires to a single row;
-        // any other DB error gets logged loud — money moved but the ledger
-        // missed the entry, which is a data-integrity event worth paging on.
-        try {
-          await this.db.insert(payouts).values({
-            userId: orgConnect.userId,
-            organizationId: orgId,
-            subscriptionId,
-            amountCents: effectiveOrgFeeCents,
-            payoutType: 'organization_fee',
-            status: 'paid',
-            stripeTransferId: transfer.id,
-            stripeChargeId: chargeId,
-            transferGroup,
-            resolvedAt: new Date(),
-          });
-        } catch (insertError) {
-          if (!isUniqueViolation(insertError)) {
-            this.obs.error(
-              'Org transfer succeeded but payouts ledger insert failed',
-              {
-                subscriptionId,
-                organizationId: orgId,
-                stripeTransferId: transfer.id,
-                amountCents: effectiveOrgFeeCents,
-                error: (insertError as Error).message,
-              }
-            );
-          }
-        }
-      } catch (transferError) {
-        this.obs.error('Org transfer failed, accumulating as pending payout', {
-          subscriptionId,
-          organizationId: orgId,
-          amountCents: effectiveOrgFeeCents,
-          error: (transferError as Error).message,
-        });
-        try {
-          await this.db.insert(payouts).values({
-            userId: orgConnect.userId,
-            organizationId: orgId,
-            subscriptionId,
-            amountCents: effectiveOrgFeeCents,
-            payoutType: 'organization_fee',
-            status: 'failed',
-            reason: 'transfer_failed',
-            // See the creator_payout_to_owner failed insert: without the
-            // charge correlation a refund of this charge cannot reverse the
-            // obligation, and the sweep later pays a refunded charge.
-            stripeChargeId: chargeId,
-            transferGroup,
-          });
-        } catch (insertError) {
-          this.obs.error('Failed to record pending payout for org transfer', {
-            subscriptionId,
-            organizationId: orgId,
-            amountCents: effectiveOrgFeeCents,
-            error: (insertError as Error).message,
-          });
-        }
-      }
-    } else if (effectiveOrgFeeCents > 0) {
-      // Accumulate if Connect not ready — resolve the org owner's userId
-      const ownerId =
-        orgConnect?.userId ?? (await this.resolveOrgOwnerId(orgId));
-      if (!ownerId) {
-        this.obs.error(
-          'Cannot record pending payout: no Connect account and no org owner found',
-          {
-            subscriptionId,
-            organizationId: orgId,
-            amountCents: effectiveOrgFeeCents,
-          }
-        );
-      } else {
-        try {
-          await this.db.insert(payouts).values({
-            userId: ownerId,
-            organizationId: orgId,
-            subscriptionId,
-            amountCents: effectiveOrgFeeCents,
-            payoutType: 'organization_fee',
-            status: 'pending',
-            reason: 'connect_not_ready',
-            // Charge correlation: reverseSubscriptionPayoutsForCharge selects
-            // by stripeChargeId, so a pending row without it is invisible to
-            // refund reversal and the sweep pays a refunded charge.
-            stripeChargeId: chargeId,
-            transferGroup,
-          });
-        } catch (insertError) {
-          this.obs.error(
-            'Failed to record pending payout (Connect not ready)',
-            {
-              subscriptionId,
-              organizationId: orgId,
-              amountCents: effectiveOrgFeeCents,
-              error: (insertError as Error).message,
-            }
-          );
-        }
-      }
-    }
-
-    if (creatorAgreements.length === 0) {
-      // No creator agreements — org owner gets the full creator pool
-      // (Already handled by org transfer above or accumulated).
-      // Codex-xz61z (I2): delegate to the shared helper.
-      await this.transferCreatorPoolToOwner(
-        subscriptionId,
-        orgId,
-        chargeId,
-        transferGroup,
-        creatorPayoutCents,
-        orgConnect,
-        'empty_agreements'
-      );
-      return;
-    }
-
-    // Distribute creator pool by per-creator share basis points
-    // (Codex-rzfjw, WP-4 of Codex-nk4km): `creatorAgreements[i].sharePercent`
-    // is the creator's slice of the POST-PLATFORM pool, per the
-    // agreement-math.ts ADR header. `totalShareBps` was computed above
-    // (before the org transfer) so the org's effective fee equals the
-    // post-platform residual `max(0, 10000 - totalShareBps)`.
-    //
-    // Edge: every agreement carries `sharePercent=0` (e.g. legacy rows
-    // backfilled with org_fee=10000). totalShareBps == 0 means there is
-    // no creator pool to distribute — route to the org owner instead.
-    if (totalShareBps <= 0) {
-      this.obs.info(
-        'All active subscription agreements have zero creator share; routing pool to org owner',
-        {
-          organizationId: orgId,
-          subscriptionId,
-          agreementCount: creatorAgreements.length,
-        }
-      );
-      // Codex-xz61z (I2): delegate to the shared helper. Same
-      // idempotency key as the empty-agreements branch so a webhook
-      // replay still collapses to one Stripe transfer regardless of
-      // which branch fires on the replay.
-      // Codex-xz61z (N1): dropped dead `creatorAgreements.length = 0;`
-      // mutation — the function returns immediately below, no reader.
-      await this.transferCreatorPoolToOwner(
-        subscriptionId,
-        orgId,
-        chargeId,
-        transferGroup,
-        creatorPayoutCents,
-        orgConnect,
-        'zero_share'
-      );
-      return;
-    }
+    await orgSlice(effectiveOrgFeeCents);
 
     // Batch-fetch all creator Connect accounts to avoid N+1 queries. Each
     // creator has one account keyed by userId (Codex-69t7c), independent of
     // which org this subscription belongs to.
-    const creatorIds = creatorAgreements.map((a) => a.creatorId);
     const creatorConnects = await this.db
       .select()
       .from(stripeConnectAccounts)
-      .where(inArray(stripeConnectAccounts.userId, creatorIds));
+      .where(
+        inArray(
+          stripeConnectAccounts.userId,
+          creatorShares.map((c) => c.creatorId)
+        )
+      );
     const connectByCreator = new Map(creatorConnects.map((c) => [c.userId, c]));
 
-    // Codex-ez3tl (C1): per-creator amount uses the POST-PLATFORM pool
-    // as the base and the creator's absolute share fraction — matching
-    // the ADR (agreement-math.ts header) and the content-purchase
-    // pipeline (purchase-service.ts via calculateRevenueSplit). The
-    // divisor is `max(totalShareBps, 10000)`:
-    //   - For well-formed configs where `validateProposedShare` bounds
-    //     sum ≤ 10000, the divisor is 10000 and each creator gets their
-    //     absolute share of post-platform.
-    //   - For oversum (totalShareBps > 10000) defensive clamp: divide
-    //     by the actual sum so total transferred never exceeds the pool
-    //     (creators jointly take 100% of post-platform, org gets 0).
-    const shareDivisor = Math.max(totalShareBps, 10_000);
-    for (const agreement of creatorAgreements) {
-      const creatorAmount = Math.floor(
-        (postPlatformCents * agreement.sharePercent) / shareDivisor
-      );
-
-      // Codex-xz61z (I4): emit `payout_split_skipped` for iterations
-      // that never reach the transfer call. The previous code emitted
-      // `payout_split_computed` BEFORE the zero-amount + min-transfer
-      // gates, which made the log misleading — it claimed an amount
-      // was paid out when it was actually skipped or accumulated as
-      // pending. Each iteration now emits exactly one log line whose
-      // shape matches the iteration's terminal state.
-      if (creatorAmount <= 0) {
+    for (const creator of creatorShares) {
+      // Codex-xz61z (I4): exactly one log line per iteration whose shape
+      // matches its terminal state.
+      if (creator.amountCents <= 0) {
         this.obs.info('payout_split_skipped', {
           subscriptionId,
           organizationId: orgId,
-          creatorId: agreement.creatorId,
-          amountCents: creatorAmount,
-          sharePercent: agreement.sharePercent,
+          creatorId: creator.creatorId,
+          amountCents: creator.amountCents,
+          sharePercent: creator.sharePercent,
           totalShareBps,
           pendingReason: 'zero_amount',
         });
         continue;
       }
 
-      // Codex-m644n: per-creator min-transfer floor. Walk the override chain
-      // for this specific (org, creator) pair — Creator A and Creator B can
-      // carry different `minTransferCents` thresholds even in the same invoice.
-      // When the calculated amount falls below this creator's floor, accumulate
-      // as pending with reason='min_transfer_floor' instead of firing a Stripe
-      // transfer. The next invoice payment will re-roll the floor evaluation.
+      // Codex-m644n: per-creator min-transfer floor. Creator A and Creator B
+      // can carry different `minTransferCents` in the same invoice. Below the
+      // floor the slice is held pending ('min_transfer_floor'); the drains
+      // release it once the creator's pending total clears the floor.
       const creatorFees = await this.resolvePayoutFees(
         orgId,
         'subscription',
-        agreement.creatorId
+        creator.creatorId
       );
-      if (creatorAmount < creatorFees.minTransferCents) {
-        this.obs.info('Creator payout below min-transfer floor, accumulating', {
-          subscriptionId,
-          creatorId: agreement.creatorId,
-          amountCents: creatorAmount,
-          minTransferCents: creatorFees.minTransferCents,
-        });
-        // Codex-xz61z (I4): tagged-skip log so split-vs-transfer
-        // accounting can be reconstructed from observability alone.
-        this.obs.info('payout_split_skipped', {
+      const belowFloor = creator.amountCents < creatorFees.minTransferCents;
+
+      const outcome = await recordSlice(ledger, {
+        payoutType: 'creator_payout',
+        amountCents: creator.amountCents,
+        organizationId: orgId,
+        source,
+        stripeChargeId: chargeId,
+        transferGroup,
+        sendTransferGroup: true,
+        payee: {
+          userId: creator.creatorId,
+          account: connectByCreator.get(creator.creatorId),
+        },
+        ...(belowFloor ? { hold: 'min_transfer_floor' as const } : {}),
+        idempotencyKey: `${chargeId}_creator_${creator.creatorId}`,
+        metadata: {
+          subscription_id: subscriptionId,
+          creator_id: creator.creatorId,
+        },
+      });
+
+      this.obs.info(
+        belowFloor ? 'payout_split_skipped' : 'payout_split_computed',
+        {
           subscriptionId,
           organizationId: orgId,
-          creatorId: agreement.creatorId,
-          amountCents: creatorAmount,
-          sharePercent: agreement.sharePercent,
-          totalShareBps,
-          minTransferCents: creatorFees.minTransferCents,
-          pendingReason: 'min_transfer_floor',
-        });
-        try {
-          await this.db.insert(payouts).values({
-            userId: agreement.creatorId,
-            organizationId: orgId,
-            subscriptionId,
-            amountCents: creatorAmount,
-            payoutType: 'creator_payout',
-            status: 'pending',
-            reason: 'min_transfer_floor',
-            // Charge correlation — see the connect_not_ready insert above.
-            stripeChargeId: chargeId,
-            transferGroup,
-          });
-        } catch (insertError) {
-          this.obs.error(
-            'Failed to record pending payout (min_transfer_floor)',
-            {
-              subscriptionId,
-              creatorId: agreement.creatorId,
-              amountCents: creatorAmount,
-              error: (insertError as Error).message,
-            }
-          );
-        }
-        continue;
-      }
-
-      const creatorConnect = connectByCreator.get(agreement.creatorId);
-
-      if (creatorConnect?.chargesEnabled) {
-        let transferred = false;
-        let pendingReason: string | undefined;
-        try {
-          const transfer = await this.stripe.transfers.create(
-            {
-              amount: creatorAmount,
-              currency: CURRENCY.GBP,
-              destination: creatorConnect.stripeAccountId,
-              source_transaction: chargeId,
-              transfer_group: transferGroup,
-              metadata: {
-                subscription_id: subscriptionId,
-                creator_id: agreement.creatorId,
-                type: 'creator_payout',
-              },
-            },
-            { idempotencyKey: `${chargeId}_creator_${agreement.creatorId}` }
-          );
-          transferred = true;
-          try {
-            await this.db.insert(payouts).values({
-              userId: agreement.creatorId,
-              organizationId: orgId,
-              subscriptionId,
-              amountCents: creatorAmount,
-              payoutType: 'creator_payout',
-              status: 'paid',
-              stripeTransferId: transfer.id,
-              stripeChargeId: chargeId,
-              transferGroup,
-              resolvedAt: new Date(),
-            });
-          } catch (insertError) {
-            if (!isUniqueViolation(insertError)) {
-              this.obs.error(
-                'Creator transfer succeeded but payouts ledger insert failed',
-                {
-                  subscriptionId,
-                  creatorId: agreement.creatorId,
-                  stripeTransferId: transfer.id,
-                  amountCents: creatorAmount,
-                  error: (insertError as Error).message,
-                }
-              );
-            }
-          }
-        } catch (transferError) {
-          pendingReason = 'transfer_failed';
-          this.obs.error('Creator transfer failed, accumulating as pending', {
-            subscriptionId,
-            creatorId: agreement.creatorId,
-            amountCents: creatorAmount,
-            error: (transferError as Error).message,
-          });
-          // BUG-036: Wrap pending payout insert in try/catch so a DB failure
-          // doesn't crash the entire transfer flow.
-          try {
-            await this.db.insert(payouts).values({
-              userId: agreement.creatorId,
-              organizationId: orgId,
-              subscriptionId,
-              amountCents: creatorAmount,
-              payoutType: 'creator_payout',
-              status: 'failed',
-              reason: 'transfer_failed',
-              // Charge correlation — see the connect_not_ready insert above.
-              stripeChargeId: chargeId,
-              transferGroup,
-            });
-          } catch (insertError) {
-            this.obs.error(
-              'Failed to record pending payout for creator transfer failure',
-              {
-                subscriptionId,
-                creatorId: agreement.creatorId,
-                amountCents: creatorAmount,
-                error: (insertError as Error).message,
-              }
-            );
-          }
-        }
-        // Codex-xz61z (I4): emit `payout_split_computed` AFTER the
-        // transfer attempt so `actuallyTransferred` reflects the
-        // terminal state of the iteration. `pendingReason` is set
-        // when the transfer failed and the row was accumulated.
-        this.obs.info('payout_split_computed', {
-          subscriptionId,
-          organizationId: orgId,
-          creatorId: agreement.creatorId,
-          amountCents: creatorAmount,
-          sharePercent: agreement.sharePercent,
+          creatorId: creator.creatorId,
+          amountCents: creator.amountCents,
+          sharePercent: creator.sharePercent,
           totalShareBps,
           postPlatformCents,
           effectiveOrgFeeCents,
           effectiveCreatorPoolCents,
-          actuallyTransferred: transferred,
-          pendingReason,
-        });
-      } else {
-        // Accumulate pending payout
-        // BUG-036: Wrap pending payout insert in try/catch so a DB failure
-        // doesn't crash the entire transfer flow.
-        const pendingReason = creatorConnect
-          ? 'connect_restricted'
-          : 'connect_not_ready';
-        try {
-          await this.db.insert(payouts).values({
-            userId: agreement.creatorId,
-            organizationId: orgId,
-            subscriptionId,
-            amountCents: creatorAmount,
-            payoutType: 'creator_payout',
-            status: 'pending',
-            reason: pendingReason,
-            // Charge correlation — see the connect_not_ready insert above.
-            stripeChargeId: chargeId,
-            transferGroup,
-          });
-        } catch (insertError) {
-          this.obs.error(
-            'Failed to record pending payout (Connect not ready)',
-            {
-              subscriptionId,
-              creatorId: agreement.creatorId,
-              amountCents: creatorAmount,
-              error: (insertError as Error).message,
-            }
-          );
+          ...(belowFloor
+            ? { minTransferCents: creatorFees.minTransferCents }
+            : {}),
+          outcome: outcome?.kind,
+          actuallyTransferred:
+            outcome?.kind === 'paid' || outcome?.kind === 'unsettled',
+          pendingReason:
+            outcome?.kind === 'pending'
+              ? outcome.reason
+              : outcome?.kind === 'failed'
+                ? 'transfer_failed'
+                : undefined,
         }
-
-        this.obs.warn('Creator payout accumulated (Connect not ready)', {
-          creatorId: agreement.creatorId,
-          amountCents: creatorAmount,
-          subscriptionId,
-        });
-        // Codex-xz61z (I4): emit `payout_split_computed` for the
-        // Connect-not-ready path so the per-creator audit log
-        // captures every iteration, with `actuallyTransferred=false`.
-        this.obs.info('payout_split_computed', {
-          subscriptionId,
-          organizationId: orgId,
-          creatorId: agreement.creatorId,
-          amountCents: creatorAmount,
-          sharePercent: agreement.sharePercent,
-          totalShareBps,
-          postPlatformCents,
-          effectiveOrgFeeCents,
-          effectiveCreatorPoolCents,
-          actuallyTransferred: false,
-          pendingReason,
-        });
-      }
+      );
     }
   }
 
@@ -5233,6 +4772,66 @@ export class SubscriptionService extends BaseService {
   //   5. olderThanMinutes guards against racing the webhook on freshly inserted
   //      rows — only sweep rows old enough that the webhook would already have
   //      fired by now if it was going to.
+
+  /**
+   * Give an ownerless organisation's held slices to their next owner, now
+   * that it has one. `moveOwnership` hands them over as ownership moves,
+   * but a slice written while that hand-over was committing is invisible to
+   * its UPDATE (READ COMMITTED) and would wait forever; the sweep catches it
+   * (Codex-2hxff.37). Returns how many rows moved.
+   */
+  private async rehomeHeldPayouts(orgId: string): Promise<number> {
+    // Nobody owns it now: nothing can be re-homed (an owner who came and
+    // went would have taken the held rows with them).
+    if (!(await resolveOrganisationPayee(this.db, orgId))) return 0;
+
+    const held = await this.db
+      .select()
+      .from(payouts)
+      .where(
+        and(
+          eq(payouts.organizationId, orgId),
+          isNull(payouts.userId),
+          eq(payouts.reason, 'no_owner'),
+          eq(payouts.status, 'pending')
+        )
+      );
+    let rehomed = 0;
+    // Each row's next owner is decided by its own time; there are rarely
+    // any rows here, as the hand-over normally moves them.
+    for (const row of held) {
+      const payee = await resolveOrganisationPayee(
+        this.db,
+        orgId,
+        row.createdAt,
+        this.obs
+      );
+      if (!payee) continue;
+      const moved = await this.db
+        .update(payouts)
+        .set({
+          userId: payee.userId,
+          reason: 'connect_not_ready',
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(payouts.id, row.id),
+            isNull(payouts.userId),
+            eq(payouts.status, 'pending')
+          )
+        )
+        .returning();
+      rehomed += moved.length;
+    }
+    if (rehomed > 0) {
+      this.obs.info('Held payouts re-homed to the organisation owner', {
+        organizationId: orgId,
+        rehomed,
+      });
+    }
+    return rehomed;
+  }
 
   /**
    * Sweep pending payouts rows older than `olderThanMinutes`,
@@ -5262,7 +4861,12 @@ export class SubscriptionService extends BaseService {
       })
       .from(payouts)
       .where(
-        and(eq(payouts.status, 'pending'), lt(payouts.attemptedAt, threshold))
+        and(
+          // Failed transfers are retried too (Codex-2hxff.11), unless an old
+          // write path failed them (see isDrainablePayout).
+          isDrainablePayout(),
+          lt(payouts.attemptedAt, threshold)
+        )
       );
 
     const groupsScanned = groups.length;
@@ -5292,6 +4896,30 @@ export class SubscriptionService extends BaseService {
       // The original `!group.organizationId` guard skipped every orgless group,
       // so the cron safety-net never resolved orgless rows — stranding money.
       if (!group.userId) {
+        // Only an ownerless organisation's held money has no payee (platform
+        // fees are paid, so never here). Nothing can drain it until support
+        // assigns an owner, so every sweep says so (Codex-2hxff.37).
+        if (group.organizationId) {
+          try {
+            const rehomed = await this.rehomeHeldPayouts(group.organizationId);
+            if (rehomed === 0) {
+              this.obs.warn(
+                'sweepUnresolvedPayouts: money held for an organisation with no owner',
+                { organizationId: group.organizationId }
+              );
+            }
+          } catch (error) {
+            errors++;
+            this.obs.error(
+              'sweepUnresolvedPayouts: re-homing held payouts failed',
+              {
+                errorId: crypto.randomUUID(),
+                organizationId: group.organizationId,
+                error: error instanceof Error ? error.message : String(error),
+              }
+            );
+          }
+        }
         groupsSkipped++;
         continue;
       }

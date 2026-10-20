@@ -4,10 +4,8 @@
  * MOVED OUT of `render/JourneyRenderer.svelte`, same semantics: assembles the
  * `JourneySalesContext` every kit block renders against, from the awaited
  * envelope, the streamed sell-preview, the viewer's entitlement and the
- * authoritative offer. `+page.svelte` calls this instead of rendering
- * `JourneyRenderer` (which built the same shape inline); `JourneyRenderer`
- * itself is untouched — it stays live for checkout and the studio canvas
- * until WP-9 retires it.
+ * authoritative offer. `+page.svelte` calls it; the pre-kit renderer that
+ * built the same shape inline was retired with the rest of it by WP-9.
  *
  * PURE + CE-4 SAFE: data in, data out, no DOM. `buildJourneyUrl` needs the
  * current request URL to decide same-org (root-relative) vs cross-org

@@ -866,6 +866,40 @@ importers:
         specifier: ^4.0.2
         version: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.8.9)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
 
+  packages/payments:
+    dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
+      '@codex/database':
+        specifier: workspace:*
+        version: link:../database
+      '@codex/service-errors':
+        specifier: workspace:*
+        version: link:../service-errors
+      drizzle-orm:
+        specifier: 0.44.7
+        version: 0.44.7(@cloudflare/workers-types@4.20251121.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/pg@8.15.6)(better-sqlite3@12.4.6)(kysely@0.28.8)(mysql2@3.15.3)(pg@8.16.3)(prisma@5.22.0)
+      stripe:
+        specifier: ^19.2.0
+        version: 19.3.1(@types/node@22.13.0)
+    devDependencies:
+      '@codex/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.13.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.2.2
+        version: 7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
+      vitest:
+        specifier: ^4.0.2
+        version: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.8.9)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
+
   packages/platform-settings:
     dependencies:
       '@codex/cloudflare-clients':
@@ -920,6 +954,9 @@ importers:
       '@codex/database':
         specifier: workspace:*
         version: link:../database
+      '@codex/payments':
+        specifier: workspace:*
+        version: link:../payments
       '@codex/service-errors':
         specifier: workspace:*
         version: link:../service-errors
@@ -1037,6 +1074,9 @@ importers:
       '@codex/database':
         specifier: workspace:*
         version: link:../database
+      '@codex/payments':
+        specifier: workspace:*
+        version: link:../payments
       '@codex/purchase':
         specifier: workspace:*
         version: link:../purchase
@@ -1277,6 +1317,9 @@ importers:
 
   workers/admin-api:
     dependencies:
+      '@codex/cache':
+        specifier: workspace:*
+        version: link:../../packages/cache
       '@codex/constants':
         specifier: workspace:*
         version: link:../../packages/constants
@@ -1811,6 +1854,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250102.0
         version: 4.20251121.0
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../../packages/agreements
       '@vitest/runner':
         specifier: ~3.2.4
         version: 3.2.4

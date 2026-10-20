@@ -17,9 +17,12 @@
     voices: readonly Testimonial[];
     /** The featured tile's scheme: the Style's filled card for this section. */
     featured: ColourSchemeId;
+    /** The section draws faces (Voice). */
+    faces?: boolean;
+    mediaBaseUrl?: string | null;
   }
 
-  const { voices, featured }: Props = $props();
+  const { voices, featured, faces = false, mediaBaseUrl = null }: Props = $props();
 </script>
 
 <ul class="tm-wall" data-count={voices.length}>
@@ -29,7 +32,7 @@
       data-featured={index === 0 ? '' : undefined}
       data-lp-scheme={index === 0 ? featured : undefined}
     >
-      <Voice {voice} size="wall" featured={index === 0} />
+      <Voice {voice} size="wall" featured={index === 0} {faces} {mediaBaseUrl} />
     </li>
   {/each}
 </ul>
@@ -43,7 +46,7 @@
   }
 
   .tm-wall[data-count='1'] {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   /* A tile never breaks across two columns. base.css's `li` spacing gives way
@@ -62,29 +65,14 @@
     color: var(--lp-ink);
   }
 
-  /* The opening mark hangs outside the quote's words (`Voice`: 0.42em of a
-     quote set in the display face, 0.4em of one set to be read). The room
-     for it is added on the voice, not the tile, so it comes on top of
-     whatever padding a Style gives the tile: the mark clears the edge by that
-     whole padding, and the words and the name still share one edge. The
-     sizes are the Voice's own, case by case. */
+  /* The opening mark hangs outside the quote's words (`Voice`). The room for
+     it is added on the voice, not the tile, so it comes on top of whatever
+     padding a Style gives the tile: the mark clears the edge by that whole
+     padding, and the words and the name still share one edge. The room is
+     Voice's own (`--lp-voice-room`, its quote's size times the share its mark
+     hangs by), so it follows every size Voice or a Type sets. */
   .tm-wall__tile > :global(.voice) {
-    --_quote: var(--lp-size-lead);
-    --_hang: 0.4;
-    padding-inline-start: calc(var(--_quote) * var(--_hang));
-  }
-
-  .tm-wall__tile > :global(.voice[data-length='long']) {
-    --_quote: var(--lp-size-body);
-  }
-
-  .tm-wall__tile > :global(.voice:is([data-length='short'], [data-featured])) {
-    --_quote: var(--lp-size-title);
-    --_hang: 0.42;
-  }
-
-  .tm-wall__tile > :global(.voice[data-featured]:not([data-length='long'])) {
-    --_quote: calc((var(--lp-size-heading) + var(--lp-size-title)) / 2);
+    padding-inline-start: var(--lp-voice-room);
   }
 
   @container (min-width: 40rem) {

@@ -3,7 +3,7 @@
 
   The page's standing way in, for a reader who has scrolled past the hero's
   button. It appears once the first section leaves the viewport and yields
-  whenever a pricing or call-to-action section is on screen — it stands in for
+  whenever a pricing, call-to-action or Button section is on screen — it stands in for
   a button the reader cannot see, so it never covers one they can.
 
   On a phone it is a bar above the org layout's fixed bottom nav (hidden from
@@ -33,7 +33,7 @@
     signature?: string;
   }
 
-  const { context, label, priceLine, scheme = 'contrast', signature = '' }: Props = $props();
+  const { context, label, priceLine, scheme = 'base', signature = '' }: Props = $props();
 
   const cta = $derived(resolvePrimaryCta(context, label));
   /** Set by the first observation, so the bar is never shown on a guess. */
@@ -52,7 +52,10 @@
       const page = bar.parentElement?.querySelector(':scope > .lp-page');
       if (!page || typeof IntersectionObserver === 'undefined') return;
       const opening = page.querySelector('[data-lp-type="hero"]') ?? page.firstElementChild;
-      const offers = page.querySelectorAll('[data-lp-type="pricing"], [data-lp-type="cta"]');
+      // A Button section is an ask too (03 X64): the bar never shows beside it.
+      const offers = page.querySelectorAll(
+        '[data-lp-type="pricing"], [data-lp-type="cta"], [data-lp-type="button"]'
+      );
       const onScreen = new WeakSet<Element>();
       let count = 0;
 
@@ -112,9 +115,10 @@
 {/if}
 
 <style>
-  /* `--_clear` must be a LENGTH: `--space-0` is a unitless 0, and
-     `calc(0 + 12px)` is a type error that voids the whole `max()` and drops
-     the bar to its static position at the foot of the page. */
+  /* `--_clear` must be a LENGTH: a unitless 0 (as `--space-0` was until
+     Codex-61zsk.67) makes `calc(0 + 12px)` a type error that voids the whole
+     `max()` and drops the bar to its static position at the foot of the page.
+     `token-math.test.ts` holds every sheet to it. */
   .lp-sticky {
     --_clear: var(--lp-nav-clearance, var(--space-16));
     position: fixed;
@@ -134,7 +138,7 @@
     border-radius: calc(var(--lp-radius-button) + var(--space-2));
     background: var(--lp-bg);
     color: var(--lp-ink);
-    box-shadow: var(--shadow-xl);
+    box-shadow: var(--lp-shadow-raised);
     opacity: 0;
     transform: translateY(calc(100% + var(--space-8)));
     transition:
@@ -146,6 +150,15 @@
     .lp-sticky {
       --_clear: 0px;
     }
+  }
+
+  /* On the org's surfaces it is a raised card (owner, D9): the scheme's card
+     colour, which there is the org's own, lifted on the org's floating
+     shadow. The card is held in the ground's band as the ground is, so the
+     inks and the button proven on that band hold on it. Another scheme
+     (Cinematic's soft band) keeps its band colour: its card is the ground. */
+  .lp-sticky[data-lp-scheme='base'] {
+    background: var(--lp-panel);
   }
 
   .lp-sticky[data-shown] {

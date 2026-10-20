@@ -438,7 +438,7 @@ export const createJourney = command(
 /** Persist the builder's draft (frozen save command). */
 export const saveJourneyPage = command(
   saveJourneyPageBodySchema,
-  async (record): Promise<void> => {
+  async (record): Promise<{ revision: string }> => {
     const ctx = await resolveStudioOrg();
     if (!ctx) {
       error(400, 'Journeys can only be saved within an organization');
@@ -449,8 +449,10 @@ export const saveJourneyPage = command(
     // 'The slug "bone-deep" is already in use' — true text a creator can act on in
     // three seconds, and text production replaces with "An unexpected error
     // occurred". `saveBuilderDraft` puts whatever arrives straight into the toast
-    // (`stage: 'page'`), so the honest sentence was one forward away.
-    await withServiceErrors(() =>
+    // (`stage: 'page'`), so the honest sentence was one forward away. A 412
+    // (another save got there first, Codex-61zsk.18) arrives the same way, and
+    // the builder session reads its status.
+    return withServiceErrors(() =>
       ctx.api.access.saveJourneyPage(ctx.orgId, record)
     );
   }
@@ -613,6 +615,10 @@ export const setJourneyStatus = command(
         sections: record.sections,
         ...(record.design ? { design: record.design } : {}),
         ...(record.seo ? { seo: record.seo } : {}),
+        // This writes the whole page back from the read above, so a builder
+        // save that lands in between would be undone: name the revision read,
+        // and the write is refused instead (Codex-61zsk.18).
+        ...(record.revision ? { revision: record.revision } : {}),
       };
       await ctx.api.access.saveJourneyPage(ctx.orgId, body);
     } catch (err) {
@@ -1212,8 +1218,8 @@ export const deleteJourneyHeroImage = command(
  * `signatureMediaId` points at a table CHECK-constrained to ('video','audio'), so
  * the "signature" a creator could pick there was a VIDEO's poster frame — which is
  * not a thing anyone signs a letter with. This writes
- * `courses.signatureImageKey`, the first link in A32's chain, so the two coexist
- * and clearing the upload degrades to the ref rather than to nothing.
+ * `courses.signatureImageKey`, the signature's only source since Codex-61zsk.47
+ * (the ref is retired: kept, never read for the sign-off).
  *
  * The field is named `image` to match the worker's `files` key, as the hero does.
  */
@@ -1261,9 +1267,8 @@ export const uploadJourneySignatureImageForm = form(
 /**
  * Clear the course's uploaded signature.
  *
- * NOT the same as "the guide has no signature": clearing drops back to A32's next
- * link, the signature media ref's poster still, and only then to whatever the
- * composition draws without one.
+ * The guide then signs off with the typeset name: the upload is the signature's
+ * only source (Codex-61zsk.47), so nothing stands in.
  */
 export const deleteJourneySignatureImage = command(
   journeyPageIdSchema,

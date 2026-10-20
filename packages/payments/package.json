@@ -1,0 +1,38 @@
+{
+  "name": "@codex/payments",
+  "version": "1.0.0",
+  "description": "Payment domain modules shared by every payment path: the payouts ledger and the organisation payee (docs/payments/architecture.md, decision D1)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "vite build --config vite.config.payments.ts",
+    "dev": "vite build --config vite.config.payments.ts --watch",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "test": "vitest run --config vitest.config.payments.ts",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome lint --write .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "@codex/constants": "workspace:*",
+    "@codex/database": "workspace:*",
+    "@codex/service-errors": "workspace:*",
+    "drizzle-orm": "0.44.7",
+    "stripe": "^19.2.0"
+  },
+  "devDependencies": {
+    "@codex/test-utils": "workspace:*",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^7.2.2",
+    "vitest": "^4.0.2"
+  }
+}

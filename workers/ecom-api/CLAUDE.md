@@ -1,159 +1,113 @@
 # Ecom-API Worker (port 42072)
 
-Stripe e-commerce integration: checkout sessions, payment/subscription/connect webhooks, purchase management, subscription lifecycle, and Stripe Connect onboarding.
+Stripe commerce: checkout, purchases and sales, subscriptions, course
+monetisation, Stripe Connect, revenue-share agreements, the Stripe webhooks and
+the payouts cron.
 
-## Route Groups
+**Behaviour lives in the payments spec — read it before changing money code:**
+[docs/payments/](../../docs/payments/README.md). Webhook endpoints, events,
+secrets, the error policy and the Stripe Dashboard settings are in
+[docs/payments/operations.md](../../docs/payments/operations.md). The spec
+describes the intended behaviour and marks every place the code does not match
+yet with its bead.
 
-### Checkout (`/checkout`)
+## Routes
 
-| Method | Path | Policy | Rate Limit | Status | Response |
-|---|---|---|---|---|---|
-| POST | `/checkout/create` | `auth: 'required'` | `strict` | 200 | `{ data: { sessionUrl, sessionId } }` |
-| POST | `/checkout/portal-session` | `auth: 'required'` | `strict` | 200 | `{ data: { url } }` |
-| GET | `/checkout/verify` | `auth: 'required'` | `api` | 200 | `{ data: { sessionStatus, purchase?, content? } }` |
+All routes use `procedure()`. Mounted in `src/index.ts`:
 
-### Purchases (`/purchases`)
-
-| Method | Path | Policy | Status | Response |
-|---|---|---|---|---|
-| GET | `/purchases` | `auth: 'required'` | 200 | `{ items, pagination }` |
-| GET | `/purchases/:id` | `auth: 'required'` | 200 | `{ data: Purchase }` |
-
-### Subscriptions (`/subscriptions`)
-
-| Method | Path | Policy | Rate Limit | Status | Response |
-|---|---|---|---|---|---|
-| POST | `/subscriptions/checkout` | `auth: 'required'` | `strict` | 201 | `{ data: { checkoutUrl, sessionId } }` |
-| GET | `/subscriptions/current` | `auth: 'required'` | — | 200 | `{ data: Subscription }` |
-| GET | `/subscriptions/mine` | `auth: 'required'` | — | 200 | `{ items }` |
-| POST | `/subscriptions/change-tier` | `auth: 'required'` | `strict` | 200 | `{ data: Subscription }` |
-| POST | `/subscriptions/cancel` | `auth: 'required'` | — | 200 | `{ data: Subscription }` |
-| POST | `/subscriptions/reactivate` | `auth: 'required'` | — | 200 | `{ data: Subscription }` |
-| GET | `/subscriptions/stats` | `auth: 'required'`, `requireOrgManagement` | — | 200 | `{ data: Stats }` |
-| GET | `/subscriptions/subscribers` | `auth: 'required'`, `requireOrgManagement` | — | 200 | `{ items, pagination }` |
-
-### Connect (`/connect`)
-
-| Method | Path | Policy | Rate Limit | Status | Response |
-|---|---|---|---|---|---|
-| POST | `/connect/onboard` | `auth: 'required'`, `requireOrgManagement` | `strict` | 201 | `{ data: { url } }` |
-| GET | `/connect/status` | `auth: 'required'`, `requireOrgManagement` | — | 200 | `{ data: ConnectStatus }` |
-| POST | `/connect/sync` | `auth: 'required'`, `requireOrgManagement` | `strict` | 200 | `{ data: ConnectStatus }` |
-| POST | `/connect/dashboard` | `auth: 'required'`, `requireOrgManagement` | — | 200 | `{ data: { url } }` |
-
-## Webhook Endpoints
-
-All webhooks bypass `procedure()` and are deliberately NOT rate-limited — there is no `webhook` preset (the HMAC signature is already the auth; a per-caller cap can only reject a legitimate Stripe retry burst). Flow: `verifyStripeSignature()` (HMAC) → `createWebhookHandler()` → handler.
-
-| Path | Env Var for Secret | Handler | Events |
-|---|---|---|---|
-| `/webhooks/stripe/booking` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `handleCheckoutCompleted` | `checkout.session.completed` (payment mode) |
-| `/webhooks/stripe/payment` | `STRIPE_WEBHOOK_SECRET_PAYMENT` | `handlePaymentWebhook` | `payment_intent.*`, `charge.*` (incl. refunds) |
-| `/webhooks/stripe/subscription` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` | `checkout.session.completed` (subscription mode), `customer.subscription.*`, `invoice.*`, `product.updated`, `price.created`, `price.updated` |
-| `/webhooks/stripe/connect` | `STRIPE_WEBHOOK_SECRET_CONNECT` | `handleConnectWebhook` | `account.*`, `capability.*`, `person.*` |
-| `/webhooks/stripe/customer` | `STRIPE_WEBHOOK_SECRET_CUSTOMER` | (logging stub) | `customer.*` |
-| `/webhooks/stripe/dispute` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | `handlePaymentWebhook` (Codex-sxu5a) | `charge.dispute.created` handled; other `charge.dispute.*` + `radar.early_fraud_warning.*` log-only via the switch default |
-| `/webhooks/stripe/dev` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `routeDevWebhook` | All events — routes to correct handler. Returns 404 in production. |
-
-Dev usage: `stripe listen --forward-to http://localhost:42072/webhooks/stripe/dev` — set all `STRIPE_WEBHOOK_SECRET_*` to the same CLI-generated value.
-
-## Webhook Handler Architecture
-
-```
-verifyStripeSignature (HMAC) → createWebhookHandler (wraps handler, logs, returns { received: true })
-  → handler(event, stripe, context)
-    → createWebhookDbClient (per-request WebSocket client for transactions)
-    → service method (business logic)
-    → waitUntil: cache invalidation + email dispatch (fire-and-forget)
-    → cleanup() DB connection
-```
-
-Handlers are thin orchestrators. Business logic lives in `@codex/purchase` and `@codex/subscription`.
-
-## Services Used
-
-| Service | Package | Purpose |
+| Mount | File | Routes |
 |---|---|---|
-| `PurchaseService` (`purchase`) | `@codex/purchase` | Checkout sessions, purchase completion, refunds, portal, verification |
-| `SubscriptionService` (`subscription`) | `@codex/subscription` | Subscription CRUD, webhook handlers, tier changes, stats |
-| `TierService` (`tier`) | `@codex/subscription` | Tier CRUD, Stripe Product/Price sync |
-| `ConnectAccountService` (`connect`) | `@codex/subscription` | Connect account creation, status, dashboard links |
+| `/checkout` | `routes/checkout.ts` | `POST /create`, `/course`, `/course-subscription`, `/portal-session` · `GET /verify` |
+| `/purchases` | `routes/purchases.ts` | `GET /`, `/:id` (the buyer's own) |
+| `/sales` | `routes/sales.ts` | `GET /`, `/stats` (organisation management) |
+| `/subscriptions` | `routes/subscriptions.ts` | `POST /checkout`, `/preview-tier-change`, `/change-tier`, `/cancel`, `/reactivate`, `/resume` · `GET /verify`, `/current`, `/mine` · organisation management: `GET /stats`, `/subscribers`, `/payouts`, `/payouts/summary`, `/payouts/by-creator` · self: `GET /me/payouts`, `/me/earnings-summary` |
+| `/courses` | `routes/courses.ts` | `GET /:courseId/offer` |
+| `/studio/courses` | `routes/course-monetisation.ts` | `PUT`/`DELETE /:courseId/subscription-plan`, `PUT /:courseId/tier-access` |
+| `/connect` | `routes/connect.ts` | self: `POST /me/onboard`, `/me/sync`, `/me/dashboard` · `GET /me/status`. Org, read-only, any member: `GET /organization-status` (status fields only). The old organisation routes (`/onboard`, `/status`, `/sync`, `/dashboard`) are retired — `/dashboard` was an IDOR (`Codex-2hxff.1`); never add an org-keyed route that acts on a Connect account |
+| `/agreements` | `routes/agreements.ts` | see [agreements.md → Routes](../../docs/payments/agreements.md#routes) |
 
-## Key Flows
+## Webhooks
 
-### Purchase Flow
-```
-POST /checkout/create → validate content → Stripe Checkout Session
-  → User pays → /webhooks/stripe/booking → completePurchase (idempotent)
-    → INSERT purchase + contentAccess (transaction) → bump library cache
-```
+Mounted in `src/index.ts`, outside `procedure()`:
+`verifyStripeSignature()` (secret chosen by path) → `createWebhookHandler()` →
+handler.
 
-### Subscription Flow
-```
-POST /subscriptions/checkout → validate tier + Connect account → Stripe Session
-  → /webhooks/stripe/subscription (checkout.session.completed, subscription mode)
-    → handleSubscriptionCreated → INSERT subscription + membership → email + cache
-  → Renewal: invoice.payment_succeeded → update period + revenue
-  → Cancel: customer.subscription.updated (cancel_at_period_end) → status=cancelling
-  → Period end: customer.subscription.deleted → deactivate membership
-```
-
-### Refund Flow
-```
-Stripe Dashboard refund → /webhooks/stripe/payment (charge.refunded)
-  → processRefund (idempotent) → purchase.status=refunded + soft-delete contentAccess
-```
-
-### Dashboard Tier-Edit Sync-Back Flow (Codex-kqmvd Q1)
-```
-Operator edits tier in Stripe Dashboard → /webhooks/stripe/subscription
-  → product.updated → TierService.applyStripeProductUpdate → mirror name/description
-  → price.created   → TierService.applyStripePriceCreated  → adopt as canonical + archive old
-  → price.updated   → obs.error (log-only: archive-without-replacement is drift)
-  → waitUntil(cache.invalidate(orgId))  → stales ORG_TIERS so storefronts refetch
-```
-
-Operator action: `product.updated`, `price.created`, and `price.updated` must be added to the `/webhooks/stripe/subscription` endpoint in Stripe Dashboard. Without these events, TierService has no signal and Dashboard edits stay desynced — detection AND sync-back both require the webhook delivery.
-
-## Config Variables
-
-| Variable | Required | Purpose |
+| Path | Secret | Handler |
 |---|---|---|
-| `DATABASE_URL` | Yes | Neon PostgreSQL |
-| `STRIPE_SECRET_KEY` | Yes | Stripe API key |
-| `STRIPE_WEBHOOK_SECRET_BOOKING` | Yes | Booking webhook secret |
-| `STRIPE_WEBHOOK_SECRET_PAYMENT` | Yes | Payment webhook secret |
-| `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | Yes | Subscription webhook secret |
-| `STRIPE_WEBHOOK_SECRET_CONNECT` | Yes | Connect webhook secret |
-| `STRIPE_WEBHOOK_SECRET_CUSTOMER` | No | Customer webhook secret (stub only) |
-| `STRIPE_WEBHOOK_SECRET_DISPUTE` | No | Dispute webhook secret (stub only) |
-| `RATE_LIMIT_STRICT` / `RATE_LIMIT_API` | Yes | Native per-preset rate-limit bindings — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17); the limiter fails OPEN when the binding is missing |
-| `AUTH_SESSION_KV` | Yes | Session validation (for `procedure()` routes) |
-| `CACHE_KV` | No | Cache invalidation after purchase/subscription |
-| `ENVIRONMENT` | No | `production` enables production guards (dev webhook 404) |
-| `WEB_APP_URL` | No | App URL for email links |
+| `/webhooks/stripe/booking` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `handleCheckoutCompleted` (`handlers/checkout.ts`) |
+| `/webhooks/stripe/payment` | `STRIPE_WEBHOOK_SECRET_PAYMENT` | `handlePaymentWebhook` (`handlers/payment-webhook.ts`) |
+| `/webhooks/stripe/dispute` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | `handlePaymentWebhook` |
+| `/webhooks/stripe/subscription` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` (`handlers/subscription-webhook.ts`) |
+| `/webhooks/stripe/connect` | `STRIPE_WEBHOOK_SECRET_CONNECT` | `handleConnectWebhook` (`handlers/connect-webhook.ts`) |
+| `/webhooks/stripe/customer` | `STRIPE_WEBHOOK_SECRET_CUSTOMER` | log-only stub, to be removed (`Codex-2hxff.24`) |
+| `/webhooks/stripe/dev` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `routeDevWebhook` — all events, by type; 404 outside development/staging |
+
+Local: `stripe listen --forward-to http://localhost:42072/webhooks/stripe/dev`
+with every `STRIPE_WEBHOOK_SECRET_*` set to the CLI's secret.
+
+The payouts sweep runs from `scheduled` (`handlers/payouts-sweep.ts`), cron
+`0 * * * *`, production only.
+
+## Handler shape
+
+```
+verifyStripeSignature → createWebhookHandler (logs; 200, or 500 on a transient error)
+  → handler(event, stripe, c)
+    → createWebhookServices(c.env, c.executionCtx, { obs, stripe })
+        — the registry's services, as routes get them (Codex-2hxff.54)
+    → services.<name>.method() (business logic lives in the packages)
+    → background(promise): DB work after the response, on the shared pool
+    → waitUntil(promise): KV cache invalidation and emails
+    → finally: release() — closes the pool once background work settles
+```
+
+The payouts cron builds its services the same way (`handlers/payouts-sweep.ts`).
 
 ## Strict Rules
 
-- **MUST** verify Stripe webhooks with `verifyStripeSignature()` — NEVER process unverified webhooks
-- **MUST** return `{ received: true }` to all Stripe webhooks — prevents retries
-- **MUST** use idempotent operations — webhooks fire multiple times
-- **MUST** use `createWebhookDbClient(env)` from `@codex/worker-utils` and `await cleanup()` in a `finally` block in webhook handlers
-- **MUST** fire-and-forget cache invalidation and emails via `waitUntil` — never block webhook response
-- **NEVER** expose Stripe secret keys in responses or logs
-- **NEVER** put DB queries or email composition in webhook handlers — delegate to services
+- **MUST** verify every Stripe webhook with `verifyStripeSignature()` — never
+  process an unverified payload.
+- **MUST** return **500 for transient failures** (database, Stripe outage, network)
+  so Stripe retries, and 200 `{ received: true }` only when the event was
+  processed, deliberately skipped, or failed permanently. A `ServiceError` that
+  wraps a transient cause is still transient (`Codex-2hxff.6`).
+- **MUST** make every handler idempotent — Stripe delivers at least once.
+- **MUST** get services from `createWebhookServices` (`@codex/worker-utils`),
+  never build them by hand. It gives webhooks and crons the registry's whole
+  graph (`feeConfig`, the mailers, `webAppUrl`, caches), the webhook's own
+  verified Stripe client, and the Neon driver even where Hyperdrive is bound.
+  Hand-built services silently skipped fee configuration and emails
+  (`Codex-2hxff.7`, `.13`).
+- **MUST** ignore events about Stripe objects created by another environment —
+  production and local development share one sandbox (`Codex-2hxff.5`).
+- **MUST** call `release()` in a `finally` block, exactly once per
+  `createWebhookServices` call. It hands the pool's teardown to `waitUntil`
+  after the background work settles, so it never blocks the response.
+- **MUST** run DB work that outlives the response through `background(...)`.
+  A promise on plain `waitUntil` that queries the database races `release()`,
+  which can close the pool under it.
+- **MUST** fire-and-forget KV cache invalidation and emails through
+  `waitUntil`; never block the webhook response on them.
+- **NEVER** put DB queries or email composition in handlers — delegate to services.
+- **NEVER** expose Stripe secret keys, or raw Stripe error messages, in responses
+  or logs.
+- Webhooks are deliberately not rate-limited (the HMAC is the auth). Any preset a
+  route uses needs its binding (`RATE_LIMIT_STRICT`, `RATE_LIMIT_API`) in
+  `wrangler.jsonc`, or it fails open.
+
+## Configuration
+
+Secrets and vars are listed in
+[docs/payments/operations.md → Secrets and configuration](../../docs/payments/operations.md#secrets-and-configuration-ecom-api).
+Production secrets live in the GitHub environment `production` and reach the
+worker (`ecom-api-production`) at deploy time.
 
 ## Reference Files
 
-- `workers/ecom-api/src/index.ts` — worker setup, route + webhook registration
-- `workers/ecom-api/src/routes/checkout.ts` — create, portal-session, verify
-- `workers/ecom-api/src/routes/purchases.ts` — purchase list + get
-- `workers/ecom-api/src/routes/subscriptions.ts` — subscription management
-- `workers/ecom-api/src/routes/connect.ts` — Stripe Connect routes
-- `workers/ecom-api/src/handlers/checkout.ts` — booking webhook handler
-- `workers/ecom-api/src/handlers/payment-webhook.ts` — payment/refund handler
-- `workers/ecom-api/src/handlers/subscription-webhook.ts` — subscription lifecycle handler
-- `workers/ecom-api/src/handlers/connect-webhook.ts` — Connect account handler
-- `workers/ecom-api/src/middleware/verify-signature.ts` — Stripe HMAC verification
-- `workers/ecom-api/src/utils/dev-webhook-router.ts` — dev event routing
-- `workers/ecom-api/src/utils/webhook-handler.ts` — webhook handler factory
+- `src/index.ts` — worker setup, route + webhook mounts, required env
+- `src/routes/*.ts` — the route files above
+- `src/handlers/checkout.ts`, `payment-webhook.ts`, `subscription-webhook.ts`,
+  `connect-webhook.ts`, `payouts-sweep.ts`
+- `src/middleware/verify-signature.ts` — HMAC verification, secret per path
+- `src/utils/webhook-handler.ts`, `src/utils/error-classification.ts` — the 200/500 policy
+- `src/utils/dev-webhook-router.ts` — local event routing

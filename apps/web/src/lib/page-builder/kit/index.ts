@@ -5,6 +5,11 @@
  * Public-bundle code: nothing here may import the studio editor
  * (`$lib/components/page-builder`, `check-brand-editor-boundary.mjs`).
  */
+export {
+  type ButtonAction,
+  isButtonHref,
+  readButtonAction,
+} from './model/button-action';
 export { DEFINITIONS, fieldOf, GROUP_ORDER } from './model/catalog';
 export { COPY } from './model/copy';
 export {
@@ -22,12 +27,16 @@ export {
 } from './model/offer';
 export {
   featuredScheme,
+  OWN_BACKDROP,
   renderableSections,
+  resolveGroundBands,
   resolveLayout,
   resolveScheme,
   resolveSections,
   resolveSpacing,
   resolveStyle,
+  SIMPLE_SECTIONS,
+  spacingSource,
 } from './model/resolve';
 export {
   SAMPLE_COURSE,

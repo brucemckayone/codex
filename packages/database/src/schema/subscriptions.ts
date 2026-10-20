@@ -135,6 +135,13 @@ export const subscriptions = pgTable(
     // Complements cancel_reason (free-text) — both fields fill in independently.
     churnReason: varchar('churn_reason', { length: 50 }),
 
+    // Set while a chargeback on one of its invoices is open: access is paused
+    // (every granting query requires it null) and so is billing (Stripe's
+    // `pause_collection`). Not a status: ours mirrors Stripe's on every
+    // subscription event, which would overwrite it (Codex-2hxff.9,
+    // docs/payments/subscription-disputes.md).
+    disputedAt: timestamp('disputed_at', { withTimezone: true }),
+
     // Revenue split snapshot (immutable — calculated at creation, updated on renewal)
     // Platform keeps 10% of gross. Org gets 15% of post-platform. Creators get remainder.
     amountCents: integer('amount_cents').notNull(),

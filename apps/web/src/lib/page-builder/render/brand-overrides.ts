@@ -25,6 +25,7 @@ import {
   darkTokenOverridesToCssVars,
   tokenOverridesToCssVars,
 } from '$lib/brand-editor';
+import { withFallback } from '$lib/brand-editor/font-fallbacks';
 import type { BrandTokenOverrides } from '$lib/page-builder';
 
 /**
@@ -75,10 +76,15 @@ function isSafeDeclaration([prop, value]: [string, string]): boolean {
  * emitted `--brand-font-*` value composes cleanly into org-brand.css's
  * `var(--brand-font-body, 'Inter'), …` stack. Mirrors the brand editor's
  * `quoteFamily`. Idempotent — an already-quoted value is left untouched.
+ * A face the fallback table knows is quoted and followed by its own fallback
+ * (`font-fallbacks.ts`, Codex-61zsk.61), so the value starts quoted and a
+ * second pass leaves it too.
  */
 function quoteFamily(value: string): string {
   const v = value.trim();
   if (v.startsWith('"') || v.startsWith("'")) return v;
+  const followed = withFallback(v, `"${v}"`);
+  if (followed !== `"${v}"`) return followed;
   return /[\s,]/.test(v) ? `"${v}"` : v;
 }
 
@@ -122,7 +128,9 @@ export function brandOverridesToCssVars(
   // A page that re-colours the brand must not keep the ORG's dark-mode colour
   // (an org `--brand-color-dark` would otherwise win in dark previews): without
   // its own dark value, the page's colour carries into dark. Background is
-  // exempt — a light page background must never paint dark mode.
+  // exempt — a light page background must never paint dark mode, nor a dark
+  // one light mode: a background with no twin applies only to its own theme,
+  // and the other takes the org's (`kit/styles/schemes.css`, owner D7).
   for (const field of ['primaryColor', 'secondaryColor', 'accentColor']) {
     const light = out[CORE_LIGHT[field]];
     const darkProp = CORE_DARK[field];
@@ -141,6 +149,18 @@ export function brandOverridesToCssVars(
   }
 
   return Object.fromEntries(Object.entries(out).filter(isSafeDeclaration));
+}
+
+/** A page's own background per theme, where it sets one (owner, D7): what
+ * its grounds' bands are read from (`resolveGroundBands`, 03 X48). */
+export function pageGrounds(
+  overrides: BrandTokenOverrides | null | undefined
+): {
+  light?: string;
+  dark?: string;
+} {
+  const vars = brandOverridesToCssVars(overrides);
+  return { light: vars['--brand-bg'], dark: vars['--brand-bg-dark'] };
 }
 
 /**

@@ -38,8 +38,18 @@
   //
   // Scheme: env digit (1 dev, 2 test, 3 production) + two-digit worker number
   // from CLAUDE.md + preset digit (1 strict, 2 streaming, 3 api, 4 web).
-  // admin-api is worker 5, so its api preset is 1053 / 2053 / 3053.
+  // admin-api is worker 5, so its api preset is 1053 / 2053 / 3053 and its
+  // strict preset (the support owner reassignment, Codex-2hxff.2) 1051 / 2051 /
+  // 3051.
   "ratelimits": [
+    {
+      "name": "RATE_LIMIT_STRICT",
+      "namespace_id": "1051",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
+    },
     {
       "name": "RATE_LIMIT_API",
       "namespace_id": "1053",
@@ -100,6 +110,14 @@
       "name": "admin-api-test",
       // Bindings are not inherited into a named env — see the default env.
       "ratelimits": [
+        {
+          "name": "RATE_LIMIT_STRICT",
+          "namespace_id": "2051",
+          "simple": {
+            "limit": 20,
+            "period": 60
+          }
+        },
         {
           "name": "RATE_LIMIT_API",
           "namespace_id": "2053",
@@ -167,6 +185,14 @@
       ],
       // Bindings are not inherited into a named env — see the default env.
       "ratelimits": [
+        {
+          "name": "RATE_LIMIT_STRICT",
+          "namespace_id": "3051",
+          "simple": {
+            "limit": 20,
+            "period": 60
+          }
+        },
         {
           "name": "RATE_LIMIT_API",
           "namespace_id": "3053",

@@ -5,31 +5,23 @@
  *
  * Key Points:
  * - Uses the production database client from @codex/database
- * - GitHub Actions creates one Neon branch per test domain (7 branches total)
- * - Complete isolation between test domains
- * - Optional cleanup helpers for tests within the same domain
+ * - Each CI job has its own Postgres service container
+ * - Optional cleanup helpers for tests that share a database
  * - Supports test user creation for auth scenarios
  * - Transaction helpers for isolated test scenarios
  *
- * WORKFLOW-LEVEL NEON BRANCHING:
- * ==============================
- * **Local Development** (FREE, unlimited test runs):
- * - Uses DATABASE_URL from .env.test (LOCAL_PROXY method)
- * - No ephemeral branch creation costs
- * - Fast execution with no provisioning delay
- * - Tests share database (cleanup helpers still work if needed)
+ * WHERE TESTS RUN:
+ * ================
+ * **Local Development**:
+ * - Uses DATABASE_URL_LOCAL_PROXY from .env.test (LOCAL_PROXY method)
+ * - The disposable `main_test` on the local Postgres container
+ * - Tests share the database (the cleanup helpers keep them apart)
  *
- * **CI/CD** (Isolated by test domain):
- * - GitHub Actions creates a dedicated Neon branch per domain per run, named
- *   `<domain>-<run_id>-<run_attempt>` so concurrent runs never share one:
- *   - ci-unit-tests-* (shared by all package tests)
- *   - ci-auth-tests-*, ci-content-api-tests-*, etc. (per worker)
- *   - ci-e2e-api-tests-*, ci-e2e-web-tests-* (E2E tests)
- * - DATABASE_URL set at workflow level
- * - Tests share branch within their domain
- * - Branches cleaned up after workflow completes
- *
- * This approach saves ~97% of Neon branches vs per-test-file ephemeral branches!
+ * **CI/CD**:
+ * - Each test job runs a Postgres service container plus the local Neon
+ *   proxy, migrated empty on every run (Codex-75m0t.2)
+ * - DB_METHOD=LOCAL_PROXY; both URLs point at db.localtest.me:5432/neondb
+ * - Tests share the job's database; it is discarded with the job
  *
  * Usage:
  * ```typescript
@@ -59,9 +51,10 @@ import {
 } from '@codex/database';
 import * as schema from '@codex/database/schema';
 import { neonConfig } from '@neondatabase/serverless';
-import { sql as sqlOperator } from 'drizzle-orm';
+import { eq, sql as sqlOperator } from 'drizzle-orm';
 import ws from 'ws';
 import { assertDestructiveTargetAllowed } from './destructive-target';
+import { createTestOwnershipPeriodInput } from './subscription-factories';
 
 // Configure Neon serverless WebSocket for Node.js environment
 // This is required for @neondatabase/serverless in Node.js v21 and earlier
@@ -189,16 +182,17 @@ export function setupTestDatabase(): Database {
  *
  * Deletion order (respects foreign keys):
  * 1. video_playback (references content, users)
- * 2. refund_reviews (references purchases AND payouts with onDelete: 'restrict')
- * 3. payouts (referenced by refund_reviews)
- * 4. purchases (references content, users, organizations; referenced by refund_reviews)
- * 5. content_access (references content, users, organizations)
- * 6. agreement_proposals (references organizations, users; self-FK)
- * 7. creator_organization_agreements (references users, organizations, proposals)
- * 8. organization_platform_agreements (references organizations)
- * 9. content (references media_items, organizations, users)
- * 10. media_items (references users)
- * 11. organizations (no foreign keys from other content tables)
+ * 2. refund_reviews (references purchases, payouts AND payout_reversals with onDelete: 'restrict')
+ * 3. payout_reversals (references payouts with onDelete: 'restrict'; Codex-2hxff.8)
+ * 4. payouts (referenced by refund_reviews and payout_reversals)
+ * 5. purchases (references content, users, organizations; referenced by refund_reviews)
+ * 6. content_access (references content, users, organizations)
+ * 7. agreement_proposals (references organizations, users; self-FK)
+ * 8. creator_organization_agreements (references users, organizations, proposals)
+ * 9. organization_platform_agreements (references organizations)
+ * 10. content (references media_items, organizations, users)
+ * 11. media_items (references users)
+ * 12. organizations (no foreign keys from other content tables)
  *
  * @param db - Database client
  */
@@ -213,6 +207,12 @@ export async function cleanupDatabase(db: Database): Promise<void> {
   // must go before either. Was previously missed in cleanup and caused FK
   // failures whenever a prior subscription test left rows behind.
   await db.delete(schema.refundReviews);
+  // refunds references purchases with onDelete: 'restrict' (Codex-2hxff.8).
+  await db.delete(schema.refunds);
+  // disputes references purchases with onDelete: 'restrict' (Codex-2hxff.9).
+  await db.delete(schema.disputes);
+  // payout_reversals references payouts with onDelete: 'restrict' (Codex-2hxff.8).
+  await db.delete(schema.payoutReversals);
   await db.delete(schema.payouts);
   await db.delete(schema.purchases);
   await db.delete(schema.contentAccess);
@@ -253,6 +253,12 @@ export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   // Delete in order that respects foreign key constraints
   await db.delete(schema.videoPlayback);
   await db.delete(schema.refundReviews);
+  // refunds references purchases with onDelete: 'restrict' (Codex-2hxff.8).
+  await db.delete(schema.refunds);
+  // disputes references purchases with onDelete: 'restrict' (Codex-2hxff.9).
+  await db.delete(schema.disputes);
+  // payout_reversals references payouts with onDelete: 'restrict' (Codex-2hxff.8).
+  await db.delete(schema.payoutReversals);
   await db.delete(schema.payouts);
   await db.delete(schema.purchases);
   await db.delete(schema.contentAccess);
@@ -495,6 +501,27 @@ export async function executeRawSQL(
   query: string
 ): Promise<void> {
   await db.execute(sqlOperator.raw(query));
+}
+
+/**
+ * Make `userId` the org's payee for every test sale (Codex-2hxff.2): replaces
+ * the org's ownership periods with one open period from long before any test
+ * sale. The test analogue of the retired `primaryConnectAccountUserId` pin —
+ * money paths resolve the payee from ownership periods, so a test routing an
+ * org slice to a user calls this. Replacing (rather than adding) keeps it
+ * re-callable on one org without tripping the one-open-period index.
+ */
+export async function setTestOrganisationPayee(
+  db: Database,
+  orgId: string,
+  userId: string
+): Promise<void> {
+  await db
+    .delete(schema.organizationOwnershipPeriods)
+    .where(eq(schema.organizationOwnershipPeriods.organizationId, orgId));
+  await db
+    .insert(schema.organizationOwnershipPeriods)
+    .values(createTestOwnershipPeriodInput(orgId, userId));
 }
 
 /**

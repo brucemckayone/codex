@@ -21,7 +21,8 @@
   points at a made-up image. While editing, the prompt sits over them.
 -->
 <script lang="ts">
-  import { resolvePageImageUrl } from '../../../page-images';
+  import { hasHead } from '../../model/read';
+  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
@@ -50,6 +51,7 @@
       ),
       alt: item.image.alt ?? '',
       caption: item.caption,
+      focus: storedFocus(item.image),
     }))
   );
   const plates = $derived<Picture[]>(
@@ -68,7 +70,7 @@
 {/snippet}
 
 <div class="gallery" class:lp-bleed={layout === 'strip'} data-layout={layout}>
-  {#if content.eyebrow || content.heading || content.body}
+  {#if hasHead(content)}
     <header class="gallery__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="gallery" {edit} />{/if}
       {#if content.heading}
@@ -118,15 +120,17 @@
     grid-column: bleed;
   }
 
+  /* The measure is its heading's room too (louder's fit, 03 X62). */
   .gallery__head {
     display: grid;
     gap: var(--lp-stack);
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
+    --lp-heading-column: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .gallery__head :global(.lp-heading) {
-    max-inline-size: 20ch;
+    max-inline-size: calc(20 * var(--lp-measure-unit));
   }
 
   /* Never on the public page: an empty gallery there is only its words. */

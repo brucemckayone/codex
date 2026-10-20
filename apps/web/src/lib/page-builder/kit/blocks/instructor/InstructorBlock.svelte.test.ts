@@ -6,7 +6,8 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import type { JourneySalesContext, SellPreview } from '../../../render/types';
-import { SECTION_LAYOUTS } from '../../model/ids';
+import { DEFAULT_PAGE_STYLE, SECTION_LAYOUTS } from '../../model/ids';
+import { featuredScheme } from '../../model/resolve';
 import { sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
 import { INSTRUCTOR_COPY } from './copy';
@@ -178,26 +179,130 @@ describe('InstructorBlock', () => {
     expect(portrait()?.getAttribute('src')).toBe(MEDIA.guideClip?.posterUrl);
   });
 
-  it('signs off with the signature mark only when one was uploaded', async () => {
-    await render(GUIDE);
+  it('quote: signs off with the signature mark only when there is one', async () => {
+    await render(GUIDE, { layout: 'quote' });
     const mark = document.body.querySelector<HTMLImageElement>('img.sig');
     expect(mark?.getAttribute('src')).toBe(MEDIA.signatureUrl);
     expect(mark?.getAttribute('alt')).toBe('');
     unmount(app);
     await render(GUIDE, {
+      layout: 'quote',
       media: { guidePortraitUrl: MEDIA.guidePortraitUrl },
     });
     expect(document.body.querySelector('img.sig')).toBeNull();
     expect(text()).toContain(GUIDE.name);
   });
 
+  // 03 X57, the reference plan's round 3: the "signature" a film stands in
+  // for was a tiny landscape thumbnail above the guide's name.
+  const face = () => document.body.querySelector('.signoff__face');
+
+  it.each([
+    'split',
+    'centered',
+  ])('%s: signs off with a round portrait beside the name, never the mark', async (layout) => {
+    await render(GUIDE, { layout });
+    expect(document.body.querySelector('img.sig')).toBeNull();
+    const photo = face();
+    expect(photo?.tagName).toBe('IMG');
+    expect(photo?.getAttribute('src')).toBe(MEDIA.guidePortraitUrl);
+    // Decorative: the name beside it is what reads.
+    expect(photo?.getAttribute('alt')).toBe('');
+    const signoff = photo?.closest('.signoff');
+    expect(signoff?.querySelector('.signoff__name')?.textContent).toBe(
+      GUIDE.name
+    );
+    expect(signoff?.querySelector('.signoff__role')?.textContent).toBe(
+      GUIDE.role
+    );
+  });
+
+  it('signs off with the clip’s frame when that is the only picture of the guide', async () => {
+    await render(GUIDE, { media: { guideClip: MEDIA.guideClip } });
+    expect(face()?.getAttribute('src')).toBe(MEDIA.guideClip?.posterUrl);
+  });
+
+  it('signs off with the guide’s initials when there is no picture', async () => {
+    await render(GUIDE, { media: { signatureUrl: MEDIA.signatureUrl } });
+    const initials = face();
+    expect(initials?.tagName).toBe('SPAN');
+    expect(initials?.textContent).toBe('ML');
+    expect(initials?.getAttribute('aria-hidden')).toBe('true');
+    expect(document.body.querySelector('img.sig')).toBeNull();
+  });
+
+  it('holds the circle’s place while the stream is out, so the name never moves', async () => {
+    let settle: (preview: SellPreview) => void = () => {};
+    const sellPreview = new Promise<SellPreview>((resolve) => {
+      settle = resolve;
+    });
+    await render(GUIDE, { context: { ...sampleContext(), sellPreview } });
+    const held = face();
+    expect(held).not.toBeNull();
+    expect(held?.textContent).toBe('');
+    settle({
+      intro: null,
+      reel: null,
+      guidePortraitUrl: MEDIA.guidePortraitUrl,
+    });
+    await tick();
+    await Promise.resolve();
+    flushSync();
+    expect(face()?.getAttribute('src')).toBe(MEDIA.guidePortraitUrl);
+  });
+
+  it('with neither a name nor a picture, signs off with no face at all', async () => {
+    const { name: _, ...nameless } = GUIDE;
+    await render(nameless, { media: {} });
+    expect(face()).toBeNull();
+    expect(text()).toContain(GUIDE.role);
+  });
+
+  // Codex-61zsk.37 (C1): with no portrait, split left about 40% of the band
+  // empty. The guide's initials hold the portrait's place instead.
+  it.each([
+    'split',
+    'centered',
+  ])('%s with no portrait: the guide’s initials hold its place, on the filled scheme', async (layout) => {
+    await render(GUIDE, { layout, media: {} });
+    const medallion = document.body.querySelector(
+      '.guide__portrait .lp-media[data-mark]'
+    );
+    expect(medallion?.textContent?.trim()).toBe('ML');
+    expect(medallion?.getAttribute('data-lp-scheme')).toBe(
+      featuredScheme(DEFAULT_PAGE_STYLE, 'base')
+    );
+    expect(document.body.querySelector('.lp-media__plate')).toBeNull();
+    expect(text()).toContain(GUIDE.body);
+    expect(text()).not.toContain(INSTRUCTOR_PROMPT);
+  });
+
+  it.each([
+    'split',
+    'centered',
+  ])('%s: the canvas draws the same medallion and asks for the photo over it', async (layout) => {
+    await render(GUIDE, { layout, media: {}, edit: { commit: () => {} } });
+    expect(
+      document.body.querySelector('.lp-media[data-mark]')?.textContent?.trim()
+    ).toBe('ML');
+    expect(
+      document.body.querySelector('[data-lp-edit-only]')?.textContent
+    ).toContain(INSTRUCTOR_PROMPT);
+  });
+
   it.each(
     SECTION_LAYOUTS.instructor
-  )('%s: no portrait leaves the story whole on the public page', async (layout) => {
-    await render(GUIDE, { layout, media: {} });
+  )('%s: no portrait and no name to draw leaves the story whole on the public page', async (layout) => {
+    await render({ ...GUIDE, name: undefined }, { layout, media: {} });
     expect(document.body.querySelector('.lp-media')).toBeNull();
     expect(text()).toContain(GUIDE.body);
     expect(text()).not.toContain(INSTRUCTOR_PROMPT);
+  });
+
+  it('quote signs off with the name alone when there is no portrait', async () => {
+    await render(GUIDE, { layout: 'quote', media: {} });
+    expect(document.body.querySelector('.lp-media')).toBeNull();
+    expect(text()).toContain(GUIDE.name);
   });
 
   it.each(

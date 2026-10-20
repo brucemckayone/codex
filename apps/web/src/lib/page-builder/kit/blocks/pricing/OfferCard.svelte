@@ -5,11 +5,15 @@
   copy that describes it, and a button that deep-links the checkout to exactly
   this path. The recommended card renders in its own nested colour scheme, so
   its button is contrasted against the CARD, not the section around it.
+
+  The small print under the button is always this path's own billing line,
+  derived here rather than passed in: nothing a creator writes can end up
+  describing an offer it was not written for.
 -->
 <script lang="ts">
   import type { OfferPath } from '../../../offer-paths';
   import type { JourneySalesContext } from '../../../render/types';
-  import { COPY, pathActionName } from '../../model/copy';
+  import { COPY, derivedNote, pathActionName } from '../../model/copy';
   import { pathHref } from '../../model/cta';
   import type { ColourSchemeId } from '../../model/ids';
   import type { BlockEdit } from '../../model/types';
@@ -21,7 +25,6 @@
     path: OfferPath;
     context: JourneySalesContext;
     label: string;
-    note: string;
     /** The nested scheme of the recommended card; absent = transparent card. */
     scheme?: ColourSchemeId;
     /** "Recommended" means something only when there is a choice. */
@@ -36,7 +39,6 @@
     path,
     context,
     label,
-    note,
     scheme,
     badge = false,
     size = 'card',
@@ -73,16 +75,18 @@
       field={editable ? 'ctaLabel' : undefined}
       {edit}
     />
-    <p class="offer__note">{note}</p>
+    <p class="offer__note">{derivedNote(path)}</p>
   </div>
 </article>
 
 <style>
   .offer {
+    --_pad: var(--space-6);
+    --_inset: calc(var(--_pad) + var(--lp-border));
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-    padding: var(--space-6);
+    padding: var(--_pad);
     border: var(--lp-border) var(--border-style) var(--lp-line);
     border-radius: var(--lp-radius-card);
     color: var(--lp-ink);
@@ -94,11 +98,14 @@
   }
 
   .offer[data-size='focus'] {
+    --_pad: clamp(var(--space-6), var(--space-4) + 3cqi, var(--space-12));
     gap: var(--space-5);
-    padding: clamp(var(--space-6), var(--space-4) + 3cqi, var(--space-12));
   }
 
+  /* The name's room (03 X71): the card's width, which the cards name
+     (`--_track`), less its inset. */
   .offer__top {
+    --lp-title-column: calc(var(--_track, var(--lp-column)) - 2 * var(--_inset));
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -143,7 +150,7 @@
 
   .offer__amount {
     font-family: var(--lp-font-display);
-    font-size: var(--lp-size-heading);
+    font-size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1));
     font-weight: var(--lp-weight-display);
     font-synthesis: none;
     font-variant-numeric: lining-nums tabular-nums;
@@ -178,6 +185,7 @@
 
   /* Bold: open columns under a hard ink rule; only the featured card is a block. */
   :global(.lp[data-lp-style='bold']) .offer:not([data-featured]) {
+    --_inset: 0px;
     padding-inline: 0;
     border: none;
     border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);

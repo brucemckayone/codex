@@ -25,6 +25,12 @@
 
   // Lazy label + hint: this table is module-scope, so a message read here would
   // resolve before the request's language tag is set. Called at render instead.
+  //
+  // A course portal only, for now (Codex-61zsk.20). A Landing page could be
+  // built but never seen: the public page and its Preview read a course, so
+  // it 404ed. Serving one is its own feature (Codex-y58y8: no course, nothing
+  // sold, the course's sections folded), and its entry comes back with it:
+  // `id: 'landing'`, `m.studio_journey_new_type_landing()` and its hint.
   const PAGE_TYPES: readonly {
     id: NewPageType;
     label: () => string;
@@ -34,11 +40,6 @@
       id: 'course',
       label: () => m.studio_journey_new_type_course(),
       hint: () => m.studio_journey_new_type_course_hint(),
-    },
-    {
-      id: 'landing',
-      label: () => m.studio_journey_new_type_landing(),
-      hint: () => m.studio_journey_new_type_landing_hint(),
     },
   ];
 
@@ -108,22 +109,25 @@
       />
     </label>
 
-    <fieldset class="new-journey__field new-journey__types">
-      <legend class="new-journey__label">{m.studio_journey_new_type_label()}</legend>
-      {#each PAGE_TYPES as t (t.id)}
-        <label class="new-journey__type" class:new-journey__type--active={pageType === t.id}>
-          <input
-            type="radio"
-            name="pageType"
-            value={t.id}
-            checked={pageType === t.id}
-            onchange={() => (pageType = t.id)}
-          />
-          <span class="new-journey__type-label">{t.label()}</span>
-          <span class="new-journey__type-hint">{t.hint()}</span>
-        </label>
-      {/each}
-    </fieldset>
+    <!-- A choice of one is no choice: the picker shows once there are two. -->
+    {#if PAGE_TYPES.length > 1}
+      <fieldset class="new-journey__field new-journey__types">
+        <legend class="new-journey__label">{m.studio_journey_new_type_label()}</legend>
+        {#each PAGE_TYPES as t (t.id)}
+          <label class="new-journey__type" class:new-journey__type--active={pageType === t.id}>
+            <input
+              type="radio"
+              name="pageType"
+              value={t.id}
+              checked={pageType === t.id}
+              onchange={() => (pageType = t.id)}
+            />
+            <span class="new-journey__type-label">{t.label()}</span>
+            <span class="new-journey__type-hint">{t.hint()}</span>
+          </label>
+        {/each}
+      </fieldset>
+    {/if}
 
     <div class="new-journey__actions">
       <a href="/studio/journeys" class="new-journey__btn new-journey__btn--ghost">{m.studio_journey_new_cancel()}</a>

@@ -44,4 +44,9 @@
       transition: none;
     }
   }
+
+  /* The motion dial at still is the page reduced motion sees (03 X62). */
+  :global(.lp[data-lp-motion='still']) .lp-sign::after {
+    transition: none;
+  }
 </style>

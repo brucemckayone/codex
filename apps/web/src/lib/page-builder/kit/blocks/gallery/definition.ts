@@ -5,7 +5,7 @@ import {
   headingField,
   layout,
 } from '../../model/fields';
-import { compact, readItems, readText } from '../../model/read';
+import { compact, firstItem, readItems, readText } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
 
 export interface GalleryItem {
@@ -51,7 +51,27 @@ export const galleryDefinition: BlockDefinition<GalleryProps> = {
       control: 'items',
       maxItems: MAX_GALLERY_ITEMS,
       itemFields: [
-        { key: 'image', label: 'Picture', control: 'image' },
+        {
+          key: 'image',
+          label: 'Picture',
+          control: 'image',
+          // Each layout's frame at 1440 and 390, in the Style that cuts it
+          // most; a mosaic's and a strip's is the tile that cuts it most.
+          focalLayouts: {
+            mosaic: [
+              { at: 'wide', ratio: '3 / 5' },
+              { at: 'phone', ratio: '13 / 5' },
+            ],
+            strip: [
+              { at: 'wide', ratio: '4 / 5' },
+              { at: 'phone', ratio: '4 / 5' },
+            ],
+            grid: [
+              { at: 'wide', ratio: '4 / 3' },
+              { at: 'phone', ratio: '4 / 3' },
+            ],
+          },
+        },
         { key: 'caption', label: 'Caption', control: 'text', maxLength: 120 },
       ],
     },
@@ -83,4 +103,9 @@ export const galleryDefinition: BlockDefinition<GalleryProps> = {
         MAX_GALLERY_ITEMS
       ),
     }),
+  // The mosaic's first picture is its largest.
+  leadingItem: (raw, layout) =>
+    layout === 'mosaic'
+      ? firstItem(raw, 'items', (entry) => isImageRef(entry.image))
+      : null,
 };

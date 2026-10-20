@@ -17,6 +17,7 @@ export const CLEAN: StyleDefinition = {
     curriculum: 'accordion',
     preview: 'feature',
     gallery: 'grid',
+    inside: 'carousel',
     instructor: 'split',
     testimonials: 'grid',
     faq: 'accordion',
@@ -24,6 +25,11 @@ export const CLEAN: StyleDefinition = {
     cta: 'split',
     stats: 'grid',
     text: 'columns',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'start',
+    break: 'space',
+    button: 'stack',
   },
   // The ground, a whisper of tint for the passages that ask to be read, and
   // the dark inverse as the screening room — the film, the look inside, and
@@ -39,12 +45,21 @@ export const CLEAN: StyleDefinition = {
     curriculum: 'base',
     preview: 'contrast',
     gallery: 'base',
+    // The whisper of tint between the hero's ground and the change's, so the
+    // opening still takes turns (03 X63).
+    inside: 'soft',
     instructor: 'base',
     testimonials: 'soft',
     stats: 'base',
     pricing: 'soft',
     faq: 'base',
     cta: 'contrast',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   featured: {
     base: 'contrast',
@@ -57,6 +72,7 @@ export const CLEAN: StyleDefinition = {
   order: STORY_ORDER,
   starter: [
     'hero',
+    'inside',
     'transformation',
     'benefits',
     'curriculum',
@@ -74,4 +90,7 @@ export const CLEAN: StyleDefinition = {
   // defaults the suggestion changes the heading face, which is the part of
   // the page Clean's crispness rests on.
   fonts: { heading: 'Plus Jakarta Sans', body: 'Inter' },
+  // Hazy, as Studio: the org's moving background through a third of the
+  // inner pages' blur and a thinner veil, so it is seen moving (03 X53, X59).
+  atmosphere: 'hazy',
 };

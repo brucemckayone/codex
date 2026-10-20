@@ -1,11 +1,20 @@
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
 import {
   flushSync,
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
-import { PAGE_STYLE_IDS } from './model/ids';
+import type { SellPreview } from '../render/types';
+import { priceWithCadence } from './model/copy';
+import {
+  PAGE_STYLE_IDS,
+  type PageStyleId,
+  type SectionTypeId,
+} from './model/ids';
+import { pricingView } from './model/offer';
+import { SIMPLE_SECTIONS } from './model/resolve';
 import { sampleContext, samplePage } from './model/sample';
 import { STYLES } from './model/styles';
 import type { KitPage } from './model/types';
@@ -21,6 +30,16 @@ import type { PageEdit } from './page-context';
 
 let app: ReturnType<typeof mount> | null = null;
 
+/**
+ * The page's films. A visitor's page folds a Video or Preview section whose
+ * film is not coming (Codex-61zsk.57), so a page meant to draw every section
+ * brings both.
+ */
+const FILMS = {
+  intro: { playlistUrl: 'https://cdn.example/intro.m3u8' },
+  reel: { playlistUrl: 'https://cdn.example/reel.m3u8' },
+};
+
 afterEach(() => {
   if (app) unmount(app);
   app = null;
@@ -34,7 +53,7 @@ async function render(props: Record<string, unknown> = {}) {
       page: samplePage('bold'),
       context: sampleContext({
         offer: 'tiers',
-        media: { heroImageUrl: '/hero.jpg' },
+        media: { heroImageUrl: '/hero.jpg', ...FILMS },
       }),
       ...props,
     },
@@ -73,14 +92,65 @@ function publicMarkup(root: HTMLElement): string {
   copy.querySelector('.lp-sticky')?.remove();
   // The one sanctioned editor-only element (contract A4): an empty-state prompt.
   for (const el of copy.querySelectorAll('[data-lp-edit-only]')) el.remove();
+  // Attributes in name order: the markup keeps them in the order they were
+  // set, which is timing, not meaning. The editor holds the poster's picture
+  // from the first paint, so `data-pictured` is set with its root; the public
+  // page sets it when the still arrives, after the root's own style.
+  for (const el of [copy, ...copy.querySelectorAll('*')]) {
+    const attributes = [...el.attributes]
+      .map(({ name, value }) => [name, value] as const)
+      .sort(([a], [b]) => (a < b ? -1 : 1));
+    for (const [name] of attributes) el.removeAttribute(name);
+    for (const [name, value] of attributes) el.setAttribute(name, value);
+  }
   return copy.innerHTML.replace(/<!--[\s\S]*?-->/g, '');
 }
+
+/** Where the sample's Picture section finds its picture. */
+const PICTURE_CDN = 'https://cdn.example';
+
+/**
+ * A Style's sample page with a picture in its Picture section, so a
+ * visitor's page draws every section: an empty Picture is folded away
+ * (03 X64), and the definitions' own samples carry no picture.
+ */
+function everySection(style: (typeof PAGE_STYLE_IDS)[number]): KitPage {
+  const page = samplePage(style);
+  return {
+    ...page,
+    sections: page.sections.map((s) =>
+      s.type === 'picture'
+        ? {
+            ...s,
+            props: {
+              ...s.props,
+              image: {
+                key: 'landing-pages/page-1/images/image-1',
+                w: 1600,
+                h: 1067,
+              },
+            },
+          }
+        : s
+    ),
+  };
+}
+
+const pictureContext = () =>
+  sampleContext({
+    offer: 'tiers',
+    media: { heroImageUrl: '/hero.jpg', ...FILMS },
+    mediaBaseUrl: PICTURE_CDN,
+  });
 
 describe('PageRenderer', () => {
   it.each(
     PAGE_STYLE_IDS
   )('renders every section of the %s page, in order, under one h1', async (style) => {
-    const root = await render({ page: samplePage(style) });
+    const root = await render({
+      page: everySection(style),
+      context: pictureContext(),
+    });
     expect(root.dataset.lpStyle).toBe(style);
     const sections = [...root.querySelectorAll('.lp-section')];
     expect(sections.map((s) => s.getAttribute('data-lp-type'))).toEqual([
@@ -88,15 +158,152 @@ describe('PageRenderer', () => {
     ]);
     expect(sections.map((s) => s.id)).toEqual([...STYLES[style].order]);
     expect(root.querySelectorAll('h1')).toHaveLength(1);
-    for (const s of sections) {
-      expect(s.getAttribute('data-lp-scheme')).toBe(
-        STYLES[style].schemes[
-          s.getAttribute(
-            'data-lp-type'
-          ) as keyof (typeof STYLES)['bold']['schemes']
-        ]
+    sections.forEach((s, i) => {
+      const type = s.getAttribute('data-lp-type') as SectionTypeId;
+      const scheme = s.getAttribute('data-lp-scheme');
+      if (SIMPLE_SECTIONS.has(type)) {
+        // A simple section is on the ground of the band it joins (03 X64).
+        expect([
+          sections[i - 1]?.getAttribute('data-lp-scheme'),
+          sections[i + 1]?.getAttribute('data-lp-scheme'),
+        ]).toContain(scheme);
+      } else {
+        expect(scheme).toBe(STYLES[style].schemes[type]);
+      }
+    });
+  });
+
+  it('folds an empty Picture and Heading from a visitor’s page, and keeps them on the canvas', async () => {
+    const page = samplePage('studio', [
+      'problem',
+      'picture',
+      'heading',
+      'curriculum',
+    ]);
+    const heading = page.sections.find((s) => s.type === 'heading');
+    if (heading) heading.props = { eyebrow: 'Part two' };
+    const types = (root: HTMLElement) =>
+      [...root.querySelectorAll('.lp-section')].map((s) =>
+        s.getAttribute('data-lp-type')
       );
-    }
+    expect(types(await render({ page }))).toEqual(['problem', 'curriculum']);
+    unmount(app);
+    expect(types(await render({ page, edit: { commit: () => {} } }))).toEqual([
+      'problem',
+      'picture',
+      'heading',
+      'curriculum',
+    ]);
+    unmount(app);
+    expect(types(await render({ page, still: true }))).toHaveLength(4);
+  });
+
+  describe('a film section with no film (Codex-61zsk.57)', () => {
+    // Clean draws Benefits and Testimonials as soft tints; the Video between
+    // them is what kept them apart.
+    const page = () =>
+      samplePage('clean', ['hero', 'benefits', 'video', 'testimonials']);
+    /** What a visitor sees: a section its block folds away is not displayed. */
+    const seen = (root: HTMLElement) =>
+      [...root.querySelectorAll('.lp-section')]
+        .filter(
+          (s) => !s.querySelector(':scope > .lp-inner > [class$="-none"]')
+        )
+        .map(
+          (s) =>
+            `${s.getAttribute('data-lp-type')}:${s.getAttribute('data-lp-scheme')}`
+        );
+    const settling = (attached: boolean) => {
+      let settle: (value: SellPreview | null) => void = () => {};
+      const context = {
+        ...sampleContext({
+          offer: 'tiers',
+          course: {
+            filmsAttached: { hero: false, intro: attached, reel: false },
+          },
+        }),
+        sellPreview: new Promise<SellPreview | null>((resolve) => {
+          settle = resolve;
+        }),
+      };
+      return { context, settle: (value: SellPreview | null) => settle(value) };
+    };
+    const settled = async () => {
+      await tick();
+      await Promise.resolve();
+      flushSync();
+    };
+
+    it('folds before the bands resolve, so the bands either side never meet in one colour', async () => {
+      const root = await render({
+        page: page(),
+        context: sampleContext({ offer: 'tiers' }),
+      });
+      expect(seen(root).slice(1)).toEqual([
+        'benefits:soft',
+        'testimonials:base',
+      ]);
+      expect(root.querySelector('#video')).toBeNull();
+      unmount(app);
+      // The canvas keeps it, asking for the film.
+      const canvas = await render({
+        page: page(),
+        context: sampleContext({ offer: 'tiers' }),
+        edit: { commit: () => {} },
+      });
+      expect(canvas.querySelector('#video')).not.toBeNull();
+    });
+
+    it('folds from the first paint when none is attached, and comes back for a film that arrives anyway', async () => {
+      const { context, settle } = settling(false);
+      const root = await render({ page: page(), context });
+      expect(root.querySelector('#video')).toBeNull();
+      const none = await sampleContext().sellPreview;
+      settle({ ...(none as SellPreview), intro: FILMS.intro });
+      await settled();
+      expect(root.querySelector('#video .lp-media')).not.toBeNull();
+      expect(seen(root).map((s) => s.split(':')[0])).toEqual([
+        'hero',
+        'benefits',
+        'video',
+        'testimonials',
+      ]);
+    });
+
+    it('holds its place while an attached film is on its way, and folds if the stream brings none', async () => {
+      const { context, settle } = settling(true);
+      const root = await render({ page: page(), context });
+      expect(
+        root.querySelector('#video .lp-media[data-pending]')
+      ).not.toBeNull();
+      settle(await sampleContext().sellPreview);
+      await settled();
+      expect(root.querySelector('#video')).toBeNull();
+      expect(seen(root).slice(1)).toEqual([
+        'benefits:soft',
+        'testimonials:base',
+      ]);
+    });
+
+    it('folds a Preview section whose clip is not coming, the same way', async () => {
+      const preview = samplePage('clean', [
+        'hero',
+        'benefits',
+        'preview',
+        'testimonials',
+      ]);
+      const root = await render({
+        page: preview,
+        context: sampleContext({ offer: 'tiers' }),
+      });
+      expect(root.querySelector('#preview')).toBeNull();
+      unmount(app);
+      const withClip = await render({
+        page: preview,
+        context: sampleContext({ offer: 'tiers', media: { reel: FILMS.reel } }),
+      });
+      expect(withClip.querySelector('#preview .lp-media')).not.toBeNull();
+    });
   });
 
   // Every Style, because each defaults different layouts (Clean/Soft reach
@@ -104,8 +311,8 @@ describe('PageRenderer', () => {
   it.each(
     PAGE_STYLE_IDS
   )('draws the %s page identical with and without the editor, apart from editing attributes', async (style) => {
-    const page = samplePage(style);
-    const publicRoot = await render({ page });
+    const page = everySection(style);
+    const publicRoot = await render({ page, context: pictureContext() });
     // Stripping edit-only prompts must never hide a public element: the
     // public render carries none at all.
     expect(publicRoot.querySelectorAll('[data-lp-edit-only]').length).toBe(0);
@@ -114,6 +321,7 @@ describe('PageRenderer', () => {
     const edit: PageEdit = { commit: () => {} };
     const editingRoot = await render({
       page,
+      context: pictureContext(),
       edit,
       selectedId: 'sample-pricing',
     });
@@ -157,6 +365,125 @@ describe('PageRenderer', () => {
         'link[href*="fonts.googleapis.com"][href*="Syne"]'
       )
     ).not.toBeNull();
+    // No background of its own: the org's surfaces are inherited, not re-derived.
+    expect(root.hasAttribute('data-org-bg')).toBe(false);
+  });
+
+  it('re-derives the org’s surfaces on the carrier when the page sets its own background, light or dark', async () => {
+    let root = await render({ brandOverrides: { backgroundColor: '#F6EFE6' } });
+    expect(root.hasAttribute('data-org-brand')).toBe(true);
+    expect(root.hasAttribute('data-org-bg')).toBe(true);
+    unmount(app);
+    root = await render({
+      brandOverrides: { darkOverrides: { backgroundColor: '#101018' } },
+    });
+    expect(root.hasAttribute('data-org-bg')).toBe(true);
+    expect(root.getAttribute('style')).toContain('--brand-bg-dark: #101018');
+  });
+
+  it('names which theme the page’s own background is for, so the other takes the org’s (owner, D7)', async () => {
+    const cases = [
+      [{ backgroundColor: '#F6EFE6' }, 'light'],
+      [{ darkOverrides: { backgroundColor: '#101018' } }, 'dark'],
+      [
+        {
+          backgroundColor: '#F6EFE6',
+          darkOverrides: { backgroundColor: '#101018' },
+        },
+        'both',
+      ],
+      [{ primaryColor: '#0D9488' }, null],
+      // A blank background is no background (the override drops it).
+      [{ backgroundColor: '  ' }, null],
+    ] as const;
+    for (const [brandOverrides, expected] of cases) {
+      if (app) unmount(app);
+      document.body.innerHTML = '';
+      const root = await render({ brandOverrides });
+      expect(
+        root.getAttribute('data-page-bg'),
+        JSON.stringify(brandOverrides)
+      ).toBe(expected);
+    }
+  });
+
+  it('names each theme’s ground band on the root, so the pole follows the ground (Codex-61zsk.42)', async () => {
+    const cases = [
+      // Night: a dark ground for the light theme; the dark theme's is the
+      // org's (none here: the platform's, so no band).
+      [{ backgroundColor: '#15211C' }, 'd24', null],
+      [
+        {
+          backgroundColor: '#E9D8B4',
+          darkOverrides: { backgroundColor: '#15211C' },
+        },
+        'l85',
+        'd24',
+      ],
+      [{ primaryColor: '#0D9488' }, null, null],
+    ] as const;
+    for (const [brandOverrides, light, dark] of cases) {
+      if (app) unmount(app);
+      document.body.innerHTML = '';
+      const root = await render({ brandOverrides });
+      const label = JSON.stringify(brandOverrides);
+      expect(root.getAttribute('data-ground-light'), label).toBe(light);
+      expect(root.getAttribute('data-ground-dark'), label).toBe(dark);
+    }
+  });
+
+  it('draws a moving background as base off the bands its veil is proven on', async () => {
+    const page = samplePage('bold');
+    const hero = page.sections.find((s) => s.type === 'hero');
+    if (!hero) throw new Error('no hero');
+    hero.design = { ...hero.design, scheme: 'atmosphere' };
+    const scheme = (root: HTMLElement) =>
+      root
+        .querySelector(`.lp-section[data-lp-type='hero']`)
+        ?.getAttribute('data-lp-scheme');
+    expect(scheme(await render({ page }))).toBe('atmosphere');
+    if (app) unmount(app);
+    document.body.innerHTML = '';
+    expect(
+      scheme(
+        // L 0.82: the l80 band, whose veil would hide the shader (03 X50).
+        await render({ page, brandOverrides: { backgroundColor: '#D2C3A8' } })
+      )
+    ).toBe('base');
+  });
+
+  it('marks the section that continues the band above, and only it (03 X58)', async () => {
+    const page: KitPage = {
+      design: { style: 'studio' },
+      sections: [
+        {
+          id: 'p',
+          type: 'pricing',
+          enabled: true,
+          design: { scheme: 'base' },
+          props: { heading: 'Join' },
+        },
+        {
+          id: 'q',
+          type: 'faq',
+          enabled: true,
+          design: { scheme: 'base' },
+          props: {},
+        },
+        {
+          id: 'r',
+          type: 'faq',
+          enabled: true,
+          design: { scheme: 'base' },
+          props: { heading: 'More' },
+        },
+      ],
+    };
+    const root = await render({ page });
+    const marked = [
+      ...root.querySelectorAll('.lp-section[data-lp-continues]'),
+    ].map((s) => s.id);
+    expect(marked).toEqual(['faq']);
   });
 
   it('previews a theme on its own root, never on <html>', async () => {
@@ -165,6 +492,145 @@ describe('PageRenderer', () => {
     expect(document.documentElement.getAttribute('data-theme')).not.toBe(
       'dark'
     );
+  });
+
+  describe("the page's dials (03 X61)", () => {
+    const dialled = (dials: unknown): KitPage => {
+      const page = samplePage('soft');
+      return { ...page, design: { ...page.design, dials: dials as never } };
+    };
+
+    it('names the corners on the root', async () => {
+      const root = await render({ page: dialled({ corners: 'rounder' }) });
+      expect(root.dataset.lpCorners).toBe('rounder');
+    });
+
+    it('names no corners a page did not set', async () => {
+      expect((await render()).hasAttribute('data-lp-corners')).toBe(false);
+    });
+
+    it('never writes a step no rule draws: it would match nothing', async () => {
+      const root = await render({ page: dialled({ corners: 'square' }) });
+      expect(root.hasAttribute('data-lp-corners')).toBe(false);
+    });
+
+    // 03 X62.
+    it('names the type and motion steps on the root, and only steps a rule draws', async () => {
+      let root = await render({
+        page: dialled({ drama: 'louder', motion: 'gentle' }),
+      });
+      expect([root.dataset.lpDrama, root.dataset.lpMotion]).toEqual([
+        'louder',
+        'gentle',
+      ]);
+      unmount(app!);
+      app = null;
+      root = await render({
+        page: dialled({ drama: 'shouty', motion: 'frantic' }),
+      });
+      expect(root.hasAttribute('data-lp-drama')).toBe(false);
+      expect(root.hasAttribute('data-lp-motion')).toBe(false);
+    });
+
+    it.each([
+      'still',
+      'gentle',
+    ])("holds the org's moving background still at %s while the page is shown, and lets go after", async (motion) => {
+      await render({ page: dialled({ motion }) });
+      expect(shaderTone.held).toBe(true);
+      unmount(app!);
+      app = null;
+      expect(shaderTone.held).toBe(false);
+    });
+
+    it.each([
+      ['with no motion dial', {}, undefined],
+      ['on the canvas', { edit: { commit: () => {} } }, 'still'],
+      ['in a still thumbnail', { still: true }, 'still'],
+    ])('never holds it %s', async (_, props, motion) => {
+      await render({
+        page: dialled(motion ? { motion } : undefined),
+        ...props,
+      });
+      expect(shaderTone.held).toBe(false);
+    });
+
+    it('draws each section in the colour and spacing its dials resolve to', async () => {
+      const root = await render({
+        page: dialled({ colour: 'vivid', spacing: 'spacious' }),
+      });
+      const sections = [...root.querySelectorAll('.lp-section')];
+      // Soft's questions stay a tint beside its brand ask; its other tints go brand.
+      expect(
+        sections
+          .filter(
+            (s) =>
+              STYLES.soft.schemes[s.getAttribute('data-lp-type') as 'faq'] ===
+              'soft'
+          )
+          .map((s) => s.getAttribute('data-lp-scheme'))
+      ).toEqual(
+        sections
+          .filter(
+            (s) =>
+              STYLES.soft.schemes[s.getAttribute('data-lp-type') as 'faq'] ===
+              'soft'
+          )
+          .map((s) =>
+            s.getAttribute('data-lp-type') === 'faq' ? 'soft' : 'brand'
+          )
+      );
+      expect(
+        new Set(sections.map((s) => s.getAttribute('data-lp-spacing')))
+      ).toEqual(new Set(['spacious']));
+    });
+  });
+
+  // The Type rules are keyed on the root's Type, never on the Style, so a page
+  // that names none must still name its own: an unset root would draw no
+  // Style's type at all.
+  describe("the page's Type (03 X73)", () => {
+    const typed = (style: PageStyleId, facets: unknown): KitPage => {
+      const page = samplePage(style);
+      return { ...page, design: { ...page.design, facets: facets as never } };
+    };
+
+    it.each(
+      PAGE_STYLE_IDS
+    )('names the %s page’s own Type when it borrows none', async (style) => {
+      const root = await render({ page: samplePage(style) });
+      expect(root.dataset.lpTypeFacet).toBe(style);
+    });
+
+    // Path takes no Type (its route reads its own numbers, 03 X74), so a
+    // Type on Path's page is always one its Style may not take.
+    it.each([
+      ['a Type the Style may not take', { type: 'poster' }],
+      ['a Type that is no Type', { type: 'path' }],
+      ['a bag that is not one', 'poster'],
+    ])('draws its own Type for %s', async (_, facets) => {
+      const root = await render({ page: typed('path', facets) });
+      expect(root.dataset.lpTypeFacet).toBe('path');
+    });
+
+    it('draws a Type its Style may take, keeping its own Style', async () => {
+      const root = await render({ page: typed('bold', { type: 'poster' }) });
+      expect([root.dataset.lpStyle, root.dataset.lpTypeFacet]).toEqual([
+        'bold',
+        'poster',
+      ]);
+    });
+
+    it('draws the gallery’s proof Type whatever the list says', async () => {
+      const root = await render({
+        page: samplePage('soft'),
+        proofType: 'bold',
+      });
+      expect([root.dataset.lpStyle, root.dataset.lpTypeFacet]).toEqual([
+        'soft',
+        'bold',
+      ]);
+    });
   });
 
   describe('atmosphere and background images (03 §5)', () => {
@@ -185,29 +651,40 @@ describe('PageRenderer', () => {
             };
           if (s.type === 'text' || s.type === 'cta')
             return { ...s, props: { ...s.props, background: IMAGE } };
+          // A Picture with its picture, or the visitor's page folds it.
+          if (s.type === 'picture')
+            return { ...s, props: { ...s.props, image: IMAGE } };
           return s;
         }),
       };
     }
 
-    const context = () => sampleContext({ offer: 'tiers', mediaBaseUrl: CDN });
+    const context = () =>
+      sampleContext({ offer: 'tiers', media: FILMS, mediaBaseUrl: CDN });
 
-    it('flags a live page that has a Moving background section, blurred unless the Style asks otherwise', async () => {
+    it('flags a live page that has a Moving background section, in the look its Style asks for, blurred when it names none', async () => {
+      // Bold asks for the hazy look (03 X59).
       const root = await render({ page: surfacedPage(), context: context() });
-      expect(root.dataset.lpAtmosphere).toBe('soft');
+      expect(root.dataset.lpAtmosphere).toBe('hazy');
       unmount(app);
-      const cinematic = STYLES.cinematic as { atmosphere?: 'soft' | 'sharp' };
-      cinematic.atmosphere = 'sharp';
+      // Cinematic asks for it sharp.
+      const page = samplePage('cinematic');
+      page.sections[0] = {
+        ...page.sections[0],
+        design: { scheme: 'atmosphere' },
+      };
+      const sharp = await render({ page, context: context() });
+      expect(sharp.dataset.lpAtmosphere).toBe('sharp');
+      unmount(app);
+      // A Style that names no look is blurred, as the org's other pages.
+      const bold = STYLES.bold as { atmosphere?: 'soft' | 'hazy' | 'sharp' };
+      const asked = bold.atmosphere;
+      delete bold.atmosphere;
       try {
-        const page = samplePage('cinematic');
-        page.sections[0] = {
-          ...page.sections[0],
-          design: { scheme: 'atmosphere' },
-        };
-        const sharp = await render({ page, context: context() });
-        expect(sharp.dataset.lpAtmosphere).toBe('sharp');
+        const soft = await render({ page: surfacedPage(), context: context() });
+        expect(soft.dataset.lpAtmosphere).toBe('soft');
       } finally {
-        delete cinematic.atmosphere;
+        bold.atmosphere = asked;
       }
     });
 
@@ -247,7 +724,7 @@ describe('PageRenderer', () => {
         context: context(),
         brandOverrides: { fontHeading: 'Syne' },
       });
-      expect(fontsOnly.dataset.lpAtmosphere).toBe('soft');
+      expect(fontsOnly.dataset.lpAtmosphere).toBe('hazy');
     });
 
     it('draws a background image behind a section, decoratively, on the media colours', async () => {
@@ -255,6 +732,14 @@ describe('PageRenderer', () => {
       const text = root.querySelector<HTMLElement>('#text');
       const img = text?.querySelector('.lp-surface > img');
       expect(img?.getAttribute('src')).toBe(`${CDN}/${IMAGE.key}/lg.webp`);
+      // Edge to edge, so every size it has, at the viewport's width
+      // (Codex-61zsk.13); a key without its size has no xl.
+      expect(img?.getAttribute('srcset')).toBe(
+        ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w']
+          .map((size) => `${CDN}/${IMAGE.key}/${size}`)
+          .join(', ')
+      );
+      expect(img?.getAttribute('sizes')).toBe('100vw');
       expect(img?.getAttribute('alt')).toBe('');
       expect(img?.getAttribute('loading')).toBe('lazy');
       expect(img?.getAttribute('decoding')).toBe('async');
@@ -305,6 +790,41 @@ describe('PageRenderer', () => {
     });
   });
 
+  // Codex-61zsk.39: a creator who recommends a path other than the platform's
+  // must see that same path featured everywhere the page sells.
+  it('features the pricing section’s recommended path in the call to action and the floating bar too', async () => {
+    const page = samplePage('bold', ['hero', 'pricing', 'cta']);
+    const pricing = page.sections.find((s) => s.type === 'pricing');
+    expect(pricing).toBeDefined();
+    pricing!.props = {
+      ...pricing!.props,
+      offers: [{ id: 'purchase', best: true }],
+    };
+    const context = sampleContext({
+      offer: 'tiers',
+      media: { heroImageUrl: '/hero.jpg' },
+    });
+    const authored = pricingView(context, pricing!.props).featured;
+    // The premise: on its own the platform recommends a different path.
+    expect(authored?.id).toBe('purchase');
+    expect(pricingView(context, {}).featured?.id).not.toBe('purchase');
+
+    const root = await render({ page, context });
+    const cta = root.querySelector('.cta');
+    expect(cta?.querySelector('.cta__amount')?.textContent).toBe(
+      authored!.priceLabel
+    );
+    expect(
+      cta?.querySelector('a[href*="offer="]')?.getAttribute('href')
+    ).toContain('offer=purchase');
+    expect(
+      root.querySelector('.pricing a[href*="offer=purchase"]')
+    ).not.toBeNull();
+    expect(document.body.querySelector('.lp-sticky__price')?.textContent).toBe(
+      priceWithCadence(authored!)
+    );
+  });
+
   it('keeps the floating call to action outside every query container', async () => {
     const root = await render();
     const bar = root.querySelector<HTMLElement>('.lp-sticky');
@@ -322,10 +842,10 @@ describe('PageRenderer', () => {
     const root = await render({ page: samplePage(style) });
     expect(
       root.querySelector('.lp-sticky')?.getAttribute('data-lp-scheme')
-    ).toBe(STYLES[style].sticky ?? 'contrast');
+    ).toBe(STYLES[style].sticky ?? 'base');
   });
 
-  it('floats Quiet’s bar on its own ground and Cinematic’s on its tint; the rest on contrast', async () => {
+  it('floats the bar on the org’s own surface (base, its raised card) unless a Style names a band: Cinematic’s on its tint', async () => {
     const bars: Record<string, string | null | undefined> = {};
     for (const style of ['quiet', 'cinematic', 'bold'] as const) {
       const root = await render({ page: samplePage(style) });
@@ -338,7 +858,7 @@ describe('PageRenderer', () => {
     expect(bars).toEqual({
       quiet: 'base',
       cinematic: 'soft',
-      bold: 'contrast',
+      bold: 'base',
     });
   });
 });
@@ -377,9 +897,24 @@ describe('PageRenderer entrances (03 X13)', () => {
     );
   });
 
+  const moving = (motion: string): KitPage => {
+    const page = samplePage('bold');
+    return { ...page, design: { ...page.design, dials: { motion } as never } };
+  };
+
+  it("stages the page at the motion dial's gentle, which keeps its entrances (03 X62)", async () => {
+    const root = await render({ page: moving('gentle') });
+    const [, ...below] = headings(root);
+    for (const heading of below) wake(heading, 'below');
+    expect(below.map((h) => h.getAttribute('data-lp-enter'))).toEqual(
+      below.map(() => 'wait')
+    );
+  });
+
   it.each([
     ['the canvas', { edit: { commit: () => {} } }],
     ['a still thumbnail', { still: true }],
+    ['a page with the motion dial at still', { page: moving('still') }],
   ])('stages nothing on %s', async (_, props) => {
     const root = await render(props);
     for (const heading of headings(root)) wake(heading, 'below');

@@ -59,9 +59,11 @@ import { sql } from 'drizzle-orm';
  * - `main_test` — the local test database, separate from the dev `main`, on
  *   the same local Postgres container. `pnpm db:test:setup` creates and
  *   migrates it (Codex-1ggzd); `.env.test` points at it.
- * - `neondb` — Neon's default database name, which is what a CI test branch
- *   created by `neondatabase/create-branch-action` is called. Every CI branch
- *   is per-run and deleted afterwards, so it is disposable by construction.
+ * - `neondb` — the CI test database: each test job's own Postgres service
+ *   container, discarded with the job (Codex-75m0t.2). It is also Neon's
+ *   default database name, which the manual Neon workflows' per-run branches
+ *   (`e2e-debug.yml`, `e2e-api-fast.yml`) are called. Both are disposable by
+ *   construction.
  *
  * Deliberately NOT a host check. A Neon HOST would also match the production
  * database, and "is this host Neon" is not the question — "is this database

@@ -8,7 +8,7 @@
  * return a pre-verified payload — we are only asserting the value
  * forwarded to the R2 signer.
  *
- * See docs/subscription-cache-audit/phase-2-followup.md — Phase 3.
+ * See docs/payments/access.md — "Streaming revocation".
  */
 
 import type { PurchaseService } from '@codex/purchase';
@@ -90,7 +90,7 @@ describe('ContentAccessService — default streaming URL TTL', () => {
   it('exports the documented constant value of 600 seconds', () => {
     // Guards against a future edit silently changing the product decision.
     // Any adjustment to this number requires explicit product sign-off;
-    // see docs/subscription-cache-audit/phase-2-followup.md Phase 3.
+    // see docs/payments/access.md, "Streaming revocation".
     expect(DEFAULT_STREAMING_URL_TTL_SECONDS).toBe(600);
   });
 

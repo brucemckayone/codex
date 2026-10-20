@@ -19,6 +19,8 @@
     context: JourneySalesContext;
     brandOverrides?: BrandTokenOverrides | null;
     theme?: 'light' | 'dark';
+    /** Whether the offer read has answered (`BuilderSession.offerRead`). */
+    offerRead?: 'read' | 'loading' | 'failed';
     onDuplicate: (id: string) => void;
     onToggle: (id: string) => void;
     onDelete: (id: string) => void;
@@ -31,6 +33,7 @@
     context,
     brandOverrides = null,
     theme,
+    offerRead = 'read',
     onDuplicate,
     onToggle,
     onDelete,
@@ -48,6 +51,7 @@
       {context}
       {brandOverrides}
       {theme}
+      {offerRead}
       {onDuplicate}
       {onToggle}
       {onDelete}

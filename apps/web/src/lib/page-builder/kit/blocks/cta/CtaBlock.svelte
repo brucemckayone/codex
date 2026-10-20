@@ -2,30 +2,33 @@
   @component CtaBlock
 
   An invitation to join, anywhere on the page. Three layouts:
-    band    — a big closing band: large heading, the words, the button
-    split   — the words on one side; on the other a panel with the recommended
-              path's real price and the button
-    compact — one line and a button, to sit between sections
+    band    — a big closing band: large heading, the words, the offer
+    split   — the words on one side; on the other a panel with the offer
+    compact — one line and the offer, to sit between sections
 
-  Every state has its next step: the button (buy), "Continue" (enrolled) or the
-  closed notice (no way in) — all decided by `ButtonRow`. The price line in
-  `split` comes from the live offer, and is simply absent when there is none.
+  The button travels with the offer it sells. While the page is priced, every
+  layout sets the recommended path's price and period beside the button, which
+  deep-links the checkout to that path (as the pricing strip does), and under
+  it that path's own billing line — never the creator's note, which is the
+  section's words. Every other state has its next step from `ButtonRow`:
+  "Continue" (enrolled), the closed notice (no way in), or a price-less button
+  (the offer could not be read).
 
   `band` may carry the creator's background image (contract A5): the whole
   band sits on the media ink set, over a full-strength scrim, so every line is
-  legible wherever the Style aligns it.
+  legible wherever the Style aligns it. The image runs edge to edge, so it
+  offers every size it has, drawn at the viewport's width (Codex-61zsk.13).
 -->
 <script lang="ts">
-  import { resolvePageImageUrl } from '../../../page-images';
-  import { priceWithCadence } from '../../model/copy';
+  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import { pricingView } from '../../model/offer';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
-  import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
   import Media from '../../primitives/Media.svelte';
+  import OfferAsk from '../../primitives/OfferAsk.svelte';
   import Text from '../../primitives/Text.svelte';
   import { ctaDefinition } from './definition';
 
@@ -34,12 +37,19 @@
   const page = getKitPage();
   const content = $derived(ctaDefinition.coerce(props));
   const layout = $derived(section.layout);
-  const view = $derived(pricingView(context, {}));
+  // The page's own offer choices, so the path featured here is the one the
+  // pricing section and the floating bar recommend (Codex-61zsk.39).
+  const view = $derived(pricingView(context, page.offerProps));
+  // The note reassures a buyer: it has no place once there is nothing to buy.
+  const selling = $derived(view.state === 'priced' || view.state === 'unpriced');
   const panel = $derived(featuredScheme(page.style, section.scheme));
   const backdrop = $derived(
     layout === 'band'
       ? resolvePageImageUrl(content.background, 'lg', context.mediaBaseUrl)
       : null
+  );
+  const backdropSrcset = $derived(
+    backdrop ? pageImageSrcset(content.background, context.mediaBaseUrl) : ''
   );
 </script>
 
@@ -64,37 +74,44 @@
       {edit}
     />
   {/if}
+  {#if content.note && selling}
+    <Text
+      text={content.note}
+      size={size === 'heading' ? 'body' : 'small'}
+      type="cta"
+      field="note"
+      {edit}
+    />
+  {/if}
+{/snippet}
+
+{#snippet offer(size: 'md' | 'lg')}
+  <OfferAsk {context} section="cta" label={content.ctaLabel} {size} {edit} />
 {/snippet}
 
 <div class="cta" data-layout={layout} data-lp-on-media={backdrop ? '' : undefined}>
   {#if backdrop}
     <div class="cta__backdrop">
-      <Media image={backdrop} alt={content.background?.alt ?? ''} />
+      <Media
+        image={backdrop}
+        srcset={backdropSrcset}
+        sizes="100vw"
+        focus={storedFocus(content.background)}
+        alt={content.background?.alt ?? ''}
+      />
     </div>
   {:else}
     <span class="lp-atmos cta__atmos" data-drift aria-hidden="true"></span>
   {/if}
   {#if layout === 'split'}
     <div class="cta__words">{@render words('heading')}</div>
-    <div class="cta__panel" data-lp-scheme={panel}>
-      {#if view.featured}
-        <p class="cta__price">{priceWithCadence(view.featured)}</p>
-      {/if}
-      <ButtonRow {context} section="cta" label={content.ctaLabel} note={content.note} {edit} />
-    </div>
+    <div class="cta__panel" data-lp-scheme={panel}>{@render offer('lg')}</div>
   {:else if layout === 'compact'}
     <div class="cta__words">{@render words('title')}</div>
-    <ButtonRow
-      {context}
-      section="cta"
-      label={content.ctaLabel}
-      note={content.note}
-      size="md"
-      {edit}
-    />
+    {@render offer('md')}
   {:else}
     <div class="cta__words">{@render words('heading')}</div>
-    <ButtonRow {context} section="cta" label={content.ctaLabel} note={content.note} {edit} />
+    {@render offer('lg')}
   {/if}
 </div>
 
@@ -107,14 +124,14 @@
     isolation: isolate;
   }
 
-  /* The heading measures itself in its own `ch`; the body keeps its measure. */
+  /* The heading measures itself in its own face's `0`s; the body keeps its measure. */
   .cta__words {
     display: grid;
     gap: var(--lp-stack);
   }
 
   .cta__words :global(.lp-heading) {
-    max-inline-size: 18ch;
+    max-inline-size: calc(18 * var(--lp-measure-unit));
   }
 
   /* The glow belongs to Cinematic's dark room only; on a light band it would
@@ -128,8 +145,11 @@
   }
 
   /* ── band ──────────────────────────────────────────────────────────────── */
+  /* The band's heading is drawn at the ask's size, which louder leaves (03
+     X62): there is no step in it for the heading's fit to take back. */
   .cta[data-layout='band'] {
     --lp-size-heading: var(--lp-size-cta);
+    --lp-drama-held: 1;
     padding-block: var(--space-4);
   }
 
@@ -177,32 +197,43 @@
     color: var(--lp-ink);
   }
 
-  .cta__price {
-    margin: 0;
-    font-family: var(--lp-font-display);
-    font-size: var(--lp-size-title);
-    font-weight: var(--lp-weight-title);
-    font-synthesis: none;
-    font-variant-numeric: lining-nums tabular-nums;
-  }
-
   @container (min-width: 56rem) {
     .cta[data-layout='split'] {
       grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
       align-items: center;
+      /* The heading's room is its share (louder's fit, 03 X62). */
+      --lp-heading-column: calc((var(--lp-column) - var(--lp-gap)) * 7 / 12);
     }
   }
 
   /* ── compact ───────────────────────────────────────────────────────────── */
-  /* One line where it fits: the 18ch cap is for the band's display heading. */
+  /* One line where it fits: the 18-`0` cap is for the band's display heading. */
   .cta[data-layout='compact'] .cta__words :global(.lp-heading) {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
+  /* Wide: the words beside the offer wherever the title's widest word fits
+     there, and over it where it does not (as the offer's band, 03 X70). The
+     words grow from nothing, so the narrowest they can be is that word (a
+     flex item's automatic minimum) at the size the fit draws it in the
+     column, and the row wraps before it could run into the offer, whose
+     width is its own words'. The words stack as a column, not a grid: a
+     grid's narrowest drops any child whose own minimum is 0. */
   @container (min-width: 48rem) {
     .cta[data-layout='compact'] {
-      grid-template-columns: minmax(0, 1fr) auto;
+      display: flex;
+      flex-wrap: wrap;
       align-items: center;
+      justify-content: space-between;
+    }
+
+    .cta[data-layout='compact'] > .cta__words {
+      display: flex;
+      flex: 1 1 0;
+      flex-direction: column;
     }
   }
+
+  /* The offer itself (price and period, the button, its own billing line)
+     is `OfferAsk`, shared with the Button section (03 X64). */
 </style>

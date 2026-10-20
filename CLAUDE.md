@@ -24,7 +24,7 @@ When working with beads, you MUST have a full understanding of how tasks fit int
 | Handle errors correctly | [packages/service-errors/CLAUDE.md](packages/service-errors/CLAUDE.md) |
 | Work with R2/KV | [packages/cloudflare-clients/CLAUDE.md](packages/cloudflare-clients/CLAUDE.md) |
 | Work with caching/versions | [packages/cache/CLAUDE.md](packages/cache/CLAUDE.md) (if exists), [apps/web/CLAUDE.md](apps/web/CLAUDE.md) |
-| Work with payouts / Stripe transfers | [docs/payouts/README.md](docs/payouts/README.md) — pipeline + fee config |
+| Work with payments, subscriptions, payouts or fees | [docs/payments/README.md](docs/payments/README.md) — the payments spec (desired behaviour + known gaps) |
 | Run an epic (scope → ship → retro) | [docs/epics/conventions.md](docs/epics/conventions.md) + skills `codex-epic-create` → `codex-epic-implement` → `codex-review` → `codex-epic-retro` → `codex-crystalize` (the canonical epic+quality workflow; replaces `epic-cycle`) |
 
 ---
@@ -39,7 +39,7 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServic
 | 2 | **content-api** | 4001 | Content CRUD, media registration, access control, streaming | `POST /api/content`, `GET /api/access/content/:id/stream` |
 | 3 | **organization-api** | 42071 | Org CRUD, membership, settings, tiers, followers | `POST /api/organizations`, `GET /api/organizations/slug/:slug` |
 | 4 | **ecom-api** | 42072 | Stripe checkout, webhooks, purchase history | `POST /checkout/create`, `POST /webhooks/stripe/payment` |
-| 5 | **admin-api** | 42073 | Analytics, content/customer management (platform_owner) | `GET /api/admin/analytics/revenue`, `POST /api/admin/content/:contentId/publish` |
+| 5 | **admin-api** | 42073 | Analytics, content/customer management (org owner/admin); fee configuration (platform_owner) | `GET /api/admin/analytics/revenue`, `POST /api/admin/content/:contentId/publish` |
 | 6 | **identity-api** | 42074 | User profiles, preferences, creator onboarding, org membership (user side) | `GET /api/user/profile`, `PATCH /api/user/profile`, `GET /api/user/public/:username` (the worker's only anonymous route) |
 | 7 | **notifications-api** | 42075 | Email templates, sending (Resend) | `POST /api/templates`, `POST /internal/send` (worker HMAC) |
 | 8 | **media-api** | 4002 | Transcoding pipeline (RunPod), webhooks, HLS | `POST /internal/media/:id/transcode` (worker HMAC), `POST /api/transcoding/webhook` (RunPod HMAC) |
@@ -49,7 +49,7 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServic
 
 ---
 
-## Packages (24 total)
+## Packages (25 total)
 
 ### Foundation (core infrastructure, no business logic)
 | Package | Purpose | Key Exports |
@@ -72,6 +72,7 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServic
 | **@codex/purchase** | Stripe, purchases | `PurchaseService` |
 | **@codex/subscription** | Tiers, Connect, subscription lifecycle | `TierService`, `SubscriptionService`, `ConnectAccountService` |
 | **@codex/agreements** | Revenue-share agreements | `AgreementService`, `validateProposedShare` |
+| **@codex/payments** | Payment domain modules (payouts ledger, organisation payee) shared by every payment path | `recordSlice`, `settleTransfer`, `resolveOrganisationPayee` |
 | **@codex/notifications** | Email, templates | `NotificationsService`, `TemplateService` |
 | **@codex/admin** | Admin analytics/mgmt | `AdminAnalyticsService` |
 | **@codex/transcoding** | RunPod transcoding | `TranscodingService` |
@@ -108,7 +109,7 @@ These rules are MANDATORY. Every agent working anywhere in this codebase MUST fo
 
 - **MUST** use `ctx.services.*` from the service registry for all services in `procedure()` handlers — NEVER create ad-hoc service instances with `createDbClient(env)` in route files
 - **MUST** add new services to the registry (`packages/worker-utils/src/procedure/service-registry.ts`) following the lazy getter pattern before using them in route handlers
-- Webhook handlers that bypass `procedure()` (Stripe HMAC, RunPod) are the only exception — they manage their own DB lifecycle with `createPerRequestDbClient` + `waitUntil(cleanup())`
+- Webhook handlers that bypass `procedure()` (Stripe HMAC, RunPod) and crons are the only exception. Stripe webhooks and the payouts cron get the registry's services from `createWebhookServices(env, executionCtx, { obs, stripe })` (`@codex/worker-utils`) and call `release()` in `finally`; DB work after the response goes through its `background()`, never plain `waitUntil`. The RunPod webhook (media-api) uses the stateless `createDbClient(env)`, which has no pool to close
 
 ### Error Handling
 
@@ -169,10 +170,13 @@ comments. The reasoning for its settings lives here.
   typecheck reported one package while tearing down others mid-run — they print
   `ELIFECYCLE Command failed.` with zero diagnostics, indistinguishable from a
   pass.
-- **Package tests are NOT typechecked.** 23 of 24 packages exclude
-  `**/*.test.ts` (their tsconfig drives the `dist` build too). Workers and
-  apps/web do include theirs. Tracked in Codex-629bw — until it lands, a broken
-  package test only surfaces at runtime.
+- **Package tests ARE typechecked** (Codex-629bw, PR #523, 2026-09-17). A
+  package's `tsconfig.json` still excludes `**/*.test.ts`, because it drives
+  the `dist` build; its `typecheck` runs `tsc -p tsconfig.typecheck.json`,
+  which takes all of `src/**/*`, tests included (identity's own tsconfig
+  never excluded them). `noUncheckedIndexedAccess` is on there too, so a
+  test-only edit needs `pnpm typecheck` like any other: `keys[0]` is
+  `string | undefined` (it failed PR #574's static-analysis).
 - **`.fallowrc.json` is also comment-free strict JSON**, so its reasoning lives
   here too.
   - **Never suppress a class member by name in `usedClassMembers`.** A name

@@ -22,7 +22,11 @@
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
+  import { NavigationProgress } from '$lib/components/ui/Feedback/NavigationProgress';
   import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
+  // Every brand face's own fallback, so a face on its way draws on its lines (Codex-61zsk.61).
+  import '$lib/styles/tokens/font-fallbacks.css';
+  import { withFallback } from '$lib/brand-editor/font-fallbacks';
   import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
   import { getStaleKeys, resolveStaleCacheTargets, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
@@ -40,6 +44,9 @@
 
   // Studio routes have their own header/sidebar — hide the org chrome
   const isStudio = $derived(page.url.pathname.startsWith('/studio'));
+  // The page kit's gallery stands in for a live page (its screenshot mode),
+  // so the shader-backed page rules below apply there as on a live page.
+  const isKitGallery = $derived(page.url.pathname.startsWith('/studio/page-kit'));
   // Landing page needs mix-blend-mode to reach the shader canvas,
   // which requires dropping view-transition-name (it creates isolation)
   const isLanding = $derived(page.url.pathname === '/');
@@ -445,6 +452,7 @@
 <div
   class="org-layout"
   class:org-layout--studio={isStudio}
+  class:org-layout--kit-gallery={isKitGallery}
   class:org-layout--landing={isLanding}
   data-org-brand={hasBranding ? '' : undefined}
   data-org-bg={brandBackground ? '' : undefined}
@@ -467,12 +475,22 @@
   style:--brand-bg-dark={brandBackgroundDark}
   style:--brand-density={brandDensity}
   style:--brand-radius={brandRadius}
-  style:--brand-font-body={brandFontBody ? `'${brandFontBody}'` : undefined}
-  style:--brand-font-heading={brandFontHeading ? `'${brandFontHeading}'` : undefined}
+  style:--brand-font-body={brandFontBody ? withFallback(brandFontBody, `'${brandFontBody}'`) : undefined}
+  style:--brand-font-heading={brandFontHeading ? withFallback(brandFontHeading, `'${brandFontHeading}'`) : undefined}
   style:--brand-shader-logo-url={brandLogoUrl}
   style={serverTokenOverrideStyle}
 >
-  <ShaderHero class="shader-hero--fullpage" />
+  <!-- The page-load bar, mounted HERE so it inherits this element's brand remap
+       of `--color-interactive` (dark: `--brand-color-dark` first). The root
+       layout's bar stands down while this one is mounted (Codex-451j0). A
+       direct child, outside `.org-main`, so the `page-content` view transition
+       never snapshots it; this element sets no transform, filter or z-index, so
+       `position: fixed` still pins it to the viewport above all chrome. -->
+  <NavigationProgress placement="brand" />
+  <!-- Still in the studio: there it sits behind an 80% cover and a 60px blur,
+       where its motion buys nothing and every frame is a full-viewport render.
+       `tone`: it reports what it draws to a page kit's live veil (03 X54). -->
+  <ShaderHero class="shader-hero--fullpage" still={isStudio} tone />
   <div class="shader-blur-overlay" class:shader-blur-overlay--landing={isLanding}></div>
   {#if !isStudio}
     <SidebarRail variant="org" user={data.user} org={previewOrg} onSearchClick={() => { searchOpen = true; }} />
@@ -527,7 +545,7 @@
      backdrop-filter doesn't reliably composite against WebGL canvases
      when view-transition-name creates a stacking context on org-main. */
   .org-layout:not(.org-layout--landing) :global(.shader-hero--fullpage) {
-    filter: blur(var(--blur-2xl));
+    filter: blur(var(--_shader-blur, var(--blur-2xl)));
   }
 
   /* Landing page: backdrop-filter overlay with gradient mask.
@@ -586,12 +604,33 @@
      §5.1): for the life of that page, clear the stack above the org's shader
      so the section's own veil sits on the shader itself. The kit clears its
      root and keeps every other section opaque (`kit/styles/surfaces.css`). A
-     Style that asks for a sharp background lifts the blur as well. */
-  .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere])) .org-main {
+     Style that asks for a hazy background takes a third of the blur, and one
+     that asks for a sharp background lifts it.
+     Never in the studio but for the page kit's gallery, which stands in for a
+     live page (Codex-61zsk.21). The page editor draws a page, and a
+     thumbnail of it per Style, inside this root; with the rule live, every
+     page added or taken away under it (a tab's thumbnails, a gallery's
+     previews) had the browser re-match `:has()` here and restyle the WHOLE
+     page: 150-250ms of each Page-tab switch on a long page. The gate is two
+     classes and comes BEFORE the `:has()`: a compound that fails first never
+     reaches it, so nothing below the root is watched. A `:has()` in the gate
+     would itself mark the root as one to re-match. */
+  .org-layout[data-hero-shader-active]:is(:not(.org-layout--studio), .org-layout--kit-gallery):has(
+      :global(.lp[data-lp-atmosphere])
+    )
+    .org-main {
     background: transparent;
   }
 
-  .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere='sharp']))
+  .org-layout[data-hero-shader-active]:is(:not(.org-layout--studio), .org-layout--kit-gallery):has(
+      :global(.lp[data-lp-atmosphere='hazy'])
+    ) {
+    --_shader-blur: var(--blur-xl);
+  }
+
+  .org-layout[data-hero-shader-active]:is(:not(.org-layout--studio), .org-layout--kit-gallery):has(
+      :global(.lp[data-lp-atmosphere='sharp'])
+    )
     :global(.shader-hero--fullpage) {
     filter: none;
   }
@@ -605,21 +644,17 @@
      window, so the frame the GPU renders each tick and its mobile resolution
      cap are unchanged. `cover` keeps the shader's aspect; its crop is off
      screen. The reset caps a canvas at `max-width: 100%`. */
-  .org-layout[data-hero-shader-active]:not(.org-layout--landing):has(
-      :global(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp']))
-    )
+  .org-layout[data-hero-shader-active]:not(.org-layout--landing):is(:not(.org-layout--studio), .org-layout--kit-gallery):has(:global(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp'])))
     :global(.shader-hero--fullpage) {
     overflow: visible;
   }
 
-  .org-layout[data-hero-shader-active]:not(.org-layout--landing):has(
-      :global(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp']))
-    )
+  .org-layout[data-hero-shader-active]:not(.org-layout--landing):is(:not(.org-layout--studio), .org-layout--kit-gallery):has(:global(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp'])))
     :global(.shader-hero--fullpage canvas) {
-    width: calc(100% + 4 * var(--blur-2xl));
+    width: calc(100% + 4 * var(--_shader-blur, var(--blur-2xl)));
     max-width: none;
-    height: calc(100% + 4 * var(--blur-2xl));
-    margin: calc(-2 * var(--blur-2xl));
+    height: calc(100% + 4 * var(--_shader-blur, var(--blur-2xl)));
+    margin: calc(-2 * var(--_shader-blur, var(--blur-2xl)));
     object-fit: cover;
   }
 
@@ -636,7 +671,10 @@
 
     /* The page ends above that clearance, so it keeps its usual cover: the
        shader is seen through the page's own veil, never raw below it. */
-    .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere])) .org-main {
+    .org-layout[data-hero-shader-active]:is(:not(.org-layout--studio), .org-layout--kit-gallery):has(
+        :global(.lp[data-lp-atmosphere])
+      )
+      .org-main {
       background: linear-gradient(color-mix(in srgb, var(--color-background) 80%, transparent) 0 0)
         bottom / 100% var(--space-20) no-repeat;
     }

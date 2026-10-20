@@ -15,9 +15,9 @@
 
    TYPE. Luminous titles: display type large and close-set (0.98), lit by a
    faint halo of the scheme's accent on the two title cards only; titles
-   centred on those cards, left-set everywhere the page reads. Labels
-   tracked a little open, sentence case. Emphasis is size and light, never
-   weight.
+   centred on those cards, left-set everywhere the page reads. Labels in the
+   org's case (`kit.css`), tracked a little open when not uppercase. Emphasis
+   is size and light, never weight.
 
    LAYOUT. Two title cards on the Moving background (`atmosphere`, the
    panel veil, 03 X9/X10): the opening (a cover with no picture) and the
@@ -26,7 +26,7 @@
    it. A cover WITH a picture keeps the picture edge to edge. Between them,
    scenes: pictures that bleed and fade into the dark (the in-block rules),
    the story as a scroll whose sticky picture changes as its numbered
-   moments pass. Corners are the brand's own radius; buttons are pills when
+   moments pass. Corners are the org's own; buttons are pills when
    the brand is rounded at all.
 
    MOTION. The opening: the light is already moving, the words arrive over
@@ -44,18 +44,14 @@
    Fonts: suggests Unbounded over Sora; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.lp[data-lp-style='cinematic'] {
-  /* ── the room: the brand's dark ground, or the primary taken down ─────── */
-  --lp-dark-ground-in: var(
-    --brand-bg-dark,
-    oklch(from var(--lp-brand) 0.16 min(c * 0.22, 0.027) h)
-  );
-  --lp-tint-soft: 10%;
-
+/* Cinematic's Type, wherever it is drawn: its own page, or another Style's that
+   borrows it (03 X73). Keyed on the page's Type, never on its Style, and it
+   declares no token the Style block below does. */
+.lp[data-lp-type-facet='cinematic'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(2.6rem, 0.8rem + 7.4cqi, 7rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(2rem, 1rem + 3.6cqi, 3.9rem) * var(--lp-scale));
-  --lp-size-cta: calc(clamp(2.4rem, 0.8rem + 5.8cqi, 5.75rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.6rem, 0.8rem + 7.4cqi, 7rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(2rem, 1rem + 3.6cqi, 3.9rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
+  --lp-size-cta: calc(clamp(2.4rem, 0.8rem + 5.8cqi, 5.75rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 0.98;
   --lp-leading-heading: 1.02;
@@ -65,10 +61,19 @@
   --lp-tracking-heading: -0.015em;
   --lp-tracking-label: 0.04em;
   --lp-weight-label: var(--font-medium);
+}
 
-  /* ── shape: the brand radius exactly (03 §4.2, k 1) ───────────────────── */
-  --lp-radius-card: max(0rem, var(--lp-brand-radius));
-  --lp-radius-media: max(0rem, var(--lp-brand-radius));
+.lp[data-lp-style='cinematic'] {
+  /* ── the room: the brand's dark ground, or the primary taken down ─────── */
+  --lp-dark-ground-in: var(
+    --brand-bg-dark,
+    oklch(from var(--lp-brand) 0.16 min(c * 0.22, 0.027) h)
+  );
+  --lp-tint-soft: 10%;
+
+  /* ── shape: the org's corners exactly (03 §4.2, k 1) ──────────────────── */
+  --lp-radius-card: max(0rem, var(--radius-card));
+  --lp-radius-media: max(0rem, var(--radius-lg));
   --lp-radius-button: var(--lp-radius-pill-if-rounded);
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
@@ -109,10 +114,14 @@
   --lp-pad-spacious: clamp(var(--space-20), 28svh, calc(var(--space-32) * 2.5));
 }
 
-/* The opening card: the words centred in it, the card as tall as they are. */
+/* The opening card: the words centred in it, the card as tall as they are,
+   Cinematic's display a step down to fit it (the Type's, 03 X73). */
+:is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .hero-cover__copy:not([data-lp-on-media]) {
+  --lp-display-scale: 0.82;
+}
+
 :is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-cover__copy:not([data-lp-on-media]) {
   --lp-actions-align: center;
-  --lp-display-scale: 0.82;
   justify-items: center;
   align-content: center;
   min-block-size: 0;
@@ -130,16 +139,16 @@
    headline's parent, so the poster's picture steps with it. The centred
    hero holds: its measure is counted in characters. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-statement:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .hero-statement:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.8;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='cinematic']
+  :is(.lp, #lp-style)[data-lp-type-facet='cinematic']
     :is(.hero-cover__copy, .hero-poster):has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.62;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-split__copy:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .hero-split__copy:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.55;
   }
 }
@@ -151,11 +160,11 @@
    1440 × 900 fold in Archivo Black with no word split — a step above the
    long one. The other layouts, and the pictured cover, hold it. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-poster:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .hero-poster:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.85;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='cinematic']
+  :is(.lp, #lp-style)[data-lp-type-facet='cinematic']
     .hero-cover__copy:not([data-lp-on-media]):has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.75;
   }
@@ -180,27 +189,27 @@
    longest the field takes. */
 @supports (line-height: pow(2, 0.5)) {
   @container (min-width: 56rem) {
-    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .lp-section[data-lp-type='hero']
       .hero-statement:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(85 / var(--lp-heading-chars, 120), 0.39));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .lp-section[data-lp-type='hero']
       .hero-split__copy:has(> .hero__headline) {
       --lp-display-scale: calc(0.7 * min(1, pow(78 / var(--lp-heading-chars, 120), 0.51)));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .lp-section[data-lp-type='hero']
       .hero-cover__copy[data-lp-on-media]:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(45 / var(--lp-heading-chars, 120), 0.38));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:not([data-lp-on-media]):has(> .hero__headline) {
       --lp-display-scale: calc(0.82 * min(1, pow(53 / var(--lp-heading-chars, 120), 0.43)));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .lp-section[data-lp-type='hero']
       .hero-centered:has(> .hero__headline) {
       --lp-display-scale: calc(0.84 * min(1, pow(106 / var(--lp-heading-chars, 120), 1.36)));
     }
@@ -213,7 +222,9 @@
    laid on the ground wherever the glow thins, and its edge goes. A hairline
    of the ink rims it, and a shade under it lifts it off the light — the
    same on both, so the canvas shows the page it makes. Paint only: the
-   card's box, and every line in it, stay the panel's own (03 X10). */
+   card's box, and every line in it, stay the panel's own (03 X10). The
+   shade is the room's own ground deepened, not the org's card shadow: the
+   room is the Style's deliberate dark, where a grey shadow cannot show. */
 :is(.lp, #lp-style)[data-lp-style='cinematic']
   .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media], :has(> .lp-inner > .lp-bleed))
   > .lp-surface::after {
@@ -253,7 +264,7 @@
    number, silent to assistive tech — the list already counts. Wide, and
    pictured, the moments stand apart, so the sticky picture holds each one
    for a while; words alone keep the block's own pace. */
-:is(.lp, #lp-style)[data-lp-style='cinematic'] .story-scroll {
+:is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .story-scroll {
   --lp-size-title: calc(clamp(1.45rem, 1rem + 1.5cqi, 2.4rem) * var(--lp-scale));
 }
 
@@ -279,4 +290,13 @@
   :is(.lp, #lp-style)[data-lp-style='cinematic'] .story-scroll:has(> .story-scroll__frame) .story-scroll__steps {
     gap: clamp(var(--space-16), 22svh, calc(var(--space-32) * 1.5));
   }
+}
+
+/* ── the simple sections (03 X64) ────────────────────────────────────────── */
+/* A marked Break: a hairline in the mark ink that fades out at both ends,
+   like a light across the dark. */
+:is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-break__mark {
+  inline-size: min(100%, calc(var(--lp-container) / 2));
+  block-size: var(--border-width);
+  background: linear-gradient(to right, transparent, var(--lp-mark-ink), transparent);
 }

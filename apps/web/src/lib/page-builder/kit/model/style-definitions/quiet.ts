@@ -23,6 +23,7 @@ export const QUIET: StyleDefinition = {
     curriculum: 'accordion',
     preview: 'feature',
     gallery: 'grid',
+    inside: 'carousel',
     instructor: 'quote',
     testimonials: 'quote',
     faq: 'accordion',
@@ -30,6 +31,11 @@ export const QUIET: StyleDefinition = {
     cta: 'band',
     stats: 'row',
     text: 'statement',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'start',
+    break: 'space',
+    button: 'stack',
   },
   schemes: {
     hero: 'base',
@@ -42,12 +48,19 @@ export const QUIET: StyleDefinition = {
     curriculum: 'base',
     preview: 'base',
     gallery: 'base',
+    inside: 'base',
     instructor: 'base',
     testimonials: 'base',
     stats: 'base',
     pricing: 'base',
     faq: 'base',
     cta: 'base',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   // One card may lift off the ground: a tint of it. Inside a band a creator
   // chose, the card is the plain ground.
@@ -59,19 +72,25 @@ export const QUIET: StyleDefinition = {
     accent: 'base',
     atmosphere: 'soft',
   },
-  // The statement straight after the promise, then the story in order.
+  // What the course holds straight after the promise (03 X63), then the
+  // statement, then the story in order.
   order: [
     'hero',
+    'inside',
     'text',
     'problem',
+    'picture',
     'video',
     'story',
     'transformation',
     'benefits',
+    'heading',
     'curriculum',
+    'button',
     'preview',
     'gallery',
     'instructor',
+    'break',
     'testimonials',
     'stats',
     'pricing',
@@ -80,6 +99,7 @@ export const QUIET: StyleDefinition = {
   ],
   starter: [
     'hero',
+    'inside',
     'text',
     'transformation',
     'curriculum',
@@ -93,4 +113,7 @@ export const QUIET: StyleDefinition = {
   fonts: { heading: 'Spectral', body: 'DM Sans' },
   // No colour bands, the bar included: it floats on the brand's own ground.
   sticky: 'base',
+  // Hazy, as Studio: the org's moving background through a third of the
+  // inner pages' blur and a thinner veil, so it is seen moving (03 X53, X59).
+  atmosphere: 'hazy',
 };

@@ -967,7 +967,7 @@ export async function seedCommerce(
     // MOST RECENT accounts and supports no metadata filter, so the window has
     // to be wide enough to still contain the seed accounts. It competes with
     // real churn: E2E spec 1.b (`clicking Set up Stripe redirects to a Stripe
-    // Connect URL`) drives `connectOnboard`, which creates a throwaway Connect
+    // Connect URL`) drives `connectMeOnboard`, which creates a throwaway Connect
     // account on EVERY run — 20 was roughly ten runs of headroom, after which
     // the seed accounts fell out of the window and a duplicate was created each
     // time. Reuse now also requires `charges_enabled`

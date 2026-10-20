@@ -163,6 +163,18 @@ export interface SectionDesign {
     | 'poster'
     | 'studio'
     | 'quiet';
+  /** A page's dials; an unset dial is the Style's. Mirrors `PageDials` in `kit/model/ids.ts`. Page-only. */
+  dials?: {
+    colour?: 'muted' | 'vivid';
+    corners?: 'brand' | 'rounder';
+    spacing?: 'compact' | 'spacious';
+    drama?: 'calmer' | 'louder';
+    motion?: 'still' | 'gentle';
+  };
+  /** Another Style's Type on the page; unset is the Style's own. Mirrors `PageFacets` in `kit/model/ids.ts`. Page-only. */
+  facets?: {
+    type?: 'bold' | 'poster' | 'soft' | 'quiet';
+  };
 }
 
 /**
@@ -783,13 +795,26 @@ export interface EnrolledCourseSummary {
  * MUST keep the FE mirror structurally equal.
  */
 
-/** One practice on the PUBLIC sales page — no completion/media (public shell). */
+/** One practice on the PUBLIC sales page — no completion or stream (public shell). */
 export interface JourneyPracticeView {
   contentId: string;
   slug: string | null;
   title: string;
   contentType: PracticeContentType;
   sortOrder: number;
+  /**
+   * The practice's length in seconds, from its media item: null for a written
+   * practice or media whose duration was never probed. OPTIONAL-additive: an
+   * older worker deployment omits it and the curriculum names the kind alone.
+   */
+  durationSeconds?: number | null;
+  /**
+   * The practice's picture as a full CDN URL (the `lg` variant): the creator's
+   * own thumbnail, else its film's frame, else null (Codex-61zsk.52). The same
+   * public object its own content page shows. OPTIONAL-additive: an older
+   * worker omits it and the "What's inside" cards draw their brand tile.
+   */
+  thumbnailUrl?: string | null;
   /** Completion — dashboard / in-course only; omitted on the public sales page. */
   completed?: boolean;
 }
@@ -852,6 +877,39 @@ export interface JourneyCourseView {
    * streamed field.
    */
   heroImageUrl?: string | null;
+  /**
+   * Which films the STREAMED `CourseSellPreview` can carry, known at first
+   * paint (Codex-61zsk.40). See {@link JourneyFilmsAttached}.
+   *
+   * OPTIONAL-additive: an older worker omits it and the blocks keep their
+   * stream-settled behaviour.
+   */
+  filmsAttached?: JourneyFilmsAttached;
+}
+
+/**
+ * Which films a course's streamed `CourseSellPreview` can carry (Codex-61zsk.40).
+ * The films ride the stream, so without this the server cannot tell a section
+ * with a film on its way from one with none: a hero whose only media is a video
+ * drew its words alone and re-framed once the video arrived (an above-the-fold
+ * shift), and the film sections were sent whole, then folded away.
+ *
+ * ONE-SIDED, by design. Each flag reads the course's own columns, with no join:
+ * the media ref is set, the course is PUBLISHED and a CDN base is configured,
+ * the gates `getCourseSellPreview` applies before it resolves anything. So
+ * `false` means the stream CANNOT carry that film, and the page draws without it
+ * from the first paint. `true` means it probably will. A film that then fails to
+ * resolve (its preview never transcoded) still folds after load.
+ *
+ * Keyed by the streamed field each one predicts.
+ */
+export interface JourneyFilmsAttached {
+  /** `courses.introVideoMediaId` → `CourseSellPreview.intro`. */
+  intro: boolean;
+  /** `courses.previewVideoMediaId` → `CourseSellPreview.reel`. */
+  reel: boolean;
+  /** `courses.heroMediaId` → `heroClip`, and its poster as `heroImageUrl`. */
+  hero: boolean;
 }
 
 /** One testimonial rendered by the `proof` section. */
@@ -868,6 +926,12 @@ export interface JourneyPageRecord extends PageBuilderState {
   id: string;
   organizationId: string;
   publishedAt: string | null;
+  /**
+   * The page's revision as read (Codex-61zsk.18): a save that names it is
+   * refused (412) once another save has changed the page. Server-owned, so
+   * never part of the editable {@link PageBuilderState}.
+   */
+  revision?: string;
 }
 
 /**
@@ -1053,7 +1117,11 @@ export interface JourneySellMedia {
    * `media` design axis had nothing to act on in the page's loudest section.
    */
   heroMediaId: string | null;
-  /** The guide's SIGNATURE mark (`courses.signatureMediaId`, A27) — `guide.letter`'s sign-off. */
+  /**
+   * The retired "Signature film" (`courses.signatureMediaId`, A27): loaded and
+   * saved so nothing picked is lost, never read for the sign-off
+   * (Codex-61zsk.47). The signature is `signatureImageUrl`'s upload.
+   */
   signatureMediaId: string | null;
   /** Cover CDN URL (`md.webp`), or null when no cover is uploaded. */
   coverImageUrl: string | null;
@@ -1086,7 +1154,7 @@ export interface JourneySellMedia {
    * The UPLOAD ONLY, for the identical reason as {@link heroImageUrl}: the
    * panel's Replace / Remove act on the uploaded file, so a value that could also
    * be a video's poster frame would offer a Remove that removes nothing.
-   * `CourseSellPreview.signatureUrl` owns the chain.
+   * Publicly the signature is this upload too (`CourseSellPreview.signatureUrl`).
    *
    * OPTIONAL-additive, same deployment-skew reason as the two above.
    */
@@ -1231,18 +1299,12 @@ export interface CourseSellPreview {
    * The guide's SIGNATURE mark — a public CDN URL, or null when there is none,
    * which leaves `guide.letter` signed with the typeset name alone.
    *
-   * Resolved down an ORDERED chain, uploaded first, exactly as {@link
-   * heroImageUrl} is (Codex-wqxv4's named-slot half):
-   *
-   *   signatureImageKey (an uploaded PNG/JPEG/WebP, `md.webp`)
-   *     ?? signatureMediaId's poster frame (a video's `thumbnailKey`, A27)
-   *       ?? nothing
-   *
-   * The uploaded link had to exist for this field to be usable at all, not merely
-   * to be better: `media_items` is CHECK-constrained to ('video','audio'), so the
-   * only signature A27 could express was a frame of a FILM of a signature. The
-   * media ref stays as the second link rather than being replaced, so a journey
-   * that already picked one does not lose its mark.
+   * The UPLOADED mark only (`signatureImageKey`, a PNG/JPEG/WebP, `md.webp`;
+   * Codex-61zsk.47). `media_items` is CHECK-constrained to ('video','audio'), so
+   * the only signature A27's `signatureMediaId` could express was a frame of a
+   * FILM of a signature, and the sign-off drew that photo where a mark belongs.
+   * It used to stand in when nothing was uploaded; it no longer does, and the
+   * column keeps what was picked, unread.
    */
   signatureUrl?: string | null;
 }

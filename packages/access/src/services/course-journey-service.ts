@@ -42,15 +42,16 @@ import {
 } from '@codex/database/schema';
 import type { OrphanedFileService } from '@codex/image-processing';
 import {
+  droppedPageImageKeys,
   pageIdOfPageImageKey,
   pageImageObjectKeys,
-  recordOrphansOrLog,
 } from '@codex/image-processing';
 import {
   BaseService,
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  PreconditionFailedError,
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
@@ -73,6 +74,7 @@ import type {
   JourneyCoursePage,
   JourneyCourseSummary,
   JourneyEnrollment,
+  JourneyFilmsAttached,
   JourneyListItem,
   JourneyPageRecord,
   JourneyPractice,
@@ -92,6 +94,8 @@ import type {
 } from '@codex/shared-types';
 import { PAGE_STYLE_IDS } from '@codex/validation';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { pageRevision } from './page-revision';
+import { resolvePracticeThumbnail } from './practice-thumbnail';
 
 /**
  * Narrow a stored `content.contentType` varchar to the practice union. The DB
@@ -172,8 +176,7 @@ function resolveCourseHeroUrl(
  *
  * Returns null when there is no uploaded signature OR no configured base, so a
  * client never receives a raw R2 key and never a half-formed URL. Null is a
- * legitimate state — the chain then falls to `signatureMediaId`'s poster frame,
- * and then to the letter signing off with its typeset name alone.
+ * legitimate state: the letter then signs off with its typeset name alone.
  */
 function resolveCourseSignatureUrl(
   signatureImageKey: string | null | undefined,
@@ -185,44 +188,30 @@ function resolveCourseSignatureUrl(
 }
 
 /**
- * Deep-scan arbitrary `sections` content for page-image keys (contract
- * amendment A3, Codex-61zsk.10).
- *
- * NO PER-TYPE SCHEMA KNOWLEDGE, deliberately. A page image is referenced as
- * an `ImageRef = { key: string; alt?: string }` from anywhere a block author
- * chooses — `props.image`, `props.background`, `items[].image`, one nested
- * inside another — and this file has no catalogue of block prop shapes (that
- * lives in `apps/web`'s page-kit). So rather than name known keys, this walks
- * every string LEAF in the tree and keeps the ones that are EXACTLY a key the
- * upload route mints (`pageIdOfPageImageKey`). Page copy, a CTA href or a
- * string that merely shares the prefix is inert.
- *
- * Any page's key counts, not only this page's: a duplicated page renders its
- * source's keys, and dropping one must still nominate it. Nominating is all a
- * save does. The sweep deletes a page image only after a grace period, and
- * only if no page in the key's own org references it
- * (`OrphanedFileService.isPageImageReferenced`), so a key pasted in from
- * another org can neither keep that org's image nor lose it.
- *
- * Takes `unknown` rather than `PageSection[]` on purpose: it is called once
- * for the OLD stored value (whatever an earlier, possibly different, version
- * of the type persisted) and once for the NEW input, and a shape it does not
- * recognise should be walked past, never thrown on.
+ * Which films the streamed sell preview can carry, from the course's own
+ * columns (Codex-61zsk.40). ONE-SIDED: it applies the gates
+ * {@link CourseJourneyService.getCourseSellPreview} applies before resolving
+ * anything (the media ref set, the course PUBLISHED, a CDN base configured), and
+ * nothing it would need a `media_items` join for. So a `false` is certain and a
+ * `true` is a promise the stream can still break (a preview never transcoded).
+ * See `JourneyFilmsAttached`.
  */
-function collectPageImageKeys(
-  value: unknown,
-  into: Set<string> = new Set()
-): Set<string> {
-  if (typeof value === 'string') {
-    if (pageIdOfPageImageKey(value)) into.add(value);
-  } else if (Array.isArray(value)) {
-    for (const item of value) collectPageImageKeys(item, into);
-  } else if (value !== null && typeof value === 'object') {
-    for (const nested of Object.values(value)) {
-      collectPageImageKeys(nested, into);
-    }
-  }
-  return into;
+function resolveFilmsAttached(
+  course: {
+    status: string;
+    introVideoMediaId: string | null;
+    previewVideoMediaId: string | null;
+    heroMediaId: string | null;
+  },
+  r2PublicUrlBase: string | undefined
+): JourneyFilmsAttached {
+  const servable =
+    course.status === CONTENT_STATUS.PUBLISHED && Boolean(r2PublicUrlBase);
+  return {
+    intro: servable && course.introVideoMediaId !== null,
+    reel: servable && course.previewVideoMediaId !== null,
+    hero: servable && course.heroMediaId !== null,
+  };
 }
 
 /**
@@ -482,6 +471,11 @@ export class CourseJourneyService extends BaseService {
           // AWAITED envelope for the same reason `coverImageKey` is — see
           // `course.heroImageUrl` below (Codex-61zsk.6 · WP-6).
           heroImageKey: courses.heroImageKey,
+          // Codex-61zsk.40: the three film refs, read as presence only, so
+          // the awaited envelope can say which films the stream can carry.
+          introVideoMediaId: courses.introVideoMediaId,
+          previewVideoMediaId: courses.previewVideoMediaId,
+          heroMediaId: courses.heroMediaId,
         })
         .from(courses)
         .where(
@@ -498,7 +492,7 @@ export class CourseJourneyService extends BaseService {
 
       // 3. Curriculum + social proof (bounded, parallel).
       const [stages, testimonials] = await Promise.all([
-        this.loadPublicStages(courseRow.id),
+        this.loadPublicStages(courseRow.id, r2PublicUrlBase),
         this.loadTestimonials(courseRow.id),
       ]);
 
@@ -568,6 +562,10 @@ export class CourseJourneyService extends BaseService {
             courseRow.heroImageKey,
             r2PublicUrlBase
           ),
+          // Codex-61zsk.40: which films the STREAMED preview can carry, so a
+          // block can draw without a film from the first paint rather than
+          // folding or re-framing once the stream settles.
+          filmsAttached: resolveFilmsAttached(courseRow, r2PublicUrlBase),
         },
         stages,
         testimonials,
@@ -646,6 +644,10 @@ export class CourseJourneyService extends BaseService {
           coverImageKey: courses.coverImageKey,
           // A32 (Codex-490z7) — see `getCoursePage`'s identical projection.
           heroImageKey: courses.heroImageKey,
+          // Codex-61zsk.40 — see `getCoursePage`'s identical projection.
+          introVideoMediaId: courses.introVideoMediaId,
+          previewVideoMediaId: courses.previewVideoMediaId,
+          heroMediaId: courses.heroMediaId,
         })
         .from(courses)
         .where(
@@ -660,7 +662,7 @@ export class CourseJourneyService extends BaseService {
       if (!courseRow) return null;
 
       const [stages, testimonials] = await Promise.all([
-        this.loadPublicStages(courseRow.id),
+        this.loadPublicStages(courseRow.id, r2PublicUrlBase),
         this.loadTestimonials(courseRow.id),
       ]);
 
@@ -725,6 +727,9 @@ export class CourseJourneyService extends BaseService {
             courseRow.heroImageKey,
             r2PublicUrlBase
           ),
+          // Codex-61zsk.40 — a DRAFT course reads all false: the stream serves
+          // published courses only, so a draft preview never waits on a film.
+          filmsAttached: resolveFilmsAttached(courseRow, r2PublicUrlBase),
         },
         stages,
         testimonials,
@@ -758,17 +763,17 @@ export class CourseJourneyService extends BaseService {
           introVideoMediaId: courses.introVideoMediaId,
           previewVideoMediaId: courses.previewVideoMediaId,
           guideVideoMediaId: courses.guideVideoMediaId,
-          // A27: the hero still + the guide's signature. Real columns (unlike the
-          // portrait below), so they select and write like the three videos.
+          // A27: the hero still. A real column (unlike the portrait below), so
+          // it selects and writes like the three videos.
           heroMediaId: courses.heroMediaId,
-          signatureMediaId: courses.signatureMediaId,
           // A32 (Codex-490z7): the UPLOADED hero still. An R2 key, not a media
           // ref — see the column comment for why `media_items` cannot hold one.
           heroImageKey: courses.heroImageKey,
-          // The UPLOADED signature mark (Codex-wqxv4's named-slot half). An R2
-          // key for the same reason, and here the reason bites hardest: nobody
-          // films a signature, so the media ref could only ever hold a frame of a
-          // film OF one.
+          // The UPLOADED signature mark (Codex-wqxv4's named-slot half), the
+          // signature's only source (Codex-61zsk.47). `signatureMediaId` is not
+          // read: `media_items` holds video and audio, so it could only ever
+          // give a frame of a film, which the sign-off drew as a photo where a
+          // mark belongs. The column stays, and keeps what a creator picked.
           signatureImageKey: courses.signatureImageKey,
           // The portrait ref lives INSIDE the `guide` jsonb bag, not in a column
           // of its own — `updateJourneySellMedia` read-then-merges it there.
@@ -794,7 +799,6 @@ export class CourseJourneyService extends BaseService {
         courseRow.guideVideoMediaId,
         guidePortraitMediaId,
         courseRow.heroMediaId,
-        courseRow.signatureMediaId,
       ].filter((id): id is string => id !== null);
 
       const previewByMediaId = new Map<
@@ -882,24 +886,15 @@ export class CourseJourneyService extends BaseService {
         // was thrown away here, so a creator's hero video could only ever appear
         // as its own poster frame (Codex-uj4jc).
         heroClip: toClip(courseRow.heroMediaId),
-        // The guide's signature, down the SAME ordered chain as the hero above
-        // and for a sharper version of the same reason (Codex-wqxv4's named-slot
-        // half):
-        //
-        //   signatureImageKey (an uploaded PNG/JPEG/WebP) ?? signatureMediaId's
-        //   poster frame ?? nothing (the letter signs with its typeset name)
-        //
-        // A27 gave `guide.letter` a signature SLOT and no way to fill it with a
-        // signature: `media_items` is video/audio-only, so `toStill` could only
-        // ever return a frame of a FILM of a mark. Uploaded therefore does not
-        // merely outrank derived here — it is the only link that can hold the
-        // thing the composition is named after. The media ref stays as the second
-        // link so a journey that already picked one keeps rendering it.
-        signatureUrl:
-          resolveCourseSignatureUrl(
-            courseRow.signatureImageKey,
-            r2PublicUrlBase
-          ) ?? toStill(courseRow.signatureMediaId),
+        // The guide's signature: the uploaded mark (a PNG/JPEG/WebP) or nothing,
+        // and the letter signs with its typeset name (Codex-61zsk.47). Unlike
+        // the hero, no film's frame stands in: `media_items` is video/audio-only,
+        // so `signatureMediaId` could only give a frame of a FILM, and the
+        // sign-off drew that photo where a mark belongs (03 X57).
+        signatureUrl: resolveCourseSignatureUrl(
+          courseRow.signatureImageKey,
+          r2PublicUrlBase
+        ),
       };
     } catch (error) {
       this.handleError(error, 'getCourseSellPreview');
@@ -919,7 +914,9 @@ export class CourseJourneyService extends BaseService {
    */
   async getCourseDashboard(
     userId: string,
-    courseId: string
+    courseId: string,
+    /** Env-owned; resolves each practice's picture (Codex-e140e). */
+    r2PublicUrlBase?: string
   ): Promise<CourseDashboardData | null> {
     try {
       const course = await this.loadCourseSummaryById(courseId);
@@ -938,7 +935,7 @@ export class CourseJourneyService extends BaseService {
             completedAt: true,
           },
         }),
-        this.loadStages(courseId),
+        this.loadStages(courseId, r2PublicUrlBase),
       ]);
 
       const completions = await this.loadCompletions(userId, stages);
@@ -978,13 +975,15 @@ export class CourseJourneyService extends BaseService {
   async getInCoursePractice(
     userId: string,
     courseId: string,
-    contentSlug: string
+    contentSlug: string,
+    /** Env-owned; resolves the practice's picture (Codex-e140e). */
+    r2PublicUrlBase?: string
   ): Promise<InCoursePracticeData | null> {
     try {
       const course = await this.loadCourseSummaryById(courseId);
       if (!course) return null;
 
-      const stages = await this.loadStages(courseId);
+      const stages = await this.loadStages(courseId, r2PublicUrlBase);
 
       // Find the target practice + its stage within the loaded curriculum.
       let stageMatch: { id: string; name: string } | null = null;
@@ -1162,7 +1161,8 @@ export class CourseJourneyService extends BaseService {
       // `loadStages` + `loadCompletions` pair was O(N) round trips in
       // catalogue size (Codex-kgrdp.23 defect 2).
       const stagesByCourse = await this.loadStagesForCourses(
-        rows.map((row) => row.courseId)
+        rows.map((row) => row.courseId),
+        r2PublicUrlBase
       );
       const allCompletions = await this.loadCompletions(
         userId,
@@ -1745,6 +1745,9 @@ export class CourseJourneyService extends BaseService {
         // this projection the two meta fields would come back EMPTY after every
         // reload, which is the shape a creator reads as "it did not save".
         ...(row.seo ? { seo: row.seo as PageSeo } : {}),
+        // What the builder's saves name, so a save made from an out-of-date
+        // copy is refused (Codex-61zsk.18).
+        revision: await pageRevision(row),
       };
     } catch (error) {
       this.handleError(error, 'getJourneyForBuilder');
@@ -1956,6 +1959,14 @@ export class CourseJourneyService extends BaseService {
    * publishes the course (so the public sales page, which requires BOTH, goes
    * live in one action), unpublishing it unpublishes the course, and the course's
    * `slug`/`title` follow the page's.
+   *
+   * A save that names the `revision` it was made from is refused with a
+   * `PreconditionFailedError` (412) when the stored page has moved on since:
+   * another tab or device saved over it, and this copy would undo that save
+   * (Codex-61zsk.18, {@link pageRevision}). The row is locked while it is
+   * checked, so two saves made from one revision cannot both pass. A save
+   * without one writes as before. Returns the page's revision after the save,
+   * for the next one to name.
    */
   async saveJourneyPage(
     organizationId: string,
@@ -1995,12 +2006,20 @@ export class CourseJourneyService extends BaseService {
        * nothing about SEO" is treated as no instruction.
        */
       seo?: PageSeo;
+      /**
+       * The page's revision as the caller last read or saved it. Present, the
+       * save is refused if the stored page has moved on; absent, it is not
+       * checked (a caller that writes what it just read, such as a status
+       * change, has nothing to lose).
+       */
+      revision?: string;
     }
-  ): Promise<void> {
+  ): Promise<{ revision: string }> {
     // Captured inside the transaction below and read AFTER it commits — see
     // the page-image orphan scan following the try/catch for why acting on
     // "the old sections are gone" has to wait until they really are.
     let oldSections: PageSection[] | undefined;
+    let revision = '';
 
     try {
       const status: PageStatus = record.status;
@@ -2014,11 +2033,15 @@ export class CourseJourneyService extends BaseService {
           .select({
             id: landingPages.id,
             slug: landingPages.slug,
+            title: landingPages.title,
+            status: landingPages.status,
             publishedAt: landingPages.publishedAt,
             subjectType: landingPages.subjectType,
             subjectId: landingPages.subjectId,
+            brandOverrides: landingPages.brandOverrides,
             sections: landingPages.sections,
             design: landingPages.design,
+            seo: landingPages.seo,
             legacySnapshot: landingPages.legacySnapshot,
           })
           .from(landingPages)
@@ -2029,10 +2052,21 @@ export class CourseJourneyService extends BaseService {
               isNull(landingPages.deletedAt)
             )
           )
-          .limit(1);
+          .limit(1)
+          // Held to the commit, so a second save from the same revision waits
+          // and then reads this one's result, and is refused.
+          .for('update');
 
         if (!existing) {
           throw new NotFoundError('Journey page not found');
+        }
+        if (
+          record.revision !== undefined &&
+          (await pageRevision(existing)) !== record.revision
+        ) {
+          throw new PreconditionFailedError(
+            'This page was saved somewhere else since you opened it. Reload to keep editing.'
+          );
         }
         oldSections = existing.sections;
 
@@ -2094,7 +2128,7 @@ export class CourseJourneyService extends BaseService {
         const nowPublishedAt =
           publishing && !existing.publishedAt ? new Date() : undefined;
 
-        await tx
+        const [saved] = await tx
           .update(landingPages)
           .set({
             title: record.title,
@@ -2112,7 +2146,22 @@ export class CourseJourneyService extends BaseService {
               eq(landingPages.id, record.id),
               eq(landingPages.organizationId, organizationId)
             )
-          );
+          )
+          // The row as stored, not as sent: the revision the next read
+          // computes is of the stored columns (a `design` left alone, say).
+          .returning({
+            slug: landingPages.slug,
+            title: landingPages.title,
+            status: landingPages.status,
+            brandOverrides: landingPages.brandOverrides,
+            sections: landingPages.sections,
+            design: landingPages.design,
+            seo: landingPages.seo,
+          });
+        if (!saved) {
+          throw new NotFoundError('Journey page not found');
+        }
+        revision = await pageRevision(saved);
 
         if (subjectCourseId) {
           await this.cascadeCourseFromPage(tx, {
@@ -2134,7 +2183,14 @@ export class CourseJourneyService extends BaseService {
     // is referenced from ANYWHERE in `sections` as an `ImageRef = { key,
     // alt? }`, with no per-type schema knowledge, so finding what changed
     // means deep-scanning both trees for page-image keys rather than diffing
-    // named columns — see {@link collectPageImageKeys}.
+    // named columns — see `droppedPageImageKeys` (`@codex/image-processing`,
+    // beside the key rules the upload and the sweep share). Any of this
+    // org's pages' keys counts, not only this page's: a duplicated page
+    // renders its source's keys, and dropping one must still nominate it.
+    // Another org's key does not (Codex-61zsk.17): the sweep deletes one only
+    // if no page in the key's OWN org references it, so a key pasted in from
+    // another org can neither keep that org's image nor lose it, and
+    // queueing it would only fill the queue every tenant's cleanup shares.
     //
     // What this queues is a NOMINATION, not a verdict. Undo, a duplicated
     // page and two overlapping saves can all put a reference back after the
@@ -2153,22 +2209,18 @@ export class CourseJourneyService extends BaseService {
     // BACK would be actively wrong — it would queue a key the (unchanged)
     // old sections still hold.
     //
-    // Recording never throws (`recordOrphansOrLog` swallows and logs), so the
-    // outer try here is defensive insurance around the scan itself, not
-    // around the record call.
+    // The lookups and the nomination can throw, and the try catches them:
+    // the save stands, nothing is queued, and the error log names the
+    // dropped keys, so what went untracked can be found and queued by hand.
+    let nominated: string[] = [];
     try {
-      const oldKeys = collectPageImageKeys(oldSections);
-      const newKeys = collectPageImageKeys(record.sections);
-      const removedKeys = [...oldKeys].filter((key) => !newKeys.has(key));
+      const removedKeys = droppedPageImageKeys(oldSections, record.sections);
 
       if (removedKeys.length === 0) {
-        return;
+        return { revision };
       }
 
-      const nominated = removedKeys.slice(
-        0,
-        MAX_PAGE_IMAGES_NOMINATED_PER_SAVE
-      );
+      nominated = removedKeys.slice(0, MAX_PAGE_IMAGES_NOMINATED_PER_SAVE);
       if (removedKeys.length > nominated.length) {
         this.obs.warn('Page image nominations capped for one save', {
           context: 'landing-page-image',
@@ -2177,19 +2229,42 @@ export class CourseJourneyService extends BaseService {
           nominated: nominated.length,
         });
       }
-      const r2Keys = nominated.flatMap(pageImageObjectKeys);
+
+      const owned = await this.pageImageKeysOfOrg(organizationId, nominated);
+      if (owned.length < nominated.length) {
+        this.obs.warn("Page image nominations skipped: another org's images", {
+          context: 'landing-page-image',
+          pageId: record.id,
+          keys: nominated.filter((key) => !owned.includes(key)).slice(0, 20),
+        });
+      }
+      const r2Keys = owned.flatMap(pageImageObjectKeys);
 
       if (this.orphanedFileService) {
-        await recordOrphansOrLog(
-          this.orphanedFileService,
-          r2Keys.map((r2Key) => ({
+        // Only objects an upload minted (Codex-61zsk.17). A key is text a
+        // manager can write, and this queue is every tenant's: a key of
+        // this org's own shape that no upload made would delay every other
+        // org's cleanup. An upload records its objects as it stores them, so
+        // a key with no row is fabricated, or its upload's record failed
+        // (that upload logged 'keys are untracked'); either way it is
+        // skipped, and the keys are logged.
+        const minted =
+          await this.orphanedFileService.mintedPageImageObjects(r2Keys);
+        const mintedKeys = r2Keys.filter((r2Key) => minted.has(r2Key));
+        if (mintedKeys.length < r2Keys.length) {
+          this.obs.warn('Page image nominations skipped: no upload row', {
+            context: 'landing-page-image',
+            pageId: record.id,
+            r2Keys: r2Keys.filter((r2Key) => !minted.has(r2Key)).slice(0, 20),
+          });
+        }
+        await this.orphanedFileService.nominatePageImageObjects(
+          mintedKeys.map((r2Key) => ({
             r2Key,
             imageType: 'page_image' as const,
             entityId: record.id,
             entityType: 'landing_page' as const,
-          })),
-          this.obs,
-          'landing-page-image'
+          }))
         );
       } else {
         // The registry always supplies one (service-registry.ts, the
@@ -2209,10 +2284,47 @@ export class CourseJourneyService extends BaseService {
       this.obs.error('Page image orphan scan failed after a successful save', {
         context: 'landing-page-image',
         pageId: record.id,
+        keys: nominated,
         error:
           scanError instanceof Error ? scanError.message : String(scanError),
       });
     }
+    return { revision };
+  }
+
+  /**
+   * Which of these page-image keys were uploaded to one of `organizationId`'s
+   * pages: the page id is part of the key (`pageIdOfPageImageKey`). Soft-
+   * deleted pages count, as they do for the sweep, since a restore brings
+   * their images back; so this is scoped by org alone, not `scopedNotDeleted`.
+   */
+  private async pageImageKeysOfOrg(
+    organizationId: string,
+    keys: string[]
+  ): Promise<string[]> {
+    const pageIds = [
+      ...new Set(
+        keys.flatMap((key) => {
+          const pageId = pageIdOfPageImageKey(key);
+          return pageId ? [pageId] : [];
+        })
+      ),
+    ];
+    if (pageIds.length === 0) return [];
+    const pages = await this.db
+      .select({ id: landingPages.id })
+      .from(landingPages)
+      .where(
+        and(
+          eq(landingPages.organizationId, organizationId),
+          inArray(landingPages.id, pageIds)
+        )
+      );
+    const own = new Set(pages.map((page) => page.id));
+    return keys.filter((key) => {
+      const pageId = pageIdOfPageImageKey(key);
+      return pageId !== null && own.has(pageId);
+    });
   }
 
   /**
@@ -2849,7 +2961,11 @@ export class CourseJourneyService extends BaseService {
       guidePortraitMediaId: string | null;
       /** A27 (Codex-wqxv4) — the hero still. */
       heroMediaId: string | null;
-      /** A27 (Codex-wqxv4) — the guide's signature mark. */
+      /**
+       * A27 (Codex-wqxv4) — the retired "Signature film" (Codex-61zsk.47):
+       * written as sent, but never read for the sign-off; the stored value is
+       * not re-checked (see below).
+       */
       signatureMediaId: string | null;
     },
     /**
@@ -2877,6 +2993,28 @@ export class CourseJourneyService extends BaseService {
         pageId
       );
 
+      // The retired "Signature film" (Codex-61zsk.47): no surface offers it, so
+      // the builder sends back whatever is stored. A stored film that has since
+      // been deleted would fail the check below on every save, and the creator
+      // could no longer clear it. So the stored value is kept without being
+      // checked again; a new one is checked like any other.
+      const [stored] = await this.db
+        .select({ signatureMediaId: courses.signatureMediaId })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.id, courseId),
+            eq(courses.organizationId, organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        .limit(1);
+      const signatureToCheck =
+        input.signatureMediaId !== null &&
+        input.signatureMediaId === stored?.signatureMediaId
+          ? null
+          : input.signatureMediaId;
+
       // Validate the ids BEFORE opening the transaction — a rejected write must
       // leave no trace, and a ForbiddenError here is cheaper than a rollback.
       //
@@ -2892,12 +3030,12 @@ export class CourseJourneyService extends BaseService {
           input.guideVideoMediaId,
           input.guidePortraitMediaId,
           input.heroMediaId,
-          input.signatureMediaId,
+          signatureToCheck,
         ],
         [
           { label: 'Hero image', mediaId: input.heroMediaId },
           { label: 'Guide portrait', mediaId: input.guidePortraitMediaId },
-          { label: 'Guide signature', mediaId: input.signatureMediaId },
+          { label: 'Guide signature', mediaId: signatureToCheck },
         ]
       );
 
@@ -3120,10 +3258,10 @@ export class CourseJourneyService extends BaseService {
    * accumulating orphans, and no client is ever handed a raw key so the
    * unreferenced variants are unreachable in the meantime.
    *
-   * Clearing does NOT necessarily leave the letter unsigned — it drops to the
-   * next link, `signatureMediaId`'s poster frame, and only then to the typeset
-   * name alone. That is why this is a separate column rather than a replacement
-   * for the media ref.
+   * Clearing leaves the letter signed with the typeset name alone: the upload is
+   * the signature's only source (Codex-61zsk.47). `signatureMediaId`'s poster
+   * frame used to stand in, which is why this is a separate column rather than
+   * a replacement for the media ref.
    *
    * @returns the persisted key (null when cleared).
    */
@@ -3338,11 +3476,13 @@ export class CourseJourneyService extends BaseService {
    */
   async getCourseCurriculumForEditor(
     organizationId: string,
-    courseId: string
+    courseId: string,
+    /** Env-owned; resolves each practice's picture (Codex-e140e). */
+    r2PublicUrlBase?: string
   ): Promise<EditorCurriculum> {
     try {
       await this.assertCourseInOrg(organizationId, courseId);
-      const stages = await this.loadEditorStages(courseId);
+      const stages = await this.loadEditorStages(courseId, r2PublicUrlBase);
       return { courseId, stages };
     } catch (error) {
       this.handleError(error, 'getCourseCurriculumForEditor');
@@ -3684,7 +3824,10 @@ export class CourseJourneyService extends BaseService {
    * PUBLISHED filter (drafts must remain visible in the editor) and WITH the
    * linked content's publish `status` for the inspector.
    */
-  private async loadEditorStages(courseId: string): Promise<EditorStageView[]> {
+  private async loadEditorStages(
+    courseId: string,
+    r2PublicUrlBase?: string
+  ): Promise<EditorStageView[]> {
     const stageRows = await this.db
       .select({
         id: courseStages.id,
@@ -3717,7 +3860,16 @@ export class CourseJourneyService extends BaseService {
       })
       .from(stagePractices)
       .innerJoin(content, eq(content.id, stagePractices.contentId))
-      .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+      // In the ON clause, as the public read has it: a deleted media item
+      // lends no length or picture (its frame object outlives the delete)
+      // but never drops its practice from the editor.
+      .leftJoin(
+        mediaItems,
+        and(
+          eq(mediaItems.id, content.mediaItemId),
+          isNull(mediaItems.deletedAt)
+        )
+      )
       .where(
         and(
           inArray(stagePractices.stageId, stageIds),
@@ -3735,7 +3887,11 @@ export class CourseJourneyService extends BaseService {
         title: row.title,
         contentType: toPracticeContentType(row.contentType),
         status: toPageStatus(row.status),
-        thumbnailUrl: row.thumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.thumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         // From the already-joined media item — null for a written practice, or
         // media whose duration was never probed.
         durationSeconds: row.mediaDurationSeconds ?? null,
@@ -4010,14 +4166,21 @@ export class CourseJourneyService extends BaseService {
    * Load the ordered curriculum: non-deleted stages (by `sortOrder`) each with
    * their PUBLISHED, non-deleted practice content (by `stage_practices.sortOrder`).
    * Two bounded queries (stages, then practices) so a stage with no practices
-   * still appears. `durationSeconds` / `thumbnailUrl` fall back to the media item.
+   * still appears. `durationSeconds` / `thumbnailUrl` fall back to the media item
+   * (the picture resolved against `r2PublicUrlBase`, never a bare key).
    *
    * Thin wrapper over {@link loadStagesForCourses} so the grouping logic exists
    * once. Callers loading MORE THAN ONE course must call the batched form
    * directly — see Codex-kgrdp.23 defect 2.
    */
-  private async loadStages(courseId: string): Promise<JourneyStage[]> {
-    const byCourse = await this.loadStagesForCourses([courseId]);
+  private async loadStages(
+    courseId: string,
+    r2PublicUrlBase?: string
+  ): Promise<JourneyStage[]> {
+    const byCourse = await this.loadStagesForCourses(
+      [courseId],
+      r2PublicUrlBase
+    );
     return byCourse.get(courseId) ?? [];
   }
 
@@ -4036,7 +4199,8 @@ export class CourseJourneyService extends BaseService {
    * with `?? []`.
    */
   private async loadStagesForCourses(
-    courseIds: readonly string[]
+    courseIds: readonly string[],
+    r2PublicUrlBase?: string
   ): Promise<Map<string, JourneyStage[]>> {
     const byCourse = new Map<string, JourneyStage[]>();
     if (courseIds.length === 0) return byCourse;
@@ -4078,7 +4242,16 @@ export class CourseJourneyService extends BaseService {
       })
       .from(stagePractices)
       .innerJoin(content, eq(content.id, stagePractices.contentId))
-      .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+      // In the ON clause, as the public read has it: a deleted media item
+      // lends no length or picture (its frame object outlives the delete)
+      // but never drops its practice from the dashboard.
+      .leftJoin(
+        mediaItems,
+        and(
+          eq(mediaItems.id, content.mediaItemId),
+          isNull(mediaItems.deletedAt)
+        )
+      )
       .where(
         and(
           inArray(stagePractices.stageId, stageIds),
@@ -4096,7 +4269,11 @@ export class CourseJourneyService extends BaseService {
         title: row.title,
         contentType: toPracticeContentType(row.contentType),
         durationSeconds: row.mediaDurationSeconds ?? null,
-        thumbnailUrl: row.thumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.thumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         sortOrder: row.sortOrder,
       };
       const list = practicesByStage.get(row.stageId);
@@ -4128,11 +4305,19 @@ export class CourseJourneyService extends BaseService {
    * Load the ordered curriculum for the PUBLIC sales page (SPEC §5): non-deleted
    * stages (by `sortOrder`), each with its PUBLISHED, non-deleted practices (by
    * `stage_practices.sortOrder`). Distinct from {@link loadStages} (the member
-   * dashboard shape): the public view carries NO completion flag and NO media
-   * (duration / thumbnail / stream) — the sell map lists titles + types only.
+   * dashboard shape): the public view carries NO completion flag (per viewer)
+   * and NO stream (access-controlled). It does carry each practice's LENGTH
+   * (Codex-61zsk.46) and its PICTURE (Codex-61zsk.52, the "What's inside"
+   * carousel), both from the already-public media item. The picture is the
+   * same public CDN object the practice's own content page already serves to
+   * anonymous visitors (`routes/public.ts` resolves it identically, and its
+   * by-slug read is exempt from the course-only filter), and only published
+   * content reaches this read, so nothing becomes visible that was not.
    */
   private async loadPublicStages(
-    courseId: string
+    courseId: string,
+    /** Env-owned; resolves each practice's picture. Omitted → no pictures. */
+    r2PublicUrlBase?: string
   ): Promise<JourneyStageView[]> {
     const stageRows = await this.db
       .select({
@@ -4159,9 +4344,21 @@ export class CourseJourneyService extends BaseService {
         slug: content.slug,
         title: content.title,
         contentType: content.contentType,
+        thumbnailUrl: content.thumbnailUrl,
+        mediaThumbnailKey: mediaItems.thumbnailKey,
+        mediaDurationSeconds: mediaItems.durationSeconds,
       })
       .from(stagePractices)
       .innerJoin(content, eq(content.id, stagePractices.contentId))
+      // In the ON clause, so a deleted media item lends no length or picture
+      // but never drops its practice from the page.
+      .leftJoin(
+        mediaItems,
+        and(
+          eq(mediaItems.id, content.mediaItemId),
+          isNull(mediaItems.deletedAt)
+        )
+      )
       .where(
         and(
           inArray(stagePractices.stageId, stageIds),
@@ -4178,6 +4375,12 @@ export class CourseJourneyService extends BaseService {
         slug: row.slug,
         title: row.title,
         contentType: toPracticeContentType(row.contentType),
+        durationSeconds: row.mediaDurationSeconds ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.thumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         sortOrder: row.sortOrder,
       };
       const list = practicesByStage.get(row.stageId);

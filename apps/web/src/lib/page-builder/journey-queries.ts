@@ -42,6 +42,18 @@ export interface JourneyPracticeView {
   contentType: JourneyContentType;
   /** Flat practice index within the course (`stage.sortOrder` ⋈ `practice.sortOrder`). */
   sortOrder: number;
+  /**
+   * The practice's length in seconds, from its media item: null for a written
+   * practice or media whose duration was never probed. OPTIONAL-additive: an
+   * older worker deployment omits it and the curriculum names the kind alone.
+   */
+  durationSeconds?: number | null;
+  /**
+   * The practice's picture as a full CDN URL (the `lg` variant): the creator's
+   * own thumbnail, else its film's frame, else null (Codex-61zsk.52).
+   * OPTIONAL-additive: an older worker omits it and a card draws its tile.
+   */
+  thumbnailUrl?: string | null;
   /** Completion — dashboard / in-course only; omitted on the public sales page. */
   completed?: boolean;
 }
@@ -144,6 +156,21 @@ export interface JourneyCourseView {
    * the streamed field.
    */
   heroImageUrl?: string | null;
+  /**
+   * Which films the streamed `sellPreview` can carry, known at first paint
+   * (Codex-61zsk.40). ONE-SIDED: `false` means that film cannot arrive, so a
+   * block draws without it from the first paint; `true` means it probably
+   * will. See `@codex/shared-types` `JourneyFilmsAttached`. OPTIONAL-additive:
+   * an older worker omits it and the blocks wait for the stream as before.
+   */
+  filmsAttached?: {
+    /** The intro film, `sellPreview.intro`. */
+    intro: boolean;
+    /** The practice reel, `sellPreview.reel`. */
+    reel: boolean;
+    /** The hero's media item: `sellPreview.heroClip` and its poster still. */
+    hero: boolean;
+  };
 }
 
 export interface JourneyTestimonialView {
@@ -159,6 +186,12 @@ export interface JourneyPageRecord extends PageBuilderState {
   id: string;
   organizationId: string;
   publishedAt: string | null;
+  /**
+   * The page's revision as read (Codex-61zsk.18): a save that names it is
+   * refused (412) once another save has changed the page. Server-owned, so
+   * never part of the editable {@link PageBuilderState}.
+   */
+  revision?: string;
 }
 
 /** Progress rollup = `practice_completions ⋈ stage_practices`, scoped to the enrollment (§11). */
@@ -287,9 +320,11 @@ export interface JourneyCardView {
  * Every id is a `media_items` ref; neither uploaded still is (`media_items` is
  * CHECK-constrained to video/audio, so a still image cannot live there) — both
  * arrive already resolved to a CDN URL. `heroMediaId` / `signatureMediaId` are
- * contract amendment A27 (Codex-wqxv4); each resolves publicly to the picked
+ * contract amendment A27 (Codex-wqxv4). The hero resolves publicly to the picked
  * item's thumbnail, the same way the guide portrait does — which is exactly why
  * A32 had to add a real uploaded hero BESIDE `heroMediaId` rather than reuse it.
+ * `signatureMediaId` is stored but never resolved: only an uploaded mark is a
+ * signature (Codex-61zsk.47).
  */
 export interface JourneySellMedia {
   courseId: string;

@@ -21,8 +21,15 @@
                                              Unset: straight.
      --lp-edge-depth: <length>               how deep the cut runs, never more
                                              than the smallest section padding.
-     --lp-atmosphere-scrim: <0–1>            a thicker atmosphere veil (never
-                                             thinner, `schemes.css`).
+     --lp-atmosphere-scrim: <0–1>            a thicker atmosphere veil
+                                             (`schemes.css`).
+     --lp-atmosphere-show: <number >= 1>     a thinner one: this many times as
+                                             much of the shader through as the
+                                             proven veil lets through (03 X53).
+                                             No longer proven over black and
+                                             white, so it is measured over a
+                                             real shader first. Set once, by
+                                             the hazy look (`schemes.css`).
      --lp-atmosphere-veil: section | panel   where that veil is drawn (03 X9).
                                              `section` (default): the whole
                                              band. `panel`: one card behind the
@@ -111,7 +118,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .lp:not([data-lp-still])
+  .lp:not([data-lp-still], [data-lp-motion])
     .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media])
     > .lp-surface::before {
     animation: lp-drift calc(var(--duration-slowest) * 30) var(--ease-smooth) infinite
@@ -133,6 +140,13 @@
     .lp[data-lp-atmosphere]:not([data-lp-still])
     .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media]) {
     background: var(--_atmos-veil);
+  }
+
+  /* The live veil (03 X54) eases in as it thins, so the shader comes up
+     through the band once it has been watched; it thickens at once, so no
+     word is ever shown on less veil than it needs. */
+  .lp-section[data-lp-veil-easing] {
+    transition: background-color var(--duration-slowest) var(--ease-smooth);
   }
 
   .org-layout[data-hero-shader-active]
@@ -304,7 +318,7 @@
 .lp-section + .lp-section {
   --lp-edge-offset: var(--_edge-d, 0px);
   margin-block-start: calc(-1 * var(--_edge-d, 0px));
-  padding-block-start: calc(var(--lp-pad) + var(--_edge-d, 0px));
+  padding-block-start: calc(var(--lp-pad-start) + var(--_edge-d, 0px));
   mask:
     var(--_edge-top) top / 100% calc(var(--_edge-d) + 1px) no-repeat,
     linear-gradient(currentColor 0 0) left 0 top var(--_edge-d) / 100% 100% no-repeat;

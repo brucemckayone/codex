@@ -3,11 +3,11 @@ import { expect, test } from '@playwright/test';
 /**
  * Progress Save Access Gate E2E (PR 2 — defense-in-depth)
  *
- * Covers the PR 2 row in docs/subscription-cache-audit/testing-matrix.md:
+ * Covers "Playback progress" in docs/payments/access.md:
  *   "savePlaybackProgress rejects user without access"
  *   "savePlaybackProgress accepts user with access"
  *
- * Product rule (docs/subscription-cache-audit/phase-2-followup.md §4.1):
+ * Product rule (docs/payments/access.md, "Playback progress"):
  *   A user with `cancel_at_period_end=true` whose `currentPeriodEnd` has NOT
  *   passed still has paid access, so progress POSTs succeed.
  *   Once the period ends (or a revocation key is present), progress POSTs
@@ -51,7 +51,7 @@ const BLOCKER_MESSAGE =
   'Blocked by Codex-z1wuz — seeded subscription has synthetic stripeSubscriptionId. ' +
   'Enable by adding the same /_test/revocation endpoint referenced in ' +
   'streaming-revocation.spec.ts, then wire seedRevocation() below. See ' +
-  'docs/subscription-cache-audit/phase-2-followup.md.';
+  'docs/payments/access.md.';
 
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
   await page.goto('/login');

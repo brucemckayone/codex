@@ -4,7 +4,8 @@
   Small · Medium · Large — how much room the section's band leaves above and
   below its content. It always shows the RESOLVED size (a compact layout sits
   small until the creator picks otherwise), so the pressed button is what
-  the canvas shows. Each button draws its size.
+  the canvas shows. Each button draws its size. Where the page's spacing
+  dial gave it (`fromPage`), the note says so (Codex-61zsk.59).
 -->
 <script lang="ts">
   import { type SectionSpacingId, SPACING_OPTIONS } from '$lib/page-builder/kit';
@@ -16,9 +17,11 @@
     chosen: boolean;
     onChoose: (spacing: SectionSpacingId) => void;
     onReset: () => void;
+    /** The page's spacing dial gave `value`, not the layout. */
+    fromPage?: boolean;
   }
 
-  const { value, chosen, onChoose, onReset }: Props = $props();
+  const { value, chosen, onChoose, onReset, fromPage = false }: Props = $props();
 
   const label = $derived(SPACING_OPTIONS.find((option) => option.id === value)?.label ?? value);
 </script>
@@ -43,7 +46,11 @@
       {m.studio_page_editor_spacing_reset()}
     </button>
   {:else}
-    <p class="spacing__note">{m.studio_page_editor_spacing_default({ size: label })}</p>
+    <p class="spacing__note">
+      {fromPage
+        ? m.studio_page_editor_spacing_from_page({ size: label })
+        : m.studio_page_editor_spacing_default({ size: label })}
+    </p>
   {/if}
 </div>
 

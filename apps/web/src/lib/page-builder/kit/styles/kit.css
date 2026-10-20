@@ -2,8 +2,10 @@
    PAGE KIT — BASE TOKENS AND FRAME (contract §4, §6)
 
    The `--lp-*` token system every primitive and block reads. These are the
-   neutral defaults; each Style (`style-<id>.css`) re-sets them on
-   `.lp[data-lp-style=…]`. Sizes are CONTAINER-relative (`cqi`) so a section
+   neutral defaults; each Style (`style-<id>.css`) re-sets them, its type on
+   `.lp[data-lp-type-facet=…]` (the page's Type, which another Style's page
+   may borrow: 03 X73) and the rest on `.lp[data-lp-style=…]`. Sizes are
+   CONTAINER-relative (`cqi`) so a section
    lays out by the width it is given — a 390px canvas frame gets the phone
    layout even inside a desktop window — and scale with the brand's text scale.
 
@@ -16,8 +18,8 @@
   --lp-font-body: var(--font-body, var(--font-sans));
   --lp-scale: var(--text-scale, 1);
 
-  --lp-size-display: calc(clamp(2.6rem, 0.8rem + 6.4cqi, 6.5rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(1.9rem, 1rem + 3.2cqi, 3.5rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.6rem, 0.8rem + 6.4cqi, 6.5rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(1.9rem, 1rem + 3.2cqi, 3.5rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.2rem, 1rem + 0.9cqi, 1.6rem) * var(--lp-scale));
   /* Supporting text is quiet by colour and weight, never by size: body never
      drops below 1.125rem, and the smallest line on a page is 0.9375rem. */
@@ -27,7 +29,7 @@
   --lp-size-label: calc(clamp(0.9375rem, 0.9rem + 0.08cqi, 1rem) * var(--lp-scale));
   --lp-size-price: calc(clamp(2.75rem, 1.6rem + 4cqi, 4.75rem) * var(--lp-scale));
   /* The closing call to action's heading: one step up from a section heading. */
-  --lp-size-cta: calc(clamp(2.2rem, 1rem + 4.2cqi, 4.5rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.2rem, 1rem + 4.2cqi, 4.5rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 1;
   --lp-leading-heading: 1.05;
@@ -47,7 +49,10 @@
   --lp-weight-body: var(--body-weight, var(--font-normal));
   --lp-weight-label: var(--font-semibold);
   --lp-case-display: none;
-  --lp-case-label: none;
+  /* A label (the eyebrow, the kit's kicker) is in the org's own label case:
+     uppercase unless the org or the page chose otherwise. An uppercase label
+     takes the org's tracking for it (after `.lp-page`, below). */
+  --lp-case-label: var(--text-transform-label, none);
   /* In em, so a lead's paragraphs part further than body copy's. */
   --lp-paragraph-gap: 0.9em;
   --lp-underline-offset: 0.3em;
@@ -60,27 +65,44 @@
   --lp-eyebrow-radius: 0;
 
   /* ── shape ────────────────────────────────────────────────────────────── */
-  /* The brand's own corner radius (03 §4.2). A Style BENDS it, never replaces
-     it: each radius token is `clamp(<floor>, calc(var(--lp-brand-radius) *
-     <k>), <ceiling>)`. A zero floor must be a length (`0rem`) — the
-     `--radius-none` token is a unitless 0, which voids any math function it
-     enters. `--brand-radius` is always rem (org layout, page overrides). */
+  /* The org's own corners (03 §4.2): a card is its `--radius-card`, a
+     picture its `--radius-lg` and a button its `--radius-button`, the tokens
+     its own pages draw them in (all derived from the brand radius, and
+     re-derived on a page's own carrier). A Style BENDS them, never replaces
+     them: each radius token is `clamp(<floor>, calc(var(<org token>) * <k>),
+     <ceiling>)`. A zero floor must be a length (`0rem`) — the `--radius-none`
+     token is a unitless 0, which voids any math function it enters. */
   --lp-brand-radius: var(--brand-radius, var(--radius-md));
   /* A pill when the brand is rounded at all, square when the brand is square. */
   --lp-radius-pill-if-rounded: min(calc(var(--lp-brand-radius) * 1000), var(--radius-full));
-  --lp-radius-card: var(--radius-lg);
+  --lp-radius-card: var(--radius-card);
   --lp-radius-media: var(--radius-lg);
-  --lp-radius-button: var(--radius-md);
+  --lp-radius-button: var(--radius-button);
   --lp-radius-chip: var(--radius-full);
   --lp-border: var(--border-width);
   --lp-rule: var(--border-width);
 
+  /* ── depth ────────────────────────────────────────────────────────────── */
+  /* The org's own shadows, where a Style lifts a card at all. A card at rest
+     sits on the shadow the org's cards rest on (explore's, `--shadow-md`); a
+     card that floats over the page, on the one the org floats its own bar
+     and raised panels on (`--shadow-xl`). The org's dark mode deepens both. */
+  --lp-shadow-card: var(--shadow-md);
+  --lp-shadow-raised: var(--shadow-xl);
+
   /* ── buttons ──────────────────────────────────────────────────────────── */
-  --lp-button-height: max(var(--tap-target-min), var(--space-12));
+  /* The org's own buttons (`ui/Button`), in every Style: a call to action is
+     the org's large button (`--space-11`, 44px, never under the tap target)
+     and a leading one (`size="lg"`: the hero's, the closing band's, a
+     featured offer's) its extra large (`--space-12`, 48px), both scaled by
+     the brand's density, at the org's medium weight. A Style keeps the
+     label's size, tracking and padding. */
+  --lp-button-height: var(--tap-target-min);
+  --lp-button-height-lg: max(var(--tap-target-min), var(--space-12));
   --lp-button-pad: var(--space-6);
   /* Its own step: a button label follows the body only so far. */
   --lp-button-size: calc(clamp(1.0625rem, 1rem + 0.15cqi, 1.125rem) * var(--lp-scale));
-  --lp-button-weight: var(--font-semibold);
+  --lp-button-weight: var(--font-medium);
   --lp-button-tracking: 0em;
 
   /* ── rhythm ───────────────────────────────────────────────────────────── */
@@ -88,8 +110,25 @@
   --lp-pad-regular: clamp(var(--space-16), var(--space-8) + 5cqi, var(--space-24));
   --lp-pad-spacious: clamp(var(--space-20), var(--space-10) + 8cqi, var(--space-32));
   --lp-container: 76rem;
-  --lp-measure: 62ch;
-  --lp-measure-lead: 44ch;
+  /* A line's measure is a COUNT of the face's own `0`s, never `ch`
+     (Codex-61zsk.64): `1ch` is the `0` of whatever font draws the line, so a
+     measure in it widened as the brand's face replaced its fallback, and the
+     block re-wrapped. Each measure is `calc(<count> * var(--lp-measure-unit))`,
+     the unit read where the measure is used: the `0` of the face the element
+     is drawn in, which the section (below) and each face it draws set. A
+     count is not a length: a measure that leaves out the unit is none. */
+  --lp-measure: 62;
+  --lp-measure-lead: 44;
+  --lp-measure-unit: 1ch;
+  /* The tallest a Picture section stands in the column (03 X64): it narrows
+     instead, so a portrait never runs past a laptop screen. */
+  --lp-picture-tall: 45rem;
+  /* A practice card's width and the gap between cards, wherever practices
+     sit in a row (What's inside, the layered curriculum): four-fifths of a
+     phone, so the next card shows at the edge. One width, so a picture shown
+     in both picks the same size and is fetched once (PRACTICE_CARD_SIZES). */
+  --lp-practice-card: clamp(17rem, 80cqi, 22.5rem);
+  --lp-practice-gap: clamp(var(--space-4), 0.5rem + 1.2cqi, var(--space-8));
   --lp-gutter: clamp(var(--space-4), 4.5cqi, var(--space-12));
   --lp-gap: clamp(var(--space-6), var(--space-4) + 2cqi, var(--space-12));
   --lp-stack: clamp(var(--space-4), var(--space-3) + 0.8cqi, var(--space-6));
@@ -112,6 +151,65 @@
   overflow-x: clip;
 }
 
+/* The corners dial (03 X61): the org's own corners, unbent by the Style (the
+   kit's defaults above), or Soft's on any Style. One attribute above each
+   Style's own tokens (`.lp[data-lp-style='<id>']`), so it wins by specificity,
+   never by load order. `rounder` is Soft's recipe, held to `style-soft.css`
+   by `dials.test.ts`. */
+.lp[data-lp-style][data-lp-corners='brand'] {
+  --lp-radius-card: var(--radius-card);
+  --lp-radius-media: var(--radius-lg);
+  --lp-radius-button: var(--radius-button);
+  --lp-radius-chip: var(--radius-full);
+}
+
+.lp[data-lp-style][data-lp-corners='rounder'] {
+  --lp-radius-card: clamp(var(--space-2), calc(var(--radius-card) * 2), var(--space-8));
+  --lp-radius-media: clamp(var(--space-2), calc(var(--radius-lg) * 2), var(--space-8));
+  --lp-radius-button: var(--lp-radius-pill-if-rounded);
+  --lp-radius-chip: var(--lp-radius-pill-if-rounded);
+}
+
+/* The type dial (03 X62): a factor beside the org's own text scale in every
+   headline size the kit and each Style declare, so each Style's sizes, steps
+   and curves keep their shape. Calmer takes every headline a step down;
+   louder takes the section headings a step up and leaves the opening's and
+   the closing ask's, which are drawn as large as they fit (X34). */
+.lp[data-lp-drama='calmer'] {
+  --lp-drama-display: 0.85;
+  --lp-drama-heading: 0.85;
+}
+
+/* `--lp-drama-held` takes louder's step back out of `--lp-size-heading`. A
+   quote, a price, a number or a lead tile's name is drawn at the heading's
+   size in a card's or a column's room, where no fit bound can see its words,
+   so it follows the dial down and never up. */
+.lp[data-lp-drama='louder'] {
+  --lp-drama-heading: 1.15;
+  --lp-drama-held: calc(1 / var(--lp-drama-heading));
+}
+
+/* The motion dial at still (03 X62) is the page reduced motion sees. Beside
+   the gates (`motion/attributes.ts`), the timing tokens go instant as
+   `tokens/motion.css` makes them for reduced motion, so what answers a hover
+   or a click changes at once. The transitions are declared again because a
+   custom property takes its `var()`s where it is declared: `:root`'s would
+   keep `:root`'s durations. 0.01ms, not 0: a transition of no length fires no
+   `transitionend`. `dials.test.ts` holds this to the token file. */
+.lp[data-lp-motion='still'] {
+  --duration-fast: 0.01ms;
+  --duration-normal: 0.01ms;
+  --duration-slow: 0.01ms;
+  --duration-slower: 0.01ms;
+  --duration-slowest: 0.01ms;
+  --transition-colors: color var(--duration-fast) var(--ease-default),
+    background-color var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default);
+  --transition-transform: transform var(--duration-normal) var(--ease-out);
+  --transition-opacity: opacity var(--duration-normal) var(--ease-default);
+  --transition-shadow: box-shadow var(--duration-normal) var(--ease-default);
+}
+
 /* The query container sections measure against. The root is deliberately NOT
    one: size containment implies layout containment, which makes an element the
    containing block of its `position: fixed` descendants — the sticky CTA would
@@ -122,16 +220,54 @@
   container: lp-page / inline-size;
 }
 
+/* An uppercase label is tracked open the way the org tracks its own. The org
+   has no label-tracking token; its uppercase labels (the floating bar's, the
+   pricing page's, the catalogue tile's) pair the case with `--tracking-wider`.
+   A label in any other case keeps its Style's tracking. Declared on each
+   section, so it outranks the Style's root value; a browser without style
+   queries keeps the Style's. */
+@container lp-page style(--lp-case-label: uppercase) {
+  .lp-section {
+    --lp-tracking-label: var(--tracking-wider);
+  }
+}
+
 /* ── sections ────────────────────────────────────────────────────────────── */
 .lp-section {
   container-type: inline-size;
   position: relative;
   isolation: isolate;
   overflow: clip;
-  padding-block: var(--lp-pad);
+  padding-block: var(--lp-pad-start) var(--lp-pad-end);
   background: var(--lp-bg);
   color: var(--lp-ink);
   --lp-pad: var(--lp-pad-regular);
+  /* The band's top padding: its spacing, unless it continues the band above.
+     Anything placed from the top of a section that can continue reads this,
+     not `--lp-pad`. */
+  --lp-pad-start: var(--lp-pad);
+  /* Its foot: the spacing too, unless the section ends flush (a Break, a
+     full-width picture, 03 X64). `--lp-pad` stays the rung other rules read. */
+  --lp-pad-end: var(--lp-pad);
+  /* The content column `.lp-inner` sets, for what is sized against it (a
+     heading's fit, 03 X62). It is declared on the section because a Style can
+     re-set the gutter or the container there, and `cqi` resolves where it is
+     used: against this section. */
+  --lp-column: calc(100cqi - 2 * max(var(--lp-gutter), (100cqi - var(--lp-container)) / 2));
+  /* Each type role's `0`, in em of the size it is drawn at: the face the role
+     is set in (display, heading and title in the display face; body and
+     label in the body face) at the role's weight, between the face's 400 and
+     700 (`styles/faces.css`). Declared on the section because that is where
+     the sheet matches the face, and a `var()` is read where it is declared. A
+     face the sheet does not know keeps `1ch`. An element drawn in a role sets
+     it as its measure's unit (`Heading.svelte` by size, a quote set like a
+     heading); the rest of a section measures in the body's. */
+  --lp-zero-display: calc(var(--lp-zero-display-400) + (var(--lp-zero-display-700) - var(--lp-zero-display-400)) * (clamp(400, var(--lp-weight-display), 700) - 400) / 300);
+  --lp-zero-heading: calc(var(--lp-zero-display-400) + (var(--lp-zero-display-700) - var(--lp-zero-display-400)) * (clamp(400, var(--lp-weight-heading), 700) - 400) / 300);
+  --lp-zero-title: calc(var(--lp-zero-display-400) + (var(--lp-zero-display-700) - var(--lp-zero-display-400)) * (clamp(400, var(--lp-weight-title), 700) - 400) / 300);
+  --lp-zero-body: calc(var(--lp-zero-body-400) + (var(--lp-zero-body-700) - var(--lp-zero-body-400)) * (clamp(400, var(--lp-weight-body), 700) - 400) / 300);
+  --lp-zero-label: calc(var(--lp-zero-body-400) + (var(--lp-zero-body-700) - var(--lp-zero-body-400)) * (clamp(400, var(--lp-weight-label), 700) - 400) / 300);
+  --lp-measure-unit: var(--lp-zero-body);
 }
 
 .lp-section[data-lp-spacing='compact'] {
@@ -140,6 +276,42 @@
 
 .lp-section[data-lp-spacing='spacious'] {
   --lp-pad: var(--lp-pad-spacious);
+}
+
+/* No words of its own on the ground of the section above (03 X58): nothing
+   announces a new section, so the page spends no break on it, and the band
+   above's foot is the whole joint. */
+.lp-section[data-lp-continues] {
+  --lp-pad-start: 0px;
+}
+
+/* A Break is its rung and nothing else (03 X64): no padding of its own, so
+   the pause is exactly one Small, Medium or Large step. */
+.lp-section[data-lp-type='break'] {
+  --lp-pad-start: 0px;
+  --lp-pad-end: 0px;
+}
+
+/* In a Style whose sections rise into the one above along an edge (a curve,
+   an angle: `surfaces.css`), the next section covers the Break's foot to the
+   edge's depth, and a mark centred in the whole step was cut by it (Soft's
+   pebbles, Poster's rule). A mark is centred in what the cut leaves; the
+   pause stays one step. */
+.lp-section[data-lp-type='break'] .lp-break[data-mark] {
+  padding-block-end: var(--_edge-d, 0px);
+}
+
+/* A full-width picture runs to its band's foot; with a caption under it the
+   foot is the compact rung, so the words never touch the next section. In a
+   Style whose sections rise into the one above along an edge (a curve, an
+   angle: `surfaces.css`), the foot is exactly that edge's depth, so the next
+   band's cut lands in padding and never on the photograph. */
+.lp-section[data-lp-type='picture'][data-lp-layout='full'] {
+  --lp-pad-end: var(--_edge-d, 0px);
+}
+
+.lp-section[data-lp-type='picture'][data-lp-layout='full']:has(.picture__caption) {
+  --lp-pad-end: var(--lp-pad-compact);
 }
 
 .lp-section:target,
@@ -202,7 +374,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .lp:not([data-lp-still]) .lp-atmos[data-drift] {
+  .lp:not([data-lp-still], [data-lp-motion]) .lp-atmos[data-drift] {
     animation: lp-drift calc(var(--duration-slowest) * 30) var(--ease-smooth)
       infinite alternate;
   }

@@ -1,7 +1,7 @@
 /**
  * ContentAccessService.getStreamingUrl — revocation short-circuit tests.
  *
- * Covers Phase 3 of docs/subscription-cache-audit/phase-2-followup.md:
+ * Covers "Streaming revocation" in docs/payments/access.md:
  * when a revocation key is present for (userId, orgId), `getStreamingUrl`
  * MUST reject with `AccessDeniedError` BEFORE opening the DB transaction.
  * Cryptographic presigned URLs cannot be invalidated once issued, so the

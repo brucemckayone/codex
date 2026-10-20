@@ -11,15 +11,33 @@
     ?offer=buy|sub|tiers|enrolled|unavailable|unknown    ?media=off
     ?only=<type>&layout=<id>&scheme=<id>&spacing=<id>
       (`only` may list types, `only=hero,transformation`, drawn in that order:
-      a layout or colour applies to each listed section it fits)
+      a layout or colour applies to each listed section it fits; `layout` may
+      name one per type instead, `layout=benefits:grid,curriculum:timeline`)
+    ?dials=colour:muted|vivid,corners:brand|rounder,spacing:compact|spacious,
+      drama:calmer|louder,motion:still|gentle
+      (the page's dials, 03 X61, X62; any subset, any order)
+    ?type=bold|poster|soft|quiet (another Style's Type, 03 X73: drawn on any
+      Style, offered or not, so a pair is proven before the allow-list
+      offers it)
     ?img=1..6 (the hero's photo; every picture field takes the next ones)
+    ?eyebrow=<text> (the hero's eyebrow, which the sample leaves empty: a
+      chip on Soft and Poster, so their tallest hero)
+    ?focus=<x>,<y> (every sample picture's focal point, in percent)
+    ?set=<type>.<key>:<value>,... (a section control on every section of that
+      type, `set=text.imageAt:after,faq.openFirst:true`; each block's own
+      reading still applies, so an unknown one draws nothing new)
+    ?faces=1 (each testimonials section's first written quote gets a photo,
+      so the course's own show their initials)   ?marks=1 (each benefit
+      takes the kit's marks in turn)
     ?edit=1 (inline-edit attributes on)   ?chrome=0 (hide the studio chrome)
 -->
 <script lang="ts">
   import { dev } from '$app/environment';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { brandEditor } from '$lib/brand-editor';
   import type { BrandTokenOverrides } from '$lib/page-builder';
+  import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import {
     COLOUR_SCHEME_IDS,
     isColourSchemeId,
@@ -27,9 +45,12 @@
     isPageStyleId,
     isSectionSpacingId,
     isSectionTypeId,
+    isTypeFacet,
     type KitPage,
+    type KitSection,
     PAGE_STYLE_IDS,
     PageRenderer,
+    readPageDials,
     SAMPLE_OFFER_STATES,
     type SampleOfferState,
     SECTION_LAYOUTS,
@@ -38,6 +59,7 @@
     sampleContext,
     samplePage,
   } from '$lib/page-builder/kit';
+  import { MARKS } from '$lib/page-builder/kit/model/marks';
   import { type SamplePicture, withSamplePictures } from '$lib/page-builder/kit/model/sample';
 
   /** The local dev-cdn (`workers/dev-cdn`) that serves the seeded sample
@@ -46,8 +68,9 @@
   const LOCAL_CDN = 'http://localhost:4100';
 
   /** What each of the dev-cdn's six sample photographs (`page-kit/img1-6.jpg`,
-   *  copies of `docs/design/mockup-assets`) shows; half carry a caption, so a
-   *  gallery shows both kinds of tile. */
+   *  copies of `docs/design/mockup-assets` that `db:seed` writes:
+   *  `pageKitSamplePhotos` in packages/database/scripts/seed/r2.ts) shows; half
+   *  carry a caption, so a gallery shows both kinds of tile. */
   const PHOTOS: readonly { alt: string; caption?: string }[] = [
     { alt: 'Storm clouds over a dark sea, waves breaking on the shore', caption: 'Weather coming in off the sea' },
     { alt: 'A road through an avenue of trees, fading into fog' },
@@ -102,6 +125,14 @@
   ];
 
   const params = $derived(page.url.searchParams);
+  // The org's own backgrounds, so the kit keeps its real ground (03 X48).
+  const grounds = $derived(
+    orgGrounds(page.data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
+  // The org's moving background, so the hero takes it (03 X50, X51).
+  const shader = $derived(
+    orgShader(page.data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
   const param = (key: string) => params.get(key) ?? '';
 
   const style = $derived.by(() => {
@@ -129,6 +160,12 @@
   const editing = $derived(param('edit') === '1');
   const chrome = $derived(param('chrome') !== '0');
 
+  /** `?focus=64,36`: the point every sample picture is steered by (Codex-61zsk.58). */
+  const point = $derived.by(() => {
+    const match = /^(\d{1,3}),(\d{1,3})$/.exec(param('focus'));
+    return match ? { x: Number(match[1]), y: Number(match[2]) } : undefined;
+  });
+
   /*
    * Every picture field takes the photos in turn, from the one after the
    * hero's. The files are plain JPEGs, not the size variants a real page
@@ -140,27 +177,114 @@
     PHOTOS.map((_, index) => {
       const n = ((photo + index) % PHOTOS.length) + 1;
       const { alt, caption } = PHOTOS[n - 1];
-      return { image: { key: `page-kit/img${n}.jpg#`, alt }, ...(caption ? { caption } : {}) };
+      const image = { key: `page-kit/img${n}.jpg#`, alt, ...(point ? { focus: point } : {}) };
+      return { image, ...(caption ? { caption } : {}) };
     })
   );
 
+  /** `?set=text.imageAt:after`: each control, by the type it is set on. */
+  const controls = $derived.by(() => {
+    const byType = new Map<string, Record<string, unknown>>();
+    for (const pair of param('set').split(',')) {
+      const match = /^([a-z]+)\.([A-Za-z]+):(.+)$/.exec(pair);
+      if (!match) continue;
+      const [, type, key, value] = match;
+      byType.set(type, { ...byType.get(type), [key]: value === 'true' ? true : value });
+    }
+    return byType;
+  });
+
+  /** `?faces=1`, `?marks=1`: the items' own controls, drawn on the sample (Codex-61zsk.58). */
+  const faces = $derived(param('faces') === '1');
+  const marks = $derived(param('marks') === '1');
+
+  /** Each entry of a section's `items`, changed by `edit`. */
+  function eachItem(
+    section: KitSection,
+    edit: (entry: Record<string, unknown>, index: number) => Record<string, unknown>
+  ): KitSection {
+    const items = Array.isArray(section.props.items) ? section.props.items : [];
+    return { ...section, props: { ...section.props, items: items.map(edit) } };
+  }
+
+  /** `?dials=colour:muted,corners:rounder`: unknown dials and steps are dropped. */
+  const dials = $derived(
+    readPageDials(Object.fromEntries(param('dials').split(',').map((pair) => pair.split(':'))))
+  );
+
+  /** `?type=poster`: an unknown Type is dropped. */
+  const proofType = $derived.by(() => {
+    const type = param('type');
+    return isTypeFacet(type) ? type : undefined;
+  });
+
+  /** `?eyebrow=Six weeks, online`: cut to the field's 60 characters. */
+  const eyebrow = $derived(param('eyebrow').slice(0, 60));
+
   const kitPage: KitPage = $derived.by(() => {
-    const plain = only ? samplePage(style, only) : samplePage(style);
-    const sample = withMedia ? withSamplePictures(plain, pictures) : plain;
+    const drawn = only ? samplePage(style, only) : samplePage(style);
+    const plain = eyebrow
+      ? {
+          ...drawn,
+          sections: drawn.sections.map((section) =>
+            section.type === 'hero' ? { ...section, props: { ...section.props, eyebrow } } : section
+          ),
+        }
+      : drawn;
+    const pictured = withMedia ? withSamplePictures(plain, pictures) : plain;
+    const controlled = controls.size
+      ? {
+          ...pictured,
+          sections: pictured.sections.map((section) => {
+            const set = controls.get(section.type);
+            return set ? { ...section, props: { ...section.props, ...set } } : section;
+          }),
+        }
+      : pictured;
+    const itemised =
+      faces || marks
+        ? {
+            ...controlled,
+            sections: controlled.sections.map((section) =>
+              faces && section.type === 'testimonials'
+                ? eachItem(section, (entry, index) =>
+                    index === 0 ? { ...entry, photo: pictures[0].image } : entry
+                  )
+                : marks && section.type === 'benefits'
+                  ? eachItem(section, (entry, index) => ({
+                      ...entry,
+                      mark: MARKS[index % MARKS.length],
+                    }))
+                  : section
+            ),
+          }
+        : controlled;
+    const sample = dials ? { ...itemised, design: { ...itemised.design, dials } } : itemised;
     if (!only) return sample;
     const layout = param('layout');
     const scheme = param('scheme');
     const spacing = param('spacing');
+    /** The layout named for a type: its own (`type:id`), or the one for all. */
+    const layoutFor = (type: string) =>
+      layout.includes(':')
+        ? layout
+            .split(',')
+            .find((pair) => pair.startsWith(`${type}:`))
+            ?.slice(type.length + 1)
+        : layout;
     return {
       ...sample,
-      sections: sample.sections.map((section) => ({
-        ...section,
-        variant: isLayoutOf(section.type, layout) ? layout : undefined,
-        design: {
-          scheme: isColourSchemeId(scheme) ? scheme : undefined,
-          spacing: isSectionSpacingId(spacing) ? spacing : undefined,
-        },
-      })),
+      sections: sample.sections.map((section) => {
+        const named = layoutFor(section.type);
+        return {
+          ...section,
+          variant: isLayoutOf(section.type, named) ? named : undefined,
+          design: {
+            scheme: isColourSchemeId(scheme) ? scheme : undefined,
+            spacing: isSectionSpacingId(spacing) ? spacing : undefined,
+          },
+        };
+      }),
     };
   });
 
@@ -172,6 +296,11 @@
       // page-image block (`resolvePageImageUrl`) previews here too instead of
       // rendering its designed empty state on every gallery load.
       mediaBaseUrl: LOCAL_CDN,
+      // The same photographs on the practices, so "What's inside" shows a
+      // pictured card, in each Style's frame, beside a kind's tile.
+      practicePictures: withMedia
+        ? PHOTOS.map((_, index) => `${LOCAL_CDN}/page-kit/img${index + 1}.jpg`)
+        : [],
     })
   );
 
@@ -259,13 +388,17 @@
     brandOverrides={brand.overrides}
     {theme}
     {edit}
+    orgGrounds={grounds}
+    orgShader={shader}
+    {proofType}
   />
 </div>
 
 <style>
   .kit-preview {
     /* The studio has no mobile bottom nav for the floating bar to clear.
-       A length, not `--space-0` (a unitless 0 is invalid inside `calc()` sums). */
+       A length: a unitless 0 is invalid inside `calc()` sums
+       (`token-math.test.ts`). */
     --lp-nav-clearance: 0px;
     min-block-size: 100vh;
   }

@@ -28,7 +28,10 @@ import {
   organizations,
   orphanedImageFiles,
 } from '@codex/database/schema';
-import { OrphanedFileService } from '@codex/image-processing';
+import {
+  OrphanedFileService,
+  pageImageObjectKeys,
+} from '@codex/image-processing';
 import {
   createUniqueSlug,
   type Database,
@@ -100,9 +103,35 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
     return { pageId, slug, title };
   }
 
-  /** Every pending `page_image` orphan row queued for this page, newest first. */
+  /** The rows uploads wrote, which a save's nominations are told apart from. */
+  const uploadRows = new Set<string>();
+
+  /**
+   * Record `keys` as uploaded to `pageId`, as the upload path does: it
+   * records every object it stores (`ImageProcessingService`). A save only
+   * nominates what an upload minted (Codex-61zsk.17). Returns the rows' ids.
+   */
+  async function uploaded(pageId: string, keys: string[]): Promise<string[]> {
+    const ids = await new OrphanedFileService({
+      db,
+      environment: 'test',
+    }).recordOrphanedFiles(
+      keys.flatMap((key) =>
+        pageImageObjectKeys(key).map((r2Key) => ({
+          r2Key,
+          imageType: 'page_image' as const,
+          entityId: pageId,
+          entityType: 'landing_page' as const,
+        }))
+      )
+    );
+    for (const id of ids) uploadRows.add(id);
+    return ids;
+  }
+
+  /** Every `page_image` row a SAVE queued for this page (uploads' rows left out). */
   async function pendingOrphansFor(pageId: string) {
-    return db
+    const rows = await db
       .select()
       .from(orphanedImageFiles)
       .where(
@@ -111,6 +140,30 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
           eq(orphanedImageFiles.originalEntityId, pageId)
         )
       );
+    return rows.filter((row) => !uploadRows.has(row.id));
+  }
+
+  /** Every pending row behind `keys`' objects, however old, whoever filed it. */
+  async function pendingBehind(keys: string[]) {
+    return db
+      .select()
+      .from(orphanedImageFiles)
+      .where(
+        and(
+          eq(orphanedImageFiles.imageType, 'page_image'),
+          eq(orphanedImageFiles.status, 'pending'),
+          inArray(orphanedImageFiles.r2Key, keys.flatMap(pageImageObjectKeys))
+        )
+      );
+  }
+
+  /**
+   * What a save queued for `keys`: their pending rows whose wait started at
+   * or after `since`. A drop restarts an object's pending row (its upload's,
+   * or an earlier drop's) or adds one, so the filer is not the test.
+   */
+  async function queuedSince(keys: string[], since: Date) {
+    return (await pendingBehind(keys)).filter((row) => row.orphanedAt >= since);
   }
 
   it('queues a removed page-image key once a save drops its last reference', async () => {
@@ -120,6 +173,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
       orgId
     );
     const key = `landing-pages/${pageId}/images/${randomUUID()}`;
+    await uploaded(pageId, [key]);
 
     // Save 1: the key is referenced from an arbitrary block prop.
     await serviceWithOrphanTracking.saveJourneyPage(orgId, {
@@ -140,6 +194,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
     expect(await pendingOrphansFor(pageId)).toEqual([]);
 
     // Save 2: the block (and its only reference to `key`) is gone.
+    const dropped = new Date();
     await serviceWithOrphanTracking.saveJourneyPage(orgId, {
       id: pageId,
       title,
@@ -149,11 +204,16 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
       brandOverrides: null,
     });
 
-    // The three OBJECTS, never the base key: nothing lives at the base key,
-    // so a sweep given it deletes nothing and marks the row done.
-    const orphans = await pendingOrphansFor(pageId);
+    // Every OBJECT behind the key, never the base key: nothing lives at the
+    // base key, so a sweep given it deletes nothing and marks the row done.
+    // The objects are the upload's own list (`pageImageObjectKeys`), so a size
+    // added to it (xl, Codex-61zsk.13) is nominated with the rest.
+    // The upload's own row is still pending, so the drop restarts its wait:
+    // one row per object, due a full grace period after the DROP, not the
+    // upload (Codex-61zsk.17).
+    const orphans = await queuedSince([key], dropped);
     expect(orphans.map((orphan) => orphan.r2Key).sort()).toEqual(
-      [`${key}/lg.webp`, `${key}/md.webp`, `${key}/sm.webp`].sort()
+      pageImageObjectKeys(key).sort()
     );
     expect(orphans[0]).toMatchObject({
       imageType: 'page_image',
@@ -161,6 +221,9 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
       originalEntityType: 'landing_page',
       status: 'pending',
     });
+    expect(await pendingBehind([key])).toHaveLength(
+      pageImageObjectKeys(key).length
+    );
   });
 
   it('does NOT queue a key that is still referenced after the save', async () => {
@@ -170,6 +233,9 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
       orgId
     );
     const key = `landing-pages/${pageId}/images/${randomUUID()}`;
+    // Uploaded, so a nomination could pass the minted check: only the diff
+    // can keep this one out of the queue.
+    await uploaded(pageId, [key]);
     const sections = [
       {
         id: 'sec-1',
@@ -188,6 +254,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
       brandOverrides: null,
     });
     // Re-save the SAME content — a real no-op autosave tick.
+    const since = new Date();
     await serviceWithOrphanTracking.saveJourneyPage(orgId, {
       id: pageId,
       title,
@@ -198,6 +265,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
     });
 
     expect(await pendingOrphansFor(pageId)).toEqual([]);
+    expect(await queuedSince([key], since)).toEqual([]);
   });
 
   it('does NOT queue a key that moves to a different prop or block — no per-type schema knowledge', async () => {
@@ -207,6 +275,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
       orgId
     );
     const key = `landing-pages/${pageId}/images/${randomUUID()}`;
+    await uploaded(pageId, [key]);
 
     await serviceWithOrphanTracking.saveJourneyPage(orgId, {
       id: pageId,
@@ -227,6 +296,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
     // Same key, now nested inside a DIFFERENT block's DIFFERENT prop path
     // (`items[].image`) — proves the scan is a generic string walk, not a
     // lookup keyed on `props.image`.
+    const since = new Date();
     await serviceWithOrphanTracking.saveJourneyPage(orgId, {
       id: pageId,
       title,
@@ -244,6 +314,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
     });
 
     expect(await pendingOrphansFor(pageId)).toEqual([]);
+    expect(await queuedSince([key], since)).toEqual([]);
   });
 
   it('never fails the save when no orphanedFileService is configured', async () => {
@@ -282,7 +353,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
         sections: [],
         brandOverrides: null,
       })
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ revision: expect.any(String) });
 
     const loaded = await serviceWithoutOrphanTracking.getJourneyForBuilder(
       orgId,
@@ -324,13 +395,15 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
     // A duplicate renders its source's keys verbatim (duplicateJourneyPage
     // copies `sections`), so the key is under the SOURCE page's prefix.
     const key = `landing-pages/${source.pageId}/images/${randomUUID()}`;
+    await uploaded(source.pageId, [key]);
 
     await saveImages(orgId, copy, [key]);
+    const dropped = new Date();
     await saveImages(orgId, copy, []);
 
     expect(
-      (await pendingOrphansFor(copy.pageId)).map((row) => row.r2Key).sort()
-    ).toEqual([`${key}/lg.webp`, `${key}/md.webp`, `${key}/sm.webp`].sort());
+      (await queuedSince([key], dropped)).map((row) => row.r2Key).sort()
+    ).toEqual(pageImageObjectKeys(key).sort());
   });
 
   it('ignores a string that only shares the prefix', async () => {
@@ -345,6 +418,27 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
     expect(await pendingOrphansFor(page.pageId)).toEqual([]);
   });
 
+  // Codex-61zsk.17: a key is text a manager can write, and the queue is every
+  // tenant's, so a key of the minted shape that no upload made must queue
+  // nothing. The real one's upload row has been swept already (`retained`):
+  // a row of any status is an upload's, so it is still nominated.
+  it('nominates only what an upload minted: a fabricated key of the minted shape queues nothing', async () => {
+    const orgId = await makeOrg('PageImgMinted');
+    const page = await makePage(serviceWithOrphanTracking, orgId);
+    const real = `landing-pages/${page.pageId}/images/${randomUUID()}`;
+    const fabricated = `landing-pages/${page.pageId}/images/${randomUUID()}`;
+    const sweeps = new OrphanedFileService({ db, environment: 'test' });
+    for (const id of await uploaded(page.pageId, [real]))
+      await sweeps.markRetained(id, 'still referenced');
+
+    await saveImages(orgId, page, [real, fabricated]);
+    await saveImages(orgId, page, []);
+
+    expect(
+      (await pendingOrphansFor(page.pageId)).map((row) => row.r2Key).sort()
+    ).toEqual(pageImageObjectKeys(real).sort());
+  });
+
   it('nominates at most 100 images from one save', async () => {
     const orgId = await makeOrg('PageImgCap');
     const page = await makePage(serviceWithOrphanTracking, orgId);
@@ -352,11 +446,62 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
       { length: 101 },
       () => `landing-pages/${page.pageId}/images/${randomUUID()}`
     );
+    await uploaded(page.pageId, keys);
 
     await saveImages(orgId, page, keys);
+    const dropped = new Date();
     await saveImages(orgId, page, []);
 
-    expect(await pendingOrphansFor(page.pageId)).toHaveLength(300);
+    // The cap is on images; each is nominated as every object behind it.
+    expect(await queuedSince(keys, dropped)).toHaveLength(
+      keys.slice(0, 100).flatMap((key) => pageImageObjectKeys(key)).length
+    );
+    expect(await queuedSince(keys.slice(100), dropped)).toEqual([]);
+  });
+
+  // Codex-61zsk.17 (codex-review): a key is visible in any public page's
+  // image URLs, so a manager can paste another org's real, uploaded key. Its
+  // own org's pages alone decide its fate, so queueing it is only queue
+  // traffic: it is not nominated at all.
+  it("does not nominate another org's image", async () => {
+    const ours = await makeOrg('PageImgOurs');
+    const theirs = await makeOrg('PageImgTheirs');
+    const ourPage = await makePage(serviceWithOrphanTracking, ours);
+    const theirPage = await makePage(serviceWithOrphanTracking, theirs);
+    const key = `landing-pages/${theirPage.pageId}/images/${randomUUID()}`;
+    await uploaded(theirPage.pageId, [key]);
+
+    await saveImages(ours, ourPage, [key]);
+    const dropped = new Date();
+    await saveImages(ours, ourPage, []);
+
+    expect(await queuedSince([key], dropped)).toEqual([]);
+    expect(await pendingOrphansFor(ourPage.pageId)).toEqual([]);
+  });
+
+  // A page toggled in and out of an image queues it once: each drop
+  // restarts the one pending row per object, so the queue a tenant makes is
+  // bounded by its images, not by how often it saves.
+  it('queues an image once, however often it is dropped', async () => {
+    const orgId = await makeOrg('PageImgRedrop');
+    const page = await makePage(serviceWithOrphanTracking, orgId);
+    const key = `landing-pages/${page.pageId}/images/${randomUUID()}`;
+    await uploaded(page.pageId, [key]);
+
+    for (let round = 0; round < 3; round++) {
+      await saveImages(orgId, page, [key]);
+      await saveImages(orgId, page, []);
+    }
+    const lastDrop = new Date();
+    await saveImages(orgId, page, [key]);
+    await saveImages(orgId, page, []);
+
+    expect(await pendingBehind([key])).toHaveLength(
+      pageImageObjectKeys(key).length
+    );
+    expect(await queuedSince([key], lastDrop)).toHaveLength(
+      pageImageObjectKeys(key).length
+    );
   });
 
   // The sweep's side of the contract (OrphanedFileService), against the same

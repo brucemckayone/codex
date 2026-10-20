@@ -8,12 +8,17 @@
  * component half).
  */
 import { benefitsDefinition } from '../blocks/benefits/definition';
+import { breakDefinition } from '../blocks/break/definition';
+import { buttonDefinition } from '../blocks/button/definition';
 import { ctaDefinition } from '../blocks/cta/definition';
 import { curriculumDefinition } from '../blocks/curriculum/definition';
 import { faqDefinition } from '../blocks/faq/definition';
 import { galleryDefinition } from '../blocks/gallery/definition';
+import { headingDefinition } from '../blocks/heading/definition';
 import { heroDefinition } from '../blocks/hero/definition';
+import { insideDefinition } from '../blocks/inside/definition';
 import { instructorDefinition } from '../blocks/instructor/definition';
+import { pictureDefinition } from '../blocks/picture/definition';
 import { previewDefinition } from '../blocks/preview/definition';
 import { pricingDefinition } from '../blocks/pricing/definition';
 import { problemDefinition } from '../blocks/problem/definition';
@@ -43,10 +48,16 @@ export const DEFINITIONS: Readonly<Record<SectionTypeId, BlockDefinition>> = {
   text: textDefinition,
   story: storyDefinition,
   gallery: galleryDefinition,
+  inside: insideDefinition,
+  picture: pictureDefinition,
+  heading: headingDefinition,
+  break: breakDefinition,
+  button: buttonDefinition,
 };
 
 /** Gallery groups, in the order the add-section gallery shows them. */
 export const GROUP_ORDER: readonly { id: BlockGroup; label: string }[] = [
+  { id: 'basics', label: 'Basics' },
   { id: 'opening', label: 'Opening' },
   { id: 'story', label: 'Your story' },
   { id: 'proof', label: 'Proof' },

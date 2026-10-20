@@ -1,16 +1,39 @@
 /**
- * Page-level facts a block may need but `BlockProps` does not carry — today,
- * only the page's Style (a featured card's scheme depends on it).
+ * Page-level facts a block may need but `BlockProps` does not carry: the
+ * page's Style (a featured card's scheme depends on it), and whether the page
+ * is still.
  *
- * Provided by `PageRenderer` as a getter so a Style change re-renders the
- * blocks that read it. A block mounted on its own (a test, a thumbnail) gets
- * the default Style rather than a missing context.
+ * Provided by `PageRenderer` as getters so a change re-renders the blocks
+ * that read them. A block mounted on its own (a test) gets the default Style
+ * and a live page rather than a missing context.
  */
 import { getContext, setContext } from 'svelte';
 import { DEFAULT_PAGE_STYLE, type PageStyleId } from './model/ids';
 
 export interface KitPageContext {
   readonly style: PageStyleId;
+  /**
+   * Looked at rather than read: the canvas, and every still thumbnail (the
+   * Layout picker, the Section gallery, the Style panel). Only then may a
+   * block draw what stands in for missing media — a plate, a frame waiting
+   * for a picture. The public page draws only what it has. The root's
+   * `data-lp-still` is the same fact for CSS.
+   */
+  readonly still: boolean;
+  /**
+   * The page's own offer choices: its pricing section's props, where a
+   * creator may name the path to recommend (`offers[].best`). A block that
+   * sells reads them, so the call to action features the same path as the
+   * pricing section and the floating bar (Codex-61zsk.39). Empty with no
+   * pricing section, and for a block mounted on its own.
+   */
+  readonly offerProps: Readonly<Record<string, unknown>>;
+  /**
+   * The anchor (`id`) of a section this page draws, by section id, so a
+   * Button can jump to it (03 X64). `undefined` for a section the page does
+   * not draw (hidden, deleted, folded), and for a block mounted on its own.
+   */
+  anchorOf(id: string): string | undefined;
 }
 
 /**
@@ -29,6 +52,11 @@ export function setKitPage(context: KitPageContext): void {
 
 export function getKitPage(): KitPageContext {
   return (
-    getContext<KitPageContext | undefined>(KEY) ?? { style: DEFAULT_PAGE_STYLE }
+    getContext<KitPageContext | undefined>(KEY) ?? {
+      style: DEFAULT_PAGE_STYLE,
+      still: false,
+      offerProps: {},
+      anchorOf: () => undefined,
+    }
   );
 }

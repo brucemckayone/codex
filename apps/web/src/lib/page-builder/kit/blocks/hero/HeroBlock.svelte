@@ -12,10 +12,21 @@
                 the band's edge (HeroPoster)
 
   The one sanctioned fallback in the kit: an empty headline renders the course
-  title. Media arrives on the streamed `sellPreview`; each layout holds its
-  space while it loads. Structure is identical in every Style — the Style
-  changes it through tokens and a few `[data-lp-style]` rules — so switching
-  Style never re-mounts the block.
+  title. Media arrives on the streamed `sellPreview`. Structure is identical in
+  every Style — the Style changes it through tokens and a few
+  `[data-lp-style]` rules — so switching Style never re-mounts the block.
+
+  NO PICTURE (Codex-61zsk.37): the public page draws only what it has, so a
+  split, centered or poster hero with no picture is its words alone — split
+  set as the statement sets them. The plate that holds a picture's place
+  appears where the page is looked at (the canvas, a still thumbnail:
+  `page.still`), and there each layout keeps its shape while media loads. On
+  the public page it appears only while a hero video the awaited view says is
+  attached (`course.filmsAttached.hero`, Codex-61zsk.40) is on its way, so a
+  video-only hero is framed from the first paint rather than re-framed above
+  the fold; one that then fails to resolve leaves the words alone. The cover
+  draws its play button in the words' column, not over the picture, so it
+  holds that button's place too, hidden, while the video is on its way.
 
   A medium or a long headline is marked `data-medium` / `data-long` (the
   kit's tiers, `model/long-heading.ts`; long as the problem statement's): a
@@ -27,11 +38,13 @@
 -->
 <script lang="ts">
   import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
-  import { resolvePageImageUrl } from '../../../page-images';
+  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import type { PreviewMedia, SellPreview } from '../../../render/types';
   import { COPY } from '../../model/copy';
-  import { headingLength } from '../../model/long-heading';
+  import { heroFacts } from '../../model/facts';
+  import { headingLength, headingRuns } from '../../model/long-heading';
   import type { BlockProps } from '../../model/types';
+  import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
@@ -44,12 +57,16 @@
 
   const { props, section, context, edit }: BlockProps = $props();
 
+  const page = getKitPage();
   const content = $derived(heroDefinition.coerce(props));
   const heading = $derived(content.heading ?? context.course.title);
   const length = $derived(headingLength(heading));
   const chars = $derived(heading.length);
+  const runs = $derived(headingRuns(heading));
   const mode = $derived(content.media ?? 'auto');
   const layout = $derived(section.layout);
+  // The course's shape and its way in, under the lede (`model/facts.ts`).
+  const facts = $derived(heroFacts(context));
   let watching = $state<PreviewMedia | null>(null);
 
   interface HeroMedia {
@@ -64,6 +81,19 @@
   );
   // Decorative unless described; only the creator's image can carry words.
   const alt = $derived(ownStill ? (content.image?.alt ?? '') : '');
+  // The creator's image offers every size it has, at the width its layout
+  // draws it: one 800px image across a cover band upscales (Codex-61zsk.13).
+  // Wherever there is one, it is the still every layout draws (`pick`); a
+  // course still from the journey is not a page image, so it has none.
+  const ownSrcset = $derived(
+    ownStill ? pageImageSrcset(content.image, context.mediaBaseUrl) : ''
+  );
+  // Where the creator placed the image's subject, so a layout's crop keeps it
+  // (Codex-61zsk.58); a course still from the journey has none.
+  const ownFocus = $derived(ownStill ? storedFocus(content.image) : undefined);
+  const frameSizes = $derived(
+    layout === 'split' ? '(min-width: 50rem) 50vw, 100vw' : '100vw'
+  );
 
   // The uploaded hero still rides the AWAITED envelope, so it is in the
   // server-rendered HTML (the page's largest paint); the streamed preview can
@@ -84,20 +114,37 @@
     if (!edit) watching = clip;
   }
 
-  // The streamed preview once it settles, for the two layouts whose shape
-  // depends on whether there is media at all (cover, poster) — read in place,
-  // never through `{#await}` (`settled.svelte.ts`). Until it settles, and on
-  // the server, the media is the synchronous still.
+  // The streamed preview once it settles, for the layouts whose shape depends
+  // on whether there is media at all (cover, poster; split and centered on
+  // the public page) — read in place, never through `{#await}`
+  // (`settled.svelte.ts`). Until it settles, and on the server, the media is
+  // the synchronous still.
   const preview = $derived(settledValue(context.sellPreview));
   const settled = $derived<HeroMedia>(
     preview === undefined ? { still: syncStill, clip: null } : pick(preview)
   );
+  const pending = $derived(preview === undefined && !syncStill);
   const hasMedia = $derived(Boolean(settled.still || settled.clip));
+  // Where the page is looked at rather than read, a picture's place is kept
+  // with the plate in it; the public page draws only the picture it has.
+  const previewing = $derived(page.still || !!edit);
+  // A hero video the awaited view says is attached, still on its way: the
+  // public page holds its place as the canvas does (Codex-61zsk.40).
+  const heroComing = $derived(
+    mode !== 'none' &&
+      preview === undefined &&
+      context.course.filmsAttached?.hero === true
+  );
+  const framed = $derived(
+    mode !== 'none' && (hasMedia || previewing || heroComing)
+  );
   // A cover with nothing to show on a Moving background leaves the band to
   // the section: the org's shader (or the glow standing in for it) under the
   // scheme's own veil and ink. Otherwise it draws its own band — the image,
   // or its glow — under the media colours.
-  const coverOwnsBand = $derived(section.scheme !== 'atmosphere' || hasMedia);
+  const coverOwnsBand = $derived(
+    section.scheme !== 'atmosphere' || hasMedia || heroComing
+  );
 </script>
 
 {#snippet copy(align: 'start' | 'center')}
@@ -120,9 +167,17 @@
       {edit}
     />
   </div>
-  {#if content.body}
+  {#if content.body || facts.length > 0}
     <div class="hero__lede hero__enter-c">
-      <Text text={content.body} size="lead" type="hero" field="body" {edit} />
+      {#if content.body}
+        <Text text={content.body} size="lead" type="hero" field="body" {edit} />
+      {/if}
+      {#if facts.length > 0}
+        <p class="hero__facts">
+          {#each facts as fact, i (fact)}{#if i > 0}<span aria-hidden="true">{' · '}</span
+              >{/if}<span>{fact}</span>{/each}
+        </p>
+      {/if}
     </div>
   {/if}
   <div class="hero__actions hero__enter-c">
@@ -150,11 +205,30 @@
 
 {#snippet frame(media: HeroMedia, pending: boolean, ratio: string)}
   {#if media.clip}
-    <Media image={media.still} clip={media.clip} {ratio} {pending} priority {alt}>
+    <Media
+      image={media.still}
+      clip={media.clip}
+      srcset={ownSrcset}
+      sizes={frameSizes}
+      focus={ownFocus}
+      {ratio}
+      {pending}
+      priority
+      {alt}
+    >
       {@render watchControl(media)}
     </Media>
   {:else}
-    <Media image={media.still} {ratio} {pending} priority {alt} />
+    <Media
+      image={media.still}
+      srcset={ownSrcset}
+      sizes={frameSizes}
+      focus={ownFocus}
+      {ratio}
+      {pending}
+      priority
+      {alt}
+    />
   {/if}
 {/snippet}
 
@@ -166,7 +240,15 @@
   {#if coverOwnsBand}
     <div class="hero-cover__media lp-bleed hero__enter-m" data-lp-on-media>
       {#if hasMedia}
-        <Media image={settled.still} clip={settled.clip} priority {alt} />
+        <Media
+          image={settled.still}
+          clip={settled.clip}
+          srcset={ownSrcset}
+          sizes="100vw"
+          focus={ownFocus}
+          priority
+          {alt}
+        />
       {:else}
         <span class="lp-atmos" data-drift aria-hidden="true"></span>
       {/if}
@@ -178,46 +260,56 @@
     style:--lp-heading-chars={chars}
   >
     {@render copy('start')}
-    {#if settled.clip}<div class="hero__enter-c">{@render watchControl(settled)}</div>{/if}
-  </div>
-{:else if layout === 'poster'}
-  <!-- With no still known as it draws, the picture's place is held (the clip
-       or the plate fills it), so nothing moves when the stream settles. The
-       poster's own box is the headline's parent, where a Style scales it;
-       this plain box only hands it the headline's length, and the section's
-       grid places it as it placed the poster. -->
-  <div style:--lp-heading-chars={chars}>
-    <HeroPoster
-      still={settled.still}
-      clip={settled.clip}
-      reserve={!syncStill && mode !== 'none'}
-      {alt}
-      {copy}
-      watch={posterWatch}
-    />
-  </div>
-{:else if layout === 'split'}
-  <div class="hero-split" style:--lp-heading-chars={chars}>
-    <div class="hero-split__copy">{@render copy('start')}</div>
-    {#if mode !== 'none'}
-      <div class="hero-split__media hero__enter-m">
-        {#await context.sellPreview}
-          {@render frame({ still: syncStill, clip: null }, !syncStill, 'var(--_ratio)')}
-        {:then preview}
-          {@render frame(pick(preview), false, 'var(--_ratio)')}
-        {/await}
+    <!-- One box for the play button, held while the video is on its way, so
+         the words neither rise nor push the band taller when it lands. -->
+    {#if settled.clip || heroComing}
+      <div
+        class="hero-cover__watch hero__enter-c"
+        data-held={settled.clip ? undefined : ''}
+        inert={!settled.clip}
+      >
+        <WatchButton
+          label={content.watchLabel ?? COPY.hero.watch}
+          onclick={() => settled.clip && watch(settled.clip)}
+        />
       </div>
     {/if}
   </div>
+{:else if layout === 'poster'}
+  <!-- Where the page is looked at, the picture's place is held (the clip or
+       the plate fills it), so nothing moves when the stream settles; the
+       public page sets the words round a picture only once it has one. The
+       poster's own box is the headline's parent, where a Style scales it,
+       so it takes the headline's length and its words' widths itself. -->
+  <HeroPoster
+    still={settled.still}
+    srcset={ownSrcset}
+    focus={ownFocus}
+    clip={settled.clip}
+    reserve={(previewing || heroComing) && mode !== 'none'}
+    {alt}
+    {copy}
+    {chars}
+    {runs}
+    watch={posterWatch}
+  />
+{:else if layout === 'split'}
+  {#if framed}
+    <div class="hero-split" style:--lp-heading-chars={chars}>
+      <div class="hero-split__copy">{@render copy('start')}</div>
+      <div class="hero-split__media hero__enter-m">
+        {@render frame(settled, pending, 'var(--_ratio)')}
+      </div>
+    </div>
+  {:else}
+    <!-- No picture to share the band with: the words across it. -->
+    <div class="hero-statement" style:--lp-heading-chars={chars}>{@render copy('start')}</div>
+  {/if}
 {:else if layout === 'centered'}
   <div class="hero-centered" style:--lp-heading-chars={chars}>{@render copy('center')}</div>
-  {#if mode !== 'none'}
+  {#if framed}
     <div class="hero-centered__media hero__enter-m">
-      {#await context.sellPreview}
-        {@render frame({ still: syncStill, clip: null }, !syncStill, 'var(--_ratio)')}
-      {:then preview}
-        {@render frame(pick(preview), false, 'var(--_ratio)')}
-      {/await}
+      {@render frame(settled, pending, 'var(--_ratio)')}
     </div>
   {/if}
 {:else}
@@ -226,6 +318,10 @@
     {#if syncStill}
       <div class="hero-statement__media hero__enter-m">
         {@render frame({ still: syncStill, clip: null }, false, 'var(--_ratio)')}
+      </div>
+    {:else if heroComing}
+      <div class="hero-statement__media hero__enter-m">
+        {@render frame({ still: null, clip: null }, true, 'var(--_ratio)')}
       </div>
     {/if}
   {:then preview}
@@ -248,6 +344,21 @@
 {/if}
 
 <style>
+  /* ── the facts line: small, in the soft ink, its figures lined up ──────── */
+  .hero__facts {
+    margin: 0;
+    font-family: var(--lp-font-body);
+    font-size: var(--lp-size-small);
+    line-height: var(--lp-leading-body);
+    font-variant-numeric: tabular-nums;
+    color: var(--lp-ink-soft);
+    text-wrap: balance;
+  }
+
+  .hero__lede:has(> :global(.lp-text)) > .hero__facts {
+    margin-block-start: var(--lp-stack);
+  }
+
   /* ── statement ─────────────────────────────────────────────────────────── */
   .hero-statement {
     display: grid;
@@ -405,6 +516,11 @@
     isolation: isolate;
   }
 
+  /* Held for a video still on its way: its place, not yet the button. */
+  .hero-cover__watch[data-held] {
+    visibility: hidden;
+  }
+
   /* A scrim shaped to the WORDS: every line sits on at least 72% of the scrim
      colour however the headline wraps, and it fades out to the right and at
      the top so the rest of the image stays bright. It starts at the band's
@@ -436,11 +552,11 @@
   .hero-centered :global(.lp-heading),
   .hero-centered :global(.lp-text) {
     margin-inline: auto;
-    max-inline-size: 18ch;
+    max-inline-size: calc(18 * var(--lp-measure-unit));
   }
 
   .hero-centered :global(.lp-text) {
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
   }
 
   .hero-centered__media {
@@ -460,17 +576,41 @@
     }
   }
 
+  /* ── the headline's size where it is wide ──────────────────────────────── */
+  /* Wide, each layout sizes the headline for its length (X34), its poster
+     for its words beside the picture (X60) and a borrowed Type for another
+     Style's column (X74), measured at 1440 to cut no word, so it is held at
+     that size. Narrower, it is fitted to its column as every heading is
+     (`Heading.svelte`, X71): at a phone's display floor Bold's and Poster's
+     drew "Transformation" past a 390 column, off the screen in four layouts
+     and split mid-word in the statement (03 X74). */
+  @container (min-width: 56rem) {
+    .hero__headline :global(.lp-heading) {
+      --lp-heading-hold: 1;
+    }
+  }
+
   /* ── the one entrance (keyframes named by the Style) ───────────────────── */
+  /* The headline's wrapper is set at the headline's display size, so an
+     entrance that draws it through a clip (Bold's lift, Poster's wipe)
+     overhangs it in the headline's em, not the body's. The hero keeps its
+     entrance's last frame, and a clip in the body's em cut a capital's mark
+     and a comma off for as long as the page was open (03 X74). Nothing in
+     the wrapper reads its size but that; the headline sets its own. */
+  .hero__enter-h {
+    font-size: calc(var(--lp-size-display) * var(--lp-display-scale, 1) * var(--lp-type-fit, 1));
+  }
+
   @media (prefers-reduced-motion: no-preference) {
-    :global(:root[data-theme] .lp:not([data-lp-still])) .hero__enter-h {
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still'])) .hero__enter-h {
       animation: var(--lp-enter-headline);
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still])) .hero__enter-c {
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still'])) .hero__enter-c {
       animation: var(--lp-enter-copy);
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still])) .hero__enter-m {
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still'])) .hero__enter-m {
       animation: var(--lp-enter-media);
     }
   }

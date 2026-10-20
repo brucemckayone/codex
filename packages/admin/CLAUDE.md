@@ -64,11 +64,11 @@ const service = new AdminCustomerManagementService({ db, environment });
 |---|---|---|
 | `listCustomers` | `(organizationId: string, options?)` | Paginated customers (users with completed purchases). Filters: search, contentId, joinedWithin, minSpendCents, maxSpendCents. |
 | `getCustomerDetails` | `(customerId: string, organizationId: string)` | Full customer profile with purchase history. |
-| `grantContentAccess` | `(customerId: string, contentId: string, organizationId: string)` | Transaction. Grants complimentary access via `contentAccess` table — NOT a purchase record. |
+| `grantContentAccess` | `(customerId: string, contentId: string, organizationId: string)` | Complimentary access — NOT a purchase record. Must write a `grant` entitlement (see below). |
 
 ## Important: Complimentary Access vs Purchases
 
-`grantContentAccess()` writes to `contentAccess` table (not `purchases`). This keeps revenue analytics accurate — comps don't inflate purchase counts or revenue figures.
+A comp is never a `purchases` row, so it never inflates purchase counts or revenue. It must write an `entitlements` row with source `grant` — that is what `@codex/access` reads. Today it writes only `contentAccess`, which nothing reads for access, so a grant gives **no** access (`Codex-2hxff.21`). Rules: [docs/payments/access.md](../../docs/payments/access.md#support-grants). Revenue analytics must count every revenue type, not only one-off purchases (`Codex-2hxff.20`).
 
 ## Rules
 

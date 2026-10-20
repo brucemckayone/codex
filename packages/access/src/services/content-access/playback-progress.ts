@@ -19,7 +19,7 @@ import type { AccessRevocation } from '../access-revocation';
 /**
  * Save playback progress (upsert pattern).
  *
- * Access gate (MANDATORY — see docs/subscription-cache-audit/phase-2-followup.md Phase 4.1):
+ * Access gate (MANDATORY — see docs/payments/access.md, "Playback progress"):
  *   1. Resolve content's organizationId.
  *   2. If `AccessRevocation.isRevoked(userId, orgId)` returns a revocation,
  *      throw `ForbiddenError('Access revoked', { reason })`. This closes
