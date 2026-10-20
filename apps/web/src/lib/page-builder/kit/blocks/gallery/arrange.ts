@@ -138,7 +138,8 @@ const MOSAIC_WIDE_SHARE: Readonly<Record<MosaicTile, number>> = {
  * shapes as {@link pictureVariant}:
  * - a strip picture is a fixed height (`clamp(13rem, 8rem + 16cqi, 26rem)`)
  *   at 3:2 or 4:5;
- * - a grid divides the column by its row count from 60rem, in two from 36rem;
+ * - a grid divides the column by its row count from 60rem (Clean: three at
+ *   most, a set of six in pairs), in two from 36rem;
  * - a mosaic tile spans its share of four columns from a 48rem column, and on
  *   two columns the first picture, and an even count's last, span both.
  * Each width is the column's at most (`columnSize`), never less than a Style
@@ -147,7 +148,8 @@ const MOSAIC_WIDE_SHARE: Readonly<Record<MosaicTile, number>> = {
 export function pictureSizes(
   layout: string,
   index: number,
-  count: number
+  count: number,
+  style?: string
 ): string {
   if (layout === 'strip') {
     return stripShape(index) === 'wide'
@@ -156,7 +158,10 @@ export function pictureSizes(
   }
   if (layout === 'grid') {
     if (count <= 1) return columnSize();
-    const wide = Math.max(gridColumns(count), 2);
+    // Clean hangs no more than three to a row, and a set of six in pairs.
+    const columns = Math.max(gridColumns(count), 2);
+    const wide =
+      style === 'clean' ? (count === 6 ? 2 : Math.min(columns, 3)) : columns;
     return `(min-width: 60rem) ${columnSize(1 / wide)}, (min-width: 36rem) ${columnSize(0.5)}, ${columnSize()}`;
   }
   const tile = mosaicTiles(count)[index];

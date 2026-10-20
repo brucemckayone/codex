@@ -49,12 +49,13 @@
   const focus = $derived(storedFocus(content.image));
   // Every size the picture has, at the width each form draws it: centred caps
   // at 52rem, a statement spans the column, and columns take a half once the
-  // band is 56rem wide (Codex-61zsk.66).
+  // band is 56rem wide, unless there is no body to sit beside, when the
+  // heading and its picture span the column (Codex-61zsk.66).
   const srcset = $derived(pageImageSrcset(content.image, context.mediaBaseUrl));
   const sizes = $derived(
     layout === 'centered'
       ? 'min(100vw, 52rem)'
-      : layout === 'columns'
+      : layout === 'columns' && content.body
         ? `(min-width: 56rem) ${columnSize(0.5)}, ${columnSize()}`
         : columnSize()
   );

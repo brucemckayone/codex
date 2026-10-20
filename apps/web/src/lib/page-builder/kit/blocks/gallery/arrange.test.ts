@@ -206,3 +206,19 @@ describe('pictureSizes (Codex-61zsk.66)', () => {
     }
   });
 });
+
+describe('pictureSizes under Clean (Codex-61zsk.66)', () => {
+  // Clean never hangs more than three to a row, and a set of six in pairs
+  // (style-clean.css), so its grid declares those shares, not the base ones.
+  it('a set of six is drawn in pairs, and four or more in threes', () => {
+    expect(pictureSizes('grid', 0, 6, 'clean')).toBe(
+      '(min-width: 60rem) min(50vw, 41rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+    );
+    expect(pictureSizes('grid', 0, 7, 'clean')).toBe(
+      '(min-width: 60rem) min(33.33vw, 27.33rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+    );
+    expect(pictureSizes('grid', 0, 7)).toBe(
+      '(min-width: 60rem) min(25vw, 20.5rem), (min-width: 36rem) min(50vw, 41rem), min(100vw, 82rem)'
+    );
+  });
+});

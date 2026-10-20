@@ -117,7 +117,7 @@
     <HeroLoopVideo
       src={clip.playlistUrl}
       posterUrl={still}
-      posterSrcset={still === image ? srcset : ''}
+      posterSrcset={still && still === image ? srcset : ''}
       posterSizes={sizes}
     />
   {:else if still}

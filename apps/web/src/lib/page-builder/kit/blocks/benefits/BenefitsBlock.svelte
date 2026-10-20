@@ -19,12 +19,7 @@
 <script lang="ts">
   import { hasHead } from '../../model/read';
   import { CheckIcon } from '$lib/components/ui/Icon';
-  import {
-    columnSize,
-    pageImageSrcset,
-    resolvePageImageUrl,
-    storedFocus,
-  } from '../../../page-images';
+  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -35,6 +30,7 @@
   import Media from '../../primitives/Media.svelte';
   import Text from '../../primitives/Text.svelte';
   import BenefitsBento from './BenefitsBento.svelte';
+  import { gridCardSizes } from './grid-sizes';
   import { BENEFITS_EMPTY, benefitsDefinition } from './definition';
 
   const { props, section, context, edit }: BlockProps = $props();
@@ -64,17 +60,11 @@
       : []
   );
   const pictured = $derived(tileImages.some(Boolean));
-  // Every size each picture has (Codex-61zsk.66). A grid card is one of the
-  // row's `--_n`: one alone, two from 36rem, then three or four from 60rem.
+  // Every size each picture has, at its card's width (Codex-61zsk.66).
   const tileSrcsets = $derived(
     items.map((item) => pageImageSrcset(item.image, context.mediaBaseUrl))
   );
-  const gridSizes = $derived.by(() => {
-    const count = items.length;
-    if (count <= 1) return columnSize();
-    const wide = [3, 5, 6, 9].includes(count) ? 3 : [4, 7, 8].includes(count) ? 4 : 2;
-    return `(min-width: 60rem) ${columnSize(1 / wide)}, (min-width: 36rem) ${columnSize(0.5)}, ${columnSize()}`;
-  });
+  const gridSizes = $derived(gridCardSizes(items.length, page.style));
 </script>
 
 {#snippet words()}

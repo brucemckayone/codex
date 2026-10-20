@@ -316,3 +316,20 @@ describe('TextBlock', () => {
     });
   });
 });
+
+describe('TextBlock: columns without a body (Codex-61zsk.66)', () => {
+  // The heading and its picture span the column when there is no body to sit
+  // beside (`.text__head` takes 1 / -1), so the picture is declared full width.
+  it('declares the picture across the column', async () => {
+    await render(
+      {
+        heading: 'Alone',
+        image: { key: 'landing-pages/p1/images/t1', alt: '', w: 2400, h: 1600 },
+      },
+      { layout: 'columns', mediaBaseUrl: 'https://cdn.test' }
+    );
+    expect(
+      document.body.querySelector('.text__media img')?.getAttribute('sizes')
+    ).toBe('min(100vw, 82rem)');
+  });
+});

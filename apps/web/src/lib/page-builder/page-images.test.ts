@@ -228,16 +228,22 @@ describe('columnSize (Codex-61zsk.66)', () => {
   // column would declare less than it is drawn and fetch a file too small.
   it('caps at the widest --lp-container any Style sets', () => {
     const styles = join(dirname(fileURLToPath(import.meta.url)), 'kit/styles');
-    const widths = readdirSync(styles)
+    const declared = readdirSync(styles)
       .filter((file) => file.endsWith('.css'))
-      .flatMap((file) =>
-        [
-          ...readFileSync(join(styles, file), 'utf8').matchAll(
-            /--lp-container:\s*([\d.]+)rem/g
-          ),
-        ].map((match) => Number(match[1]))
+      .flatMap(
+        (file) =>
+          readFileSync(join(styles, file), 'utf8').match(
+            /--lp-container:[^;]*/g
+          ) ?? []
       );
-    expect(widths.length).toBeGreaterThan(3);
+    // A width written any other way (min(), var(), px) would drop out of the
+    // max below without a word, so every declaration must be a plain rem.
+    expect(declared.length).toBeGreaterThan(3);
+    for (const line of declared)
+      expect(line, line).toMatch(/^--lp-container:\s*[\d.]+rem$/);
+    const widths = declared.map((line) =>
+      Number(/([\d.]+)rem/.exec(line)?.[1])
+    );
     expect(columnSize()).toBe(`min(100vw, ${Math.max(...widths)}rem)`);
   });
 });

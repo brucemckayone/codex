@@ -10,7 +10,6 @@ import { SECTION_LAYOUTS } from '../../model/ids';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
 import BenefitsBlock from './BenefitsBlock.svelte';
-import { bentoSizes } from './bento';
 import { BENEFITS_EMPTY, benefitsDefinition } from './definition';
 
 let app: ReturnType<typeof mount> | null = null;
@@ -441,6 +440,9 @@ describe('BenefitsBlock: every size a tile picture has (Codex-61zsk.66)', () => 
     await render(three, { layout: 'bento', mediaBaseUrl: CDN });
     const img = document.body.querySelector('img');
     expect(img?.getAttribute('srcset')).toBe(SET);
-    expect(img?.getAttribute('sizes')).toBe(bentoSizes(0, 3));
+    // The lead tile: four of six columns from 56rem, both of two from 36rem.
+    expect(img?.getAttribute('sizes')).toBe(
+      '(min-width: 56rem) min(66.67vw, 54.67rem), (min-width: 36rem) min(100vw, 82rem), min(100vw, 82rem)'
+    );
   });
 });

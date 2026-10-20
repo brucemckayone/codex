@@ -374,6 +374,17 @@ describe('InstructorBlock: every size the portrait has (Codex-61zsk.66)', () => 
     expect(img?.getAttribute('sizes')).toBe(sizes);
   });
 
+  it('the round sign-off face takes the smallest file the still has', async () => {
+    await render(GUIDE, {
+      layout: 'split',
+      media: { guidePortraitUrl: STILL },
+    });
+    const face = document.body.querySelector('img.signoff__face');
+    expect(face).not.toBeNull();
+    expect(face?.getAttribute('srcset')).toBe(SET);
+    expect(face?.getAttribute('sizes')).toBe('4.5rem');
+  });
+
   it('a still whose URL names no sizes offers none', async () => {
     await render(GUIDE, { layout: 'split' });
     const img = document.body.querySelector(
