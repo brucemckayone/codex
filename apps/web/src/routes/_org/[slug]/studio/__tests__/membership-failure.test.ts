@@ -41,6 +41,7 @@ vi.mock('$lib/observability', () => ({
 }));
 
 const { load } = await import('../+layout.server');
+const { ApiError } = await import('$lib/api/errors');
 
 const ORG = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -84,6 +85,18 @@ describe('studio membership gate', () => {
 
     expect(isRedirect(thrown)).toBe(false);
     expect(isHttpError(thrown, 503)).toBe(true);
+  });
+
+  // A 401 is the session ending between the hook and this read (codex-review):
+  // a retry cannot help, so it goes to sign in, back to where it was.
+  it('sends a read refused for its session (401) to sign in, not to a retry', async () => {
+    getMyMembership.mockRejectedValue(new ApiError(401, 'Unauthorized'));
+
+    const thrown = await thrownBy(runLoad);
+
+    expect(isRedirect(thrown) && thrown.location).toBe(
+      '/login?redirect=%2Fstudio'
+    );
   });
 
   it('still redirects a genuine non-member, whose read answers role: null', async () => {

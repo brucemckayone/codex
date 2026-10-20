@@ -10,6 +10,7 @@
  * a retryable 503, never that redirect: a failure is not an answer.
  */
 import { error, redirect } from '@sveltejs/kit';
+import { ApiError } from '$lib/api/errors';
 import { logger } from '$lib/observability';
 import { getMyOrganizations } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
@@ -119,13 +120,23 @@ export const load: LayoutServerLoad = async ({
     // admits non-members on purpose and answers them 200 with `role: null`, so
     // a throw here is the backend failing, not the caller's answer. Read as
     // `role: null`, it bounced a signed-in owner out of their own studio under
-    // load; a 503 leaves them on an error page they can retry.
+    // load; a 503 leaves them on an error page they can retry. A 401 is not
+    // the backend failing but the session ending since the hook read it:
+    // retrying cannot help, so it goes to sign in, as no session does above.
     resolveMembershipWithRetry(() => api.org.getMyMembership(org.id)).catch(
       (err: unknown) => {
+        const status = ApiError.isApiError(err) ? err.status : undefined;
         logger.error('studio-layout:getMyMembership failed', {
           orgId: org.id,
+          status,
           error: String(err),
         });
+        if (status === 401) {
+          redirect(
+            302,
+            `/login?redirect=${encodeURIComponent(_safeStudioRedirect(url))}`
+          );
+        }
         error(
           503,
           'We could not check your access to this studio just now. Please try again.'
