@@ -28,6 +28,17 @@
  * Measured in Chrome with canvas `measureText`, one glyph at a time (so no
  * kerning, which only ever narrows a word), at weights 400 and 700 (the most
  * the org layout loads), the larger kept, and each scale rounded up.
+ *
+ * The same sheet carries each face's `0` (`FACE_ZERO`, Codex-61zsk.64), so a
+ * line's measure holds while the face loads. A measure in `ch` is that many
+ * `0`s of whatever font draws the line, and before the brand's face lands
+ * that is its fallback's: Inter's `0` is about 7% wider against its letters
+ * than Arial's, so a heading capped at 18ch widened as the face arrived and
+ * re-wrapped. No fallback can hold it, since `size-adjust` scales every glyph
+ * alike. So the kit sizes a measure from the face's own `0`
+ * (`--lp-measure-unit`, `styles/kit.css`): from the moment the page draws it
+ * is the width the line will have once the face lands. A face the sheet does
+ * not know, or a browser without style queries, keeps `1ch`.
  */
 import { withFallback } from '$lib/brand-editor/font-fallbacks';
 
@@ -247,6 +258,67 @@ export const FACE_SCALE: Readonly<Record<string, readonly [number, number]>> = {
   'Space Mono': [0.609, 0.776],
 };
 
+/**
+ * Each face's `0` in em, at weights 400 and 700: canvas `measureText('0')` at
+ * 100px in Chrome, every face and weight from its own loaded file (a FontFace
+ * whose status was `loaded`, never `document.fonts.check()`, which answers yes
+ * for a face it has no file for). A face with one weight draws its 700 as a
+ * synthetic bold of the 400, which keeps its advances, so its two match. A
+ * weight between is drawn from the face's own instance (the org layout loads
+ * 400 to 700), whose advances lie between: the kit interpolates.
+ */
+export const FACE_ZERO: Readonly<Record<string, readonly [number, number]>> = {
+  Inter: [0.6309, 0.6741],
+  'DM Sans': [0.684, 0.7039],
+  'Source Sans 3': [0.497, 0.528],
+  Poppins: [0.628, 0.652],
+  Nunito: [0.6, 0.6],
+  Montserrat: [0.6622, 0.6787],
+  Raleway: [0.6122, 0.614],
+  Outfit: [0.656, 0.6655],
+  'Space Grotesk': [0.6409, 0.648],
+  Rubik: [0.6351, 0.6797],
+  Manrope: [0.61, 0.658],
+  'Plus Jakarta Sans': [0.732, 0.708],
+  Figtree: [0.6408, 0.6482],
+  Sora: [0.743, 0.7625],
+  Urbanist: [0.5955, 0.6043],
+  'Open Sans': [0.5718, 0.5718],
+  Lato: [0.58, 0.58],
+  Roboto: [0.562, 0.5739],
+  'Playfair Display': [0.6, 0.645],
+  Merriweather: [0.6457, 0.6622],
+  Lora: [0.621, 0.636],
+  'Crimson Text': [0.5039, 0.5029],
+  'Libre Baskerville': [0.714, 0.755],
+  'EB Garamond': [0.48, 0.5292],
+  'Cormorant Garamond': [0.477, 0.477],
+  Bitter: [0.6413, 0.6347],
+  'Source Serif 4': [0.529, 0.5686],
+  Spectral: [0.5, 0.561],
+  'Bebas Neue': [0.4, 0.4],
+  Righteous: [0.6421, 0.6421],
+  Fredoka: [0.5867, 0.565],
+  'Josefin Sans': [0.6235, 0.628],
+  'Abril Fatface': [0.664, 0.664],
+  'Archivo Black': [0.667, 0.667],
+  Unbounded: [0.893, 0.9248],
+  Anton: [0.4941, 0.4941],
+  Oswald: [0.517, 0.55],
+  Syne: [0.588, 0.738],
+  'Lilita One': [0.639, 0.639],
+  'Titan One': [0.726, 0.726],
+  Caveat: [0.45, 0.45],
+  Kalam: [0.5, 0.513],
+  'Patrick Hand': [0.448, 0.448],
+  Pacifico: [0.543, 0.543],
+  'Dancing Script': [0.63, 0.66],
+  Satisfy: [0.4893, 0.4893],
+  'JetBrains Mono': [0.6, 0.6],
+  'IBM Plex Mono': [0.6, 0.6],
+  'Space Mono': [0.612, 0.612],
+};
+
 /** The weight of a letter the table does not know: its widest, the W. */
 const UNKNOWN_GLYPH = Math.max(...Object.values(GLYPH_WEIGHT));
 
@@ -261,11 +333,12 @@ export function runWeight(run: string): number {
 }
 
 /**
- * What follows the face in every stack the headings can resolve
- * (`org-brand.css` `--font-sans` and `--font-heading`, light and dark, and
- * `typography.css`'s), so `--lp-font-display` always ends with it. A style
- * query compares the text as written, spaces and quotes included, so the
- * sheet spells it exactly; `faces.test.ts` holds the stacks to it.
+ * What follows the face in every stack the headings and the body can resolve
+ * (`org-brand.css` `--font-sans`, `--font-body` and `--font-heading`, light
+ * and dark, and `typography.css`'s), so `--lp-font-display` and
+ * `--lp-font-body` always end with it. A style query compares the text as
+ * written, spaces and quotes included, so the sheet spells it exactly;
+ * `faces.test.ts` holds the stacks to it.
  */
 export const SANS_STACK_TAIL =
   "'Inter-fallback', system-ui, -apple-system, sans-serif";
@@ -280,7 +353,8 @@ export function widestScale(): readonly [number, number] {
 }
 
 /**
- * Every way the page can spell a face, as `--lp-font-display` resolves it:
+ * Every way the page can spell a face, as `--lp-font-display` (or
+ * `--lp-font-body`, whose writers quote it the same) resolves it:
  * quoted either way (the org layout and the brand editor single-quote it; a
  * page's own fonts double-quote it, or leave a one-word name bare), as
  * written or followed by its own fallback (`withFallback`, Codex-61zsk.61),
@@ -294,24 +368,44 @@ export function faceSpellings(face: string): string[] {
   ].map((name) => `${name}, ${SANS_STACK_TAIL}`);
 }
 
+/** The style query that matches one face on one of the page's face tokens. */
+const faceQuery = (
+  token: '--lp-font-display' | '--lp-font-body',
+  face: string
+) =>
+  `@container lp-page ${faceSpellings(face)
+    .map((spelling) => `style(${token}: ${spelling})`)
+    .join(' or ')}`;
+
+/** A face's `0` at 400 and 700, for the page's display or body face. */
+const zeroDeclarations = (
+  role: 'display' | 'body',
+  [at400, at700]: readonly [number, number]
+) =>
+  `    --lp-zero-${role}-400: ${at400}em;\n    --lp-zero-${role}-700: ${at700}em;\n`;
+
 /** `styles/faces.css`, as `write-faces-sheet.ts` writes it. */
 export function facesSheet(): string {
   const [caps, text] = widestScale();
-  const rules = Object.entries(FACE_SCALE).map(
-    ([face, [faceCaps, faceText]]) =>
-      `@container lp-page ${faceSpellings(face)
-        .map((spelling) => `style(--lp-font-display: ${spelling})`)
-        .join(
-          ' or '
-        )} {\n  .lp-section {\n    --lp-face-caps: ${faceCaps};\n    --lp-face-text: ${faceText};\n  }\n}\n`
+  const display = Object.entries(FACE_SCALE).map(
+    ([face, [faceCaps, faceText]]) => {
+      const zero = FACE_ZERO[face];
+      return `${faceQuery('--lp-font-display', face)} {\n  .lp-section {\n    --lp-face-caps: ${faceCaps};\n    --lp-face-text: ${faceText};\n${zero ? zeroDeclarations('display', zero) : ''}  }\n}\n`;
+    }
+  );
+  const body = Object.entries(FACE_ZERO).map(
+    ([face, zero]) =>
+      `${faceQuery('--lp-font-body', face)} {\n  .lp-section {\n${zeroDeclarations('body', zero)}  }\n}\n`
   );
   return [
     '/* GENERATED from model/faces.ts by apps/web/scripts/write-faces-sheet.ts:',
     '   do not edit. How many em a unit of word weight takes in each display',
-    '   face, in capitals and as written, matched on the face as the page',
+    '   face, in capitals and as written, and how wide its `0` is at 400 and',
+    '   700, then the `0` of each body face, matched on the face as the page',
     '   resolves it, in every spelling its writers use. A face not listed, or a',
-    '   browser without style queries, keeps the widest. */',
-    `.lp {\n  --lp-face-caps: ${caps};\n  --lp-face-text: ${text};\n}\n`,
-    ...rules,
+    '   browser without style queries, keeps the widest scale, and `1ch`. */',
+    `.lp {\n  --lp-face-caps: ${caps};\n  --lp-face-text: ${text};\n  --lp-zero-display-400: 1ch;\n  --lp-zero-display-700: 1ch;\n  --lp-zero-body-400: 1ch;\n  --lp-zero-body-700: 1ch;\n}\n`,
+    ...display,
+    ...body,
   ].join('\n');
 }

@@ -132,7 +132,7 @@
   }
 
   .story-chapter :global(.story-words .lp-heading) {
-    max-inline-size: 18ch;
+    max-inline-size: calc(18 * var(--lp-measure-unit));
   }
 
   /* No heading above: the first scene starts at the section's top edge (on

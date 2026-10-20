@@ -114,7 +114,7 @@
   .picture__caption,
   .picture__caption-prompt {
     margin: 0;
-    max-inline-size: 52ch;
+    max-inline-size: calc(52 * var(--lp-measure-unit));
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-small);
     line-height: var(--lp-leading-body);
@@ -179,7 +179,7 @@
   }
 
   .picture[data-layout='beside'] :is(.picture__caption, .picture__caption-prompt) {
-    max-inline-size: 34ch;
+    max-inline-size: calc(34 * var(--lp-measure-unit));
     font-size: var(--lp-size-body);
   }
 

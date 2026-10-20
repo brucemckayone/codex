@@ -29,10 +29,15 @@
  *               (the fallbacks throughout) and again with them loaded, once
  *               everything has settled, so no timing is in it; every text
  *               block is matched by order. Held: no block breaks onto a
- *               different number of lines at the same width. A block whose
- *               own width moves with the font (a measure in `ch`) is counted
- *               and printed, not held (Codex-61zsk.64). Drawing the page
- *               twice with the fonts refused is the instrument's zero.
+ *               different number of lines at the same width, and none
+ *               whose own width moved with the font, as a measure in `ch`
+ *               did until each counted its face's own `0`s (Codex-61zsk.64:
+ *               22 such blocks on the three local sell pages, then 0). A box
+ *               sized to its words moves with them too and is counted the
+ *               same; telling it from a measure by the box's own
+ *               `max-inline-size` misses a measure set on its wrapper (8 of
+ *               the 22). Drawing the page twice with the fonts refused is the
+ *               instrument's zero.
  */
 import { expect, type Page, test } from '@playwright/test';
 import {
@@ -464,6 +469,7 @@ test('a seeded sell page re-wraps nothing at the swap that its fallback could ho
   ).toEqual([]);
 
   const rewrapped: string[] = [];
+  const moved: string[] = [];
   for (const [org, slug] of PAGES)
     for (const width of VIEWPORTS) {
       const label = `${org}/${slug} @${width}`;
@@ -473,7 +479,7 @@ test('a seeded sell page re-wraps nothing at the swap that its fallback could ho
         label
       );
       console.log(
-        `${label}: ${swap.rewrapped.length} re-wrapped, ${swap.boxMoved.length} with a measure in ch that moved`
+        `${label}: ${swap.rewrapped.length} re-wrapped, ${swap.boxMoved.length} whose own width moved`
       );
       for (const x of [...swap.rewrapped, ...swap.boxMoved])
         console.log(
@@ -486,6 +492,10 @@ test('a seeded sell page re-wraps nothing at the swap that its fallback could ho
       rewrapped.push(
         ...swap.rewrapped.map((x) => `${label} ${x.where} "${x.text}"`)
       );
+      moved.push(
+        ...swap.boxMoved.map((x) => `${label} ${x.where} "${x.text}"`)
+      );
     }
   expect(rewrapped).toEqual([]);
+  expect(moved, 'a block whose own width moved with the font').toEqual([]);
 });

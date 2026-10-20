@@ -142,9 +142,9 @@
     grid-column: bleed;
   }
 
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .tm__head :global(.lp-heading[data-size='heading']) {
-    max-inline-size: 20ch;
+    max-inline-size: calc(20 * var(--lp-measure-unit));
   }
 
   /* global.css caps every `p` at 65ch; the prompt spans its region. */
@@ -176,7 +176,7 @@
   }
 
   .tm-list[data-count='1'] {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   @container (min-width: 40rem) {

@@ -124,13 +124,13 @@
   .gallery__head {
     display: grid;
     gap: var(--lp-stack);
-    max-inline-size: var(--lp-measure);
-    --lp-heading-column: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
+    --lp-heading-column: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .gallery__head :global(.lp-heading) {
-    max-inline-size: 20ch;
+    max-inline-size: calc(20 * var(--lp-measure-unit));
   }
 
   /* Never on the public page: an empty gallery there is only its words. */

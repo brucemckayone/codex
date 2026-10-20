@@ -118,9 +118,9 @@
     align-content: start;
   }
 
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .text__head :global(.lp-heading[data-size='heading']) {
-    max-inline-size: 20ch;
+    max-inline-size: calc(20 * var(--lp-measure-unit));
   }
 
   /* Calm and low above a passage; a little taller beside one. */
@@ -186,7 +186,7 @@
   }
 
   .text[data-layout='statement'] :global(.text__body > p:first-child) {
-    max-inline-size: 34ch;
+    max-inline-size: calc(34 * var(--lp-measure-unit));
     color: var(--lp-ink);
     font-size: calc(var(--lp-size-title) * 1.3);
     line-height: var(--leading-snug);
@@ -194,14 +194,14 @@
   }
 
   .text[data-layout='statement'][data-long-lead] :global(.text__body > p:first-child) {
-    max-inline-size: 40ch;
+    max-inline-size: calc(40 * var(--lp-measure-unit));
     font-size: var(--lp-size-lead);
     line-height: var(--lp-leading-lead);
     text-wrap: pretty;
   }
 
   .text[data-layout='statement'] :global(.text__body > p:not(:first-child)) {
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
     color: var(--lp-ink-soft);
   }
 
@@ -291,7 +291,7 @@
   /* Several paragraphs keep the centred column but read from the start of
      each line: centred prose past a few lines is hard to follow. */
   .text[data-layout='centered'][data-long] > :global(.lp-text.text__body) {
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
     text-align: start;
   }
 </style>

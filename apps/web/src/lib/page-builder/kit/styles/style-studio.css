@@ -59,8 +59,8 @@
   --lp-tracking-heading: -0.012em;
   --lp-tracking-title: -0.005em;
 
-  --lp-measure: 58ch;
-  --lp-measure-lead: 40ch;
+  --lp-measure: 58;
+  --lp-measure-lead: 40;
 }
 
 .lp[data-lp-style='studio'] {
@@ -458,10 +458,13 @@
   margin-inline: auto;
 }
 
-/* A Picture's caption in the display face's italic, like a note on a print. */
+/* A Picture's caption in the display face's italic, like a note on a print.
+   Its measure counts that face's `0`s at the body's weight, which it keeps
+   (`styles/kit.css`): the org loads no italic, so it is the upright slanted. */
 :is(.lp, #lp-style)[data-lp-type-facet='studio'] .lp-section[data-lp-type='picture'] .picture__caption {
   font-family: var(--lp-font-display);
   font-style: italic;
+  --lp-measure-unit: calc(var(--lp-zero-display-400) + (var(--lp-zero-display-700) - var(--lp-zero-display-400)) * (clamp(400, var(--lp-weight-body), 700) - 400) / 300);
 }
 
 /* A Break's mark: a short stroke of the pen, centred, drawn on as it enters

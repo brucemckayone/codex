@@ -14,7 +14,8 @@
  *   one owner   no token is declared by a Type's root and a Style's root.
  *
  * TYPE is how the words are set: their sizes, weights, case, tracking,
- * leading and hyphenation, a line's measure in `ch`, the hero's fit
+ * leading and hyphenation, a line's measure (a count of the face's own `0`s,
+ * and the unit it counts in, `styles/kit.css`), the hero's fit
  * (`--lp-display-scale`, and a borrowed Type's factor, `--lp-type-fit`, X74)
  * and the heading fit's face and run (Heading.svelte).
  * Spacing stays the Style's, and so do a centred line's balance
@@ -42,9 +43,12 @@ const TYPE_PROPERTY =
 const TYPE_TOKEN =
   /^--lp-(size|leading|tracking|weight|case|font)-|^--lp-(display-scale|type-fit|heading-face|heading-run)$|^--lp-button-(size|weight|tracking)$|^--lp-measure|^--_figure$/;
 
+/** A line's measure: so many of the face's own `0`s (Codex-61zsk.64). */
+const MEASURE = /^calc\(\d+(\.\d+)? \* var\(--lp-measure-unit\)\)$/;
+
 /** A type declaration, as the header files it. */
 function isType(property: string, value: string): boolean {
-  if (property === 'max-inline-size') return /^\d+(\.\d+)?ch$/.test(value);
+  if (property === 'max-inline-size') return MEASURE.test(value);
   return property.startsWith('--')
     ? TYPE_TOKEN.test(property)
     : TYPE_PROPERTY.test(property);

@@ -67,7 +67,7 @@
   --lp-button-weight: var(--font-semibold);
   --lp-button-tracking: 0.05em;
 
-  --lp-measure-lead: 38ch;
+  --lp-measure-lead: 38;
 }
 
 .lp[data-lp-style='poster'] {

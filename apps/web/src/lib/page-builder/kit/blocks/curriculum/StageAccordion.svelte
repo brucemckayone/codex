@@ -170,7 +170,7 @@
   }
 
   .stages__gloss {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
     margin: 0;
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-body);

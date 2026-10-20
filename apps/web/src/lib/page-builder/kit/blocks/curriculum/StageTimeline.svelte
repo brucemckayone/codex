@@ -222,7 +222,7 @@
   }
 
   .timeline__gloss {
-    max-inline-size: 40ch;
+    max-inline-size: calc(40 * var(--lp-measure-unit));
     margin: 0;
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-body);

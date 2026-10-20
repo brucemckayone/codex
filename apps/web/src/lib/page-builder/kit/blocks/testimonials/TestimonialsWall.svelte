@@ -46,7 +46,7 @@
   }
 
   .tm-wall[data-count='1'] {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   /* A tile never breaks across two columns. base.css's `li` spacing gives way

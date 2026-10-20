@@ -154,8 +154,8 @@
   .pricing__head {
     display: grid;
     gap: var(--lp-stack);
-    max-inline-size: var(--lp-measure);
-    --lp-heading-column: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
+    --lp-heading-column: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   /* Soft centres its cards' head, so the states that stand in for the cards
@@ -202,7 +202,7 @@
     display: grid;
     gap: var(--space-3);
     justify-items: start;
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
     padding: var(--space-8);
     border-radius: var(--lp-radius-card);
     background: var(--lp-bg);
@@ -225,9 +225,9 @@
   /* ── cards ─────────────────────────────────────────────────────────────── */
   /* A card's width (`--_track`), which its name's room is read from
      (03 X71): its share of the cards, `--_n` across, which draws the tracks
-     too. A lone card is held to the lead's measure, in the body's `ch`,
-     which a title's room reads as its box does (in `font-size` a `ch` is
-     the parent's face). */
+     too. A lone card is held to the lead's measure, in the body's `0`s,
+     which a title's room reads as its box does (in `font-size` an `em` is
+     the parent's). */
   .pricing__cards {
     --_n: 1;
     --_track: calc((var(--lp-column) - (var(--_n) - 1) * var(--lp-gap)) / var(--_n));
@@ -238,8 +238,8 @@
   }
 
   .pricing__cards[data-count='1'] {
-    --_track: min(var(--lp-column), var(--lp-measure-lead) + var(--space-16));
-    max-inline-size: calc(var(--lp-measure-lead) + var(--space-16));
+    --_track: min(var(--lp-column), var(--lp-measure-lead) * var(--lp-measure-unit) + var(--space-16));
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit) + var(--space-16));
   }
 
   @container (min-width: 44rem) {
@@ -281,7 +281,7 @@
     .pricing[data-layout='focus'] > .pricing__head {
       position: sticky;
       top: var(--space-12);
-      --lp-heading-column: min(var(--lp-measure), (var(--lp-column) - var(--lp-gap) * 1.5) * 5 / 12);
+      --lp-heading-column: min(var(--lp-measure) * var(--lp-measure-unit), (var(--lp-column) - var(--lp-gap) * 1.5) * 5 / 12);
     }
   }
 

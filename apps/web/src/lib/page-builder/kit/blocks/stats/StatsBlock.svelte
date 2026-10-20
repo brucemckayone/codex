@@ -152,7 +152,7 @@
   }
 
   .stat__label {
-    max-inline-size: 26ch;
+    max-inline-size: calc(26 * var(--lp-measure-unit));
     font-size: var(--lp-size-small);
     line-height: var(--lp-leading-body);
     color: var(--lp-ink-soft);

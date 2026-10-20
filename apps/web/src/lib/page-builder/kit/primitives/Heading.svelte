@@ -139,6 +139,9 @@
     line-height: var(--lp-leading-display);
     letter-spacing: var(--lp-tracking-display);
     text-transform: var(--lp-case-display);
+    /* A measure set on a heading counts its own face's `0`s at its weight
+       (`styles/kit.css`), so it holds while the face loads. */
+    --lp-measure-unit: var(--lp-zero-display);
   }
 
   /* A section heading is drawn no larger than its widest run fits its room
@@ -171,6 +174,7 @@
     font-weight: var(--lp-weight-heading);
     line-height: var(--lp-leading-heading);
     letter-spacing: var(--lp-tracking-heading);
+    --lp-measure-unit: var(--lp-zero-heading);
   }
 
   /* The Style's tracking per character at each size, in em: a real property,
@@ -228,5 +232,6 @@
     font-weight: var(--lp-weight-title);
     line-height: var(--lp-leading-title);
     letter-spacing: var(--lp-tracking-title);
+    --lp-measure-unit: var(--lp-zero-title);
   }
 </style>

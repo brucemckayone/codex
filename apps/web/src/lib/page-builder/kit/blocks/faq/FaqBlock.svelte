@@ -129,9 +129,9 @@
     gap: var(--lp-gap);
   }
 
-  /* The heading measures itself in its own `ch`, not the body face's. */
+  /* The heading measures itself in its own face's `0`s, not the body's. */
   .faq__head :global(.lp-heading) {
-    max-inline-size: 18ch;
+    max-inline-size: calc(18 * var(--lp-measure-unit));
   }
 
   /* The list and its closing row share one column of the section. */

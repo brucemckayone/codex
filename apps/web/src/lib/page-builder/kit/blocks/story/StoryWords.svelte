@@ -31,8 +31,8 @@
     display: grid;
     align-content: start;
     gap: var(--space-3);
-    max-inline-size: var(--lp-measure);
-    --lp-heading-column: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
+    --lp-heading-column: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   .story-words[data-size='heading'] {
@@ -52,6 +52,6 @@
   .story-words[data-size='heading'] .story-words__body {
     font-size: var(--lp-size-lead);
     line-height: var(--lp-leading-lead);
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: calc(var(--lp-measure-lead) * var(--lp-measure-unit));
   }
 </style>

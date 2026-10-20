@@ -109,7 +109,7 @@
   }
 
   .tm-marquee__lane:has(> :only-child) {
-    max-inline-size: var(--lp-measure);
+    max-inline-size: calc(var(--lp-measure) * var(--lp-measure-unit));
   }
 
   .tm-marquee__lane[data-copy] {

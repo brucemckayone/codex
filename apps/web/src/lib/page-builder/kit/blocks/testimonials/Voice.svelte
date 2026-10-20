@@ -140,16 +140,17 @@
     font-synthesis: none;
     line-height: var(--lp-leading-heading);
     letter-spacing: var(--lp-tracking-heading);
+    --lp-measure-unit: var(--lp-zero-heading);
     text-wrap: balance;
     text-indent: calc(var(--_hang) * -1em);
   }
 
   .voice[data-size='lead'] p {
-    max-inline-size: 30ch;
+    max-inline-size: calc(30 * var(--lp-measure-unit));
   }
 
   .voice[data-size='monument'] p {
-    max-inline-size: 26ch;
+    max-inline-size: calc(26 * var(--lp-measure-unit));
   }
 
   .voice[data-size='monument'][data-length='short'] {
@@ -157,7 +158,7 @@
   }
 
   .voice[data-size='monument'][data-length='short'] p {
-    max-inline-size: 20ch;
+    max-inline-size: calc(20 * var(--lp-measure-unit));
   }
 
   .voice:is([data-size='lead'], [data-size='monument'])[data-length='long'] {
@@ -165,10 +166,11 @@
   }
 
   .voice:is([data-size='lead'], [data-size='monument'])[data-length='long'] p {
-    max-inline-size: 38ch;
+    max-inline-size: calc(38 * var(--lp-measure-unit));
     font-weight: var(--lp-weight-title);
     line-height: var(--lp-leading-title);
     letter-spacing: var(--lp-tracking-title);
+    --lp-measure-unit: var(--lp-zero-title);
   }
 
   .voice:is([data-size='lead'], [data-size='monument']) .voice__by {
