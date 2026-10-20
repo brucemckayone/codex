@@ -419,11 +419,19 @@
     border-color: color-mix(in oklab, var(--color-interactive) 40%, var(--color-border));
   }
 
+  /* At least 24px tall (WCAG 2.2 AA 2.5.8, Codex-61zsk.71) at ANY density:
+     the space tokens scale with the org's density (0.75 makes --space-6 18px),
+     so each size keeps a rem floor, as --tap-target-min does. The colours
+     stay the panel's own: they were measured for 1.4.11 on this surface
+     (Codex-6nb7i; off reads 6.2:1 knob to track). */
   .way__sw {
+    --sw-h: max(1.5rem, var(--space-6));
+    --sw-w: max(2.75rem, var(--space-11));
+    --sw-inset: max(0.125rem, var(--space-0-5));
     position: relative;
     flex: none;
-    width: 34px;
-    height: 20px;
+    width: var(--sw-w);
+    height: var(--sw-h);
     border: 0;
     border-radius: var(--radius-full);
     background-color: var(--color-surface-tertiary, var(--color-surface-secondary));
@@ -439,10 +447,10 @@
   .way__sw::after {
     content: '';
     position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 16px;
-    height: 16px;
+    top: var(--sw-inset);
+    left: var(--sw-inset);
+    width: calc(var(--sw-h) - 2 * var(--sw-inset));
+    height: calc(var(--sw-h) - 2 * var(--sw-inset));
     border-radius: 50%;
     background-color: var(--color-text-secondary);
     transition: transform var(--duration-fast) var(--ease-default), background-color var(--duration-fast) var(--ease-default);
@@ -453,13 +461,22 @@
   }
 
   .way--on .way__sw::after {
-    transform: translateX(14px);
+    transform: translateX(calc(var(--sw-w) - var(--sw-h)));
     background-color: var(--color-interactive);
   }
 
   .way__sw:focus-visible {
     outline: none;
     box-shadow: var(--shadow-focus-ring);
+  }
+
+  /* A finger gets the full tap target; the drawn switch keeps its size. */
+  @media (pointer: coarse) {
+    .way__sw::before {
+      content: '';
+      position: absolute;
+      inset: calc((var(--sw-h) - var(--tap-target-min)) / 2) 0;
+    }
   }
 
   .way__copy {
