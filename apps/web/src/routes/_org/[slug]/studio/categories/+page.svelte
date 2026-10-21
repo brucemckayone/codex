@@ -52,6 +52,7 @@
   import { PlusIcon, UploadIcon } from '$lib/components/ui/Icon';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { keepValuesOnSave } from '$lib/utils/remote-form';
+  import { shrinkPhotoInput } from '$lib/utils/shrink-photo';
 
   let { data } = $props();
 
@@ -125,10 +126,10 @@
     coverInput?.click();
   }
 
-  function onCoverSelected() {
-    if (coverInput?.files?.length && coverFormEl) {
-      coverFormEl.requestSubmit();
-    }
+  async function onCoverSelected() {
+    if (!coverInput?.files?.length) return;
+    await shrinkPhotoInput(coverInput);
+    coverFormEl?.requestSubmit();
   }
 
   // Session upload URL (freshest) wins over the persisted list URL.

@@ -18,6 +18,7 @@
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import { saveOnboardingProfile } from '$lib/remote/account.remote';
   import { avatarUploadForm } from '$lib/remote/avatar-upload.remote';
+  import { shrinkPhotoInput } from '$lib/utils/shrink-photo';
   import * as m from '$paraglide/messages';
 
   interface SocialLinks {
@@ -58,6 +59,18 @@
 
   let saving = $state(false);
   let saveError = $state<string | null>(null);
+
+  // The picked photo is swapped for its shrunk copy before it can be sent
+  // (Codex-kk9nv.12), so Upload waits for that to finish.
+  let shrinking = $state(false);
+  async function shrinkPicked(event: Event & { currentTarget: HTMLInputElement }) {
+    shrinking = true;
+    try {
+      await shrinkPhotoInput(event.currentTarget);
+    } finally {
+      shrinking = false;
+    }
+  }
 
   // Show the freshly uploaded avatar if one was just uploaded, else the prop.
   const avatarUrl = $derived(
@@ -107,6 +120,7 @@
         class="avatar__input"
         {...avatarUploadForm.fields.avatar.as('file')}
         accept="image/png,image/jpeg,image/webp,image/gif"
+        onchange={shrinkPicked}
       />
       <!-- Schema validation (HEIC/oversize) surfaces on the field's issues(),
            NOT on .result — the handler never runs when validation fails. The
@@ -122,6 +136,7 @@
         type="submit"
         variant="secondary"
         size="sm"
+        disabled={shrinking}
         loading={avatarUploadForm.pending > 0}
       >
         {avatarUploadForm.pending > 0

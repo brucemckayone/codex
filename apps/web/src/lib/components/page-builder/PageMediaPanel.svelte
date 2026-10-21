@@ -58,6 +58,7 @@
   import MediaPicker from '$lib/components/studio/MediaPicker.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
+  import { shrinkPhotoAndSubmit } from '$lib/utils/shrink-photo';
   import { PAGE_MEDIA_SLOTS } from './page-media-slots';
   import {
     uploadJourneyCoverForm,
@@ -240,7 +241,7 @@
           accept="image/png,image/jpeg,image/webp,image/gif"
           {...uploadJourneyCoverForm.fields.cover.as('file')}
           tabindex="-1"
-          onchange={(event) => event.currentTarget.form?.requestSubmit()}
+          onchange={shrinkPhotoAndSubmit}
         />
         <button
           type="button"
@@ -344,7 +345,7 @@
           accept="image/png,image/jpeg,image/webp,image/gif"
           {...uploadJourneyHeroImageForm.fields.image.as('file')}
           tabindex="-1"
-          onchange={(event) => event.currentTarget.form?.requestSubmit()}
+          onchange={shrinkPhotoAndSubmit}
         />
         <button
           type="button"
@@ -450,7 +451,7 @@
           accept="image/png,image/jpeg,image/webp,image/gif"
           {...uploadJourneySignatureImageForm.fields.image.as('file')}
           tabindex="-1"
-          onchange={(event) => event.currentTarget.form?.requestSubmit()}
+          onchange={shrinkPhotoAndSubmit}
         />
         <button
           type="button"

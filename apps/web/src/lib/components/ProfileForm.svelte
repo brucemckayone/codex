@@ -10,6 +10,7 @@
   import * as m from '$paraglide/messages';
   import { updateProfileForm } from '$lib/remote/account.remote';
   import { avatarUploadForm } from '$lib/remote/avatar-upload.remote';
+  import { shrinkPhotoInput } from '$lib/utils/shrink-photo';
   import { avatarDeleteForm } from '$lib/remote/avatar-delete.remote';
   import { keepValuesOnSave } from '$lib/utils/remote-form';
   import Button from '$lib/components/ui/Button/Button.svelte';
@@ -76,9 +77,8 @@
       .slice(0, 2) ?? profile?.username?.slice(0, 2).toUpperCase() ?? '?'
   );
 
-  function handleAvatarSelect(e: Event) {
-    const target = e.target as HTMLInputElement;
-    const file = target.files?.[0];
+  async function handleAvatarSelect(e: Event) {
+    const file = await shrinkPhotoInput(e.target as HTMLInputElement);
     if (file) {
       avatarPreview = URL.createObjectURL(file);
       hasSelectedFile = true;

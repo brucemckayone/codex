@@ -23,6 +23,7 @@
   import { Button } from '$lib/components/ui';
   import { useDropZone } from '$lib/utils/use-drop-zone.svelte';
   import { uploadThumbnailForm, deleteThumbnailCommand } from '$lib/remote/content.remote';
+  import { shrinkPhoto } from '$lib/utils/shrink-photo';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
 
@@ -65,7 +66,11 @@
     return null;
   }
 
-  function handleFile(file: File) {
+  async function handleFile(picked: File) {
+    // Shrunk first (Codex-kk9nv.12): a phone photo is far over what the server
+    // can decode, and the size check and the upload both see the shrunk copy.
+    // A type the thumbnail refuses is not redrawn, so it is still refused.
+    const file = ALLOWED_TYPES.includes(picked.type) ? await shrinkPhoto(picked) : picked;
     const error = validateFile(file);
     if (error) {
       validationError = error;
