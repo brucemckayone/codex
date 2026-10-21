@@ -40,6 +40,7 @@ import {
 } from 'vitest';
 import {
   AgreementNotFoundError,
+  FutureStartNotAllowedError,
   InvalidProposalStateError,
   ShareExceedsAvailableError,
 } from '../../errors';
@@ -194,6 +195,50 @@ describe('AgreementService', () => {
       expect(proposal.proposedByRole).toBe('owner');
       expect(proposal.roundNumber).toBe(1);
       expect(proposal.parentProposalId).toBeNull();
+    });
+
+    // Owner decision 2026-10-21, "Refuse a future start" (Codex-2hxff.63):
+    // accepting ends the current agreement at once, so a later start would
+    // leave the creator unpaid in between.
+    it('refuses a future start, and writes nothing', async () => {
+      const fx = await seedOrgFixture(db);
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await expect(
+        service.proposeAgreement({
+          organizationId: fx.orgId,
+          creatorId: fx.creatorAId,
+          revenueType: 'subscription',
+          sharePercent: 3000,
+          termMonths: 6,
+          proposedByUserId: fx.ownerId,
+          effectiveFrom: tomorrow,
+        })
+      ).rejects.toBeInstanceOf(FutureStartNotAllowedError);
+      const written = await db.query.agreementProposals.findMany({
+        where: and(
+          eq(schema.agreementProposals.organizationId, fx.orgId),
+          eq(schema.agreementProposals.creatorId, fx.creatorAId)
+        ),
+      });
+      expect(written).toEqual([]);
+    });
+
+    it('allows a start in the past', async () => {
+      const fx = await seedOrgFixture(db);
+      const lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+      const proposal = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+        effectiveFrom: lastWeek,
+      });
+
+      expect(proposal.proposedEffectiveFrom).toEqual(lastWeek);
     });
 
     it('non-owner cannot propose (Forbidden)', async () => {
@@ -603,6 +648,54 @@ describe('AgreementService', () => {
       });
       expect(proposalAfter?.status).toBe('accepted');
       expect(proposalAfter?.respondedByUserId).toBe(fx.creatorAId);
+    });
+
+    // Codex-2hxff.63: a proposal made before the rule can still carry a
+    // future start. Accepting it would end the current agreement now.
+    it('refuses a proposal that starts in the future, and leaves the current agreement paying', async () => {
+      const fx = await seedOrgFixture(db);
+      const first = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const current = await service.acceptProposal({
+        proposalId: first.id,
+        acceptedByUserId: fx.creatorAId,
+      });
+      const next = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 4000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      await db
+        .update(schema.agreementProposals)
+        .set({
+          proposedEffectiveFrom: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        })
+        .where(eq(schema.agreementProposals.id, next.id));
+
+      await expect(
+        service.acceptProposal({
+          proposalId: next.id,
+          acceptedByUserId: fx.creatorAId,
+        })
+      ).rejects.toBeInstanceOf(FutureStartNotAllowedError);
+
+      const after = await db.query.creatorOrganizationAgreements.findFirst({
+        where: eq(schema.creatorOrganizationAgreements.id, current.id),
+      });
+      expect(after?.status).toBe('active');
+      const nextAfter = await db.query.agreementProposals.findFirst({
+        where: eq(schema.agreementProposals.id, next.id),
+      });
+      expect(nextAfter?.status).toBe('open');
     });
 
     it('accepting supersedes any open/countered sibling proposals in the thread', async () => {

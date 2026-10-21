@@ -76,6 +76,7 @@ export {
   BusinessLogicError,
   ConflictError,
   ForbiddenError,
+  FutureStartNotAllowedError,
   InternalServiceError,
   InvalidProposalStateError,
   isAgreementServiceError,

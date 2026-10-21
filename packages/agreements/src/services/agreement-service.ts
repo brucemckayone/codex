@@ -56,7 +56,11 @@ import {
   ne,
   or,
 } from 'drizzle-orm';
-import { AgreementNotFoundError, InvalidProposalStateError } from '../errors';
+import {
+  AgreementNotFoundError,
+  FutureStartNotAllowedError,
+  InvalidProposalStateError,
+} from '../errors';
 import type {
   AgreementProposal,
   CreatorOrganizationAgreement,
@@ -269,6 +273,7 @@ export class AgreementService extends BaseService {
     input: ProposeAgreementInput
   ): Promise<AgreementProposal> {
     try {
+      assertNotFutureStart(input.effectiveFrom, new Date());
       const proposal = await this.db.transaction(async (tx) => {
         await this.assertActiveOwner(
           tx,
@@ -586,6 +591,9 @@ export class AgreementService extends BaseService {
         });
 
         const now = new Date();
+        // A proposal made before the rule may still start in the future
+        // (Codex-2hxff.63): step (5) would end the current agreement now.
+        assertNotFutureStart(proposal.proposedEffectiveFrom, now);
 
         // (3) Mark the proposal accepted.
         await tx
@@ -1984,5 +1992,18 @@ export class AgreementService extends BaseService {
       throw new AgreementNotFoundError('Agreement not found', { agreementId });
     }
     return row;
+  }
+}
+
+/**
+ * Owner decision 2026-10-21, "Refuse a future start" (Codex-2hxff.63):
+ * accepting ends the creator's current agreement at once, so a new one that
+ * began later would leave them unpaid in between. A past start is allowed.
+ */
+function assertNotFutureStart(effectiveFrom: Date | undefined, now: Date) {
+  if (effectiveFrom && effectiveFrom.getTime() > now.getTime()) {
+    throw new FutureStartNotAllowedError({
+      effectiveFrom: effectiveFrom.toISOString(),
+    });
   }
 }

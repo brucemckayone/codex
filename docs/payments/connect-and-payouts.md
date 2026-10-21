@@ -192,10 +192,19 @@ Rules:
 - **The row comes first.** A writer reserves a slice's row (`pending`) before
   any money moves, transfers, then marks it `paid` — so a replay, at any age,
   finds the row and sends nothing, and money never moves unrecorded. Every
-  writer goes through `recordSlice` (`packages/purchase/src/utils/payout-ledger.ts`).
+  writer goes through the ledger (`packages/payments/src/payout-ledger.ts`):
+  `recordSlice`, or `recordSplitOnce` for a whole split.
   A replayed purchase webhook re-records the purchase's slices from its stored
   split, adding only a slice the first delivery never wrote — unless the
   purchase has been refunded or disputed since.
+- **An organisation subscription invoice is split once** (owner decision
+  2026-10-21, "Keep its first split", `Codex-2hxff.62`). Its slices past the
+  platform fee are reserved together, in one transaction that holds a lock on
+  the charge (`recordSplitOnce`). A redelivery that finds any of them adds
+  nothing. This includes a redelivery after a creator accepts an agreement
+  backdated to before the invoice: the creator is paid from the next invoice,
+  and the owner keeps what the first split gave them. A slice that was
+  reserved but never sent is paid by the drains.
 - **Nothing is dropped.** A slice that cannot be paid yet is a pending row in
   its payee's name. The organisation's money while it has **no owner** is a
   pending `no_owner` row with no payee (owner decision 2026-10-18, "Hold it for
