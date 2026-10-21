@@ -68,6 +68,7 @@
 -->
 <script lang="ts">
   import { formatPrice } from '$lib/utils/format';
+  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
   import type { JourneyEntryCardProps } from './journey-entry-card';
 
   const {
@@ -128,6 +129,27 @@
    * off, so string discriminants are the narrowing that actually works here.
    */
   const showFlair = $derived(!(layout === 'row' && Boolean(coverImageUrl)));
+
+  /**
+   * How wide the cover is drawn, for choosing from its stored sizes
+   * (Codex-kk9nv.3). A tile is a 3:4 portrait in a 15-17rem rail; a row's
+   * cover is a narrow column the row stretches tall, and full width at 16:9
+   * on a phone. Both crop, so a landscape picture is drawn wider than its box
+   * (`coverCropSizes`), taken here as about 3:4.
+   */
+  const coverSrcset = $derived(
+    coverImageUrl ? getThumbnailSrcset(coverImageUrl) : ''
+  );
+  const coverSizes = $derived.by(() => {
+    if (!coverSrcset) return undefined;
+    if (layout === 'tile') {
+      return coverCropSizes('min(17rem, 82vw)', 3 / 4, coverImageUrl);
+    }
+    const column = featured
+      ? 'clamp(7.5rem, 30vw, 12.5rem)'
+      : 'clamp(6rem, 22vw, 7.5rem)';
+    return `(max-width: 39.9375rem) calc(100vw - 2rem), ${coverCropSizes(column, 3 / 4, coverImageUrl)}`;
+  });
 
   /**
    * The bar's value, sanitised to an integer in 0–100.
@@ -213,6 +235,8 @@
       <img
         class="jec__cover-img"
         src={coverImageUrl}
+        srcset={coverSrcset || undefined}
+        sizes={coverSizes}
         alt=""
         loading="lazy"
         decoding="async"

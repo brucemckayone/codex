@@ -43,6 +43,8 @@
   @prop {(slug: string) => void} [onselect] - Optional inline-filter hook (WP-10).
 -->
 <script lang="ts">
+  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
+
   interface Props {
     name: string;
     slug: string;
@@ -67,6 +69,20 @@
    * the mark simply does not render rather than painting a stray box.
    */
   const markGlyph = $derived(name.trim().charAt(0).toUpperCase());
+
+  /**
+   * The cover's stored sizes, and how wide it is drawn: a 16:9 frame in the
+   * topic rail's `min(21rem, 82vw)` items (Codex-kk9nv.3). A picture wider
+   * than 16:9 is cropped, and so drawn wider than the card.
+   */
+  const coverSrcset = $derived(
+    coverImageUrl ? getThumbnailSrcset(coverImageUrl) : ''
+  );
+  const coverSizes = $derived(
+    coverSrcset
+      ? coverCropSizes('min(21rem, 82vw)', 16 / 9, coverImageUrl)
+      : undefined
+  );
 
   /**
    * Left-click with `onselect` set → filter inline instead of navigating.
@@ -95,7 +111,14 @@
     class:topic-card__media--fallback={!coverImageUrl}
   >
     {#if coverImageUrl}
-      <img src={coverImageUrl} alt="" loading="lazy" decoding="async" />
+      <img
+        src={coverImageUrl}
+        srcset={coverSrcset || undefined}
+        sizes={coverSizes}
+        alt=""
+        loading="lazy"
+        decoding="async"
+      />
     {/if}
   </div>
   {#if !coverImageUrl && markGlyph}
