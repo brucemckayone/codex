@@ -91,3 +91,20 @@ export class ShareExceedsAvailableError extends BusinessLogicError {
     this.name = 'ShareExceedsAvailableError';
   }
 }
+
+/**
+ * Thrown when an agreement would start in the future (owner decision
+ * 2026-10-21, "Refuse a future start", Codex-2hxff.63). Accepting ends the
+ * creator's current agreement at once, so a later start would leave them
+ * unpaid until it began. Refused when proposed, and again when accepted, for
+ * a proposal made before the rule.
+ *
+ * Maps to 422 (BusinessLogicError). The context is sent to the client, so it
+ * carries the date only.
+ */
+export class FutureStartNotAllowedError extends BusinessLogicError {
+  constructor(context: { effectiveFrom: string }) {
+    super('An agreement cannot start in the future', context);
+    this.name = 'FutureStartNotAllowedError';
+  }
+}
