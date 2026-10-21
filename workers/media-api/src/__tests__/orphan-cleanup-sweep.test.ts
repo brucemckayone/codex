@@ -8,14 +8,27 @@
  * runs. Before this bead the sweep deleted the key unconditionally, so the live
  * thumbnail went with it.
  *
+ * Codex-kk9nv.13: a still in a folder named for its size
+ * (`{base}/{w}x{h}-{nonce}/`, kk9nv.5) is never re-written, so the check is
+ * skipped for it. It misfired on the commonest such orphan, an upload whose
+ * row write and discard both failed: written seconds before its row, it read
+ * as a re-upload and was kept for good.
+ *
  * Runs the DO's real sweep (runCleanup) inside the DO, against the test env's
  * R2 and database, so the check is exercised where the delete happens.
  */
 import { env, runInDurableObject } from 'cloudflare:test';
+import type { R2Service } from '@codex/cloudflare-clients';
 import { closeDbPool, createDbClient, inArray, schema } from '@codex/database';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type {
+  OrphanedFileRecord,
+  OrphanedFileService,
+} from '@codex/image-processing';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  isFreshStillObject,
   type OrphanedFileCleanupDO,
+  reasonToKeep,
   wasRewrittenAfterOrphaning,
 } from '../durable-objects/orphaned-file-cleanup-do';
 
@@ -31,6 +44,7 @@ const keys = {
   reused: `${prefix}/reused.webp`,
   orphan: `${prefix}/orphan.webp`,
   absent: `${prefix}/absent.webp`,
+  fresh: `${prefix}/1600x900-0a1b2c3d/lg.webp`,
 };
 
 describe('wasRewrittenAfterOrphaning', () => {
@@ -55,12 +69,60 @@ describe('wasRewrittenAfterOrphaning', () => {
   });
 });
 
+describe('isFreshStillObject (Codex-kk9nv.13)', () => {
+  it.each([
+    'creator-1/content-thumbnails/content-1/1600x900-0a1b2c3d/lg.webp',
+    'avatars/user-1/300x300-ffffffff/sm.webp',
+    'courses/course-1/cover/1200x630-0a1b2c3d/xl.webp',
+  ])('recognises an object in a sized folder: %s', (key) => {
+    expect(isFreshStillObject(key)).toBe(true);
+  });
+
+  it.each([
+    ['a legacy fixed key', 'creator-1/content-thumbnails/content-1/lg.webp'],
+    ['a nonce one digit short', 'avatars/user-1/300x300-fffffff/sm.webp'],
+    ['a sized folder above the parent', 'c/1600x900-0a1b2c3d/sub/lg.webp'],
+    ['a bare file name', 'lg.webp'],
+  ])('leaves %s to the re-upload check', (_what, key) => {
+    expect(isFreshStillObject(key)).toBe(false);
+  });
+
+  it('decides a sized-folder orphan without asking R2 when it was written', async () => {
+    // `head` reports a write after the row, which the re-upload check reads
+    // as a live upload. A sized folder cannot have one.
+    const head = vi.fn().mockResolvedValue({ uploaded: new Date() });
+    const record: OrphanedFileRecord = {
+      id: 'orphan-1',
+      r2Key: keys.fresh,
+      imageType: 'content_thumbnail',
+      originalEntityId: null,
+      originalEntityType: null,
+      orphanedAt: new Date(Date.now() - 60 * 1000),
+      cleanupAttempts: 0,
+      lastAttemptAt: null,
+      status: 'pending',
+      errorMessage: null,
+      fileSizeBytes: null,
+    };
+
+    expect(
+      await reasonToKeep(
+        record,
+        { head } as unknown as R2Service,
+        {} as OrphanedFileService
+      )
+    ).toBeNull();
+    expect(head).not.toHaveBeenCalled();
+  });
+});
+
 describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
   const db = createDbClient(env);
   const ids: Record<keyof typeof keys, string> = {
     reused: '',
     orphan: '',
     absent: '',
+    fresh: '',
   };
 
   beforeAll(async () => {
@@ -87,6 +149,11 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
           imageType: 'content_thumbnail',
           orphanedAt: new Date(Date.now() - 60 * MINUTE),
         },
+        {
+          r2Key: keys.fresh,
+          imageType: 'content_thumbnail',
+          orphanedAt: new Date(Date.now() - 60 * MINUTE),
+        },
       ])
       .returning({
         id: schema.orphanedImageFiles.id,
@@ -101,6 +168,9 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
 
     // The re-upload lands at the orphaned key AFTER the row was written.
     await testEnv.ASSETS_BUCKET.put(keys.reused, 'new live bytes');
+    // The same timing at a sized folder (Codex-kk9nv.13), so only the key's
+    // shape can tell the two apart.
+    await testEnv.ASSETS_BUCKET.put(keys.fresh, 'orphaned bytes');
   });
 
   afterAll(async () => {
@@ -131,7 +201,7 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
     return row?.status;
   }
 
-  it('keeps a re-uploaded key, deletes a genuine orphan, and marks an absent one deleted', async () => {
+  it('keeps a re-uploaded key, deletes a genuine orphan and a sized-folder one, and marks an absent one deleted', async () => {
     const ns = testEnv.ORPHAN_CLEANUP_DO;
     const stub = ns.get(ns.idFromName('singleton'));
 
@@ -151,5 +221,8 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
     expect(await testEnv.ASSETS_BUCKET.head(keys.orphan)).toBeNull();
 
     expect(await statusOf(ids.absent)).toBe('deleted');
+
+    expect(await statusOf(ids.fresh)).toBe('deleted');
+    expect(await testEnv.ASSETS_BUCKET.head(keys.fresh)).toBeNull();
   });
 });

@@ -28,6 +28,7 @@ import {
 } from '@codex/image-processing';
 import { ObservabilityClient } from '@codex/observability';
 import { InternalServiceError } from '@codex/service-errors';
+import { readStillFolderName } from '@codex/validation';
 
 /**
  * Cleanup interval: 1 hour in milliseconds
@@ -67,17 +68,27 @@ const REUPLOAD_CLOCK_SKEW_MS = 5 * 60 * 1000;
  * orphaned, which means it holds new bytes rather than the orphan
  * (Codex-r85jo.6).
  *
- * Every image key except a page image's is a pure function of an entity id
- * and is overwritten in place: a content thumbnail, avatar, cover or logo is
- * re-uploaded to the SAME key it was deleted from. So an orphan recorded when
- * a delete failed can be re-occupied by the next upload before the sweep
- * runs, and deleting it then destroys the image the row now points at.
+ * An org logo's key, and a still's key stored before Codex-kk9nv.5, is a pure
+ * function of an entity id and is overwritten in place: it is re-uploaded to
+ * the SAME key it was deleted from. So an orphan recorded when a delete failed
+ * can be re-occupied by the next upload before the sweep runs, and deleting it
+ * then destroys the image the row now points at.
  */
 export function wasRewrittenAfterOrphaning(
   uploaded: Date,
   orphanedAt: Date
 ): boolean {
   return uploaded.getTime() > orphanedAt.getTime() - REUPLOAD_CLOCK_SKEW_MS;
+}
+
+/**
+ * Whether an object sits in a still folder named for its picture's size
+ * (`{base}/{w}x{h}-{nonce}/{size}.webp`, Codex-kk9nv.5). Each upload mints a
+ * new folder, so nothing ever re-writes one.
+ */
+export function isFreshStillObject(r2Key: string): boolean {
+  const folder = r2Key.split('/').at(-2);
+  return folder !== undefined && readStillFolderName(folder) !== null;
 }
 
 /**
@@ -89,6 +100,11 @@ export function wasRewrittenAfterOrphaning(
  * for good. What decides a page image is whether a page still shows it, and
  * the row that queued it cannot say: undo, duplicated pages and overlapping
  * saves all put a reference back after the save that dropped it.
+ *
+ * A sized still folder is never re-written either, so the check can only
+ * misfire on it, and it is deleted without one (Codex-kk9nv.13). It misfired
+ * on every upload whose row write and discard both failed: orphaned seconds
+ * after its put, the object read as a re-upload and was kept for good.
  */
 export async function reasonToKeep(
   orphan: OrphanedFileRecord,
@@ -102,6 +118,7 @@ export async function reasonToKeep(
       ? 'still referenced by a landing page'
       : null;
   }
+  if (isFreshStillObject(orphan.r2Key)) return null;
 
   const current = await r2Service.head(orphan.r2Key);
   return current &&
