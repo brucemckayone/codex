@@ -553,6 +553,9 @@ async function upsertPeople(
           name: p.name,
           image,
           avatarUrl: null,
+          // A size never outlives the avatar it measured (Codex-kk9nv.5).
+          avatarWidth: null,
+          avatarHeight: null,
           username: p.username,
           bio: p.bio,
           socialLinks: p.socialLinks as never,

@@ -11,6 +11,7 @@
 import { PhotonImage } from '@cf-wasm/photon';
 import { describe, expect, it } from 'vitest';
 import { readJpegOrientation } from '../exif-orientation';
+import { SafePhotonImage } from '../photon-wrapper';
 import { processStillVariants } from '../processor';
 
 /** An APP1 EXIF segment holding one Orientation entry. */
@@ -194,5 +195,85 @@ describe('processStillVariants turns a tagged picture upright', () => {
     const expected = PILLOW[orientation] ?? '';
     expect(corners(result.variants.lg)).toBe(expected);
     expect(`${result.width}x${result.height}`).toBe(expected.split(' ')[0]);
+  });
+
+  it.each([
+    1, 2, 3, 4, 5, 6, 7, 8,
+  ])('orientation %i leaves no transparent pixel on any edge of any variant', (orientation) => {
+    // Photon's `rotate` left the right two columns and the bottom row
+    // transparent at every angle; the corners above sit 4px in and missed it.
+    const result = processStillVariants(withSegments(jpeg, app1(orientation)));
+    for (const bytes of Object.values(result.variants)) {
+      const image = PhotonImage.new_from_byteslice(bytes);
+      const w = image.get_width();
+      const h = image.get_height();
+      const raw = image.get_raw_pixels();
+      image.free();
+      const alpha = (x: number, y: number) => raw[(y * w + x) * 4 + 3];
+      const edges: number[] = [];
+      for (let x = 0; x < w; x++)
+        edges.push(alpha(x, 0) ?? -1, alpha(x, h - 1) ?? -1);
+      for (let y = 0; y < h; y++)
+        edges.push(alpha(0, y) ?? -1, alpha(w - 1, y) ?? -1);
+      expect(edges.filter((a) => a !== 255)).toEqual([]);
+    }
+  });
+});
+
+describe('SafePhotonImage.orient moves every pixel exactly where EXIF says', () => {
+  // Every pixel names its own (x, y), so a pixel in the wrong place, a lost
+  // row or a transparent edge all show.
+  const W = 7;
+  const H = 5;
+  function coordinateImage(): SafePhotonImage {
+    const raw = new Uint8Array(W * H * 4);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++)
+        raw.set([x * 30, y * 50, 99, 255], (y * W + x) * 4);
+    }
+    const png = new PhotonImage(raw, W, H);
+    try {
+      return SafePhotonImage.fromBuffer(png.get_bytes());
+    } finally {
+      png.free();
+    }
+  }
+  /** Which source pixel belongs at display (u, v), straight from the EXIF definitions. */
+  const SOURCE: Record<number, (u: number, v: number) => [number, number]> = {
+    1: (u, v) => [u, v],
+    2: (u, v) => [W - 1 - u, v],
+    3: (u, v) => [W - 1 - u, H - 1 - v],
+    4: (u, v) => [u, H - 1 - v],
+    5: (u, v) => [v, u],
+    6: (u, v) => [v, H - 1 - u],
+    7: (u, v) => [W - 1 - v, H - 1 - u],
+    8: (u, v) => [W - 1 - v, u],
+  };
+
+  it.each([
+    1, 2, 3, 4, 5, 6, 7, 8,
+  ] as const)('orientation %i', (orientation) => {
+    const image = coordinateImage();
+    const turned = image.orient(orientation);
+    const w = turned.get_width();
+    const h = turned.get_height();
+    const raw = turned.inner.get_raw_pixels();
+    if (turned !== image) turned.free();
+    image.free();
+
+    expect([w, h]).toEqual(orientation >= 5 ? [H, W] : [W, H]);
+    const wrong: string[] = [];
+    for (let v = 0; v < h; v++) {
+      for (let u = 0; u < w; u++) {
+        const [x, y] = SOURCE[orientation]?.(u, v) ?? [-1, -1];
+        const got = Array.from(
+          raw.subarray((v * w + u) * 4, (v * w + u) * 4 + 4)
+        );
+        const want = [x * 30, y * 50, 99, 255];
+        if (got.join() !== want.join())
+          wrong.push(`(${u},${v}) ${got} != ${want}`);
+      }
+    }
+    expect(wrong).toEqual([]);
   });
 });

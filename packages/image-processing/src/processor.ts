@@ -57,8 +57,8 @@ function assertDecodable(inputBuffer: Uint8Array): void {
  * carry no EXIF, so a portrait phone photo was stored, measured and served
  * sideways. Every size here is the UPRIGHT picture's. Each variant is resized
  * in the stored orientation to the upright size's mirror image, and only that
- * small output is turned: a quarter turn clones its image several times, so
- * turning the decode itself would cost several full-size copies.
+ * small output is turned: a quarter turn is a pixel remap into a new image,
+ * so turning the decode itself would cost full-size copies.
  *
  * Memory (Codex-kk9nv.12): a Worker has 128 MB for the JS heap and Wasm
  * together, and Photon's `resize` clones its source and builds a float
@@ -126,8 +126,8 @@ function withVariants<K extends string>(
       encoded.set(name, upright(variant));
       variant.free();
     }
-    // Turned last: a mirror (2, 4) flips in place, and every smaller variant
-    // was made from it unturned.
+    // Turned last: 2, 3 and 4 flip in place, and every smaller variant was
+    // made from it unturned.
     encoded.set(largestName, upright(largest));
 
     const variants = {} as Record<K, Uint8Array>;

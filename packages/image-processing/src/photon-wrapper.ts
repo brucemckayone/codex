@@ -1,4 +1,4 @@
-import { fliph, flipv, PhotonImage, resize, rotate } from '@cf-wasm/photon';
+import { fliph, flipv, PhotonImage, resize } from '@cf-wasm/photon';
 import { InvalidImageError, UNREADABLE_IMAGE_MESSAGE } from './errors';
 import type { ExifOrientation } from './exif-orientation';
 
@@ -56,39 +56,28 @@ export class SafePhotonImage {
   /**
    * The image turned upright for an EXIF orientation (Codex-kk9nv.11).
    *
-   * Returns THIS instance for 1, and for the plain mirrors 2 and 4, which it
-   * flips in place. Every orientation that turns (3, 5, 6, 7, 8) returns a NEW
-   * instance, which the caller frees.
+   * Returns THIS instance for 1 and for the turns that need no transpose:
+   * the mirrors 2 (`fliph`) and 4 (`flipv`), and 3, a half turn, which is
+   * both at once. All three flip in place. The quarter turns (5-8) return a
+   * NEW instance, which the caller frees.
    *
-   * Photon's `rotate` turns clockwise and keeps exact dimensions at 90, 180
-   * and 270. A negative angle adds a pixel, so none is used. 5 (transpose) is
-   * a quarter turn then a mirror, and 7 (transverse) a quarter turn then a
-   * flip.
+   * Photon's `rotate` is NOT used. At every angle it leaves the right two
+   * columns and the bottom row fully transparent and drops the source rows
+   * or columns beside them: a 300x200 image turned 90 has 798 transparent
+   * pixels. So every turned variant shipped with a transparent edge.
+   * `fliph` and `flipv` are exact, and a quarter turn is a plain remap of
+   * pixels, done here in JS. It only ever runs on a resized output, at most
+   * 1600 x 1600.
    */
   orient(orientation: ExifOrientation): SafePhotonImage {
     this.checkFreed();
     if (orientation === 1) return this;
-    if (orientation === 2) {
-      fliph(this.inner);
+    if (orientation === 2 || orientation === 3 || orientation === 4) {
+      if (orientation !== 4) fliph(this.inner);
+      if (orientation !== 2) flipv(this.inner);
       return this;
     }
-    if (orientation === 4) {
-      flipv(this.inner);
-      return this;
-    }
-    // Wrapped before the flip, so a trap inside it cannot strand the turned
-    // copy outside the caller's cleanup.
-    const turned = new SafePhotonImage(
-      rotate(this.inner, orientation === 3 ? 180 : orientation === 8 ? 270 : 90)
-    );
-    try {
-      if (orientation === 5) fliph(turned.inner);
-      if (orientation === 7) flipv(turned.inner);
-    } catch (error) {
-      turned.free();
-      throw error;
-    }
-    return turned;
+    return new SafePhotonImage(quarterTurned(this.inner, orientation));
   }
 
   /**
@@ -140,4 +129,42 @@ export class SafePhotonImage {
       throw new Error('Attempted to use freed SafePhotonImage');
     }
   }
+}
+
+/**
+ * `image` given a quarter turn for EXIF orientation 5-8, as a new image that
+ * is `height` wide and `width` tall. Each RGBA pixel moves as one 32-bit
+ * word, so byte order is kept whatever the platform's endianness.
+ *
+ * For a source pixel at (x, y) in a `width` x `height` image, its place in
+ * the turned image (which is `height` wide) is:
+ *   5 transpose          (y, x)
+ *   6 90° clockwise      (height-1-y, x)
+ *   7 transverse         (height-1-y, width-1-x)
+ *   8 90° anticlockwise  (y, width-1-x)
+ */
+function quarterTurned(
+  image: PhotonImage,
+  orientation: 5 | 6 | 7 | 8
+): PhotonImage {
+  const width = image.get_width();
+  const height = image.get_height();
+  const raw = image.get_raw_pixels();
+  const bytes = raw.byteOffset % 4 === 0 ? raw : raw.slice();
+  const source = new Uint32Array(
+    bytes.buffer,
+    bytes.byteOffset,
+    width * height
+  );
+  const turned = new Uint32Array(width * height);
+  const mirrorsX = orientation === 6 || orientation === 7;
+  const mirrorsY = orientation === 7 || orientation === 8;
+  for (let y = 0; y < height; y++) {
+    const column = mirrorsX ? height - 1 - y : y;
+    for (let x = 0; x < width; x++) {
+      const row = mirrorsY ? width - 1 - x : x;
+      turned[row * height + column] = source[y * width + x] ?? 0;
+    }
+  }
+  return new PhotonImage(new Uint8Array(turned.buffer), height, width);
 }

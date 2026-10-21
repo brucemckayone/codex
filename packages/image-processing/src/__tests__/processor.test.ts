@@ -54,16 +54,13 @@ vi.mock('../photon-wrapper', () => {
       events.push(`resize ${this.image.width} -> ${width}`);
       return new FakePhoton(width, height);
     }
-    // Like the real one: THIS for 1 and for the mirrors 2 and 4, which it
-    // flips in place; a NEW instance (swapped for a quarter turn) for 3, 5-8.
+    // Like the real one: THIS for 1 and for 2, 3 and 4, which it flips in
+    // place; a NEW, swapped instance for a quarter turn (5-8).
     orient(orientation: number) {
       orients.push(orientation);
       events.push(`orient ${this.image.width}`);
-      if (orientation === 1 || orientation === 2 || orientation === 4)
-        return this;
-      return orientation >= 5
-        ? new FakePhoton(this.image.height, this.image.width)
-        : new FakePhoton(this.image.width, this.image.height);
+      if (orientation <= 4) return this;
+      return new FakePhoton(this.image.height, this.image.width);
     }
     getBytesWebP() {
       return new Uint8Array([this.image.width % 256]);
