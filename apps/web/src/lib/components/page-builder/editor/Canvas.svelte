@@ -51,6 +51,11 @@
   interface Props {
     page: KitPage;
     context: JourneySalesContext;
+    /**
+     * Every read `context` is built from has answered. Until then the
+     * sections draw their empty fallbacks, at heights that are not theirs.
+     */
+    contextSettled?: boolean;
     brandOverrides?: BrandTokenOverrides | null;
     device: Device;
     theme: 'light' | 'dark';
@@ -69,6 +74,7 @@
   const {
     page,
     context,
+    contextSettled = true,
     brandOverrides = null,
     device,
     theme,
@@ -177,20 +183,52 @@
     return () => observer.disconnect();
   });
 
-  // Every section is laid out in full first, so each has a height remembered
-  // (`contain-intrinsic-block-size: auto`) before any is skipped; the second
-  // frame is after the first one's layout and its size records
-  // (Codex-61zsk.72).
+  // Sections out of view are skipped only once each has a height worth
+  // remembering (`contain-intrinsic-block-size: auto`): every section is laid
+  // out in full first, with the page's reads answered, and the second frame
+  // is after that layout and its size records (Codex-61zsk.72).
+  const ids = $derived(visible.map((section) => section.id));
+  /** The sections laid out in full when `lazy` was last set. */
+  let drawn = new Set<string>();
+  // What every section's height hangs on besides its own words.
+  const designKey = $derived(
+    `${JSON.stringify(page.design)}|${JSON.stringify(brandOverrides)}`
+  );
+
   $effect(() => {
-    if (!frame || lazy) return;
+    if (!frame || lazy || !contextSettled || ids.length === 0) return;
+    const now = ids;
     let next = 0;
     const first = requestAnimationFrame(() => {
-      next = requestAnimationFrame(() => (lazy = true));
+      next = requestAnimationFrame(() => {
+        drawn = new Set(now);
+        lazy = true;
+      });
     });
     return () => {
       cancelAnimationFrame(first);
       cancelAnimationFrame(next);
     };
+  });
+
+  // Lay every section out in full again, so each records a true height, when
+  // one appears that never was (a template, an unhidden or inserted section)
+  // or a read is loading again...
+  $effect(() => {
+    if (!contextSettled || ids.some((id) => !drawn.has(id))) lazy = false;
+  });
+  // ...when the Style, its dials or the brand being edited change...
+  $effect(() => {
+    void designKey;
+    lazy = false;
+  });
+  // ...and when a font arrives, which reflows every section's words.
+  $effect(() => {
+    const fonts = typeof document === 'undefined' ? undefined : document.fonts;
+    if (!fonts?.addEventListener) return;
+    const relayout = () => (lazy = false);
+    fonts.addEventListener('loadingdone', relayout);
+    return () => fonts.removeEventListener('loadingdone', relayout);
   });
 
   /** A section's top, in the scroller's content. */
@@ -202,45 +240,96 @@
     );
   }
 
-  /** Where the scroller must be for a section's top to sit just under its edge. */
+  /**
+   * Where the scroller must be for a section's top to sit just under its
+   * edge, or as near as the scroller can go (a short last section).
+   */
   function landingOf(element: HTMLElement, view: HTMLElement): number {
-    return Math.max(0, topOf(element, view) - 16);
+    const furthest = view.scrollHeight - view.clientHeight;
+    return Math.max(0, Math.min(furthest, topOf(element, view) - 16));
   }
 
-  let landing = 0;
+  /** Input that means the creator is steering the scroller themselves. */
+  const STEERING = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+  /** How long the scroller stays still before a landing is checked. */
+  const STILL_MS = 150;
+
+  /** Puts away the landing being checked, if there is one. */
+  let stopSettle: (() => void) | null = null;
+  $effect(() => () => stopSettle?.());
 
   /**
    * A section out of view keeps the height it was last drawn at, which is
    * stale after the canvas changes width, so a scroll aimed past it lands off
-   * by the difference. Once the scroll ends the sections at the target have
-   * been drawn: aim again, and again two frames after each correction, at
-   * most three times (Codex-61zsk.72).
+   * by the difference. Once the scroller is still, the sections at the target
+   * have been drawn: aim again, two frames after each correction, at most
+   * three times, and stop once a landing holds for two frames
+   * (Codex-61zsk.72).
+   *
+   * The creator always wins: their own wheel, touch, click or key puts the
+   * check away, and so does a newer jump, or the section leaving the page.
    */
   function settle(element: HTMLElement, view: HTMLElement): void {
-    const ticket = ++landing;
-    const aim = (tries: number) => {
-      if (ticket !== landing) return;
+    stopSettle?.();
+    const armed = performance.now();
+    let idle = 0;
+    let tick = 0;
+    const steer = (event: Event) => {
+      // The event that asked for this jump may still be on its way up.
+      if (event.timeStamp > armed) stop();
+    };
+    const stop = () => {
+      clearTimeout(idle);
+      cancelAnimationFrame(tick);
+      view.removeEventListener('scrollend', land);
+      view.removeEventListener('scroll', wait);
+      for (const type of STEERING) view.removeEventListener(type, steer);
+      if (stopSettle === stop) stopSettle = null;
+    };
+    const later = (then: () => void) => {
+      tick = requestAnimationFrame(() => {
+        tick = requestAnimationFrame(then);
+      });
+    };
+    const aim = (tries: number, held: boolean) => {
+      // Deleted or hidden on the way: a detached box measures all zeros.
+      if (!element.isConnected || !view.isConnected) return stop();
       const goal = landingOf(element, view);
-      if (Math.abs(view.scrollTop - goal) <= 2 || tries <= 0) return;
+      if (Math.abs(view.scrollTop - goal) <= 2) {
+        // Look once more after the sections now in range have drawn.
+        if (held) stop();
+        else later(() => aim(tries, true));
+        return;
+      }
+      if (tries <= 0) return stop();
       view.scrollTo({ top: goal, behavior: 'auto' });
-      requestAnimationFrame(() => requestAnimationFrame(() => aim(tries - 1)));
+      later(() => aim(tries - 1, false));
     };
-    let ended = false;
-    let fallback = 0;
-    const end = () => {
-      if (ended) return;
-      ended = true;
-      view.removeEventListener('scrollend', end);
-      clearTimeout(fallback);
-      aim(3);
+    const land = () => {
+      clearTimeout(idle);
+      view.removeEventListener('scrollend', land);
+      view.removeEventListener('scroll', wait);
+      aim(3, false);
     };
-    view.addEventListener('scrollend', end);
-    // No `scrollend` in this browser, or the scroll was too short to fire one.
-    fallback = window.setTimeout(end, 900);
+    // `scrollend` is the fast path; without it (Safari), or when the scroll
+    // was a no-op and fires nothing, the scroller going still is the end.
+    const wait = () => {
+      clearTimeout(idle);
+      idle = window.setTimeout(land, STILL_MS);
+    };
+    view.addEventListener('scrollend', land);
+    view.addEventListener('scroll', wait, { passive: true });
+    for (const type of STEERING) {
+      view.addEventListener(type, steer, { passive: true });
+    }
+    stopSettle = stop;
+    wait();
   }
 
   /** Bring a section's top into view, unless it already is. */
   export function scrollToSection(id: string): void {
+    // A newer jump replaces a landing still being checked.
+    stopSettle?.();
     const element = sectionElements().find((el) => el.dataset.lpSection === id);
     if (!element || !scroller) return;
     const top = topOf(element, scroller);
@@ -535,13 +624,18 @@
      down the page: on a 28-section page, most of the switch. A skipped
      section keeps the height it was last drawn at (`auto`), recorded while
      it was drawn, so the scroll, the section rings and the insert points
-     hold; `scrollToSection` corrects a landing the stale heights moved. */
+     hold; `scrollToSection` corrects a landing the stale heights moved.
+     Only where the browser anchors scrolling: without it, a stale section
+     drawn above the view as the creator scrolls up shoves what they are
+     reading (Safari). */
   .canvas__page :global(.lp-section) {
     contain-intrinsic-block-size: auto 40rem;
   }
 
-  .canvas__page[data-lazy] :global(.lp-section) {
-    content-visibility: auto;
+  @supports (overflow-anchor: auto) {
+    .canvas__page[data-lazy] :global(.lp-section) {
+      content-visibility: auto;
+    }
   }
 
   .canvas__page :global([contenteditable='true']) {

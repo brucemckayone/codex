@@ -454,6 +454,7 @@
           bind:this={canvas}
           page={session.page}
           context={session.context}
+          contextSettled={session.contextSettled}
           brandOverrides={pageBuilder.pending?.brandOverrides ?? null}
           {device}
           {theme}
