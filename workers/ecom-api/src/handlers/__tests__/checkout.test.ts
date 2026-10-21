@@ -197,6 +197,32 @@ describe('handleCheckoutCompleted', () => {
       );
     });
 
+    // Codex-2hxff.64 Q1: the agreement resolves when the checkout STARTED, so
+    // a checkout opened before a creator's removal completes at the old split.
+    it.each([
+      ['content', { customerId: 'user_123', contentId: 'content_456' }],
+      ['course', { kind: 'course', customerId: 'user_123', courseId: 'c_1' }],
+    ])("passes the %s session's own created time as offerAt, apart from paidAt", async (_kind, metadata) => {
+      const event = createMockStripeCheckoutEvent({
+        paymentIntentId: 'pi_test_offer_at',
+        metadata,
+      }) as unknown as Stripe.Event;
+      const sessionCreated = 1_759_999_000;
+      const paid = 1_760_000_000;
+      (event as { created: number }).created = paid;
+      (event.data.object as { created?: number }).created = sessionCreated;
+
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+
+      expect(mockCompletePurchase).toHaveBeenCalledWith(
+        'pi_test_offer_at',
+        expect.objectContaining({
+          offerAt: new Date(sessionCreated * 1000),
+          paidAt: new Date(paid * 1000),
+        })
+      );
+    });
+
     it('should handle payment_intent as string', async () => {
       const event = createMockStripeCheckoutEvent({
         paymentIntentId: 'pi_string_123',

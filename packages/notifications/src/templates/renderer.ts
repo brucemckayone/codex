@@ -336,6 +336,23 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'deepLinkUrl',
     'note',
   ],
+  // Removal from an organisation (Codex-2hxff.64).
+  'removed-from-organisation': [
+    'recipientName',
+    'orgName',
+    'removedOn',
+    'agreementsEnded',
+    'contentOffSale',
+    'coursesOffSale',
+    'courseSubscriptionsEnding',
+  ],
+  'course-no-longer-offered': [
+    'userName',
+    'courseTitle',
+    'orgName',
+    'accessUntil',
+    'manageUrl',
+  ],
   'agreement-terminated': [
     'recipientName',
     'orgName',
@@ -423,6 +440,9 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'agreement-declined',
   'agreement-terminated',
   'agreement-expiring-soon',
+  // Removal from an organisation (Codex-2hxff.64): what it ended.
+  'removed-from-organisation',
+  'course-no-longer-offered',
   // Ownership transfer (Codex-2hxff.2): who receives the org's money.
   'ownership-offered',
   'ownership-transferred',

@@ -82,6 +82,14 @@ import type {
   PaginationParams,
 } from '../types';
 import {
+  type WithdrawnCatalogue,
+  withdrawCatalogueOnDeparture,
+} from './catalogue-departure';
+import {
+  countDepartureEffects,
+  type DeparturePreview,
+} from './departure-preview';
+import {
   acceptOwnershipOffer,
   createOwnershipOffer,
   declineOwnershipOffer,
@@ -114,6 +122,16 @@ import {
  * absent the logo gate FAILS CLOSED (no base ⇒ no URL can be
  * platform-produced).
  */
+/** What a member's removal ended, for the post-commit follow-up. */
+export interface MemberDeparture {
+  organizationId: string;
+  creatorId: string;
+  /** The removal moment: every agreement and item it ended carries it. */
+  at: Date;
+  endedAgreements: DepartureTerminatedAgreement[];
+  catalogue: WithdrawnCatalogue;
+}
+
 export interface OrganizationServiceConfig extends ServiceConfig {
   /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
   r2PublicUrlBase?: string;
@@ -124,14 +142,13 @@ export interface OrganizationServiceConfig extends ServiceConfig {
    */
   ownershipMailer?: OwnershipMailer;
   /**
-   * Told which agreements a member's removal ended, after the removal commits,
-   * so the creator is emailed (Codex-2hxff.18; the registry wires
-   * `AgreementService.notifyTerminatedOnDeparture`). When absent the
-   * agreements are still ended and only the email is skipped.
+   * Told what a member's removal ended, after the removal commits: their
+   * agreements (Codex-2hxff.18) and the content and courses taken off sale
+   * (Codex-2hxff.64). The registry uses it to clear caches, cancel course
+   * subscriptions at period end, and email the creator once. When absent the
+   * removal still ends everything; only that follow-up work is skipped.
    */
-  onAgreementsEndedByDeparture?: (
-    agreements: DepartureTerminatedAgreement[]
-  ) => Promise<void>;
+  onMemberRemoved?: (departure: MemberDeparture) => Promise<void>;
   /** Absolute web-app base for the emails' Studio links (`WEB_APP_URL`). */
   webAppUrl?: string;
   /** `ExecutionContext.waitUntil`, to send the emails off the request path. */
@@ -181,8 +198,8 @@ export class OrganizationService extends BaseService {
   >;
 
   private readonly ownershipMailer: OwnershipMailer | undefined;
-  private readonly onAgreementsEndedByDeparture:
-    | OrganizationServiceConfig['onAgreementsEndedByDeparture']
+  private readonly onMemberRemoved:
+    | OrganizationServiceConfig['onMemberRemoved']
     | undefined;
   private readonly webAppUrl: string | undefined;
   private readonly waitUntil: ((promise: Promise<unknown>) => void) | undefined;
@@ -191,7 +208,7 @@ export class OrganizationService extends BaseService {
     super(config);
     this.logoUrlSchema = createPlatformImageUrlSchema(config.r2PublicUrlBase);
     this.ownershipMailer = config.ownershipMailer;
-    this.onAgreementsEndedByDeparture = config.onAgreementsEndedByDeparture;
+    this.onMemberRemoved = config.onMemberRemoved;
     this.webAppUrl = config.webAppUrl;
     this.waitUntil = config.waitUntil;
   }
@@ -862,6 +879,33 @@ export class OrganizationService extends BaseService {
   }
 
   /**
+   * What removing this member would unwind, as counts: active agreements,
+   * content and courses on sale, live course subscriptions and affected tier
+   * subscribers — all scoped to this organisation and this member as creator
+   * (Codex-2hxff.64; see `./departure-preview.ts`). Read by the Studio's
+   * Remove dialog before the owner confirms. Not cached.
+   *
+   * @throws {MemberNotFoundError} If the user has no membership here
+   */
+  async getDeparturePreview(
+    organizationId: string,
+    userId: string
+  ): Promise<DeparturePreview> {
+    try {
+      const preview = await countDepartureEffects(this.db, {
+        organizationId,
+        creatorId: userId,
+      });
+      if (!preview) {
+        throw new MemberNotFoundError(userId);
+      }
+      return preview;
+    } catch (error) {
+      this.handleError(error, 'getDeparturePreview');
+    }
+  }
+
+  /**
    * Get the current user's membership in an organization
    *
    * Returns the user's role and joined date for the specified organization.
@@ -1156,59 +1200,69 @@ export class OrganizationService extends BaseService {
    * (Codex-2hxff.2). Removing the recipient of an open ownership offer
    * withdraws it in the same transaction, and so does ending the member's
    * revenue-share agreements in the organisation (owner decision AGR-09, "End
-   * on removal"): money earned before is still paid to them.
+   * on removal"): money earned before is still paid to them. Everything of
+   * theirs on sale there is taken off sale too (Codex-2hxff.64): buyers keep
+   * what they bought, tier subscribers keep it until their next renewal.
    *
    * @param organizationId - Organization ID
    * @param userId - User ID to remove
    */
   async removeMember(organizationId: string, userId: string): Promise<void> {
     try {
-      const { withdrawn, endedAgreements } = await this.db.transaction(
-        async (tx) => {
-          const membership = await this.findMembershipOrThrow(
-            tx,
-            organizationId,
-            userId
-          );
+      const { withdrawn, departure } = await this.db.transaction(async (tx) => {
+        const membership = await this.findMembershipOrThrow(
+          tx,
+          organizationId,
+          userId
+        );
 
-          if (membership.role === 'owner' && membership.status === 'active') {
-            throw new OwnershipTransferRequiredError({ organizationId });
-          }
-
-          const now = new Date();
-          // Before the membership change: see withdrawProposalsOnDeparture.
-          await withdrawProposalsOnDeparture(tx, {
-            organizationId,
-            creatorId: userId,
-            at: now,
-          });
-          await tx
-            .update(organizationMemberships)
-            .set({ status: 'inactive', updatedAt: now })
-            .where(
-              and(
-                eq(organizationMemberships.organizationId, organizationId),
-                eq(organizationMemberships.userId, userId)
-              )
-            );
-
-          const endedAgreements = await terminateAgreementsOnDeparture(tx, {
-            organizationId,
-            creatorId: userId,
-            at: now,
-          });
-          const withdrawn = await withdrawOfferForIneligibleRecipient(
-            tx,
-            organizationId,
-            userId,
-            now
-          );
-          return { withdrawn, endedAgreements };
+        if (membership.role === 'owner' && membership.status === 'active') {
+          throw new OwnershipTransferRequiredError({ organizationId });
         }
-      );
-      if (endedAgreements.length > 0) {
-        this.notifyAgreementsEnded(endedAgreements);
-      }
+
+        const now = new Date();
+        // Before the membership change: see withdrawProposalsOnDeparture.
+        await withdrawProposalsOnDeparture(tx, {
+          organizationId,
+          creatorId: userId,
+          at: now,
+        });
+        await tx
+          .update(organizationMemberships)
+          .set({ status: 'inactive', updatedAt: now })
+          .where(
+            and(
+              eq(organizationMemberships.organizationId, organizationId),
+              eq(organizationMemberships.userId, userId)
+            )
+          );
+
+        const endedAgreements = await terminateAgreementsOnDeparture(tx, {
+          organizationId,
+          creatorId: userId,
+          at: now,
+        });
+        const catalogue = await withdrawCatalogueOnDeparture(tx, {
+          organizationId,
+          creatorId: userId,
+          at: now,
+        });
+        const withdrawn = await withdrawOfferForIneligibleRecipient(
+          tx,
+          organizationId,
+          userId,
+          now
+        );
+        const departure: MemberDeparture = {
+          organizationId,
+          creatorId: userId,
+          at: now,
+          endedAgreements,
+          catalogue,
+        };
+        return { withdrawn, departure };
+      });
+      this.notifyMemberRemoved(departure);
       if (withdrawn) {
         this.notifyOwnership({
           kind: 'closed',
@@ -1609,22 +1663,25 @@ export class OrganizationService extends BaseService {
   }
 
   /**
-   * Email a removed creator that their agreements ended, after the commit and
-   * through `waitUntil` when available. Never throws: the termination is the
-   * source of truth, a failure only skips the email.
+   * Hand what a removal ended to the follow-up work (caches, course
+   * subscriptions, the creator's email), after the commit and through
+   * `waitUntil` when available. Never throws: the removal is the source of
+   * truth; a failure here is logged and the follow-up's own retries recover.
    */
-  private notifyAgreementsEnded(
-    agreements: DepartureTerminatedAgreement[]
-  ): void {
-    const notify = this.onAgreementsEndedByDeparture;
+  private notifyMemberRemoved(departure: MemberDeparture): void {
+    const notify = this.onMemberRemoved;
     if (!notify) return;
     // Deferred, so a callback that throws synchronously becomes a rejection
     // here instead of a 500 for a removal that has already committed.
     const task = Promise.resolve()
-      .then(() => notify(agreements))
+      .then(() => notify(departure))
       .catch((error: unknown) => {
-        this.obs.warn('Agreement departure email dispatch failed', {
-          agreementIds: agreements.map((agreement) => agreement.id),
+        this.obs.error('Member removal follow-up failed', {
+          organizationId: departure.organizationId,
+          creatorId: departure.creatorId,
+          agreementIds: departure.endedAgreements.map((a) => a.id),
+          contentIds: departure.catalogue.contentIds.length,
+          courseIds: departure.catalogue.courseIds.length,
           error: error instanceof Error ? error.message : String(error),
         });
       });

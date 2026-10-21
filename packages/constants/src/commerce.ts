@@ -143,6 +143,19 @@ export function subscriptionStatusGrantsAccess(
 }
 
 /**
+ * The course subscription statuses a creator's removal cancels at period end
+ * (Codex-2hxff.64). `paused` is included: it still renews when resumed.
+ * `cancelling` is not: it already ends. The cancel
+ * (`cancelForCoursesOffSale`) and the Remove dialog's preview count both read
+ * this list, so the owner is shown exactly what will be cancelled.
+ */
+export const OFF_SALE_CANCELLABLE_COURSE_SUBSCRIPTION_STATUSES = [
+  SUBSCRIPTION_STATUS.ACTIVE,
+  SUBSCRIPTION_STATUS.PAST_DUE,
+  SUBSCRIPTION_STATUS.PAUSED,
+] as const;
+
+/**
  * Structured churn-reason taxonomy for subscription cancellation (Q7).
  *
  * Persisted on `subscriptions.churn_reason` alongside the existing free-text

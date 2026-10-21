@@ -196,6 +196,43 @@ describe('Journey publish/unpublish cascade (Codex-xzwl5)', () => {
       expect(await service.getCoursePage(orgId, slug)).not.toBeNull();
     });
 
+    it('re-publishing a course taken off sale on a departure clears its stamp, and only publishing does (Codex-2hxff.64)', async () => {
+      const orgId = await makeOrg('cascade-offsale');
+      const { pageId, courseId, slug, title } = await seedLiveJourney(orgId);
+      // What a removal leaves (withdrawCatalogueOnDeparture).
+      const stampedAt = new Date();
+      await db
+        .update(courses)
+        .set({ status: 'archived', offSaleAt: stampedAt })
+        .where(eq(courses.id, courseId));
+      await db
+        .update(landingPages)
+        .set({ status: 'archived' })
+        .where(eq(landingPages.id, pageId));
+      const page = {
+        id: pageId,
+        title,
+        slug,
+        sections: [],
+        brandOverrides: null,
+      };
+      const stamp = async () =>
+        (
+          await db
+            .select({ offSaleAt: courses.offSaleAt })
+            .from(courses)
+            .where(eq(courses.id, courseId))
+        )[0]?.offSaleAt;
+
+      // A draft save is not back on sale: the stamp stays.
+      await service.saveJourneyPage(orgId, { ...page, status: 'draft' });
+      expect(await stamp()).toEqual(stampedAt);
+
+      await service.saveJourneyPage(orgId, { ...page, status: 'published' });
+      expect((await readCourse(courseId))?.status).toBe('published');
+      expect(await stamp()).toBeNull();
+    });
+
     it('keeps the course published when ANOTHER published page still sells it', async () => {
       const orgId = await makeOrg('cascade-multi');
       const { pageId, courseId, slug, title } = await seedLiveJourney(orgId);

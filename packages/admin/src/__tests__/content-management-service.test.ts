@@ -452,6 +452,39 @@ describe('AdminContentManagementService', () => {
       expect(published.status).toBe(CONTENT_STATUS.PUBLISHED);
     });
 
+    it('republishing an item taken off sale on a departure clears the stamp (Codex-2hxff.64)', async () => {
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      // What a removal leaves (withdrawCatalogueOnDeparture).
+      const content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            title: 'Taken off sale',
+            slug: createUniqueSlug('off-sale-republish'),
+            contentType: 'written',
+            contentBody: 'Body',
+            status: CONTENT_STATUS.ARCHIVED,
+            publishedAt: new Date(),
+            offSaleAt: new Date(),
+            priceCents: 0,
+          })
+          .returning()
+      );
+
+      const published = await service.publishContent(testOrg.id, content.id);
+
+      // Without the clear, tier access would still end at the next renewal.
+      expect(published.status).toBe(CONTENT_STATUS.PUBLISHED);
+      expect(published.offSaleAt).toBeNull();
+    });
+
     it('should throw NotFoundError for content from different organization', async () => {
       const org1 = takeFirst(
         await db

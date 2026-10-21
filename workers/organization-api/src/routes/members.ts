@@ -11,6 +11,7 @@
  * - POST   /invite          - Invite a member by email
  * - PATCH  /:userId         - Update member role
  * - DELETE /:userId         - Remove member
+ * - GET    /:userId/departure-preview - What removing them would unwind
  */
 
 import { invalidateUserLibrary as invalidateUserLibraryShared } from '@codex/cache';
@@ -208,6 +209,34 @@ app.delete(
         logger: ctx.obs,
       });
       return null;
+    },
+  })
+);
+
+/**
+ * GET /api/organizations/:id/members/:userId/departure-preview
+ * What removing this member would unwind, shown in the Studio's Remove dialog
+ * before the owner confirms (Codex-2hxff.64)
+ *
+ * Returns: { data: { agreements, contentOnSale, coursesOnSale,
+ *   courseSubscriptions, tierSubscribersAffected } } — counts only, scoped to
+ *   this organisation and this member as creator; 404 MEMBER_NOT_FOUND if they
+ *   are not a member. Not cached: read once, when the dialog opens.
+ * Security: the same policy as DELETE /:userId — whoever may remove a member
+ * may see what the removal does, and no one else.
+ */
+app.get(
+  '/:userId/departure-preview',
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: {
+      params: z.object({ id: uuidSchema, userId: userIdSchema }),
+    },
+    handler: async (ctx) => {
+      return await ctx.services.organization.getDeparturePreview(
+        ctx.input.params.id,
+        ctx.input.params.userId
+      );
     },
   })
 );

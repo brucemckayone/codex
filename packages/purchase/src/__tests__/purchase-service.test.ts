@@ -50,6 +50,7 @@ import {
 import {
   AlreadyPurchasedError,
   ContentNotPurchasableError,
+  CourseNotPurchasableError,
   ForbiddenError,
   PaymentProcessingError,
   PurchaseNotFoundError,
@@ -615,6 +616,67 @@ describe('PurchaseService Integration', () => {
       // (No assertion on checkout.sessions.create here because prior tests
       // may have called it; instead we assert above that NotFoundError is
       // thrown — that branch returns before session.create is reached.)
+    });
+
+    // Codex-2hxff.64: a creator's removal archives their catalogue, and that
+    // is what takes it off sale. Only this status gate stops a new checkout.
+    it('refuses content taken off sale on a departure', async () => {
+      const paidContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Taken off sale',
+          slug: createUniqueSlug('off-sale-checkout'),
+          contentType: 'written',
+          contentBody: 'Body',
+          priceCents: 1999,
+          tags: [],
+        },
+        userId
+      );
+      await seedReadyConnect(userId);
+      await contentService.publish(paidContent.id, userId);
+      await db
+        .update(schema.content)
+        .set({ status: 'archived', offSaleAt: new Date() })
+        .where(eq(schema.content.id, paidContent.id));
+
+      await expect(
+        purchaseService.createCheckoutSession(
+          {
+            contentId: paidContent.id,
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
+          },
+          otherUserId
+        )
+      ).rejects.toThrow(ContentNotPurchasableError);
+    });
+
+    it('refuses a course taken off sale on a departure (course checkout)', async () => {
+      const [course] = await db
+        .insert(schema.courses)
+        .values({
+          organizationId,
+          creatorId: userId,
+          slug: createUniqueSlug('off-sale-course'),
+          title: 'Course taken off sale',
+          status: 'archived',
+          offSaleAt: new Date(),
+          priceCents: 4999,
+        })
+        .returning({ id: schema.courses.id });
+      if (!course) throw new Error('failed course');
+
+      await expect(
+        purchaseService.createCourseCheckoutSession(
+          {
+            courseId: course.id,
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
+          },
+          otherUserId
+        )
+      ).rejects.toThrow(CourseNotPurchasableError);
     });
 
     it('throws ContentNotPurchasableError for free content', async () => {
@@ -2522,6 +2584,75 @@ describe('PurchaseService Integration', () => {
 
       expect(purchase.organizationFeeCents).toBe(2700);
       expect(purchase.creatorPayoutCents).toBe(6300);
+    });
+
+    // Owner decision 2026-10-21 (Codex-2hxff.64 Q1): a checkout opened before
+    // the creator's agreement ended, and paid after, keeps the old split.
+    it('WP-4: the agreement in force when the checkout STARTED sets the split, not the one at payment', async () => {
+      const { content } = await seedPaidContent({
+        title: 'WP-4 checkout start',
+        priceCents: 10000,
+      });
+      const hour = 60 * 60 * 1000;
+      await seedContentPurchaseAgreement(organizationId, userId, 7000, {
+        effectiveFrom: new Date(Date.now() - 48 * hour),
+        status: 'terminated',
+        terminatedAt: new Date(Date.now() - hour),
+      });
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+
+      const started = await purchaseService.completePurchase(
+        `pi_wp4_offer_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          offerAt: new Date(Date.now() - 2 * hour), // before the termination
+          paidAt: new Date(), // after it
+        }
+      );
+      expect(started.organizationFeeCents).toBe(2700);
+      expect(started.creatorPayoutCents).toBe(6300);
+    });
+
+    it('Codex-2hxff.64 Q1: a course purchase splits by the agreement in force when its checkout STARTED', async () => {
+      const [course] = await db
+        .insert(schema.courses)
+        .values({
+          organizationId,
+          creatorId: userId,
+          slug: createUniqueSlug('q1-course'),
+          title: 'Q1 checkout start',
+          status: 'published',
+          priceCents: 10000,
+        })
+        .returning({ id: schema.courses.id });
+      if (!course) throw new Error('failed course');
+      const hour = 60 * 60 * 1000;
+      await seedContentPurchaseAgreement(organizationId, userId, 7000, {
+        effectiveFrom: new Date(Date.now() - 48 * hour),
+        status: 'terminated',
+        terminatedAt: new Date(Date.now() - hour),
+      });
+
+      const started = await purchaseService.completeCoursePurchase(
+        `pi_q1_course_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          courseId: course.id,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          offerAt: new Date(Date.now() - 2 * hour), // before the termination
+          paidAt: new Date(), // after it
+        }
+      );
+      expect(started.organizationFeeCents).toBe(2700);
+      expect(started.creatorPayoutCents).toBe(6300);
     });
 
     it('WP-4: subscription-type agreement does NOT apply to content_purchase split', async () => {

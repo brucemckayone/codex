@@ -2411,6 +2411,10 @@ export class CourseJourneyService extends BaseService {
         title: input.title,
         status: courseStatus,
         ...(input.publishedAt ? { publishedAt: input.publishedAt } : {}),
+        // Back on sale: clears the departure stamp (Codex-2hxff.64).
+        ...(courseStatus === CONTENT_STATUS.PUBLISHED
+          ? { offSaleAt: null }
+          : {}),
       })
       .where(
         and(

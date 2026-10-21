@@ -56,7 +56,6 @@ fixed by PR 2 below. The production checks to run around these releases
 | `Codex-2hxff.61` | P3 | A revocation also stops streams already playing, not only new stream URLs | [access](access.md) |
 | `Codex-2hxff.62` | P1 | A redelivered invoice never pays out more than its creator pool, even after a backdated agreement is accepted | [agreements](agreements.md#how-a-share-applies) |
 | `Codex-2hxff.63` | P2 | Accepting an agreement with a future start leaves no unpaid gap | [agreements](agreements.md#negotiating) |
-| `Codex-2hxff.64` | P1 | Removing a creator takes everything of theirs off sale; tier access to it ends; one-off buyers keep theirs | [agreements](agreements.md#leaving-an-organisation) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
 
@@ -67,6 +66,11 @@ dispute follow-ups are `.58`–`.61`. `Codex-2hxff.32` (every one-off price at
 least £1.00) and `.10` (a failed renewal keeps access while Stripe retries; a
 full refund of the latest payment cancels) are fixed together in one pull
 request. `.26` (this documentation) and `.31` (the policy drafts) are done.
+`.17` (an agreement keeps paying after its review date), `.18` (removing a
+creator ends their agreements) and `.65` (a buyer still opens a course taken
+off sale) are merged to `dev`. `.64` (removing a creator takes everything of
+theirs off sale; see [agreements](agreements.md#what-comes-off-sale)) is fixed
+in its own pull request.
 
 `Codex-2hxff.6`, `.11`, `.12` and `.37` (label `payments-fix-pr-2`) are fixed in
 payments fix PR 2 and so are not listed above: webhooks answer 500 for a

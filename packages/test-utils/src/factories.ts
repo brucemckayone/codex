@@ -319,6 +319,7 @@ export function createTestContent(overrides: Partial<Content> = {}): Content {
     featured: false,
     status: CONTENT_STATUS.DRAFT,
     publishedAt: null,
+    offSaleAt: null,
     viewCount: 0,
     purchaseCount: 0,
     shaderPreset: null,
