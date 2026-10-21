@@ -39,6 +39,15 @@ vi.mock('@codex/image-processing', () => ({
   SUPPORTED_IMAGE_MIME_TYPES: ['image/jpeg'],
 }));
 
+// deleteAccount also ends the creator's agreements, inside its transaction
+// (Codex-2hxff.18). That is identity-service.test.ts's to prove; this file is
+// about which caches the write invalidates, so the two helpers are stubbed.
+vi.mock('@codex/agreements', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@codex/agreements')>()),
+  withdrawProposalsOnDeparture: vi.fn(async () => []),
+  terminateAgreementsOnDeparture: vi.fn(async () => []),
+}));
+
 const USER_ID = 'user-1';
 const SLUGS = ['org-a', 'org-b'];
 
@@ -101,6 +110,8 @@ function harness({ withCache = true, existingUsername = 'alice2' } = {}) {
         where: () => ({ returning: async () => [UPDATED_ROW] }),
       }),
     })),
+    // deleteAccount's scrub runs in a transaction (Codex-2hxff.18).
+    transaction: async (fn: (tx: unknown) => unknown) => fn(db),
   } as unknown as Database;
 
   const service = new IdentityService({
