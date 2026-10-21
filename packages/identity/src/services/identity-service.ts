@@ -729,9 +729,6 @@ export class IdentityService extends BaseService {
               username: null,
               bio: null,
               avatarUrl: null,
-              // A size never outlives the image it describes (Codex-kk9nv.5).
-              avatarWidth: null,
-              avatarHeight: null,
               image: null,
               socialLinks: null,
             })

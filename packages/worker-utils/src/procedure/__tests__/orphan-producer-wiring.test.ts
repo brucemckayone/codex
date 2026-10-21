@@ -1,8 +1,9 @@
 /**
  * Codex-r85jo.3 — the orphan-record PRODUCER is connected.
  *
- * `withDbUpdateOrphanCleanup` and the two `delete*` methods record failed R2
- * deletes through an `OrphanedFileService`, for media-api's
+ * Every still delete — a failed upload's new folder, a replaced or dropped
+ * folder, the two `delete*` methods — records failed R2 deletes through an
+ * `OrphanedFileService` (`deleteStillFiles`, Codex-kk9nv.5), for media-api's
  * `OrphanedFileCleanupDO` to sweep. Until this bead no production
  * ImageProcessingService was ever handed one, so the recording branch could
  * only take its warn path and the DO drained a table nothing wrote. Neither

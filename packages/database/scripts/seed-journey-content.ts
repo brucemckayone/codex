@@ -130,15 +130,9 @@ async function main(): Promise<void> {
     : [];
 
   const mediaUpdates: Record<string, string> = {};
-  // A seed still has no recorded size (Codex-kk9nv.5): clear any size a real
-  // upload left, or it would describe a picture that is gone.
-  const sizeResets: { heroImageWidth?: null; heroImageHeight?: null } = {};
   if (course) {
-    if (!course.heroImageKey || FORCE) {
+    if (!course.heroImageKey || FORCE)
       mediaUpdates.heroImageKey = HERO_STILL_KEY;
-      sizeResets.heroImageWidth = null;
-      sizeResets.heroImageHeight = null;
-    }
 
     // Attach whatever ready media the org actually owns, so the clip-bearing
     // sections stop rendering an empty frame. `intro_video_media_id` accepts
@@ -181,10 +175,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  await dbWs
-    .update(courses)
-    .set({ ...mediaUpdates, ...sizeResets })
-    .where(eq(courses.id, course.id));
+  await dbWs.update(courses).set(mediaUpdates).where(eq(courses.id, course.id));
 
   console.log('  written\n');
 }

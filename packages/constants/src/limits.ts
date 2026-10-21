@@ -433,13 +433,17 @@ export type CachePresetName = keyof typeof CACHE_PRESETS;
  * viewer-variance, cannot express it".
  *
  * THE INVARIANT IT ENCODES: the key is REWRITTEN IN PLACE and is not
- * content-addressed. Every image key on this platform is a pure function of
- * `(entityId, size)` — `getContentThumbnailKey`, `getUserAvatarKey`,
- * `getOrgLogoKey`, `categories/{id}/cover/{size}.webp`,
- * `courses/{id}/{cover,hero,signature}/{size}.webp`, and
- * `logos/{orgId}/logo.{ext}`. No timestamp, no uuid, no content hash, and the
- * public URL is `${r2PublicUrlBase}/${key}` with no version query. Re-uploading
- * writes NEW BYTES AT THE SAME URL.
+ * content-addressed. The org logo's key is a pure function of the org —
+ * `logos/{orgId}/logo.{ext}` — with no timestamp, uuid or content hash, and
+ * the public URL is `${r2PublicUrlBase}/${key}` with no version query.
+ * Re-uploading writes NEW BYTES AT THE SAME URL.
+ *
+ * Until Codex-kk9nv.5 every still was keyed the same way
+ * (`getContentThumbnailKey`, `getUserAvatarKey`,
+ * `categories/{id}/cover/{size}.webp`,
+ * `courses/{id}/{cover,hero,signature}/{size}.webp`), and those files are
+ * still stored with this value. A still uploaded since then goes to a new
+ * folder and is stored with {@link R2_IMMUTABLE_OBJECT_CACHE_CONTROL}.
  *
  * WHY EACH DIRECTIVE, given that:
  *
@@ -479,6 +483,21 @@ export type CachePresetName = keyof typeof CACHE_PRESETS;
  */
 export const R2_OVERWRITTEN_OBJECT_CACHE_CONTROL =
   'public, max-age=3600, must-revalidate';
+
+/**
+ * `Cache-Control` STORED ON an R2 object that is never overwritten: every
+ * still and page image since Codex-kk9nv.5. Each upload writes a new key (a
+ * still's `{w}x{h}-{8 hex}` folder, a page image's fresh uuid), so the bytes
+ * at a URL never change and a cache may keep them for a year without asking
+ * (owner, 2026-10-21: "Cache forever"). A replaced picture is a NEW URL, so
+ * nothing can serve the old one in its place, which is exactly what made
+ * `immutable` wrong on the fixed keys above (Codex-p3rre).
+ *
+ * Not a `CACHE_PRESETS` entry, for the reason given on
+ * {@link R2_OVERWRITTEN_OBJECT_CACHE_CONTROL}.
+ */
+export const R2_IMMUTABLE_OBJECT_CACHE_CONTROL =
+  'public, max-age=31536000, immutable';
 
 export const TIMEOUTS = {
   DEFAULT_TEST: 10000,

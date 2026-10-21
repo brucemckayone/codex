@@ -58,14 +58,7 @@ export const categories = pgTable(
     slug: varchar('slug', { length: 120 }).notNull(), // Unique per resolved space
     description: varchar('description', { length: 500 }),
     icon: varchar('icon', { length: 64 }), // emoji or lucide icon name
-    coverImageKey: varchar('cover_image_key', { length: 500 }), // R2 base key (sm/md/lg/xl variants, like content thumbnails)
-    // The upright picture's size in pixels, written in the same UPDATE as the
-    // image by the upload pipeline (Codex-kk9nv.5). Set, the stored files
-    // include xl (min(1600, width)). Null, the size is unknown (an image from
-    // before, sm/md/lg only, or a URL or key set by hand): draw from
-    // sm/md/lg. The web sizes its srcset from these.
-    coverImageWidth: integer('cover_image_width'),
-    coverImageHeight: integer('cover_image_height'),
+    coverImageKey: varchar('cover_image_key', { length: 500 }), // R2 key (sm/md/lg variants like content thumbnails)
     sortOrder: integer('sort_order').default(0).notNull(),
 
     // Timestamps

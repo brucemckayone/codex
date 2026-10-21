@@ -1,44 +1,27 @@
 /**
  * Codex-r85jo.2 — a partial image upload must not DELETE the previous image.
  *
- * ## The bug this proves is gone
+ * ## The bug this proved gone, and why the fix changed shape (Codex-kk9nv.5)
  *
- * `uploadImageVariants` used to run a compensating `delete` of ALL THREE
- * variant keys whenever ANY of the three puts rejected. That was written under
- * a premise `Codex-p3rre` retired: the old docblock claimed "variants get
- * unique filenames per upload", and under unique keys deleting all three is a
- * correct rollback of objects that were just created and are referenced by
- * nothing.
+ * `uploadImageVariants` used to delete ALL variant keys whenever ANY put
+ * rejected. Under the keys of that time, deterministic per `(creatorId,
+ * contentId)` with no nonce, those were the keys the row ALREADY pointed at,
+ * so the "rollback" 404'd the live image. The r85jo.2 fix was to delete
+ * NOTHING on a partial failure and let the fixed keys self-heal on retry.
  *
- * The keys are DETERMINISTIC — `getContentThumbnailBaseKey(creatorId,
- * contentId)` plus a fixed file name is a pure function with no nonce, hash or
- * timestamp — so the keys the
- * "rollback" deleted are the keys the DB row ALREADY points at. And
- * `uploadImageVariants` runs BEFORE the DB write, so the throw skips the
- * update and the row keeps addressing objects that no longer exist.
- *
- * ## Why NO deletion subset is correct
- *
- * R2 `put` is atomic per object, so after a partial failure every key is in
- * exactly one state:
- *
- *   | key            | prior bytes            | new bytes |
- *   |----------------|------------------------|-----------|
- *   | put SUCCEEDED  | gone (overwritten)     | present   |
- *   | put REJECTED   | INTACT                 | absent    |
- *
- * Deleting a REJECTED key destroys an intact previous variant — it targets
- * precisely the objects still worth keeping. Deleting a SUCCEEDED key leaves
- * the key empty. So "delete only the keys that rejected" is the WORST option,
- * not the safe one, and the correct behaviour is to delete NOTHING and let the
- * deterministic keys self-heal on retry.
+ * Since kk9nv.5 every upload writes a NEW folder,
+ * `{base}/{w}x{h}-{8 hex}/{sm,md,lg,xl}.webp`. The previous image sits in a
+ * different folder (or, uploaded before kk9nv.5, at the old fixed keys), and
+ * nothing references the new folder until the row is written. So the safe
+ * response has inverted: whatever landed in the new folder is deleted, and the
+ * previous image's keys are never touched at all.
  *
  * ## What these tests assert
  *
- * The bucket is modelled as a `Map`, seeded with a previous image at all four
- * keys (sm, md, lg and xl, Codex-kk9nv.5), so the assertion is the
- * acceptance criterion's own wording — every key the previous image occupied
- * is still READABLE — rather than the weaker "delete was not called".
+ * The bucket is modelled as a `Map`, seeded with a previous image, so each
+ * assertion is the acceptance criterion's own wording — every key the previous
+ * image occupied is still READABLE — plus the new half: nothing the failed
+ * upload wrote is left behind.
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
@@ -54,16 +37,17 @@ vi.mock('../../processor', () => ({
 const R2_BASE = 'https://test.r2.dev';
 const CONTENT_ID = 'content-1';
 const CREATOR_ID = 'user-1';
+const THUMBNAIL_BASE = `${CREATOR_ID}/content-thumbnails/${CONTENT_ID}`;
 
-const KEYS = {
-  sm: `${CREATOR_ID}/content-thumbnails/${CONTENT_ID}/sm.webp`,
-  md: `${CREATOR_ID}/content-thumbnails/${CONTENT_ID}/md.webp`,
-  lg: `${CREATOR_ID}/content-thumbnails/${CONTENT_ID}/lg.webp`,
-  xl: `${CREATOR_ID}/content-thumbnails/${CONTENT_ID}/xl.webp`,
-} as const;
+/** The files of one still folder, in put order. */
+function folderKeys(folder: string): string[] {
+  return ['sm', 'md', 'lg', 'xl'].map((size) => `${folder}/${size}.webp`);
+}
 
-/** Every key a thumbnail occupies, in put order. */
-const ALL_KEYS = [KEYS.sm, KEYS.md, KEYS.lg, KEYS.xl];
+/** A previous image uploaded before kk9nv.5: fixed keys under the base. */
+const LEGACY_FOLDER = THUMBNAIL_BASE;
+/** A previous image uploaded since: its own sized folder. */
+const PRIOR_FOLDER = `${THUMBNAIL_BASE}/640x480-0a1b2c3d`;
 
 /** Bytes standing in for the image that is already live in the bucket. */
 const PRIOR = 'PREVIOUS-IMAGE-BYTES';
@@ -73,16 +57,25 @@ const PRIOR = 'PREVIOUS-IMAGE-BYTES';
  * actually matters — "is this key still readable?" — instead of inspecting
  * which methods were called.
  *
- * `rejectPutFor` names the ONE key whose put fails, which is the mid-sequence
- * transient failure (a 500, a quota rejection) the bug reacts to.
+ * `rejectNewPut` names the size whose put fails for a key the bucket does not
+ * already hold, which is the mid-sequence transient failure (a 500, a quota
+ * rejection) the upload reacts to.
  */
-function createBucket(options: { rejectPutFor?: string } = {}) {
+function createBucket(
+  priorFolder: string,
+  options: { rejectNewPut?: 'sm' | 'md' | 'lg' | 'xl' } = {}
+) {
+  const priorKeys = folderKeys(priorFolder);
   const objects = new Map<string, string>(
-    ALL_KEYS.map((key) => [key, PRIOR] as const)
+    priorKeys.map((key) => [key, PRIOR] as const)
   );
 
   const put = vi.fn(async (key: string, body: Uint8Array) => {
-    if (key === options.rejectPutFor) {
+    if (
+      options.rejectNewPut &&
+      key.endsWith(`/${options.rejectNewPut}.webp`) &&
+      !priorKeys.includes(key)
+    ) {
       throw new Error('R2 transient failure: 500');
     }
     objects.set(key, `NEW-${body.byteLength}`);
@@ -94,47 +87,33 @@ function createBucket(options: { rejectPutFor?: string } = {}) {
 
   return {
     objects,
+    priorKeys,
     put,
     delete: del,
     r2: { put, delete: del } as unknown as R2Service,
+    /** Keys the bucket holds that the previous image did not. */
+    newKeys: () => [...objects.keys()].filter((k) => !priorKeys.includes(k)),
   };
 }
 
-/** A DB whose `update` rejects, to drive the `withDbUpdateOrphanCleanup` path. */
-function createFailingUpdateDb(priorThumbnailUrl: string | null): Database {
-  return {
+/** A DB that reads `priorUrl` back and whose update resolves or rejects. */
+function createDb(priorUrl: string | null, update: 'passes' | 'fails') {
+  const where =
+    update === 'passes'
+      ? vi.fn().mockResolvedValue([{ id: CONTENT_ID }])
+      : vi.fn().mockRejectedValue(new Error('Database connection lost'));
+  const db = {
     update: vi.fn().mockReturnValue({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockRejectedValue(new Error('Database connection lost')),
-      }),
+      set: vi.fn().mockReturnValue({ where }),
     }),
     query: {
       content: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({ thumbnailUrl: priorThumbnailUrl }),
+        findFirst: vi.fn().mockResolvedValue({ thumbnailUrl: priorUrl }),
       },
       users: { findFirst: vi.fn().mockResolvedValue({ avatarUrl: null }) },
     },
-  } as unknown as Database;
-}
-
-function createPassingDb(priorThumbnailUrl: string | null): Database {
-  return {
-    update: vi.fn().mockReturnValue({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue([{ id: CONTENT_ID }]),
-      }),
-    }),
-    query: {
-      content: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({ thumbnailUrl: priorThumbnailUrl }),
-      },
-      users: { findFirst: vi.fn().mockResolvedValue({ avatarUrl: null }) },
-    },
-  } as unknown as Database;
+  };
+  return { db: db as unknown as Database, update: db.update };
 }
 
 /** A 4-byte JPEG so `validateImageFile`'s magic-byte check passes. */
@@ -147,6 +126,15 @@ function createTestImageFile(): File {
     ...new Array(100).fill(0),
   ]);
   return new File([bytes], 'test.jpg', { type: 'image/jpeg' });
+}
+
+function serviceFor(bucket: ReturnType<typeof createBucket>, db: Database) {
+  return new ImageProcessingService({
+    db,
+    environment: 'test',
+    r2Service: bucket.r2,
+    r2PublicUrlBase: R2_BASE,
+  });
 }
 
 describe('Codex-r85jo.2: a partial upload preserves the previous image', () => {
@@ -164,71 +152,65 @@ describe('Codex-r85jo.2: a partial upload preserves the previous image', () => {
     });
   });
 
-  it('leaves every previously-occupied variant key readable when one put rejects', async () => {
-    const bucket = createBucket({ rejectPutFor: KEYS.md });
-    const service = new ImageProcessingService({
-      db: createPassingDb(`${R2_BASE}/${KEYS.lg}`),
-      environment: 'test',
-      r2Service: bucket.r2,
-      r2PublicUrlBase: R2_BASE,
+  for (const [label, priorFolder] of [
+    ['a legacy fixed-key image', LEGACY_FOLDER],
+    ['a sized-folder image', PRIOR_FOLDER],
+  ] as const) {
+    it(`leaves ${label} readable and removes what landed when one put rejects`, async () => {
+      const bucket = createBucket(priorFolder, { rejectNewPut: 'md' });
+      const { db, update } = createDb(
+        `${R2_BASE}/${priorFolder}/lg.webp`,
+        'passes'
+      );
+
+      await expect(
+        serviceFor(bucket, db).processContentThumbnail(
+          CONTENT_ID,
+          CREATOR_ID,
+          createTestImageFile()
+        )
+      ).rejects.toThrow();
+
+      // The failure really is a PARTIAL upload: all four puts were attempted.
+      // Without this, a throw before any put would pass every check below.
+      expect(bucket.put).toHaveBeenCalledTimes(4);
+
+      // THE assertion: nothing the row addresses 404s, and none of it changed.
+      for (const key of bucket.priorKeys) {
+        expect(bucket.objects.get(key), key).toBe(PRIOR);
+      }
+      // And the three files that did land are gone, not leaked.
+      expect(bucket.newKeys()).toEqual([]);
+      // The row was never moved off the previous image.
+      expect(update).not.toHaveBeenCalled();
     });
+  }
+
+  it('never deletes a key the previous image occupies', async () => {
+    const bucket = createBucket(PRIOR_FOLDER, { rejectNewPut: 'xl' });
+    const { db } = createDb(`${R2_BASE}/${PRIOR_FOLDER}/lg.webp`, 'passes');
 
     await expect(
-      service.processContentThumbnail(
+      serviceFor(bucket, db).processContentThumbnail(
         CONTENT_ID,
         CREATOR_ID,
         createTestImageFile()
       )
     ).rejects.toThrow();
 
-    // The failure really is a PARTIAL upload: all four puts were attempted.
-    // Without this, a throw before any put would pass every check below.
-    expect(bucket.put).toHaveBeenCalledTimes(4);
-
-    // THE assertion: nothing 404s. sm, lg and xl hold the new bytes, md still
-    // holds the previous image because its put never landed.
-    for (const key of ALL_KEYS) {
-      expect(bucket.objects.has(key), key).toBe(true);
-    }
-    expect(bucket.objects.get(KEYS.md)).toBe(PRIOR);
-    expect(bucket.objects.get(KEYS.xl)).not.toBe(PRIOR);
-  });
-
-  it('does not delete anything on a partial upload failure', async () => {
-    const bucket = createBucket({ rejectPutFor: KEYS.md });
-    const service = new ImageProcessingService({
-      db: createPassingDb(`${R2_BASE}/${KEYS.lg}`),
-      environment: 'test',
-      r2Service: bucket.r2,
-      r2PublicUrlBase: R2_BASE,
-    });
-
-    await expect(
-      service.processContentThumbnail(
-        CONTENT_ID,
-        CREATOR_ID,
-        createTestImageFile()
-      )
-    ).rejects.toThrow();
-
-    // One of the four puts failed — and nothing was deleted.
-    expect(bucket.put).toHaveBeenCalledTimes(4);
-    expect(bucket.delete).not.toHaveBeenCalled();
+    const deleted = bucket.delete.mock.calls.map((call) => call[0]);
+    expect(deleted).toHaveLength(4);
+    expect(deleted.filter((key) => bucket.priorKeys.includes(key))).toEqual([]);
   });
 
   it('reports an R2 failure as a 500, not as a client validation error', async () => {
-    const bucket = createBucket({ rejectPutFor: KEYS.md });
-    const service = new ImageProcessingService({
-      db: createPassingDb(null),
-      environment: 'test',
-      r2Service: bucket.r2,
-      r2PublicUrlBase: R2_BASE,
-    });
+    const bucket = createBucket(LEGACY_FOLDER, { rejectNewPut: 'md' });
+    const { db } = createDb(null, 'passes');
 
     // Asserted by `code`/`statusCode`, never by class name: class names
     // minify in the worker bundle, so an `instanceof`/name assertion passes
     // locally and goes vacuous in production.
-    const error = await service
+    const error = await serviceFor(bucket, db)
       .processContentThumbnail(CONTENT_ID, CREATOR_ID, createTestImageFile())
       .then(() => null)
       .catch((e: unknown) => e as { code?: string; statusCode?: number });
@@ -238,15 +220,10 @@ describe('Codex-r85jo.2: a partial upload preserves the previous image', () => {
   });
 
   it('names the failed variant in the error without leaking R2 internals', async () => {
-    const bucket = createBucket({ rejectPutFor: KEYS.md });
-    const service = new ImageProcessingService({
-      db: createPassingDb(null),
-      environment: 'test',
-      r2Service: bucket.r2,
-      r2PublicUrlBase: R2_BASE,
-    });
+    const bucket = createBucket(LEGACY_FOLDER, { rejectNewPut: 'md' });
+    const { db } = createDb(null, 'passes');
 
-    const error = await service
+    const error = await serviceFor(bucket, db)
       .processContentThumbnail(CONTENT_ID, CREATOR_ID, createTestImageFile())
       .then(() => null)
       .catch(
@@ -265,61 +242,56 @@ describe('Codex-r85jo.2: a partial upload preserves the previous image', () => {
     expect(serialised).not.toMatch(/content-thumbnails/);
   });
 
-  describe('the DB-failure cleanup splits on whether the keys were referenced', () => {
-    it('does NOT delete on a REPLACEMENT — the row still addresses these keys', async () => {
-      const bucket = createBucket();
-      const service = new ImageProcessingService({
-        // Prior URL is exactly the URL this upload would write, so the row
-        // already addresses these keys and deleting them 404s a live image.
-        db: createFailingUpdateDb(`${R2_BASE}/${KEYS.lg}`),
-        environment: 'test',
-        r2Service: bucket.r2,
-        r2PublicUrlBase: R2_BASE,
-      });
+  describe('the row write decides which folder goes', () => {
+    it('a FAILED write deletes the new folder and keeps the previous image', async () => {
+      const bucket = createBucket(PRIOR_FOLDER);
+      const { db } = createDb(`${R2_BASE}/${PRIOR_FOLDER}/lg.webp`, 'fails');
 
       await expect(
-        service.processContentThumbnail(
+        serviceFor(bucket, db).processContentThumbnail(
           CONTENT_ID,
           CREATOR_ID,
           createTestImageFile()
         )
       ).rejects.toThrow(/Database connection lost/i);
 
-      expect(bucket.delete).not.toHaveBeenCalled();
-      expect(bucket.objects.has(KEYS.lg)).toBe(true);
+      // All four new files go, xl included, or they leak (Codex-kk9nv.5).
+      expect(bucket.delete).toHaveBeenCalledTimes(4);
+      expect(bucket.newKeys()).toEqual([]);
+      for (const key of bucket.priorKeys) {
+        expect(bucket.objects.get(key), key).toBe(PRIOR);
+      }
     });
 
-    it('DOES delete on a FIRST upload — nothing references the new keys', async () => {
-      const bucket = createBucket();
-      const service = new ImageProcessingService({
-        db: createFailingUpdateDb(null),
-        environment: 'test',
-        r2Service: bucket.r2,
-        r2PublicUrlBase: R2_BASE,
-      });
+    it('a SUCCESSFUL write deletes the previous image and keeps the new one', async () => {
+      const bucket = createBucket(LEGACY_FOLDER);
+      const { db } = createDb(`${R2_BASE}/${LEGACY_FOLDER}/lg.webp`, 'passes');
 
-      await expect(
-        service.processContentThumbnail(
-          CONTENT_ID,
-          CREATOR_ID,
-          createTestImageFile()
-        )
-      ).rejects.toThrow(/Database connection lost/i);
+      const result = await serviceFor(bucket, db).processContentThumbnail(
+        CONTENT_ID,
+        CREATOR_ID,
+        createTestImageFile()
+      );
 
-      // This is the one case the compensating delete is FOR: the puts landed,
-      // the DB never recorded them, so the objects are genuine orphans. All
-      // four go, xl included, or they leak (Codex-kk9nv.5).
-      expect(bucket.delete).toHaveBeenCalledTimes(4);
-      expect(bucket.delete.mock.calls.map((call) => call[0])).toEqual(ALL_KEYS);
+      // "Inline, same request": the replaced folder is gone once the call
+      // returns, and the URL handed back is one of the files still present.
+      for (const key of bucket.priorKeys) {
+        expect(bucket.objects.has(key), key).toBe(false);
+      }
+      expect(bucket.newKeys()).toHaveLength(4);
+      expect(bucket.objects.has(result.url.slice(R2_BASE.length + 1))).toBe(
+        true
+      );
     });
 
     it('CALIBRATION: the bucket model detects a delete', async () => {
       // Without this, a stubbed-out `delete` that never touches the Map would
       // make every "key is still readable" assertion above pass vacuously.
-      const bucket = createBucket();
-      await bucket.r2.delete(KEYS.md);
-      expect(bucket.objects.has(KEYS.md)).toBe(false);
-      expect(bucket.objects.has(KEYS.sm)).toBe(true);
+      const bucket = createBucket(LEGACY_FOLDER);
+      const [first, second] = bucket.priorKeys;
+      await bucket.r2.delete(first ?? '');
+      expect(bucket.objects.has(first ?? '')).toBe(false);
+      expect(bucket.objects.has(second ?? '')).toBe(true);
     });
   });
 });

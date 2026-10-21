@@ -119,8 +119,6 @@ describe('IdentityService', () => {
       url: `https://cdn-test.revelations.studio/avatars/${userId}/lg.webp`,
       size: 1024,
       mimeType: 'image/webp',
-      width: 800,
-      height: 800,
     };
 
     it('should upload avatar and update user record successfully', async () => {
@@ -1014,9 +1012,6 @@ describe('IdentityService', () => {
       expect(setArg.username).toBeNull();
       expect(setArg.bio).toBeNull();
       expect(setArg.avatarUrl).toBeNull();
-      // The size goes with the picture it measured (Codex-kk9nv.5).
-      expect(setArg.avatarWidth).toBeNull();
-      expect(setArg.avatarHeight).toBeNull();
       expect(setArg.image).toBeNull();
       expect(setArg.socialLinks).toBeNull();
     });

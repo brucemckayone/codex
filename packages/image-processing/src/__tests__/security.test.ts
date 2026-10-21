@@ -110,15 +110,17 @@ describe('ImageProcessingService - Security', () => {
         expect.anything(),
         expect.anything()
       );
-      // Every object, xl included (Codex-kk9nv.5), sits under the creator's
-      // prefix — none escapes the tenant boundary.
+      // Every object, xl included, sits in ONE new sized folder under the
+      // creator's prefix (Codex-kk9nv.5) — none escapes the tenant boundary.
       const keys = putKeys(mockR2Service);
-      expect(keys).toEqual(
-        ['sm', 'md', 'lg', 'xl'].map(
-          (size) => `user-owner/content-thumbnails/content-1/${size}.webp`
-        )
+      expect(keys).toHaveLength(4);
+      expect(new Set(keys.map((key) => key.replace(/\/[^/]+$/, ''))).size).toBe(
+        1
       );
       for (const key of keys) {
+        expect(key).toMatch(
+          /^user-owner\/content-thumbnails\/content-1\/\d+x\d+-[0-9a-f]{8}\/(sm|md|lg|xl)\.webp$/
+        );
         expect(key.startsWith('user-owner/content-thumbnails/content-1/')).toBe(
           true
         );
@@ -136,13 +138,14 @@ describe('ImageProcessingService - Security', () => {
         expect.anything(),
         expect.anything()
       );
-      // Every object, xl included (Codex-kk9nv.5), sits under the user's own
-      // avatar folder.
+      // Every object, xl included, sits in one new folder under the user's own
+      // avatar prefix (Codex-kk9nv.5).
       const keys = putKeys(mockR2Service);
-      expect(keys).toEqual(
-        ['sm', 'md', 'lg', 'xl'].map((size) => `avatars/user-123/${size}.webp`)
-      );
+      expect(keys).toHaveLength(4);
       for (const key of keys) {
+        expect(key).toMatch(
+          /^avatars\/user-123\/\d+x\d+-[0-9a-f]{8}\/(sm|md|lg|xl)\.webp$/
+        );
         expect(key.startsWith('avatars/user-123/')).toBe(true);
       }
     });
@@ -167,12 +170,42 @@ describe('ImageProcessingService - Security', () => {
     });
 
     it('should use creatorId prefix in R2 delete keys', async () => {
+      (mockDb.query.content.findFirst as Mock).mockResolvedValueOnce({
+        thumbnailUrl:
+          'https://cdn.test.com/user-owner/content-thumbnails/content-1/1200x800-0a1b2c3d/lg.webp',
+      });
       await service.deleteContentThumbnail('content-1', 'user-owner');
 
       // Verify R2 delete uses creatorId-prefixed keys
       expect(mockR2Service.delete).toHaveBeenCalledWith(
         expect.stringContaining('user-owner/content-thumbnails/content-1/')
       );
+    });
+
+    it("never deletes another creator's files named by a hand-set thumbnail URL", async () => {
+      // `thumbnailUrl` is accepted from a PATCH body as any URL on the CDN
+      // (Codex-8so68), so it can name ANOTHER creator's upload. Every cleanup
+      // derives what it may delete from THIS content's own base key, so
+      // replacing, dropping or deleting that URL touches none of their files.
+      const foreign =
+        'https://cdn.test.com/user-victim/content-thumbnails/content-9/1200x800-0a1b2c3d/lg.webp';
+      (mockDb.query.content.findFirst as Mock).mockResolvedValue({
+        thumbnailUrl: foreign,
+      });
+
+      await service.deleteContentThumbnail('content-1', 'user-owner');
+      await service.deleteDroppedContentThumbnail(
+        'content-1',
+        'user-owner',
+        foreign
+      );
+      await service.processContentThumbnail(
+        'content-1',
+        'user-owner',
+        createTestImageFile('image/png', 'thumbnail.png')
+      );
+
+      expect(mockR2Service.delete).not.toHaveBeenCalled();
     });
   });
 

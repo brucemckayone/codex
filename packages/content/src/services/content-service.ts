@@ -39,6 +39,7 @@ import {
 import {
   type ImageProcessingResult,
   ImageProcessingService,
+  ownContentThumbnailFolder,
 } from '@codex/image-processing';
 import type { ServiceConfig } from '@codex/service-errors';
 import { BaseService, ValidationError } from '@codex/service-errors';
@@ -108,6 +109,7 @@ export interface ContentServiceConfig extends ServiceConfig {
 
 export class ContentService extends BaseService {
   private cache?: VersionedCache;
+  private readonly r2PublicUrlBase?: string;
 
   /**
    * Narrowed `thumbnailUrl` schema, bound to this worker's asset CDN base.
@@ -119,6 +121,7 @@ export class ContentService extends BaseService {
 
   constructor(config: ContentServiceConfig) {
     super(config);
+    this.r2PublicUrlBase = config.r2PublicUrlBase;
     this.thumbnailUrlSchema = createPlatformImageUrlSchema(
       config.r2PublicUrlBase
     );
@@ -512,6 +515,25 @@ export class ContentService extends BaseService {
     input: UpdateContentInput,
     creatorId: string
   ): Promise<Content> {
+    const { content: updated } = await this.updateReportingDroppedThumbnail(
+      id,
+      input,
+      creatorId
+    );
+    return updated;
+  }
+
+  /**
+   * {@link update}, also returning the thumbnail URL the update moved the row
+   * off, or null. Each upload goes to a new folder (Codex-kk9nv.5), so nothing
+   * would ever overwrite the old one; this service has no R2 binding, so the
+   * content-api PATCH route deletes it.
+   */
+  async updateReportingDroppedThumbnail(
+    id: string,
+    input: UpdateContentInput,
+    creatorId: string
+  ): Promise<{ content: Content; droppedThumbnailUrl: string | null }> {
     // Validate input
     const validated = updateContentSchema.parse(input);
 
@@ -519,6 +541,9 @@ export class ContentService extends BaseService {
     // is a partial, so an absent `thumbnailUrl` is a no-op and an explicit
     // null clears it; only a string is checked.
     this.assertPlatformThumbnailUrl(validated.thumbnailUrl);
+
+    // Read inside the transaction; only meaningful once it has committed.
+    let previousThumbnailUrl: string | null = null;
 
     try {
       const result = await this.db.transaction(async (tx) => {
@@ -542,6 +567,22 @@ export class ContentService extends BaseService {
         } = validated;
         const bodyFields =
           _rawBody !== undefined ? this.parseContentBody(_rawBody) : {};
+        previousThumbnailUrl = existing.thumbnailUrl;
+
+        // A URL in this content's own thumbnail folders is written only by an
+        // upload. One the payload sends that differs from the row's names an
+        // upload since replaced, whose files are deleted, so a stale form
+        // re-sending it would point the row at a 404. The stored thumbnail
+        // stays (Codex-kk9nv.5).
+        const sentThumbnailUrl = restValidated.thumbnailUrl;
+        const keepStoredThumbnail =
+          sentThumbnailUrl != null &&
+          sentThumbnailUrl !== existing.thumbnailUrl &&
+          ownContentThumbnailFolder(
+            sentThumbnailUrl,
+            { creatorId, contentId: id },
+            this.r2PublicUrlBase
+          ) !== null;
 
         // Codex-up7bx: `includedInTierId` (the subscriber gate) is only valid
         // on org-scoped content — subscription_tiers is org-scoped. Determine
@@ -618,15 +659,10 @@ export class ContentService extends BaseService {
             ...('shaderPreset' in restValidated
               ? { shaderPreset: restValidated.shaderPreset || null }
               : {}),
-            ...(clearTier ? { includedInTierId: null } : {}),
-            // A thumbnail's recorded size describes the upload that made it
-            // (Codex-kk9nv.5). A URL the client sets here was never measured,
-            // so a CHANGED URL clears the old size; re-sending the same URL
-            // leaves it alone. The upload route writes the size itself.
-            ...(restValidated.thumbnailUrl !== undefined &&
-            restValidated.thumbnailUrl !== existing.thumbnailUrl
-              ? { thumbnailWidth: null, thumbnailHeight: null }
+            ...(keepStoredThumbnail
+              ? { thumbnailUrl: existing.thumbnailUrl }
               : {}),
+            ...(clearTier ? { includedInTierId: null } : {}),
             // Clamp AFTER the spread so it overrides a stale `isFree:false` the
             // partial may carry alongside the gate it just cleared.
             ...(effHasGate ? {} : { isFree: true }),
@@ -681,7 +717,11 @@ export class ContentService extends BaseService {
         }
       }
 
-      return result;
+      const thumbnailMoved = previousThumbnailUrl !== result.thumbnailUrl;
+      return {
+        content: result,
+        droppedThumbnailUrl: thumbnailMoved ? previousThumbnailUrl : null,
+      };
     } catch (error) {
       if (error instanceof ContentNotFoundError) {
         throw error;
