@@ -228,6 +228,23 @@ export const removeMember = command(
   }
 );
 
+/**
+ * What removing a member would unwind, as counts (Codex-2hxff.64). Read by the
+ * team page's Remove dialog each time it opens; the removal does not depend on
+ * it, so a failure here only costs the dialog its impact list.
+ */
+export const getDeparturePreview = query(
+  z.object({
+    orgId: z.string().uuid(),
+    userId: z.string().min(1),
+  }),
+  async ({ orgId, userId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.org.getDeparturePreview(orgId, userId);
+  }
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Create Organization
 // ─────────────────────────────────────────────────────────────────────────────

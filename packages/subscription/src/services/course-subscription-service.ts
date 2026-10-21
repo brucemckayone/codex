@@ -34,6 +34,7 @@ import {
   CONTENT_STATUS,
   CURRENCY,
   FEES,
+  OFF_SALE_CANCELLABLE_COURSE_SUBSCRIPTION_STATUSES,
   stripeEnvMetadata,
   subscriptionStatusGrantsAccess,
 } from '@codex/constants';
@@ -43,6 +44,7 @@ import {
   courseSubscriptionPlans,
   courseSubscriptions,
   courses,
+  organizations,
   stripeConnectAccounts,
   users,
 } from '@codex/database/schema';
@@ -72,7 +74,7 @@ import {
   type ServiceConfig,
 } from '@codex/service-errors';
 import type { CreateCourseSubscriptionCheckoutInput } from '@codex/validation';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, count, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadyCourseSubscribedError,
@@ -740,6 +742,162 @@ export class CourseSubscriptionService extends BaseService {
       }
     } catch (error) {
       this.handleError(error, 'deactivatePlan');
+    }
+  }
+
+  /**
+   * Cancel, at period end, the live course subscriptions to courses taken off
+   * sale because their creator left the organisation (owner decision
+   * 2026-10-21, Codex-2hxff.64: "Cancel at period end"). Each subscriber keeps
+   * access until the period they paid for ends, is not charged again, and is
+   * emailed `course-no-longer-offered`.
+   *
+   * At most `limit` per call (owner: "50 at once, rest hourly"): the removal
+   * runs it for its own courses, and the hourly sweep (no `courseIds`) does
+   * whatever is left. A course is off sale when `off_sale_at` is set; a
+   * republish clears it, so a course put back on sale is never swept. Stripe's
+   * idempotency key makes a repeat safe; the webhook then mirrors the status
+   * as for any other cancel. A Stripe failure is logged at error and the row
+   * stays eligible, so the next sweep retries it.
+   */
+  async cancelForCoursesOffSale(params: {
+    courseIds?: readonly string[];
+    limit: number;
+  }): Promise<{ cancelled: number; failed: number; remaining: number }> {
+    try {
+      if (params.courseIds && params.courseIds.length === 0) {
+        return { cancelled: 0, failed: 0, remaining: 0 };
+      }
+      const eligible = and(
+        isNotNull(courses.offSaleAt),
+        params.courseIds
+          ? inArray(courses.id, [...params.courseIds])
+          : undefined,
+        // Live and not yet cancelling; the Remove dialog's preview counts the
+        // same list.
+        inArray(courseSubscriptions.status, [
+          ...OFF_SALE_CANCELLABLE_COURSE_SUBSCRIPTION_STATUSES,
+        ]),
+        eq(courseSubscriptions.cancelAtPeriodEnd, false)
+      );
+
+      const rows = await this.db
+        .select({
+          id: courseSubscriptions.id,
+          stripeSubscriptionId: courseSubscriptions.stripeSubscriptionId,
+          status: courseSubscriptions.status,
+          currentPeriodEnd: courseSubscriptions.currentPeriodEnd,
+          organizationId: courseSubscriptions.organizationId,
+          userId: courseSubscriptions.userId,
+          userEmail: users.email,
+          userName: users.name,
+          courseTitle: courses.title,
+          orgName: organizations.name,
+        })
+        .from(courseSubscriptions)
+        .innerJoin(courses, eq(courses.id, courseSubscriptions.courseId))
+        .leftJoin(users, eq(users.id, courseSubscriptions.userId))
+        .leftJoin(organizations, eq(organizations.id, courses.organizationId))
+        .where(eligible)
+        .limit(params.limit);
+
+      let cancelled = 0;
+      let failed = 0;
+      const batchSize = 8;
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const batch = rows.slice(i, i + batchSize);
+        const results = await Promise.allSettled(
+          batch.map((row) =>
+            this.stripe.subscriptions.update(
+              row.stripeSubscriptionId,
+              { cancel_at_period_end: true },
+              { idempotencyKey: `course_off_sale_cancel_${row.id}` }
+            )
+          )
+        );
+        for (const [idx, result] of results.entries()) {
+          const row = batch[idx];
+          if (!row) continue;
+          if (result.status === 'rejected') {
+            failed += 1;
+            this.obs.error('Course subscription off-sale cancel failed', {
+              courseSubscriptionId: row.id,
+              error:
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : String(result.reason),
+            });
+            continue;
+          }
+          cancelled += 1;
+          await this.db
+            .update(courseSubscriptions)
+            .set({
+              cancelAtPeriodEnd: true,
+              // `active` + cancel-at-period-end is `cancelling`; a past-due
+              // or paused row keeps its status (resolveStatus, the webhook).
+              ...(row.status === 'active' ? { status: 'cancelling' } : {}),
+              updatedAt: new Date(),
+            })
+            .where(eq(courseSubscriptions.id, row.id));
+          this.sendCourseNoLongerOffered(row);
+        }
+      }
+
+      const [left] = await this.db
+        .select({ total: count() })
+        .from(courseSubscriptions)
+        .innerJoin(courses, eq(courses.id, courseSubscriptions.courseId))
+        .where(eligible);
+      const remaining = Number(left?.total ?? 0);
+      if (rows.length > 0) {
+        this.obs.info('Course subscriptions cancelled for courses off sale', {
+          cancelled,
+          failed,
+          remaining,
+        });
+      }
+      return { cancelled, failed, remaining };
+    } catch (error) {
+      this.handleError(error, 'cancelForCoursesOffSale');
+    }
+  }
+
+  /** Tell one subscriber their course is no longer offered. Never throws. */
+  private sendCourseNoLongerOffered(row: {
+    id: string;
+    userId: string;
+    organizationId: string | null;
+    userEmail: string | null;
+    userName: string | null;
+    courseTitle: string | null;
+    orgName: string | null;
+    currentPeriodEnd: Date;
+  }): void {
+    if (!this.mailer || !row.userEmail) return;
+    try {
+      this.mailer({
+        to: row.userEmail,
+        toName: row.userName || undefined,
+        templateName: 'course-no-longer-offered',
+        category: 'transactional',
+        userId: row.userId,
+        organizationId: row.organizationId,
+        data: {
+          userName: row.userName || 'there',
+          courseTitle: row.courseTitle || 'your course',
+          orgName: row.orgName || 'the organisation',
+          accessUntil: row.currentPeriodEnd.toLocaleDateString('en-GB', {
+            timeZone: 'UTC',
+          }),
+          manageUrl: `${this.webAppUrl ?? ''}/account/subscriptions`,
+        },
+      });
+    } catch (error) {
+      this.obs.warn('Course off-sale notice: mailer threw', {
+        courseSubscriptionId: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

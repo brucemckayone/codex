@@ -40,9 +40,25 @@ import {
   inArray,
   isNull,
   or,
+  type SQL,
   sql,
 } from 'drizzle-orm';
 import { resolvePracticeThumbnail } from '../practice-thumbnail';
+
+/**
+ * Is this content on offer to a subscription whose current period began at
+ * `periodStart`? Published content always is. Content taken off sale because
+ * its creator left the organisation (Codex-2hxff.64) stays on offer until the
+ * subscriber's next renewal — while `off_sale_at >= periodStart` — the rule
+ * `decideContentAccess` applies to the subscription arms. Anything else that
+ * is unpublished (an ordinary draft has no `off_sale_at`) is not.
+ *
+ * Raw `sql`, never drizzle's `or()`, which is typed `SQL | undefined`: `and()`
+ * drops an undefined argument silently, and losing this would list drafts.
+ */
+function onOfferToSubscriptionPeriod(periodStart: Date): SQL {
+  return sql`(${content.status} = ${CONTENT_STATUS.PUBLISHED} OR (${content.offSaleAt} IS NOT NULL AND ${content.offSaleAt} >= ${periodStart}))`;
+}
 
 /**
  * User library item with content, access type, purchase, and progress
@@ -573,6 +589,12 @@ export async function listUserLibrary(
     //
     // Since each subscription may be to a different org with a different tier,
     // we build an OR of per-subscription conditions.
+    //
+    // Publication is decided PER SUBSCRIPTION too, because it depends on the
+    // subscription's period (Codex-2hxff.64): an item taken off sale when its
+    // creator left the org stays in the library until this subscription's next
+    // renewal — the same rule `decideContentAccess` applies, so the shelf never
+    // lists an item the player would refuse, nor hides one it would play.
     const subConditions = activeSubscriptions.map((sub) => {
       const tierSortOrder = sub.tier.sortOrder;
       return and(
@@ -586,7 +608,8 @@ export async function listUserLibrary(
               AND ${subscriptionTiers.organizationId} = ${sub.organizationId}
               AND ${subscriptionTiers.deletedAt} IS NULL
           )`
-        )
+        ),
+        onOfferToSubscriptionPeriod(sub.currentPeriodStart)
       );
     });
 
@@ -609,9 +632,10 @@ export async function listUserLibrary(
       // Per-org tier-sortOrder check below (subConditions) decides whether this
       // user's tier is high enough for any given item.
       sql`${content.includedInTierId} IS NOT NULL`,
-      eq(content.status, CONTENT_STATUS.PUBLISHED),
       isNull(content.deletedAt),
-      // Must belong to one of the user's subscribed orgs (with tier check)
+      // Must belong to one of the user's subscribed orgs (with tier check),
+      // and be on offer to that subscription — published, or off sale within
+      // its current period (see `subConditions`).
       subscribedOrgScope,
       // Cross-arm exclusion — see `notAcquiredByPurchase`. Matters most in
       // this arm: paid + tier-gated content qualifies for BOTH it and the
@@ -781,6 +805,20 @@ export async function listUserLibrary(
     throw new Error('[library] relationship predicate collapsed to undefined');
   }
 
+  // Follower-gated content taken off sale when its creator left the org
+  // (Codex-2hxff.64) stays for a SUBSCRIBER until their next renewal — the
+  // `followers_subscription` arm of `decideContentAccess`. A follow alone is
+  // not a payment, so a non-subscribed follower does not keep it. Same
+  // subscription predicate as `relationshipPredicate`, plus the period test.
+  const offSaleWithinSubscribedPeriod = sql`(${content.offSaleAt} IS NOT NULL
+    AND EXISTS (SELECT 1 FROM ${subscriptions}
+                WHERE ${subscriptions.userId} = ${userId}
+                  AND ${subscriptions.organizationId} = ${content.organizationId}
+                  AND ${subscriptions.status} IN (${grantingStatusList})
+                  AND ${subscriptions.disputedAt} IS NULL
+                  AND ${subscriptions.currentPeriodEnd} > ${asOf}
+                  AND ${content.offSaleAt} >= ${subscriptions.currentPeriodStart}))`;
+
   const buildRelationshipQuery = async (
     bucketAccessType:
       | typeof CONTENT_ACCESS_TYPE.FREE
@@ -791,10 +829,14 @@ export async function listUserLibrary(
       bucketAccessType === CONTENT_ACCESS_TYPE.FREE
         ? eq(content.isFree, true)
         : eq(content.isFollowerGated, true),
-      eq(content.status, CONTENT_STATUS.PUBLISHED),
+      // Free content is on offer only while published. Follower-gated content
+      // is also on offer to a subscriber while it is off sale within their
+      // period (see `offSaleWithinSubscribedPeriod`).
+      bucketAccessType === CONTENT_ACCESS_TYPE.FREE
+        ? sql`(${content.status} = ${CONTENT_STATUS.PUBLISHED} AND ${relationshipPredicate})`
+        : sql`((${content.status} = ${CONTENT_STATUS.PUBLISHED} AND ${relationshipPredicate}) OR ${offSaleWithinSubscribedPeriod})`,
       isNull(content.deletedAt),
       sql`${content.organizationId} IS NOT NULL`,
-      relationshipPredicate,
       // Cross-arm exclusion — see `notAcquiredByPurchase`. Defensive here:
       // free/followers items shouldn't be priced, but a flag-flip
       // (paid → free) could create overlap. Keeps the priority contract

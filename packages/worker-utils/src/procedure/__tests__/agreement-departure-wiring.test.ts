@@ -1,17 +1,18 @@
 /**
- * Codex-2hxff.18 — a removal's departure emails are connected.
+ * Codex-2hxff.18 / .64 — a removal's follow-up is connected.
  *
- * `OrganizationService.removeMember` ends the member's agreements and hands
- * them to an injected `onAgreementsEndedByDeparture` callback, which the
- * registry points at `AgreementService.notifyTerminatedOnDeparture`. The
- * service tests construct their own callback, so without this pin deleting the
- * registry wiring would leave every test green while no removed creator is
- * ever told their agreement ended.
+ * `OrganizationService.removeMember` hands what a removal ended to an injected
+ * `onMemberRemoved` callback, which the registry points at
+ * `followUpMemberDeparture` (course subscriptions cancelled at period end,
+ * caches cleared, one email to the creator). The service tests construct
+ * their own callback, so without this pin deleting the registry wiring would
+ * leave every test green while no course subscription is ever cancelled.
  *
  * DATABASE-FREE: the DB client is constructed, never queried (same env shape
- * as orphan-producer-wiring.test.ts).
+ * as orphan-producer-wiring.test.ts). No CACHE_KV and no execution context,
+ * so the follow-up skips its cache and email steps.
  */
-import type { DepartureTerminatedAgreement } from '@codex/agreements';
+import type { MemberDeparture } from '@codex/organization';
 import type { Bindings } from '@codex/shared-types';
 import { describe, expect, it, vi } from 'vitest';
 import { createServiceRegistry } from '../service-registry';
@@ -26,34 +27,38 @@ function orgEnv(): Bindings {
 }
 
 /** Read a private field without widening the production type. */
-function departureCallbackOf(
+function removalCallbackOf(
   service: object
-): ((agreements: DepartureTerminatedAgreement[]) => Promise<void>) | undefined {
+): ((departure: MemberDeparture) => Promise<void>) | undefined {
   return (
     service as {
-      onAgreementsEndedByDeparture?: (
-        agreements: DepartureTerminatedAgreement[]
-      ) => Promise<void>;
+      onMemberRemoved?: (departure: MemberDeparture) => Promise<void>;
     }
-  ).onAgreementsEndedByDeparture;
+  ).onMemberRemoved;
 }
 
-describe('agreement departure wiring (Codex-2hxff.18)', () => {
-  it('registry organization hands ended agreements to the agreements service', async () => {
+describe('member removal wiring (Codex-2hxff.64)', () => {
+  it("registry organization cancels the removed creator's course subscriptions, 50 at once", async () => {
     const { registry, cleanup } = await createServiceRegistry(orgEnv());
     try {
-      const notify = vi
-        .spyOn(registry.agreements, 'notifyTerminatedOnDeparture')
-        .mockResolvedValue(undefined);
-      const callback = departureCallbackOf(registry.organization);
+      const cancel = vi
+        .spyOn(registry.courseSubscription, 'cancelForCoursesOffSale')
+        .mockResolvedValue({ cancelled: 0, failed: 0, remaining: 0 });
+      const callback = removalCallbackOf(registry.organization);
       expect(callback).toBeTypeOf('function');
 
-      const ended = [
-        { id: 'agreement-1' },
-      ] as unknown as DepartureTerminatedAgreement[];
-      await callback?.(ended);
+      await callback?.({
+        organizationId: 'org-1',
+        creatorId: 'creator-1',
+        at: new Date(),
+        endedAgreements: [],
+        catalogue: { contentIds: [], courseIds: ['course-1'] },
+      });
 
-      expect(notify).toHaveBeenCalledWith(ended);
+      expect(cancel).toHaveBeenCalledWith({
+        courseIds: ['course-1'],
+        limit: 50,
+      });
     } finally {
       await cleanup();
     }

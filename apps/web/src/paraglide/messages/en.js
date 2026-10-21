@@ -7639,14 +7639,6 @@ export const team_remove = () => `Remove`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const team_remove_confirm = () => `Are you sure you want to remove this member?`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const team_change_role = () => `Change Role`
 
 
@@ -16712,3 +16704,323 @@ export const team_owner_transfer = () => `Transfer ownership`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const team_owner_view_ownership = () => `Ownership settings`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_title = (params) => `Remove ${params.name}?`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_title_from_org = (params) => `Remove ${params.name} from ${params.orgName}?`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_loses_access = (params) => `${params.name} loses access to this studio straight away.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_loses_access_unnamed = () => `This member loses access to this studio straight away.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_nothing_else = (params) => `${params.name} loses access to this studio straight away. Nothing else changes: ${params.name} has nothing on sale and no agreements here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_nothing_else_unnamed = () => `This member loses access to this studio straight away. Nothing else changes: they have nothing on sale and no agreements here.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_confirm_named = (params) => `Remove ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_confirm_member = () => `Remove member`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_checking = () => `Checking what else this affects…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_group_now = () => `Stops now`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_group_later = () => `Ends later`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_group_kept = () => `Kept`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_agreements_one = () => `1 revenue-share agreement ends`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_agreements_other = (params) => `${params.count} revenue-share agreements end`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_agreements_detail = (params) => `${params.name} stops earning from new sales and subscriptions.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_agreements_detail_unnamed = () => `This member stops earning from new sales and subscriptions.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_items_one = () => `1 item`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_items_other = (params) => `${params.count} items`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_courses_one = () => `1 course`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_courses_other = (params) => `${params.count} courses`
+
+
+/**
+ * @param {{ things: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_off_sale_one = (params) => `${params.things} comes off sale`
+
+
+/**
+ * @param {{ things: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_off_sale_other = (params) => `${params.things} come off sale`
+
+
+/**
+ * @param {{ items: NonNullable<unknown>, courses: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_off_sale_both = (params) => `${params.items} and ${params.courses} come off sale`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_off_sale_detail_one = () => `No one new can buy or find it. Drafts aren't touched.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_off_sale_detail_other = () => `No one new can buy or find them. Drafts aren't touched.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_course_subscriptions_one = () => `1 course subscription cancels when its current period ends`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_course_subscriptions_other = (params) => `${params.count} course subscriptions cancel when their current period ends`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_course_subscriptions_detail_one = () => `The subscriber keeps access until then, won't be charged again, and we'll email them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_course_subscriptions_detail_other = () => `They keep access until then, won't be charged again, and we'll email them.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_tier_subscribers_one = (params) => `1 tier subscriber keeps ${params.name}'s content until their next renewal`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_tier_subscribers_other = (params) => `${params.count} tier subscribers keep ${params.name}'s content until their next renewal`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_tier_subscribers_unnamed_one = () => `1 tier subscriber keeps this member's content until their next renewal`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_tier_subscribers_unnamed_other = (params) => `${params.count} tier subscribers keep this member's content until their next renewal`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_tier_subscribers_detail = () => `After that, it's no longer in their subscription.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_kept_lead = () => `One-off buyers keep what they bought`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_kept_detail = () => `Anyone who bought an item or course keeps access.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_preview_error_title = () => `We couldn't load what this removal affects.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_preview_error_body = (params) => `You can still remove ${params.name}. The removal works the same either way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_preview_error_body_unnamed = () => `You can still remove this member. The removal works the same either way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_remove_preview_retry = () => `Try again`

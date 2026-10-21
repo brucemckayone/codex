@@ -29,6 +29,7 @@ import {
   type WebhookServices,
 } from '@codex/worker-utils';
 import type Stripe from 'stripe';
+import { runCourseOffSaleSweep } from './course-off-sale-sweep';
 
 /** Default age threshold — only sweep rows old enough that the
  *  account.updated webhook would already have fired by now if it was
@@ -157,6 +158,9 @@ export async function runScheduledPayoutsSweep(
       olderThanMinutes: deps?.olderThanMinutes,
     });
   } finally {
+    // Same hourly wake (Codex-2hxff.64): never throws, so the pool is always
+    // released below.
+    await runCourseOffSaleSweep(webhookServices.services, obs);
     webhookServices.release();
   }
 }

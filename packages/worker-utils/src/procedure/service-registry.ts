@@ -49,7 +49,7 @@ import {
   NotificationsService,
   TemplateService,
 } from '@codex/notifications';
-import type { ObservabilityClient } from '@codex/observability';
+import { ObservabilityClient } from '@codex/observability';
 import { DevDomainService, OrganizationService } from '@codex/organization';
 import {
   BrandingSettingsService,
@@ -72,6 +72,7 @@ import {
 import { TranscodingService } from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
 import { sendEmailToWorker } from '../email/send-email';
+import { followUpMemberDeparture } from './member-departure';
 import type { ServiceRegistry } from './types';
 import type { BackgroundTracker } from './upload-shared';
 
@@ -731,11 +732,33 @@ export async function createServiceRegistry(
                 sendEmailToWorker(env, executionCtx, params);
               }
             : undefined,
-          // Codex-2hxff.18: a removed member's ended agreements are emailed
-          // to them by the agreements service. `async`, so even a throw while
-          // building that service becomes a rejection the caller logs.
-          onAgreementsEndedByDeparture: async (agreements) => {
-            await registry.agreements.notifyTerminatedOnDeparture(agreements);
+          // Codex-2hxff.18 / .64: what a removal ended goes to the follow-up
+          // (course subscriptions cancelled at period end, caches cleared, one
+          // email to the creator). `async`, so even a throw while building a
+          // service becomes a rejection the caller logs.
+          onMemberRemoved: async (departure) => {
+            await followUpMemberDeparture(
+              {
+                // Reads and KV only, so the stateless HTTP client, as
+                // content-api's cache bump uses.
+                db: createDbClient(env),
+                cache: env.CACHE_KV
+                  ? buildTrackedCache(env.CACHE_KV)
+                  : undefined,
+                waitUntil: (promise) => dbWaitUntil?.(promise),
+                cancelCourseSubscriptions: (params) =>
+                  registry.courseSubscription.cancelForCoursesOffSale(params),
+                sendEmail: executionCtx
+                  ? (params) => {
+                      sendEmailToWorker(env, executionCtx, params);
+                    }
+                  : undefined,
+                obs:
+                  _obs ??
+                  new ObservabilityClient('member-departure', getEnvironment()),
+              },
+              departure
+            );
           },
           webAppUrl: env.WEB_APP_URL,
           // The email task looks its recipients up in the DB first.
@@ -980,7 +1003,9 @@ export async function createServiceRegistry(
           ? (params: {
               to: string;
               toName?: string;
-              templateName: 'subscription-tier-price-change';
+              templateName:
+                | 'subscription-tier-price-change'
+                | 'course-no-longer-offered';
               category: 'transactional';
               userId?: string;
               organizationId?: string | null;

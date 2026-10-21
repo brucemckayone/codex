@@ -63,10 +63,6 @@ import type {
   RevenueType,
 } from '../types';
 import {
-  DEPARTURE_TERMINATION_REASON,
-  type DepartureTerminatedAgreement,
-} from './agreement-departure';
-import {
   creatorShareFromLegacyOrgFee,
   formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,
@@ -1033,64 +1029,6 @@ export class AgreementService extends BaseService {
       return terminated;
     } catch (error) {
       this.handleError(error, 'terminateAgreement');
-    }
-  }
-
-  /**
-   * Emails the creator about each agreement ended because they are no longer
-   * a member of the organisation (`terminateAgreementsOnDeparture`, owner
-   * decision AGR-09). The organisation, through its first active owner, is the
-   * counterparty; with no active owner the email names "The other party", so
-   * the creator is still told. Runs after the removal has committed, so a
-   * failure here is logged and never undoes it.
-   */
-  async notifyTerminatedOnDeparture(
-    agreements: readonly DepartureTerminatedAgreement[]
-  ): Promise<void> {
-    for (const terminated of agreements) {
-      try {
-        const [ownerRow] = await this.db
-          .select({ userId: organizationMemberships.userId })
-          .from(organizationMemberships)
-          .where(
-            and(
-              eq(
-                organizationMemberships.organizationId,
-                terminated.organizationId
-              ),
-              eq(organizationMemberships.role, 'owner'),
-              eq(organizationMemberships.status, 'active')
-            )
-          )
-          .limit(1);
-        await this.dispatchLifecycleEmail({
-          recipientUserId: terminated.creatorId,
-          organizationId: terminated.organizationId,
-          templateName: 'agreement-terminated',
-          extraContext: {
-            terminationReason: DEPARTURE_TERMINATION_REASON,
-            effectiveTerminationDate: this.formatDate(
-              terminated.terminatedAt ?? new Date()
-            ),
-          },
-          threadId: terminated.id,
-          counterpartyUserId: ownerRow?.userId ?? null,
-          revenueType: terminated.revenueType as RevenueType,
-          sharePercent: 10000 - terminated.organizationFeePercentage,
-          termMonths: this.estimateTermMonths(
-            terminated.effectiveFrom,
-            terminated.effectiveUntil
-          ),
-          note: null,
-        });
-      } catch (error) {
-        this.obs.warn('agreement departure notice failed', {
-          agreementId: terminated.id,
-          organizationId: terminated.organizationId,
-          creatorId: terminated.creatorId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
     }
   }
 

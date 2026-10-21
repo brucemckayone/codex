@@ -35,6 +35,7 @@ import type { DatabaseClient } from '@codex/database';
 import {
   courseStages,
   courseSubscriptions,
+  courses,
   courseTierAccess,
   entitlements,
   stagePractices,
@@ -76,6 +77,24 @@ const COURSE_GRANT_SOURCES: string[] = [
  */
 export function grantNotPausedByDispute(): SQL {
   return sql`NOT EXISTS (SELECT 1 FROM ${courseSubscriptions} WHERE ${entitlements.source} = 'course_subscription' AND ${courseSubscriptions.id} = ${entitlements.sourceRef} AND ${courseSubscriptions.disputedAt} IS NOT NULL)`;
+}
+
+/**
+ * A tier subscription still reaches a course that was taken off sale only
+ * until the subscriber's next renewal (Codex-2hxff.64, owner decision
+ * 2026-10-21). When a creator leaves an organisation their courses there are
+ * archived and stamped `off_sale_at`; the subscriber already paid for the
+ * period in which that happened, so the derived grant holds while
+ * `off_sale_at >= current_period_start` and ends when a renewal moves the
+ * period start past the stamp. A course with no stamp is unaffected — this
+ * adds no status condition of its own.
+ *
+ * Raw `sql` rather than drizzle's `or()`, which is typed `SQL | undefined`:
+ * `and()` drops an undefined argument without complaint, and losing this
+ * predicate would silently keep every off-sale course open.
+ */
+function courseStillCoveredBySubscription(): SQL {
+  return sql`(${courses.offSaleAt} IS NULL OR ${courses.offSaleAt} >= ${subscriptions.currentPeriodStart})`;
 }
 
 /**
@@ -150,6 +169,7 @@ async function hasDerivedCourseTierAccess(
     .select({ courseId: courseTierAccess.courseId })
     .from(courseTierAccess)
     .innerJoin(subscriptions, eq(subscriptions.tierId, courseTierAccess.tierId))
+    .innerJoin(courses, eq(courses.id, courseTierAccess.courseId))
     .where(
       and(
         eq(courseTierAccess.courseId, courseId),
@@ -159,7 +179,8 @@ async function hasDerivedCourseTierAccess(
         ]),
         // Paused while a chargeback on one of its invoices is open.
         isNull(subscriptions.disputedAt),
-        gt(subscriptions.currentPeriodEnd, new Date())
+        gt(subscriptions.currentPeriodEnd, new Date()),
+        courseStillCoveredBySubscription()
       )
     )
     .limit(1);
@@ -223,6 +244,7 @@ export async function resolveCourseEntitlementsBatch(
     .select({ courseId: courseTierAccess.courseId })
     .from(courseTierAccess)
     .innerJoin(subscriptions, eq(subscriptions.tierId, courseTierAccess.tierId))
+    .innerJoin(courses, eq(courses.id, courseTierAccess.courseId))
     .where(
       and(
         inArray(courseTierAccess.courseId, ids),
@@ -232,7 +254,8 @@ export async function resolveCourseEntitlementsBatch(
         ]),
         // Paused while a chargeback on one of its invoices is open.
         isNull(subscriptions.disputedAt),
-        gt(subscriptions.currentPeriodEnd, now)
+        gt(subscriptions.currentPeriodEnd, now),
+        courseStillCoveredBySubscription()
       )
     );
   for (const row of derived) {

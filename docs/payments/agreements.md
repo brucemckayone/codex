@@ -89,8 +89,10 @@ admin revenue view all treat an agreement past its review date as active.
 Owner decision AGR-09, "End on removal". When a creator is removed from an
 organisation, their agreements there are **terminated at that moment**
 (`terminateAgreementsOnDeparture`, in the same transaction as the membership
-change). The creator is emailed `agreement-terminated` after the commit. Their
-agreements in other organisations are untouched.
+change). Their agreements in other organisations are untouched. After the
+commit the creator gets one `removed-from-organisation` email listing
+everything that ended (owner decision: "Yes, one email"). On removal it takes
+the place of `agreement-terminated`.
 
 Nothing new can start for them either. Their open proposals there are
 withdrawn in the same transaction (`withdrawProposalsOnDeparture`), and
@@ -109,10 +111,35 @@ agreements end and their open proposals are withdrawn in the same transaction
 as the deletion, with the reason "The creator deleted their account". No email
 is sent, because the address is scrubbed by the deletion.
 
-— **gap**: `Codex-2hxff.64`. The removed creator's content and courses stay
-on sale, at the default split. Owner decision: on removal nothing of theirs
-stays on sale, tier access to their content ends, and one-off buyers keep what
-they bought.
+#### What comes off sale
+
+Owner decision, `Codex-2hxff.64`: when a creator is removed, nothing of theirs
+stays on sale there. In the same transaction as the removal
+(`withdrawCatalogueOnDeparture`), their **published** content and courses in
+that organisation become `archived`, together with each course's landing
+page. Each archived item is stamped with `off_sale_at`. Drafts, deleted rows,
+personal content, other creators' items and other organisations are left
+alone.
+
+| Who | What happens |
+|---|---|
+| One-off buyers, entitlement holders, course owners | Keep it for good. |
+| Organisation tier subscribers | Keep it until their next renewal: access needs `off_sale_at >= current_period_start` ([access](access.md#when-access-ends)). Tier-derived course access ends the same way. |
+| Course subscribers | Their subscription is cancelled at period end, and each subscriber gets a `course-no-longer-offered` email. Up to 50 are cancelled right after the removal; the hourly ecom-api sweep cancels the rest, up to 200 an hour. |
+| Followers and everyone else | Lose it immediately. |
+| Another creator's course that uses one of their practices | Keeps it, for existing and new buyers alike (owner decision: "Stays for everyone"). |
+
+A checkout that was already open when the removal happened still completes,
+at the old split. A purchase resolves its agreement when its checkout
+**started** ([purchases](purchases.md#completing-the-purchase)).
+
+Nothing comes back by itself if the creator rejoins. Republishing an item by
+hand clears `off_sale_at`. The owner sees all of this before confirming: the
+remove dialog loads a preview of what stops now, what ends later and what is
+kept (`GET /api/organizations/:id/members/:userId/departure-preview`).
+
+Account deletion never reaches this step: an account that still has content
+cannot be deleted.
 
 `removeMember` and account deletion are the only ways a creator leaves today.
 Any new way out must call `withdrawProposalsOnDeparture` and
@@ -132,9 +159,9 @@ One resolver decides which agreements apply, for every path
 (`agreementsInForce` in `@codex/agreements`) — **gap**: `Codex-2hxff.19` for
 the two items marked "today":
 
-- it uses the sale's own time: the invoice's creation time for subscriptions and
-  the payment time for purchases (today purchases use the time the webhook is
-  processed);
+- it uses the sale's own time: the invoice's creation time for subscriptions,
+  and the checkout session's creation time for purchases (`offerAt`), so a
+  buyer pays the split that was on offer when they started;
 - an agreement counts if it is active at that time, or was terminated after it,
   and it had taken effect by then (the review date is not read);
 - a missing proposal link is logged and skipped, never silently dropped, and
@@ -174,7 +201,9 @@ also require the caller to be an active owner.
 | `agreement-proposed-by-owner` | The creator |
 | `agreement-countered-by-creator` / `agreement-countered-by-owner` | The other side |
 | `agreement-accepted`, `agreement-declined` | Both sides |
-| `agreement-terminated` | The side that did not terminate |
+| `agreement-terminated` | The side that did not terminate (not sent on removal) |
+| `removed-from-organisation` | A removed creator: their agreements ended, items taken off sale, course subscriptions ending |
+| `course-no-longer-offered` | A course subscriber whose course was taken off sale |
 | `agreement-expiring-soon` | Both sides, 30 days before the review date |
 
 Every link in these emails opens a page that exists for that recipient — the

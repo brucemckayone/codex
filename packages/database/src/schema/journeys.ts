@@ -190,6 +190,10 @@ export const courses = pgTable(
 
     status: varchar('status', { length: 20 }).notNull().default('draft'),
     publishedAt: timestamp('published_at', { withTimezone: true }),
+    // When the course was taken off sale because its creator left the
+    // organisation (status -> 'archived'; Codex-2hxff.64). Tier-derived
+    // access ends at the subscriber's next renewal. Cleared on republish.
+    offSaleAt: timestamp('off_sale_at', { withTimezone: true }),
 
     // { name, bio, portraitMediaId, quote }
     guide: jsonb('guide').$type<CourseGuide>(),

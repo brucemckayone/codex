@@ -99,6 +99,13 @@ export interface ContentAccessPolicyRow {
   isFollowerGated: boolean;
   isTeamOnly: boolean;
   courseOnly: boolean;
+  /**
+   * When the item was taken off sale because its creator left the
+   * organisation (Codex-2hxff.64). Read by the renewal rule in
+   * `decideContentAccess`; `null` for everything else, including ordinary
+   * drafts, which the rule therefore leaves alone.
+   */
+  offSaleAt: Date | null;
 }
 
 /**
@@ -146,11 +153,32 @@ type GrantVia =
   | 'paid_course'
   | 'paid_management';
 
+/** The two arms granted by a subscription the user is paying for. */
+type SubscriptionGrantVia =
+  | 'followers_subscription'
+  | 'subscribers_subscription';
+
+/**
+ * A subscription grant carries the granting subscription's
+ * `currentPeriodStart` — the renewal rule in `decideContentAccess` compares it
+ * with the item's `offSaleAt`. Typed as its own variant so a subscription arm
+ * cannot be granted without it.
+ */
 type AccessDecision =
-  | { granted: true; via: GrantVia }
+  | { granted: true; via: Exclude<GrantVia, SubscriptionGrantVia> }
+  | { granted: true; via: SubscriptionGrantVia; periodStart: Date }
   | { granted: false; reason: DenyReason };
 
-const grant = (via: GrantVia): AccessDecision => ({ granted: true, via });
+const grant = (
+  via: Exclude<GrantVia, SubscriptionGrantVia>
+): AccessDecision => ({
+  granted: true,
+  via,
+});
+const grantBySubscription = (
+  via: SubscriptionGrantVia,
+  periodStart: Date
+): AccessDecision => ({ granted: true, via, periodStart });
 const deny = (reason: DenyReason): AccessDecision => ({
   granted: false,
   reason,
@@ -212,10 +240,12 @@ async function decidePolicyAccess(
 
   // Active subscription meeting the content's minimum tier (by sortOrder).
   // `minimumTierId === null` → any active subscription grants (community gate).
-  const hasSubscriptionAccess = async (
+  // Returns the GRANTING subscription, or `null` when none grants: the renewal
+  // rule in `decideContentAccess` reads its `currentPeriodStart`.
+  const grantingSubscription = async (
     minimumTierId: string | null
-  ): Promise<boolean> => {
-    if (userId == null || orgId == null) return false;
+  ): Promise<{ currentPeriodStart: Date } | null> => {
+    if (userId == null || orgId == null) return null;
     const userSub = await db.query.subscriptions.findFirst({
       where: and(
         eq(subscriptions.userId, userId),
@@ -229,14 +259,14 @@ async function decidePolicyAccess(
       ),
       with: { tier: true },
     });
-    if (!userSub) return false;
-    if (!minimumTierId) return true;
+    if (!userSub) return null;
+    if (!minimumTierId) return userSub;
     const contentTier = await db.query.subscriptionTiers.findFirst({
       where: eq(subscriptionTiers.id, minimumTierId),
       columns: { sortOrder: true },
     });
-    if (!contentTier) return false;
-    return userSub.tier.sortOrder >= contentTier.sortOrder;
+    if (!contentTier) return null;
+    return userSub.tier.sortOrder >= contentTier.sortOrder ? userSub : null;
   };
 
   const verifyPurchase = async (): Promise<boolean> => {
@@ -280,8 +310,12 @@ async function decidePolicyAccess(
   // the management bypass.
   if (policy.isFollowerGated) {
     if (!orgId) return deny('followers_only_requires_org');
-    if (await hasSubscriptionAccess(null))
-      return grant('followers_subscription');
+    const sub = await grantingSubscription(null);
+    if (sub)
+      return grantBySubscription(
+        'followers_subscription',
+        sub.currentPeriodStart
+      );
     if (await hasFollower()) return grant('followers_follower');
     return (await hasManagementMembership())
       ? grant('followers_management')
@@ -294,14 +328,30 @@ async function decidePolicyAccess(
   // arm; then management fallback.
   if (policy.includedInTierId != null) {
     if (!orgId) return deny('subscribers_only_requires_org');
-    const [subscribed, purchased] = await Promise.all([
-      hasSubscriptionAccess(policy.includedInTierId),
+    const [sub, purchased] = await Promise.all([
+      grantingSubscription(policy.includedInTierId),
       verifyPurchase(),
     ]);
-    if (subscribed) return grant('subscribers_subscription');
+    // Once the item is off offer, only some grants outlive that (see
+    // GRANT_SURVIVES_UNPUBLICATION), and a subscription's ends at renewal.
+    // So an unpublished item tries every arm that survives BEFORE the
+    // subscription: a subscriber who also bought it keeps it (owner, "one-off
+    // buyers keep what they bought"; Codex-2hxff.64). On offer, the
+    // subscription still answers first, as before.
+    const onOffer = policy.status === CONTENT_STATUS.PUBLISHED;
+    if (sub && onOffer)
+      return grantBySubscription(
+        'subscribers_subscription',
+        sub.currentPeriodStart
+      );
     if (purchased) return grant('subscribers_purchase');
     if (await viaContentEntitlement()) return grant('subscribers_entitlement');
     if (await viaOwnedCourse()) return grant('subscribers_course');
+    if (sub)
+      return grantBySubscription(
+        'subscribers_subscription',
+        sub.currentPeriodStart
+      );
     return (await hasManagementMembership())
       ? grant('subscribers_management')
       : deny('subscribers_only');
@@ -364,7 +414,10 @@ const GRANT_SURVIVES_UNPUBLICATION: Record<GrantVia, boolean> = {
 
   // ── RELATIONSHIP: access for as long as the item is on offer. A cancelled
   // subscriber does not keep the back catalogue, and unpublishing is the
-  // creator withdrawing the offer.
+  // creator withdrawing the offer. The two `*_subscription` arms have ONE
+  // exception, decided before this table is read: an item taken off sale
+  // because its creator left stays until the subscriber's next renewal (see
+  // `subscriptionCoversOffSaleItem`).
   free: false,
   followers_subscription: false,
   followers_follower: false,
@@ -377,6 +430,31 @@ const GRANT_SURVIVES_UNPUBLICATION: Record<GrantVia, boolean> = {
   subscribers_management: false,
   paid_management: false,
 };
+
+/**
+ * Does a subscription grant still cover an item that is no longer published?
+ * (Codex-2hxff.64)
+ *
+ * Owner decision, 2026-10-21: when a creator leaves an organisation, their
+ * published catalogue there is archived and stamped `offSaleAt`. A subscriber
+ * already PAID for the period in which that happened, so they keep the item
+ * until their next renewal: covered while `offSaleAt >= currentPeriodStart`.
+ * A renewal moves `currentPeriodStart` past the stamp, and access ends.
+ *
+ * Only the two subscription arms qualify. A follow is not a payment, so
+ * `followers_follower` stays lost on unpublication. An item with no
+ * `offSaleAt` (an ordinary draft, or one the creator archived themselves) is
+ * never covered, so that case reaches {@link GRANT_SURVIVES_UNPUBLICATION}
+ * exactly as before.
+ */
+function subscriptionCoversOffSaleItem(
+  decision: AccessDecision,
+  offSaleAt: Date | null
+): boolean {
+  if (!decision.granted || !('periodStart' in decision)) return false;
+  if (offSaleAt == null) return false;
+  return offSaleAt.getTime() >= decision.periodStart.getTime();
+}
 
 /**
  * THE decision — the policy branches, then the publication rule.
@@ -396,6 +474,9 @@ async function decideContentAccess(
 
   if (!decision.granted) return decision;
   if (policy.status === CONTENT_STATUS.PUBLISHED) return decision;
+  if (subscriptionCoversOffSaleItem(decision, policy.offSaleAt)) {
+    return decision;
+  }
 
   return GRANT_SURVIVES_UNPUBLICATION[decision.via]
     ? decision
@@ -441,6 +522,7 @@ const POLICY_COLUMNS = {
   isFollowerGated: true,
   isTeamOnly: true,
   courseOnly: true,
+  offSaleAt: true,
 } as const;
 
 /**

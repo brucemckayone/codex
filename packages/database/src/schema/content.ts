@@ -300,6 +300,11 @@ export const content = pgTable(
     status: varchar('status', { length: 50 }).default('draft').notNull(),
     // 'draft' | 'published' | 'archived'
     publishedAt: timestamp('published_at', { withTimezone: true }),
+    // When the item was taken off sale because its creator left the
+    // organisation (status -> 'archived'; Codex-2hxff.64). Tier subscribers
+    // keep it until their next renewal: access while off_sale_at >= their
+    // current period start. Cleared when the item is republished.
+    offSaleAt: timestamp('off_sale_at', { withTimezone: true }),
 
     // Creator-flagged feature — promotes the item to a full-width editorial
     // card on the org homepage feed. Orthogonal to status: only published

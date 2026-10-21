@@ -137,6 +137,12 @@ split and paid out exactly like a sale ([fees-and-splits.md](fees-and-splits.md#
 There is no immediate cancellation, except that a full refund ends a
 subscription (see [refunds](#refunds)).
 
+When a course is taken off sale because its creator was removed, each live
+course subscription to it is set to cancel at period end, with Stripe
+idempotency key `course_off_sale_cancel_{id}`. Up to 50 are cancelled at once
+and the rest by the hourly ecom-api sweep (see
+[agreements](agreements.md#what-comes-off-sale)).
+
 ---
 
 ## Changing tier
@@ -297,4 +303,5 @@ configuration, which allows cancelling.
 | `payment-failed` | A renewal fails (with the next retry date) |
 | `subscription-tier-price-change` | A price changes — sent at least 30 days before the new price applies. Says the subscription "renews at the new price from {{effectiveDate}}"; migration `0098` rewrote the old "on the next billing cycle" sentence on existing rows (`Codex-2hxff.35`) |
 | `subscription-cancelled` | The subscription ends |
+| `course-no-longer-offered` | A course subscription is cancelled because the course was taken off sale; gives the date access ends |
 | `trial-ending-soon` | A trial is about to end (no trials are configured today) |

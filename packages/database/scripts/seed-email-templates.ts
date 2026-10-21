@@ -464,7 +464,29 @@ If you have any questions, please contact our support team at {{supportEmail}}.
     status: 'active' as const,
     description:
       "Sent to both parties 30 days before the agreement's review date. The review date is not an expiry: the agreement keeps paying (owner decision AGR-01; migration 0106 rewords existing rows).",
-  }, // ============ Ownership transfer (Codex-2hxff.2) ============
+  },
+  // ============ Removal from an organisation (Codex-2hxff.64) ============
+  {
+    name: 'removed-from-organisation',
+    scope: 'global' as const,
+    subject: "You've been removed from {{orgName}}",
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#f8fafc;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #e2e8f0}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>You've been removed from {{orgName}}</h1><p>Hi {{recipientName}},</p><p>You are no longer a member of <strong>{{orgName}}</strong> as of {{removedOn}}. This is what that ended:</p><div class="details"><p style="margin:5px 0;"><strong>Revenue-share agreements ended:</strong> {{agreementsEnded}}</p><p style="margin:5px 0;"><strong>Items taken off sale:</strong> {{contentOffSale}}</p><p style="margin:5px 0;"><strong>Courses taken off sale:</strong> {{coursesOffSale}}</p><p style="margin:5px 0;"><strong>Course subscriptions ending at their period end:</strong> {{courseSubscriptionsEnding}}</p></div><p>Money you earned before {{removedOn}} is still paid to you. People who already bought your work keep it.</p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Hi {{recipientName}},\n\nYou are no longer a member of {{orgName}} as of {{removedOn}}. This is what that ended:\n\nRevenue-share agreements ended: {{agreementsEnded}}\nItems taken off sale: {{contentOffSale}}\nCourses taken off sale: {{coursesOffSale}}\nCourse subscriptions ending at their period end: {{courseSubscriptionsEnding}}\n\nMoney you earned before {{removedOn}} is still paid to you. People who already bought your work keep it.\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to a creator removed from an organisation, listing what the removal ended (Codex-2hxff.64, owner decision Q5). Replaces the agreement-terminated email on removal.',
+  },
+  {
+    name: 'course-no-longer-offered',
+    scope: 'global' as const,
+    subject: '{{courseTitle}} is no longer offered',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#f8fafc;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #e2e8f0}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>{{courseTitle}} is no longer offered</h1><p>Hi {{userName}},</p><p><strong>{{courseTitle}}</strong> is no longer offered by <strong>{{orgName}}</strong>, so your subscription to it will end.</p><div class="details"><p style="margin:5px 0;"><strong>You keep access until:</strong> {{accessUntil}}</p><p style="margin:5px 0;">You won't be charged for it again.</p></div><p style="text-align:center;margin:30px 0;"><a href="{{manageUrl}}" class="button" style="color:white;">Manage subscriptions</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Hi {{userName}},\n\n{{courseTitle}} is no longer offered by {{orgName}}, so your subscription to it will end.\n\nYou keep access until: {{accessUntil}}\nYou won't be charged for it again.\n\nManage subscriptions: {{manageUrl}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to each course subscriber when the course is taken off sale because its creator left the organisation; the subscription cancels at period end (Codex-2hxff.64, owner decision D4).',
+  },
+  // ============ Ownership transfer (Codex-2hxff.2) ============
   //
   // Copy is the owner-reviewed mockup's state 10.
   {

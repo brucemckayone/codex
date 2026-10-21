@@ -86,7 +86,11 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
    - a `purchases` row is inserted with status `completed` and the split
      snapshot (platform, organisation and creator amounts that must sum to the
      amount paid). The unique `stripe_payment_intent_id` makes a redelivered
-     event a no-op;
+     event a no-op. The creator's agreement is looked up as it stood when
+     the checkout session was **created** (`session.created`, passed as
+     `offerAt`), not when the webhook arrives. A buyer who started checkout
+     before a creator was removed still completes at the old split (owner
+     decision, `Codex-2hxff.64`). `purchasedAt` is still the payment time;
    - an entitlement is written — `content_purchase`, or `course_purchase` plus
      course enrolment — for organisation **and** orgless sales — **gap**:
      `Codex-2hxff.21` (orgless sales get none).

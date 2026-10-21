@@ -9,9 +9,9 @@
  * Money earned before is still paid: rows already recorded are untouched, and
  * a sale made before `at` still finds the agreement, which was terminated
  * after it. Runs in the caller's transaction, beside the change that caused
- * it, so neither can land without the other; after a removal the caller
- * emails the creator once it commits
- * (`AgreementService.notifyTerminatedOnDeparture`).
+ * it, so neither can land without the other. After a removal commits, the
+ * creator gets one email listing everything it ended
+ * (`followUpMemberDeparture` in @codex/worker-utils, Codex-2hxff.64 Q5).
  */
 
 import type { DatabaseClient } from '@codex/database';

@@ -319,6 +319,25 @@ export interface OrgMemberItem {
   joinedAt: string;
 }
 
+/**
+ * What removing a member would unwind (Codex-2hxff.64): counts from
+ * `GET /api/organizations/:id/members/:userId/departure-preview`, scoped to the
+ * organisation and that member as creator. Mirrors `DeparturePreview` in
+ * `@codex/organization`.
+ */
+export interface DeparturePreview {
+  /** Active revenue-share agreements, which end at removal. */
+  agreements: number;
+  /** Published content, which comes off sale at removal. */
+  contentOnSale: number;
+  /** Published courses, which come off sale at removal. */
+  coursesOnSale: number;
+  /** Live course subscriptions to those courses, cancelled at period end. */
+  courseSubscriptions: number;
+  /** Tier subscribers who keep the member's work until their next renewal. */
+  tierSubscribersAffected: number;
+}
+
 // ─── Ownership Transfer Types (Codex-2hxff.2) ──────────────────────────────
 //
 // Mirrors the fixed API contract in

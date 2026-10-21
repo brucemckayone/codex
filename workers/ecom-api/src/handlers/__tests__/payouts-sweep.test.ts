@@ -8,12 +8,17 @@
  *   - forwards `olderThanMinutes` override to the service
  *   - then retries failed refund clawbacks, isolated from the sweep
  *     (Codex-2hxff.8)
+ *   - then cancels course subscriptions a creator's removal left, before
+ *     the pool is released (Codex-2hxff.64)
  *
  * Consolidated into workers/ecom-api 2026-05-13. Lives alongside the Stripe
  * webhook handlers because the cron + the Stripe webhooks share an owner.
  */
 
-import { SubscriptionService } from '@codex/subscription';
+import {
+  CourseSubscriptionService,
+  SubscriptionService,
+} from '@codex/subscription';
 import {
   afterEach,
   beforeEach,
@@ -24,6 +29,7 @@ import {
   vi,
 } from 'vitest';
 
+import { COURSE_OFF_SALE_SWEEP_LIMIT } from '../course-off-sale-sweep';
 import { runPayoutsSweep, runScheduledPayoutsSweep } from '../payouts-sweep';
 
 /** A real instance whose sweep each test stubs on the prototype. */
@@ -76,7 +82,15 @@ describe('ecom-api payouts-sweep handler', () => {
   // The cron also retries failed clawbacks after the sweep. These tests are
   // about the sweep, so the retry is a no-op here; its own tests are below.
   let clawbackRetry: MockInstance<SubscriptionService['retryFailedClawbacks']>;
+  // So is the course off-sale sweep (Codex-2hxff.64), pinned in the
+  // "invokes sweepUnresolvedPayouts" test below.
+  let offSaleCancel: MockInstance<
+    CourseSubscriptionService['cancelForCoursesOffSale']
+  >;
   beforeEach(() => {
+    offSaleCancel = vi
+      .spyOn(CourseSubscriptionService.prototype, 'cancelForCoursesOffSale')
+      .mockResolvedValue({ cancelled: 0, failed: 0, remaining: 0 });
     clawbackRetry = vi
       .spyOn(SubscriptionService.prototype, 'retryFailedClawbacks')
       .mockResolvedValue({
@@ -88,6 +102,7 @@ describe('ecom-api payouts-sweep handler', () => {
   });
   afterEach(() => {
     clawbackRetry.mockRestore();
+    offSaleCancel.mockRestore();
   });
 
   it('runPayoutsSweep delegates to SubscriptionService.sweepUnresolvedPayouts and logs the result', async () => {
@@ -223,6 +238,15 @@ describe('ecom-api payouts-sweep handler', () => {
     expect(sweptBy.payoutMailer).toBeTypeOf('function');
     // The pool is handed back after the sweep, on waitUntil.
     expect(ctx.waitUntil).toHaveBeenCalledOnce();
+    // The same wake cancels what a creator's removal left (Codex-2hxff.64),
+    // every off-sale course, before the pool goes back.
+    expect(offSaleCancel).toHaveBeenCalledWith({
+      limit: COURSE_OFF_SALE_SWEEP_LIMIT,
+    });
+    expect(offSaleCancel.mock.invocationCallOrder[0]).toBeLessThan(
+      ctx.waitUntil.mock.invocationCallOrder[0] ?? 0
+    );
+    expect(obs.error).not.toHaveBeenCalled();
 
     spy.mockRestore();
   });
