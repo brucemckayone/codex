@@ -154,7 +154,7 @@ describe('Stability Tests', () => {
     });
   });
 
-  describe('processImageVariants Contract', () => {
+  describe('processStillVariants Contract', () => {
     /**
      * NOTE: These tests use mocking since real Wasm processing
      * requires valid image data that may not be available in

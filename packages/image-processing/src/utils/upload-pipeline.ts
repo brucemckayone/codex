@@ -9,8 +9,8 @@
  *
  * Three helpers:
  *
- *   - `uploadImageVariants` — `Promise.allSettled` puts of 3 WebP variants with
- *     the canonical R2 options literal; on partial failure, deletes NOTHING,
+ *   - `uploadImageVariants` — `Promise.allSettled` puts of the four WebP
+ *     variants (sm/md/lg/xl) with the canonical R2 options literal; on partial failure, deletes NOTHING,
  *     logs the rejected keys with their reasons, and throws
  *     `InternalServiceError`.
  *
@@ -18,7 +18,7 @@
  *     throws, cleans up the supplied keys ONLY when the caller says nothing
  *     referenced them yet, records any failed deletes via `OrphanedFileService`
  *     (or warns when not configured), and rethrows the original error. Works
- *     for both 3-variant raster and 1-key SVG flows.
+ *     for both the four-variant raster and the 1-key SVG flows.
  *
  *   - `recordOrphansOrLog` — the one guarded way to write orphan records from a
  *     failure path; a failed insert is logged, never thrown (Codex-r85jo.3).
@@ -39,7 +39,13 @@
  * rejected" is the WORST option because it targets precisely the objects still
  * worth keeping. Doing nothing is self-healing: the succeeded keys hold new
  * bytes at URLs the row already points at, so nothing 404s, and a retry re-puts
- * all three at the same keys and converges.
+ * all four at the same keys and converges.
+ *
+ * One thing it cannot heal on its own: a replacement that fails part way
+ * leaves the row's recorded width/height describing the OLD picture while some
+ * files hold the new one, until the retry rewrites both (Codex-kk9nv.5). The
+ * uploader is told it failed; nulling the size on failure would need a second
+ * write on every caller-owned still's path for a state a retry already fixes.
  *
  * `withDbUpdateOrphanCleanup` is the one place a delete stays correct, and only
  * conditionally: on a FIRST upload the puts landed but the row never recorded
@@ -57,7 +63,7 @@ import type {
   RecordOrphanInput,
 } from '../orphaned-file-service';
 
-/** R2 keys for the three size variants of a raster image. */
+/** R2 keys for the three base sizes; every still also has `xl` ({@link StillKeys}). */
 export interface VariantKeys {
   sm: string;
   md: string;
@@ -65,14 +71,13 @@ export interface VariantKeys {
 }
 
 /**
- * Every file a still keeps (Codex-kk9nv.5): its three sizes, `xl` at
- * min(1600, width), and the upload as it came (`original`, no extension; its
- * content type is stored on the object, so a re-upload in another format
- * overwrites it in place, like the sizes, and never orphans the old file).
+ * Every file a still keeps (Codex-kk9nv.5): its three sizes and `xl` at
+ * min(1600, width). The upload as it came is NOT kept: in the public assets
+ * bucket it would serve the photo's raw EXIF, GPS included, at a URL anyone
+ * can derive from a served one (owner, 2026-10-21: "Defer originals").
  */
 export interface StillKeys extends VariantKeys {
   xl: string;
-  original: string;
 }
 
 /**
@@ -87,36 +92,25 @@ export function stillVariantKeys(baseKey: string): StillKeys {
     md: `${baseKey}/md.webp`,
     lg: `${baseKey}/lg.webp`,
     xl: `${baseKey}/xl.webp`,
-    original: `${baseKey}/original`,
   };
 }
 
 /**
- * Every key in a set as a flat list, for the cleanup paths: the three sizes,
- * then `xl` and `original` when the set has them. A list that named only
- * sm/md/lg would leak the other two on every delete.
+ * Every key in a set as a flat list, for the cleanup paths. A list that named
+ * only sm/md/lg would leak `xl` on every delete.
  */
-export function variantKeyList(
-  keys: VariantKeys & { xl?: string; original?: string }
-): string[] {
-  return [
-    keys.sm,
-    keys.md,
-    keys.lg,
-    ...(keys.xl ? [keys.xl] : []),
-    ...(keys.original ? [keys.original] : []),
-  ];
+export function variantKeyList(keys: StillKeys): string[] {
+  return [keys.sm, keys.md, keys.lg, keys.xl];
 }
 
-/** WebP buffers for the three size variants, and a page image's `xl`
- * (Codex-61zsk.13). Internal helper — service.ts passes a structurally-
- * matching object literal to `uploadImageVariants` and never imports the
- * named type, so this stays unexported. */
+/** WebP buffers for the four variants. Internal helper — service.ts passes a
+ * structurally-matching object and never imports the named type, so this
+ * stays unexported. */
 interface VariantBuffers {
   sm: Uint8Array;
   md: Uint8Array;
   lg: Uint8Array;
-  xl?: Uint8Array;
+  xl: Uint8Array;
 }
 
 /**
@@ -139,12 +133,12 @@ const IMAGE_VARIANT_PUT_OPTIONS = {
 } as const;
 
 /**
- * Upload three WebP variants to R2 in parallel via `Promise.allSettled`.
+ * Upload the four WebP variants to R2 in parallel via `Promise.allSettled`.
  *
  * On any rejection this deletes NOTHING — see the module docblock for why no
  * deletion subset can restore the prior state on deterministic keys. The
  * rejected keys and their R2 reasons go to `obs.error`, and the thrown error
- * names the affected VARIANTS (`sm`/`md`/`lg`) and the `failureLabel`.
+ * names the affected VARIANTS (`sm`/`md`/`lg`/`xl`) and the `failureLabel`.
  *
  * ## Where the failure detail is allowed to go
  *
@@ -160,16 +154,13 @@ const IMAGE_VARIANT_PUT_OPTIONS = {
  * never appears in 5xx-rate monitoring.
  */
 export async function uploadImageVariants(params: {
-  /** `xl` and `original` are each put only when both sides carry them. */
-  keys: VariantKeys & { xl?: string; original?: string };
+  keys: StillKeys;
   variants: VariantBuffers;
-  /** The upload as it came, kept so any later size or format can be made. */
-  original?: { body: Uint8Array; contentType: string };
   r2: R2Service;
   failureLabel: string;
   obs: Pick<Required<Logger>, 'error'>;
 }): Promise<void> {
-  const { keys, variants, original, r2, failureLabel, obs } = params;
+  const { keys, variants, r2, failureLabel, obs } = params;
 
   // Zipped rather than indexed so a rejection can be paired back to its key
   // and size without an index assertion (`noNonNullAssertion` is an error in
@@ -193,30 +184,12 @@ export async function uploadImageVariants(params: {
       body: variants.lg,
       options: IMAGE_VARIANT_PUT_OPTIONS,
     },
-    ...(keys.xl && variants.xl
-      ? [
-          {
-            size: 'xl',
-            key: keys.xl,
-            body: variants.xl,
-            options: IMAGE_VARIANT_PUT_OPTIONS,
-          },
-        ]
-      : []),
-    ...(keys.original && original
-      ? [
-          {
-            size: 'original',
-            key: keys.original,
-            body: original.body,
-            // The same overwritten-in-place cache policy, in the upload's own type.
-            options: {
-              ...IMAGE_VARIANT_PUT_OPTIONS,
-              contentType: original.contentType,
-            },
-          },
-        ]
-      : []),
+    {
+      size: 'xl',
+      key: keys.xl,
+      body: variants.xl,
+      options: IMAGE_VARIANT_PUT_OPTIONS,
+    },
   ];
 
   const uploadResults = await Promise.allSettled(
@@ -276,7 +249,7 @@ export async function uploadImageVariants(params: {
  *
  * `keys` is `string[]` rather than `VariantKeys` because it once served a
  * 1-key SVG flow as well; every surviving caller passes `variantKeyList(keys)`,
- * which names the sizes, `xl` and `original`.
+ * which names all four sizes.
  */
 export async function withDbUpdateOrphanCleanup<T>(
   params: {

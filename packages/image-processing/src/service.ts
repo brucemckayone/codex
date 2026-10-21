@@ -28,7 +28,7 @@ import {
   pageImageObjectKeys,
   pageImageVariantKeys,
 } from './page-image-keys';
-import { type PageImageVariants, processPageImageVariants } from './processor';
+import { processStillVariants, type StillVariants } from './processor';
 import {
   recordOrphansOrLog,
   type StillKeys,
@@ -58,7 +58,7 @@ interface ImageProcessingServiceConfig extends ServiceConfig {
  *
  * RASTER ONLY, with no opt-out. This took an `allowSvg` flag until Codex-z520h
  * removed `processOrgLogo`, the only caller that ever passed `true`; every
- * other caller feeds `processPageImageVariants`, which decodes via Photon and
+ * other caller feeds `processStillVariants`, which decodes via Photon and
  * cannot rasterise SVG, so an SVG would have failed inside the Wasm decoder
  * rather than at this boundary. A flag no caller can set is an unreachable
  * branch in a security validator, so it is gone rather than defaulted. SVG
@@ -117,27 +117,16 @@ async function validateImageFile(
 
 /**
  * A still ready to store (Codex-kk9nv.5): decoded once and upright, its sizes
- * made up to `xl` = min(1600, width), its own size measured, and the upload
- * kept as it came.
+ * made up to `xl` = min(1600, width), and its own size measured. The upload
+ * itself is not kept (owner, 2026-10-21: "Defer originals"): in the public
+ * assets bucket it would serve the photo's raw EXIF, GPS included.
  */
-interface PreparedStill {
-  variants: PageImageVariants['variants'];
-  width: number;
-  height: number;
-  original: { body: Uint8Array; contentType: string };
-}
+type PreparedStill = StillVariants;
 
 /** Validate (MIME type, size, magic bytes; raster only) and prepare a still. */
 async function prepareStill(file: File): Promise<PreparedStill> {
-  const { buffer, mimeType } = await validateImageFile(file);
-  const inputBuffer = new Uint8Array(buffer);
-  const { variants, width, height } = processPageImageVariants(inputBuffer);
-  return {
-    variants,
-    width,
-    height,
-    original: { body: inputBuffer, contentType: mimeType },
-  };
+  const { buffer } = await validateImageFile(file);
+  return processStillVariants(new Uint8Array(buffer));
 }
 
 /** Orphan classification for the four stills whose DB write the caller owns. */
@@ -164,7 +153,7 @@ export class ImageProcessingService extends BaseService {
     this.orphanedFileService = config.orphanedFileService;
   }
 
-  /** Put every file a still keeps: its four sizes and its original. */
+  /** Put every file a still keeps: its four sizes. */
   private putStill(
     keys: StillKeys,
     still: PreparedStill,
@@ -173,7 +162,6 @@ export class ImageProcessingService extends BaseService {
     return uploadImageVariants({
       keys,
       variants: still.variants,
-      original: still.original,
       r2: this.r2Service,
       failureLabel,
       obs: this.obs,
@@ -184,7 +172,7 @@ export class ImageProcessingService extends BaseService {
    * Process and store content thumbnail.
    *
    * Replacement semantics — important invariant:
-   *   The R2 keys (sm/md/lg) are deterministic per `(creatorId, contentId)`,
+   *   The R2 keys (sm/md/lg/xl) are deterministic per `(creatorId, contentId)`,
    *   so re-uploading a thumbnail OVERWRITES at the same keys. This means:
    *     • the previous custom thumbnail is replaced atomically (no orphan);
    *     • transcoding output (`media-thumbnails/{mediaId}/...`,
@@ -220,7 +208,7 @@ export class ImageProcessingService extends BaseService {
     // WHERE clause so the read describes exactly the row the write targets.
     //
     // Read BEFORE the puts, so a failing read costs nothing: reading after
-    // would leave three freshly-written objects with no decision recorded
+    // would leave four freshly-written objects with no decision recorded
     // about whether anything may reclaim them.
     const existing = await this.db.query.content.findFirst({
       where: and(
@@ -279,7 +267,7 @@ export class ImageProcessingService extends BaseService {
    *
    * Those four methods only upload: the scoped DB write lives in the
    * space/org-aware service that owns the row, so this cannot be done inside
-   * them. Without it, a write that fails after the puts strands sm/md/lg with
+   * them. Without it, a write that fails after the puts strands sm/md/lg/xl with
    * nothing able to name them.
    *
    * `storedBaseKey` is the key column as read BEFORE the upload, and it is
@@ -318,7 +306,7 @@ export class ImageProcessingService extends BaseService {
   /**
    * Process and store a category cover image (org landing "Browse by topic").
    *
-   * Mirrors {@link processContentThumbnail}'s variant pipeline (sm/md/lg WebP →
+   * Mirrors {@link processContentThumbnail}'s variant pipeline (sm/md/lg/xl WebP →
    * R2) with two deliberate differences:
    *   • It does NOT touch the database. Category ownership (the resolved space)
    *     lives in `CategoriesService`, not here, so the caller persists the
@@ -332,7 +320,7 @@ export class ImageProcessingService extends BaseService {
    * @param categoryId - Owning category (keys are namespaced under it)
    * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
    * @returns The base R2 key plus the lg CDN URL, size, and mime type. Append
-   *   `/{sm|md|lg}.webp` to `coverImageKey` to address a specific variant.
+   *   `/{sm|md|lg|xl}.webp` to `coverImageKey` to address a specific variant.
    */
   async processCategoryCover(
     categoryId: string,
@@ -372,7 +360,7 @@ export class ImageProcessingService extends BaseService {
    * Identical in shape to {@link processCategoryCover}, and deliberately so: a
    * course cover is a still image, and `media_items` is CHECK-constrained to
    * ('video','audio'), so the cover cannot be a media-item ref. It reuses the
-   * same sm/md/lg WebP → R2 pipeline and the same "caller owns the DB write"
+   * same sm/md/lg/xl WebP → R2 pipeline and the same "caller owns the DB write"
    * split — `CourseJourneyService.setCourseCoverImageKey` persists the returned
    * key org-scoped, so no scope logic is duplicated in the image layer.
    *
@@ -383,7 +371,7 @@ export class ImageProcessingService extends BaseService {
    * @param courseId - Owning course (keys are namespaced under it)
    * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
    * @returns The base R2 key plus the md CDN URL, size, and mime type. Append
-   *   `/{sm|md|lg}.webp` to `coverImageKey` to address a specific variant.
+   *   `/{sm|md|lg|xl}.webp` to `coverImageKey` to address a specific variant.
    */
   async processCourseCover(
     courseId: string,
@@ -427,7 +415,7 @@ export class ImageProcessingService extends BaseService {
    * hero. A32's chain is therefore `heroImageKey ?? heroMediaId's poster ??
    * synthetic plate`, and this method produces the first link.
    *
-   * Deliberately the same shape as {@link processCourseCover} — same sm/md/lg
+   * Deliberately the same shape as {@link processCourseCover} — same sm/md/lg/xl
    * WebP → R2 pipeline, same "the caller owns the DB write" split
    * (`CourseJourneyService.setCourseHeroImageKey` persists the returned key
    * org-scoped, so no scope logic is duplicated in the image layer), and the same
@@ -450,7 +438,7 @@ export class ImageProcessingService extends BaseService {
    * @param courseId - Owning course (keys are namespaced under it)
    * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
    * @returns The base R2 key plus the lg CDN URL, size, and mime type. Append
-   *   `/{sm|md|lg}.webp` to `heroImageKey` to address a specific variant.
+   *   `/{sm|md|lg|xl}.webp` to `heroImageKey` to address a specific variant.
    */
   async processCourseHero(
     courseId: string,
@@ -465,7 +453,7 @@ export class ImageProcessingService extends BaseService {
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
     //
-    // Raster-only is not an oversight: `processImageVariants` decodes through
+    // Raster-only is not an oversight: `processStillVariants` decodes through
     // Photon, which cannot rasterise SVG, so an SVG here would fail in the Wasm
     // decoder rather than at the boundary. The one path on this platform that
     // DOES accept SVG — `BrandingSettingsService.uploadLogo` in
@@ -504,7 +492,7 @@ export class ImageProcessingService extends BaseService {
    * since it shipped, and rendered typeset text alone.
    *
    * Deliberately the same shape as {@link processCourseHero} and
-   * {@link processCourseCover} — same sm/md/lg WebP → R2 pipeline, same "the
+   * {@link processCourseCover} — same sm/md/lg/xl WebP → R2 pipeline, same "the
    * caller owns the DB write" split (`CourseJourneyService.
    * setCourseSignatureImageKey` persists the returned key org-scoped), and the
    * same `courses/{id}/…` namespace so every still a course owns lives together.
@@ -532,7 +520,7 @@ export class ImageProcessingService extends BaseService {
    * @param courseId - Owning course (keys are namespaced under it)
    * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
    * @returns The base R2 key plus the md CDN URL, size, and mime type. Append
-   *   `/{sm|md|lg}.webp` to `signatureImageKey` to address a specific variant.
+   *   `/{sm|md|lg|xl}.webp` to `signatureImageKey` to address a specific variant.
    */
   async processCourseSignature(
     courseId: string,
@@ -549,7 +537,7 @@ export class ImageProcessingService extends BaseService {
     //
     // Raster-only costs something real worth naming here: a signature is exactly
     // the kind of mark that is often an SVG. It still cannot come through this
-    // path, because `processImageVariants` decodes via Photon, which cannot
+    // path, because `processStillVariants` decodes via Photon, which cannot
     // rasterise SVG — an SVG would fail inside the Wasm decoder rather than at
     // this boundary. The one path on this platform that DOES accept SVG —
     // `BrandingSettingsService.uploadLogo` in `@codex/platform-settings` —
@@ -640,8 +628,8 @@ export class ImageProcessingService extends BaseService {
     contentId: string,
     creatorId: string
   ): Promise<void> {
-    // Every file the thumbnail keeps, xl and the original included; a list
-    // that named only sm/md/lg would leak the other two (Codex-kk9nv.5).
+    // Every file the thumbnail keeps, xl included; a list that named only
+    // sm/md/lg would leak it (Codex-kk9nv.5).
     const keys = variantKeyList(
       stillVariantKeys(getContentThumbnailBaseKey(creatorId, contentId))
     );
@@ -708,7 +696,7 @@ export class ImageProcessingService extends BaseService {
       return; // Nothing to delete
     }
 
-    // Every file the avatar keeps, xl and the original included (Codex-kk9nv.5).
+    // Every file the avatar keeps, xl included (Codex-kk9nv.5).
     const keys = variantKeyList(stillVariantKeys(getUserAvatarBaseKey(userId)));
 
     // Try to delete from R2, track failures as orphans
@@ -790,10 +778,10 @@ export class ImageProcessingService extends BaseService {
    * @param imageId - Caller-minted uuid; unique per upload, never reused or
    *   overwritten
    * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
-   * FOUR variants, not three: `xl` (`min(1600, width)`, Codex-61zsk.13) is
-   * written for page images alone, so a picture drawn across the band is
-   * never an 800px file stretched. Every object is in `pageImageObjectKeys`,
-   * so the upload records all four and the sweep can delete all four.
+   * FOUR variants, like every still: `xl` (`min(1600, width)`, Codex-61zsk.13)
+   * means a picture drawn across the band is never an 800px file stretched.
+   * Every object is in `pageImageObjectKeys`, so the upload records all four
+   * and the sweep can delete all four.
    *
    * @returns The base R2 key plus the md CDN URL, size, mime type, and the
    *   source picture's own `width` and `height`, which the page stores on its

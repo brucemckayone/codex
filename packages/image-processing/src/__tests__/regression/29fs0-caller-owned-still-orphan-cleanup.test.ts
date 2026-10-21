@@ -3,8 +3,8 @@
  * failure cleanup as the thumbnail and avatar.
  *
  * `processCategoryCover`, `processCourseCover`, `processCourseHero` and
- * `processCourseSignature` upload sm/md/lg/xl plus the original (Codex-kk9nv.5)
- * and return the base key; the scoped write happens afterwards in
+ * `processCourseSignature` upload sm/md/lg/xl (Codex-kk9nv.5) and return the
+ * base key; the scoped write happens afterwards in
  * CategoriesService / CourseJourneyService. Before this, a failure in that
  * write stranded every object with nothing able to name them. The routes now
  * run the write through `persistStillWithOrphanCleanup`.
@@ -25,7 +25,6 @@ const KEYS = [
   `${BASE}/md.webp`,
   `${BASE}/lg.webp`,
   `${BASE}/xl.webp`,
-  `${BASE}/original`,
 ];
 const WRITE_ERROR = 'Database connection lost';
 
@@ -51,7 +50,7 @@ function service(r2: R2Service, orphanedFileService?: OrphanedFileService) {
 const failingWrite = () => Promise.reject(new Error(WRITE_ERROR));
 
 describe('persistStillWithOrphanCleanup (Codex-29fs0)', () => {
-  it('FIRST upload (nothing stored): a failed write deletes the five new objects and rethrows', async () => {
+  it('FIRST upload (nothing stored): a failed write deletes the four new objects and rethrows', async () => {
     const bucket = bucketHoldingTheNewImage();
 
     await expect(
@@ -67,7 +66,7 @@ describe('persistStillWithOrphanCleanup (Codex-29fs0)', () => {
       )
     ).rejects.toThrow(WRITE_ERROR);
 
-    // All five, xl and the original included — none is left for nothing to name.
+    // All four, xl included — none is left for nothing to name.
     expect(bucket.objects.size).toBe(0);
     expect(bucket.del.mock.calls.map((call) => call[0])).toEqual(KEYS);
   });
@@ -96,7 +95,7 @@ describe('persistStillWithOrphanCleanup (Codex-29fs0)', () => {
     const bucket = bucketHoldingTheNewImage({ deleteRejects: true });
     const recordOrphanedFiles = vi
       .fn()
-      .mockResolvedValue(['o1', 'o2', 'o3', 'o4', 'o5']);
+      .mockResolvedValue(['o1', 'o2', 'o3', 'o4']);
 
     await expect(
       service(bucket.r2, {
@@ -123,7 +122,6 @@ describe('persistStillWithOrphanCleanup (Codex-29fs0)', () => {
       expect.objectContaining({ r2Key: 'categories/cat-1/cover/md.webp' }),
       expect.objectContaining({ r2Key: 'categories/cat-1/cover/lg.webp' }),
       expect.objectContaining({ r2Key: 'categories/cat-1/cover/xl.webp' }),
-      expect.objectContaining({ r2Key: 'categories/cat-1/cover/original' }),
     ]);
   });
 

@@ -27,7 +27,7 @@ import * as processor from '../../processor';
 import { ImageProcessingService } from '../../service';
 
 vi.mock('../../processor', () => ({
-  processPageImageVariants: vi.fn(),
+  processStillVariants: vi.fn(),
 }));
 
 const ORIGINAL_DB_ERROR = 'Database connection lost';
@@ -85,7 +85,7 @@ describe('Codex-r85jo.3 F7: orphan-record failure keeps the original outcome', (
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    vi.mocked(processor.processPageImageVariants).mockReturnValue({
+    vi.mocked(processor.processStillVariants).mockReturnValue({
       variants: {
         sm: new Uint8Array([1]),
         md: new Uint8Array([2]),
@@ -130,9 +130,8 @@ describe('Codex-r85jo.3 F7: orphan-record failure keeps the original outcome', (
         context: 'content-thumbnail',
         r2Keys: expect.arrayContaining([
           'user-1/content-thumbnails/content-1/lg.webp',
-          // xl and the original are written too, so they must be logged too.
+          // xl is written too, so it must be logged too.
           'user-1/content-thumbnails/content-1/xl.webp',
-          'user-1/content-thumbnails/content-1/original',
         ]),
       })
     );

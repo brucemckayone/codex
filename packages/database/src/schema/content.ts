@@ -252,10 +252,11 @@ export const content = pgTable(
 
     // Thumbnail (optional custom thumbnail)
     thumbnailUrl: text('thumbnail_url'),
-    // The source picture's size in pixels, written in the same UPDATE as the
+    // The upright picture's size in pixels, written in the same UPDATE as the
     // image by the upload pipeline (Codex-kk9nv.5). Set, the stored files
-    // include xl (min(1600, width)) and the original. Null, an image from
-    // before: sm/md/lg only. The web sizes its srcset from these.
+    // include xl (min(1600, width)). Null, the size is unknown (an image from
+    // before, sm/md/lg only, or a URL or key set by hand): draw from
+    // sm/md/lg. The web sizes its srcset from these.
     thumbnailWidth: integer('thumbnail_width'),
     thumbnailHeight: integer('thumbnail_height'),
 

@@ -18,7 +18,7 @@ describe('page-image keys', () => {
     expect(pageImageKey(PAGE, IMAGE)).toBe(BASE);
   });
 
-  it('names the five objects that actually hold the bytes, xl and the original included (Codex-61zsk.13, Codex-kk9nv.5)', () => {
+  it('names the four objects that actually hold the bytes, xl included (Codex-61zsk.13, Codex-kk9nv.5)', () => {
     // The upload records this list and the save nominates it, so an object
     // missing here is written and never swept.
     expect(pageImageObjectKeys(BASE)).toEqual([
@@ -26,14 +26,12 @@ describe('page-image keys', () => {
       `${BASE}/md.webp`,
       `${BASE}/lg.webp`,
       `${BASE}/xl.webp`,
-      `${BASE}/original`,
     ]);
     expect(pageImageVariantKeys(BASE)).toEqual({
       sm: `${BASE}/sm.webp`,
       md: `${BASE}/md.webp`,
       lg: `${BASE}/lg.webp`,
       xl: `${BASE}/xl.webp`,
-      original: `${BASE}/original`,
     });
   });
 
@@ -68,7 +66,7 @@ describe('page-image keys', () => {
     ['the base key itself', BASE],
     ['a size no upload writes', `${BASE}/xxl.webp`],
     ['a size in another format', `${BASE}/xl.png`],
-    ['an original with an extension', `${BASE}/original.jpg`],
+    ['a raw upload, which no still keeps (Codex-kk9nv.5)', `${BASE}/original`],
     ['a course still variant', `courses/${PAGE}/hero/lg.webp`],
   ])('refuses %s as an object key', (_label, value) => {
     expect(pageImageKeyOfObject(value)).toBeNull();
@@ -161,13 +159,12 @@ describe('droppedPageImageKeys: what a save nominates for the sweep', () => {
     ).toEqual([]);
   });
 
-  it('every nomination names the five objects the sweep deletes, xl and the original included', () => {
+  it('every nomination names the four objects the sweep deletes, xl included', () => {
     const objects = droppedPageImageKeys([picture('p', BASE)], []).flatMap(
       pageImageObjectKeys
     );
-    expect(objects).toEqual([
-      ...['sm', 'md', 'lg', 'xl'].map((v) => `${BASE}/${v}.webp`),
-      `${BASE}/original`,
-    ]);
+    expect(objects).toEqual(
+      ['sm', 'md', 'lg', 'xl'].map((v) => `${BASE}/${v}.webp`)
+    );
   });
 });

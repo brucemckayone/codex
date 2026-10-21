@@ -17,15 +17,14 @@ export const VARIANT_WIDTHS = {
 } as const;
 
 /**
- * The largest page-image variant (Codex-61zsk.13, -61zsk.53): a full-bleed
- * picture across a 1440 window, and the column's 720px cap at 2x. Page images
- * ONLY: every other still shares {@link VARIANT_WIDTHS} and is drawn far
- * smaller, so it is not added there.
+ * Every still's largest variant (Codex-61zsk.13 for page images, then every
+ * still in Codex-kk9nv.5): a full-bleed picture across a 1440 window, and a
+ * 720px column at 2x.
  */
-export const PAGE_IMAGE_XL_WIDTH = 1600;
+export const XL_WIDTH = 1600;
 
-/** A page image's four variants, and the size of the picture they came from. */
-export interface PageImageVariants {
+/** A still's four variants, and the size of the picture they came from. */
+export interface StillVariants {
   variants: ImageVariants & { xl: Uint8Array };
   /** The source picture's own width and height, in pixels. */
   width: number;
@@ -150,35 +149,21 @@ function withVariants<K extends string>(
 }
 
 /**
- * Process an input image buffer into its three WebP size variants.
+ * A still's variants (every raster still, Codex-kk9nv.5): sm/md/lg, plus `xl`
+ * at `min(1600, width)`, and the upright picture's own size. A page image
+ * stores that size on its reference (`ImageRef.w` / `.h`); every other still
+ * stores it in its row's width/height columns. Either way it is how the web
+ * knows the picture has an `xl` to offer, and how much room to keep for it
+ * before it loads.
  *
  * Logic:
  * 1. Read the size from the header; refuse it over `MAX_IMAGE_PIXELS`.
  * 2. Load image into Wasm.
- * 3. Resize (Lanczos3) to lg from the decode, then md and sm from lg. Never
- *    upscale, preserve aspect ratio.
+ * 3. Resize (Lanczos3) to xl from the decode, then lg, md and sm from xl,
+ *    each turned upright. Never upscale, preserve aspect ratio.
  * 4. Convert to WebP.
  * 5. Free Wasm memory as each step finishes, and anything left in `finally`.
- *
- * @param inputBuffer - Raw image buffer (JPEG, PNG, etc.)
- * @returns Object containing WebP buffers for each variant
  */
-export function processImageVariants(inputBuffer: Uint8Array): ImageVariants {
-  return withVariants(inputBuffer, VARIANT_WIDTHS).variants;
-}
-
-/**
- * A PAGE image's variants: the three every still has, plus `xl` at
- * `min(1600, width)` for a picture drawn across the band (Codex-61zsk.13),
- * and the source's own size. The page stores that size on its reference
- * (`ImageRef.w` / `.h`), which is how the renderer knows the reference has an
- * `xl` to offer, and how much room to keep for the picture before it loads.
- */
-export function processPageImageVariants(
-  inputBuffer: Uint8Array
-): PageImageVariants {
-  return withVariants(inputBuffer, {
-    ...VARIANT_WIDTHS,
-    xl: PAGE_IMAGE_XL_WIDTH,
-  });
+export function processStillVariants(inputBuffer: Uint8Array): StillVariants {
+  return withVariants(inputBuffer, { ...VARIANT_WIDTHS, xl: XL_WIDTH });
 }

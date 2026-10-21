@@ -76,8 +76,7 @@ vi.mock('../photon-wrapper', () => {
   return { SafePhotonImage: FakePhoton };
 });
 
-const { PAGE_IMAGE_XL_WIDTH, processImageVariants, processPageImageVariants } =
-  await import('../processor');
+const { XL_WIDTH, processStillVariants } = await import('../processor');
 const { InvalidImageError, UNREADABLE_IMAGE_MESSAGE } = await import(
   '../errors'
 );
@@ -135,14 +134,14 @@ function jpegTagged(orientation: number): Uint8Array {
   ]);
 }
 
-describe('processPageImageVariants', () => {
+describe('processStillVariants (every raster still)', () => {
   it('writes sm, md, lg and an xl at 1600 from a large picture, and returns its size', () => {
     source = { width: 1950, height: 1300 };
-    const result = processPageImageVariants(new Uint8Array([1]));
+    const result = processStillVariants(new Uint8Array([1]));
 
     expect(Object.keys(result.variants)).toEqual(['sm', 'md', 'lg', 'xl']);
     expect(resizes.map((r) => r.width)).toEqual([1600, 800, 400, 200]);
-    expect(PAGE_IMAGE_XL_WIDTH).toBe(1600);
+    expect(XL_WIDTH).toBe(1600);
     // Each keeps the picture's shape: 1600 x 1067 for 3:2.
     expect(resizes[0]).toEqual({ width: 1600, height: 1067 });
     expect(resizes[1]).toEqual({ width: 800, height: 533 });
@@ -154,7 +153,7 @@ describe('processPageImageVariants', () => {
 
   it('never upscales: a 1000px picture gives an xl of 1000, not 1600', () => {
     source = { width: 1000, height: 1250 };
-    const result = processPageImageVariants(new Uint8Array([1]));
+    const result = processStillVariants(new Uint8Array([1]));
 
     expect(resizes.map((r) => r.width)).toEqual([1000, 800, 400, 200]);
     expect(resizes[0]).toEqual({ width: 1000, height: 1250 });
@@ -163,7 +162,7 @@ describe('processPageImageVariants', () => {
 
   it('frees every Wasm allocation, the source included', () => {
     source = { width: 1950, height: 1300 };
-    processPageImageVariants(new Uint8Array([1]));
+    processStillVariants(new Uint8Array([1]));
 
     // The source and four resizes.
     expect(made).toHaveLength(5);
@@ -172,7 +171,7 @@ describe('processPageImageVariants', () => {
 
   it('makes xl from the decode, frees the decode, then makes the rest from xl', () => {
     source = { width: 1950, height: 1300 };
-    processPageImageVariants(new Uint8Array([1]));
+    processStillVariants(new Uint8Array([1]));
 
     // Holding the decode while every variant was made from it peaked at
     // 81 MB of Wasm on a 2000x1280 picture; this order peaks at 65.
@@ -199,10 +198,10 @@ describe('the size check, before anything is decoded', () => {
   it('refuses a 12 MP photo without decoding it, and says how big it is', () => {
     source = { width: 4032, height: 3024 };
 
-    expect(() => processPageImageVariants(new Uint8Array([1]))).toThrow(
+    expect(() => processStillVariants(new Uint8Array([1]))).toThrow(
       InvalidImageError
     );
-    expect(() => processImageVariants(new Uint8Array([1]))).toThrow(
+    expect(() => processStillVariants(new Uint8Array([1]))).toThrow(
       /4032 × 3024 pixels/
     );
     expect(made).toHaveLength(0);
@@ -210,18 +209,18 @@ describe('the size check, before anything is decoded', () => {
 
   it('takes a picture of exactly 1600 x 1600', () => {
     source = { width: 1600, height: 1600 };
-    expect(() => processPageImageVariants(new Uint8Array([1]))).not.toThrow();
+    expect(() => processStillVariants(new Uint8Array([1]))).not.toThrow();
   });
 
   it('limits pixels, not width: 2560 x 1000 is the same 2.56 MP and is taken', () => {
     source = { width: 2560, height: 1000 };
-    const result = processPageImageVariants(new Uint8Array([1]));
+    const result = processStillVariants(new Uint8Array([1]));
     expect(result.width).toBe(2560);
   });
 
   it('refuses one pixel over the limit', () => {
     source = { width: 1600, height: 1601 };
-    expect(() => processPageImageVariants(new Uint8Array([1]))).toThrow(
+    expect(() => processStillVariants(new Uint8Array([1]))).toThrow(
       InvalidImageError
     );
     expect(made).toHaveLength(0);
@@ -229,7 +228,7 @@ describe('the size check, before anything is decoded', () => {
 
   it('refuses a file whose size cannot be read, without decoding it', () => {
     headerReadable = false;
-    expect(() => processImageVariants(new Uint8Array([1]))).toThrow(
+    expect(() => processStillVariants(new Uint8Array([1]))).toThrow(
       UNREADABLE_IMAGE_MESSAGE
     );
     expect(made).toHaveLength(0);
@@ -240,7 +239,7 @@ describe('EXIF orientation (Codex-kk9nv.11)', () => {
   it('measures upright, resizes in the stored orientation, and turns only the small outputs', () => {
     // Stored landscape; the camera says to display it turned 90° (6).
     source = { width: 1950, height: 1300 };
-    const result = processPageImageVariants(jpegTagged(6));
+    const result = processStillVariants(jpegTagged(6));
 
     expect({ width: result.width, height: result.height }).toEqual({
       width: 1300,
@@ -263,7 +262,7 @@ describe('EXIF orientation (Codex-kk9nv.11)', () => {
 
   it('mirrors (2) every variant, the largest last, because a mirror flips in place', () => {
     source = { width: 1950, height: 1300 };
-    processPageImageVariants(jpegTagged(2));
+    processStillVariants(jpegTagged(2));
 
     // Each smaller variant is made from xl BEFORE xl is flipped, or it
     // would be flipped twice.
@@ -283,25 +282,9 @@ describe('EXIF orientation (Codex-kk9nv.11)', () => {
 
   it('leaves an untagged picture as it is', () => {
     source = { width: 1950, height: 1300 };
-    processImageVariants(new Uint8Array([1]));
+    processStillVariants(new Uint8Array([1]));
 
-    expect(orients).toEqual([1, 1, 1]);
-    expect(made).toHaveLength(4);
-  });
-});
-
-describe('processImageVariants (every other still)', () => {
-  it('keeps its three sizes: no xl for a still that is never drawn across a band', () => {
-    source = { width: 1950, height: 1300 };
-    const variants = processImageVariants(new Uint8Array([1]));
-
-    expect(Object.keys(variants)).toEqual(['sm', 'md', 'lg']);
-    // lg from the decode, then md and sm from lg.
-    expect(resizes.map((r) => r.width)).toEqual([800, 400, 200]);
-    expect(events.slice(0, 3)).toEqual([
-      'resize 1950 -> 800',
-      'free 1950',
-      'resize 800 -> 400',
-    ]);
+    expect(orients).toEqual([1, 1, 1, 1]);
+    expect(made).toHaveLength(5);
   });
 });

@@ -8,8 +8,8 @@
  * of an entity id and a size — `getContentThumbnailBaseKey`,
  * `getUserAvatarBaseKey`, `getOrgLogoKey`, and the inline
  * `categories/{id}/cover/{size}.webp` and
- * `courses/{id}/{cover,hero,signature}/{size}.webp`, each with a kept
- * `{base}/original` beside the sizes (Codex-kk9nv.5). There is no timestamp, no
+ * `courses/{id}/{cover,hero,signature}/{size}.webp`, four sizes per still
+ * (Codex-kk9nv.5). There is no timestamp, no
  * uuid and no content hash anywhere in the package, and the public URL is
  * `${r2PublicUrlBase}/${key}` with no version query string. Re-uploading
  * therefore writes NEW BYTES AT THE SAME URL.
@@ -46,7 +46,7 @@ import * as processor from '../processor';
 import { ImageProcessingService } from '../service';
 
 vi.mock('../processor', () => ({
-  processPageImageVariants: vi.fn(),
+  processStillVariants: vi.fn(),
 }));
 
 /** One day, in seconds — the loosest window this invariant tolerates. */
@@ -165,7 +165,7 @@ describe('Cache-Control on deterministic image keys (Codex-p3rre)', () => {
       r2PublicUrlBase: 'https://test.r2.dev',
     });
 
-    vi.mocked(processor.processPageImageVariants).mockReturnValue({
+    vi.mocked(processor.processStillVariants).mockReturnValue({
       variants: {
         sm: new Uint8Array([1]),
         md: new Uint8Array([2]),
@@ -178,9 +178,9 @@ describe('Cache-Control on deterministic image keys (Codex-p3rre)', () => {
   });
 
   /**
-   * The five objects every still writes under `base`, in put order: the four
-   * sizes, then the original (Codex-kk9nv.5). The original rides the same
-   * overwritten-in-place key policy, so it is held to the same invariant.
+   * The four objects every still writes under `base`, in put order: sm, md,
+   * lg and xl (Codex-kk9nv.5). Each rides the same overwritten-in-place key
+   * policy, so each is held to the same invariant.
    */
   function stillObjects(base: string): string[] {
     return [
@@ -188,7 +188,6 @@ describe('Cache-Control on deterministic image keys (Codex-p3rre)', () => {
       `${base}/md.webp`,
       `${base}/lg.webp`,
       `${base}/xl.webp`,
-      `${base}/original`,
     ];
   }
 
@@ -208,7 +207,7 @@ describe('Cache-Control on deterministic image keys (Codex-p3rre)', () => {
     return new File([bytes], 'image.png', { type: 'image/png' });
   }
 
-  it('content thumbnail files, the original included, are revalidatable, not immutable', async () => {
+  it('content thumbnail files are revalidatable, not immutable', async () => {
     await service.processContentThumbnail('content-1', 'user-1', pngFile());
 
     const headers = putHeaders();
@@ -220,7 +219,7 @@ describe('Cache-Control on deterministic image keys (Codex-p3rre)', () => {
     }
   });
 
-  it('avatar files, the original included, are revalidatable, not immutable', async () => {
+  it('avatar files are revalidatable, not immutable', async () => {
     await service.processUserAvatar('user-1', pngFile());
 
     const headers = putHeaders();
@@ -230,7 +229,7 @@ describe('Cache-Control on deterministic image keys (Codex-p3rre)', () => {
     }
   });
 
-  it('category cover files, the original included, are revalidatable, not immutable', async () => {
+  it('category cover files are revalidatable, not immutable', async () => {
     await service.processCategoryCover('cat-1', pngFile());
 
     const headers = putHeaders();
@@ -242,7 +241,7 @@ describe('Cache-Control on deterministic image keys (Codex-p3rre)', () => {
     }
   });
 
-  it('course hero files, the original included, are revalidatable, not immutable', async () => {
+  it('course hero files are revalidatable, not immutable', async () => {
     await service.processCourseHero('course-1', pngFile());
 
     const headers = putHeaders();

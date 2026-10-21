@@ -44,7 +44,7 @@ function createTestImageFile(mimeType: string, filename: string): File {
 // Mock processor: every still goes through the page-image pipeline
 // (Codex-kk9nv.5), which returns four sizes and the source's size.
 vi.mock('../processor', () => ({
-  processPageImageVariants: vi.fn().mockReturnValue({
+  processStillVariants: vi.fn().mockReturnValue({
     variants: {
       sm: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
       md: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
@@ -110,11 +110,13 @@ describe('ImageProcessingService - Security', () => {
         expect.anything(),
         expect.anything()
       );
-      // Every object, the kept original included (Codex-kk9nv.5), sits under
-      // the creator's prefix — none escapes the tenant boundary.
+      // Every object, xl included (Codex-kk9nv.5), sits under the creator's
+      // prefix — none escapes the tenant boundary.
       const keys = putKeys(mockR2Service);
-      expect(keys).toContain(
-        'user-owner/content-thumbnails/content-1/original'
+      expect(keys).toEqual(
+        ['sm', 'md', 'lg', 'xl'].map(
+          (size) => `user-owner/content-thumbnails/content-1/${size}.webp`
+        )
       );
       for (const key of keys) {
         expect(key.startsWith('user-owner/content-thumbnails/content-1/')).toBe(
@@ -134,10 +136,12 @@ describe('ImageProcessingService - Security', () => {
         expect.anything(),
         expect.anything()
       );
-      // Every object, the kept original included (Codex-kk9nv.5), sits under
-      // the user's own avatar folder.
+      // Every object, xl included (Codex-kk9nv.5), sits under the user's own
+      // avatar folder.
       const keys = putKeys(mockR2Service);
-      expect(keys).toContain('avatars/user-123/original');
+      expect(keys).toEqual(
+        ['sm', 'md', 'lg', 'xl'].map((size) => `avatars/user-123/${size}.webp`)
+      );
       for (const key of keys) {
         expect(key.startsWith('avatars/user-123/')).toBe(true);
       }

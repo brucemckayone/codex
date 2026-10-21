@@ -266,8 +266,8 @@ export function getContentThumbnailKey(
 }
 
 /**
- * The folder a content thumbnail's files live in: its sizes
- * (`{size}.webp`) and its kept original (`original`, Codex-kk9nv.5).
+ * The folder a content thumbnail's files live in: its four sizes
+ * (`{size}.webp`, xl included since Codex-kk9nv.5).
  *
  * @example
  * getContentThumbnailBaseKey('user-123', 'content-456')
@@ -319,8 +319,8 @@ export function getUserAvatarKey(userId: string, size: string): string {
 }
 
 /**
- * The folder a user's avatar files live in: its sizes (`{size}.webp`) and
- * its kept original (`original`, Codex-kk9nv.5).
+ * The folder a user's avatar files live in: its four sizes
+ * (`{size}.webp`, xl included since Codex-kk9nv.5).
  *
  * @example
  * getUserAvatarBaseKey('user-123')

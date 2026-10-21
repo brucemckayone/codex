@@ -1087,7 +1087,7 @@ app.patch(
  *
  * The cover is NOT a `media_items` ref: `media_items` is CHECK-constrained to
  * ('video','audio'), so a still image cannot live there. It reuses the category
- * cover pipeline instead — sm/md/lg WebP variants under a deterministic
+ * cover pipeline instead — sm/md/lg/xl WebP variants under a deterministic
  * per-course key, so a re-upload overwrites in place and never orphans an
  * object. The page is resolved (and org-scoped) BEFORE R2 is written, so an
  * out-of-org id can never seed an orphaned cover.

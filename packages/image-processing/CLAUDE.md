@@ -43,7 +43,7 @@ Returns `ImageProcessingResult: { url: string, size: number, mimeType: string, w
 
 1. **Validation**: size ≤ 5MB, MIME type must be in `SUPPORTED_IMAGE_MIME_TYPES` (PNG, JPEG, WebP, GIF — no SVG, no opt-out), magic bytes verified against MIME
 2. **Size check, before any decode** (Codex-kk9nv.12): `readImageDimensions` (`image-dimensions.ts`) reads width x height from the JPEG/PNG/WebP/GIF header, and over `MAX_IMAGE_PIXELS` (1600 x 1600, from `@codex/validation`) is an `InvalidImageError`. A Worker isolate has **128 MB for the JS heap and Wasm together**, and Photon's decode alone peaks at about 11 bytes a pixel: a 12 MP phone photo needs 137 MB, so it killed the isolate (error 1102) where no handler or log could see it. The studio shrinks every photo in the browser first (`apps/web/src/lib/utils/shrink-photo.ts`), so only a caller that skips the studio meets the limit. **Never raise `MAX_IMAGE_PIXELS` without re-measuring the Wasm peak** (`chunk.initSync().memory.buffer.byteLength` after a run; Wasm memory never shrinks, so that is the peak).
-3. **Processing**: `@cf-wasm/photon` (Cloudflare-compatible WASM) — Lanczos3 resize, WebP conversion. NEVER upscales. The LARGEST variant is made from the decode, the decode is freed at once, and every smaller variant is made from that largest one and freed as soon as it is encoded: `resize` clones its source and builds a 16-byte-a-pixel float intermediate as wide as the source, so holding the decode while making every variant from it peaked at 81 MB on a 2000x1280 page image (this order: 65). A file that will not decode is an `InvalidImageError` (400), not a 500. Every still goes through `processPageImageVariants`. The picture is turned upright from the JPEG's EXIF orientation (`exif-orientation.ts`, Codex-kk9nv.11): Photon ignores that tag and WebP drops it, so without this a phone portrait was stored sideways. Every size is the upright picture's; each variant is resized in the stored orientation and only that small output is turned, because a quarter turn clones its image several times.
+3. **Processing**: `@cf-wasm/photon` (Cloudflare-compatible WASM) — Lanczos3 resize, WebP conversion. NEVER upscales. The LARGEST variant is made from the decode, the decode is freed at once, and every smaller variant is made from that largest one and freed as soon as it is encoded: `resize` clones its source and builds a 16-byte-a-pixel float intermediate as wide as the source, so holding the decode while making every variant from it peaked at 81 MB on a 2000x1280 page image (this order: 65). A file that will not decode is an `InvalidImageError` (400), not a 500. Every still goes through `processStillVariants`. The picture is turned upright from the JPEG's EXIF orientation (`exif-orientation.ts`, Codex-kk9nv.11): Photon ignores that tag and WebP drops it, so without this a phone portrait was stored sideways. Every size is the upright picture's; each variant is resized in the stored orientation and only that small output is turned, because a quarter turn clones its image several times.
 4. **Storage** → R2 via `ASSETS_BUCKET` (falls back to `MEDIA_BUCKET`):
    - Raster variants: `cacheControl: R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` from
      `@codex/constants` — **never a string written in this package.**
@@ -76,14 +76,15 @@ R2 key builders come from `@codex/transcoding`:
 | `md` | 400px: standard display, feeds |
 | `lg` | 800px: hero, full-size (the URL every old image has) |
 | `xl` | min(1600, width): full-bleed at 1440 and 2x (Codex-kk9nv.5) |
-| `original` | The upload as it came, no extension, its content type on the object. Not served; kept so any later size or format can be made without a re-upload |
 
-Every cleanup list goes through `variantKeyList(stillVariantKeys(base))`, so it names all five, or `xl` and the original leak.
+Every cleanup list goes through `variantKeyList(stillVariantKeys(base))`, so it names all four, or `xl` leaks.
+
+**The upload itself is NOT kept** (owner, 2026-10-21: "Defer originals (Recommended)"). The assets bucket is public and every served URL shows its base key, so `{base}/original` would serve the photo's raw EXIF (GPS, capture time, device serial) to anyone who swaps `lg.webp` for `original`. Keeping originals needs its own design, in a private store.
 
 ## Strict Rules
 
 - **MUST** validate MIME type AND magic bytes — NEVER trust `Content-Type` header alone
-- **MUST** reject SVG. `validateImageFile` is raster-only with no opt-out, because `processImageVariants` decodes via Photon which cannot rasterise SVG. The one path on this platform that accepts SVG is `BrandingSettingsService.uploadLogo`, and it **MUST** sanitize with `sanitizeSvgContent()` — unsanitized SVGs are stored XSS vectors
+- **MUST** reject SVG. `validateImageFile` is raster-only with no opt-out, because `processStillVariants` decodes via Photon which cannot rasterise SVG. The one path on this platform that accepts SVG is `BrandingSettingsService.uploadLogo`, and it **MUST** sanitize with `sanitizeSvgContent()` — unsanitized SVGs are stored XSS vectors
 - **MUST** scope operations by `creatorId` / `userId` / `orgId`
 - **MUST** use `ASSETS_BUCKET` binding (not `MEDIA_BUCKET`) for public images — see service-registry for binding fallback logic
 - **MUST** provide `R2_PUBLIC_URL_BASE` env var — required to construct public image URLs
@@ -98,5 +99,5 @@ Every cleanup list goes through `variantKeyList(stillVariantKeys(base))`, so it 
 ## Reference Files
 
 - `packages/image-processing/src/service.ts` — ImageProcessingService
-- `packages/image-processing/src/processor.ts` — processImageVariants (WASM resize logic)
+- `packages/image-processing/src/processor.ts` — processStillVariants (WASM resize logic)
 - `packages/image-processing/src/orphaned-file-service.ts` — OrphanedFileService
