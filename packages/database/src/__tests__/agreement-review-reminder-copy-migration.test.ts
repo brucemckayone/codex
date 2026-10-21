@@ -11,7 +11,9 @@
  * rolled back, so the shared test database is left exactly as it was. Pins:
  *   - a stale row gets exactly the new subject and sentences, nothing else;
  *   - an org-scoped copy is fixed too;
- *   - an edited row, a soft-deleted row and another template are untouched.
+ *   - a row whose HTML was customised keeps it, while its stock text is fixed;
+ *   - an edited row, a soft-deleted row and another template are untouched;
+ *   - a second run changes nothing.
  *
  * Real DB. Skips when DB_METHOD is not configured (fee-config-schema.test.ts).
  */
@@ -93,16 +95,19 @@ describe('0106 agreement review-reminder copy (Codex-2hxff.17)', () => {
                 isNull(emailTemplates.deletedAt)
               )
             );
-          const [orgA, orgB] = await tx
+          const [orgA, orgB, orgC] = await tx
             .insert(organizations)
             .values([
               { name: 'Review Copy Org A', slug: `review-copy-a-${suffix}` },
               { name: 'Review Copy Org B', slug: `review-copy-b-${suffix}` },
+              { name: 'Review Copy Org C', slug: `review-copy-c-${suffix}` },
             ])
             .returning({ id: organizations.id });
-          if (!orgA || !orgB) throw new Error('fixture orgs not inserted');
+          if (!orgA || !orgB || !orgC) {
+            throw new Error('fixture orgs not inserted');
+          }
 
-          const [stale, orgCopy, edited, deleted, other] = await tx
+          const [stale, orgCopy, edited, deleted, other, htmlEdited] = await tx
             .insert(emailTemplates)
             .values([
               { ...row(TEMPLATE, oldHtml, oldText), scope: 'global' },
@@ -125,9 +130,21 @@ describe('0106 agreement review-reminder copy (Codex-2hxff.17)', () => {
                 ...row(`${TEMPLATE}-other-${suffix}`, oldHtml, oldText),
                 scope: 'global',
               },
+              {
+                ...row(TEMPLATE, '<p>Our own wording.</p>', oldText),
+                scope: 'organization',
+                organizationId: orgC.id,
+              },
             ])
             .returning({ id: emailTemplates.id });
-          if (!stale || !orgCopy || !edited || !deleted || !other) {
+          if (
+            !stale ||
+            !orgCopy ||
+            !edited ||
+            !deleted ||
+            !other ||
+            !htmlEdited
+          ) {
             throw new Error('fixture templates not inserted');
           }
           ids = {
@@ -136,8 +153,11 @@ describe('0106 agreement review-reminder copy (Codex-2hxff.17)', () => {
             edited: edited.id,
             deleted: deleted.id,
             other: other.id,
+            htmlEdited: htmlEdited.id,
           };
 
+          await tx.execute(sql.raw(MIGRATION));
+          // Safe to run again: the guard no longer matches a fixed body.
           await tx.execute(sql.raw(MIGRATION));
 
           rows = await tx
@@ -168,7 +188,11 @@ describe('0106 agreement review-reminder copy (Codex-2hxff.17)', () => {
       expect(edited?.htmlBody).toBe('<p>Our own wording.</p>');
       expect(edited?.subject).toBe(OLD_SUBJECT);
       expect(edited?.updatedAt.getTime()).toBe(stamp.getTime());
-      expect(rows).toHaveLength(5);
+      const htmlEdited = byId(ids.htmlEdited);
+      expect(htmlEdited?.htmlBody).toBe('<p>Our own wording.</p>');
+      expect(htmlEdited?.textBody).toBe(newText);
+      expect(htmlEdited?.subject).toBe(NEW_SUBJECT);
+      expect(rows).toHaveLength(6);
     }
   );
 });

@@ -129,18 +129,23 @@ describe('agreementsInForce', () => {
       organizationId: orgId,
       revenueType: 'subscription',
       at: AT,
+      obs: { error: vi.fn() },
       ...extra,
     });
 
-  it('keeps paying past the review date: the term is not an expiry (AGR-01)', async () => {
+  it.each([
+    'subscription',
+    'content_purchase',
+  ] as const)('keeps paying past the review date: the term is not an expiry (AGR-01, %s)', async (revenueType) => {
     const fx = await org();
     await agreement(fx, {
       creatorId: fx.creatorA,
       share: 3000,
+      revenueType,
       effectiveUntil: day(-10),
     });
 
-    expect(await resolve(fx.orgId)).toEqual([
+    expect(await resolve(fx.orgId, { revenueType })).toEqual([
       expect.objectContaining({ creatorId: fx.creatorA, sharePercent: 3000 }),
     ]);
   });
@@ -190,12 +195,18 @@ describe('agreementsInForce', () => {
       effectiveFrom: day(-5),
       createdAt: day(0),
     });
-    const obs = { warn: vi.fn() };
+    const obs = { error: vi.fn() };
 
     expect(await resolve(fx.orgId, { at: day(-1), obs })).toEqual([]);
-    expect(obs.warn).toHaveBeenCalledWith(
+    // An error, with the sale's moment, so the creator can be made whole.
+    expect(obs.error).toHaveBeenCalledWith(
       'agreement has no current proposal; skipped',
-      expect.objectContaining({ agreementId: orphan.id })
+      expect.objectContaining({
+        agreementId: orphan.id,
+        creatorId: fx.creatorA,
+        revenueType: 'subscription',
+        at: day(-1).toISOString(),
+      })
     );
   });
 

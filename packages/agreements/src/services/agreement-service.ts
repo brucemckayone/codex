@@ -386,6 +386,14 @@ export class AgreementService extends BaseService {
           );
         }
 
+        // Neither side can keep negotiating once the creator has left
+        // the organisation (AGR-09).
+        await this.assertActiveMember(
+          tx,
+          parent.organizationId,
+          parent.creatorId
+        );
+
         // Counter-party check. If the parent was owner-proposed, only
         // the named creator may counter. If creator-proposed, only an
         // active owner of the org may counter.
@@ -539,6 +547,14 @@ export class AgreementService extends BaseService {
             }
           );
         }
+
+        // A removed creator's proposals are withdrawn on removal; this
+        // also closes the race with a removal in flight (AGR-09).
+        await this.assertActiveMember(
+          tx,
+          proposal.organizationId,
+          proposal.creatorId
+        );
 
         // Counter-party authorisation: the side that did NOT propose
         // is the one allowed to accept. Defensive: if a future bug ever
@@ -1024,8 +1040,9 @@ export class AgreementService extends BaseService {
    * Emails the creator about each agreement ended because they are no longer
    * a member of the organisation (`terminateAgreementsOnDeparture`, owner
    * decision AGR-09). The organisation, through its first active owner, is the
-   * counterparty. Runs after the removal has committed, so a failure here is
-   * logged and never undoes it.
+   * counterparty; with no active owner the email names "The other party", so
+   * the creator is still told. Runs after the removal has committed, so a
+   * failure here is logged and never undoes it.
    */
   async notifyTerminatedOnDeparture(
     agreements: readonly DepartureTerminatedAgreement[]
@@ -1046,13 +1063,6 @@ export class AgreementService extends BaseService {
             )
           )
           .limit(1);
-        if (!ownerRow) {
-          this.obs.warn(
-            'agreement departure notice skipped: no active owner for org',
-            { organizationId: terminated.organizationId }
-          );
-          continue;
-        }
         await this.dispatchLifecycleEmail({
           recipientUserId: terminated.creatorId,
           organizationId: terminated.organizationId,
@@ -1064,7 +1074,7 @@ export class AgreementService extends BaseService {
             ),
           },
           threadId: terminated.id,
-          counterpartyUserId: ownerRow.userId,
+          counterpartyUserId: ownerRow?.userId ?? null,
           revenueType: terminated.revenueType as RevenueType,
           sharePercent: 10000 - terminated.organizationFeePercentage,
           termMonths: this.estimateTermMonths(
@@ -1076,6 +1086,8 @@ export class AgreementService extends BaseService {
       } catch (error) {
         this.obs.warn('agreement departure notice failed', {
           agreementId: terminated.id,
+          organizationId: terminated.organizationId,
+          creatorId: terminated.creatorId,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -1673,7 +1685,8 @@ export class AgreementService extends BaseService {
     templateName: AgreementTemplateName;
     extraContext: Record<string, string>;
     threadId: string;
-    counterpartyUserId: string;
+    /** `null` when there is nobody to name: the email says "The other party". */
+    counterpartyUserId: string | null;
     revenueType: RevenueType;
     sharePercent: number;
     termMonths: number | null;
@@ -1709,7 +1722,8 @@ export class AgreementService extends BaseService {
     templateName: AgreementTemplateName;
     extraContext: Record<string, string>;
     threadId: string;
-    counterpartyUserId: string;
+    /** `null` when there is nobody to name: the email says "The other party". */
+    counterpartyUserId: string | null;
     revenueType: RevenueType;
     sharePercent: number;
     termMonths: number | null;
@@ -1724,7 +1738,9 @@ export class AgreementService extends BaseService {
 
     const [recipient, counterparty, orgName] = await Promise.all([
       this.lookupUserContact(params.recipientUserId),
-      this.lookupUserContact(params.counterpartyUserId),
+      params.counterpartyUserId
+        ? this.lookupUserContact(params.counterpartyUserId)
+        : null,
       this.lookupOrgName(params.organizationId),
     ]);
 
@@ -1848,20 +1864,27 @@ export class AgreementService extends BaseService {
    * active role qualifies; we don't gate on `role='creator'` so an
    * owner can propose to themselves (single-creator-orgs do this to
    * pre-empt the org-keeps-100% fallback path).
+   *
+   * Takes a SHARE lock on the membership row, so a removal running at the
+   * same moment waits for this transaction (and then ends what it created),
+   * or wins and this check fails (owner decision AGR-09).
    */
   private async assertActiveMember(
     tx: Tx,
     organizationId: string,
     userId: string
   ): Promise<void> {
-    const membership = await tx.query.organizationMemberships.findFirst({
-      where: and(
-        eq(organizationMemberships.organizationId, organizationId),
-        eq(organizationMemberships.userId, userId),
-        eq(organizationMemberships.status, 'active')
-      ),
-      columns: { id: true },
-    });
+    const [membership] = await tx
+      .select({ id: organizationMemberships.id })
+      .from(organizationMemberships)
+      .where(
+        and(
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.userId, userId),
+          eq(organizationMemberships.status, 'active')
+        )
+      )
+      .for('share');
     if (!membership) {
       throw new ForbiddenError(
         'Target user is not an active member of this organization',

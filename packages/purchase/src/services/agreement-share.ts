@@ -18,6 +18,7 @@
 import {
   type AgreementRevenueType,
   agreementsInForce,
+  type ResolverLogger,
 } from '@codex/agreements';
 import type { DatabaseClient } from '@codex/database';
 
@@ -37,7 +38,7 @@ export async function findActiveCreatorAgreementShare(
     creatorId: string;
     revenueType: AgreementRevenueType;
     at: Date;
-    obs?: { warn(message: string, metadata?: Record<string, unknown>): void };
+    obs: ResolverLogger;
   }
 ): Promise<number | null> {
   const [agreement] = await agreementsInForce(client, params);

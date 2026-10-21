@@ -14,6 +14,7 @@
 import {
   type DepartureTerminatedAgreement,
   terminateAgreementsOnDeparture,
+  withdrawProposalsOnDeparture,
 } from '@codex/agreements';
 import { isReservedSubdomain, PAGINATION } from '@codex/constants';
 import {
@@ -1174,6 +1175,12 @@ export class OrganizationService extends BaseService {
           }
 
           const now = new Date();
+          // Before the membership change: see withdrawProposalsOnDeparture.
+          await withdrawProposalsOnDeparture(tx, {
+            organizationId,
+            creatorId: userId,
+            at: now,
+          });
           await tx
             .update(organizationMemberships)
             .set({ status: 'inactive', updatedAt: now })
@@ -1609,12 +1616,16 @@ export class OrganizationService extends BaseService {
   ): void {
     const notify = this.onAgreementsEndedByDeparture;
     if (!notify) return;
-    const task = notify(agreements).catch((error: unknown) => {
-      this.obs.warn('Agreement departure email dispatch failed', {
-        agreementIds: agreements.map((agreement) => agreement.id),
-        error: error instanceof Error ? error.message : String(error),
+    // Deferred, so a callback that throws synchronously becomes a rejection
+    // here instead of a 500 for a removal that has already committed.
+    const task = Promise.resolve()
+      .then(() => notify(agreements))
+      .catch((error: unknown) => {
+        this.obs.warn('Agreement departure email dispatch failed', {
+          agreementIds: agreements.map((agreement) => agreement.id),
+          error: error instanceof Error ? error.message : String(error),
+        });
       });
-    });
     this.waitUntil?.(task);
   }
 

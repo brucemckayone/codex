@@ -11,11 +11,13 @@
 
 import { randomUUID } from 'node:crypto';
 import {
+  agreementProposals,
   type CourseSubscriptionPlan,
   courseEnrollments,
   courseSubscriptionPlans,
   courseSubscriptions,
   courses,
+  creatorOrganizationAgreements,
   entitlements,
   organizationMemberships,
   organizations,
@@ -344,6 +346,100 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
       .from(payouts)
       .where(eq(payouts.courseSubscriptionId, courseSubscriptionId as string));
     expect(payoutRowsAfter).toHaveLength(payoutRows.length);
+  });
+
+  // Owner decision AGR-01 "Keeps paying" (Codex-2hxff.17): the course
+  // creator's subscription agreement applies past its review date.
+  it("an invoice pays the course creator their agreed share past the agreement's review date", async () => {
+    // A fresh creator, so the agreement cannot reach the file's other tests.
+    const [agreedCreatorId] = await seedTestUsers(db, 1);
+    if (!agreedCreatorId) throw new Error('creator not seeded');
+    const [c] = await db
+      .insert(courses)
+      .values({
+        organizationId: orgId,
+        creatorId: agreedCreatorId,
+        slug: createUniqueSlug('cs-agreed'),
+        title: 'Agreed Course',
+        status: 'published',
+        priceCents: null,
+      })
+      .returning({ id: courses.id });
+    if (!c) throw new Error('failed course');
+    const [p] = await db
+      .insert(courseSubscriptionPlans)
+      .values({
+        courseId: c.id,
+        priceMonthly: 5000,
+        priceAnnual: 50000,
+        stripeProductId: `prod_${randomUUID().slice(0, 8)}`,
+        stripePriceMonthlyId: `price_m_${randomUUID().slice(0, 8)}`,
+        stripePriceAnnualId: `price_a_${randomUUID().slice(0, 8)}`,
+      })
+      .returning({ id: courseSubscriptionPlans.id });
+    if (!p) throw new Error('failed plan');
+    const day = 86_400_000;
+    const [proposal] = await db
+      .insert(agreementProposals)
+      .values({
+        organizationId: orgId,
+        creatorId: agreedCreatorId,
+        revenueType: 'subscription',
+        roundNumber: 1,
+        proposedByUserId: creatorId,
+        proposedByRole: 'owner',
+        proposedCreatorSharePercent: 7000,
+        proposedEffectiveFrom: new Date(Date.now() - 60 * day),
+        status: 'accepted',
+      })
+      .returning({ id: agreementProposals.id });
+    if (!proposal) throw new Error('proposal not inserted');
+    await db.insert(creatorOrganizationAgreements).values({
+      organizationId: orgId,
+      creatorId: agreedCreatorId,
+      organizationFeePercentage: 3000,
+      revenueType: 'subscription',
+      status: 'active',
+      effectiveFrom: new Date(Date.now() - 60 * day),
+      effectiveUntil: new Date(Date.now() - day), // review date passed
+      currentProposalId: proposal.id,
+    });
+
+    const stripeSubId = `sub_${randomUUID().slice(0, 8)}`;
+    const sub = courseSubStripeObject(stripeSubId, c.id, p.id);
+    await service.handleCourseSubscriptionCreated(sub);
+    const [row] = await db
+      .select({ id: courseSubscriptions.id })
+      .from(courseSubscriptions)
+      .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSubId));
+    if (!row) throw new Error('course subscription not written');
+
+    const invoice = createMockStripeInvoice({
+      amount_paid: 5000,
+      currency: 'gbp',
+      parent: {
+        subscription_details: {
+          subscription: stripeSubId,
+          metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
+        },
+      },
+      payments: paidByCard(`ch_${randomUUID().slice(0, 8)}`),
+    }) as unknown as Stripe.Invoice;
+    await service.handleCourseInvoicePaymentSucceeded(invoice, sub);
+
+    const rows = await db
+      .select({
+        payoutType: payouts.payoutType,
+        amountCents: payouts.amountCents,
+      })
+      .from(payouts)
+      .where(eq(payouts.courseSubscriptionId, row.id));
+    const amountOf = (type: string) =>
+      rows.find((r) => r.payoutType === type)?.amountCents;
+    // 10% platform; the creator takes 70% of the 4500 left, not the default.
+    expect(amountOf('platform_fee')).toBe(500);
+    expect(amountOf('organization_fee')).toBe(1350);
+    expect(amountOf('creator_payout')).toBe(3150);
   });
 
   // Codex-2hxff.50, the production shape end to end: the webhook's invoice

@@ -193,7 +193,7 @@ describe('buildOwnerAgreementFocusItems', () => {
     ).toBeUndefined();
   });
 
-  it('emits an expiring warning when effectiveUntil is within the 30-day window', () => {
+  it('emits a review prompt when the review date is within the 30-day window', () => {
     const items = buildOwnerAgreementFocusItems({
       teamMembers: [
         {
@@ -223,7 +223,7 @@ describe('buildOwnerAgreementFocusItems', () => {
     expect(expiring?.title).toMatch(/is due for review in 25 days/);
   });
 
-  it('does NOT emit an expiring warning when effectiveUntil is beyond the 30-day window', () => {
+  it('does NOT emit a review prompt when the review date is beyond the 30-day window', () => {
     const items = buildOwnerAgreementFocusItems({
       teamMembers: [
         {
@@ -251,7 +251,7 @@ describe('buildOwnerAgreementFocusItems', () => {
     ).toBeUndefined();
   });
 
-  it('does NOT emit an expiring warning for indefinite agreements (effectiveUntil = null)', () => {
+  it('does NOT emit a review prompt for indefinite agreements (effectiveUntil = null)', () => {
     const items = buildOwnerAgreementFocusItems({
       teamMembers: [
         {
@@ -384,7 +384,7 @@ describe('buildCreatorAgreementFocusItems', () => {
     expect(items[0]?.title).toContain('An organisation');
   });
 
-  it('emits a dismissable warning when an active agreement is expiring in 30d', () => {
+  it('emits a dismissable prompt when an active agreement is due for review in 30d', () => {
     const items = buildCreatorAgreementFocusItems({
       pendingProposalsFromOrg: [],
       activeAgreements: [

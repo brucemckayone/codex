@@ -2287,8 +2287,11 @@ describe('PurchaseService Integration', () => {
         status?: 'active' | 'terminated';
         terminatedAt?: Date | null;
         revenueType?: 'subscription' | 'content_purchase';
+        effectiveFrom?: Date;
+        effectiveUntil?: Date | null;
       } = {}
     ) {
+      const effectiveFrom = options.effectiveFrom ?? new Date();
       const [proposal] = await db
         .insert(schema.agreementProposals)
         .values({
@@ -2300,7 +2303,7 @@ describe('PurchaseService Integration', () => {
           proposedByRole: 'owner',
           proposedCreatorSharePercent: sharePercent,
           proposedTermMonths: null,
-          proposedEffectiveFrom: new Date(),
+          proposedEffectiveFrom: effectiveFrom,
           status: 'accepted',
           respondedAt: new Date(),
           respondedByUserId: creatorId,
@@ -2315,6 +2318,8 @@ describe('PurchaseService Integration', () => {
         status: options.status ?? 'active',
         terminatedAt: options.terminatedAt ?? null,
         currentProposalId: proposal.id,
+        ...(options.effectiveFrom ? { effectiveFrom } : {}),
+        effectiveUntil: options.effectiveUntil ?? null,
       });
       return { proposalId: proposal.id };
     }
@@ -2450,6 +2455,73 @@ describe('PurchaseService Integration', () => {
       expect(purchase.platformFeeCents).toBe(1000);
       expect(purchase.organizationFeeCents).toBe(900);
       expect(purchase.creatorPayoutCents).toBe(8100);
+    });
+
+    // Owner decision AGR-01 "Keeps paying" (Codex-2hxff.17).
+    it('WP-4: an agreement past its review date still sets the split', async () => {
+      const { content } = await seedPaidContent({
+        title: 'WP-4 review date passed',
+        priceCents: 10000,
+      });
+      const day = 24 * 60 * 60 * 1000;
+      await seedContentPurchaseAgreement(organizationId, userId, 7000, {
+        effectiveFrom: new Date(Date.now() - 60 * day),
+        effectiveUntil: new Date(Date.now() - day),
+      });
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+
+      const purchase = await purchaseService.completePurchase(
+        `pi_wp4_review_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+        }
+      );
+
+      // The agreement split, not the 900 / 8100 default.
+      expect(purchase.platformFeeCents).toBe(1000);
+      expect(purchase.organizationFeeCents).toBe(2700);
+      expect(purchase.creatorPayoutCents).toBe(6300);
+    });
+
+    // AGR-09 / no pro-rating: the payment's own time decides, so a sale made
+    // before the agreement ended still pays it when its webhook lands after.
+    it('WP-4: a sale paid before the agreement ended keeps its split when processed after', async () => {
+      const { content } = await seedPaidContent({
+        title: 'WP-4 late webhook',
+        priceCents: 10000,
+      });
+      const hour = 60 * 60 * 1000;
+      await seedContentPurchaseAgreement(organizationId, userId, 7000, {
+        effectiveFrom: new Date(Date.now() - 48 * hour),
+        status: 'terminated',
+        terminatedAt: new Date(Date.now() - hour),
+      });
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+
+      const purchase = await purchaseService.completePurchase(
+        `pi_wp4_late_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          paidAt: new Date(Date.now() - 2 * hour),
+        }
+      );
+
+      expect(purchase.organizationFeeCents).toBe(2700);
+      expect(purchase.creatorPayoutCents).toBe(6300);
     });
 
     it('WP-4: subscription-type agreement does NOT apply to content_purchase split', async () => {

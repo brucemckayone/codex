@@ -43,12 +43,14 @@ export {
   formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,
   type ProposeAgreementInput,
+  type ResolverLogger,
   sumActiveCreatorShares,
   type TerminateAgreementInput,
   terminateAgreementsOnDeparture,
   type ValidateProposedShareInput,
   validateProposedShare,
   type WithdrawProposalInput,
+  withdrawProposalsOnDeparture,
 } from './services';
 
 // ─── Types ────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ export {
   DEPARTURE_TERMINATION_REASON,
   type DepartureTerminatedAgreement,
   terminateAgreementsOnDeparture,
+  withdrawProposalsOnDeparture,
 } from './agreement-departure';
 export {
   type ActiveAgreementShareView,
@@ -20,6 +21,7 @@ export {
   type AgreementInForce,
   type AgreementRevenueType,
   agreementsInForce,
+  type ResolverLogger,
 } from './agreement-resolver';
 export {
   type AcceptProposalInput,

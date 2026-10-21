@@ -47,15 +47,17 @@ export interface AgreementInForce {
   sharePercent: number;
 }
 
-interface ResolverLogger {
-  warn(message: string, metadata?: Record<string, unknown>): void;
+/** Required: a skipped agreement moves a creator's money, so it must be seen. */
+export interface ResolverLogger {
+  error(message: string, metadata?: Record<string, unknown>): void;
 }
 
 /**
  * The agreements in force for `revenueType` in an organisation at `at`, one per
  * creator, ordered by creator. Narrowed to one creator when `creatorId` is
  * given. An agreement with no accepted proposal linked has no share to apply:
- * it is logged and that creator gets no share, never a newer agreement's.
+ * that creator gets no share, never a newer agreement's, and it is logged as an
+ * error with the sale's moment so the creator can be made whole.
  */
 export async function agreementsInForce(
   client: QueryClient,
@@ -64,7 +66,7 @@ export async function agreementsInForce(
     revenueType: AgreementRevenueType;
     at: Date;
     creatorId?: string;
-    obs?: ResolverLogger;
+    obs: ResolverLogger;
   }
 ): Promise<AgreementInForce[]> {
   const rows = await client
@@ -111,10 +113,12 @@ export async function agreementsInForce(
     if (resolved.has(row.creatorId)) continue;
     resolved.add(row.creatorId);
     if (row.sharePercent === null) {
-      params.obs?.warn('agreement has no current proposal; skipped', {
+      params.obs.error('agreement has no current proposal; skipped', {
         agreementId: row.agreementId,
         organizationId: params.organizationId,
         creatorId: row.creatorId,
+        revenueType: params.revenueType,
+        at: params.at.toISOString(),
       });
       continue;
     }

@@ -715,7 +715,7 @@ export class PurchaseService extends BaseService {
         // `findActiveCreatorAgreementShare` (reused by the course-purchase +
         // course-subscription payout paths so all three apply IDENTICAL
         // Decision-Q3 agreement math). Returns the creator's share in basis
-        // points, or null when no active agreement brackets `purchasedAt`.
+        // points, or null when no agreement is in force at `purchasedAt`.
         const agreementSharePercent = organizationId
           ? await findActiveCreatorAgreementShare(tx, {
               organizationId,

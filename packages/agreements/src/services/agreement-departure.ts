@@ -11,7 +11,10 @@
  */
 
 import type { DatabaseClient } from '@codex/database';
-import { creatorOrganizationAgreements } from '@codex/database/schema';
+import {
+  agreementProposals,
+  creatorOrganizationAgreements,
+} from '@codex/database/schema';
 import { and, eq } from 'drizzle-orm';
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
@@ -21,6 +24,35 @@ export const DEPARTURE_TERMINATION_REASON =
 
 export type DepartureTerminatedAgreement =
   typeof creatorOrganizationAgreements.$inferSelect;
+
+/**
+ * The creator's open proposals in the organisation, withdrawn at `at`, so a
+ * removed creator cannot accept one and start a new agreement. Call it BEFORE
+ * the membership change: accept and counter lock the proposal and then the
+ * membership, so taking them in the same order cannot deadlock.
+ */
+export async function withdrawProposalsOnDeparture(
+  tx: Tx | DatabaseClient,
+  params: { organizationId: string; creatorId: string; at: Date }
+): Promise<Array<typeof agreementProposals.$inferSelect>> {
+  return tx
+    .update(agreementProposals)
+    .set({
+      status: 'withdrawn',
+      respondedAt: params.at,
+      // Nobody withdrew it: the membership ended.
+      respondedByUserId: null,
+      updatedAt: params.at,
+    })
+    .where(
+      and(
+        eq(agreementProposals.organizationId, params.organizationId),
+        eq(agreementProposals.creatorId, params.creatorId),
+        eq(agreementProposals.status, 'open')
+      )
+    )
+    .returning();
+}
 
 /** The creator's active agreements in the organisation, terminated at `at`. */
 export async function terminateAgreementsOnDeparture(

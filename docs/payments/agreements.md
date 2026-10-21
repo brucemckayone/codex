@@ -92,6 +92,13 @@ organisation, their agreements there are **terminated at that moment**
 change). The creator is emailed `agreement-terminated` after the commit. Their
 agreements in other organisations are untouched.
 
+Nothing new can start for them either. Their open proposals there are
+withdrawn in the same transaction (`withdrawProposalsOnDeparture`), and
+accepting or countering any proposal requires the creator to still be an
+active member. That check takes a share lock on the membership row, so a
+removal and an acceptance at the same moment serialise: either the removal
+also ends the new agreement, or the acceptance is refused.
+
 Money earned before the removal is still paid to them. The resolver reads the
 termination time, not the membership. A webhook for an earlier invoice that
 lands, or is retried, after the removal still finds the agreement. A check on
@@ -117,7 +124,7 @@ the two items marked "today":
   the payment time for purchases (today purchases use the time the webhook is
   processed);
 - an agreement counts if it is active at that time, or was terminated after it,
-  and its effective dates cover it;
+  and it had taken effect by then (the review date is not read);
 - a missing proposal link is logged and skipped, never silently dropped, and
   that creator gets no share rather than a newer agreement's;
 - results are ordered deterministically and counted once per creator, even

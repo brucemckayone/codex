@@ -4584,9 +4584,11 @@ export class SubscriptionService extends BaseService {
     // payment path (`agreementsInForce`, @codex/agreements). It reads the
     // accepted proposal's `proposed_creator_share_percent`, never the legacy
     // `organization_fee_percentage` column; keeps paying past the review date
-    // (owner decision AGR-01); requires the creator to still be a member
-    // (AGR-09); and returns one agreement per creator, deterministically — a
-    // creator has one slice per charge (uq_payouts_creator_slice_per_charge).
+    // (owner decision AGR-01); and returns one agreement per creator,
+    // deterministically — a creator has one slice per charge
+    // (uq_payouts_creator_slice_per_charge). It does NOT read membership: a
+    // removal terminates the agreements at that moment (AGR-09), so an
+    // invoice raised before it is still paid when this webhook lands after.
     const creatorAgreements = await agreementsInForce(this.db, {
       organizationId: orgId,
       revenueType: 'subscription',
