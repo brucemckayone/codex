@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   /**
    * Discover page - filterable content grid with search.
    *
@@ -95,7 +96,7 @@
           titleInCover
           id={item.id}
           title={item.title}
-          thumbnail={item.mediaItem?.thumbnailUrl ?? null}
+          thumbnail={getDisplayThumbnail(item)}
           contentType={(item.contentType === 'written' ? 'article' : item.contentType) as 'video' | 'audio' | 'article'}
           duration={item.mediaItem?.durationSeconds ?? null}
           creator={item.creator ? {

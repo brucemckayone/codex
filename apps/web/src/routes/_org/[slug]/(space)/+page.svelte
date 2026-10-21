@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
   import { subscriptionStatusGrantsAccess } from '@codex/constants';
+  import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { replaceState } from '$app/navigation';
@@ -143,7 +144,7 @@
         // article pick never shows raw `{"type":"doc",…}` in its summary (R3 ②).
         description: extractPlainText(c.description),
         href: buildContentUrl(page.url, c),
-        image: c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null,
+        image: getDisplayThumbnail(c),
       }))
   );
 
@@ -227,7 +228,7 @@
     subscribeGatedContent.slice(0, 5).map((c) => ({
       id: c.id,
       title: c.title,
-      thumbnail: c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null,
+      thumbnail: getDisplayThumbnail(c),
       href: buildContentUrl(page.url, c),
     }))
   );
@@ -268,7 +269,7 @@
       title: c.title,
       href: buildContentUrl(page.url, c),
       contentType: c.contentType === 'written' ? 'article' : c.contentType,
-      thumbnail: c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null,
+      thumbnail: getDisplayThumbnail(c),
       description: c.description,
       duration: c.mediaItem?.durationSeconds ?? null,
       creator: c.creator
@@ -713,7 +714,7 @@
       chrome="transparent"
       id={c.id}
       title={c.title}
-      thumbnail={c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null}
+      thumbnail={getDisplayThumbnail(c)}
       description={c.description}
       contentType={c.contentType === 'written' ? 'article' : c.contentType}
       duration={c.mediaItem?.durationSeconds ?? null}

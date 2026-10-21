@@ -443,8 +443,9 @@ export async function createServiceRegistry(
 
   // Orphan-record PRODUCER for the media-api OrphanedFileCleanupDO sweep
   // (Codex-r85jo.3). Every ImageProcessingService built here — directly, or
-  // inside IdentityService.uploadAvatar — must receive it: without it the
-  // orphan-recording branch in upload-pipeline.ts can only take its warn path,
+  // inside IdentityService.uploadAvatar / deleteAvatar — must receive it:
+  // without it the orphan-recording branch in upload-pipeline.ts can only take
+  // its warn path,
   // and the DO drains a table nothing writes. Private to the registry, not a
   // `ctx.services.*` entry: no route has a reason to call it directly.
   let _orphanedFiles: OrphanedFileService | undefined;
@@ -658,6 +659,9 @@ export async function createServiceRegistry(
           // verify the short-lived token signed with WORKER_SHARED_SECRET.
           contentApiBaseUrl: buildServiceUrl('content', env),
           hlsTokenSecret: env.WORKER_SHARED_SECRET,
+          // Library tiles resolve a video poster's R2 key to a URL with it
+          // (Codex-kk9nv.6).
+          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
         });
       }
       return _access;

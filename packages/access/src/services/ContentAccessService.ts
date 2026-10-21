@@ -104,6 +104,12 @@ export interface ContentAccessServiceConfig extends ServiceConfig {
    * reason as `contentApiBaseUrl`.
    */
   hlsTokenSecret?: string;
+  /**
+   * The env-owned public CDN base (`R2_PUBLIC_URL_BASE`). The library turns a
+   * video poster's bare R2 key into a URL with it (Codex-kk9nv.6). Optional:
+   * without it, an item with no custom thumbnail has no picture, never a key.
+   */
+  r2PublicUrlBase?: string;
 }
 
 /**
@@ -141,6 +147,7 @@ export class ContentAccessService
   private readonly revocation: AccessRevocation | undefined;
   private readonly contentApiBaseUrl: string | undefined;
   private readonly hlsTokenSecret: string | undefined;
+  private readonly r2PublicUrlBase: string | undefined;
 
   constructor(config: ContentAccessServiceConfig) {
     super(config);
@@ -149,6 +156,7 @@ export class ContentAccessService
     this.revocation = config.revocation;
     this.contentApiBaseUrl = config.contentApiBaseUrl;
     this.hlsTokenSecret = config.hlsTokenSecret;
+    this.r2PublicUrlBase = config.r2PublicUrlBase;
   }
 
   /**
@@ -495,7 +503,11 @@ export class ContentAccessService
     userId: string,
     input: ListUserLibraryInput
   ): Promise<UserLibraryResponse> {
-    return buildUserLibrary({ db: this.db, obs: this.obs }, userId, input);
+    return buildUserLibrary(
+      { db: this.db, obs: this.obs, r2PublicUrlBase: this.r2PublicUrlBase },
+      userId,
+      input
+    );
   }
 }
 
@@ -637,6 +649,7 @@ export function createContentAccessService(env: ContentAccessEnv): {
     revocation,
     contentApiBaseUrl,
     hlsTokenSecret: env.WORKER_SHARED_SECRET,
+    r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
   });
 
   // Return service with cleanup function

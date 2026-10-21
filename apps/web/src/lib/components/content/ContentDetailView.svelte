@@ -22,6 +22,7 @@
   @prop {Snippet} [purchaseForm] - Purchase form with use:enhance
 -->
 <script lang="ts">
+  import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
   import { browser } from '$app/environment';
@@ -241,7 +242,7 @@
     !!description && description.length <= 160
   );
 
-  const thumbnailUrl = $derived(content.mediaItem?.thumbnailUrl ?? undefined);
+  const thumbnailUrl = $derived(getDisplayThumbnail(content) ?? undefined);
   const duration = $derived(content.mediaItem?.durationSeconds ?? 0);
   const priceCents = $derived(content.priceCents ?? null);
   const isPaid = $derived(!!priceCents && priceCents > 0);

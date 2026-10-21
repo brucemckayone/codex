@@ -15,22 +15,27 @@ const THUMBNAIL_WIDTHS: Record<ThumbnailSize, number> = {
 };
 
 /**
+ * Check whether a thumbnail URL has webp size variants (sm/md/lg.webp).
+ * Only URLs ending with a recognised size filename have siblings to swap to.
+ */
+const HAS_SIZE_VARIANTS = /\/(sm|md|lg)\.webp$/;
+
+/**
  * Get thumbnail URL for a specific size.
  * Replaces the last path segment (filename) with {size}.webp.
+ *
+ * Any other URL comes back unchanged (Codex-kk9nv.4): an OAuth provider
+ * avatar, a legacy seed image or an external picture has no `{size}.webp`
+ * siblings, so rewriting its filename made a URL that 404'd.
  *
  * @example
  * getThumbnailUrl('http://localhost:4100/abc/media-thumbnails/xyz/md.webp', 'sm')
  * // => 'http://localhost:4100/abc/media-thumbnails/xyz/sm.webp'
  */
 export function getThumbnailUrl(baseUrl: string, size: ThumbnailSize): string {
+  if (!HAS_SIZE_VARIANTS.test(baseUrl)) return baseUrl;
   return baseUrl.replace(/\/[^/]+$/, `/${size}.webp`);
 }
-
-/**
- * Check whether a thumbnail URL has webp size variants (sm/md/lg.webp).
- * Only URLs ending with a recognised size filename are safe for srcset generation.
- */
-const HAS_SIZE_VARIANTS = /\/(sm|md|lg)\.webp$/;
 
 /**
  * Generate srcset string from a thumbnail URL.

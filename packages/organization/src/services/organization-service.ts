@@ -19,6 +19,7 @@ import {
 import { isReservedSubdomain, PAGINATION } from '@codex/constants';
 import {
   isUniqueViolation,
+  listedCreatorConditions,
   toIso,
   whereNotDeleted,
   withPagination,
@@ -1436,13 +1437,14 @@ export class OrganizationService extends BaseService {
 
   /**
    * SQL where-clause for active "creator" memberships (owner/admin/creator roles).
-   * Shared by public profile stats and creator listings.
+   * Shared by public profile stats and creator listings. The conditions are
+   * the same ones IdentityService uses to invalidate this list's cache
+   * (`listedCreatorConditions`, Codex-kk9nv.7).
    */
   private activeCreatorWhere(orgId: string) {
     return and(
       eq(organizationMemberships.organizationId, orgId),
-      eq(organizationMemberships.status, 'active'),
-      inArray(organizationMemberships.role, ['owner', 'admin', 'creator'])
+      ...listedCreatorConditions()
     );
   }
 
