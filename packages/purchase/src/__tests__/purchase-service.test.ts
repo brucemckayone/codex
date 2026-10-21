@@ -2620,6 +2620,41 @@ describe('PurchaseService Integration', () => {
       expect(started.creatorPayoutCents).toBe(6300);
     });
 
+    it('Codex-2hxff.64 Q1: a course purchase splits by the agreement in force when its checkout STARTED', async () => {
+      const [course] = await db
+        .insert(schema.courses)
+        .values({
+          organizationId,
+          creatorId: userId,
+          slug: createUniqueSlug('q1-course'),
+          title: 'Q1 checkout start',
+          status: 'published',
+          priceCents: 10000,
+        })
+        .returning({ id: schema.courses.id });
+      if (!course) throw new Error('failed course');
+      const hour = 60 * 60 * 1000;
+      await seedContentPurchaseAgreement(organizationId, userId, 7000, {
+        effectiveFrom: new Date(Date.now() - 48 * hour),
+        status: 'terminated',
+        terminatedAt: new Date(Date.now() - hour),
+      });
+
+      const started = await purchaseService.completeCoursePurchase(
+        `pi_q1_course_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          courseId: course.id,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          offerAt: new Date(Date.now() - 2 * hour), // before the termination
+          paidAt: new Date(), // after it
+        }
+      );
+      expect(started.organizationFeeCents).toBe(2700);
+      expect(started.creatorPayoutCents).toBe(6300);
+    });
+
     it('WP-4: subscription-type agreement does NOT apply to content_purchase split', async () => {
       // A subscription agreement exists for the uploader — but the
       // content-purchase path must only look at content_purchase

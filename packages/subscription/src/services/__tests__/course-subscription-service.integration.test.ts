@@ -840,6 +840,38 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
       expect(again).toEqual({ cancelled: 0, failed: 0, remaining: 0 });
     });
 
+    // A paused (or past_due) row keeps its status when cancelled, so only
+    // `cancel_at_period_end` stops the next run re-sending it to Stripe.
+    it('cancels a paused subscription once: it stays paused, and the next run leaves it', async () => {
+      const offSale = await subscribedCourse(true);
+      await db
+        .update(courseSubscriptions)
+        .set({ status: 'paused' })
+        .where(eq(courseSubscriptions.id, offSale.sub.id));
+      const { svc, stripe } = serviceWithMailer();
+
+      const first = await svc.cancelForCoursesOffSale({
+        courseIds: [offSale.courseId],
+        limit: 50,
+      });
+      const [after] = await db
+        .select()
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.id, offSale.sub.id));
+      const again = await svc.cancelForCoursesOffSale({
+        courseIds: [offSale.courseId],
+        limit: 50,
+      });
+
+      expect(first).toEqual({ cancelled: 1, failed: 0, remaining: 0 });
+      expect(after).toMatchObject({
+        status: 'paused',
+        cancelAtPeriodEnd: true,
+      });
+      expect(again).toEqual({ cancelled: 0, failed: 0, remaining: 0 });
+      expect(stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    });
+
     it('stops at the limit and reports what is left for the hourly sweep', async () => {
       const first = await subscribedCourse(true);
       const second = await subscribedCourse(true);

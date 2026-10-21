@@ -1226,11 +1226,14 @@ describe('OrganizationService', () => {
         const elsewhere = await item(removed, otherOrg.id);
         const personal = await item(removed, null);
 
-        const course = async (creatorId: string) => {
+        const course = async (
+          creatorId: string,
+          organizationId = memberMgmtTestOrgId
+        ) => {
           const [row] = await db
             .insert(schema.courses)
             .values({
-              organizationId: memberMgmtTestOrgId,
+              organizationId,
               creatorId,
               slug: createUniqueSlug('course'),
               title: 'A course',
@@ -1243,6 +1246,7 @@ describe('OrganizationService', () => {
         };
         const theirCourse = await course(removed);
         const colleaguesCourse = await course(stays);
+        const theirCourseElsewhere = await course(removed, otherOrg.id);
         const page = async (courseId: string, status: string) => {
           const [row] = await db
             .insert(schema.landingPages)
@@ -1301,12 +1305,18 @@ describe('OrganizationService', () => {
 
         const courseRows = await db.query.courses.findMany({
           where: (c, { inArray }) =>
-            inArray(c.id, [theirCourse, colleaguesCourse]),
+            inArray(c.id, [
+              theirCourse,
+              colleaguesCourse,
+              theirCourseElsewhere,
+            ]),
         });
         const courseById = new Map(courseRows.map((row) => [row.id, row]));
         expect(courseById.get(theirCourse)?.status).toBe('archived');
         expect(courseById.get(theirCourse)?.offSaleAt?.getTime()).toBe(at);
         expect(courseById.get(colleaguesCourse)?.status).toBe('published');
+        expect(courseById.get(theirCourseElsewhere)?.status).toBe('published');
+        expect(courseById.get(theirCourseElsewhere)?.offSaleAt).toBeNull();
 
         // The course and the page that sold it move together.
         const pageRows = await db.query.landingPages.findMany({
