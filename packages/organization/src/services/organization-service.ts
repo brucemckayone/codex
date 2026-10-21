@@ -11,6 +11,11 @@
  * - Slug uniqueness enforced
  */
 
+import {
+  type DepartureTerminatedAgreement,
+  terminateAgreementsOnDeparture,
+  withdrawProposalsOnDeparture,
+} from '@codex/agreements';
 import { isReservedSubdomain, PAGINATION } from '@codex/constants';
 import {
   isUniqueViolation,
@@ -117,6 +122,15 @@ export interface OrganizationServiceConfig extends ServiceConfig {
    * the email is skipped.
    */
   ownershipMailer?: OwnershipMailer;
+  /**
+   * Told which agreements a member's removal ended, after the removal commits,
+   * so the creator is emailed (Codex-2hxff.18; the registry wires
+   * `AgreementService.notifyTerminatedOnDeparture`). When absent the
+   * agreements are still ended and only the email is skipped.
+   */
+  onAgreementsEndedByDeparture?: (
+    agreements: DepartureTerminatedAgreement[]
+  ) => Promise<void>;
   /** Absolute web-app base for the emails' Studio links (`WEB_APP_URL`). */
   webAppUrl?: string;
   /** `ExecutionContext.waitUntil`, to send the emails off the request path. */
@@ -166,6 +180,9 @@ export class OrganizationService extends BaseService {
   >;
 
   private readonly ownershipMailer: OwnershipMailer | undefined;
+  private readonly onAgreementsEndedByDeparture:
+    | OrganizationServiceConfig['onAgreementsEndedByDeparture']
+    | undefined;
   private readonly webAppUrl: string | undefined;
   private readonly waitUntil: ((promise: Promise<unknown>) => void) | undefined;
 
@@ -173,6 +190,7 @@ export class OrganizationService extends BaseService {
     super(config);
     this.logoUrlSchema = createPlatformImageUrlSchema(config.r2PublicUrlBase);
     this.ownershipMailer = config.ownershipMailer;
+    this.onAgreementsEndedByDeparture = config.onAgreementsEndedByDeparture;
     this.webAppUrl = config.webAppUrl;
     this.waitUntil = config.waitUntil;
   }
@@ -1135,41 +1153,61 @@ export class OrganizationService extends BaseService {
    *
    * The owner cannot be removed — they transfer ownership first
    * (Codex-2hxff.2). Removing the recipient of an open ownership offer
-   * withdraws it in the same transaction.
+   * withdraws it in the same transaction, and so does ending the member's
+   * revenue-share agreements in the organisation (owner decision AGR-09, "End
+   * on removal"): money earned before is still paid to them.
    *
    * @param organizationId - Organization ID
    * @param userId - User ID to remove
    */
   async removeMember(organizationId: string, userId: string): Promise<void> {
     try {
-      const withdrawn = await this.db.transaction(async (tx) => {
-        const membership = await this.findMembershipOrThrow(
-          tx,
-          organizationId,
-          userId
-        );
-
-        if (membership.role === 'owner' && membership.status === 'active') {
-          throw new OwnershipTransferRequiredError({ organizationId });
-        }
-
-        await tx
-          .update(organizationMemberships)
-          .set({ status: 'inactive', updatedAt: new Date() })
-          .where(
-            and(
-              eq(organizationMemberships.organizationId, organizationId),
-              eq(organizationMemberships.userId, userId)
-            )
+      const { withdrawn, endedAgreements } = await this.db.transaction(
+        async (tx) => {
+          const membership = await this.findMembershipOrThrow(
+            tx,
+            organizationId,
+            userId
           );
 
-        return await withdrawOfferForIneligibleRecipient(
-          tx,
-          organizationId,
-          userId,
-          new Date()
-        );
-      });
+          if (membership.role === 'owner' && membership.status === 'active') {
+            throw new OwnershipTransferRequiredError({ organizationId });
+          }
+
+          const now = new Date();
+          // Before the membership change: see withdrawProposalsOnDeparture.
+          await withdrawProposalsOnDeparture(tx, {
+            organizationId,
+            creatorId: userId,
+            at: now,
+          });
+          await tx
+            .update(organizationMemberships)
+            .set({ status: 'inactive', updatedAt: now })
+            .where(
+              and(
+                eq(organizationMemberships.organizationId, organizationId),
+                eq(organizationMemberships.userId, userId)
+              )
+            );
+
+          const endedAgreements = await terminateAgreementsOnDeparture(tx, {
+            organizationId,
+            creatorId: userId,
+            at: now,
+          });
+          const withdrawn = await withdrawOfferForIneligibleRecipient(
+            tx,
+            organizationId,
+            userId,
+            now
+          );
+          return { withdrawn, endedAgreements };
+        }
+      );
+      if (endedAgreements.length > 0) {
+        this.notifyAgreementsEnded(endedAgreements);
+      }
       if (withdrawn) {
         this.notifyOwnership({
           kind: 'closed',
@@ -1566,6 +1604,29 @@ export class OrganizationService extends BaseService {
     } catch (error) {
       this.handleError(error, 'reassignOwner');
     }
+  }
+
+  /**
+   * Email a removed creator that their agreements ended, after the commit and
+   * through `waitUntil` when available. Never throws: the termination is the
+   * source of truth, a failure only skips the email.
+   */
+  private notifyAgreementsEnded(
+    agreements: DepartureTerminatedAgreement[]
+  ): void {
+    const notify = this.onAgreementsEndedByDeparture;
+    if (!notify) return;
+    // Deferred, so a callback that throws synchronously becomes a rejection
+    // here instead of a 500 for a removal that has already committed.
+    const task = Promise.resolve()
+      .then(() => notify(agreements))
+      .catch((error: unknown) => {
+        this.obs.warn('Agreement departure email dispatch failed', {
+          agreementIds: agreements.map((agreement) => agreement.id),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    this.waitUntil?.(task);
   }
 
   /**

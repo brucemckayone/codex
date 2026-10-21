@@ -1,6 +1,11 @@
 import type { R2Service } from '@codex/cloudflare-clients';
 import type { Database } from '@codex/database';
-import { sessions } from '@codex/database/schema';
+import {
+  agreementProposals,
+  creatorOrganizationAgreements,
+  sessions,
+  users,
+} from '@codex/database/schema';
 import type { ImageProcessingResult } from '@codex/image-processing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -33,6 +38,9 @@ const mockDb = {
   update: vi.fn(),
   insert: vi.fn(),
   select: vi.fn(),
+  // Runs the callback against the same mock: the writes inside are asserted
+  // through `update` like any other.
+  transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(mockDb)),
 } as unknown as Database;
 
 // Mock returning function for the update chain
@@ -974,6 +982,7 @@ describe('IdentityService', () => {
         from: mockSelectFrom,
       });
       mockSelectFrom.mockClear();
+      (mockDb.transaction as ReturnType<typeof vi.fn>).mockClear();
       mockInnerJoin.mockClear();
       mockOwnedOrgsWhere.mockClear();
       mockExistsWhere.mockClear();
@@ -990,7 +999,10 @@ describe('IdentityService', () => {
 
       await service.deleteAccount(userId);
 
-      expect(mockDb.update).toHaveBeenCalledTimes(1);
+      // The account first; then its agreements (see the test below).
+      expect(
+        (mockDb.update as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+      ).toBe(users);
       const setArg = mockUpdateSet.mock.calls[0][0] as Record<string, unknown>;
       expect(setArg.deletedAt).toBeInstanceOf(Date);
       // Per-user tombstone keeps the globally-unique email column collision-free
@@ -1020,8 +1032,35 @@ describe('IdentityService', () => {
       expect(tokens).toEqual(['tok-laptop', 'tok-phone', 'tok-tablet']);
       // Read AFTER the tombstone UPDATE, so a session created mid-flight is
       // still caught rather than missed.
-      expect(mockDb.update).toHaveBeenCalledTimes(1);
+      expect(mockDb.update).toHaveBeenCalled();
       expect(mockSessionsWhere).toHaveBeenCalledTimes(1);
+    });
+
+    // Owner decision AGR-09, "End them like a removal" (Codex-2hxff.18).
+    it("ends the creator's agreements and withdraws their open proposals in every organisation, in the same transaction", async () => {
+      mockReturning.mockResolvedValue([{ id: userId }]);
+
+      await service.deleteAccount(userId);
+
+      expect(mockDb.transaction).toHaveBeenCalledTimes(1);
+      expect(
+        (mockDb.update as ReturnType<typeof vi.fn>).mock.calls.map(
+          (call) => call[0]
+        )
+      ).toEqual([users, agreementProposals, creatorOrganizationAgreements]);
+      const [, proposalSet, agreementSet] = mockUpdateSet.mock.calls.map(
+        (call) => call[0] as Record<string, unknown>
+      );
+      expect(proposalSet?.status).toBe('withdrawn');
+      expect(agreementSet).toMatchObject({
+        status: 'terminated',
+        terminatedByUserId: null,
+        terminationReason: 'The creator deleted their account',
+      });
+      // All three at one moment: the account's deletion time.
+      expect(agreementSet?.terminatedAt).toEqual(
+        (mockUpdateSet.mock.calls[0]?.[0] as { deletedAt: Date }).deletedAt
+      );
     });
 
     it('returns an empty list when the user holds no sessions', async () => {

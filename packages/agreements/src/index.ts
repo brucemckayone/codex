@@ -26,23 +26,33 @@
 // ─── Services ─────────────────────────────────────────────────────────────
 
 export {
+  ACCOUNT_DELETED_TERMINATION_REASON,
   type AcceptProposalInput,
   type ActiveAgreementShareView,
+  type AgreementInForce,
   type AgreementLifecycleMailer,
+  type AgreementRevenueType,
   AgreementService,
   type AgreementServiceConfig,
   type AgreementTemplateName,
+  agreementsInForce,
   type CounterProposeInput,
   creatorShareFromLegacyOrgFee,
+  DEPARTURE_TERMINATION_REASON,
   type DeclineProposalInput,
+  type DepartureScope,
+  type DepartureTerminatedAgreement,
   formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,
   type ProposeAgreementInput,
+  type ResolverLogger,
   sumActiveCreatorShares,
   type TerminateAgreementInput,
+  terminateAgreementsOnDeparture,
   type ValidateProposedShareInput,
   validateProposedShare,
   type WithdrawProposalInput,
+  withdrawProposalsOnDeparture,
 } from './services';
 
 // ─── Types ────────────────────────────────────────────────────────────────

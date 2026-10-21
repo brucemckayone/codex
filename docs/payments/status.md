@@ -36,8 +36,6 @@ fixed by PR 2 below. The production checks to run around these releases
 | `Codex-2hxff.14` | P1 | Checkout only for content a purchase can unlock; no double purchases | [purchases](purchases.md#checkout) |
 | `Codex-2hxff.15` | P1 | Our subscription row always follows Stripe; duplicates are cancelled and refunded | [subscriptions](subscriptions.md#lifecycle-and-access) |
 | `Codex-2hxff.16` | P2 | Downgrades at period end; tier reorders warn first | [subscriptions](subscriptions.md#changing-tier) |
-| `Codex-2hxff.17` | P1 | An agreement keeps paying after its review date | [agreements](agreements.md#term-and-review-date) |
-| `Codex-2hxff.18` | P1 | Removing a creator ends their agreements | [agreements](agreements.md#leaving-an-organisation) |
 | `Codex-2hxff.19` | P2 | One agreement resolver for every payment path | [agreements](agreements.md#how-a-share-applies) |
 | `Codex-2hxff.20` | P2 | Revenue screens and agreement emails show the real numbers and working links | [fees-and-splits](fees-and-splits.md#reporting) |
 | `Codex-2hxff.21` | P1 | Support grants give access; orgless sales get entitlements; course purchases appear in history | [access](access.md#support-grants) |
@@ -56,6 +54,9 @@ fixed by PR 2 below. The production checks to run around these releases
 | `Codex-2hxff.59` | P3 | Dispute edge cases: later re-pay causes, a refund under a full chargeback, zero reductions | [dispute record](dispute-record.md) |
 | `Codex-2hxff.60` | P3 | A subscriber is told when a dispute pauses their access | [subscription disputes](subscription-disputes.md) |
 | `Codex-2hxff.61` | P3 | A revocation also stops streams already playing, not only new stream URLs | [access](access.md) |
+| `Codex-2hxff.62` | P1 | A redelivered invoice never pays out more than its creator pool, even after a backdated agreement is accepted | [agreements](agreements.md#how-a-share-applies) |
+| `Codex-2hxff.63` | P2 | Accepting an agreement with a future start leaves no unpaid gap | [agreements](agreements.md#negotiating) |
+| `Codex-2hxff.64` | P1 | Removing a creator takes everything of theirs off sale; tier access to it ends; one-off buyers keep theirs | [agreements](agreements.md#leaving-an-organisation) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
 

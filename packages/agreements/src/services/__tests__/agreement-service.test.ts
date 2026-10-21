@@ -28,7 +28,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   afterAll,
   beforeAll,
@@ -43,6 +43,11 @@ import {
   InvalidProposalStateError,
   ShareExceedsAvailableError,
 } from '../../errors';
+import {
+  DEPARTURE_TERMINATION_REASON,
+  terminateAgreementsOnDeparture,
+  withdrawProposalsOnDeparture,
+} from '../agreement-departure';
 import { AgreementService } from '../agreement-service';
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────
@@ -1545,9 +1550,10 @@ describe('AgreementService', () => {
       expect(results).toHaveLength(0);
     });
 
-    it('getActiveAgreements: effective_until <= activeAt does NOT surface (legacy time-slice)', async () => {
-      // Defence in depth: legacy `effective_until` filter still trims
-      // any rows whose explicit end-date is in the past.
+    it('getActiveAgreements: effective_until <= activeAt STILL surfaces (a review date, not an expiry)', async () => {
+      // Owner decision AGR-01 (Codex-2hxff.17): the agreement keeps paying
+      // past its review date until either side ends it. This test used to pin
+      // the opposite, a `effective_until` cutoff that silently stopped pay.
       const fx = await seedOrgFixture(db);
       const invoiceAt = new Date('2026-01-15T00:00:00Z');
       await db.insert(schema.creatorOrganizationAgreements).values({
@@ -1557,13 +1563,14 @@ describe('AgreementService', () => {
         revenueType: 'subscription',
         status: 'active',
         effectiveFrom: new Date('2025-12-01T00:00:00Z'),
-        effectiveUntil: new Date('2026-01-01T00:00:00Z'), // ended before invoice
+        effectiveUntil: new Date('2026-01-01T00:00:00Z'), // review date passed
       });
       const results = await service.getActiveAgreements({
         organizationId: fx.orgId,
         activeAt: invoiceAt,
       });
-      expect(results).toHaveLength(0);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.creatorId).toBe(fx.creatorAId);
     });
 
     // Codex-xz61z (I6): `getActiveAgreement` (singular) was dropped —
@@ -1846,6 +1853,80 @@ describe('AgreementService', () => {
       expect(params.userId).toBe(fx.creatorAId);
     });
 
+    // Owner decision AGR-09, "End on removal" (Codex-2hxff.18).
+    it('an agreement ended by removal emails the creator, with the reason and their share', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      const proposal = await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      await serviceWithMailer.acceptProposal({
+        proposalId: proposal.id,
+        acceptedByUserId: fx.creatorAId,
+      });
+      const ended = await terminateAgreementsOnDeparture(db, {
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        at: new Date(),
+      });
+      expect(ended).toHaveLength(1);
+      mailer.mockClear();
+
+      await serviceWithMailer.notifyTerminatedOnDeparture(ended);
+
+      expect(mailer).toHaveBeenCalledTimes(1);
+      const params = mailer.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params.templateName).toBe('agreement-terminated');
+      expect(params.userId).toBe(fx.creatorAId);
+      expect(params.organizationId).toBe(fx.orgId);
+      const data = params.data as Record<string, string>;
+      expect(data.terminationReason).toBe(DEPARTURE_TERMINATION_REASON);
+      expect(data.sharePercentDisplay).toBe('30%');
+    });
+
+    it('a departure notice with no active owner still reaches the creator, naming "The other party"', async () => {
+      const fx = await seedOrgFixture(db);
+      const other = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      const agreementIn = async (orgId: string, creatorId: string) =>
+        (
+          await db
+            .insert(schema.creatorOrganizationAgreements)
+            .values({
+              organizationId: orgId,
+              creatorId,
+              organizationFeePercentage: 7000,
+              revenueType: 'subscription',
+              status: 'terminated',
+              terminatedAt: new Date(),
+              effectiveFrom: new Date(Date.now() - 86_400_000),
+            })
+            .returning()
+        )[0];
+      const ownerless = await agreementIn(fx.orgId, fx.creatorAId);
+      const owned = await agreementIn(other.orgId, other.creatorAId);
+      if (!ownerless || !owned) throw new Error('agreements not inserted');
+      await db
+        .update(schema.organizationMemberships)
+        .set({ status: 'inactive' })
+        .where(eq(schema.organizationMemberships.userId, fx.ownerId));
+
+      await serviceWithMailer.notifyTerminatedOnDeparture([ownerless, owned]);
+
+      expect(mailer).toHaveBeenCalledTimes(2);
+      const sent = mailer.mock.calls.map(
+        (call) => call[0] as { userId: string; data: Record<string, string> }
+      );
+      const toOwnerless = sent.find((p) => p.userId === fx.creatorAId);
+      expect(toOwnerless?.data.otherPartyName).toBe('The other party');
+      expect(sent.map((p) => p.userId)).toContain(other.creatorAId);
+    });
+
     it('withdrawProposal does NOT fire any notification (silent withdrawal per epic plan)', async () => {
       const fx = await seedOrgFixture(db);
       const { serviceWithMailer, mailer } = buildServiceWithMailer();
@@ -2086,7 +2167,7 @@ describe('AgreementService', () => {
       return agreement.id;
     }
 
-    it('agreement expiring in 25 days IS returned (within 30-day window)', async () => {
+    it('agreement whose review date is in 25 days IS returned (within 30-day window)', async () => {
       const fx = await seedOrgFixture(db);
       // 6-month term placed 5 months and 5 days ago -> ~25 days remaining.
       // Easier: compute backwards — set effectiveFrom such that
@@ -2124,7 +2205,7 @@ describe('AgreementService', () => {
       expect(expiring[0]?.orgName).toBe('Test Org');
     });
 
-    it('agreement expiring in 35 days is NOT returned (outside window)', async () => {
+    it('agreement whose review date is in 35 days is NOT returned (outside window)', async () => {
       const fx = await seedOrgFixture(db);
       const desiredDaysUntilExpiry = 35;
       const termMs = 6 * 30 * 86_400_000;
@@ -2204,7 +2285,7 @@ describe('AgreementService', () => {
       expect(expiring).toHaveLength(0);
     });
 
-    it('agreement already past expiry (effectiveUntil <= now) is NOT returned', async () => {
+    it('agreement already past its review date (effectiveUntil <= now) is not reminded again', async () => {
       const fx = await seedOrgFixture(db);
       await db.insert(schema.creatorOrganizationAgreements).values({
         creatorId: fx.creatorAId,
@@ -2213,7 +2294,7 @@ describe('AgreementService', () => {
         revenueType: 'subscription',
         status: 'active',
         effectiveFrom: new Date(Date.now() - 200 * 86_400_000),
-        effectiveUntil: new Date(Date.now() - 10 * 86_400_000), // expired 10 days ago
+        effectiveUntil: new Date(Date.now() - 10 * 86_400_000), // review date passed 10 days ago
       });
 
       const expiring = await service.findExpiringAgreements({ daysAhead: 30 });
@@ -2302,6 +2383,193 @@ describe('AgreementService', () => {
         now: nearExpiry,
       });
       expect(withCustomNow).toHaveLength(1);
+    });
+  });
+
+  // ─── Review dates and removals (Codex-2hxff.17, Codex-2hxff.18) ────────
+  //
+  // AGR-01 "Keeps paying": past its review date an agreement is still in
+  // force everywhere it is read. AGR-09 "End on removal": once a creator has
+  // left, no new agreement can start for them.
+
+  describe('review dates and removals (AGR-01, AGR-09)', () => {
+    const yesterday = () => new Date(Date.now() - 86_400_000);
+
+    async function removeFromOrg(orgId: string, userId: string) {
+      await db
+        .update(schema.organizationMemberships)
+        .set({ status: 'inactive' })
+        .where(
+          and(
+            eq(schema.organizationMemberships.organizationId, orgId),
+            eq(schema.organizationMemberships.userId, userId)
+          )
+        );
+    }
+
+    it('an agreement past its review date still counts against the 100% limit', async () => {
+      const fx = await seedOrgFixture(db);
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorBId,
+        organizationFeePercentage: 3000, // creator B has 70%
+        revenueType: 'subscription',
+        status: 'active',
+        effectiveFrom: settledEffectiveFrom(),
+        effectiveUntil: yesterday(),
+      });
+
+      await expect(
+        service.proposeAgreement({
+          organizationId: fx.orgId,
+          creatorId: fx.creatorAId,
+          revenueType: 'subscription',
+          sharePercent: 3100,
+          termMonths: 6,
+          proposedByUserId: fx.ownerId,
+        })
+      ).rejects.toBeInstanceOf(ShareExceedsAvailableError);
+    });
+
+    it("the creator's portfolio and the organisation's summaries keep an agreement past its review date, and drop a terminated one", async () => {
+      const fx = await seedOrgFixture(db);
+      const proposal = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const kept = await service.acceptProposal({
+        proposalId: proposal.id,
+        acceptedByUserId: fx.creatorAId,
+      });
+      await db
+        .update(schema.creatorOrganizationAgreements)
+        .set({ effectiveUntil: yesterday() })
+        .where(eq(schema.creatorOrganizationAgreements.id, kept.id));
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorBId,
+        organizationFeePercentage: 8000,
+        revenueType: 'subscription',
+        status: 'terminated',
+        terminatedAt: yesterday(),
+        effectiveFrom: settledEffectiveFrom(),
+      });
+
+      const portfolio = await service.getActiveAgreementsForCreator({
+        creatorId: fx.creatorAId,
+      });
+      expect(portfolio.map((a) => a.id)).toEqual([kept.id]);
+
+      const summaries = await service.getActiveAgreementSummaries(fx.orgId);
+      expect(summaries).toEqual([
+        expect.objectContaining({ creatorId: fx.creatorAId, shareBps: 3000 }),
+      ]);
+    });
+
+    it('a creator who has left cannot accept an open proposal, and no agreement starts', async () => {
+      const fx = await seedOrgFixture(db);
+      const proposal = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      await removeFromOrg(fx.orgId, fx.creatorAId);
+
+      await expect(
+        service.acceptProposal({
+          proposalId: proposal.id,
+          acceptedByUserId: fx.creatorAId,
+        })
+      ).rejects.toBeInstanceOf(ForbiddenError);
+      const agreements = await db
+        .select({ id: schema.creatorOrganizationAgreements.id })
+        .from(schema.creatorOrganizationAgreements)
+        .where(
+          eq(schema.creatorOrganizationAgreements.organizationId, fx.orgId)
+        );
+      expect(agreements).toEqual([]);
+    });
+
+    it('neither side can counter once the creator has left', async () => {
+      const fx = await seedOrgFixture(db);
+      const ownerOffer = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const creatorCounter = await service.counterPropose({
+        proposalId: ownerOffer.id,
+        sharePercent: 4000,
+        termMonths: 6,
+        counteredByUserId: fx.creatorAId,
+      });
+      await removeFromOrg(fx.orgId, fx.creatorAId);
+
+      // The owner answering the creator's counter.
+      await expect(
+        service.counterPropose({
+          proposalId: creatorCounter.id,
+          sharePercent: 3500,
+          termMonths: 6,
+          counteredByUserId: fx.ownerId,
+        })
+      ).rejects.toBeInstanceOf(ForbiddenError);
+    });
+
+    it("withdrawProposalsOnDeparture withdraws only that creator's open proposals in that organisation", async () => {
+      const fx = await seedOrgFixture(db);
+      const other = await seedOrgFixture(db);
+      const propose = (orgId: string, ownerId: string, creatorId: string) =>
+        service.proposeAgreement({
+          organizationId: orgId,
+          creatorId,
+          revenueType: 'subscription',
+          sharePercent: 2000,
+          termMonths: 6,
+          proposedByUserId: ownerId,
+        });
+      const leaving = await propose(fx.orgId, fx.ownerId, fx.creatorAId);
+      const colleague = await propose(fx.orgId, fx.ownerId, fx.creatorBId);
+      // The same creator in another organisation they still belong to.
+      await db.insert(schema.organizationMemberships).values({
+        organizationId: other.orgId,
+        userId: fx.creatorAId,
+        role: 'creator',
+        status: 'active',
+      });
+      const elsewhere = await propose(
+        other.orgId,
+        other.ownerId,
+        fx.creatorAId
+      );
+
+      const withdrawn = await withdrawProposalsOnDeparture(db, {
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        at: new Date(),
+      });
+
+      expect(withdrawn.map((p) => p.id)).toEqual([leaving.id]);
+      const statusOf = async (id: string) =>
+        (
+          await db
+            .select({ status: schema.agreementProposals.status })
+            .from(schema.agreementProposals)
+            .where(eq(schema.agreementProposals.id, id))
+        )[0]?.status;
+      expect(await statusOf(leaving.id)).toBe('withdrawn');
+      expect(await statusOf(colleague.id)).toBe('open');
+      expect(await statusOf(elsewhere.id)).toBe('open');
     });
   });
 });

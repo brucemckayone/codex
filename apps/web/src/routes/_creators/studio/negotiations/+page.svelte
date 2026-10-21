@@ -348,7 +348,7 @@
                   <span class="negotiations-page__item-hint">
                     of post-platform {revLabel} revenue · effective from
                     {formatDate(row.effectiveFrom)}{row.effectiveUntil
-                      ? ` until ${formatDate(row.effectiveUntil)}`
+                      ? ` · review by ${formatDate(row.effectiveUntil)}`
                       : ''}
                   </span>
                 </span>

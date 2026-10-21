@@ -34,6 +34,7 @@
     "format": "biome format --write ."
   },
   "dependencies": {
+    "@codex/agreements": "workspace:*",
     "@codex/cache": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",

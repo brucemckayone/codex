@@ -1012,8 +1012,8 @@ export class AdminAnalyticsService extends BaseService {
    * Per-creator revenue split for org-owner visibility on the studio
    * analytics page (Codex-mtv05).
    *
-   * Returns one row per ACTIVE creator-organization agreement
-   * (`effectiveUntil IS NULL OR > now()`), annotated with:
+   * Returns one row per ACTIVE creator-organization agreement (`status =
+   * 'active'`; the review date is not an expiry), annotated with:
    *  - Purchase-revenue aggregated for content authored by that creator
    *    within the org and the optional date window. Subscription invoice
    *    revenue is NOT included in Phase 1 — there is no per-creator
@@ -1062,13 +1062,9 @@ export class AdminAnalyticsService extends BaseService {
               schema.creatorOrganizationAgreements.organizationId,
               organizationId
             ),
-            or(
-              isNull(schema.creatorOrganizationAgreements.effectiveUntil),
-              gt(
-                schema.creatorOrganizationAgreements.effectiveUntil,
-                new Date()
-              )
-            )
+            // Active, whatever the review date: it is not an expiry (owner
+            // decision AGR-01, Codex-2hxff.17). Terminated ones are out.
+            eq(schema.creatorOrganizationAgreements.status, 'active')
           )
         );
 

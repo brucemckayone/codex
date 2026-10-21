@@ -5,7 +5,8 @@
  * Companion to the unit-mocked analytics-service.test.ts. These tests prove
  * the SQL produces the right shape against a real Postgres branch — namely:
  *
- *   1. Active vs expired agreement filter (effectiveUntil semantics).
+ *   1. Active vs terminated agreement filter (effectiveUntil is a review
+ *      date and is not read: AGR-01, Codex-2hxff.17).
  *   2. Purchase-revenue aggregation through `content.creatorId`.
  *   3. Pending-payout split: resolved → lastPayoutAt, unresolved → pending.
  *   4. Multi-org pending-payout scoping (the bead STOP rule).
@@ -220,30 +221,33 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     expect(second.splitPercent).toBe(25);
   });
 
-  it('excludes agreements whose effectiveUntil has elapsed', async () => {
+  it('keeps an agreement past its review date and drops a terminated one', async () => {
     const { orgId, creators } = await seedScenario(2);
-    const [active, expired] = creators as [string, string];
+    const [reviewDue, terminated] = creators as [string, string];
 
     const past = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     await db.insert(creatorOrganizationAgreements).values([
       {
-        creatorId: active,
+        creatorId: reviewDue,
         organizationId: orgId,
         organizationFeePercentage: 5000,
+        // A review date, not an expiry: the agreement keeps paying (AGR-01).
+        effectiveUntil: past,
       },
       {
-        creatorId: expired,
+        creatorId: terminated,
         organizationId: orgId,
         organizationFeePercentage: 5000,
-        effectiveUntil: past,
+        status: 'terminated',
+        terminatedAt: past,
       },
     ]);
 
     const result = await service.getRevenueByCreator(orgId);
 
     expect(result.items).toHaveLength(1);
-    expect(result.items[0]!.creatorId).toBe(active);
+    expect(result.items[0]!.creatorId).toBe(reviewDue);
   });
 
   it('reports lastPayoutAt from resolved payouts and pending from unresolved', async () => {

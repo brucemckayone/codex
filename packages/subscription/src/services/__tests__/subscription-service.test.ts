@@ -3929,8 +3929,9 @@ describe('SubscriptionService', () => {
   //   - The "no agreements" branch (line 2894) routes the entire creator
   //     pool to the org owner — distinct from the "agreements with
   //     undersum" branch (which keeps the pool inside the creator fan-out).
-  //   - effectiveUntil > now() filters out soft-deleted/expired rows from
-  //     the next cycle (line 2890).
+  //   - effectiveUntil is a REVIEW date and is NOT read (AGR-01,
+  //     Codex-2hxff.17); a removed creator's agreement is terminated
+  //     instead, and the next cycle skips it (AGR-09, Codex-2hxff.18).
   //
   // Schema note: creator_organization_agreements already has a unique
   // index on (creator_id, organization_id, effective_from) — see
@@ -3938,8 +3939,8 @@ describe('SubscriptionService', () => {
   // are by design (a creator can renegotiate their share over time), so
   // we do NOT add a stricter (creator_id, organization_id) unique
   // constraint — that would break the historical-record use case. The
-  // application layer is responsible for ensuring only one row has
-  // `effective_until IS NULL OR > now()` per pair at any time. The
+  // application layer is responsible for ensuring only one row is
+  // `status = 'active'` per pair at any time (a partial unique index). The
   // duplicate-row test below covers the cheap schema case (same
   // effective_from), which IS rejected.
   describe('executeTransfers multi-creator split invariants', () => {
@@ -4606,8 +4607,7 @@ describe('SubscriptionService', () => {
       // effective_from values are allowed by design (time-sliced
       // agreements — a creator can renegotiate). This test pins the
       // narrow schema-level dedupe; the broader "only one active row"
-      // invariant is an application-layer concern (see effectiveUntil
-      // filter in subscription-service.ts:2890).
+      // invariant is the partial unique index on status = 'active'.
       const { org } = await createFullOrg('split-duplicate');
       const c1 = await seedCreatorWithConnect(org.id);
 
@@ -4629,24 +4629,68 @@ describe('SubscriptionService', () => {
       ).rejects.toThrow();
     });
 
-    it('mid-period creator removal: expired agreement (effective_until in the past) is excluded from next-cycle transfers', async () => {
+    it("a review date passing mid-period does NOT stop the creator's cut (AGR-01)", async () => {
+      // Owner decision AGR-01 (Codex-2hxff.17): the term's end is a review
+      // date. This test used to pin the opposite: an `effective_until` in
+      // the past silently routed the creator's share to the owner.
+      const { org, tier1 } = await createFullOrg('split-review-date');
+      const c1 = await seedCreatorWithConnect(org.id);
+      const { agreementId } = await seedAgreement(org.id, c1, 10000, {
+        effectiveFrom: new Date(Date.now() - 60_000),
+        effectiveUntil: new Date(Date.now() - 1000),
+      });
+      expect(agreementId).toBeDefined();
+
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+            })
+          )
+          .returning()
+      );
+      const chargeId = 'ch_review_date_passed';
+      await service.handleInvoicePaymentSucceeded(
+        createMockStripeInvoice({
+          amount_paid: 1000,
+          parent: {
+            subscription_details: { subscription: sub.stripeSubscriptionId },
+          },
+          payments: {
+            data: [
+              { payment: { charge: chargeId, payment_intent: 'pi_review_1' } },
+            ],
+          },
+        }) as unknown as Stripe.Invoice
+      );
+
+      const transfersMock = stripe.transfers.create as ReturnType<typeof vi.fn>;
+      expect(
+        perCreatorTransferCalls(transfersMock).filter(
+          (c) => c.idempotencyKey === `${chargeId}_creator_${c1}`
+        )
+      ).toHaveLength(1);
+    });
+
+    it('mid-period creator removal: the terminated agreement is excluded from next-cycle transfers (AGR-09)', async () => {
       // Setup: creator + agreement, fire one invoice → 1 transfer to creator.
-      // Then expire the agreement (set effective_until to the past) and
-      // fire the next invoice → executeTransfers' SELECT (line 2890)
-      // filters by `effective_until IS NULL OR > now()` and skips the
-      // expired row. With no other agreements, the loop has zero rows
-      // and the "no agreements" branch routes the entire creator pool
-      // to the org owner (`creator_payout_to_owner`).
+      // Then remove the creator the way removeMember does (membership
+      // inactive + agreements terminated at that moment) and fire the next
+      // invoice → the resolver skips the agreement terminated before it.
+      // With no other agreements, the "no agreements" branch routes the
+      // entire creator pool to the org owner (`creator_payout_to_owner`).
       const { org, tier1 } = await createFullOrg('split-mid-removal');
       const c1 = await seedCreatorWithConnect(org.id);
 
       // Codex-rzfjw (WP-4): seed via seedAgreement so the payout
       // pipeline's JOIN against agreement_proposals resolves the share.
       // 100% share to c1 — org owner takes zero residual on the first
-      // invoice. effective_until is updated below to simulate mid-period
-      // termination.
-      const { agreementId } = await seedAgreement(org.id, c1, 10000);
-      const agreementRow = { id: agreementId };
+      // invoice.
+      await seedAgreement(org.id, c1, 10000, {
+        effectiveFrom: new Date(Date.now() - 120_000),
+      });
 
       const sub = takeFirst(
         await db
@@ -4681,14 +4725,16 @@ describe('SubscriptionService', () => {
       );
       expect(firstCreatorCalls).toHaveLength(1);
 
-      // Expire the agreement (mid-period removal): effective_until set
-      // to one second ago. The next-cycle SELECT must skip this row.
-      const { eq } = await import('drizzle-orm');
-      const oneSecondAgo = new Date(Date.now() - 1000);
-      await db
-        .update(creatorOrganizationAgreements)
-        .set({ effectiveUntil: oneSecondAgo })
-        .where(eq(creatorOrganizationAgreements.id, agreementRow.id));
+      // Remove the creator a minute ago, as removeMember does.
+      const { terminateAgreementsOnDeparture } = await import(
+        '@codex/agreements'
+      );
+      const ended = await terminateAgreementsOnDeparture(db, {
+        organizationId: org.id,
+        creatorId: c1,
+        at: new Date(Date.now() - 60_000),
+      });
+      expect(ended).toHaveLength(1);
 
       // Second invoice: creator must NOT receive a transfer; the org
       // owner gets the full creator pool via the "no agreements" branch.
@@ -10065,7 +10111,7 @@ describe('SubscriptionService', () => {
      * Mint a removed-creator scenario: a fresh org, a connect account for the
      * creator (with a deterministic stripeAccountId), an active subscription
      * for FK references, and an OPTIONAL agreement row that the caller can
-     * end-date / leave-missing to drive the "removed from org" semantics.
+     * terminate / leave-missing to drive the "removed from org" semantics.
      */
     async function seedOrgWithCreatorConnect(
       slug: string,
@@ -10123,24 +10169,26 @@ describe('SubscriptionService', () => {
       return { org, tier, sub, stripeAccountId };
     }
 
-    it('pays out a removed creator whose agreement is end-dated (effectiveUntil in the past)', async () => {
-      // Setup: creator + agreement + accrued pendingPayout, then end-date the
-      // agreement to simulate "removed from org". The Connect account stays
+    it('pays out a removed creator whose agreement was terminated on removal', async () => {
+      // Setup: creator + agreement + accrued pendingPayout, with the agreement
+      // terminated the way removeMember ends it (AGR-09, Codex-2hxff.18).
+      // The Connect account stays
       // active (the creator still owns their Stripe Connect), so the next
       // sweep MUST disburse the owed money.
       const { org, sub, stripeAccountId } = await seedOrgWithCreatorConnect(
-        'aq58x-end-dated',
+        'aq58x-terminated',
         creatorId
       );
 
-      // Insert + end-date an agreement for the creator-org pair.
+      // Insert a terminated agreement for the creator-org pair.
       const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
       await db.insert(creatorOrganizationAgreements).values({
         creatorId,
         organizationId: org.id,
         organizationFeePercentage: 1500,
         effectiveFrom: new Date(Date.now() - 48 * 60 * 60 * 1000),
-        effectiveUntil: yesterday,
+        status: 'terminated',
+        terminatedAt: yesterday,
       });
 
       const payout = takeFirst(
@@ -10167,7 +10215,7 @@ describe('SubscriptionService', () => {
         stripeAccountId
       );
 
-      // Removed-creator orphan still resolves — agreement end-date does NOT
+      // Removed-creator orphan still resolves — the termination does NOT
       // block the payout.
       expect(result).toEqual({ resolved: 1, failed: 0 });
       expect(transferSpy).toHaveBeenCalledTimes(1);
@@ -10265,9 +10313,9 @@ describe('SubscriptionService', () => {
       expect(after.stripeTransferId).toMatch(/^tr_/);
     });
 
-    it('resolves each removed creator independently across multiple end-dated agreements', async () => {
+    it('resolves each removed creator independently across multiple terminated agreements', async () => {
       // Setup: ONE org, THREE creators each with their own Connect account,
-      // each with their own pendingPayout row, each with an end-dated
+      // each with their own pendingPayout row, each with a terminated
       // agreement. resolvePendingPayouts takes one (orgId, stripeAccountId)
       // pair at a time — each call MUST only touch its own user's rows and
       // never disturb the others.
@@ -10303,7 +10351,7 @@ describe('SubscriptionService', () => {
         creators.every((id) => typeof id === 'string' && id.length > 0)
       ).toBe(true);
 
-      // Per-creator: connect account + end-dated agreement + subscription FK
+      // Per-creator: connect account + terminated agreement + subscription FK
       // + pendingPayout row.
       const seeded: {
         userId: string;
@@ -10332,7 +10380,8 @@ describe('SubscriptionService', () => {
           organizationId: org.id,
           organizationFeePercentage: 1500,
           effectiveFrom: new Date(Date.now() - 48 * 60 * 60 * 1000),
-          effectiveUntil: yesterday,
+          status: 'terminated',
+          terminatedAt: yesterday,
         });
 
         // Each pendingPayout needs a subscription FK. Use a unique subscriber

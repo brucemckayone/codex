@@ -1,3 +1,8 @@
+import {
+  ACCOUNT_DELETED_TERMINATION_REASON,
+  terminateAgreementsOnDeparture,
+  withdrawProposalsOnDeparture,
+} from '@codex/agreements';
 import type { VersionedCache } from '@codex/cache';
 import { CacheType } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
@@ -628,27 +633,52 @@ export class IdentityService extends BaseService {
         throw new AccountHasContentError();
       }
 
-      // Soft-delete + PII scrub in one atomic statement.
-      const [deleted] = await this.db
-        .update(users)
-        .set({
-          deletedAt: new Date(),
-          email: `deleted-${userId}@deleted.invalid`,
-          name: 'Deleted User',
-          username: null,
-          bio: null,
-          avatarUrl: null,
-          image: null,
-          socialLinks: null,
-        })
-        .where(and(eq(users.id, userId), whereNotDeleted(users)))
-        .returning();
+      // Soft-delete + PII scrub, and the creator's revenue-share agreements
+      // ended in every organisation (owner decision AGR-09, "End them like a
+      // removal"), in one transaction. Money earned before is still paid; no
+      // email, since the address is scrubbed here.
+      const { endedAgreements, withdrawnProposals } = await this.db.transaction(
+        async (tx) => {
+          const now = new Date();
+          const [deleted] = await tx
+            .update(users)
+            .set({
+              deletedAt: now,
+              email: `deleted-${userId}@deleted.invalid`,
+              name: 'Deleted User',
+              username: null,
+              bio: null,
+              avatarUrl: null,
+              image: null,
+              socialLinks: null,
+            })
+            .where(and(eq(users.id, userId), whereNotDeleted(users)))
+            .returning();
 
-      if (!deleted) {
-        throw new UserNotFoundError(userId);
-      }
+          if (!deleted) {
+            throw new UserNotFoundError(userId);
+          }
 
-      this.obs.info('User account soft-deleted', { userId });
+          const withdrawn = await withdrawProposalsOnDeparture(tx, {
+            creatorId: userId,
+            at: now,
+            everyOrganisation: true,
+          });
+          const ended = await terminateAgreementsOnDeparture(tx, {
+            creatorId: userId,
+            at: now,
+            everyOrganisation: true,
+            reason: ACCOUNT_DELETED_TERMINATION_REASON,
+          });
+          return { endedAgreements: ended, withdrawnProposals: withdrawn };
+        }
+      );
+
+      this.obs.info('User account soft-deleted', {
+        userId,
+        agreementsEnded: endedAgreements.length,
+        proposalsWithdrawn: withdrawnProposals.length,
+      });
 
       if (this.cache) {
         await this.cache.invalidate(userId);

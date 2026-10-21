@@ -262,7 +262,7 @@
                 </div>
                 {#if row.state.effectiveUntil}
                   <div class="agreement-card__row-detail-cell">
-                    <dt>Effective until</dt>
+                    <dt>Review by</dt>
                     <dd>{formatDate(row.state.effectiveUntil)}</dd>
                   </div>
                 {/if}

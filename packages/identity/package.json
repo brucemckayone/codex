@@ -22,6 +22,7 @@
     "format": "biome format --write ."
   },
   "dependencies": {
+    "@codex/agreements": "workspace:*",
     "@codex/cache": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/image-processing": "workspace:*",

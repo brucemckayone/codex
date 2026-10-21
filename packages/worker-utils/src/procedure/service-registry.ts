@@ -727,6 +727,12 @@ export async function createServiceRegistry(
                 sendEmailToWorker(env, executionCtx, params);
               }
             : undefined,
+          // Codex-2hxff.18: a removed member's ended agreements are emailed
+          // to them by the agreements service. `async`, so even a throw while
+          // building that service becomes a rejection the caller logs.
+          onAgreementsEndedByDeparture: async (agreements) => {
+            await registry.agreements.notifyTerminatedOnDeparture(agreements);
+          },
           webAppUrl: env.WEB_APP_URL,
           // The email task looks its recipients up in the DB first.
           waitUntil: dbWaitUntil,
