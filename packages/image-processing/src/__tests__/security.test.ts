@@ -41,14 +41,25 @@ function createTestImageFile(mimeType: string, filename: string): File {
   return new File([new Uint8Array(jpegBuffer)], filename, { type: mimeType });
 }
 
-// Mock processor
+// Mock processor: every still goes through the page-image pipeline
+// (Codex-kk9nv.5), which returns four sizes and the source's size.
 vi.mock('../processor', () => ({
-  processImageVariants: vi.fn().mockReturnValue({
-    sm: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
-    md: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
-    lg: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+  processPageImageVariants: vi.fn().mockReturnValue({
+    variants: {
+      sm: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+      md: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+      lg: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+      xl: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+    },
+    width: 1200,
+    height: 800,
   }),
 }));
+
+/** Every key handed to `R2Service.put` so far. */
+function putKeys(r2: R2Service): string[] {
+  return (r2.put as Mock).mock.calls.map((call) => call[0] as string);
+}
 
 describe('ImageProcessingService - Security', () => {
   let service: ImageProcessingService;
@@ -99,6 +110,17 @@ describe('ImageProcessingService - Security', () => {
         expect.anything(),
         expect.anything()
       );
+      // Every object, the kept original included (Codex-kk9nv.5), sits under
+      // the creator's prefix — none escapes the tenant boundary.
+      const keys = putKeys(mockR2Service);
+      expect(keys).toContain(
+        'user-owner/content-thumbnails/content-1/original'
+      );
+      for (const key of keys) {
+        expect(key.startsWith('user-owner/content-thumbnails/content-1/')).toBe(
+          true
+        );
+      }
     });
 
     it('should include userId in R2 key path for avatars', async () => {
@@ -112,6 +134,13 @@ describe('ImageProcessingService - Security', () => {
         expect.anything(),
         expect.anything()
       );
+      // Every object, the kept original included (Codex-kk9nv.5), sits under
+      // the user's own avatar folder.
+      const keys = putKeys(mockR2Service);
+      expect(keys).toContain('avatars/user-123/original');
+      for (const key of keys) {
+        expect(key.startsWith('avatars/user-123/')).toBe(true);
+      }
     });
   });
 

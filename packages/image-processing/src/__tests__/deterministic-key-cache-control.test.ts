@@ -5,9 +5,11 @@
  * need not ask about it again.
  *
  * Every key builder reachable from `ImageProcessingService` is a pure function
- * of an entity id and a size — `getContentThumbnailKey`, `getUserAvatarKey`,
- * `getOrgLogoKey`, and the inline `categories/{id}/cover/{size}.webp` and
- * `courses/{id}/{cover,hero,signature}/{size}.webp`. There is no timestamp, no
+ * of an entity id and a size — `getContentThumbnailBaseKey`,
+ * `getUserAvatarBaseKey`, `getOrgLogoKey`, and the inline
+ * `categories/{id}/cover/{size}.webp` and
+ * `courses/{id}/{cover,hero,signature}/{size}.webp`, each with a kept
+ * `{base}/original` beside the sizes (Codex-kk9nv.5). There is no timestamp, no
  * uuid and no content hash anywhere in the package, and the public URL is
  * `${r2PublicUrlBase}/${key}` with no version query string. Re-uploading
  * therefore writes NEW BYTES AT THE SAME URL.
@@ -44,7 +46,7 @@ import * as processor from '../processor';
 import { ImageProcessingService } from '../service';
 
 vi.mock('../processor', () => ({
-  processImageVariants: vi.fn(),
+  processPageImageVariants: vi.fn(),
 }));
 
 /** One day, in seconds — the loosest window this invariant tolerates. */
@@ -163,12 +165,32 @@ describe('Cache-Control on deterministic image keys (Codex-p3rre)', () => {
       r2PublicUrlBase: 'https://test.r2.dev',
     });
 
-    vi.mocked(processor.processImageVariants).mockReturnValue({
-      sm: new Uint8Array([1]),
-      md: new Uint8Array([2]),
-      lg: new Uint8Array([3]),
+    vi.mocked(processor.processPageImageVariants).mockReturnValue({
+      variants: {
+        sm: new Uint8Array([1]),
+        md: new Uint8Array([2]),
+        lg: new Uint8Array([3]),
+        xl: new Uint8Array([4]),
+      },
+      width: 1200,
+      height: 800,
     });
   });
+
+  /**
+   * The five objects every still writes under `base`, in put order: the four
+   * sizes, then the original (Codex-kk9nv.5). The original rides the same
+   * overwritten-in-place key policy, so it is held to the same invariant.
+   */
+  function stillObjects(base: string): string[] {
+    return [
+      `${base}/sm.webp`,
+      `${base}/md.webp`,
+      `${base}/lg.webp`,
+      `${base}/xl.webp`,
+      `${base}/original`,
+    ];
+  }
 
   /** A minimal but signature-valid PNG — magic bytes are verified upstream. */
   function pngFile(): File {
@@ -186,41 +208,47 @@ describe('Cache-Control on deterministic image keys (Codex-p3rre)', () => {
     return new File([bytes], 'image.png', { type: 'image/png' });
   }
 
-  it('content thumbnail variants are revalidatable, not immutable', async () => {
+  it('content thumbnail files, the original included, are revalidatable, not immutable', async () => {
     await service.processContentThumbnail('content-1', 'user-1', pngFile());
 
     const headers = putHeaders();
-    expect(headers).toHaveLength(3);
+    expect(headers.map((h) => h.key)).toEqual(
+      stillObjects('user-1/content-thumbnails/content-1')
+    );
     for (const { key, cacheControl } of headers) {
       expectSafeOnAMutableKey(cacheControl, key);
     }
   });
 
-  it('avatar variants are revalidatable, not immutable', async () => {
+  it('avatar files, the original included, are revalidatable, not immutable', async () => {
     await service.processUserAvatar('user-1', pngFile());
 
     const headers = putHeaders();
-    expect(headers).toHaveLength(3);
+    expect(headers.map((h) => h.key)).toEqual(stillObjects('avatars/user-1'));
     for (const { key, cacheControl } of headers) {
       expectSafeOnAMutableKey(cacheControl, key);
     }
   });
 
-  it('category cover variants are revalidatable, not immutable', async () => {
+  it('category cover files, the original included, are revalidatable, not immutable', async () => {
     await service.processCategoryCover('cat-1', pngFile());
 
     const headers = putHeaders();
-    expect(headers).toHaveLength(3);
+    expect(headers.map((h) => h.key)).toEqual(
+      stillObjects('categories/cat-1/cover')
+    );
     for (const { key, cacheControl } of headers) {
       expectSafeOnAMutableKey(cacheControl, key);
     }
   });
 
-  it('course hero variants are revalidatable, not immutable', async () => {
+  it('course hero files, the original included, are revalidatable, not immutable', async () => {
     await service.processCourseHero('course-1', pngFile());
 
     const headers = putHeaders();
-    expect(headers).toHaveLength(3);
+    expect(headers.map((h) => h.key)).toEqual(
+      stillObjects('courses/course-1/hero')
+    );
     for (const { key, cacheControl } of headers) {
       expectSafeOnAMutableKey(cacheControl, key);
     }

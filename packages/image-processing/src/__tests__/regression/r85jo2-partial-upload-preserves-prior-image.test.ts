@@ -10,8 +10,9 @@
  * correct rollback of objects that were just created and are referenced by
  * nothing.
  *
- * The keys are DETERMINISTIC — `getContentThumbnailKey(creatorId, contentId,
- * size)` is a pure function with no nonce, hash or timestamp — so the keys the
+ * The keys are DETERMINISTIC — `getContentThumbnailBaseKey(creatorId,
+ * contentId)` plus a fixed file name is a pure function with no nonce, hash or
+ * timestamp — so the keys the
  * "rollback" deleted are the keys the DB row ALREADY points at. And
  * `uploadImageVariants` runs BEFORE the DB write, so the throw skips the
  * update and the row keeps addressing objects that no longer exist.
@@ -34,10 +35,10 @@
  *
  * ## What these tests assert
  *
- * The bucket is modelled as a `Map`, seeded with a previous image at all three
- * keys, so the assertion is the acceptance criterion's own wording — every
- * variant key the previous image occupied is still READABLE — rather than the
- * weaker "delete was not called".
+ * The bucket is modelled as a `Map`, seeded with a previous image at all five
+ * keys (four sizes and the original, Codex-kk9nv.5), so the assertion is the
+ * acceptance criterion's own wording — every key the previous image occupied
+ * is still READABLE — rather than the weaker "delete was not called".
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
@@ -47,7 +48,7 @@ import * as processor from '../../processor';
 import { ImageProcessingService } from '../../service';
 
 vi.mock('../../processor', () => ({
-  processImageVariants: vi.fn(),
+  processPageImageVariants: vi.fn(),
 }));
 
 const R2_BASE = 'https://test.r2.dev';
@@ -58,7 +59,12 @@ const KEYS = {
   sm: `${CREATOR_ID}/content-thumbnails/${CONTENT_ID}/sm.webp`,
   md: `${CREATOR_ID}/content-thumbnails/${CONTENT_ID}/md.webp`,
   lg: `${CREATOR_ID}/content-thumbnails/${CONTENT_ID}/lg.webp`,
+  xl: `${CREATOR_ID}/content-thumbnails/${CONTENT_ID}/xl.webp`,
+  original: `${CREATOR_ID}/content-thumbnails/${CONTENT_ID}/original`,
 } as const;
+
+/** Every key a thumbnail occupies, in put order. */
+const ALL_KEYS = [KEYS.sm, KEYS.md, KEYS.lg, KEYS.xl, KEYS.original];
 
 /** Bytes standing in for the image that is already live in the bucket. */
 const PRIOR = 'PREVIOUS-IMAGE-BYTES';
@@ -72,11 +78,9 @@ const PRIOR = 'PREVIOUS-IMAGE-BYTES';
  * transient failure (a 500, a quota rejection) the bug reacts to.
  */
 function createBucket(options: { rejectPutFor?: string } = {}) {
-  const objects = new Map<string, string>([
-    [KEYS.sm, PRIOR],
-    [KEYS.md, PRIOR],
-    [KEYS.lg, PRIOR],
-  ]);
+  const objects = new Map<string, string>(
+    ALL_KEYS.map((key) => [key, PRIOR] as const)
+  );
 
   const put = vi.fn(async (key: string, body: Uint8Array) => {
     if (key === options.rejectPutFor) {
@@ -149,10 +153,15 @@ function createTestImageFile(): File {
 describe('Codex-r85jo.2: a partial upload preserves the previous image', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(processor.processImageVariants).mockReturnValue({
-      sm: new Uint8Array([1]),
-      md: new Uint8Array([2, 2]),
-      lg: new Uint8Array([3, 3, 3]),
+    vi.mocked(processor.processPageImageVariants).mockReturnValue({
+      variants: {
+        sm: new Uint8Array([1]),
+        md: new Uint8Array([2, 2]),
+        lg: new Uint8Array([3, 3, 3]),
+        xl: new Uint8Array([4, 4, 4, 4]),
+      },
+      width: 1200,
+      height: 800,
     });
   });
 
@@ -173,12 +182,17 @@ describe('Codex-r85jo.2: a partial upload preserves the previous image', () => {
       )
     ).rejects.toThrow();
 
-    // THE assertion: nothing 404s. sm and lg hold the new bytes, md still
-    // holds the previous image because its put never landed.
-    expect(bucket.objects.has(KEYS.sm)).toBe(true);
-    expect(bucket.objects.has(KEYS.md)).toBe(true);
-    expect(bucket.objects.has(KEYS.lg)).toBe(true);
+    // The failure really is a PARTIAL upload: all five puts were attempted.
+    // Without this, a throw before any put would pass every check below.
+    expect(bucket.put).toHaveBeenCalledTimes(5);
+
+    // THE assertion: nothing 404s. sm, lg, xl and the original hold the new
+    // bytes, md still holds the previous image because its put never landed.
+    for (const key of ALL_KEYS) {
+      expect(bucket.objects.has(key), key).toBe(true);
+    }
     expect(bucket.objects.get(KEYS.md)).toBe(PRIOR);
+    expect(bucket.objects.get(KEYS.original)).not.toBe(PRIOR);
   });
 
   it('does not delete anything on a partial upload failure', async () => {
@@ -198,6 +212,8 @@ describe('Codex-r85jo.2: a partial upload preserves the previous image', () => {
       )
     ).rejects.toThrow();
 
+    // One of the five puts failed — and nothing was deleted.
+    expect(bucket.put).toHaveBeenCalledTimes(5);
     expect(bucket.delete).not.toHaveBeenCalled();
   });
 
@@ -292,8 +308,10 @@ describe('Codex-r85jo.2: a partial upload preserves the previous image', () => {
       ).rejects.toThrow(/Database connection lost/i);
 
       // This is the one case the compensating delete is FOR: the puts landed,
-      // the DB never recorded them, so the objects are genuine orphans.
-      expect(bucket.delete).toHaveBeenCalledTimes(3);
+      // the DB never recorded them, so the objects are genuine orphans. All
+      // five go, xl and the original included, or they leak (Codex-kk9nv.5).
+      expect(bucket.delete).toHaveBeenCalledTimes(5);
+      expect(bucket.delete.mock.calls.map((call) => call[0])).toEqual(ALL_KEYS);
     });
 
     it('CALIBRATION: the bucket model detects a delete', async () => {

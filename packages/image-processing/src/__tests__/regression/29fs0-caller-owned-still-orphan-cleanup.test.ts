@@ -3,11 +3,11 @@
  * failure cleanup as the thumbnail and avatar.
  *
  * `processCategoryCover`, `processCourseCover`, `processCourseHero` and
- * `processCourseSignature` upload sm/md/lg and return the base key; the scoped
- * write happens afterwards in CategoriesService / CourseJourneyService. Before
- * this, a failure in that write stranded all three objects with nothing able
- * to name them. The routes now run the write through
- * `persistStillWithOrphanCleanup`.
+ * `processCourseSignature` upload sm/md/lg/xl plus the original (Codex-kk9nv.5)
+ * and return the base key; the scoped write happens afterwards in
+ * CategoriesService / CourseJourneyService. Before this, a failure in that
+ * write stranded every object with nothing able to name them. The routes now
+ * run the write through `persistStillWithOrphanCleanup`.
  *
  * The bucket is a Map, so "is the live image still readable?" is asserted
  * directly rather than inferred from which methods were called.
@@ -20,7 +20,13 @@ import type { OrphanedFileService } from '../../orphaned-file-service';
 import { ImageProcessingService } from '../../service';
 
 const BASE = 'courses/course-1/hero';
-const KEYS = [`${BASE}/sm.webp`, `${BASE}/md.webp`, `${BASE}/lg.webp`];
+const KEYS = [
+  `${BASE}/sm.webp`,
+  `${BASE}/md.webp`,
+  `${BASE}/lg.webp`,
+  `${BASE}/xl.webp`,
+  `${BASE}/original`,
+];
 const WRITE_ERROR = 'Database connection lost';
 
 function bucketHoldingTheNewImage(options: { deleteRejects?: boolean } = {}) {
@@ -45,7 +51,7 @@ function service(r2: R2Service, orphanedFileService?: OrphanedFileService) {
 const failingWrite = () => Promise.reject(new Error(WRITE_ERROR));
 
 describe('persistStillWithOrphanCleanup (Codex-29fs0)', () => {
-  it('FIRST upload (nothing stored): a failed write deletes the three new objects and rethrows', async () => {
+  it('FIRST upload (nothing stored): a failed write deletes the five new objects and rethrows', async () => {
     const bucket = bucketHoldingTheNewImage();
 
     await expect(
@@ -61,7 +67,9 @@ describe('persistStillWithOrphanCleanup (Codex-29fs0)', () => {
       )
     ).rejects.toThrow(WRITE_ERROR);
 
+    // All five, xl and the original included — none is left for nothing to name.
     expect(bucket.objects.size).toBe(0);
+    expect(bucket.del.mock.calls.map((call) => call[0])).toEqual(KEYS);
   });
 
   it('REPLACEMENT (row already holds the key): a failed write deletes NOTHING — the row still addresses them', async () => {
@@ -86,7 +94,9 @@ describe('persistStillWithOrphanCleanup (Codex-29fs0)', () => {
 
   it('a failed cleanup delete is recorded with the still-specific orphan type', async () => {
     const bucket = bucketHoldingTheNewImage({ deleteRejects: true });
-    const recordOrphanedFiles = vi.fn().mockResolvedValue(['o1', 'o2', 'o3']);
+    const recordOrphanedFiles = vi
+      .fn()
+      .mockResolvedValue(['o1', 'o2', 'o3', 'o4', 'o5']);
 
     await expect(
       service(bucket.r2, {
@@ -112,6 +122,8 @@ describe('persistStillWithOrphanCleanup (Codex-29fs0)', () => {
       }),
       expect.objectContaining({ r2Key: 'categories/cat-1/cover/md.webp' }),
       expect.objectContaining({ r2Key: 'categories/cat-1/cover/lg.webp' }),
+      expect.objectContaining({ r2Key: 'categories/cat-1/cover/xl.webp' }),
+      expect.objectContaining({ r2Key: 'categories/cat-1/cover/original' }),
     ]);
   });
 
