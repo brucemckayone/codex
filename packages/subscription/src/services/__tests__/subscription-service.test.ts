@@ -4054,6 +4054,113 @@ describe('SubscriptionService', () => {
         }));
     }
 
+    // ─── Codex-2hxff.62: an invoice keeps its first split ───
+    // Owner decision 2026-10-21, "Keep its first split": an invoice paid out
+    // once is never re-split. An accepted agreement takes effect from when it
+    // was proposed, so a redelivery after the acceptance used to find it in
+    // force at the invoice's time and ADD a creator slice on top of the
+    // owner's: the charge paid out more than it took in.
+    describe('an invoice keeps its first split (Codex-2hxff.62)', () => {
+      async function subscribedOrg(label: string) {
+        const { org, tier1 } = await createFullOrg(label);
+        const sub = takeFirst(
+          await db
+            .insert(subscriptions)
+            .values(
+              createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+                status: 'active',
+              })
+            )
+            .returning()
+        );
+        const createTransfer = vi
+          .fn()
+          .mockImplementation(
+            (args: { metadata?: { type?: string; creator_id?: string } }) =>
+              Promise.resolve({
+                id: `tr_${args?.metadata?.type ?? 'x'}_${Math.random().toString(36).slice(2, 10)}`,
+              })
+          );
+        (stripe as unknown as { transfers: unknown }).transfers = {
+          create: createTransfer,
+        };
+        const chargeId = `ch_first_split_${crypto.randomUUID().slice(0, 12)}`;
+        const invoice = createMockStripeInvoice({
+          amount_paid: 1000,
+          parent: {
+            subscription_details: { subscription: sub.stripeSubscriptionId },
+          },
+          payments: {
+            data: [
+              {
+                payment: { charge: chargeId, payment_intent: `pi_${chargeId}` },
+              },
+            ],
+          },
+        }) as unknown as Stripe.Invoice;
+        const slices = () =>
+          db
+            .select()
+            .from(payoutsTable)
+            .where(eq(payoutsTable.stripeChargeId, chargeId));
+        return { org, sub, chargeId, invoice, createTransfer, slices };
+      }
+
+      it('a redelivery after a backdated agreement is accepted adds no creator slice', async () => {
+        const { org, invoice, createTransfer, slices } = await subscribedOrg(
+          'first-split-backdated'
+        );
+        const creatorId = await seedCreatorWithConnect(org.id);
+
+        // No agreement yet: the creator pool goes to the owner.
+        await service.handleInvoicePaymentSucceeded(invoice);
+        const first = await slices();
+
+        // The creator accepts a proposal made before the invoice.
+        await seedAgreement(org.id, creatorId, 5000, {
+          effectiveFrom: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        });
+        await service.handleInvoicePaymentSucceeded(invoice);
+        const after = await slices();
+
+        expect(after.map((r) => r.id).sort()).toEqual(
+          first.map((r) => r.id).sort()
+        );
+        expect(after.some((r) => r.payoutType === 'creator_payout')).toBe(
+          false
+        );
+        expect(after.reduce((sum, r) => sum + r.amountCents, 0)).toBe(1000);
+        expect(perCreatorTransferCalls(createTransfer)).toEqual([]);
+      });
+
+      it('a delivery that died after the platform fee: the redelivery still splits it', async () => {
+        const { org, sub, chargeId, invoice, slices } =
+          await subscribedOrg('first-split-died');
+        // What the dead delivery left: the platform fee row and nothing else.
+        await db.insert(payoutsTable).values({
+          userId: null,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          sourceType: 'subscription',
+          amountCents: 100,
+          payoutType: 'platform_fee',
+          status: 'paid',
+          stripeChargeId: chargeId,
+          transferGroup: `sub_${sub.id}`,
+          resolvedAt: new Date(),
+        });
+
+        await service.handleInvoicePaymentSucceeded(invoice);
+
+        const rows = await slices();
+        expect(rows.map((r) => r.payoutType).sort()).toEqual([
+          'creator_payout_to_owner',
+          'organization_fee',
+          'platform_fee',
+        ]);
+      });
+    });
+
     // ─── Codex-69t7c WP4 (D2/D4): single-account routing invariant ───
     // A creator has exactly ONE Connect account (uq_stripe_connect_user) that
     // receives their slice from EVERY org they hold an agreement with. The

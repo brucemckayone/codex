@@ -58,8 +58,10 @@ import {
   markPayoutFailed,
   type OrganisationPayee,
   pendingReductionsFor,
+  type RecordSliceInput,
+  type RecordSliceOutcome,
   recordPlatformFee,
-  recordSlice,
+  recordSplitOnce,
   renewPayoutAttempt,
   resolveInvoiceCharge,
   resolveOrganisationPayee,
@@ -4319,7 +4321,7 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * The payouts-ledger dependencies for `recordSlice` / `recordPlatformFee`
+   * The payouts-ledger dependencies for `recordSplitOnce` / `recordPlatformFee`
    * (Codex-2hxff.11).
    */
   private ledger(): LedgerDeps {
@@ -4338,21 +4340,21 @@ export class SubscriptionService extends BaseService {
    * charge, whichever branch fires, under one idempotency key
    * (`${chargeId}_creator_pool_owner`).
    *
-   * Through `recordSlice` (Codex-2hxff.11): pending in the payee's name until
+   * Through the ledger (Codex-2hxff.11): pending in the payee's name until
    * they can be paid (Codex-2hxff.2 review — an ownership transfer may land
    * on someone who has not onboarded), and held as `no_owner` when the
    * organisation had no owner at the invoice's time (Codex-2hxff.37; it used
    * to be logged and dropped).
    */
-  private async transferCreatorPoolToOwner(
+  private creatorPoolToOwnerSlice(
     subscriptionId: string,
     orgId: string,
     chargeId: string,
     transferGroup: string,
     creatorPayoutCents: number,
     orgPayee: OrganisationPayee | undefined
-  ): Promise<void> {
-    await recordSlice(this.ledger(), {
+  ): RecordSliceInput {
+    return {
       payoutType: 'creator_payout_to_owner',
       amountCents: creatorPayoutCents,
       organizationId: orgId,
@@ -4365,7 +4367,31 @@ export class SubscriptionService extends BaseService {
         : null,
       idempotencyKey: `${chargeId}_creator_pool_owner`,
       metadata: { subscription_id: subscriptionId },
-    });
+    };
+  }
+
+  /**
+   * Record an invoice charge's split once (Codex-2hxff.62; owner decision
+   * 2026-10-21, "Keep its first split"): see `recordSplitOnce`. Returns each
+   * slice's outcome, or `null` when an earlier delivery already split the
+   * charge. Then the replay adds nothing, even if an agreement accepted since
+   * is backdated to before the invoice.
+   */
+  private async recordInvoiceSplit(
+    subscriptionId: string,
+    orgId: string,
+    chargeId: string,
+    slices: RecordSliceInput[]
+  ): Promise<Array<RecordSliceOutcome | null> | null> {
+    const result = await recordSplitOnce(this.ledger(), chargeId, slices);
+    if (result.kind === 'already_split') {
+      this.obs.info(
+        'Invoice already split by an earlier delivery; the replay keeps that split',
+        { subscriptionId, organizationId: orgId, stripeChargeId: chargeId }
+      );
+      return null;
+    }
+    return result.outcomes;
   }
 
   /**
@@ -4546,9 +4572,11 @@ export class SubscriptionService extends BaseService {
     const transferGroup = `sub_${subscriptionId}`;
 
     // Every slice goes through the payouts ledger (Codex-2hxff.11): its row is
-    // reserved by a per-charge unique key BEFORE any transfer, so a redelivered
-    // invoice.payment_succeeded re-runs this safely — slices already recorded
-    // are skipped, a missing one is added, nothing is transferred twice.
+    // reserved by a per-charge unique key BEFORE any transfer, so nothing is
+    // transferred twice. The split past the platform fee is reserved in one
+    // go and only once (Codex-2hxff.62): a redelivered
+    // invoice.payment_succeeded keeps the first delivery's split, even when
+    // an agreement accepted since is in force at the invoice's time.
     const ledger = this.ledger();
     const source = { sourceType: 'subscription', subscriptionId } as const;
 
@@ -4602,24 +4630,23 @@ export class SubscriptionService extends BaseService {
       (sum, a) => sum + a.sharePercent,
       0
     );
-    const orgSlice = (amountCents: number) =>
-      recordSlice(ledger, {
-        payoutType: 'organization_fee',
-        amountCents,
-        organizationId: orgId,
-        source,
-        stripeChargeId: chargeId,
-        transferGroup,
-        sendTransferGroup: true,
-        // Pending in the payee's name until they can be paid, so it drains
-        // to them even if ownership changes before they onboard; `no_owner`
-        // if the organisation had none (Codex-2hxff.37).
-        payee: orgPayee
-          ? { userId: orgPayee.userId, account: orgPayee.account }
-          : null,
-        idempotencyKey: `${chargeId}_org_fee`,
-        metadata: { subscription_id: subscriptionId },
-      });
+    const orgSlice = (amountCents: number): RecordSliceInput => ({
+      payoutType: 'organization_fee',
+      amountCents,
+      organizationId: orgId,
+      source,
+      stripeChargeId: chargeId,
+      transferGroup,
+      sendTransferGroup: true,
+      // Pending in the payee's name until they can be paid, so it drains
+      // to them even if ownership changes before they onboard; `no_owner`
+      // if the organisation had none (Codex-2hxff.37).
+      payee: orgPayee
+        ? { userId: orgPayee.userId, account: orgPayee.account }
+        : null,
+      idempotencyKey: `${chargeId}_org_fee`,
+      metadata: { subscription_id: subscriptionId },
+    });
 
     // No creator is paid — no agreement matched, or every one carries a zero
     // share (e.g. legacy rows backfilled with org_fee=10000): the org keeps
@@ -4635,15 +4662,17 @@ export class SubscriptionService extends BaseService {
           }
         );
       }
-      await orgSlice(orgFeeCents);
-      await this.transferCreatorPoolToOwner(
-        subscriptionId,
-        orgId,
-        chargeId,
-        transferGroup,
-        creatorPayoutCents,
-        orgPayee
-      );
+      await this.recordInvoiceSplit(subscriptionId, orgId, chargeId, [
+        orgSlice(orgFeeCents),
+        this.creatorPoolToOwnerSlice(
+          subscriptionId,
+          orgId,
+          chargeId,
+          transferGroup,
+          creatorPayoutCents,
+          orgPayee
+        ),
+      ]);
       return;
     }
 
@@ -4671,8 +4700,6 @@ export class SubscriptionService extends BaseService {
       creatorShares.reduce((sum, c) => sum + c.amountCents, 0);
     const effectiveCreatorPoolCents = postPlatformCents - effectiveOrgFeeCents;
 
-    await orgSlice(effectiveOrgFeeCents);
-
     // Batch-fetch all creator Connect accounts to avoid N+1 queries. Each
     // creator has one account keyed by userId (Codex-69t7c), independent of
     // which org this subscription belongs to.
@@ -4687,8 +4714,16 @@ export class SubscriptionService extends BaseService {
       );
     const connectByCreator = new Map(creatorConnects.map((c) => [c.userId, c]));
 
+    // The whole split is planned first and recorded once (Codex-2hxff.62),
+    // so every creator's slice is built before any row is written.
+    const creatorSlices: Array<{
+      creator: (typeof creatorShares)[number];
+      minTransferCents: number;
+      belowFloor: boolean;
+      slice: RecordSliceInput;
+    }> = [];
     for (const creator of creatorShares) {
-      // Codex-xz61z (I4): exactly one log line per iteration whose shape
+      // Codex-xz61z (I4): exactly one log line per creator whose shape
       // matches its terminal state.
       if (creator.amountCents <= 0) {
         this.obs.info('payout_split_skipped', {
@@ -4714,26 +4749,44 @@ export class SubscriptionService extends BaseService {
       );
       const belowFloor = creator.amountCents < creatorFees.minTransferCents;
 
-      const outcome = await recordSlice(ledger, {
-        payoutType: 'creator_payout',
-        amountCents: creator.amountCents,
-        organizationId: orgId,
-        source,
-        stripeChargeId: chargeId,
-        transferGroup,
-        sendTransferGroup: true,
-        payee: {
-          userId: creator.creatorId,
-          account: connectByCreator.get(creator.creatorId),
-        },
-        ...(belowFloor ? { hold: 'min_transfer_floor' as const } : {}),
-        idempotencyKey: `${chargeId}_creator_${creator.creatorId}`,
-        metadata: {
-          subscription_id: subscriptionId,
-          creator_id: creator.creatorId,
+      creatorSlices.push({
+        creator,
+        minTransferCents: creatorFees.minTransferCents,
+        belowFloor,
+        slice: {
+          payoutType: 'creator_payout',
+          amountCents: creator.amountCents,
+          organizationId: orgId,
+          source,
+          stripeChargeId: chargeId,
+          transferGroup,
+          sendTransferGroup: true,
+          payee: {
+            userId: creator.creatorId,
+            account: connectByCreator.get(creator.creatorId),
+          },
+          ...(belowFloor ? { hold: 'min_transfer_floor' as const } : {}),
+          idempotencyKey: `${chargeId}_creator_${creator.creatorId}`,
+          metadata: {
+            subscription_id: subscriptionId,
+            creator_id: creator.creatorId,
+          },
         },
       });
+    }
 
+    const outcomes = await this.recordInvoiceSplit(
+      subscriptionId,
+      orgId,
+      chargeId,
+      [orgSlice(effectiveOrgFeeCents), ...creatorSlices.map((c) => c.slice)]
+    );
+    if (!outcomes) return;
+
+    for (const [index, entry] of creatorSlices.entries()) {
+      const { creator, belowFloor, minTransferCents } = entry;
+      // The organisation's slice is first, so creator i is outcome i + 1.
+      const outcome = outcomes[index + 1];
       this.obs.info(
         belowFloor ? 'payout_split_skipped' : 'payout_split_computed',
         {
@@ -4746,9 +4799,7 @@ export class SubscriptionService extends BaseService {
           postPlatformCents,
           effectiveOrgFeeCents,
           effectiveCreatorPoolCents,
-          ...(belowFloor
-            ? { minTransferCents: creatorFees.minTransferCents }
-            : {}),
+          ...(belowFloor ? { minTransferCents } : {}),
           outcome: outcome?.kind,
           actuallyTransferred:
             outcome?.kind === 'paid' || outcome?.kind === 'unsettled',

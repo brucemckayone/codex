@@ -217,6 +217,8 @@ function pendingReasonFor(input: RecordSliceInput): PendingReason | null {
   return null;
 }
 
+type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
+
 /**
  * Record one slice of a sale in the ledger and, when its payee can be paid,
  * transfer it. Returns `null` for a zero amount (nothing to record).
@@ -225,6 +227,85 @@ export async function recordSlice(
   deps: LedgerDeps,
   input: RecordSliceInput
 ): Promise<RecordSliceOutcome | null> {
+  const reserved = await reserveSlice(deps.db, input);
+  if (reserved === null) return null;
+  if (reserved === 'exists') {
+    await reportReplayMismatch(deps, input);
+    return { kind: 'exists' };
+  }
+  return sendReservedSlice(deps, reserved, input);
+}
+
+/**
+ * Record a sale's whole split ONCE: every slice but the platform fee
+ * (Codex-2hxff.62; owner decision 2026-10-21, "Keep its first split").
+ *
+ * The slices are reserved together, in one transaction that holds a lock on
+ * the charge. If the charge already has any slice, an earlier delivery
+ * decided its split, and nothing is added: `already_split`. That covers a
+ * redelivery after an agreement is accepted and backdated to its proposal,
+ * which would otherwise find a creator in force who was not paid the first
+ * time, and pay them on top of the owner. A row that was reserved but never
+ * sent (the delivery died) is left to the drains, as for `recordSlice`.
+ *
+ * Returns each slice's outcome in `inputs` order (`null` for a zero amount).
+ */
+export async function recordSplitOnce(
+  deps: LedgerDeps,
+  stripeChargeId: string,
+  inputs: readonly RecordSliceInput[]
+): Promise<
+  | { kind: 'already_split' }
+  | { kind: 'recorded'; outcomes: Array<RecordSliceOutcome | null> }
+> {
+  const reserved = await deps.db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`payout_split:${stripeChargeId}`}))`
+    );
+    const [decided] = await tx
+      .select({ id: payouts.id })
+      .from(payouts)
+      .where(
+        and(
+          eq(payouts.stripeChargeId, stripeChargeId),
+          inArray(payouts.payoutType, [
+            'organization_fee',
+            'creator_payout_to_owner',
+            'creator_payout',
+          ])
+        )
+      )
+      .limit(1);
+    if (decided) return null;
+    const rows: Array<Payout | 'exists' | null> = [];
+    for (const input of inputs) rows.push(await reserveSlice(tx, input));
+    return rows;
+  });
+  if (reserved === null) return { kind: 'already_split' };
+
+  const outcomes: Array<RecordSliceOutcome | null> = [];
+  for (const [index, row] of reserved.entries()) {
+    const input = inputs[index];
+    if (row === null || !input) {
+      outcomes.push(null);
+    } else if (row === 'exists') {
+      // Unreachable under the lock: no slice existed when it was taken.
+      outcomes.push({ kind: 'exists' });
+    } else {
+      outcomes.push(await sendReservedSlice(deps, row, input));
+    }
+  }
+  return { kind: 'recorded', outcomes };
+}
+
+/**
+ * Reserve one slice's row, pending, before any money moves. `null` for a
+ * zero amount; `exists` when the charge already holds this slice (a replay).
+ */
+async function reserveSlice(
+  db: DatabaseClient | Tx,
+  input: RecordSliceInput
+): Promise<Payout | 'exists' | null> {
   if (input.amountCents <= 0) return null;
   if (input.payee === null && input.payoutType === 'creator_payout') {
     // A creator slice always has its creator; only the owner can be missing.
@@ -238,7 +319,7 @@ export async function recordSlice(
   }
 
   const reason = pendingReasonFor(input);
-  const [reserved] = await deps.db
+  const [reserved] = await db
     .insert(payouts)
     .values({
       userId: input.payee?.userId ?? null,
@@ -258,11 +339,19 @@ export async function recordSlice(
     .onConflictDoNothing(sliceConflictTarget(input.payoutType))
     // Bare `.returning()`: the client union collapses the projected overload.
     .returning();
-  if (!reserved) {
-    await reportReplayMismatch(deps, input);
-    return { kind: 'exists' };
-  }
+  return reserved ?? 'exists';
+}
 
+/**
+ * Transfer a reserved slice when its payee can be paid; otherwise it stays
+ * pending in their name for the drains.
+ */
+async function sendReservedSlice(
+  deps: LedgerDeps,
+  reserved: Payout,
+  input: RecordSliceInput
+): Promise<RecordSliceOutcome> {
+  const reason = pendingReasonFor(input);
   if (reason === 'no_owner') {
     deps.obs.error(
       'Organisation has no owner: its slice is held for the next one. Support must assign an owner to release it',

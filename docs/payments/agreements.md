@@ -53,6 +53,14 @@ at once cannot both succeed — **gap**: `Codex-2hxff.19` (proposing takes no
 lock). Admins can see an organisation's agreements but only the owner can act;
 the screen shows admins only what they can do — **gap**: `Codex-2hxff.20`.
 
+An agreement takes effect from its proposal's start date: the moment it was
+proposed, unless an API caller sends an earlier one (the Studio never sends
+one). **A start date in the future is refused** (`FutureStartNotAllowedError`,
+422), both when the proposal is made and again when it is accepted (owner
+decision 2026-10-21, "Refuse a future start", `Codex-2hxff.63`). Accepting
+ends the creator's current agreement at once, so a later start would leave
+them unpaid in between.
+
 A round-1 proposal exists **only** as a proposal row. There is no agreement row
 until acceptance, so anything that lists "this creator's agreements" must also
 read open proposals (`getProposalsForCreator`), or a creator following an email
@@ -168,6 +176,10 @@ the two items marked "today":
   that creator gets no share rather than a newer agreement's;
 - results are ordered deterministically and counted once per creator, even
   mid-renegotiation: the older agreement was the one in force;
+- an organisation subscription invoice is split once. A redelivery keeps the
+  first split, even when an agreement accepted since is backdated to before
+  the invoice (owner decision 2026-10-21, "Keep its first split",
+  `Codex-2hxff.62`). The creator's share starts with the next invoice;
 - the purchase or invoice records which agreement it used (today
   `creator_org_agreement_id` is always empty).
 
