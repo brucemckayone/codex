@@ -658,6 +658,9 @@ export async function createServiceRegistry(
           // verify the short-lived token signed with WORKER_SHARED_SECRET.
           contentApiBaseUrl: buildServiceUrl('content', env),
           hlsTokenSecret: env.WORKER_SHARED_SECRET,
+          // Library tiles resolve a video poster's R2 key to a URL with it
+          // (Codex-kk9nv.6).
+          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
         });
       }
       return _access;

@@ -42,6 +42,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm';
+import { resolvePracticeThumbnail } from '../practice-thumbnail';
 
 /**
  * User library item with content, access type, purchase, and progress
@@ -131,11 +132,20 @@ export interface UserLibraryResponse {
  * @returns Paginated list of content with progress
  */
 export async function listUserLibrary(
-  deps: { db: DatabaseClient; obs: ObservabilityClient },
+  deps: {
+    db: DatabaseClient;
+    obs: ObservabilityClient;
+    /**
+     * The env-owned CDN base. An item with no custom thumbnail carries only
+     * its video poster's R2 KEY, which needs this in front to be a URL
+     * (Codex-kk9nv.6). Absent, that item draws its no-picture state.
+     */
+    r2PublicUrlBase?: string;
+  },
   userId: string,
   input: ListUserLibraryInput
 ): Promise<UserLibraryResponse> {
-  const { db, obs } = deps;
+  const { db, obs, r2PublicUrlBase } = deps;
 
   obs.info('Listing user library', {
     userId,
@@ -389,7 +399,11 @@ export async function listUserLibrary(
         slug: row.contentSlug,
         title: row.contentTitle,
         description: row.contentDescription || '',
-        thumbnailUrl: row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.contentThumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         contentType: row.contentType ?? 'video',
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,
@@ -507,7 +521,11 @@ export async function listUserLibrary(
         slug: row.contentSlug,
         title: row.contentTitle,
         description: row.contentDescription || '',
-        thumbnailUrl: row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.contentThumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         contentType: row.contentType ?? 'video',
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,
@@ -669,7 +687,11 @@ export async function listUserLibrary(
         slug: row.contentSlug,
         title: row.contentTitle,
         description: row.contentDescription || '',
-        thumbnailUrl: row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.contentThumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         contentType: row.contentType ?? 'video',
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,
@@ -849,7 +871,11 @@ export async function listUserLibrary(
         slug: row.contentSlug,
         title: row.contentTitle,
         description: row.contentDescription || '',
-        thumbnailUrl: row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.contentThumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         contentType: row.contentType ?? 'video',
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,

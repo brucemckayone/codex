@@ -26,6 +26,7 @@ import { ContentService, MediaItemService } from '@codex/content';
 import {
   content,
   organizationFollowers,
+  organizationMemberships,
   organizations,
   subscriptions,
   subscriptionTiers,
@@ -510,6 +511,115 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
       expect(
         result.items.find((i) => i.content.id === item.id)
       ).toBeUndefined();
+    });
+  });
+
+  // Codex-kk9nv.6: an item with no custom thumbnail carries only its video
+  // poster's R2 KEY. The library used to hand that key to the client as the
+  // image URL, which the browser resolved as a relative path and drew broken.
+  describe('library tiles carry a picture a browser can load', () => {
+    const CDN = 'https://cdn.test.example';
+
+    function serviceWithBase(r2PublicUrlBase: string | undefined) {
+      return new ContentAccessService({
+        db,
+        environment: 'test',
+        r2: r2Client,
+        purchaseService: {
+          verifyPurchase: vi.fn(async () => false),
+        } as unknown as PurchaseService,
+        r2PublicUrlBase,
+      });
+    }
+
+    // organizationId is assigned in beforeAll, so each call passes it.
+    const libraryInput = {
+      page: 1,
+      limit: 20,
+      filter: 'all',
+      sortBy: 'recent',
+      contentType: 'all',
+      accessType: 'all',
+      search: '',
+    } as const;
+
+    it('resolves a media-only item to a CDN URL on the followed-org arm', async () => {
+      const [follower] = await seedTestUsers(db, 1);
+      await db
+        .insert(organizationFollowers)
+        .values({ userId: follower, organizationId });
+      const item = await createContentWithAccessType('free', 'thumb-free');
+
+      const result = await serviceWithBase(CDN).listUserLibrary(follower, {
+        ...libraryInput,
+        organizationId,
+      });
+
+      const row = result.items.find((i) => i.content.id === item.id);
+      expect(row?.accessType).toBe('free');
+      expect(row?.content.thumbnailUrl).toBe(
+        `${CDN}/thumbnails/thumb-free.jpg`
+      );
+    });
+
+    it('resolves a media-only item to a CDN URL on the membership arm', async () => {
+      const [member] = await seedTestUsers(db, 1);
+      await db.insert(organizationMemberships).values({
+        userId: member,
+        organizationId,
+        role: 'creator',
+        status: 'active',
+      });
+      const item = await createContentWithAccessType('free', 'thumb-member');
+
+      const result = await serviceWithBase(CDN).listUserLibrary(member, {
+        ...libraryInput,
+        organizationId,
+      });
+
+      const row = result.items.find((i) => i.content.id === item.id);
+      expect(row?.accessType).toBe('membership');
+      expect(row?.content.thumbnailUrl).toBe(
+        `${CDN}/thumbnails/thumb-member.jpg`
+      );
+    });
+
+    it("keeps the creator's custom thumbnail over the poster", async () => {
+      const [follower] = await seedTestUsers(db, 1);
+      await db
+        .insert(organizationFollowers)
+        .values({ userId: follower, organizationId });
+      const item = await createContentWithAccessType('free', 'thumb-custom');
+      const custom = `${CDN}/custom/${item.id}/lg.webp`;
+      await db
+        .update(content)
+        .set({ thumbnailUrl: custom })
+        .where(eq(content.id, item.id));
+
+      const result = await serviceWithBase(CDN).listUserLibrary(follower, {
+        ...libraryInput,
+        organizationId,
+      });
+
+      const row = result.items.find((i) => i.content.id === item.id);
+      expect(row?.content.thumbnailUrl).toBe(custom);
+    });
+
+    it('gives no picture, never a raw key, when the worker has no CDN base', async () => {
+      const [follower] = await seedTestUsers(db, 1);
+      await db
+        .insert(organizationFollowers)
+        .values({ userId: follower, organizationId });
+      const item = await createContentWithAccessType('free', 'thumb-nobase');
+
+      const result = await serviceWithBase(undefined).listUserLibrary(
+        follower,
+        { ...libraryInput, organizationId }
+      );
+
+      const row = result.items.find((i) => i.content.id === item.id);
+      expect(row).toBeDefined();
+      expect(row?.content.thumbnailUrl).toBeNull();
     });
   });
 });
