@@ -36,15 +36,20 @@ async function render(
   overrides: {
     device?: Device;
     notices?: ComponentProps<typeof Canvas>['notices'];
-  } = {}
+  } = {},
+  initial: { page?: KitPage; contextSettled?: boolean } = {}
 ) {
   const state = $state({
-    page: samplePage('bold') as KitPage,
+    page: initial.page ?? (samplePage('bold') as KitPage),
     selectedId: null as string | null,
+    contextSettled: initial.contextSettled ?? true,
   });
   const props = {
     get page() {
       return state.page;
+    },
+    get contextSettled() {
+      return state.contextSettled;
     },
     context: sampleContext({ offer: 'tiers' }),
     device: 'desktop' as Device,
@@ -227,5 +232,223 @@ describe('Canvas', () => {
   it('has no notice area when there is nothing to say', async () => {
     await render();
     expect(document.querySelector('.canvas__notices')).toBeNull();
+  });
+});
+
+describe('Canvas: sections out of view skip layout (Codex-61zsk.72)', () => {
+  const frames = () =>
+    new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    );
+  const settled = async () => {
+    await frames();
+    await frames();
+    flushSync();
+  };
+  const isLazy = () =>
+    document.querySelector('.canvas__page')?.hasAttribute('data-lazy') ?? false;
+  const jump = (id: string) =>
+    (
+      app as unknown as { scrollToSection: (id: string) => void }
+    ).scrollToSection(id);
+
+  /**
+   * A scroller 600px tall over a 10,000px page, with the last section where
+   * its skipped neighbours' remembered heights put it (`top`, movable).
+   */
+  function rig() {
+    const scroller = document.querySelector<HTMLElement>('.canvas__scroller')!;
+    const sections = [
+      ...document.querySelectorAll<HTMLElement>('[data-lp-section]'),
+    ];
+    const target = sections[sections.length - 1];
+    const state = { at: 0, top: 2000 };
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => state.at,
+      set: (value: number) => {
+        state.at = value;
+      },
+    });
+    Object.defineProperty(scroller, 'clientHeight', {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      value: 10_000,
+    });
+    scroller.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+    target.getBoundingClientRect = () =>
+      ({ top: state.top - state.at }) as DOMRect;
+    const aims: number[] = [];
+    // Like a real scroller, it cannot go past its last screen.
+    scroller.scrollTo = ((options: ScrollToOptions) => {
+      aims.push(options.top ?? 0);
+      state.at = Math.max(0, Math.min(10_000 - 600, options.top ?? 0));
+    }) as typeof scroller.scrollTo;
+    return { scroller, sections, target, state, aims };
+  }
+
+  it('lays every section out in full first, then lets those out of view skip it', async () => {
+    await render();
+    expect(isLazy()).toBe(false);
+    await settled();
+    expect(isLazy()).toBe(true);
+  });
+
+  it('does not skip while the page’s reads are loading, only once they answer', async () => {
+    const { state } = await render({}, { contextSettled: false });
+    await settled();
+    expect(isLazy()).toBe(false);
+
+    state.contextSettled = true;
+    flushSync();
+    await settled();
+    expect(isLazy()).toBe(true);
+  });
+
+  it('waits for fonts still loading before it lets any section skip', async () => {
+    let arrive = () => {};
+    const ready = new Promise<void>((resolve) => {
+      arrive = resolve;
+    });
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { status: 'loading', ready },
+    });
+    try {
+      await render();
+      await settled();
+      expect(isLazy()).toBe(false);
+
+      arrive();
+      await ready;
+      flushSync();
+      expect(isLazy()).toBe(true);
+    } finally {
+      Reflect.deleteProperty(document, 'fonts');
+    }
+  });
+
+  it('lays out sections that arrive on an empty canvas before skipping any', async () => {
+    const full = samplePage('bold') as KitPage;
+    const { state } = await render({}, { page: { ...full, sections: [] } });
+    await settled();
+
+    state.page = full;
+    flushSync();
+    expect(document.querySelector('.canvas__page')).not.toBeNull();
+    expect(isLazy()).toBe(false);
+    await settled();
+    expect(isLazy()).toBe(true);
+  });
+
+  it('lays everything out again for a new section, and for a new Style', async () => {
+    const { state } = await render();
+    await settled();
+    expect(isLazy()).toBe(true);
+
+    const [first] = state.page.sections;
+    state.page = {
+      ...state.page,
+      sections: [...state.page.sections, { ...first, id: 'a-new-section' }],
+    };
+    flushSync();
+    expect(isLazy()).toBe(false);
+    await settled();
+    expect(isLazy()).toBe(true);
+
+    const style = state.page.design.style === 'soft' ? 'bold' : 'soft';
+    state.page = { ...state.page, design: { ...state.page.design, style } };
+    flushSync();
+    expect(isLazy()).toBe(false);
+  });
+
+  it('aims again once the scroll ends, when stale heights moved the target', async () => {
+    await render();
+    await settled();
+    const { scroller, target, state, aims } = rig();
+
+    jump(target.dataset.lpSection!);
+    expect(aims).toEqual([1984]);
+
+    // Drawn on the way down at the new width, the sections above are taller.
+    state.top = 2300;
+    scroller.dispatchEvent(new Event('scrollend'));
+    expect(aims).toEqual([1984, 2284]);
+    await frames();
+    await frames();
+    expect(aims).toEqual([1984, 2284]);
+  });
+
+  it('aims again once the scroller is still, with no scrollend', async () => {
+    await render();
+    await settled();
+    const { target, state, aims } = rig();
+
+    jump(target.dataset.lpSection!);
+    state.top = 2300;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(aims).toEqual([1984, 2284]);
+  });
+
+  it('gives way to the creator’s own scrolling', async () => {
+    await render();
+    await settled();
+    const { scroller, target, state, aims } = rig();
+
+    jump(target.dataset.lpSection!);
+    scroller.dispatchEvent(new Event('wheel'));
+    state.top = 2300;
+    scroller.dispatchEvent(new Event('scrollend'));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(aims).toEqual([1984]);
+  });
+
+  it('gives way to a newer jump, even one already in view', async () => {
+    await render();
+    await settled();
+    const { scroller, sections, target, state, aims } = rig();
+    const near = sections[0];
+    near.getBoundingClientRect = () => ({ top: 100 }) as DOMRect;
+
+    jump(target.dataset.lpSection!);
+    jump(near.dataset.lpSection!);
+    state.top = 2300;
+    scroller.dispatchEvent(new Event('scrollend'));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(aims).toEqual([1984]);
+  });
+
+  it('does not aim at a section that left the page on the way', async () => {
+    await render();
+    await settled();
+    const { scroller, target, aims } = rig();
+
+    jump(target.dataset.lpSection!);
+    target.remove();
+    // What a browser measures for a node no longer in the document.
+    target.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+    scroller.dispatchEvent(new Event('scrollend'));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(aims).toEqual([1984]);
+  });
+
+  it('settles on the furthest the scroller can go for a short last section', async () => {
+    await render();
+    await settled();
+    const { scroller, target, state, aims } = rig();
+    // The last section's top is inside the last screen of the page.
+    state.top = 9800;
+
+    jump(target.dataset.lpSection!);
+    expect(aims).toEqual([9784]);
+    scroller.dispatchEvent(new Event('scrollend'));
+    await frames();
+    await frames();
+    // The scroller stopped at 9,400 (10,000 - 600): that is the landing, not
+    // 9,784 again, which it can never reach.
+    expect(aims).toEqual([9784]);
   });
 });

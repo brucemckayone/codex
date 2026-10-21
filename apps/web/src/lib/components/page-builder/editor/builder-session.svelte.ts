@@ -103,6 +103,14 @@ export interface BuilderSession {
    */
   readonly contextError: boolean;
   /**
+   * Every read the canvas is drawn from (the draft, curriculum, course
+   * details, sell preview, price) has answered or failed. While one has not,
+   * the canvas draws its empty fallback, so a section's height then is not
+   * its real one (Codex-61zsk.72). A re-read keeps its answer, so this does
+   * not flip back on a refresh.
+   */
+  readonly contextSettled: boolean;
+  /**
    * Whether the offer read has answered. Until it has, or once it fails,
    * `context.offer` is null, which reads as "no way in": the pricing
    * section's picker must not say so (Codex-61zsk.14). A page with no
@@ -227,6 +235,15 @@ export function createBuilderSession(options: {
   let dismissedErrors = $state.raw<unknown[]>([]);
   const contextError = $derived(
     failedReads.some((query) => !dismissedErrors.includes(query.error))
+  );
+  const contextSettled = $derived(
+    [
+      draftQuery,
+      curriculumQuery,
+      coursePageQuery,
+      sellPreviewQuery,
+      offerQuery,
+    ].every((query) => !query || query.current !== undefined || !!query.error)
   );
 
   function retryContext(): void {
@@ -910,6 +927,9 @@ export function createBuilderSession(options: {
     reloadTab,
     get contextError() {
       return contextError;
+    },
+    get contextSettled() {
+      return contextSettled;
     },
     get offerRead() {
       return offerRead;
