@@ -16,19 +16,21 @@
   import Mark from '../../primitives/Mark.svelte';
   import Media from '../../primitives/Media.svelte';
   import { storedFocus } from '../../../page-images';
-  import { bentoTiles } from './bento';
+  import { bentoSizes, bentoTiles } from './bento';
   import type { BenefitItem } from './definition';
 
   interface Props {
     items: readonly BenefitItem[];
     /** Each item's picture, resolved; `null` for none. */
     images: readonly (string | null)[];
+    /** Each picture's stored sizes (`pageImageSrcset`), by item. */
+    srcsets?: readonly string[];
     level: 1 | 2 | 3;
     /** The lead tile's scheme: the Style's filled card for this section. */
     featured: ColourSchemeId;
   }
 
-  const { items, images, level, featured }: Props = $props();
+  const { items, images, srcsets = [], level, featured }: Props = $props();
 
   const tiles = $derived(bentoTiles(items.length));
 </script>
@@ -46,10 +48,22 @@
         <div class="benefits-bento__picture">
           {#if index === 0}
             <div class="benefits-bento__drift" data-lp-parallax="1">
-              <Media image={images[index]} alt={item.image?.alt ?? ''} focus={storedFocus(item.image)} />
+              <Media
+                image={images[index]}
+                srcset={srcsets[index]}
+                sizes={bentoSizes(index, items.length)}
+                alt={item.image?.alt ?? ''}
+                focus={storedFocus(item.image)}
+              />
             </div>
           {:else}
-            <Media image={images[index]} alt={item.image?.alt ?? ''} focus={storedFocus(item.image)} />
+            <Media
+              image={images[index]}
+              srcset={srcsets[index]}
+              sizes={bentoSizes(index, items.length)}
+              alt={item.image?.alt ?? ''}
+              focus={storedFocus(item.image)}
+            />
           {/if}
         </div>
       {/if}

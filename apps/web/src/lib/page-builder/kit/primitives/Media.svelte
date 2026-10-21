@@ -113,7 +113,13 @@
   style:aspect-ratio={ratio}
 >
   {#if clip}
-    <HeroLoopVideo src={clip.playlistUrl} posterUrl={still} />
+    <!-- The sizes belong to `image`; a clip's own poster has none here. -->
+    <HeroLoopVideo
+      src={clip.playlistUrl}
+      posterUrl={still}
+      posterSrcset={still && still === image ? srcset : ''}
+      posterSizes={sizes}
+    />
   {:else if still}
     <img
       src={still}

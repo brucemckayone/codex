@@ -47,7 +47,7 @@
 
   interface Props {
     still: string | null;
-    /** The still's stored sizes, when it is the creator's page image (`pageImageSrcset`). */
+    /** The still's stored sizes: a page image's (`pageImageSrcset`), or the three a journey still has (`getThumbnailSrcset`). */
     srcset?: string;
     /** Where its subject is, when it is the creator's page image (`storedFocus`). */
     focus?: { x: number; y: number };

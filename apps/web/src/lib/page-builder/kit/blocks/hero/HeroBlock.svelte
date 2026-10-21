@@ -38,6 +38,7 @@
 -->
 <script lang="ts">
   import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
+  import { getThumbnailSrcset } from '$lib/utils/image';
   import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import type { PreviewMedia, SellPreview } from '../../../render/types';
   import { COPY } from '../../model/copy';
@@ -91,6 +92,13 @@
   // Where the creator placed the image's subject, so a layout's crop keeps it
   // (Codex-61zsk.58); a course still from the journey has none.
   const ownFocus = $derived(ownStill ? storedFocus(content.image) : undefined);
+  // The journey's own still (its uploaded hero, or a clip's poster) is no
+  // page image: it offers the three sizes every still has, named in its URL,
+  // instead of the one large file across the band (Codex-61zsk.66).
+  function srcsetOf(still: string | null): string {
+    if (!still) return '';
+    return still === ownStill ? ownSrcset : getThumbnailSrcset(still);
+  }
   const frameSizes = $derived(
     layout === 'split' ? '(min-width: 50rem) 50vw, 100vw' : '100vw'
   );
@@ -208,7 +216,7 @@
     <Media
       image={media.still}
       clip={media.clip}
-      srcset={ownSrcset}
+      srcset={srcsetOf(media.still)}
       sizes={frameSizes}
       focus={ownFocus}
       {ratio}
@@ -221,7 +229,7 @@
   {:else}
     <Media
       image={media.still}
-      srcset={ownSrcset}
+      srcset={srcsetOf(media.still)}
       sizes={frameSizes}
       focus={ownFocus}
       {ratio}
@@ -243,7 +251,7 @@
         <Media
           image={settled.still}
           clip={settled.clip}
-          srcset={ownSrcset}
+          srcset={srcsetOf(settled.still)}
           sizes="100vw"
           focus={ownFocus}
           priority
@@ -283,7 +291,7 @@
        so it takes the headline's length and its words' widths itself. -->
   <HeroPoster
     still={settled.still}
-    srcset={ownSrcset}
+    srcset={srcsetOf(settled.still)}
     focus={ownFocus}
     clip={settled.clip}
     reserve={(previewing || heroComing) && mode !== 'none'}

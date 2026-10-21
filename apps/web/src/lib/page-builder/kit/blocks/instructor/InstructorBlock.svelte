@@ -23,6 +23,7 @@
   stays.
 -->
 <script lang="ts">
+  import { getThumbnailSrcset } from '$lib/utils/image';
   import type { SellPreview } from '../../../render/types';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
@@ -57,6 +58,20 @@
 
   const still = (preview: SellPreview | null) =>
     preview?.guidePortraitUrl ?? preview?.guideClip?.posterUrl ?? null;
+  // The portrait is a media still, so it offers the three sizes its URL names,
+  // at the width each layout draws it (Codex-61zsk.66): split takes 5 of 12
+  // columns from 52rem (Bold and Cinematic crop it to the band's edge, so up
+  // to half the window); centred is 26rem at most; quote signs off small,
+  // except in Cinematic, where the portrait becomes the room from 52rem.
+  const portraitSizes = $derived(
+    layout === 'split'
+      ? '(min-width: 52rem) 50vw, 100vw'
+      : layout === 'quote'
+        ? page.style === 'cinematic'
+          ? '(min-width: 52rem) 50vw, 6rem'
+          : '6rem'
+        : 'min(100vw, 26rem)'
+  );
 </script>
 
 {#snippet head(size: 'heading' | 'title')}
@@ -104,11 +119,24 @@
       <div class="guide__portrait" data-layout={layout}>
         <span class="lp-atmos guide__glow" aria-hidden="true"></span>
         {#if clip && play}
-          <ClipFrame still={still(preview)} ratio="var(--_ratio)" {alt} {place}>
+          <ClipFrame
+            still={still(preview)}
+            srcset={getThumbnailSrcset(still(preview) ?? '')}
+            sizes={portraitSizes}
+            ratio="var(--_ratio)"
+            {alt}
+            {place}
+          >
             <Watch {clip} label={watchLabel} {title} {edit} />
           </ClipFrame>
         {:else}
-          <ClipFrame still={still(preview)} ratio="var(--_ratio)" {alt} />
+          <ClipFrame
+            still={still(preview)}
+            srcset={getThumbnailSrcset(still(preview) ?? '')}
+            sizes={portraitSizes}
+            ratio="var(--_ratio)"
+            {alt}
+          />
         {/if}
       </div>
     {:else if monogram}

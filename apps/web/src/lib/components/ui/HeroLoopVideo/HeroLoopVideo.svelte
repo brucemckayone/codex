@@ -44,9 +44,15 @@
     src: string;
     /** The frame shown before, instead of, and underneath the footage. */
     posterUrl?: string | null;
+    /**
+     * The poster's stored sizes and how wide it is drawn, for the still that
+     * stands in under reduced motion. `<video poster>` takes one URL.
+     */
+    posterSrcset?: string;
+    posterSizes?: string;
   }
 
-  const { src, posterUrl = null }: Props = $props();
+  const { src, posterUrl = null, posterSrcset = '', posterSizes }: Props = $props();
 
   let videoEl = $state<HTMLVideoElement | undefined>(undefined);
   let hlsInstance = $state<Hls | null>(null);
@@ -126,7 +132,14 @@
 {#if reduced || !src}
   <!-- Continuous decoration, removed by preference. The still is the fallback. -->
   {#if posterUrl}
-    <img class="hero-loop__still" src={posterUrl} alt="" decoding="async" />
+    <img
+      class="hero-loop__still"
+      src={posterUrl}
+      srcset={posterSrcset || undefined}
+      sizes={posterSrcset ? posterSizes : undefined}
+      alt=""
+      decoding="async"
+    />
   {:else}
     <span class="hero-loop__plate" aria-hidden="true"></span>
   {/if}

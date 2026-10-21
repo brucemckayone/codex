@@ -19,7 +19,7 @@
 <script lang="ts">
   import { hasHead } from '../../model/read';
   import { CheckIcon } from '$lib/components/ui/Icon';
-  import { resolvePageImageUrl, storedFocus } from '../../../page-images';
+  import { pageImageSrcset, resolvePageImageUrl, storedFocus } from '../../../page-images';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -30,6 +30,7 @@
   import Media from '../../primitives/Media.svelte';
   import Text from '../../primitives/Text.svelte';
   import BenefitsBento from './BenefitsBento.svelte';
+  import { gridCardSizes } from './grid-sizes';
   import { BENEFITS_EMPTY, benefitsDefinition } from './definition';
 
   const { props, section, context, edit }: BlockProps = $props();
@@ -59,6 +60,11 @@
       : []
   );
   const pictured = $derived(tileImages.some(Boolean));
+  // Every size each picture has, at its card's width (Codex-61zsk.66).
+  const tileSrcsets = $derived(
+    items.map((item) => pageImageSrcset(item.image, context.mediaBaseUrl))
+  );
+  const gridSizes = $derived(gridCardSizes(items.length, page.style));
 </script>
 
 {#snippet words()}
@@ -135,6 +141,7 @@
       <BenefitsBento
         {items}
         images={tileImages}
+        srcsets={tileSrcsets}
         level={itemLevel}
         featured={featuredScheme(page.style, section.scheme)}
       />
@@ -145,6 +152,8 @@
             {#if pictured}
               <Media
                 image={tileImages[index]}
+                srcset={tileSrcsets[index]}
+                sizes={gridSizes}
                 alt={item.image?.alt ?? ''}
                 ratio="3 / 2"
                 focus={storedFocus(item.image)}
