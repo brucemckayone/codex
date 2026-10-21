@@ -335,11 +335,16 @@ export class CategoriesService extends BaseService {
    *
    * @param id - Category ID
    * @param space - Resolved space (org → any org actor; personal → creator)
+   * @returns The cover key the category held, so the caller can delete its
+   *   files (Codex-kk9nv.14)
    * @throws {CategoryNotFoundError} If absent / out of space
    */
-  async softDelete(id: string, space: CategorySpace): Promise<void> {
+  async softDelete(
+    id: string,
+    space: CategorySpace
+  ): Promise<{ droppedCoverImageKey: string | null }> {
     try {
-      await this.db.transaction(async (tx) => {
+      return await this.db.transaction(async (tx) => {
         const existing = await tx.query.categories.findFirst({
           where: and(eq(categories.id, id), ...this.spaceWhere(space)),
         });
@@ -352,6 +357,7 @@ export class CategoriesService extends BaseService {
           .update(categories)
           .set({ deletedAt: new Date(), updatedAt: new Date() })
           .where(and(eq(categories.id, id), ...this.spaceWhere(space)));
+        return { droppedCoverImageKey: existing.coverImageKey };
       });
     } catch (error) {
       if (error instanceof CategoryNotFoundError) {

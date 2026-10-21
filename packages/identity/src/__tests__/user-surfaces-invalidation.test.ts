@@ -31,6 +31,7 @@ const mockProcessUserAvatar = vi.fn();
 
 vi.mock('@codex/image-processing', () => ({
   ImageProcessingService: class {
+    deleteDroppedAvatar = vi.fn();
     deleteUserAvatar = mockDeleteUserAvatar;
     processUserAvatar = mockProcessUserAvatar;
   },

@@ -327,6 +327,8 @@ app.patch(
 /**
  * DELETE /api/categories/:categoryId
  * Soft delete a category (its content_categories join rows are left in place).
+ * Its cover's files are deleted in the same request (Codex-kk9nv.14, owner:
+ * "Delete in the same request").
  */
 app.delete(
   '/:categoryId',
@@ -346,10 +348,16 @@ app.delete(
         ctx.obs,
         ctx.cacheWrite
       );
-      await ctx.services.categories.softDelete(
+      const { droppedCoverImageKey } = await ctx.services.categories.softDelete(
         ctx.input.params.categoryId,
         space
       );
+      await ctx.services.imageProcessing.deleteDroppedStill({
+        imageType: 'category_cover',
+        entityType: 'category',
+        entityId: ctx.input.params.categoryId,
+        droppedKey: droppedCoverImageKey,
+      });
       invalidateCategories(ctx.env, ctx.executionCtx, space, ctx.obs);
       return null;
     },

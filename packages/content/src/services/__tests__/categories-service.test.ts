@@ -294,7 +294,9 @@ describe('CategoriesService', () => {
         { creatorId }
       );
 
-      await service.softDelete(created.id, { creatorId });
+      expect(await service.softDelete(created.id, { creatorId })).toEqual({
+        droppedCoverImageKey: null,
+      });
 
       const result = await service.get(created.id, { creatorId });
       expect(result).toBeNull();
@@ -307,6 +309,22 @@ describe('CategoriesService', () => {
           .where(eq(categories.id, created.id))
       );
       expect(row.deletedAt).not.toBeNull();
+    });
+
+    it('reports the cover key it held, so the caller can delete its files (Codex-kk9nv.14)', async () => {
+      const created = await service.create(
+        { name: `Covered ${uniqueToken()}` },
+        { creatorId }
+      );
+      const coverImageKey = `categories/${created.id}/cover/1600x900-0a1b2c3d`;
+      await db
+        .update(categories)
+        .set({ coverImageKey })
+        .where(eq(categories.id, created.id));
+
+      expect(await service.softDelete(created.id, { creatorId })).toEqual({
+        droppedCoverImageKey: coverImageKey,
+      });
     });
 
     it('throws CategoryNotFoundError when deleting a different creator category', async () => {

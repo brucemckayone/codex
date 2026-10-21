@@ -717,9 +717,14 @@ export class IdentityService extends BaseService {
       // ended in every organisation (owner decision AGR-09, "End them like a
       // removal"), in one transaction. Money earned before is still paid; no
       // email, since the address is scrubbed here.
-      const { endedAgreements, withdrawnProposals } = await this.db.transaction(
-        async (tx) => {
+      const { endedAgreements, withdrawnProposals, droppedAvatarUrl } =
+        await this.db.transaction(async (tx) => {
           const now = new Date();
+          // The avatar the scrub drops, so its files can go after the commit.
+          const before = await tx.query.users.findFirst({
+            where: and(eq(users.id, userId), whereNotDeleted(users)),
+            columns: { avatarUrl: true },
+          });
           const [deleted] = await tx
             .update(users)
             .set({
@@ -750,9 +755,12 @@ export class IdentityService extends BaseService {
             everyOrganisation: true,
             reason: ACCOUNT_DELETED_TERMINATION_REASON,
           });
-          return { endedAgreements: ended, withdrawnProposals: withdrawn };
-        }
-      );
+          return {
+            endedAgreements: ended,
+            withdrawnProposals: withdrawn,
+            droppedAvatarUrl: before?.avatarUrl ?? null,
+          };
+        });
 
       this.obs.info('User account soft-deleted', {
         userId,
@@ -764,6 +772,12 @@ export class IdentityService extends BaseService {
       // creators list of every org that listed this user, which anyone can
       // read, until those are invalidated too (Codex-kk9nv.7).
       await this.invalidateUserSurfaces(userId, 'deleteAccount');
+
+      // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
+      // carries this user's id (Codex-kk9nv.14). Deleted after the commit, so
+      // a refused or failed deletion keeps them. A failed delete is recorded
+      // for the sweep, never thrown.
+      await this.imageService().deleteDroppedAvatar(userId, droppedAvatarUrl);
 
       // Every session this user holds, so the caller can clear the cached
       // copies. Read AFTER the tombstone lands: a session created between the

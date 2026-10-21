@@ -54,10 +54,12 @@ const mockR2Service = {
 
 // Mock ImageProcessingService - use a factory that creates instances with mock methods
 const mockProcessUserAvatar = vi.fn();
+const mockDeleteDroppedAvatar = vi.fn();
 
 vi.mock('@codex/image-processing', () => ({
   ImageProcessingService: class {
     processUserAvatar = mockProcessUserAvatar;
+    deleteDroppedAvatar = mockDeleteDroppedAvatar;
   },
   // Preserve other exports
   extractMimeType: (mimeType: string) => mimeType,
@@ -91,6 +93,7 @@ describe('IdentityService', () => {
     mockUpdateWhere.mockClear();
     mockReturning.mockClear();
     mockProcessUserAvatar.mockClear();
+    mockDeleteDroppedAvatar.mockClear();
 
     // Setup DB update mock chain
     (mockDb.update as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -1061,6 +1064,36 @@ describe('IdentityService', () => {
       expect(agreementSet?.terminatedAt).toEqual(
         (mockUpdateSet.mock.calls[0]?.[0] as { deletedAt: Date }).deletedAt
       );
+    });
+
+    it("deletes the avatar's files after the scrub commits (Codex-kk9nv.14)", async () => {
+      // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
+      // carries the user's id. The URL is read in the transaction, before the
+      // UPDATE, and handed over once the transaction has returned.
+      const avatarUrl = `https://cdn-test.revelations.studio/avatars/${userId}/300x300-ffffffff/md.webp`;
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce({ avatarUrl });
+      mockReturning.mockResolvedValue([{ id: userId }]);
+
+      await service.deleteAccount(userId);
+
+      expect(mockDeleteDroppedAvatar).toHaveBeenCalledWith(userId, avatarUrl);
+      // After the scrub: the files go once no row shows them.
+      const scrubbedAt = (mockDb.update as ReturnType<typeof vi.fn>).mock
+        .invocationCallOrder[0];
+      expect(
+        mockDeleteDroppedAvatar.mock.invocationCallOrder[0]
+      ).toBeGreaterThan(scrubbedAt ?? Number.POSITIVE_INFINITY);
+    });
+
+    it('keeps the avatar when the deletion is refused', async () => {
+      mockOwnedOrgsWhere.mockResolvedValue([{ name: 'Studio Alpha' }]);
+
+      await expect(service.deleteAccount(userId)).rejects.toThrow(
+        AccountOwnsOrganizationError
+      );
+      expect(mockDeleteDroppedAvatar).not.toHaveBeenCalled();
     });
 
     it('returns an empty list when the user holds no sessions', async () => {

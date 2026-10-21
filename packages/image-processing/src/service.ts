@@ -816,8 +816,24 @@ export class ImageProcessingService extends BaseService {
       .set({ avatarUrl: null, updatedAt: new Date() })
       .where(eq(schema.users.id, userId));
 
+    await this.deleteDroppedAvatar(userId, user.avatarUrl);
+  }
+
+  /**
+   * Delete an avatar's files after the row dropped `avatarUrl`: a removed
+   * avatar, or a deleted account's scrub (Codex-kk9nv.14). A later upload goes
+   * to a new folder, so nothing would ever overwrite these.
+   *
+   * Only this user's own folder is deleted ({@link ownedStillFolder}), so a
+   * provider's picture is left alone. A failed delete is recorded for the
+   * sweep, never thrown.
+   */
+  async deleteDroppedAvatar(
+    userId: string,
+    droppedUrl: string | null
+  ): Promise<void> {
     const folder = ownedStillFolder(
-      user.avatarUrl,
+      droppedUrl,
       getUserAvatarBaseKey(userId),
       this.r2PublicUrlBase
     );
