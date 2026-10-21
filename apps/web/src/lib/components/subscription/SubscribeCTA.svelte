@@ -26,6 +26,7 @@
     membership counts server-side.
 -->
 <script lang="ts">
+  import { getThumbnailSrcset } from '$lib/utils/image';
   import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
   import {
     Avatar,
@@ -368,8 +369,11 @@
                 >
                   <span class="subscribe-cta__preview-thumb">
                     {#if item.thumbnail}
+                      <!-- 144px at 16:9 (Codex-kk9nv.3). -->
                       <img
                         src={item.thumbnail}
+                        srcset={getThumbnailSrcset(item.thumbnail) || undefined}
+                        sizes="9rem"
                         alt=""
                         loading="lazy"
                         decoding="async"

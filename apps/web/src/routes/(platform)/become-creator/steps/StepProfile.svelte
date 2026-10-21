@@ -11,6 +11,7 @@
   @prop onSkip  Advance without saving.
 -->
 <script lang="ts">
+  import { getThumbnailUrl } from '$lib/utils/image';
   import { untrack } from 'svelte';
   import { Alert, Button } from '$lib/components/ui';
   import Input from '$lib/components/ui/Input/Input.svelte';
@@ -106,7 +107,7 @@
   <div class="avatar">
     <div class="avatar__preview" aria-hidden="true">
       {#if avatarUrl}
-        <img src={avatarUrl} alt="" class="avatar__img" />
+        <img src={getThumbnailUrl(avatarUrl, 'sm')} alt="" class="avatar__img" />
       {:else}
         <span class="avatar__placeholder"></span>
       {/if}

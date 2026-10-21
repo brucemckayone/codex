@@ -21,6 +21,7 @@
   @prop {number}           [limit=10]          Display cap.
 -->
 <script lang="ts">
+  import { getThumbnailUrl } from '$lib/utils/image';
   import type { TopContentItem } from '@codex/admin';
   import { page } from '$app/state';
   import { FilmIcon } from '$lib/components/ui/Icon';
@@ -143,7 +144,7 @@
                 {#if item.thumbnailUrl}
                   <img
                     class="thumb-img"
-                    src={item.thumbnailUrl}
+                    src={getThumbnailUrl(item.thumbnailUrl, 'sm')}
                     alt=""
                     loading="lazy"
                   />

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getContext, onMount } from 'svelte';
   import type { HTMLImgAttributes } from 'svelte/elements';
+  import { getThumbnailUrl } from '$lib/utils/image';
 
   interface Props extends HTMLImgAttributes {}
 
@@ -10,6 +11,16 @@
     onLoad: () => void;
     onError: () => void;
   }>('AVATAR');
+
+  // Every avatar is drawn at 96px or less, so its `sm` (200px) is sharp up
+  // to 2x and a fraction of the 800px `lg` every avatar URL names
+  // (Codex-kk9nv.3; owner: "A plain sm"). An OAuth or external URL has no
+  // stored sizes and is left as it is.
+  const src = $derived(
+    typeof restProps.src === 'string'
+      ? getThumbnailUrl(restProps.src, 'sm')
+      : restProps.src
+  );
 
   let imgEl: HTMLImageElement;
 
@@ -29,6 +40,7 @@
   onload={onLoad}
   onerror={onError}
   {...restProps}
+  {src}
   alt={restProps.alt || "User avatar"}
 />
 

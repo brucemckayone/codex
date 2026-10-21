@@ -23,6 +23,7 @@
   Props mirror the WP-7 spec in Codex-s80r6.
 -->
 <script lang="ts">
+  import { getThumbnailUrl } from '$lib/utils/image';
   import {
     type AgreementProposal,
     type CreatorOrganizationAgreement,
@@ -184,7 +185,7 @@
     <div class="agreement-card__identity">
       <div class="agreement-card__avatar" aria-hidden="true">
         {#if creator.avatarUrl}
-          <img src={creator.avatarUrl} alt="" loading="lazy" />
+          <img src={getThumbnailUrl(creator.avatarUrl, 'sm')} alt="" loading="lazy" />
         {:else}
           <span class="agreement-card__avatar-fallback">{getInitials(creator.name)}</span>
         {/if}

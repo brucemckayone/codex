@@ -15,6 +15,7 @@
   (which carries server ids for newly-added stages).
 -->
 <script lang="ts">
+  import { getThumbnailUrl } from '$lib/utils/image';
   import { beforeNavigate } from '$app/navigation';
   import { page } from '$app/state';
   import type { CurriculumContentOption, EditorCurriculum, JourneyContentType } from '$lib/page-builder';
@@ -585,7 +586,7 @@
             <div class="media-slot">
               <span class="media-slot__th">
                 {#if selPractice.thumbnailUrl}
-                  <img src={selPractice.thumbnailUrl} alt="" />
+                  <img src={getThumbnailUrl(selPractice.thumbnailUrl, 'sm')} alt="" />
                 {:else}
                   <Glyph size={18} />
                 {/if}

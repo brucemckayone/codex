@@ -38,6 +38,7 @@
   @prop {string} [class] - Optional class forwarded to the root element of each conditional branch
 -->
 <script lang="ts">
+  import { getThumbnailUrl } from '$lib/utils/image';
   import type { DeparturePreview, OrgMemberItem } from '$lib/types';
   import * as Table from '$lib/components/ui/Table';
   import Badge from '$lib/components/ui/Badge/Badge.svelte';
@@ -218,7 +219,7 @@
                 <div class="avatar" aria-hidden="true">
                   {#if member.avatarUrl}
                     <img
-                      src={member.avatarUrl}
+                      src={getThumbnailUrl(member.avatarUrl, 'sm')}
                       alt=""
                       class="avatar-img"
                       loading="lazy"

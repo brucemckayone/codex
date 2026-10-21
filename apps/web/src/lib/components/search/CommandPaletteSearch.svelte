@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getThumbnailUrl } from '$lib/utils/image';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
@@ -360,7 +361,7 @@
 								onclick={() => selectItem({ type: 'content', item, index: i })}
 							>
 								{#if item.thumbnailUrl}
-									<img src={item.thumbnailUrl} alt="" class="palette__thumb" />
+									<img src={getThumbnailUrl(item.thumbnailUrl, 'sm')} alt="" class="palette__thumb" />
 								{:else}
 									<div class="palette__thumb palette__thumb--empty"></div>
 								{/if}

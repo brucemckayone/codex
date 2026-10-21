@@ -14,6 +14,7 @@
   @prop onPublishToggle  Handler for publish toggle
 -->
 <script lang="ts">
+  import { getThumbnailSrcset } from '$lib/utils/image';
   import type { ContentWithRelations } from '$lib/types';
   import {
     FilmIcon,
@@ -76,7 +77,15 @@
 <article class="row" data-status={statusVariant}>
   <div class="row-thumb">
     {#if item.thumbnailUrl}
-      <img src={item.thumbnailUrl} alt="" class="thumb-img" loading="lazy" />
+      <!-- 9-12rem wide, 6rem on a phone (Codex-kk9nv.3). -->
+      <img
+        src={item.thumbnailUrl}
+        srcset={getThumbnailSrcset(item.thumbnailUrl) || undefined}
+        sizes="(max-width: 39.9375rem) 6rem, 12rem"
+        alt=""
+        class="thumb-img"
+        loading="lazy"
+      />
     {:else}
       <span class="thumb-placeholder">
         <typeMeta.icon size={24} />

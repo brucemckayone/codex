@@ -11,6 +11,7 @@
   total window — Stripe webhooks occasionally take 5-30s in production).
 -->
 <script lang="ts">
+  import { getThumbnailSrcset } from '$lib/utils/image';
   import { invalidate } from '$app/navigation';
   import * as m from '$paraglide/messages';
   import { formatPrice } from '$lib/utils/format';
@@ -110,8 +111,11 @@
       <div class="checkout-success__preview-card">
         {#if content.thumbnailUrl}
           <div class="checkout-success__content-preview">
+            <!-- At most 280px at 16:9 (Codex-kk9nv.3). -->
             <img
               src={content.thumbnailUrl}
+              srcset={getThumbnailSrcset(content.thumbnailUrl) || undefined}
+              sizes="min(17.5rem, calc(100vw - 2rem))"
               alt={content.title}
               class="checkout-success__thumbnail"
             />
