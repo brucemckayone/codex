@@ -65,17 +65,47 @@ export interface VariantKeys {
 }
 
 /**
- * The three variant keys under a still's BASE key (`categories/{id}/cover`,
- * `courses/{id}/hero`, `landing-pages/{id}/images/{id}`, ...). One definition,
- * so the upload that writes the objects and the cleanup that may delete them
- * can never disagree on a key.
+ * Every file a still keeps (Codex-kk9nv.5): its three sizes, `xl` at
+ * min(1600, width), and the upload as it came (`original`, no extension; its
+ * content type is stored on the object, so a re-upload in another format
+ * overwrites it in place, like the sizes, and never orphans the old file).
  */
-export function stillVariantKeys(baseKey: string): VariantKeys {
+export interface StillKeys extends VariantKeys {
+  xl: string;
+  original: string;
+}
+
+/**
+ * Every key under a still's BASE key (`categories/{id}/cover`,
+ * `courses/{id}/hero`, `avatars/{userId}`, ...). One definition, so the upload
+ * that writes the objects and the cleanup that may delete them can never
+ * disagree on a key.
+ */
+export function stillVariantKeys(baseKey: string): StillKeys {
   return {
     sm: `${baseKey}/sm.webp`,
     md: `${baseKey}/md.webp`,
     lg: `${baseKey}/lg.webp`,
+    xl: `${baseKey}/xl.webp`,
+    original: `${baseKey}/original`,
   };
+}
+
+/**
+ * Every key in a set as a flat list, for the cleanup paths: the three sizes,
+ * then `xl` and `original` when the set has them. A list that named only
+ * sm/md/lg would leak the other two on every delete.
+ */
+export function variantKeyList(
+  keys: VariantKeys & { xl?: string; original?: string }
+): string[] {
+  return [
+    keys.sm,
+    keys.md,
+    keys.lg,
+    ...(keys.xl ? [keys.xl] : []),
+    ...(keys.original ? [keys.original] : []),
+  ];
 }
 
 /** WebP buffers for the three size variants, and a page image's `xl`
@@ -130,31 +160,67 @@ const IMAGE_VARIANT_PUT_OPTIONS = {
  * never appears in 5xx-rate monitoring.
  */
 export async function uploadImageVariants(params: {
-  /** `xl` is a page image's alone, and is put only when both sides carry it. */
-  keys: VariantKeys & { xl?: string };
+  /** `xl` and `original` are each put only when both sides carry them. */
+  keys: VariantKeys & { xl?: string; original?: string };
   variants: VariantBuffers;
+  /** The upload as it came, kept so any later size or format can be made. */
+  original?: { body: Uint8Array; contentType: string };
   r2: R2Service;
   failureLabel: string;
   obs: Pick<Required<Logger>, 'error'>;
 }): Promise<void> {
-  const { keys, variants, r2, failureLabel, obs } = params;
+  const { keys, variants, original, r2, failureLabel, obs } = params;
 
   // Zipped rather than indexed so a rejection can be paired back to its key
   // and size without an index assertion (`noNonNullAssertion` is an error in
   // production source, and on a sparse-looking lookup it hides a real hole).
   const targets = [
-    { size: 'sm', key: keys.sm, body: variants.sm },
-    { size: 'md', key: keys.md, body: variants.md },
-    { size: 'lg', key: keys.lg, body: variants.lg },
+    {
+      size: 'sm',
+      key: keys.sm,
+      body: variants.sm,
+      options: IMAGE_VARIANT_PUT_OPTIONS,
+    },
+    {
+      size: 'md',
+      key: keys.md,
+      body: variants.md,
+      options: IMAGE_VARIANT_PUT_OPTIONS,
+    },
+    {
+      size: 'lg',
+      key: keys.lg,
+      body: variants.lg,
+      options: IMAGE_VARIANT_PUT_OPTIONS,
+    },
     ...(keys.xl && variants.xl
-      ? [{ size: 'xl', key: keys.xl, body: variants.xl } as const]
+      ? [
+          {
+            size: 'xl',
+            key: keys.xl,
+            body: variants.xl,
+            options: IMAGE_VARIANT_PUT_OPTIONS,
+          },
+        ]
+      : []),
+    ...(keys.original && original
+      ? [
+          {
+            size: 'original',
+            key: keys.original,
+            body: original.body,
+            // The same overwritten-in-place cache policy, in the upload's own type.
+            options: {
+              ...IMAGE_VARIANT_PUT_OPTIONS,
+              contentType: original.contentType,
+            },
+          },
+        ]
       : []),
   ];
 
   const uploadResults = await Promise.allSettled(
-    targets.map((target) =>
-      r2.put(target.key, target.body, {}, IMAGE_VARIANT_PUT_OPTIONS)
-    )
+    targets.map((target) => r2.put(target.key, target.body, {}, target.options))
   );
 
   const rejected = targets.flatMap((target, i) => {
@@ -209,8 +275,8 @@ export async function uploadImageVariants(params: {
  * "user-avatar").
  *
  * `keys` is `string[]` rather than `VariantKeys` because it once served a
- * 1-key SVG flow as well; every surviving caller passes
- * `[keys.sm, keys.md, keys.lg]`.
+ * 1-key SVG flow as well; every surviving caller passes `variantKeyList(keys)`,
+ * which names the sizes, `xl` and `original`.
  */
 export async function withDbUpdateOrphanCleanup<T>(
   params: {

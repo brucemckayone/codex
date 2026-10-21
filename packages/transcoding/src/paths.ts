@@ -262,7 +262,22 @@ export function getContentThumbnailKey(
   contentId: string,
   size: string
 ): string {
-  return `${creatorId}/${PATH_CONFIG.CONTENT_THUMBNAILS_FOLDER}/${contentId}/${size}.webp`;
+  return `${getContentThumbnailBaseKey(creatorId, contentId)}/${size}.webp`;
+}
+
+/**
+ * The folder a content thumbnail's files live in: its sizes
+ * (`{size}.webp`) and its kept original (`original`, Codex-kk9nv.5).
+ *
+ * @example
+ * getContentThumbnailBaseKey('user-123', 'content-456')
+ * // Returns: 'user-123/content-thumbnails/content-456'
+ */
+export function getContentThumbnailBaseKey(
+  creatorId: string,
+  contentId: string
+): string {
+  return `${creatorId}/${PATH_CONFIG.CONTENT_THUMBNAILS_FOLDER}/${contentId}`;
 }
 
 /**
@@ -300,7 +315,19 @@ export function getOrgLogoKey(creatorId: string, size: string): string {
  * // Returns: 'avatars/user-123/sm.webp'
  */
 export function getUserAvatarKey(userId: string, size: string): string {
-  return `${PATH_CONFIG.AVATARS_FOLDER}/${userId}/${size}.webp`;
+  return `${getUserAvatarBaseKey(userId)}/${size}.webp`;
+}
+
+/**
+ * The folder a user's avatar files live in: its sizes (`{size}.webp`) and
+ * its kept original (`original`, Codex-kk9nv.5).
+ *
+ * @example
+ * getUserAvatarBaseKey('user-123')
+ * // Returns: 'avatars/user-123'
+ */
+export function getUserAvatarBaseKey(userId: string): string {
+  return `${PATH_CONFIG.AVATARS_FOLDER}/${userId}`;
 }
 
 /**

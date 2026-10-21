@@ -12,7 +12,10 @@ import {
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
-import { getContentThumbnailKey, getUserAvatarKey } from '@codex/transcoding';
+import {
+  getContentThumbnailBaseKey,
+  getUserAvatarBaseKey,
+} from '@codex/transcoding';
 import {
   extractMimeType,
   MAX_IMAGE_SIZE_BYTES,
@@ -25,12 +28,13 @@ import {
   pageImageObjectKeys,
   pageImageVariantKeys,
 } from './page-image-keys';
-import { processImageVariants, processPageImageVariants } from './processor';
+import { type PageImageVariants, processPageImageVariants } from './processor';
 import {
   recordOrphansOrLog,
+  type StillKeys,
   stillVariantKeys,
   uploadImageVariants,
-  type VariantKeys,
+  variantKeyList,
   withDbUpdateOrphanCleanup,
 } from './utils/upload-pipeline';
 
@@ -38,6 +42,9 @@ export interface ImageProcessingResult {
   url: string;
   size: number;
   mimeType: string;
+  /** The source picture's size in pixels, upright (Codex-kk9nv.5). */
+  width: number;
+  height: number;
 }
 
 interface ImageProcessingServiceConfig extends ServiceConfig {
@@ -51,7 +58,7 @@ interface ImageProcessingServiceConfig extends ServiceConfig {
  *
  * RASTER ONLY, with no opt-out. This took an `allowSvg` flag until Codex-z520h
  * removed `processOrgLogo`, the only caller that ever passed `true`; every
- * other caller feeds `processImageVariants`, which decodes via Photon and
+ * other caller feeds `processPageImageVariants`, which decodes via Photon and
  * cannot rasterise SVG, so an SVG would have failed inside the Wasm decoder
  * rather than at this boundary. A flag no caller can set is an unreachable
  * branch in a security validator, so it is gone rather than defaulted. SVG
@@ -108,9 +115,29 @@ async function validateImageFile(
   return { buffer, mimeType };
 }
 
-/** Helper: collect a `VariantKeys` object as a flat `string[]` in sm/md/lg order. */
-function variantKeyList(keys: VariantKeys): string[] {
-  return [keys.sm, keys.md, keys.lg];
+/**
+ * A still ready to store (Codex-kk9nv.5): decoded once and upright, its sizes
+ * made up to `xl` = min(1600, width), its own size measured, and the upload
+ * kept as it came.
+ */
+interface PreparedStill {
+  variants: PageImageVariants['variants'];
+  width: number;
+  height: number;
+  original: { body: Uint8Array; contentType: string };
+}
+
+/** Validate (MIME type, size, magic bytes; raster only) and prepare a still. */
+async function prepareStill(file: File): Promise<PreparedStill> {
+  const { buffer, mimeType } = await validateImageFile(file);
+  const inputBuffer = new Uint8Array(buffer);
+  const { variants, width, height } = processPageImageVariants(inputBuffer);
+  return {
+    variants,
+    width,
+    height,
+    original: { body: inputBuffer, contentType: mimeType },
+  };
 }
 
 /** Orphan classification for the four stills whose DB write the caller owns. */
@@ -137,6 +164,22 @@ export class ImageProcessingService extends BaseService {
     this.orphanedFileService = config.orphanedFileService;
   }
 
+  /** Put every file a still keeps: its four sizes and its original. */
+  private putStill(
+    keys: StillKeys,
+    still: PreparedStill,
+    failureLabel: string
+  ): Promise<void> {
+    return uploadImageVariants({
+      keys,
+      variants: still.variants,
+      original: still.original,
+      r2: this.r2Service,
+      failureLabel,
+      obs: this.obs,
+    });
+  }
+
   /**
    * Process and store content thumbnail.
    *
@@ -159,18 +202,10 @@ export class ImageProcessingService extends BaseService {
     creatorId: string,
     file: File
   ): Promise<ImageProcessingResult> {
-    // Validate image (MIME type, size, magic bytes)
-    const { buffer } = await validateImageFile(file);
-
-    // Process variants (HEAD logic)
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
-
-    const keys: VariantKeys = {
-      sm: getContentThumbnailKey(creatorId, contentId, 'sm'),
-      md: getContentThumbnailKey(creatorId, contentId, 'md'),
-      lg: getContentThumbnailKey(creatorId, contentId, 'lg'),
-    };
+    const still = await prepareStill(file);
+    const keys = stillVariantKeys(
+      getContentThumbnailBaseKey(creatorId, contentId)
+    );
 
     // Use LG variant as determining URL for DB
     const url = `${this.r2PublicUrlBase}/${keys.lg}`;
@@ -195,13 +230,7 @@ export class ImageProcessingService extends BaseService {
       columns: { thumbnailUrl: true },
     });
 
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Thumbnail',
-      obs: this.obs,
-    });
+    await this.putStill(keys, still, 'Thumbnail');
 
     // Update content record — cleanup R2 if DB fails
     await withDbUpdateOrphanCleanup(
@@ -220,7 +249,11 @@ export class ImageProcessingService extends BaseService {
       async () => {
         await this.db
           .update(schema.content)
-          .set({ thumbnailUrl: url })
+          .set({
+            thumbnailUrl: url,
+            thumbnailWidth: still.width,
+            thumbnailHeight: still.height,
+          })
           .where(
             and(
               eq(schema.content.id, contentId),
@@ -232,8 +265,10 @@ export class ImageProcessingService extends BaseService {
 
     return {
       url,
-      size: variants.lg.byteLength,
+      size: still.variants.lg.byteLength,
       mimeType: 'image/webp',
+      width: still.width,
+      height: still.height,
     };
   }
 
@@ -307,31 +342,26 @@ export class ImageProcessingService extends BaseService {
     url: string;
     size: number;
     mimeType: string;
+    width: number;
+    height: number;
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
-    const { buffer } = await validateImageFile(file);
-
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
+    const still = await prepareStill(file);
 
     const coverImageKey = `categories/${categoryId}/cover`;
     const keys = stillVariantKeys(coverImageKey);
 
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Category cover',
-      obs: this.obs,
-    });
+    await this.putStill(keys, still, 'Category cover');
 
     return {
       coverImageKey,
       // Return the md variant — the public topic list serves `${key}/md.webp`,
       // so the immediately-usable URL stays consistent with what renders.
       url: `${this.r2PublicUrlBase}/${keys.md}`,
-      size: variants.md.byteLength,
+      size: still.variants.md.byteLength,
       mimeType: 'image/webp',
+      width: still.width,
+      height: still.height,
     };
   }
 
@@ -363,31 +393,26 @@ export class ImageProcessingService extends BaseService {
     url: string;
     size: number;
     mimeType: string;
+    width: number;
+    height: number;
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
-    const { buffer } = await validateImageFile(file);
-
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
+    const still = await prepareStill(file);
 
     const coverImageKey = `courses/${courseId}/cover`;
     const keys = stillVariantKeys(coverImageKey);
 
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Course cover',
-      obs: this.obs,
-    });
+    await this.putStill(keys, still, 'Course cover');
 
     return {
       coverImageKey,
       // The md variant — journey cards serve `${key}/md.webp`, so the
       // immediately-usable URL matches what renders.
       url: `${this.r2PublicUrlBase}/${keys.md}`,
-      size: variants.md.byteLength,
+      size: still.variants.md.byteLength,
       mimeType: 'image/webp',
+      width: still.width,
+      height: still.height,
     };
   }
 
@@ -412,12 +437,11 @@ export class ImageProcessingService extends BaseService {
    *   • The returned `url` is the **lg** variant, not `md`. A cover fills a card;
    *     a hero paints edge to edge, and handing back the 400px variant would show
    *     the creator a soft preview of the image the page will not use.
-   *   • `lg` is 800px wide (`VARIANT_WIDTHS`), which is the widest this pipeline
-   *     produces. On a 1440px viewport a full-bleed hero upscales it. That is a
-   *     known limit of the shared variant ladder, NOT of this key: the ladder is
-   *     the same one every other still in the product rides, and widening it
-   *     would re-encode every existing image. Recorded here so the next reader
-   *     does not mistake the softness for a bug in the hero path.
+   *   • Since Codex-kk9nv.5 every still also gets `xl` at min(1600, width), so
+   *     a full-bleed hero has a file to draw at 1440 instead of stretching the
+   *     800px `lg`. A hero uploaded before that has no `xl` and no recorded
+   *     size, and the web draws it from sm/md/lg as before. The returned `url`
+   *     stays `lg`, the one size every hero, old or new, has.
    *
    * Keys are namespaced by `courseId` (`courses/{id}/hero/{size}.webp`) and are
    * therefore deterministic: re-uploading OVERWRITES in place, so replacing a
@@ -436,6 +460,8 @@ export class ImageProcessingService extends BaseService {
     url: string;
     size: number;
     mimeType: string;
+    width: number;
+    height: number;
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
     //
@@ -445,29 +471,22 @@ export class ImageProcessingService extends BaseService {
     // DOES accept SVG — `BrandingSettingsService.uploadLogo` in
     // `@codex/platform-settings` — stores the sanitized markup verbatim instead
     // of producing variants.
-    const { buffer } = await validateImageFile(file);
-
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
+    const still = await prepareStill(file);
 
     const heroImageKey = `courses/${courseId}/hero`;
     const keys = stillVariantKeys(heroImageKey);
 
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Course hero',
-      obs: this.obs,
-    });
+    await this.putStill(keys, still, 'Course hero');
 
     return {
       heroImageKey,
       // The lg variant — the hero serves `${key}/lg.webp`, so the
       // immediately-usable URL matches what renders (see the doc comment).
       url: `${this.r2PublicUrlBase}/${keys.lg}`,
-      size: variants.lg.byteLength,
+      size: still.variants.lg.byteLength,
       mimeType: 'image/webp',
+      width: still.width,
+      height: still.height,
     };
   }
 
@@ -523,6 +542,8 @@ export class ImageProcessingService extends BaseService {
     url: string;
     size: number;
     mimeType: string;
+    width: number;
+    height: number;
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
     //
@@ -534,29 +555,22 @@ export class ImageProcessingService extends BaseService {
     // `BrandingSettingsService.uploadLogo` in `@codex/platform-settings` —
     // stores the sanitized markup verbatim instead of producing variants, and
     // that is the shape a future vector signature would have to take.
-    const { buffer } = await validateImageFile(file);
-
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
+    const still = await prepareStill(file);
 
     const signatureImageKey = `courses/${courseId}/signature`;
     const keys = stillVariantKeys(signatureImageKey);
 
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Course signature',
-      obs: this.obs,
-    });
+    await this.putStill(keys, still, 'Course signature');
 
     return {
       signatureImageKey,
       // The md variant — the letter serves `${key}/md.webp`, so the
       // immediately-usable URL matches what renders (see the doc comment).
       url: `${this.r2PublicUrlBase}/${keys.md}`,
-      size: variants.md.byteLength,
+      size: still.variants.md.byteLength,
       mimeType: 'image/webp',
+      width: still.width,
+      height: still.height,
     };
   }
 
@@ -568,17 +582,8 @@ export class ImageProcessingService extends BaseService {
     userId: string,
     file: File
   ): Promise<ImageProcessingResult> {
-    // Validate image (MIME type, size, magic bytes)
-    const { buffer } = await validateImageFile(file);
-
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
-
-    const keys: VariantKeys = {
-      sm: getUserAvatarKey(userId, 'sm'),
-      md: getUserAvatarKey(userId, 'md'),
-      lg: getUserAvatarKey(userId, 'lg'),
-    };
+    const still = await prepareStill(file);
+    const keys = stillVariantKeys(getUserAvatarBaseKey(userId));
 
     const url = `${this.r2PublicUrlBase}/${keys.lg}`;
 
@@ -589,13 +594,7 @@ export class ImageProcessingService extends BaseService {
       columns: { avatarUrl: true },
     });
 
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Avatar',
-      obs: this.obs,
-    });
+    await this.putStill(keys, still, 'Avatar');
 
     // Update user record — cleanup R2 if DB fails
     await withDbUpdateOrphanCleanup(
@@ -613,15 +612,21 @@ export class ImageProcessingService extends BaseService {
       async () => {
         await this.db
           .update(schema.users)
-          .set({ avatarUrl: url })
+          .set({
+            avatarUrl: url,
+            avatarWidth: still.width,
+            avatarHeight: still.height,
+          })
           .where(eq(schema.users.id, userId));
       }
     );
 
     return {
       url,
-      size: variants.lg.byteLength,
+      size: still.variants.lg.byteLength,
       mimeType: 'image/webp',
+      width: still.width,
+      height: still.height,
     };
   }
 
@@ -635,11 +640,11 @@ export class ImageProcessingService extends BaseService {
     contentId: string,
     creatorId: string
   ): Promise<void> {
-    const keys = [
-      getContentThumbnailKey(creatorId, contentId, 'sm'),
-      getContentThumbnailKey(creatorId, contentId, 'md'),
-      getContentThumbnailKey(creatorId, contentId, 'lg'),
-    ];
+    // Every file the thumbnail keeps, xl and the original included; a list
+    // that named only sm/md/lg would leak the other two (Codex-kk9nv.5).
+    const keys = variantKeyList(
+      stillVariantKeys(getContentThumbnailBaseKey(creatorId, contentId))
+    );
 
     // Try to delete from R2, track failures as orphans
     const deleteResults = await Promise.allSettled(
@@ -677,7 +682,7 @@ export class ImageProcessingService extends BaseService {
     // Clear database field regardless of R2 result
     await this.db
       .update(schema.content)
-      .set({ thumbnailUrl: null })
+      .set({ thumbnailUrl: null, thumbnailWidth: null, thumbnailHeight: null })
       .where(
         and(
           eq(schema.content.id, contentId),
@@ -703,12 +708,8 @@ export class ImageProcessingService extends BaseService {
       return; // Nothing to delete
     }
 
-    // Delete all size variants using key helpers
-    const keys = [
-      getUserAvatarKey(userId, 'sm'),
-      getUserAvatarKey(userId, 'md'),
-      getUserAvatarKey(userId, 'lg'),
-    ];
+    // Every file the avatar keeps, xl and the original included (Codex-kk9nv.5).
+    const keys = variantKeyList(stillVariantKeys(getUserAvatarBaseKey(userId)));
 
     // Try to delete from R2, track failures as orphans
     const deleteResults = await Promise.allSettled(
@@ -744,7 +745,12 @@ export class ImageProcessingService extends BaseService {
     // Clear database field regardless of R2 result
     await this.db
       .update(schema.users)
-      .set({ avatarUrl: null, updatedAt: new Date() })
+      .set({
+        avatarUrl: null,
+        avatarWidth: null,
+        avatarHeight: null,
+        updatedAt: new Date(),
+      })
       .where(eq(schema.users.id, userId));
   }
 
@@ -811,23 +817,15 @@ export class ImageProcessingService extends BaseService {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only),
     // same posture and same reason as every still above: the processor
     // decodes via Photon, which cannot rasterise SVG.
-    const { buffer } = await validateImageFile(file);
-
-    const inputBuffer = new Uint8Array(buffer);
-    const { variants, width, height } = processPageImageVariants(inputBuffer);
+    const still = await prepareStill(file);
+    const { variants, width, height } = still;
 
     const key = pageImageKey(pageId, imageId);
     const keys = pageImageVariantKeys(key);
     const objectKeys = pageImageObjectKeys(key);
 
     try {
-      await uploadImageVariants({
-        keys,
-        variants,
-        r2: this.r2Service,
-        failureLabel: 'Page image',
-        obs: this.obs,
-      });
+      await this.putStill(keys, still, 'Page image');
     } catch (error) {
       // `uploadImageVariants` deletes nothing on a partial failure, which is
       // right for a deterministic key: a retry re-puts the same objects and
