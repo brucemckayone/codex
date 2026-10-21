@@ -92,13 +92,16 @@ const createMockDb = () =>
     }),
   }) as unknown as Database;
 
-// Mock processor
+// Mock processor. Every still goes through the page-image pipeline
+// (Codex-kk9nv.5).
 vi.mock('../processor', () => ({
-  processImageVariants: vi.fn(),
-  processPageImageVariants: vi.fn(),
+  processStillVariants: vi.fn(),
 }));
 
-/** A page image's four variants, as `processPageImageVariants` returns them. */
+/**
+ * A still's four sizes and its source's size, as `processStillVariants`
+ * returns them — for every still, not only page images (Codex-kk9nv.5).
+ */
 function pageVariants(
   sizes: { sm?: number[]; md?: number[]; lg?: number[]; xl?: number[] } = {},
   width = 2400,
@@ -114,6 +117,45 @@ function pageVariants(
     width,
     height,
   };
+}
+
+/** The `.set()` mock behind the n-th `db.update()` call on a `createMockDb()`. */
+function setMockOf(db: Database, call = 0): Mock {
+  const update = vi.mocked(db.update) as unknown as Mock;
+  return (update.mock.results[call]?.value as { set: Mock }).set;
+}
+
+/** The keys `R2Service.put` received, in call order. */
+function putKeys(r2: R2Service): string[] {
+  return vi.mocked(r2.put).mock.calls.map((call) => call[0] as string);
+}
+
+/** The keys `R2Service.delete` received, in call order. */
+function deleteKeys(r2: R2Service): string[] {
+  return vi.mocked(r2.delete).mock.calls.map((call) => call[0] as string);
+}
+
+/** A still folder's four files, in put order. */
+function folderFiles(folder: string): string[] {
+  return ['sm', 'md', 'lg', 'xl'].map((size) => `${folder}/${size}.webp`);
+}
+
+/**
+ * The one new folder an upload wrote under `base`: every put is sm/md/lg/xl
+ * in `{base}/{width}x{height}-{8 hex}` (Codex-kk9nv.5).
+ */
+function newFolderOf(
+  r2: R2Service,
+  base: string,
+  size: { width: number; height: number }
+): string {
+  const keys = putKeys(r2);
+  const folder = keys[0]?.replace(/\/sm\.webp$/, '') ?? '';
+  expect(folder).toMatch(
+    new RegExp(`^${base}/${size.width}x${size.height}-[0-9a-f]{8}$`)
+  );
+  expect(keys).toEqual(folderFiles(folder));
+  return folder;
 }
 
 describe('ImageProcessingService', () => {
@@ -158,15 +200,13 @@ describe('ImageProcessingService', () => {
   });
 
   describe('processContentThumbnail', () => {
-    it('should process raster image and upload three variants', async () => {
+    it('should process raster image and upload four sizes', async () => {
       const file = createTestImageFile('image/png', 'test.png');
 
       // Mock processing success
-      vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-        sm: new Uint8Array([1]),
-        md: new Uint8Array([2]),
-        lg: new Uint8Array([3]),
-      });
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants({}, 1200, 900)
+      );
 
       const result = await service.processContentThumbnail(
         'content-1',
@@ -174,13 +214,18 @@ describe('ImageProcessingService', () => {
         file
       );
 
-      expect(processor.processImageVariants).toHaveBeenCalled();
+      expect(processor.processStillVariants).toHaveBeenCalled();
 
-      expect(result.url).toContain('user-1/content-thumbnails/content-1');
-      expect(result.url).toContain('test.r2.dev'); // R2 public URL base
+      // sm, md, lg, xl in a new folder named for the source's upright size
+      // (Codex-kk9nv.5), and the URL is that folder's lg.
+      const folder = newFolderOf(
+        testMockR2Service,
+        'user-1/content-thumbnails/content-1',
+        { width: 1200, height: 900 }
+      );
+      expect(result.url).toBe(`https://test.r2.dev/${folder}/lg.webp`);
       expect(result.size).toBe(1); // lg variant is Uint8Array([3]), byteLength is 1
       expect(result.mimeType).toBe('image/webp'); // Stored as WebP after processing
-      expect(testMockR2Service.put).toHaveBeenCalledTimes(3);
 
       // Verify one of the calls includes cache headers
       // R2Service.put signature: (key, body, metadata, httpMetadata)
@@ -190,102 +235,150 @@ describe('ImageProcessingService', () => {
         {}, // Empty metadata object (not undefined)
         {
           contentType: 'image/webp',
-          cacheControl: 'public, max-age=3600, must-revalidate',
+          cacheControl: 'public, max-age=31536000, immutable',
         }
       );
     });
 
-    it('should update database with thumbnail URL', async () => {
+    it("should update database with the new folder's lg URL", async () => {
       const file = createTestImageFile('image/jpeg', 'test.jpg');
 
-      vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-        sm: new Uint8Array([1]),
-        md: new Uint8Array([2]),
-        lg: new Uint8Array([3]),
-      });
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants({}, 1200, 900)
+      );
 
       await service.processContentThumbnail('content-1', 'user-1', file);
 
       expect(testMockDb.update).toHaveBeenCalled();
+      // The size travels IN the URL (Codex-kk9nv.5), so a row can never carry
+      // one image's URL with another's size: there is no column to drift.
+      expect(setMockOf(testMockDb)).toHaveBeenCalledWith({
+        thumbnailUrl: expect.stringMatching(
+          /^https:\/\/test\.r2\.dev\/user-1\/content-thumbnails\/content-1\/1200x900-[0-9a-f]{8}\/lg\.webp$/
+        ),
+      });
     });
 
-    it('re-upload overwrites the SAME R2 keys — no orphan on replace [Codex-ko8ko]', async () => {
-      // Thumbnails live at deterministic keys derived from (creatorId,
-      // contentId), so replacing one OVERWRITES in place: the second upload
-      // must hit the exact same three keys as the first, leaving no stale
-      // object behind. This locks the invariant the service's own comment
-      // warns future devs not to break (do NOT switch to timestamped/hashed
-      // keys without adding an explicit delete-previous step).
-      const put = vi.mocked(testMockR2Service.put);
-      vi.mocked(processor.processImageVariants).mockReturnValue({
-        sm: new Uint8Array([1]),
-        md: new Uint8Array([2]),
-        lg: new Uint8Array([3]),
-      });
+    it('deletes the thumbnail it replaced once the row points at the new one', async () => {
+      // The row holds a thumbnail from before kk9nv.5 (fixed keys at the base).
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants()
+      );
 
       await service.processContentThumbnail(
         'content-1',
         'user-1',
+        createTestImageFile('image/png', 'new.png')
+      );
+
+      expect(deleteKeys(testMockR2Service)).toEqual(
+        folderFiles('user-1/content-thumbnails/content-1')
+      );
+      // Inline and AFTER the write ("Inline, same request"): a delete before
+      // it would leave the row pointing at nothing if the write then failed.
+      const writeOrder = vi.mocked(testMockDb.update).mock
+        .invocationCallOrder[0];
+      const firstDelete = vi.mocked(testMockR2Service.delete).mock
+        .invocationCallOrder[0];
+      expect(firstDelete).toBeGreaterThan(writeOrder ?? Infinity);
+    });
+
+    it("never deletes a poster frame the row points at — it is the transcoding pipeline's", async () => {
+      mockDbQuery.content.findFirst.mockResolvedValueOnce({
+        thumbnailUrl: 'https://test.r2.dev/user-1/media-thumbnails/m-1/lg.webp',
+      });
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants()
+      );
+
+      await service.processContentThumbnail(
+        'content-1',
+        'user-1',
+        createTestImageFile('image/png', 'new.png')
+      );
+
+      expect(testMockR2Service.delete).not.toHaveBeenCalled();
+    });
+
+    it('a re-upload writes a NEW folder and deletes the first — no orphan on replace [Codex-ko8ko]', async () => {
+      // Each upload gets its own folder (Codex-kk9nv.5), so a replacement
+      // never overwrites in place: no cache can serve the old bytes at the new
+      // URL. The no-orphan half of Codex-ko8ko is kept by the inline delete of
+      // the folder the row pointed at. The second upload is a WebP where the
+      // first was a PNG: every size is re-encoded to WebP, so no key follows
+      // the upload's type.
+      const put = vi.mocked(testMockR2Service.put);
+      vi.mocked(processor.processStillVariants).mockReturnValue(pageVariants());
+
+      const first = await service.processContentThumbnail(
+        'content-1',
+        'user-1',
         createTestImageFile('image/png', 'first.png')
       );
-      const firstKeys = put.mock.calls.map((call) => call[0]);
+      const firstKeys = putKeys(testMockR2Service);
 
       put.mockClear();
+      vi.mocked(testMockR2Service.delete).mockClear();
+      // The row now holds the first upload.
+      mockDbQuery.content.findFirst.mockResolvedValueOnce({
+        thumbnailUrl: first.url,
+      });
 
       await service.processContentThumbnail(
         'content-1',
         'user-1',
         createTestImageFile('image/webp', 'second.webp')
       );
-      const secondKeys = put.mock.calls.map((call) => call[0]);
+      const secondKeys = putKeys(testMockR2Service);
 
-      expect(firstKeys).toHaveLength(3);
-      expect(secondKeys).toEqual(firstKeys);
+      expect(firstKeys).toHaveLength(4);
+      expect(secondKeys.filter((key) => firstKeys.includes(key))).toEqual([]);
+      expect(deleteKeys(testMockR2Service)).toEqual(firstKeys);
     });
   });
 
   describe('processCategoryCover', () => {
-    it('uploads three variants under the category-namespaced base key and returns it', async () => {
+    it('uploads four sizes under the category-namespaced base key and returns it', async () => {
       const file = createTestImageFile('image/png', 'cover.png');
 
-      vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-        sm: new Uint8Array([1]),
-        md: new Uint8Array([2]),
-        lg: new Uint8Array([3, 4, 5]),
-      });
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants({ lg: [3, 4, 5] }, 1600, 1000)
+      );
 
       const result = await service.processCategoryCover('cat-1', file);
 
-      expect(processor.processImageVariants).toHaveBeenCalled();
-      // Returns the BASE key (no variant suffix) for the caller to persist.
-      expect(result.coverImageKey).toBe('categories/cat-1/cover');
+      expect(processor.processStillVariants).toHaveBeenCalled();
+      // Returns the new FOLDER's key (no variant suffix) for the caller to
+      // persist, named for the picture's size (Codex-kk9nv.5).
+      const folder = newFolderOf(testMockR2Service, 'categories/cat-1/cover', {
+        width: 1600,
+        height: 1000,
+      });
+      expect(result.coverImageKey).toBe(folder);
       // md variant drives the returned URL + size (matches the public list,
       // which serves `${coverImageKey}/md.webp`). md = Uint8Array([2]) → len 1.
-      expect(result.url).toBe(
-        'https://test.r2.dev/categories/cat-1/cover/md.webp'
-      );
+      expect(result.url).toBe(`https://test.r2.dev/${folder}/md.webp`);
       expect(result.size).toBe(1);
       expect(result.mimeType).toBe('image/webp');
-      expect(testMockR2Service.put).toHaveBeenCalledTimes(3);
-      expect(testMockR2Service.put).toHaveBeenCalledWith(
-        'categories/cat-1/cover/sm.webp',
-        expect.any(Uint8Array),
-        {},
-        {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=3600, must-revalidate',
-        }
-      );
+      for (const key of folderFiles(folder)) {
+        expect(testMockR2Service.put).toHaveBeenCalledWith(
+          key,
+          expect.any(Uint8Array),
+          {},
+          {
+            contentType: 'image/webp',
+            cacheControl: 'public, max-age=31536000, immutable',
+          }
+        );
+      }
     });
 
     it('does NOT write to the database — the caller persists the key via the service', async () => {
       const file = createTestImageFile('image/jpeg', 'cover.jpg');
 
-      vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-        sm: new Uint8Array([1]),
-        md: new Uint8Array([2]),
-        lg: new Uint8Array([3]),
-      });
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants()
+      );
 
       await service.processCategoryCover('cat-1', file);
 
@@ -294,13 +387,9 @@ describe('ImageProcessingService', () => {
       expect(testMockDb.update).not.toHaveBeenCalled();
     });
 
-    it('re-upload overwrites the SAME keys — deterministic per categoryId, no orphan', async () => {
+    it("each upload is a NEW folder — the caller's write deletes the old one", async () => {
       const put = vi.mocked(testMockR2Service.put);
-      vi.mocked(processor.processImageVariants).mockReturnValue({
-        sm: new Uint8Array([1]),
-        md: new Uint8Array([2]),
-        lg: new Uint8Array([3]),
-      });
+      vi.mocked(processor.processStillVariants).mockReturnValue(pageVariants());
 
       await service.processCategoryCover(
         'cat-1',
@@ -316,16 +405,19 @@ describe('ImageProcessingService', () => {
       );
       const secondKeys = put.mock.calls.map((call) => call[0]);
 
-      expect(firstKeys).toHaveLength(3);
-      expect(secondKeys).toEqual(firstKeys);
+      expect(firstKeys).toHaveLength(4);
+      expect(secondKeys.filter((key) => firstKeys.includes(key))).toEqual([]);
+      // Uploading deletes nothing: the row is the caller's, so only
+      // `persistStillWithOrphanCleanup` knows which folder it replaced.
+      expect(testMockR2Service.delete).not.toHaveBeenCalled();
     });
   });
 
   describe('processPageImage', () => {
-    it('uploads four variants, xl included, under the (pageId, imageId)-namespaced base key and returns it', async () => {
+    it('uploads four sizes, xl included, under the (pageId, imageId)-namespaced base key and returns it', async () => {
       const file = createTestImageFile('image/png', 'section.png');
 
-      vi.mocked(processor.processPageImageVariants).mockReturnValueOnce(
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
         pageVariants(
           { md: [2, 2], lg: [3, 3, 3], xl: [4, 4, 4, 4] },
           3000,
@@ -335,7 +427,7 @@ describe('ImageProcessingService', () => {
 
       const result = await service.processPageImage('page-1', 'image-1', file);
 
-      expect(processor.processPageImageVariants).toHaveBeenCalled();
+      expect(processor.processStillVariants).toHaveBeenCalled();
       // Returns the BASE key (no variant suffix) — contract amendment A3's
       // `landing-pages/{pageId}/images/{imageId}` convention.
       expect(result.key).toBe('landing-pages/page-1/images/image-1');
@@ -357,7 +449,7 @@ describe('ImageProcessingService', () => {
           {},
           {
             contentType: 'image/webp',
-            cacheControl: 'public, max-age=3600, must-revalidate',
+            cacheControl: 'public, max-age=31536000, immutable',
           }
         );
       }
@@ -366,7 +458,7 @@ describe('ImageProcessingService', () => {
     it('does NOT write to the database — there is no column, only a jsonb reference the save path owns', async () => {
       const file = createTestImageFile('image/jpeg', 'section.jpg');
 
-      vi.mocked(processor.processPageImageVariants).mockReturnValueOnce(
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
         pageVariants()
       );
 
@@ -375,17 +467,14 @@ describe('ImageProcessingService', () => {
       expect(testMockDb.update).not.toHaveBeenCalled();
     });
 
-    it('two uploads to the SAME page get DIFFERENT keys — unlike every still above, nothing is ever overwritten', async () => {
-      // The inverse of the "re-upload overwrites" tests on the deterministic
-      // stills: `imageId` is caller-minted per upload, so this method has no
+    it('two uploads to the SAME page get DIFFERENT keys — nothing is ever overwritten', async () => {
+      // `imageId` is caller-minted per upload, so this method has no
       // overwrite-in-place behavior at all. A test asserting the keys DIFFER
       // is what would catch an accidental switch to a deterministic
       // `(pageId)`-only key, which would silently start overwriting one
       // page's images at random.
       const put = vi.mocked(testMockR2Service.put);
-      vi.mocked(processor.processPageImageVariants).mockReturnValue(
-        pageVariants()
-      );
+      vi.mocked(processor.processStillVariants).mockReturnValue(pageVariants());
 
       await service.processPageImage(
         'page-1',
@@ -435,7 +524,7 @@ describe('ImageProcessingService', () => {
         return { tracked, orphans };
       }
 
-      /** A put that fails for the md variant only. */
+      /** A put that fails for the md variant only (sm, md, lg, xl). */
       function putFailingOnMd() {
         return vi
           .fn()
@@ -446,7 +535,7 @@ describe('ImageProcessingService', () => {
       }
 
       beforeEach(() => {
-        vi.mocked(processor.processPageImageVariants).mockReturnValue(
+        vi.mocked(processor.processStillVariants).mockReturnValue(
           pageVariants()
         );
       });
@@ -524,44 +613,54 @@ describe('ImageProcessingService', () => {
   });
 
   describe('processUserAvatar', () => {
-    it('should process raster avatar and upload three variants', async () => {
+    it('should process raster avatar and upload four sizes', async () => {
       const file = createTestImageFile('image/jpeg', 'avatar.jpg');
 
-      vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-        sm: new Uint8Array([1, 2]),
-        md: new Uint8Array([3, 4]),
-        lg: new Uint8Array([5, 6]),
-      });
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants({ sm: [1, 2], md: [3, 4], lg: [5, 6] }, 640, 640)
+      );
 
       const result = await service.processUserAvatar('user-1', file);
 
-      expect(processor.processImageVariants).toHaveBeenCalled();
-      expect(result.url).toContain('avatars/user-1');
-      expect(result.url).toContain('lg.webp'); // Large variant used as primary
+      expect(processor.processStillVariants).toHaveBeenCalled();
+      // sm, md, lg, xl in a new folder named for the source's size.
+      const folder = newFolderOf(testMockR2Service, 'avatars/user-1', {
+        width: 640,
+        height: 640,
+      });
+      // Large variant used as primary
+      expect(result.url).toBe(`https://test.r2.dev/${folder}/lg.webp`);
       expect(result.mimeType).toBe('image/webp'); // Stored as WebP after processing
-      expect(testMockR2Service.put).toHaveBeenCalledTimes(3); // sm, md, lg
+      // The avatar it replaced (fixed keys from before kk9nv.5) is deleted.
+      expect(deleteKeys(testMockR2Service)).toEqual(
+        folderFiles('avatars/user-1')
+      );
     });
 
-    it('should update user avatarUrl column', async () => {
+    it('should update user avatarUrl with the new folder URL', async () => {
       const file = createTestImageFile('image/png', 'avatar.png');
 
-      vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-        sm: new Uint8Array([1]),
-        md: new Uint8Array([2]),
-        lg: new Uint8Array([3]),
-      });
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants({}, 640, 480)
+      );
 
       await service.processUserAvatar('user-1', file);
 
       expect(testMockDb.update).toHaveBeenCalled();
+      // The size travels in the URL (Codex-kk9nv.5).
+      expect(setMockOf(testMockDb)).toHaveBeenCalledWith({
+        avatarUrl: expect.stringMatching(
+          /^https:\/\/test\.r2\.dev\/avatars\/user-1\/640x480-[0-9a-f]{8}\/lg\.webp$/
+        ),
+      });
     });
   });
 
   describe('deleteContentThumbnail', () => {
-    it('should delete all three size variants from R2', async () => {
+    it('should delete all four sizes from R2', async () => {
       await service.deleteContentThumbnail('content-1', 'user-1');
 
-      expect(testMockR2Service.delete).toHaveBeenCalledTimes(3);
+      expect(testMockR2Service.delete).toHaveBeenCalledTimes(4);
       expect(testMockR2Service.delete).toHaveBeenCalledWith(
         expect.stringContaining('/sm.webp')
       );
@@ -571,20 +670,57 @@ describe('ImageProcessingService', () => {
       expect(testMockR2Service.delete).toHaveBeenCalledWith(
         expect.stringContaining('/lg.webp')
       );
+      // xl too, or every delete leaks it (Codex-kk9nv.5).
+      expect(testMockR2Service.delete).toHaveBeenCalledWith(
+        'user-1/content-thumbnails/content-1/xl.webp'
+      );
     });
 
-    it('should clear thumbnailUrl in database', async () => {
+    it('should clear thumbnailUrl in database before deleting the files', async () => {
       await service.deleteContentThumbnail('content-1', 'user-1');
 
       expect(testMockDb.update).toHaveBeenCalled();
+      expect(setMockOf(testMockDb)).toHaveBeenCalledWith({
+        thumbnailUrl: null,
+      });
+      // A failed clear must leave the row pointing at files that still exist.
+      const clearOrder = vi.mocked(testMockDb.update).mock
+        .invocationCallOrder[0];
+      const firstDelete = vi.mocked(testMockR2Service.delete).mock
+        .invocationCallOrder[0];
+      expect(firstDelete).toBeGreaterThan(clearOrder ?? Infinity);
+    });
+
+    it('deletes the sized folder the URL names (Codex-kk9nv.5)', async () => {
+      const folder = 'user-1/content-thumbnails/content-1/1200x800-0a1b2c3d';
+      mockDbQuery.content.findFirst.mockResolvedValueOnce({
+        thumbnailUrl: `https://test.r2.dev/${folder}/lg.webp`,
+      });
+
+      await service.deleteContentThumbnail('content-1', 'user-1');
+
+      expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
+    });
+
+    it('clears a poster-frame URL without deleting the poster', async () => {
+      mockDbQuery.content.findFirst.mockResolvedValueOnce({
+        thumbnailUrl: 'https://test.r2.dev/user-1/media-thumbnails/m-1/lg.webp',
+      });
+
+      await service.deleteContentThumbnail('content-1', 'user-1');
+
+      expect(setMockOf(testMockDb)).toHaveBeenCalledWith({
+        thumbnailUrl: null,
+      });
+      expect(testMockR2Service.delete).not.toHaveBeenCalled();
     });
   });
 
   describe('deleteUserAvatar', () => {
-    it('should delete all three size variants from R2', async () => {
+    it('should delete all four sizes from R2', async () => {
       await service.deleteUserAvatar('user-1');
 
-      expect(testMockR2Service.delete).toHaveBeenCalledTimes(3);
+      expect(testMockR2Service.delete).toHaveBeenCalledTimes(4);
       expect(testMockR2Service.delete).toHaveBeenCalledWith(
         expect.stringContaining('avatars/user-1')
       );
@@ -594,12 +730,20 @@ describe('ImageProcessingService', () => {
       expect(testMockR2Service.delete).toHaveBeenCalledWith(
         expect.stringContaining('lg.webp')
       );
+      // xl too, or every delete leaks it (Codex-kk9nv.5).
+      expect(testMockR2Service.delete).toHaveBeenCalledWith(
+        'avatars/user-1/xl.webp'
+      );
     });
 
     it('should clear avatarUrl in database', async () => {
       await service.deleteUserAvatar('user-1');
 
       expect(testMockDb.update).toHaveBeenCalled();
+      expect(setMockOf(testMockDb)).toHaveBeenCalledWith({
+        avatarUrl: null,
+        updatedAt: expect.any(Date),
+      });
     });
 
     it('should handle missing avatar gracefully', async () => {
@@ -641,11 +785,9 @@ describe('ImageProcessingService', () => {
           }
         );
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
         await expect(
           service.processContentThumbnail('content-1', 'user-1', file)
@@ -733,11 +875,9 @@ describe('ImageProcessingService', () => {
       it('should propagate R2Service.put errors', async () => {
         const file = createTestImageFile('image/jpeg', 'test.jpg');
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
         testMockR2Service.put = vi
           .fn()
@@ -769,11 +909,9 @@ describe('ImageProcessingService', () => {
       it('should propagate database update errors', async () => {
         const file = createTestImageFile('image/png', 'test.png');
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
         // Create a new mock DB with error
         const errorMockDb = {
@@ -812,7 +950,7 @@ describe('ImageProcessingService', () => {
       it('should handle corrupt image data that processor cannot process', async () => {
         const file = createTestImageFile('image/jpeg', 'corrupt.jpg');
 
-        vi.mocked(processor.processImageVariants).mockImplementation(() => {
+        vi.mocked(processor.processStillVariants).mockImplementationOnce(() => {
           throw new Error('Failed to decode image');
         });
 
@@ -823,74 +961,82 @@ describe('ImageProcessingService', () => {
     });
 
     /**
-     * These two cases previously asserted the OPPOSITE — "should cleanup all
-     * variants", `expect(delete).toHaveBeenCalledTimes(3)` — and were green for
-     * months while encoding the retired "variants get unique filenames per
-     * upload" premise as a requirement. On deterministic keys that cleanup
-     * deletes the object the content row still addresses (Codex-r85jo.2), so
-     * the assertion is inverted rather than relaxed.
+     * These two cases have flipped twice. They first asserted "cleanup all
+     * variants" while the keys were deterministic, which deleted the image the
+     * row still addressed (Codex-r85jo.2), so they were inverted to "delete
+     * nothing". Since Codex-kk9nv.5 every upload writes a NEW folder nothing
+     * references yet, so cleaning up that folder is correct again, and the
+     * previous image, in another folder, is never touched.
      *
      * The property version of this — a Map-backed bucket proving every prior
      * key stays READABLE — lives in
      * `__tests__/regression/r85jo2-partial-upload-preserves-prior-image.test.ts`.
      */
     describe('Partial Upload Failures', () => {
-      it('should delete nothing when one R2 upload fails', async () => {
+      it("should delete the new folder's files when one R2 upload fails", async () => {
         const file = createTestImageFile('image/jpeg', 'test.jpg');
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
-        // First upload succeeds, second fails, third succeeds
+        // The second upload fails; the other three succeed
         testMockR2Service.put = vi
           .fn()
           .mockResolvedValueOnce(undefined) // sm succeeds
           .mockRejectedValueOnce(new Error('R2 timeout')) // md fails
-          .mockResolvedValueOnce(undefined); // lg succeeds
+          .mockResolvedValueOnce(undefined) // lg succeeds
+          .mockResolvedValueOnce(undefined); // xl succeeds
 
         await expect(
           service.processContentThumbnail('content-1', 'user-1', file)
-        ).rejects.toThrow(/upload failed.*1 of 3 variant/i);
+        ).rejects.toThrow(/upload failed.*1 of 4 variant.*\(md\)/i);
 
-        // The rejected key still holds the PREVIOUS image; the succeeded ones
-        // hold the new bytes at URLs the row already points at. Nothing 404s.
-        expect(testMockR2Service.delete).not.toHaveBeenCalled();
+        // The three files that landed are in a folder nothing references, so
+        // all four keys are deleted; the row was never written, so it still
+        // points at the previous image, which lives elsewhere.
+        const folder = newFolderOf(
+          testMockR2Service,
+          'user-1/content-thumbnails/content-1',
+          { width: 2400, height: 1600 }
+        );
+        expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
+        expect(testMockDb.update).not.toHaveBeenCalled();
       });
 
-      it('should delete nothing when two R2 uploads fail', async () => {
+      it("should delete the new folder's files when two R2 uploads fail", async () => {
         const file = createTestImageFile('image/png', 'test.png');
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
-        // First upload succeeds, second and third fail
+        // The second and third uploads fail; the other two succeed
         testMockR2Service.put = vi
           .fn()
           .mockResolvedValueOnce(undefined) // sm succeeds
           .mockRejectedValueOnce(new Error('R2 timeout')) // md fails
-          .mockRejectedValueOnce(new Error('R2 quota exceeded')); // lg fails
+          .mockRejectedValueOnce(new Error('R2 quota exceeded')) // lg fails
+          .mockResolvedValueOnce(undefined); // xl succeeds
 
         await expect(
           service.processContentThumbnail('content-1', 'user-1', file)
-        ).rejects.toThrow(/upload failed.*2 of 3 variant/i);
+        ).rejects.toThrow(/upload failed.*2 of 4 variant.*\(md, lg\)/i);
 
-        expect(testMockR2Service.delete).not.toHaveBeenCalled();
+        const folder = newFolderOf(
+          testMockR2Service,
+          'user-1/content-thumbnails/content-1',
+          { width: 2400, height: 1600 }
+        );
+        expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
       });
 
       it('should report an R2 put failure as a 500, not a 400', async () => {
         const file = createTestImageFile('image/jpeg', 'test.jpg');
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
         testMockR2Service.put = vi
           .fn()
@@ -910,15 +1056,11 @@ describe('ImageProcessingService', () => {
 
     describe('Orphan Recording on Cleanup Failure', () => {
       /**
-       * Both cases below are FIRST uploads (`thumbnailUrl: null`), which is the
-       * only shape where the post-DB-failure cleanup is correct: the puts
-       * landed, the row never recorded them, so the objects are unreferenced.
-       *
-       * On a REPLACEMENT the row still addresses these deterministic keys, the
-       * cleanup is suppressed, and there are no orphans to record — covered in
+       * Both cases below fail the row write after the puts landed, so the new
+       * folder is unreferenced and its cleanup runs. Since Codex-kk9nv.5 that
+       * holds for a replacement too: the new folder is never the one the row
+       * addresses. Covered with a Map-backed bucket in
        * `__tests__/regression/r85jo2-partial-upload-preserves-prior-image.test.ts`.
-       * Before Codex-r85jo.2 these tests passed with the harness default (a
-       * prior URL present), which is exactly the destructive case.
        */
       it('should record orphans when R2 cleanup fails after DB error', async () => {
         const file = createTestImageFile('image/png', 'test.png');
@@ -926,11 +1068,9 @@ describe('ImageProcessingService', () => {
           thumbnailUrl: null,
         });
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
         // Create mock orphaned file service
         const mockOrphanedFileService = {
@@ -993,11 +1133,9 @@ describe('ImageProcessingService', () => {
           thumbnailUrl: null,
         });
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
         // Create a mock DB that fails on update
         const errorMockDb = {
@@ -1063,11 +1201,9 @@ describe('ImageProcessingService', () => {
       it('should handle files with special characters in names', async () => {
         const file = createTestImageFile('image/png', 'my file (copy) [2].png');
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
         await expect(
           service.processContentThumbnail('content-1', 'user-1', file)
@@ -1077,11 +1213,9 @@ describe('ImageProcessingService', () => {
       it('should handle files with Unicode characters in names', async () => {
         const file = createTestImageFile('image/jpeg', '图片-测试.jpg');
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
         await expect(
           service.processUserAvatar('user-1', file)
@@ -1098,11 +1232,9 @@ describe('ImageProcessingService', () => {
           type: 'image/gif',
         });
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
         const result = await service.processContentThumbnail(
           'content-1',
@@ -1111,7 +1243,14 @@ describe('ImageProcessingService', () => {
         );
 
         expect(result.mimeType).toBe('image/webp');
-        expect(testMockR2Service.put).toHaveBeenCalledTimes(3);
+        expect(testMockR2Service.put).toHaveBeenCalledTimes(4);
+        // Every object is WebP: none keeps the GIF's own type (Codex-kk9nv.5).
+        for (const call of vi.mocked(testMockR2Service.put).mock.calls) {
+          expect(call[3]).toEqual({
+            contentType: 'image/webp',
+            cacheControl: 'public, max-age=31536000, immutable',
+          });
+        }
       });
 
       it('should process WebP files correctly', async () => {
@@ -1134,16 +1273,14 @@ describe('ImageProcessingService', () => {
           type: 'image/webp',
         });
 
-        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-          sm: new Uint8Array([1]),
-          md: new Uint8Array([2]),
-          lg: new Uint8Array([3]),
-        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants()
+        );
 
         const result = await service.processUserAvatar('user-1', file);
 
         expect(result.mimeType).toBe('image/webp');
-        expect(processor.processImageVariants).toHaveBeenCalled();
+        expect(processor.processStillVariants).toHaveBeenCalled();
       });
     });
   });

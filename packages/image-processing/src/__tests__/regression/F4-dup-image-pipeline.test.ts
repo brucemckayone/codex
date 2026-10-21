@@ -109,18 +109,23 @@ function countAcrossScanned(needle: string): number {
 describe('denoise proof: F4 simplification:dup-image-pipeline', () => {
   it('image-variant cacheControl is declared at most once', () => {
     // The IDENTIFIER, not the value. The value now lives in
-    // R2_OVERWRITTEN_OBJECT_CACHE_CONTROL (@codex/constants) and may change
+    // R2_IMMUTABLE_OBJECT_CACHE_CONTROL (@codex/constants) and may change
     // again; a duplicated pipeline would re-declare the property either way.
-    // Pre-fix: 9 (3 pipelines x 3 variants). Now: 1.
-    expect(countAcrossScanned('cacheControl:')).toBeLessThanOrEqual(1);
+    // Pre-fix: 9 (3 pipelines x 3 variants). Now: exactly 1 — `toBe`, not
+    // "at most", so a declaration that moved out of the scanned files fails
+    // here instead of counting 0 and passing.
+    expect(countAcrossScanned('cacheControl:')).toBe(1);
   });
 
-  it('R2 cleanup-after-DB-error block is declared at most once', () => {
-    // The warn CALL, not the phrase — the docblock above it mentions the same
-    // string. Pre-fix: 3, one per pipeline. Now: 1.
+  it('the R2 still-delete warn is declared exactly once', () => {
+    // The warn CALL, not the phrase. Pre-fix: 3 cleanup blocks, one per
+    // pipeline. Codex-kk9nv.5 renamed the message when every delete path
+    // (failed put, failed write, replaced, dropped) moved onto
+    // `deleteStillFiles`; under "at most once" the old needle would have
+    // counted 0 and passed, the vacuity the docblock above describes.
     expect(
-      countAcrossScanned("obs.warn('R2 cleanup failed after DB error'")
-    ).toBeLessThanOrEqual(1);
+      countAcrossScanned("obs.warn('R2 still delete failed, no orphan service'")
+    ).toBe(1);
   });
 
   it('CALIBRATION: the counter detects a duplicate and ignores prose', () => {

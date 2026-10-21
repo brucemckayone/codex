@@ -201,9 +201,10 @@ export const courses = pgTable(
     // Still-image COVER — the base R2 key, NOT a `media_items` ref (Codex-eqh0z).
     // `media_items` is CHECK-constrained to ('video','audio'), so a poster image
     // cannot live there; this reuses the `categories.cover_image_key` convention
-    // (`ImageProcessingService.processCourseCover` writes {sm,md,lg}.webp under
-    // the key, cards serve `md`). Deterministic per course id ⇒ a re-upload
-    // overwrites in place, so replacing a cover never orphans an object.
+    // (`ImageProcessingService.processCourseCover` writes {sm,md,lg,xl}.webp
+    // under the key, cards serve `md`). Each upload is a new folder named for
+    // the picture's size, `courses/{id}/cover/{w}x{h}-{nonce}`, and replacing
+    // or clearing a cover deletes the old one (Codex-kk9nv.5).
     coverImageKey: varchar('cover_image_key', { length: 500 }),
 
     // Still-image HERO — an UPLOADED image, the same shape as `coverImageKey`
@@ -220,10 +221,9 @@ export const courses = pgTable(
     //   heroImageKey (this) ?? heroMediaId's poster frame ?? the synthetic plate.
     // Uploaded outranks derived — an explicit choice beats a by-product.
     //
-    // `ImageProcessingService.processCourseHero` writes {sm,md,lg}.webp under this
-    // base key and the hero serves `lg` (it paints full-bleed, where the cover's
-    // `md` serves a card). Deterministic per course id ⇒ a re-upload overwrites in
-    // place, so replacing a hero never orphans an object.
+    // `ImageProcessingService.processCourseHero` writes {sm,md,lg,xl}.webp under
+    // this key and the hero serves `lg` (it paints full-bleed, where the cover's
+    // `md` serves a card). A new folder per upload, as the cover's.
     heroImageKey: varchar('hero_image_key', { length: 500 }),
 
     // Still-image SIGNATURE — the guide's sign-off mark, an UPLOADED image
@@ -246,12 +246,11 @@ export const courses = pgTable(
     // to stand in, and the sign-off drew that photo where a mark belongs, so
     // it was retired (Codex-61zsk.47). That column stays, unread.
     //
-    // `ImageProcessingService.processCourseSignature` writes {sm,md,lg}.webp
-    // under this base key and the letter serves `md` — a signature is a small
+    // `ImageProcessingService.processCourseSignature` writes {sm,md,lg,xl}.webp
+    // under this key and the letter serves `md` — a signature is a small
     // inline mark (~180px in `GuideSection`), so `lg` would be 800px of payload
     // for a 180px slot while `sm` (200px) leaves nothing for a 2x display.
-    // Deterministic per course id ⇒ a re-upload overwrites in place, so
-    // replacing a signature never orphans an object.
+    // A new folder per upload, as the cover's.
     signatureImageKey: varchar('signature_image_key', { length: 500 }),
 
     // Sell media — media-item refs (reuse the transcoding pipeline; §10).

@@ -295,11 +295,29 @@ app.patch(
         ctx.obs,
         ctx.cacheWrite
       );
+      // A body that sets `coverImageKey` by hand moves the row off its cover,
+      // and each upload goes to a new folder, so nothing would ever overwrite
+      // the old one (Codex-kk9nv.5). Read only then: a rename costs nothing.
+      const before =
+        ctx.input.body.coverImageKey === undefined
+          ? null
+          : await ctx.services.categories.get(
+              ctx.input.params.categoryId,
+              space
+            );
       const category = await ctx.services.categories.update(
         ctx.input.params.categoryId,
         ctx.input.body,
         space
       );
+      if (before && before.coverImageKey !== category.coverImageKey) {
+        await ctx.services.imageProcessing.deleteDroppedStill({
+          imageType: 'category_cover',
+          entityType: 'category',
+          entityId: category.id,
+          droppedKey: before.coverImageKey,
+        });
+      }
       invalidateCategories(ctx.env, ctx.executionCtx, space, ctx.obs);
       return category;
     },
@@ -387,18 +405,18 @@ app.post(
         })
       );
 
-      // Persist the base key on the row — the space-aware service owns the
-      // write. Wrapped so a failed write cannot strand the three variants just
-      // uploaded (Codex-29fs0). `existing` was read BEFORE the upload, so its
-      // key says whether the row already addressed these deterministic keys.
+      // Persist the folder's key on the row — the space-aware service owns the
+      // write. Wrapped so a failed write deletes the files just uploaded
+      // (Codex-29fs0), and a successful one deletes the cover `existing` (read
+      // BEFORE the upload) still names (Codex-kk9nv.5).
       const updated =
         await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
           {
-            baseKey: processed.coverImageKey,
+            key: processed.coverImageKey,
             imageType: 'category_cover',
             entityType: 'category',
             entityId: ctx.input.params.categoryId,
-            storedBaseKey: existing.coverImageKey,
+            storedKey: existing.coverImageKey,
           },
           () =>
             ctx.services.categories.update(

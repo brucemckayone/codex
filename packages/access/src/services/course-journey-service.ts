@@ -3163,8 +3163,9 @@ export class CourseJourneyService extends BaseService {
    * The DB half of the cover upload: `ImageProcessingService.processCourseCover`
    * owns the R2 variants and returns the base key, and this owns the scoped
    * write — the same split `categories` uses, so no scope logic is duplicated in
-   * the image layer. Pass `null` to clear (the R2 objects are left in place;
-   * keys are deterministic per course, so a later re-upload overwrites them).
+   * the image layer. Pass `null` to clear; the caller then deletes the folder
+   * the key named (`ImageProcessingService.deleteDroppedStill`), because each
+   * upload goes to a new folder and nothing would overwrite it (Codex-kk9nv.5).
    *
    * @returns the persisted key (null when cleared).
    */
@@ -3212,10 +3213,8 @@ export class CourseJourneyService extends BaseService {
    * owns the R2 variants and returns the base key, this owns the scoped write.
    * Same split, same reason — no scope logic in the image layer.
    *
-   * Pass `null` to clear. The R2 objects are left in place: keys are
-   * deterministic per course, so a later re-upload overwrites them rather than
-   * accumulating orphans, and no client is ever handed a raw key so the
-   * unreferenced variants are unreachable in the meantime.
+   * Pass `null` to clear; the caller then deletes the folder the key named,
+   * as {@link setCourseCoverImageKey} describes.
    *
    * Clearing does NOT leave the hero empty — it drops the page back to A32's next
    * link, `heroMediaId`'s poster frame, and then to the synthetic plate. That is
@@ -3270,10 +3269,8 @@ export class CourseJourneyService extends BaseService {
    * returns the base key, this owns the scoped write. Same split, same reason —
    * no scope logic in the image layer.
    *
-   * Pass `null` to clear. The R2 objects are left in place: keys are
-   * deterministic per course, so a later re-upload overwrites them rather than
-   * accumulating orphans, and no client is ever handed a raw key so the
-   * unreferenced variants are unreachable in the meantime.
+   * Pass `null` to clear; the caller then deletes the folder the key named,
+   * as {@link setCourseCoverImageKey} describes.
    *
    * Clearing leaves the letter signed with the typeset name alone: the upload is
    * the signature's only source (Codex-61zsk.47). `signatureMediaId`'s poster
@@ -3438,11 +3435,10 @@ export class CourseJourneyService extends BaseService {
    * {@link resolveCourseIdForPage}) AND read the three still keys it holds
    * right now.
    *
-   * The still-upload routes call this BEFORE writing R2, for two reasons: a
-   * foreign or non-course page must 404 before any object exists, and the
-   * failure cleanup around the later key write has to know whether the row
-   * ALREADY addressed the deterministic keys (Codex-29fs0). A replacement must
-   * not delete them; a first upload, or one after a clear, must.
+   * The still routes call this BEFORE writing R2 or clearing a key, for two
+   * reasons: a foreign or non-course page must 404 before any object exists,
+   * and the folder the row names now is the one to delete once the row has
+   * moved off it (Codex-29fs0, Codex-kk9nv.5).
    */
   async getCourseStillImageKeys(
     organizationId: string,

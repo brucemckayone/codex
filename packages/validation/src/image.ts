@@ -48,6 +48,40 @@ export const MAX_IMAGE_WIDTH = 1600;
 export const MAX_IMAGE_PIXELS = MAX_IMAGE_WIDTH * MAX_IMAGE_WIDTH;
 
 /**
+ * A still's folder name (Codex-kk9nv.5): `{width}x{height}-{8 hex}`, the
+ * picture's upright size and a nonce. Each upload of a content thumbnail,
+ * avatar, category cover or course still writes its four files into a new
+ * folder named this way, so the address the row already stores carries the
+ * size and no column has to (owner, 2026-10-21: "shouldnt it be prat of the
+ * file name"). The nonce keeps two uploads of one size apart, which is what
+ * lets every file be cached as immutable.
+ *
+ * The writer and every reader use this one pattern, so they cannot disagree.
+ */
+const STILL_FOLDER_NAME = /^([1-9]\d{0,4})x([1-9]\d{0,4})-[0-9a-f]{8}$/;
+
+/** The folder name for one upload; `nonce` is 8 lowercase hex characters. */
+export function stillFolderName(
+  size: { width: number; height: number },
+  nonce: string
+): string {
+  return `${size.width}x${size.height}-${nonce}`;
+}
+
+/**
+ * The size a still folder's name records, or null for any other name. An
+ * image uploaded before kk9nv.5 keeps its files directly under its base key,
+ * with no size in its address.
+ */
+export function readStillFolderName(
+  name: string
+): { width: number; height: number } | null {
+  const match = STILL_FOLDER_NAME.exec(name);
+  if (!match) return null;
+  return { width: Number(match[1]), height: Number(match[2]) };
+}
+
+/**
  * Alternate SVG magic number (files starting with <svg)
  */
 const SVG_ALTERNATE = [0x3c, 0x73, 0x76, 0x67]; // <svg

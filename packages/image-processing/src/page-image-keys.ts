@@ -11,15 +11,19 @@
  * the save queued the BASE key, the sweep deleted an object that never existed
  * and marked the row deleted, and every variant stayed in R2 for good.
  *
- * `xl` (Codex-61zsk.13, -61zsk.53) is a page image's alone, for a picture
- * drawn across the band. A key uploaded before it existed has no `xl` object;
- * the sweep's delete of that missing object is a no-op, so the four-key list
- * holds for every page image, old or new. All four places that know the set
- * (the processor's variants, {@link OBJECT_KEY}, {@link pageImageObjectKeys}
- * and the web's `PageImageVariant`) change together, or an `xl` object is
- * written that nothing ever deletes.
+ * `xl` (Codex-61zsk.13, -61zsk.53) is a picture drawn across the band; since
+ * Codex-kk9nv.5 every still has one. A key uploaded before it existed has no
+ * `xl` object; the sweep's delete of that missing object is a no-op, so the
+ * four-key list holds for every page image, old or new. All the places that
+ * know the set (the processor's variants, {@link OBJECT_KEY},
+ * {@link pageImageObjectKeys}, and the web's `PageImageVariant`) change
+ * together, or an object is written that nothing ever deletes.
  */
-import { stillVariantKeys, type VariantKeys } from './utils/upload-pipeline';
+import {
+  type StillKeys,
+  stillVariantKeys,
+  variantKeyList,
+} from './utils/upload-pipeline';
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const BASE_KEY = new RegExp(`^landing-pages/(${UUID})/images/${UUID}$`);
@@ -43,21 +47,18 @@ export function pageIdOfPageImageKey(value: string): string | null {
 }
 
 /** The four variant keys under a page image's base key. */
-export function pageImageVariantKeys(
-  baseKey: string
-): VariantKeys & { xl: string } {
-  return { ...stillVariantKeys(baseKey), xl: `${baseKey}/xl.webp` };
+export function pageImageVariantKeys(baseKey: string): StillKeys {
+  return stillVariantKeys(baseKey);
 }
 
-/** The four R2 objects behind a base key, in sm/md/lg/xl order. */
+/** The four R2 objects behind a base key: sm/md/lg/xl. */
 export function pageImageObjectKeys(baseKey: string): string[] {
-  const keys = pageImageVariantKeys(baseKey);
-  return [keys.sm, keys.md, keys.lg, keys.xl];
+  return variantKeyList(pageImageVariantKeys(baseKey));
 }
 
 /**
  * The base key an R2 object belongs to, or `null` for anything that is not
- * one of a page image's four variants.
+ * one of a page image's four objects.
  */
 export function pageImageKeyOfObject(r2Key: string): string | null {
   return OBJECT_KEY.exec(r2Key)?.[1] ?? null;

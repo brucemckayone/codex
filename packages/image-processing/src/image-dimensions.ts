@@ -14,6 +14,8 @@
  * whose size cannot be read is a file whose decode cannot be bounded.
  */
 
+import { jpegSegments } from './jpeg-segments';
+
 export interface ImageDimensions {
   width: number;
   height: number;
@@ -37,34 +39,21 @@ const sized = (width: number, height: number): ImageDimensions | null =>
 /**
  * The first start-of-frame segment's size. Every SOFn marker (C0-CF) carries
  * it except the three that share the range: DHT (C4), JPG (C8) and DAC (CC).
- * A scan (DA) or the end (D9) reached first means there is no frame header.
+ * The walk ends at the first scan, so a file with no frame header by then
+ * has none.
  */
 function jpeg(b: Uint8Array): ImageDimensions | null {
-  let offset = 2;
-  while (offset + 3 < b.length) {
-    if (b[offset] !== 0xff) return null;
-    // Any number of 0xFF fill bytes may precede a marker (T.81 B.1.1.2).
-    while (b[offset + 1] === 0xff && offset + 2 < b.length) offset++;
-    const marker = b[offset + 1] ?? 0;
-    if (marker === 0xd9 || marker === 0xda) return null;
-    // TEM and RST0-7 stand alone: no length follows.
-    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
-      offset += 2;
-      continue;
-    }
+  for (const { marker, start } of jpegSegments(b)) {
     const isFrame =
       marker >= 0xc0 &&
       marker <= 0xcf &&
       marker !== 0xc4 &&
       marker !== 0xc8 &&
       marker !== 0xcc;
-    if (isFrame) {
-      if (offset + 8 >= b.length) return null;
-      return sized(u16be(b, offset + 7), u16be(b, offset + 5));
-    }
-    const length = u16be(b, offset + 2);
-    if (length < 2) return null;
-    offset += 2 + length;
+    if (!isFrame) continue;
+    // Precision (1 byte), then height and width.
+    if (start + 4 >= b.length) return null;
+    return sized(u16be(b, start + 3), u16be(b, start + 1));
   }
   return null;
 }

@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
   detectImageMimeType,
   isSniffableImageMimeType,
+  readStillFolderName,
+  stillFolderName,
   validateImageSignature,
   validateImageUpload,
 } from '../image';
@@ -234,5 +236,41 @@ describe('Image Validation', () => {
       expect(decoded).not.toContain('<script>');
       expect(decoded).toContain('<rect');
     });
+  });
+});
+
+describe('still folder names (Codex-kk9nv.5)', () => {
+  it('reads back the size the writer put in', () => {
+    const name = stillFolderName({ width: 1600, height: 900 }, '0a1b2c3d');
+    expect(name).toBe('1600x900-0a1b2c3d');
+    expect(readStillFolderName(name)).toEqual({ width: 1600, height: 900 });
+  });
+
+  it('round-trips one-pixel and five-digit sides', () => {
+    for (const size of [
+      { width: 1, height: 1 },
+      { width: 12000, height: 300 },
+    ]) {
+      expect(readStillFolderName(stillFolderName(size, 'ffffffff'))).toEqual(
+        size
+      );
+    }
+  });
+
+  it('treats any other name as "size unknown"', () => {
+    for (const name of [
+      // The variant files and the old fixed-key layout's last segment.
+      'lg.webp',
+      'cover',
+      // A zero or padded side, an upper-case or short nonce, trailing text.
+      '0x900-0a1b2c3d',
+      '01600x900-0a1b2c3d',
+      '1600x900-0A1B2C3D',
+      '1600x900-0a1b2c',
+      '1600x900-0a1b2c3d/lg.webp',
+      '',
+    ]) {
+      expect(readStillFolderName(name), name).toBeNull();
+    }
   });
 });
