@@ -32,6 +32,10 @@
     MusicIcon,
     PlayIcon,
   } from '$lib/components/ui/Icon';
+  import {
+    getThumbnailDimensions,
+    getThumbnailSrcset,
+  } from '$lib/utils/image';
   import type { FeatureItem } from './feature-carousel.types';
 
   interface Props {
@@ -40,6 +44,19 @@
   }
 
   const { items, ariaLabel = "Editor's picks" }: Props = $props();
+
+  /**
+   * How wide a slide's picture is drawn (Codex-kk9nv.3). The slide spans the
+   * section, up to 77rem, but stands only `clamp(20rem, 44vh, 28.75rem)`
+   * tall, and the picture covers it: where the slide is narrower than the
+   * picture's shape (a phone), the picture is drawn as wide as the slide's
+   * height times its ratio. A picture whose size is unknown is taken as 16:9.
+   */
+  function slideSizes(image: string): string {
+    const size = getThumbnailDimensions(image);
+    const ratio = Math.round((size ? size.width / size.height : 16 / 9) * 100) / 100;
+    return `max(min(calc(100vw - 2rem), 77rem), calc(clamp(20rem, 44vh, 28.75rem) * ${ratio}))`;
+  }
 
   // Per-type presentation: the top-left badge glyph/label + the CTA verb. The
   // CTA replaces the old generic "Explore" so the pick reads as its medium
@@ -168,7 +185,14 @@
             class:feature-carousel__media--fallback={!item.image}
           >
             {#if item.image}
-              <img src={item.image} alt="" loading="lazy" />
+              {@const srcset = getThumbnailSrcset(item.image)}
+              <img
+                src={item.image}
+                srcset={srcset || undefined}
+                sizes={srcset ? slideSizes(item.image) : undefined}
+                alt=""
+                loading="lazy"
+              />
             {/if}
           </div>
           <div class="feature-carousel__scrim" aria-hidden="true"></div>
