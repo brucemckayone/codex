@@ -109,6 +109,11 @@ agreements end and their open proposals are withdrawn in the same transaction
 as the deletion, with the reason "The creator deleted their account". No email
 is sent, because the address is scrubbed by the deletion.
 
+— **gap**: `Codex-2hxff.64`. The removed creator's content and courses stay
+on sale, at the default split. Owner decision: on removal nothing of theirs
+stays on sale, tier access to their content ends, and one-off buyers keep what
+they bought.
+
 `removeMember` and account deletion are the only ways a creator leaves today.
 Any new way out must call `withdrawProposalsOnDeparture` and
 `terminateAgreementsOnDeparture` too.
