@@ -21,23 +21,23 @@ import { DISPUTE_CHARGEBACK_OPEN_STATUSES } from '@codex/constants';
 import {
   courseSubscriptions,
   disputes,
-  payouts,
   subscriptions,
 } from '@codex/database/schema';
-import type { LedgerDeps } from '@codex/payments';
 import { refreshCourseSubscriptionEntitlementExpiry } from '@codex/purchase';
-import { and, eq, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm';
+import {
+  type ChargedSubscription,
+  invoiceForPaymentIntent,
+  isLiveAtStripe,
+  loadSubscription,
+  type SubscriptionChargeDeps,
+  subscriptionForStripeId,
+  subscriptionFromPayoutRows,
+} from './subscription-charge';
 
-type SubscriptionDisputeDeps = Pick<LedgerDeps, 'db' | 'stripe' | 'obs'>;
+type SubscriptionDisputeDeps = SubscriptionChargeDeps;
 
-export interface DisputedSubscription {
-  kind: 'tier' | 'course';
-  id: string;
-  stripeSubscriptionId: string | null;
-  userId: string;
-  organizationId: string | null;
-  status: string;
-}
+export type DisputedSubscription = ChargedSubscription;
 
 export interface DisputeInput {
   stripeDisputeId: string;
@@ -74,7 +74,7 @@ async function resolveDisputedSubscription(
   }
 
   const found =
-    (await fromPayoutRows(deps, input.chargeId)) ??
+    (await subscriptionFromPayoutRows(deps, input.chargeId)) ??
     (await fromStripeInvoice(deps, input.paymentIntentId));
   if (!found) return undefined;
   await deps.db
@@ -186,84 +186,13 @@ export async function cancelLostDisputeSubscription(
   return subscription;
 }
 
-async function loadSubscription(
-  deps: SubscriptionDisputeDeps,
-  kind: DisputedSubscription['kind'],
-  id: string
-): Promise<DisputedSubscription | undefined> {
-  const table = kind === 'tier' ? subscriptions : courseSubscriptions;
-  const [row] = await deps.db
-    .select({
-      id: table.id,
-      stripeSubscriptionId: table.stripeSubscriptionId,
-      userId: table.userId,
-      organizationId: table.organizationId,
-      status: table.status,
-    })
-    .from(table)
-    .where(eq(table.id, id))
-    .limit(1);
-  return row ? { kind, ...row } : undefined;
-}
-
-async function fromPayoutRows(
-  deps: SubscriptionDisputeDeps,
-  chargeId: string
-): Promise<DisputedSubscription | undefined> {
-  const [row] = await deps.db
-    .select({
-      subscriptionId: payouts.subscriptionId,
-      courseSubscriptionId: payouts.courseSubscriptionId,
-    })
-    .from(payouts)
-    .where(
-      and(
-        eq(payouts.stripeChargeId, chargeId),
-        or(
-          isNotNull(payouts.subscriptionId),
-          isNotNull(payouts.courseSubscriptionId)
-        )
-      )
-    )
-    .limit(1);
-  if (row?.subscriptionId) {
-    return loadSubscription(deps, 'tier', row.subscriptionId);
-  }
-  if (row?.courseSubscriptionId) {
-    return loadSubscription(deps, 'course', row.courseSubscriptionId);
-  }
-  return undefined;
-}
-
 async function fromStripeInvoice(
   deps: SubscriptionDisputeDeps,
   paymentIntentId: string | null
 ): Promise<DisputedSubscription | undefined> {
-  if (!paymentIntentId) return undefined;
-  const page = await deps.stripe.invoicePayments.list({
-    payment: { type: 'payment_intent', payment_intent: paymentIntentId },
-    limit: 1,
-  });
-  const invoiceRef = page.data[0]?.invoice;
-  const invoiceId =
-    typeof invoiceRef === 'string' ? invoiceRef : invoiceRef?.id;
-  if (!invoiceId) return undefined;
-  const invoice = await deps.stripe.invoices.retrieve(invoiceId);
-  const subscriptionRef = invoice.parent?.subscription_details?.subscription;
-  const stripeId =
-    typeof subscriptionRef === 'string' ? subscriptionRef : subscriptionRef?.id;
-  if (!stripeId) return undefined;
-
-  for (const kind of ['tier', 'course'] as const) {
-    const table = kind === 'tier' ? subscriptions : courseSubscriptions;
-    const [row] = await deps.db
-      .select({ id: table.id })
-      .from(table)
-      .where(eq(table.stripeSubscriptionId, stripeId))
-      .limit(1);
-    if (row) return loadSubscription(deps, kind, row.id);
-  }
-  return undefined;
+  const paid = await invoiceForPaymentIntent(deps, paymentIntentId);
+  if (!paid?.stripeSubscriptionId) return undefined;
+  return subscriptionForStripeId(deps, paid.stripeSubscriptionId);
 }
 
 /** Set (pause) or clear (restore) `disputed_at`; a no-op if already so. */
@@ -333,13 +262,4 @@ async function refreshCourseGrant(
     courseId: row.courseId,
     expiresAt: row.currentPeriodEnd,
   });
-}
-
-/** Stripe still bills it: not cancelled, and not an expired first invoice. */
-async function isLiveAtStripe(
-  deps: SubscriptionDisputeDeps,
-  stripeId: string
-): Promise<boolean> {
-  const live = await deps.stripe.subscriptions.retrieve(stripeId);
-  return live.status !== 'canceled' && live.status !== 'incomplete_expired';
 }

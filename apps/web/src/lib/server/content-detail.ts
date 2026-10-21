@@ -33,6 +33,7 @@
  * - `resolveAccessGranted`  — THE access-grant seam (WP-2 swap point)
  * - `handlePurchaseAction`  — Stripe checkout session creation with error handling
  */
+import { subscriptionStatusGrantsAccess } from '@codex/constants';
 import type { Cookies } from '@sveltejs/kit';
 import { fail } from '@sveltejs/kit';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
@@ -417,14 +418,14 @@ export async function loadSubscriptionContext(
   ]);
 
   // hasSubscription must mirror the backend access filter: the @codex/access
-  // streaming check only grants access for status IN (active, cancelling).
-  // paused / past_due / cancelled / incomplete are correctly denied by the
-  // DB filter but were previously flagged as "has subscription" here, so
-  // the UI showed a Play button that 403s on click.
+  // streaming check grants access for ACCESS_GRANTING_SUBSCRIPTION_STATUSES
+  // (active, cancelling, and past_due while Stripe retries). paused /
+  // cancelled / incomplete are denied by the DB filter but were previously
+  // flagged as "has subscription" here, so the UI showed a Play button that
+  // 403s on click.
   const isAccessGranting =
     !!currentSubscription &&
-    (currentSubscription.status === 'active' ||
-      currentSubscription.status === 'cancelling');
+    subscriptionStatusGrantsAccess(currentSubscription.status);
   const hasSubscription = isAccessGranting;
   let subscriptionCoversContent = false;
 

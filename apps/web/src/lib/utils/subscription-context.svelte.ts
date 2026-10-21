@@ -27,6 +27,7 @@
  * without crossing the SvelteKit server boundary).
  */
 
+import { subscriptionStatusGrantsAccess } from '@codex/constants';
 import { untrack } from 'svelte';
 import { browser } from '$app/environment';
 import { subscriptionCollection } from '$lib/collections';
@@ -137,14 +138,12 @@ export function useSubscriptionContext(
     const { organizationId, enableSubscriptions } = getParams();
     if (!browser || !enableSubscriptions || !organizationId) return null;
     const entry = subscriptionCollection?.state.get(organizationId) ?? null;
-    // Only access-granting states flip the gate. paused / past_due /
-    // cancelled / incomplete rows persist for UI (Resume button, past-due
-    // alert) but must not short-circuit the content-detail access check —
-    // backend @codex/access would 403 the stream click anyway.
+    // Only access-granting states flip the gate (`past_due` does, while
+    // Stripe retries). paused / cancelled / incomplete rows persist for UI
+    // (Resume button) but must not short-circuit the content-detail access
+    // check — backend @codex/access would 403 the stream click anyway.
     if (!entry) return null;
-    return entry.status === 'active' || entry.status === 'cancelling'
-      ? entry
-      : null;
+    return subscriptionStatusGrantsAccess(entry.status) ? entry : null;
   });
 
   const subCtx = $derived.by<SubCtx>(() => {

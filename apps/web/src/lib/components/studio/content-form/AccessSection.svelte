@@ -15,6 +15,7 @@
   @prop derivedVisibility
 -->
 <script lang="ts">
+  import { PRICE_LIMITS } from '@codex/constants';
   import { Select } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
   import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
@@ -54,6 +55,10 @@
     onTierChange,
     connectReady = true,
   }: Props = $props();
+
+  // The worker refuses 1p–99p (Codex-2hxff.32); warn before the save does.
+  const priceNum = $derived(parseFloat(priceVal || '0') || 0);
+  const belowMinimum = $derived(Math.round(priceNum * 100) < PRICE_LIMITS.MIN_CENTS);
 
   const hasOrg = $derived(!!form.fields.organizationId?.value());
   const hasTiers = $derived(tiers.length > 0);
@@ -211,8 +216,10 @@
             placeholder={m.studio_content_form_price_placeholder()}
           />
         </div>
-        {#if accessTypeVal === 'paid' && parseFloat(priceVal || '0') <= 0}
-          <span class="field-warning">Paid content requires a price greater than &pound;0</span>
+        {#if accessTypeVal === 'paid' && belowMinimum}
+          <span class="field-warning">Paid content requires a price of at least &pound;1.00</span>
+        {:else if accessTypeVal === 'subscribers' && priceNum > 0 && belowMinimum}
+          <span class="field-warning">A price must be at least &pound;1.00, or &pound;0 if only available via subscription.</span>
         {:else if accessTypeVal === 'subscribers'}
           <span class="field-hint">Optional. Leave at &pound;0 if only available via subscription.</span>
         {/if}

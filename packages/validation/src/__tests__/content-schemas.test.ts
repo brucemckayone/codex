@@ -376,10 +376,10 @@ describe('Content Schemas', () => {
           mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
           isPurchasable: true,
         })
-      ).toThrow('Purchasable content requires a price greater than £0');
+      ).toThrow('Purchasable content requires a price of at least £1.00');
     });
 
-    it('should reject price exceeding $100,000', () => {
+    it('should reject price exceeding £100,000', () => {
       expect(() =>
         createContentSchema.parse({
           title: 'Test',
@@ -388,7 +388,7 @@ describe('Content Schemas', () => {
           mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
           priceCents: 10000001,
         })
-      ).toThrow('Price cannot exceed $100,000');
+      ).toThrow('Maximum price is £100,000');
     });
 
     it('should reject negative price', () => {
@@ -545,7 +545,7 @@ describe('Content Schemas', () => {
           ...baseVideo,
           isPurchasable: true,
         })
-      ).toThrow(/price greater than £0/i);
+      ).toThrow(/price of at least £1\.00/i);
     });
 
     it('rejects purchasable content with a zero price', () => {
@@ -555,7 +555,7 @@ describe('Content Schemas', () => {
           isPurchasable: true,
           priceCents: 0,
         })
-      ).toThrow(/price greater than £0/i);
+      ).toThrow(/price of at least £1\.00/i);
     });
 
     it('rejects follower-gated content without an org', () => {
@@ -586,7 +586,29 @@ describe('Content Schemas', () => {
           isPurchasable: true,
           priceCents: 0,
         })
-      ).toThrow(/price greater than £0/i);
+      ).toThrow(/price of at least £1\.00/i);
+    });
+
+    // Codex-2hxff.32: Stripe refuses card charges under £0.30, so a sub-£1
+    // price passed here and only failed when a buyer reached Checkout.
+    it('rejects purchasable content priced under £1.00, on create and update', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          isPurchasable: true,
+          priceCents: 99,
+        })
+      ).toThrow('Minimum price is £1.00 (100 pence)');
+      expect(() => updateContentSchema.parse({ priceCents: 29 })).toThrow(
+        'Minimum price is £1.00 (100 pence)'
+      );
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          isPurchasable: true,
+          priceCents: 100,
+        })
+      ).not.toThrow();
     });
 
     // ── Non-free content MUST declare a gate (subscribers-without-tier bypass) ──

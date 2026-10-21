@@ -118,6 +118,31 @@ export const SUBSCRIPTION_STATUS = {
 } as const;
 
 /**
+ * The statuses under which a subscription (org tier or course plan) grants
+ * access. `past_due` is one of them: a failed renewal keeps access while
+ * Stripe retries the card, and access ends when Stripe cancels (owner
+ * decision P-3, docs/payments/subscriptions.md#failed-payments). Every access
+ * gate reads this one list, so the two subscription kinds cannot drift apart.
+ */
+export const ACCESS_GRANTING_SUBSCRIPTION_STATUSES = [
+  SUBSCRIPTION_STATUS.ACTIVE,
+  SUBSCRIPTION_STATUS.CANCELLING,
+  SUBSCRIPTION_STATUS.PAST_DUE,
+] as const;
+
+/** Whether a subscription in `status` grants access (see the list above). */
+export function subscriptionStatusGrantsAccess(
+  status: string | null | undefined
+): boolean {
+  return (
+    status != null &&
+    (ACCESS_GRANTING_SUBSCRIPTION_STATUSES as readonly string[]).includes(
+      status
+    )
+  );
+}
+
+/**
  * Structured churn-reason taxonomy for subscription cancellation (Q7).
  *
  * Persisted on `subscriptions.churn_reason` alongside the existing free-text
@@ -169,6 +194,17 @@ export const FEES = {
   // it; fee_config_platform.min_platform_fee_cents overrides it when a row
   // exists. docs/payments/fees-and-splits.md.
   MIN_PLATFORM_FEE_CENTS: 25,
+} as const;
+
+/**
+ * The range every price must sit in, in pence: content, courses, tiers and
+ * course subscription plans alike (owner decision 2026-10-13). Stripe refuses
+ * card charges under £0.30, and at £1.00 the 25p minimum platform fee still
+ * covers a UK card fee (about 1.5% + 20p). docs/payments/purchases.md.
+ */
+export const PRICE_LIMITS = {
+  MIN_CENTS: 100, // £1.00
+  MAX_CENTS: 10_000_000, // £100,000
 } as const;
 
 export const CURRENCY = {

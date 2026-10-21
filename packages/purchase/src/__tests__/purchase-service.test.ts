@@ -666,6 +666,60 @@ describe('PurchaseService Integration', () => {
       ).rejects.toThrow(ContentNotPurchasableError);
     });
 
+    // Codex-2hxff.32: validation now refuses 1p–99p, so only a row priced
+    // before that rule can reach checkout this way — written straight to the DB.
+    it('refuses content priced under the £1.00 minimum before reaching Stripe', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Cheap Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/cheap-video/master.m3u8',
+          thumbnailKey: 'thumbnails/cheap-video.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const cheap = await contentService.create(
+        {
+          organizationId,
+          title: 'Cheap Tutorial',
+          slug: createUniqueSlug('cheap-tutorial'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          isFree: false,
+          isPurchasable: true,
+          priceCents: 100,
+          tags: [],
+        },
+        userId
+      );
+      // Publishing paid content needs payouts set up, so the legacy row's
+      // published state is written directly too.
+      await db
+        .update(schema.content)
+        .set({ priceCents: 50, status: 'published', publishedAt: new Date() })
+        .where(eq(schema.content.id, cheap.id));
+
+      const attempt = purchaseService.createCheckoutSession(
+        {
+          contentId: cheap.id,
+          successUrl: 'http://localhost:3000/success',
+          cancelUrl: 'http://localhost:3000/cancel',
+        },
+        otherUserId
+      );
+      await expect(attempt).rejects.toThrow(ContentNotPurchasableError);
+      await expect(attempt).rejects.toThrow('below the £1.00 minimum');
+    });
+
     it('throws ContentNotPurchasableError for unpublished content', async () => {
       // Create draft content
       const media = await mediaService.create(

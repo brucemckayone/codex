@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { priceCentsSchema, uuidSchema } from '../primitives';
+import {
+  priceCentsSchema,
+  salePriceCentsSchema,
+  uuidSchema,
+} from '../primitives';
 import { checkoutRedirectUrlSchema } from './purchase';
 import { billingIntervalEnum } from './subscription';
 
@@ -36,16 +40,8 @@ export const courseMonetisationOrgQuerySchema = z.object({
  */
 export const upsertCourseSubscriptionPlanSchema = z
   .object({
-    priceMonthly: z
-      .number()
-      .int('Price must be a whole number (pence)')
-      .min(100, 'Minimum price is £1.00 (100 pence)')
-      .max(10000000, 'Maximum price is £100,000'),
-    priceAnnual: z
-      .number()
-      .int('Price must be a whole number (pence)')
-      .min(100, 'Minimum price is £1.00 (100 pence)')
-      .max(10000000, 'Maximum price is £100,000'),
+    priceMonthly: salePriceCentsSchema,
+    priceAnnual: salePriceCentsSchema,
   })
   .refine((data) => data.priceAnnual <= data.priceMonthly * 12, {
     message: 'Annual price must offer equal or better value than monthly',

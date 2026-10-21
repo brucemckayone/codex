@@ -241,6 +241,8 @@ describe('handleSubscriptionWebhook — cache invalidation', () => {
       handleInvoicePaymentFailed: mockHandleInvoiceFailed,
       // charge.refunded clawback (Codex-13v21) — handlePaymentWebhook calls this.
       reverseSubscriptionPayoutsForCharge: vi.fn(),
+      // ...and, last, the full-refund cancel (Codex-2hxff.10): nothing here.
+      cancelForFullRefund: vi.fn().mockResolvedValue(undefined),
     }));
   });
 

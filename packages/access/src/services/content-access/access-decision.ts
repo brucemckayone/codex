@@ -42,9 +42,9 @@
  */
 
 import {
+  ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   CONTENT_STATUS,
   ORGANIZATION_ROLES,
-  SUBSCRIPTION_STATUS,
 } from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
 import {
@@ -221,8 +221,7 @@ async function decidePolicyAccess(
         eq(subscriptions.userId, userId),
         eq(subscriptions.organizationId, orgId),
         inArray(subscriptions.status, [
-          SUBSCRIPTION_STATUS.ACTIVE,
-          SUBSCRIPTION_STATUS.CANCELLING,
+          ...ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
         ]),
         // Paused while a chargeback on one of its invoices is open.
         isNull(subscriptions.disputedAt),

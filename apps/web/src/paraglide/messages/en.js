@@ -4487,7 +4487,7 @@ export const subscription_churn_reason_other_required = () => `Tell us more so w
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const subscription_health_banner_past_due_single = () => `A subscription needs attention — update your payment method to restore access.`
+export const subscription_health_banner_past_due_single = () => `A subscription needs attention — update your payment method to keep access.`
 
 
 /**
@@ -12976,6 +12976,14 @@ export const studio_builder_pricing_problem_annual_cap = () => `The annual price
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_pricing_problem_oneoff_required = () => `Set a price for the one-off purchase.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_pricing_problem_oneoff_min = () => `The one-off price must be at least £1.00.`
 
 
 /**

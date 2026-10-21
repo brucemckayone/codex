@@ -64,7 +64,12 @@ export class AlreadyPurchasedError extends ConflictError {
 export class ContentNotPurchasableError extends BusinessLogicError {
   constructor(
     contentId: string,
-    reason: 'free' | 'not_published' | 'deleted' | 'no_price',
+    reason:
+      | 'free'
+      | 'not_published'
+      | 'deleted'
+      | 'no_price'
+      | 'below_minimum_price',
     context?: Record<string, unknown>
   ) {
     const messages = {
@@ -72,6 +77,8 @@ export class ContentNotPurchasableError extends BusinessLogicError {
       not_published: 'Content must be published before it can be purchased',
       deleted: 'Content is no longer available',
       no_price: 'Content does not have a price set',
+      below_minimum_price:
+        'Content is priced below the £1.00 minimum, so it cannot be sold',
     };
 
     super(messages[reason], {
@@ -90,13 +97,15 @@ export class ContentNotPurchasableError extends BusinessLogicError {
 export class CourseNotPurchasableError extends BusinessLogicError {
   constructor(
     courseId: string,
-    reason: 'no_price' | 'not_published' | 'deleted',
+    reason: 'no_price' | 'not_published' | 'deleted' | 'below_minimum_price',
     context?: Record<string, unknown>
   ) {
     const messages = {
       no_price: 'Course is not sold as a one-off purchase',
       not_published: 'Course must be published before it can be purchased',
       deleted: 'Course is no longer available',
+      below_minimum_price:
+        'Course is priced below the £1.00 minimum, so it cannot be sold',
     };
 
     super(messages[reason], {

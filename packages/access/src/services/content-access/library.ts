@@ -8,11 +8,11 @@
  */
 
 import {
+  ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   ORGANIZATION_ROLES,
   PURCHASE_STATUS,
-  SUBSCRIPTION_STATUS,
 } from '@codex/constants';
 import { type DatabaseClient, toIso } from '@codex/database';
 import {
@@ -202,8 +202,7 @@ export async function listUserLibrary(
           where: and(
             eq(subscriptions.userId, userId),
             inArray(subscriptions.status, [
-              SUBSCRIPTION_STATUS.ACTIVE,
-              SUBSCRIPTION_STATUS.CANCELLING,
+              ...ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
             ]),
             // Paused while a chargeback on one of its invoices is open.
             isNull(subscriptions.disputedAt),
@@ -727,6 +726,10 @@ export async function listUserLibrary(
   // Hyperdrive (Codex-s1i7h).
   const asOf = new Date();
 
+  const grantingStatusList = sql.join(
+    ACCESS_GRANTING_SUBSCRIPTION_STATUSES.map((status) => sql`${status}`),
+    sql`, `
+  );
   const relationshipPredicate = or(
     sql`EXISTS (SELECT 1 FROM ${organizationFollowers}
                 WHERE ${organizationFollowers.organizationId} = ${content.organizationId}
@@ -734,7 +737,7 @@ export async function listUserLibrary(
     sql`EXISTS (SELECT 1 FROM ${subscriptions}
                 WHERE ${subscriptions.userId} = ${userId}
                   AND ${subscriptions.organizationId} = ${content.organizationId}
-                  AND ${subscriptions.status} IN (${SUBSCRIPTION_STATUS.ACTIVE}, ${SUBSCRIPTION_STATUS.CANCELLING})
+                  AND ${subscriptions.status} IN (${grantingStatusList})
                   AND ${subscriptions.disputedAt} IS NULL
                   AND ${subscriptions.currentPeriodEnd} > ${asOf})`
   );

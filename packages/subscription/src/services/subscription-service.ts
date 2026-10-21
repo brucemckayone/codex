@@ -113,7 +113,10 @@ import {
   schedulePriceChange,
 } from './pending-price-change';
 import { calculateRevenueSplit } from './revenue-split';
-import { mapStripeSubscriptionStatus } from './stripe-status-mapper';
+import {
+  mapStripeSubscriptionStatus,
+  resolveStatus,
+} from './stripe-status-mapper';
 import {
   cancelLostDisputeSubscription,
   type DisputedSubscription,
@@ -127,6 +130,11 @@ import {
   invalidateForUser,
   type WaitUntilFn,
 } from './subscription-invalidation';
+import {
+  cancelForFullRefund,
+  type RefundCancellation,
+  type RefundedCharge,
+} from './subscription-refund';
 
 type Subscription = typeof subscriptions.$inferSelect;
 type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
@@ -1173,7 +1181,14 @@ export class SubscriptionService extends BaseService {
               typeof stripeSub.customer === 'string'
                 ? stripeSub.customer
                 : stripeSub.customer.id,
-            status: SUBSCRIPTION_STATUS.ACTIVE,
+            // Stripe's own status, not a blanket ACTIVE: a FIRST invoice that
+            // failed (invoice.payment_failed before .created) leaves the
+            // subscription `incomplete`, which must not grant access.
+            status: resolveStatus(
+              stripeSub.status,
+              stripeSub.cancel_at_period_end ?? false,
+              SUBSCRIPTION_STATUS.ACTIVE
+            ),
             billingInterval,
             currentPeriodStart: new Date(periodStart * 1000),
             currentPeriodEnd: new Date(periodEnd * 1000),
@@ -1486,7 +1501,14 @@ export class SubscriptionService extends BaseService {
       .set({
         currentPeriodStart: new Date(periodStart * 1000),
         currentPeriodEnd: new Date(periodEnd * 1000),
-        status: SUBSCRIPTION_STATUS.ACTIVE,
+        // The live subscription's status, not a blanket ACTIVE: a late or
+        // replayed invoice never revives one Stripe has cancelled (a refund,
+        // a lost dispute), and a renewal keeps `cancel_at_period_end`.
+        status: resolveStatus(
+          stripeSub.status,
+          stripeSub.cancel_at_period_end ?? false,
+          SUBSCRIPTION_STATUS.ACTIVE
+        ),
         amountCents,
         platformFeeCents: split.platformFeeCents,
         organizationFeeCents: split.organizationFeeCents,
@@ -1600,17 +1622,40 @@ export class SubscriptionService extends BaseService {
         userId = sub.userId;
         orgId = sub.organizationId;
 
-        await this.db
+        // past_due GRANTS access while Stripe retries (owner decision P-3),
+        // so only a subscription that was paid up may move to it. A failed
+        // FIRST payment stays `incomplete`, and a late event never revives a
+        // cancelled or paused row.
+        const [moved] = await this.db
           .update(subscriptions)
           .set({
             status: SUBSCRIPTION_STATUS.PAST_DUE,
             updatedAt: new Date(),
           })
-          .where(eq(subscriptions.id, sub.id));
+          .where(
+            and(
+              eq(subscriptions.id, sub.id),
+              inArray(subscriptions.status, [
+                SUBSCRIPTION_STATUS.ACTIVE,
+                SUBSCRIPTION_STATUS.PAST_DUE,
+              ])
+            )
+          )
+          .returning();
 
-        this.obs.info('Subscription status updated to past_due', {
-          stripeSubscriptionId: stripeSubId,
-        });
+        if (moved) {
+          this.obs.info('Subscription status updated to past_due', {
+            stripeSubscriptionId: stripeSubId,
+          });
+        } else {
+          this.obs.info(
+            'Payment failed on a subscription not paid up; status kept',
+            {
+              stripeSubscriptionId: stripeSubId,
+              status: sub.status,
+            }
+          );
+        }
       }
     }
 
@@ -1803,6 +1848,15 @@ export class SubscriptionService extends BaseService {
       sub.status as (typeof SUBSCRIPTION_STATUS)[keyof typeof SUBSCRIPTION_STATUS]
     );
     const newTierId = mapped.tierId;
+
+    if (await this.endedAtStripe(sub, mapped.status)) {
+      this.obs.warn('Late subscription event ignored: cancelled at Stripe', {
+        subscriptionId: sub.id,
+        stripeSubscriptionId: stripeSubId,
+        eventStatus: stripeSubscription.status,
+      });
+      return undefined;
+    }
 
     await this.db
       .update(subscriptions)
@@ -4424,8 +4478,48 @@ export class SubscriptionService extends BaseService {
     return ended;
   }
 
+  // ── Refunds (Codex-2hxff.10; docs/payments/subscriptions.md#refunds) ──
+
+  /**
+   * A full refund of the latest payment: the subscription cancelled at Stripe
+   * (owner decision P-4). The caller then applies the cancellation as for
+   * `customer.subscription.deleted`, so access ends now rather than when that
+   * event lands. Undefined for a partial refund, a purchase, or an earlier
+   * payment. Tier and course subscriptions alike.
+   */
+  async cancelForFullRefund(
+    charge: RefundedCharge
+  ): Promise<RefundCancellation | undefined> {
+    return cancelForFullRefund(this.disputeDeps(), charge);
+  }
+
   private disputeDeps() {
     return { db: this.db, stripe: this.stripe, obs: this.obs };
+  }
+
+  /**
+   * Whether an event that would bring a CANCELLED row back is stale: the
+   * subscription has ended at Stripe, where `canceled` is final
+   * (docs/payments/subscriptions.md#lifecycle-and-access: a late or replayed
+   * event never brings back a subscription that has ended). Asked only in
+   * that case, so it costs a Stripe call only then. A subscription Stripe
+   * marked `unpaid` and the customer later paid is live again, and returns.
+   */
+  private async endedAtStripe(
+    sub: Subscription,
+    wouldBecome: string
+  ): Promise<boolean> {
+    if (
+      sub.status !== SUBSCRIPTION_STATUS.CANCELLED ||
+      wouldBecome === SUBSCRIPTION_STATUS.CANCELLED ||
+      !sub.stripeSubscriptionId
+    ) {
+      return false;
+    }
+    const live = await this.stripe.subscriptions.retrieve(
+      sub.stripeSubscriptionId
+    );
+    return live.status === 'canceled' || live.status === 'incomplete_expired';
   }
 
   /**

@@ -8,10 +8,12 @@
  *   2. call `PurchaseService.processRefund(paymentIntentId, …)`
  *   3. on success: bump COLLECTION_USER_LIBRARY via `invalidateForUser`
  *      (requires CACHE_KV + userId)
- *   4. on success: write `AccessRevocation.revoke(userId, orgId, 'refund')`
- *      ONLY when the refund is subscription-linked (orgId returned by the
- *      service). One-time-purchase refunds deliberately skip revocation —
- *      see the inline rationale in the handler.
+ *   4. last: `SubscriptionService.cancelForFullRefund` — a FULL refund of the
+ *      LATEST subscription payment cancels the subscription (owner decision
+ *      P-4, Codex-2hxff.10). The handler then ends it here as
+ *      `customer.subscription.deleted` would, and writes
+ *      `AccessRevocation.revoke(userId, orgId, 'refund')`. A one-time
+ *      purchase's access ends through its entitlement: no revocation.
  *   5. send `refund-processed` email when billing_details.email or
  *      receipt_email is present on the charge
  *
@@ -20,7 +22,7 @@
  * | Scenario                                                      | processRefund | invalidateForUser | revoke | sendEmail |
  * | ------------------------------------------------------------- | :-----------: | :---------------: | :----: | :-------: |
  * | positive one-time: { userId } only → cache bump, NO revocation|      yes      |        yes        |   no   |    yes    |
- * | positive subscription-linked: { userId, orgId } → all three   |      yes      |        yes        |   yes  |    yes    |
+ * | positive full refund of latest sub payment → cancel + revoke  |      yes      |      yes x 2      |   yes  |    yes    |
  * | negative: unknown charge (processRefund returns void)         |      yes      |        no         |   no   |    yes*   |
  * | negative: missing payment_intent → no service call            |      no       |        no         |   no   |    no     |
  * | negative: no CACHE_KV binding → service runs, no KV writes    |      yes      |        no         |   no   |    yes    |
@@ -179,6 +181,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   let mockRelease: ReturnType<typeof vi.fn>;
   let mockProcessRefund: ReturnType<typeof vi.fn>;
   let mockReverseSubscription: ReturnType<typeof vi.fn>;
+  let mockCancelForFullRefund: ReturnType<typeof vi.fn>;
+  let mockTierDeleted: ReturnType<typeof vi.fn>;
   let mockRecordRefund: ReturnType<typeof vi.fn>;
   let mockRecordChargeRefunds: ReturnType<typeof vi.fn>;
   let mockClaimRefundEmails: ReturnType<typeof vi.fn>;
@@ -194,6 +198,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
 
     mockProcessRefund = vi.fn().mockResolvedValue(undefined);
     mockReverseSubscription = vi.fn().mockResolvedValue(undefined);
+    mockCancelForFullRefund = vi.fn().mockResolvedValue(undefined);
+    mockTierDeleted = vi.fn().mockResolvedValue(undefined);
     mockRecordRefund = vi.fn().mockResolvedValue(true);
     // The charge's refunds as Stripe lists them, newest first, and the ones
     // not emailed yet (Codex-2hxff.8: one email per refund).
@@ -220,9 +226,15 @@ describe('handlePaymentWebhook — charge.refunded', () => {
           recordChargeRefunds: mockRecordChargeRefunds,
           claimRefundEmails: mockClaimRefundEmails,
         },
-        // charge.refunded reverses subscription payouts first (Codex-13v21).
+        // charge.refunded reverses subscription payouts first (Codex-13v21),
+        // and last cancels on a full refund of the latest payment (P-4).
         subscription: {
           reverseSubscriptionPayoutsForCharge: mockReverseSubscription,
+          cancelForFullRefund: mockCancelForFullRefund,
+          handleSubscriptionDeleted: mockTierDeleted,
+        },
+        courseSubscription: {
+          handleCourseSubscriptionDeleted: vi.fn().mockResolvedValue(undefined),
         },
       } as unknown as WebhookServices['services'],
       background: (promise) => promise,
@@ -257,13 +269,20 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     expect(mockRevoke).not.toHaveBeenCalled();
   });
 
-  it('positive subscription-linked: processRefund returns { userId, orgId } → library bump + revocation written', async () => {
-    // Forward-compatibility path: when subscription-linked refunds start
-    // returning orgId, revocation must fire without another round of
-    // plumbing (see the inline comment in the handler).
-    mockProcessRefund.mockResolvedValueOnce({
-      userId: 'user_sub',
-      orgId: 'org_sub',
+  it('positive full refund of the latest subscription payment: cancelled, ended here, library bump + revocation written', async () => {
+    // processRefund finds no purchase for a subscription charge.
+    mockProcessRefund.mockResolvedValueOnce(undefined);
+    const cancelled = { id: 'sub_refunded', status: 'canceled' };
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      subscription: {
+        kind: 'tier',
+        id: 'local_sub',
+        stripeSubscriptionId: 'sub_refunded',
+        userId: 'user_sub',
+        organizationId: 'org_sub',
+        status: 'active',
+      },
+      cancelled,
     });
 
     const bundle = buildContext();
@@ -272,10 +291,31 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     await handlePaymentWebhook(event, mockStripe, bundle.context);
     await drainWaitUntil(bundle);
 
+    expect(mockTierDeleted).toHaveBeenCalledWith(cancelled);
     expect(invalidateForUser).toHaveBeenCalledTimes(1);
     expect(AccessRevocation).toHaveBeenCalledTimes(1);
     expect(mockRevoke).toHaveBeenCalledTimes(1);
     expect(mockRevoke).toHaveBeenCalledWith('user_sub', 'org_sub', 'refund');
+  });
+
+  // A permanent error would otherwise end as a quiet 200 from the webhook
+  // wrapper, leaving a customer refunded in full still billed.
+  it('a full-refund cancel that fails is alerted with an errorId for support, then rethrown', async () => {
+    mockCancelForFullRefund.mockRejectedValueOnce(new Error('Stripe said no'));
+    const bundle = buildContext();
+
+    await expect(
+      handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context)
+    ).rejects.toThrow('Stripe said no');
+
+    expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('could not be ended'),
+      expect.objectContaining({
+        errorId: expect.any(String),
+        error: 'Stripe said no',
+      })
+    );
+    expect(mockRevoke).not.toHaveBeenCalled();
   });
 
   it('negative: processRefund returns void (unknown charge) → no cache bump, no revocation, email still sent', async () => {
@@ -312,9 +352,17 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   });
 
   it('negative: no CACHE_KV binding → service runs, no KV side-effects, email still sent', async () => {
-    mockProcessRefund.mockResolvedValueOnce({
-      userId: 'user_nokv',
-      orgId: 'org_nokv',
+    mockProcessRefund.mockResolvedValueOnce({ userId: 'user_nokv' });
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      subscription: {
+        kind: 'tier',
+        id: 'local_sub',
+        stripeSubscriptionId: 'sub_nokv',
+        userId: 'user_nokv',
+        organizationId: 'org_nokv',
+        status: 'active',
+      },
+      cancelled: { id: 'sub_nokv', status: 'canceled' },
     });
     const bundle = buildContext({ CACHE_KV: undefined });
     const event = createRefundEvent();
@@ -354,9 +402,16 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   });
 
   it('fire-and-forget: AccessRevocation.revoke rejection does NOT surface, handler resolves', async () => {
-    mockProcessRefund.mockResolvedValueOnce({
-      userId: 'user_fire',
-      orgId: 'org_fire',
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      subscription: {
+        kind: 'tier',
+        id: 'local_sub',
+        stripeSubscriptionId: 'sub_fire',
+        userId: 'user_fire',
+        organizationId: 'org_fire',
+        status: 'active',
+      },
+      cancelled: { id: 'sub_fire', status: 'canceled' },
     });
     mockRevoke.mockRejectedValueOnce(new Error('KV unreachable'));
 

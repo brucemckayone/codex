@@ -26,6 +26,7 @@ import {
   CONTENT_STATUS,
   CURRENCY,
   FEES,
+  PRICE_LIMITS,
   PURCHASE_STATUS,
   stripeEnvMetadata,
 } from '@codex/constants';
@@ -384,6 +385,15 @@ export class PurchaseService extends BaseService {
         throw new ContentNotPurchasableError(validated.contentId, 'free', {
           priceCents: contentRecord.priceCents,
         });
+      }
+      // Validation refuses 1p–99p (Codex-2hxff.32). This catches a row priced
+      // before that rule, rather than letting Stripe refuse it at Checkout.
+      if (contentRecord.priceCents < PRICE_LIMITS.MIN_CENTS) {
+        throw new ContentNotPurchasableError(
+          validated.contentId,
+          'below_minimum_price',
+          { priceCents: contentRecord.priceCents }
+        );
       }
 
       // Step 2: Check for existing purchase
@@ -968,6 +978,14 @@ export class PurchaseService extends BaseService {
         throw new CourseNotPurchasableError(validated.courseId, 'no_price', {
           priceCents: course.priceCents,
         });
+      }
+      // Mirrors the content path: a course priced before the £1.00 rule.
+      if (course.priceCents < PRICE_LIMITS.MIN_CENTS) {
+        throw new CourseNotPurchasableError(
+          validated.courseId,
+          'below_minimum_price',
+          { priceCents: course.priceCents }
+        );
       }
 
       // Double-purchase guard: a completed course purchase already grants a

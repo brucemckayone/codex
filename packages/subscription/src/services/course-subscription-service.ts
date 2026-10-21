@@ -29,11 +29,13 @@
  */
 
 import {
+  ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   BILLING_INTERVAL,
   CONTENT_STATUS,
   CURRENCY,
   FEES,
   stripeEnvMetadata,
+  subscriptionStatusGrantsAccess,
 } from '@codex/constants';
 import { isUniqueViolation } from '@codex/database';
 import {
@@ -85,9 +87,6 @@ import type { TierPriceChangeMailer } from './subscription-service';
 
 /** Marks a Stripe subscription as a course sub (vs. an org tier sub). */
 export const COURSE_SUBSCRIPTION_METADATA_TYPE = 'course_subscription';
-
-/** Statuses under which a course subscription's stored grant stays live. */
-const GRANTING_STATUSES = ['active', 'cancelling', 'past_due'];
 
 interface CourseSubscriptionServiceConfig extends ServiceConfig {
   /** Injected so invoice payouts resolve fees via the 3-tier fallback chain. */
@@ -785,7 +784,9 @@ export class CourseSubscriptionService extends BaseService {
           and(
             eq(courseSubscriptions.userId, userId),
             eq(courseSubscriptions.courseId, input.courseId),
-            inArray(courseSubscriptions.status, GRANTING_STATUSES)
+            inArray(courseSubscriptions.status, [
+              ...ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
+            ])
           )
         )
         .limit(1);
@@ -1068,8 +1069,11 @@ export class CourseSubscriptionService extends BaseService {
   }
 
   /**
-   * customer.subscription.updated (course sub): mirror status/period. `unpaid`
-   * is access-reducing → revoke the grant immediately.
+   * customer.subscription.updated (course sub): mirror status/period. While the
+   * status grants access — including `past_due`, as Stripe retries a failed
+   * renewal (owner decision P-3) — the stored grant follows the period end;
+   * otherwise it would lapse at the old one, since only a PAID renewal moves it
+   * on. `unpaid` is access-reducing → revoke the grant immediately.
    */
   async handleCourseSubscriptionUpdated(
     stripeSub: Stripe.Subscription
@@ -1084,17 +1088,26 @@ export class CourseSubscriptionService extends BaseService {
       stripeSub.cancel_at_period_end ?? false,
       row.status as Parameters<typeof resolveStatus>[2]
     );
+    const currentPeriodEnd = item?.current_period_end
+      ? new Date(item.current_period_end * 1000)
+      : row.currentPeriodEnd;
     await this.db
       .update(courseSubscriptions)
       .set({
         status,
         cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? false,
-        currentPeriodEnd: item?.current_period_end
-          ? new Date(item.current_period_end * 1000)
-          : row.currentPeriodEnd,
+        currentPeriodEnd,
         updatedAt: new Date(),
       })
       .where(eq(courseSubscriptions.id, row.id));
+
+    if (subscriptionStatusGrantsAccess(status) && currentPeriodEnd) {
+      await refreshCourseSubscriptionEntitlementExpiry(this.db, {
+        userId: row.userId,
+        courseId: row.courseId,
+        expiresAt: currentPeriodEnd,
+      });
+    }
 
     if (stripeSub.status === 'unpaid') {
       await revokeCourseSubscriptionEntitlement(this.db, {

@@ -3,7 +3,7 @@
 Where the code does not yet meet this specification, the decisions the
 specification rests on, and what is still undecided.
 
-Last reviewed: 2026-10-19.
+Last reviewed: 2026-10-20.
 
 How the remaining work should be organised in the code, and in what order, is
 in [architecture.md](architecture.md) (agreed by the owner 2026-10-19).
@@ -32,10 +32,6 @@ fixed by PR 2 below. The production checks to run around these releases
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
-| `Codex-2hxff.7` | P1 | Every sale path uses fee configuration, including the minimum platform fee | [fees-and-splits](fees-and-splits.md#fee-configuration) |
-| `Codex-2hxff.8` | P1 | Partial refunds keep access and claw back each increment; failed reversals are retried | [purchases](purchases.md#refunds) |
-| `Codex-2hxff.9` | P1 | Disputes pause access, reverse slices, hold pending money, and restore on a win | [purchases](purchases.md#disputes) |
-| `Codex-2hxff.10` | P2 | Access continues while a failed renewal is retried; a full refund cancels the subscription | [subscriptions](subscriptions.md#failed-payments) |
 | `Codex-2hxff.13` | P2 | Pending money is released as soon as the payee becomes payable | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
 | `Codex-2hxff.14` | P1 | Checkout only for content a purchase can unlock; no double purchases | [purchases](purchases.md#checkout) |
 | `Codex-2hxff.15` | P1 | Our subscription row always follows Stripe; duplicates are cancelled and refunded | [subscriptions](subscriptions.md#lifecycle-and-access) |
@@ -49,17 +45,27 @@ fixed by PR 2 below. The production checks to run around these releases
 | `Codex-2hxff.23` | P2 | Financial records are permanent; one Customer per user; GBP asserted everywhere | [README](README.md#rules-that-always-hold) |
 | `Codex-2hxff.24` | P3 | Dev and CI Stripe setup mirrors production; customer stub removed | [operations](operations.md#local-development) |
 | `Codex-2hxff.25` | P2 | CI exercises real webhook round trips | [operations](operations.md#testing) |
-| `Codex-2hxff.26` | P1 | This documentation (in progress) | — |
 | `Codex-2hxff.28` | P2 | Support issues refunds from an admin screen, not the Stripe Dashboard, within 14 days | [purchases](purchases.md#refunds) |
 | `Codex-2hxff.29` | P2 | Creators' bank payouts are held for the 14-day refund window | [connect-and-payouts](connect-and-payouts.md#payout-timing) |
 | `Codex-2hxff.30` | P2 | A clawback shortfall is recovered from the creator's future earnings | [connect-and-payouts](connect-and-payouts.md#reversals) |
-| `Codex-2hxff.31` | P2 | Customer refund policy and creator payout terms drafted for legal review | [policy drafts](policy-drafts/README.md) |
-| `Codex-2hxff.32` | P1 | Every one-off content and course price is at least £1.00 (tiers and course plans already are) | [purchases](purchases.md#what-can-be-bought) |
 | `Codex-2hxff.33` | P2 | A fee increase applies 30 days after an email; a decrease at once | [fees-and-splits](fees-and-splits.md#fee-configuration) |
 | `Codex-2hxff.34` | P3 | Creators are reminded monthly about money waiting for them | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
 | `Codex-2hxff.52` | P2 | Pausing, resuming, a failed payment and a trial ending work for course subscriptions as for tiers | [subscriptions](subscriptions.md#lifecycle-and-access) |
+| `Codex-2hxff.55` | P2 | A service built without its money dependencies (fee configuration) cannot compile | [architecture](architecture.md) |
+| `Codex-2hxff.58` | P2 | A dispute whose webhook events were missed is still settled, by a reconciliation sweep | [dispute record](dispute-record.md) |
+| `Codex-2hxff.59` | P3 | Dispute edge cases: later re-pay causes, a refund under a full chargeback, zero reductions | [dispute record](dispute-record.md) |
+| `Codex-2hxff.60` | P3 | A subscriber is told when a dispute pauses their access | [subscription disputes](subscription-disputes.md) |
+| `Codex-2hxff.61` | P3 | A revocation also stops streams already playing, not only new stream URLs | [access](access.md) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
+
+`Codex-2hxff.7` (fee configuration on every sale path, including the 25p
+minimum), `.8` (partial refunds) and `.9` (disputes) were merged to `dev` and
+released to production on 2026-10-20 (#617), so are not listed above; the
+dispute follow-ups are `.58`–`.61`. `Codex-2hxff.32` (every one-off price at
+least £1.00) and `.10` (a failed renewal keeps access while Stripe retries; a
+full refund of the latest payment cancels) are fixed together in one pull
+request. `.26` (this documentation) and `.31` (the policy drafts) are done.
 
 `Codex-2hxff.6`, `.11`, `.12` and `.37` (label `payments-fix-pr-2`) are fixed in
 payments fix PR 2 and so are not listed above: webhooks answer 500 for a

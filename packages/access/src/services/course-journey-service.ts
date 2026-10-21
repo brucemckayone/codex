@@ -2457,12 +2457,14 @@ export class CourseJourneyService extends BaseService {
       // An ENABLED path with no price is the silent-failure shape: the sales page
       // advertises a way in that the checkout cannot price, so it shows nothing.
       // Reject it at the boundary rather than persisting an unsellable offer.
-      if (offer.oneOffEnabled && offer.oneOffPriceCents === null) {
+      // `0` counts as no price: `priceCentsSchema` lets it through as "not
+      // sold", and a £0 course is one the checkout refuses as `no_price`.
+      if (offer.oneOffEnabled && !offer.oneOffPriceCents) {
         throw new ValidationError(
           'Set a one-off price, or turn the one-off path off'
         );
       }
-      if (offer.subscriptionEnabled && offer.subscriptionPriceCents === null) {
+      if (offer.subscriptionEnabled && !offer.subscriptionPriceCents) {
         throw new ValidationError(
           'Set a monthly price, or turn the course subscription off'
         );

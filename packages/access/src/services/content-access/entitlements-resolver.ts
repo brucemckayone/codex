@@ -30,7 +30,7 @@
  * revocation is instant.
  */
 
-import { SUBSCRIPTION_STATUS } from '@codex/constants';
+import { ACCESS_GRANTING_SUBSCRIPTION_STATUSES } from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
 import {
   courseStages,
@@ -49,12 +49,6 @@ import { and, eq, gt, inArray, isNull, or, type SQL, sql } from 'drizzle-orm';
  */
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
 export type AccessQueryClient = DatabaseClient | Tx;
-
-/** Subscription statuses that currently grant access (mirrors access-decision.ts). */
-const GRANTING_SUBSCRIPTION_STATUSES: string[] = [
-  SUBSCRIPTION_STATUS.ACTIVE,
-  SUBSCRIPTION_STATUS.CANCELLING,
-];
 
 /**
  * `entitlements.source` values that grant a CONTENT resource (SPEC §6.2). Course
@@ -160,7 +154,9 @@ async function hasDerivedCourseTierAccess(
       and(
         eq(courseTierAccess.courseId, courseId),
         eq(subscriptions.userId, userId),
-        inArray(subscriptions.status, GRANTING_SUBSCRIPTION_STATUSES),
+        inArray(subscriptions.status, [
+          ...ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
+        ]),
         // Paused while a chargeback on one of its invoices is open.
         isNull(subscriptions.disputedAt),
         gt(subscriptions.currentPeriodEnd, new Date())
@@ -231,7 +227,9 @@ export async function resolveCourseEntitlementsBatch(
       and(
         inArray(courseTierAccess.courseId, ids),
         eq(subscriptions.userId, userId),
-        inArray(subscriptions.status, GRANTING_SUBSCRIPTION_STATUSES),
+        inArray(subscriptions.status, [
+          ...ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
+        ]),
         // Paused while a chargeback on one of its invoices is open.
         isNull(subscriptions.disputedAt),
         gt(subscriptions.currentPeriodEnd, now)

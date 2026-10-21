@@ -21,7 +21,7 @@
  *
  *   NEGATIVE (deny):
  *     6. Subscriber with status=paused → deny (PR #5 filter drops this row)
- *     7. Subscriber with status=past_due → deny (PR #5 filter drops this row)
+ *     7. Subscriber with status=cancelled → deny (the status filter drops this row)
  *     8. Non-subscriber, non-follower, non-management → deny
  *     9. Anonymous/guest (no subscription, no follower) → deny
  *    10. Tier-gated content (accessType=subscribers) with subscriber → existing
@@ -353,7 +353,9 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       });
     });
 
-    it('denies a subscriber whose status=past_due (PR #5 filter drops this row)', async () => {
+    // past_due GRANTS (Codex-2hxff.10), proven against the DB in
+    // the access integration suite; cancelled is still dropped.
+    it('denies a subscriber whose status=cancelled (the status filter drops this row)', async () => {
       stub.mocks.content.findFirst.mockResolvedValue(followersContentRow);
       stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
       stub.mocks.organizationFollowers.findFirst.mockResolvedValue(undefined);

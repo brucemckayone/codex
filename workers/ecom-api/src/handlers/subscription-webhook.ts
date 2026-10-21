@@ -652,11 +652,10 @@ export async function handleSubscriptionWebhook(
           webAppUrl
         );
 
-        // PAST_DUE is access-reducing: `handleInvoicePaymentFailed` only
-        // returns userId+orgId once the local subscription record has been
-        // flipped to PAST_DUE, so revokeAccess's guard (requires both ids)
-        // naturally gates on that transition.
-        revokeAccess(c, result, 'payment_failed');
+        // No streaming block: a failed renewal KEEPS access while Stripe
+        // retries the card (owner decision P-3). Access ends when Stripe
+        // gives up — `customer.subscription.deleted`, or `unpaid` on
+        // `customer.subscription.updated` — and those paths revoke.
         dispatchEmail(c, result);
         break;
       }

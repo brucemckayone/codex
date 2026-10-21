@@ -92,9 +92,9 @@ while Stripe's published UK card price is 1.5% + 20p, about 21.5p.
   shortfall comes from the creator, giving **platform 25p, organisation 9p,
   creator 66p**.
 
-— **gap**: `Codex-2hxff.32` (prices of 1p–29p pass validation and then fail
-at Stripe Checkout). The floor reaches every sale path since #597 (fee config in
-webhooks and the cron; `Codex-2hxff.7`, closed).
+The £1.00 minimum price is enforced by validation on every price and
+re-checked at checkout (`Codex-2hxff.32`). The floor reaches every sale path
+since #597 (fee config in webhooks and the cron; `Codex-2hxff.7`, closed).
 
 ## Minimum transfer
 

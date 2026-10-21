@@ -172,7 +172,13 @@ function makeDb(overrides: Record<string, unknown> = {}): DbSpy {
       calls.push('update');
       return {
         set: vi.fn(() => ({
-          where: vi.fn(() => Promise.resolve()),
+          // Awaitable as-is, and `.returning()` for a conditional update
+          // that reads back whether it moved a row (handleInvoicePaymentFailed).
+          where: vi.fn(() =>
+            Object.assign(Promise.resolve(), {
+              returning: vi.fn(() => Promise.resolve([{ id: 'moved' }])),
+            })
+          ),
         })),
       };
     }),

@@ -31,6 +31,7 @@
   course/content policy (SPEC §6.1) — this panel owns what the journey COSTS.
 -->
 <script lang="ts">
+  import { PRICE_LIMITS } from '@codex/constants';
   import * as m from '$paraglide/messages';
   import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
@@ -111,9 +112,11 @@
   /**
    * Everything that would make the save fail, checked here so the creator sees it
    * before spending a rate-limited commerce mutation. Each rule MIRRORS a server
-   * rule (the worker remains the authority): `min(100)` and
-   * `priceAnnual <= priceMonthly * 12` come from `upsertCourseSubscriptionPlanSchema`,
-   * the enabled-needs-a-price rule from the monetisation command.
+   * rule (the worker remains the authority): the £1.00 minimum (`PRICE_LIMITS`;
+   * `salePriceCentsSchema` for the plan, `priceCentsSchema` for the one-off),
+   * `priceAnnual <= priceMonthly * 12` from `upsertCourseSubscriptionPlanSchema`,
+   * and the enabled-needs-a-price rule from the monetisation command and
+   * `updateJourneyOffer`.
    */
   const problems = $derived.by<string[]>(() => {
     const out: string[] = [];
@@ -122,9 +125,9 @@
         out.push(m.studio_builder_pricing_problem_monthly_required());
       if (draft.priceAnnualCents == null)
         out.push(m.studio_builder_pricing_problem_annual_required());
-      if (draft.priceMonthlyCents != null && draft.priceMonthlyCents < 100)
+      if (draft.priceMonthlyCents != null && draft.priceMonthlyCents < PRICE_LIMITS.MIN_CENTS)
         out.push(m.studio_builder_pricing_problem_monthly_min());
-      if (draft.priceAnnualCents != null && draft.priceAnnualCents < 100)
+      if (draft.priceAnnualCents != null && draft.priceAnnualCents < PRICE_LIMITS.MIN_CENTS)
         out.push(m.studio_builder_pricing_problem_annual_min());
       if (
         draft.priceMonthlyCents != null &&
@@ -135,6 +138,8 @@
     }
     if (offer.oneOffEnabled && offer.oneOffPriceCents == null)
       out.push(m.studio_builder_pricing_problem_oneoff_required());
+    else if (offer.oneOffEnabled && (offer.oneOffPriceCents ?? 0) < PRICE_LIMITS.MIN_CENTS)
+      out.push(m.studio_builder_pricing_problem_oneoff_min());
     return out;
   });
 </script>

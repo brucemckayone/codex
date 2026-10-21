@@ -246,6 +246,52 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     expect(enrolls).toHaveLength(1);
   });
 
+  // Codex-2hxff.10 (owner decision P-3): a failed renewal keeps access while
+  // Stripe retries. Only a PAID renewal used to move the stored grant on, so a
+  // past_due course plan lost access at the old period end.
+  it('a past_due update moves the course grant to the new period end; a paused one does not', async () => {
+    const { cId, pId } = await makeCourseWithPlan();
+    const stripeSubId = `sub_${randomUUID().slice(0, 8)}`;
+    const created = courseSubStripeObject(stripeSubId, cId, pId);
+    await service.handleCourseSubscriptionCreated(created);
+    const grantExpiry = async () => {
+      const [grant] = await db
+        .select({ expiresAt: entitlements.expiresAt })
+        .from(entitlements)
+        .where(
+          and(
+            eq(entitlements.userId, subscriberId),
+            eq(entitlements.courseId, cId),
+            eq(entitlements.source, 'course_subscription')
+          )
+        );
+      return grant?.expiresAt?.getTime();
+    };
+    const renewedTo = (seconds: number, status: string) =>
+      ({
+        ...created,
+        status,
+        items: {
+          ...created.items,
+          data: created.items.data.map((item) => ({
+            ...item,
+            current_period_end: seconds,
+          })),
+        },
+      }) as Stripe.Subscription;
+
+    const nextPeriodEnd = Math.floor(Date.now() / 1000) + 62 * 24 * 3600;
+    await service.handleCourseSubscriptionUpdated(
+      renewedTo(nextPeriodEnd, 'past_due')
+    );
+    expect(await grantExpiry()).toBe(nextPeriodEnd * 1000);
+
+    await service.handleCourseSubscriptionUpdated(
+      renewedTo(nextPeriodEnd + 30 * 24 * 3600, 'paused')
+    );
+    expect(await grantExpiry()).toBe(nextPeriodEnd * 1000);
+  });
+
   it('invoice payment fans out payouts once; redelivery is idempotent', async () => {
     const { cId, pId } = await makeCourseWithPlan();
     const stripeSubId = `sub_${randomUUID().slice(0, 8)}`;
