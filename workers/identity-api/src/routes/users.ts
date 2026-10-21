@@ -119,8 +119,9 @@ app.delete(
     policy: { auth: 'required' },
     successStatus: 204,
     handler: async (ctx) => {
-      // Use service method for cleanup (deletes R2 files + clears DB field)
-      await ctx.services.imageProcessing.deleteUserAvatar(ctx.user.id);
+      // Through the identity service, like upload, so the profile and each
+      // org's creators list stop serving the deleted avatar (Codex-kk9nv.7).
+      await ctx.services.identity.deleteAvatar(ctx.user.id);
 
       return null;
     },

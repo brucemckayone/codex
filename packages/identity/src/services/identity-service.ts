@@ -24,7 +24,7 @@ import {
 } from '@codex/service-errors';
 import type { PublicCreatorProfile, UserProfile } from '@codex/shared-types';
 import type { UpdateCreatorOnboardingInput } from '@codex/validation';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 
 import {
   AccountHasContentError,
@@ -78,24 +78,68 @@ export class IdentityService extends BaseService {
       throw new UserNotFoundError(userId);
     }
 
-    // Create image processing service
-    const imageService = new ImageProcessingService({
+    // Process, upload, and update DB (cleanup handled inside ImageProcessingService)
+    const result = await this.imageService().processUserAvatar(userId, file);
+
+    await this.invalidateUserSurfaces(userId);
+
+    return result;
+  }
+
+  /**
+   * Remove the user's avatar (R2 files + `avatarUrl`), then invalidate every
+   * cache that shows it (Codex-kk9nv.7). The route used to call the image
+   * service directly, which holds no cache, so the profile kept serving the
+   * deleted URL for up to 10 minutes.
+   */
+  async deleteAvatar(userId: string): Promise<void> {
+    await this.imageService().deleteUserAvatar(userId);
+    await this.invalidateUserSurfaces(userId);
+  }
+
+  private imageService(): ImageProcessingService {
+    return new ImageProcessingService({
       db: this.db,
       environment: this.environment,
       r2Service: this.r2Service,
       r2PublicUrlBase: this.r2PublicUrlBase,
       orphanedFileService: this.orphanedFileService,
     });
+  }
 
-    // Process, upload, and update DB (cleanup handled inside ImageProcessingService)
-    const result = await imageService.processUserAvatar(userId, file);
+  /**
+   * Invalidate every cache that shows this user's public card: their own
+   * profile entries (keyed by user id), and the creators list of each org
+   * that lists them (`ORG_CREATORS`, keyed by org slug, 4h TTL). The creators
+   * list carries name, username, avatar, bio and social links, so it goes
+   * stale on any of those writes, not only on an avatar (Codex-kk9nv.7).
+   *
+   * The org filter mirrors `OrganizationService.activeCreatorWhere`: active
+   * owner/admin/creator memberships. Both workers bind the same CACHE_KV, so
+   * bumping the slug here is the version the organization-api reads.
+   */
+  private async invalidateUserSurfaces(userId: string): Promise<void> {
+    if (!this.cache) return;
+    await this.cache.invalidate(userId);
 
-    // Invalidate cache so next getProfile() returns the new avatarUrl
-    if (this.cache) {
-      await this.cache.invalidate(userId);
+    const orgs = await this.db
+      .select({ slug: organizations.slug })
+      .from(organizationMemberships)
+      .innerJoin(
+        organizations,
+        eq(organizationMemberships.organizationId, organizations.id)
+      )
+      .where(
+        and(
+          eq(organizationMemberships.userId, userId),
+          eq(organizationMemberships.status, 'active'),
+          inArray(organizationMemberships.role, ['owner', 'admin', 'creator']),
+          whereNotDeleted(organizations)
+        )
+      );
+    for (const { slug } of orgs) {
+      await this.cache.invalidate(slug);
     }
-
-    return result;
   }
 
   /**
@@ -427,7 +471,7 @@ export class IdentityService extends BaseService {
 
       // Invalidate cache after successful update
       if (this.cache) {
-        await this.cache.invalidate(userId);
+        await this.invalidateUserSurfaces(userId);
 
         // The public profile is keyed by user id, so the invalidate above
         // already covers it. The username -> id slot is NOT, and it is the one
