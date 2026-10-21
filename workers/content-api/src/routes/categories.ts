@@ -387,8 +387,9 @@ app.post(
         })
       );
 
-      // Persist the base key on the row — the space-aware service owns the
-      // write. Wrapped so a failed write cannot strand the three variants just
+      // Persist the base key and its measured size on the row — the
+      // space-aware service owns the write. Wrapped so a failed write cannot
+      // strand the files just
       // uploaded (Codex-29fs0). `existing` was read BEFORE the upload, so its
       // key says whether the row already addressed these deterministic keys.
       const updated =
@@ -404,7 +405,8 @@ app.post(
             ctx.services.categories.update(
               ctx.input.params.categoryId,
               { coverImageKey: processed.coverImageKey },
-              space
+              space,
+              { width: processed.width, height: processed.height }
             )
         );
 
@@ -413,6 +415,8 @@ app.post(
       return {
         coverImageKey: updated.coverImageKey,
         coverImageUrl: processed.url,
+        width: processed.width,
+        height: processed.height,
       };
     },
   })

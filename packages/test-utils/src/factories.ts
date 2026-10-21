@@ -303,6 +303,8 @@ export function createTestContent(overrides: Partial<Content> = {}): Content {
     description: 'Test content for automated testing',
     contentType,
     thumbnailUrl: null,
+    thumbnailWidth: null,
+    thumbnailHeight: null,
     contentBody:
       contentType === CONTENT_TYPES.WRITTEN ? 'Test content body' : null,
     contentBodyJson: null,

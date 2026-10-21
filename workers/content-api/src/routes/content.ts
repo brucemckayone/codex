@@ -547,6 +547,8 @@ app.post(
         thumbnailUrl: result.url,
         size: result.size,
         mimeType: result.mimeType,
+        width: result.width,
+        height: result.height,
       };
     },
   })

@@ -3167,7 +3167,12 @@ export class CourseJourneyService extends BaseService {
   async setCourseCoverImageKey(
     organizationId: string,
     pageId: string,
-    coverImageKey: string | null
+    coverImageKey: string | null,
+    /**
+     * The upload's measured size (Codex-kk9nv.5); `null` with a cleared key,
+     * so a size never outlives the image it describes.
+     */
+    size: { width: number; height: number } | null
   ): Promise<{ courseId: string; coverImageKey: string | null }> {
     try {
       const courseId = await this.resolveCourseIdForPage(
@@ -3177,7 +3182,11 @@ export class CourseJourneyService extends BaseService {
 
       const updated = await this.db
         .update(courses)
-        .set({ coverImageKey })
+        .set({
+          coverImageKey,
+          coverImageWidth: size?.width ?? null,
+          coverImageHeight: size?.height ?? null,
+        })
         .where(
           and(
             eq(courses.id, courseId),
@@ -3223,7 +3232,12 @@ export class CourseJourneyService extends BaseService {
   async setCourseHeroImageKey(
     organizationId: string,
     pageId: string,
-    heroImageKey: string | null
+    heroImageKey: string | null,
+    /**
+     * The upload's measured size (Codex-kk9nv.5); `null` with a cleared key,
+     * so a size never outlives the image it describes.
+     */
+    size: { width: number; height: number } | null
   ): Promise<{ courseId: string; heroImageKey: string | null }> {
     try {
       const courseId = await this.resolveCourseIdForPage(
@@ -3233,7 +3247,11 @@ export class CourseJourneyService extends BaseService {
 
       const updated = await this.db
         .update(courses)
-        .set({ heroImageKey })
+        .set({
+          heroImageKey,
+          heroImageWidth: size?.width ?? null,
+          heroImageHeight: size?.height ?? null,
+        })
         .where(
           and(
             eq(courses.id, courseId),
@@ -3281,7 +3299,12 @@ export class CourseJourneyService extends BaseService {
   async setCourseSignatureImageKey(
     organizationId: string,
     pageId: string,
-    signatureImageKey: string | null
+    signatureImageKey: string | null,
+    /**
+     * The upload's measured size (Codex-kk9nv.5); `null` with a cleared key,
+     * so a size never outlives the image it describes.
+     */
+    size: { width: number; height: number } | null
   ): Promise<{ courseId: string; signatureImageKey: string | null }> {
     try {
       const courseId = await this.resolveCourseIdForPage(
@@ -3291,7 +3314,11 @@ export class CourseJourneyService extends BaseService {
 
       const updated = await this.db
         .update(courses)
-        .set({ signatureImageKey })
+        .set({
+          signatureImageKey,
+          signatureImageWidth: size?.width ?? null,
+          signatureImageHeight: size?.height ?? null,
+        })
         .where(
           and(
             eq(courses.id, courseId),

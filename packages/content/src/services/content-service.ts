@@ -619,6 +619,14 @@ export class ContentService extends BaseService {
               ? { shaderPreset: restValidated.shaderPreset || null }
               : {}),
             ...(clearTier ? { includedInTierId: null } : {}),
+            // A thumbnail's recorded size describes the upload that made it
+            // (Codex-kk9nv.5). A URL the client sets here was never measured,
+            // so a CHANGED URL clears the old size; re-sending the same URL
+            // leaves it alone. The upload route writes the size itself.
+            ...('thumbnailUrl' in restValidated &&
+            restValidated.thumbnailUrl !== existing.thumbnailUrl
+              ? { thumbnailWidth: null, thumbnailHeight: null }
+              : {}),
             // Clamp AFTER the spread so it overrides a stale `isFree:false` the
             // partial may carry alongside the gate it just cleared.
             ...(effHasGate ? {} : { isFree: true }),

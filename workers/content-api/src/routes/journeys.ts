@@ -1091,7 +1091,7 @@ app.patch(
  * per-course key, so a re-upload overwrites in place and never orphans an
  * object. The page is resolved (and org-scoped) BEFORE R2 is written, so an
  * out-of-org id can never seed an orphaned cover.
- * @returns {{ coverImageUrl: string }}
+ * @returns {{ coverImageUrl: string, width: number, height: number }}
  */
 app.post(
   '/studio/journeys/:pageId/cover',
@@ -1112,7 +1112,9 @@ app.post(
         allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
       },
     },
-    handler: async (ctx): Promise<{ coverImageUrl: string }> => {
+    handler: async (
+      ctx
+    ): Promise<{ coverImageUrl: string; width: number; height: number }> => {
       // Resolve (and org-scope) the subject course FIRST — a foreign or
       // non-course page must 404 before any R2 object exists. The stored keys
       // come back with it: the write below needs to know whether the row
@@ -1144,7 +1146,8 @@ app.post(
           ctx.services.courseJourney.setCourseCoverImageKey(
             ctx.organizationId,
             ctx.input.params.pageId,
-            processed.coverImageKey
+            processed.coverImageKey,
+            { width: processed.width, height: processed.height }
           )
       );
 
@@ -1158,7 +1161,11 @@ app.post(
         ctx.obs
       );
 
-      return { coverImageUrl: processed.url };
+      return {
+        coverImageUrl: processed.url,
+        width: processed.width,
+        height: processed.height,
+      };
     },
   })
 );
@@ -1191,6 +1198,7 @@ app.delete(
       await ctx.services.courseJourney.setCourseCoverImageKey(
         ctx.organizationId,
         ctx.input.params.pageId,
+        null,
         null
       );
       bumpOrgJourneysVersion(
@@ -1224,7 +1232,7 @@ app.delete(
  * `media_items` ref — that table is CHECK-constrained to ('video','audio'), which
  * is precisely why this endpoint had to exist for a creator to use a photograph.
  * Keys are deterministic per course, so a re-upload overwrites in place.
- * @returns {{ heroImageUrl: string }}
+ * @returns {{ heroImageUrl: string, width: number, height: number }}
  */
 app.post(
   '/studio/journeys/:pageId/hero-image',
@@ -1245,7 +1253,9 @@ app.post(
         allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
       },
     },
-    handler: async (ctx): Promise<{ heroImageUrl: string }> => {
+    handler: async (
+      ctx
+    ): Promise<{ heroImageUrl: string; width: number; height: number }> => {
       // Resolve (and org-scope) the subject course FIRST — a foreign or
       // non-course page must 404 before any R2 object exists. Stored keys come
       // back with it for the cleanup decision below (Codex-29fs0).
@@ -1275,7 +1285,8 @@ app.post(
           ctx.services.courseJourney.setCourseHeroImageKey(
             ctx.organizationId,
             ctx.input.params.pageId,
-            processed.heroImageKey
+            processed.heroImageKey,
+            { width: processed.width, height: processed.height }
           )
       );
 
@@ -1299,7 +1310,11 @@ app.post(
         ctx.obs
       );
 
-      return { heroImageUrl: processed.url };
+      return {
+        heroImageUrl: processed.url,
+        width: processed.width,
+        height: processed.height,
+      };
     },
   })
 );
@@ -1337,6 +1352,7 @@ app.delete(
       await ctx.services.courseJourney.setCourseHeroImageKey(
         ctx.organizationId,
         ctx.input.params.pageId,
+        null,
         null
       );
       bumpOrgJourneysVersion(
@@ -1362,7 +1378,7 @@ app.delete(
  *
  * The page is resolved (and org-scoped) BEFORE R2 is written, so an out-of-org id
  * can never seed an orphaned object.
- * @returns {{ signatureImageUrl: string }}
+ * @returns {{ signatureImageUrl: string, width: number, height: number }}
  */
 app.post(
   '/studio/journeys/:pageId/signature-image',
@@ -1383,7 +1399,13 @@ app.post(
         allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
       },
     },
-    handler: async (ctx): Promise<{ signatureImageUrl: string }> => {
+    handler: async (
+      ctx
+    ): Promise<{
+      signatureImageUrl: string;
+      width: number;
+      height: number;
+    }> => {
       // Resolve (and org-scope) the subject course FIRST — a foreign or
       // non-course page must 404 before any R2 object exists. Stored keys come
       // back with it for the cleanup decision below (Codex-29fs0).
@@ -1413,7 +1435,8 @@ app.post(
           ctx.services.courseJourney.setCourseSignatureImageKey(
             ctx.organizationId,
             ctx.input.params.pageId,
-            processed.signatureImageKey
+            processed.signatureImageKey,
+            { width: processed.width, height: processed.height }
           )
       );
 
@@ -1425,7 +1448,11 @@ app.post(
       // hero; a signature is a guide-section mark and will never be on a card,
       // so a KV write per upload would buy nothing. If a card ever renders one,
       // add the bump here and delete this comment.
-      return { signatureImageUrl: processed.url };
+      return {
+        signatureImageUrl: processed.url,
+        width: processed.width,
+        height: processed.height,
+      };
     },
   })
 );
@@ -1463,6 +1490,7 @@ app.delete(
       await ctx.services.courseJourney.setCourseSignatureImageKey(
         ctx.organizationId,
         ctx.input.params.pageId,
+        null,
         null
       );
       return null;

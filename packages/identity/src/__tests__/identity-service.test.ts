@@ -119,6 +119,8 @@ describe('IdentityService', () => {
       url: `https://cdn-test.revelations.studio/avatars/${userId}/lg.webp`,
       size: 1024,
       mimeType: 'image/webp',
+      width: 800,
+      height: 800,
     };
 
     it('should upload avatar and update user record successfully', async () => {

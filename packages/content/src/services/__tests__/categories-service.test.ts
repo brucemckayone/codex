@@ -285,6 +285,80 @@ describe('CategoriesService', () => {
         service.update(foreign.id, { name: 'Hacked' }, { creatorId })
       ).rejects.toThrow(CategoryNotFoundError);
     });
+
+    // Codex-kk9nv.5: a cover's recorded size describes the files under its key.
+    describe("the cover's recorded size", () => {
+      /** A category whose cover an upload measured at 2400x1600. */
+      async function measuredCover(name: string) {
+        const created = await service.create(
+          { name: `${name} ${uniqueToken()}` },
+          { creatorId }
+        );
+        const key = `categories/${created.id}/cover`;
+        // What the upload route writes; seeded directly, so a test of the
+        // clearing rule does not depend on the writing half.
+        await db
+          .update(categories)
+          .set({
+            coverImageKey: key,
+            coverImageWidth: 2400,
+            coverImageHeight: 1600,
+          })
+          .where(eq(categories.id, created.id));
+        return { id: created.id, key };
+      }
+
+      it('records the size the upload measured, beside the key', async () => {
+        const created = await service.create(
+          { name: `Covered ${uniqueToken()}` },
+          { creatorId }
+        );
+        const key = `categories/${created.id}/cover`;
+
+        const updated = await service.update(
+          created.id,
+          { coverImageKey: key },
+          { creatorId },
+          { width: 2400, height: 1600 }
+        );
+
+        expect(updated.coverImageKey).toBe(key);
+        expect(updated.coverImageWidth).toBe(2400);
+        expect(updated.coverImageHeight).toBe(1600);
+      });
+
+      it('clears the size when the client sets a different key by hand', async () => {
+        const { id } = await measuredCover('Rekeyed');
+
+        const rekeyed = await service.update(
+          id,
+          { coverImageKey: 'categories/elsewhere/cover' },
+          { creatorId }
+        );
+
+        expect(rekeyed.coverImageWidth).toBeNull();
+        expect(rekeyed.coverImageHeight).toBeNull();
+      });
+
+      it('keeps the size when an edit re-sends the same key, or leaves it out', async () => {
+        const { id, key } = await measuredCover('Kept');
+
+        const resent = await service.update(
+          id,
+          { coverImageKey: key, description: 'edited' },
+          { creatorId }
+        );
+        const untouched = await service.update(
+          id,
+          { name: `Kept again ${uniqueToken()}` },
+          { creatorId }
+        );
+
+        expect(resent.coverImageWidth).toBe(2400);
+        expect(untouched.coverImageWidth).toBe(2400);
+        expect(untouched.coverImageHeight).toBe(1600);
+      });
+    });
   });
 
   describe('softDelete', () => {

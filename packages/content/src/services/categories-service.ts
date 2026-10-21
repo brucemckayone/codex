@@ -287,7 +287,13 @@ export class CategoriesService extends BaseService {
   async update(
     id: string,
     input: UpdateCategoryInput,
-    space: CategorySpace
+    space: CategorySpace,
+    /**
+     * The cover's measured size, from the upload pipeline (Codex-kk9nv.5).
+     * Never client input: it is a separate argument because the schema strips
+     * anything it does not name.
+     */
+    coverSize?: { width: number; height: number }
   ): Promise<Category> {
     const validated = updateCategorySchema.parse(input);
 
@@ -301,9 +307,23 @@ export class CategoriesService extends BaseService {
           throw new CategoryNotFoundError(id);
         }
 
+        // A cover's recorded size describes the files under its key. An
+        // upload measures it. A key the client sets by hand comes with no
+        // size, so a CHANGED key clears the old one (re-sending the same key
+        // leaves it alone).
+        const size = coverSize
+          ? {
+              coverImageWidth: coverSize.width,
+              coverImageHeight: coverSize.height,
+            }
+          : validated.coverImageKey !== undefined &&
+              validated.coverImageKey !== existing.coverImageKey
+            ? { coverImageWidth: null, coverImageHeight: null }
+            : {};
+
         const [updated] = await tx
           .update(categories)
-          .set({ ...validated, updatedAt: new Date() })
+          .set({ ...validated, ...size, updatedAt: new Date() })
           .where(and(eq(categories.id, id), ...this.spaceWhere(space)))
           .returning();
 

@@ -29,21 +29,21 @@ new ImageProcessingService({
 
 | Method | Purpose | Output |
 |---|---|---|
-| `processContentThumbnail(contentId, userId, file)` | Validate → resize → upload | 3 WebP variants (sm/md/lg) stored in R2 |
-| `processUserAvatar(userId, file)` | Validate → resize → upload | 3 WebP variants |
-| `processCategoryCover(categoryId, file)` | Validate → resize → upload | 3 WebP variants; returns the base key, does NOT write the DB |
-| `processCourseCover(courseId, file)` / `processCourseHero` / `processCourseSignature` | Validate → resize → upload | 3 WebP variants; returns the base key, does NOT write the DB |
+| `processContentThumbnail(contentId, userId, file)` | Validate → resize → upload | The still's five files (see Size Variants); writes the URL and `thumbnail_width/height` |
+| `processUserAvatar(userId, file)` | Validate → resize → upload | Five files; writes the URL and `avatar_width/height` |
+| `processCategoryCover(categoryId, file)` | Validate → resize → upload | Five files; returns the base key and `width/height`, does NOT write the DB |
+| `processCourseCover(courseId, file)` / `processCourseHero` / `processCourseSignature` | Validate → resize → upload | Five files; returns the base key and `width/height`, does NOT write the DB (the caller's setter takes the size) |
 | `persistStillWithOrphanCleanup({ baseKey, storedBaseKey, imageType, entityType, entityId }, dbWrite)` | Run the CALLER's key write for one of the four stills above | On failure, cleans up the new variants unless `storedBaseKey === baseKey` (a replacement), then rethrows. **Every caller of the four `process*` stills MUST wrap its DB write in this** (Codex-29fs0), with `storedBaseKey` read BEFORE the upload |
-| `deleteContentThumbnail(contentId, userId)` | Delete R2 files + clear DB field | |
-| `deleteUserAvatar(userId)` | Delete R2 files + clear DB field | |
+| `deleteContentThumbnail(contentId, userId)` | Delete all five R2 files + clear the URL and its size | |
+| `deleteUserAvatar(userId)` | Delete all five R2 files + clear the URL and its size | |
 
-Returns `ImageProcessingResult: { url: string, size: number, mimeType: string }`.
+Returns `ImageProcessingResult: { url: string, size: number, mimeType: string, width: number, height: number }`. `width`/`height` are the source's own size, upright.
 
 ## Processing Pipeline
 
 1. **Validation**: size ≤ 5MB, MIME type must be in `SUPPORTED_IMAGE_MIME_TYPES` (PNG, JPEG, WebP, GIF — no SVG, no opt-out), magic bytes verified against MIME
 2. **Size check, before any decode** (Codex-kk9nv.12): `readImageDimensions` (`image-dimensions.ts`) reads width x height from the JPEG/PNG/WebP/GIF header, and over `MAX_IMAGE_PIXELS` (1600 x 1600, from `@codex/validation`) is an `InvalidImageError`. A Worker isolate has **128 MB for the JS heap and Wasm together**, and Photon's decode alone peaks at about 11 bytes a pixel: a 12 MP phone photo needs 137 MB, so it killed the isolate (error 1102) where no handler or log could see it. The studio shrinks every photo in the browser first (`apps/web/src/lib/utils/shrink-photo.ts`), so only a caller that skips the studio meets the limit. **Never raise `MAX_IMAGE_PIXELS` without re-measuring the Wasm peak** (`chunk.initSync().memory.buffer.byteLength` after a run; Wasm memory never shrinks, so that is the peak).
-3. **Processing**: `@cf-wasm/photon` (Cloudflare-compatible WASM) — Lanczos3 resize, WebP conversion. NEVER upscales. The LARGEST variant is made from the decode, the decode is freed at once, and every smaller variant is made from that largest one and freed as soon as it is encoded: `resize` clones its source and builds a 16-byte-a-pixel float intermediate as wide as the source, so holding the decode while making every variant from it peaked at 81 MB on a 2000x1280 page image (this order: 65). A file that will not decode is an `InvalidImageError` (400), not a 500.
+3. **Processing**: `@cf-wasm/photon` (Cloudflare-compatible WASM) — Lanczos3 resize, WebP conversion. NEVER upscales. The LARGEST variant is made from the decode, the decode is freed at once, and every smaller variant is made from that largest one and freed as soon as it is encoded: `resize` clones its source and builds a 16-byte-a-pixel float intermediate as wide as the source, so holding the decode while making every variant from it peaked at 81 MB on a 2000x1280 page image (this order: 65). A file that will not decode is an `InvalidImageError` (400), not a 500. Every still goes through `processPageImageVariants`. The picture is turned upright from the JPEG's EXIF orientation (`exif-orientation.ts`, Codex-kk9nv.11): Photon ignores that tag and WebP drops it, so without this a phone portrait was stored sideways. Every size is the upright picture's; each variant is resized in the stored orientation and only that small output is turned, because a quarter turn clones its image several times.
 4. **Storage** → R2 via `ASSETS_BUCKET` (falls back to `MEDIA_BUCKET`):
    - Raster variants: `cacheControl: R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` from
      `@codex/constants` — **never a string written in this package.**
@@ -57,7 +57,7 @@ Returns `ImageProcessingResult: { url: string, size: number, mimeType: string }`
      (shared with the org-logo path in `@codex/platform-settings`); the
      invariant is pinned by
      `src/__tests__/deterministic-key-cache-control.test.ts`.
-5. **DB update**: writes URL to content/user/org record
+5. **DB update**: writes the URL or key AND the measured width/height in the same UPDATE (Codex-kk9nv.5). Set, a size means the files include `xl`. Null means the size is unknown (an image from before, with sm/md/lg only, or a URL or key set by hand), so draw from sm/md/lg.
 
 ## R2 Key Format
 
@@ -65,15 +65,20 @@ R2 key builders come from `@codex/transcoding`:
 - `getContentThumbnailKey(creatorId, contentId, size)` → `{creatorId}/content-thumbnails/{contentId}/{size}.webp`
 - `getUserAvatarKey(userId, size)` → `avatars/{userId}/{size}.webp`
 - `getOrgLogoKey(orgId, size)` → `{orgId}/branding/logo/{size}.webp` — **this package no longer writes or reads it** (Codex-z520h). It survives because the local dev seeds (`packages/database/scripts/seed/{r2,organizations}.ts`) still populate that key shape and `organizations.logoUrl`, whereas the live upload path writes `logos/{orgId}/logo.{ext}` and `brandingSettings.logoUrl`. Two shapes, two columns — a pre-existing divergence, not something this package arbitrates.
+- `getContentThumbnailBaseKey` / `getUserAvatarBaseKey` give the folder; `stillVariantKeys(base)` names every file under it (one definition for upload and cleanup).
 - Category and course stills are built inline, not via `@codex/transcoding`: `categories/{id}/cover/{size}.webp`, `courses/{id}/{cover,hero,signature}/{size}.webp`.
 
 ## Size Variants
 
 | Variant | Use Case |
 |---|---|
-| `sm` | Card thumbnails, compact lists |
-| `md` | Standard display, feeds |
-| `lg` | Hero, full-size |
+| `sm` | 200px: card thumbnails, compact lists |
+| `md` | 400px: standard display, feeds |
+| `lg` | 800px: hero, full-size (the URL every old image has) |
+| `xl` | min(1600, width): full-bleed at 1440 and 2x (Codex-kk9nv.5) |
+| `original` | The upload as it came, no extension, its content type on the object. Not served; kept so any later size or format can be made without a re-upload |
+
+Every cleanup list goes through `variantKeyList(stillVariantKeys(base))`, so it names all five, or `xl` and the original leak.
 
 ## Strict Rules
 

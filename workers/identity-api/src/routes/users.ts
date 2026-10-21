@@ -102,6 +102,8 @@ app.post(
         avatarUrl: result.url,
         size: result.size,
         mimeType: result.mimeType,
+        width: result.width,
+        height: result.height,
       };
     },
   })

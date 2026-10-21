@@ -557,7 +557,7 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
 
   it('persists the cover key and resolves it to an md.webp CDN URL', async () => {
     const key = `courses/${courseId}/cover`;
-    const set = await svc.setCourseCoverImageKey(orgAId, pageId, key);
+    const set = await svc.setCourseCoverImageKey(orgAId, pageId, key, null);
     expect(set).toEqual({ courseId, coverImageKey: key });
     expect((await readCourse(courseId))?.coverImageKey).toBe(key);
 
@@ -578,7 +578,12 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
   });
 
   it('clears the cover key', async () => {
-    const cleared = await svc.setCourseCoverImageKey(orgAId, pageId, null);
+    const cleared = await svc.setCourseCoverImageKey(
+      orgAId,
+      pageId,
+      null,
+      null
+    );
     expect(cleared.coverImageKey).toBeNull();
     expect((await readCourse(courseId))?.coverImageKey).toBeNull();
 
@@ -590,6 +595,72 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
     expect(read.coverImageUrl).toBeNull();
   });
 
+  // ── Recorded sizes (Codex-kk9nv.5) ─────────────────────────────────────────
+  // Each still's size describes the files under its key: written with the key
+  // by an upload, and cleared with it, so it never outlives its image.
+
+  async function stillSizes(id: string) {
+    const [row] = await db
+      .select({
+        coverW: courses.coverImageWidth,
+        coverH: courses.coverImageHeight,
+        heroW: courses.heroImageWidth,
+        heroH: courses.heroImageHeight,
+        sigW: courses.signatureImageWidth,
+        sigH: courses.signatureImageHeight,
+      })
+      .from(courses)
+      .where(eq(courses.id, id));
+    return row;
+  }
+
+  it('records each still upload’s measured size with its key, and a clear drops both', async () => {
+    await svc.setCourseCoverImageKey(
+      orgAId,
+      pageId,
+      `courses/${courseId}/cover`,
+      {
+        width: 2400,
+        height: 1600,
+      }
+    );
+    await svc.setCourseHeroImageKey(
+      orgAId,
+      pageId,
+      `courses/${courseId}/hero`,
+      {
+        width: 3000,
+        height: 2000,
+      }
+    );
+    await svc.setCourseSignatureImageKey(
+      orgAId,
+      pageId,
+      `courses/${courseId}/signature`,
+      { width: 600, height: 200 }
+    );
+    expect(await stillSizes(courseId)).toEqual({
+      coverW: 2400,
+      coverH: 1600,
+      heroW: 3000,
+      heroH: 2000,
+      sigW: 600,
+      sigH: 200,
+    });
+
+    await svc.setCourseCoverImageKey(orgAId, pageId, null, null);
+    await svc.setCourseHeroImageKey(orgAId, pageId, null, null);
+    await svc.setCourseSignatureImageKey(orgAId, pageId, null, null);
+    expect(await stillSizes(courseId)).toEqual({
+      coverW: null,
+      coverH: null,
+      heroW: null,
+      heroH: null,
+      sigW: null,
+      sigH: null,
+    });
+  });
+
   // ── getCourseStillImageKeys (Codex-29fs0) ──────────────────────────────────
   // The still-upload routes read this BEFORE writing R2. Its keys decide whether
   // a failed key write may delete the just-uploaded objects, so a stale or
@@ -598,9 +669,9 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
   it('getCourseStillImageKeys returns the stored key of each still, per column', async () => {
     const cover = `courses/${courseId}/cover`;
     const hero = `courses/${courseId}/hero`;
-    await svc.setCourseCoverImageKey(orgAId, pageId, cover);
-    await svc.setCourseHeroImageKey(orgAId, pageId, hero);
-    await svc.setCourseSignatureImageKey(orgAId, pageId, null);
+    await svc.setCourseCoverImageKey(orgAId, pageId, cover, null);
+    await svc.setCourseHeroImageKey(orgAId, pageId, hero, null);
+    await svc.setCourseSignatureImageKey(orgAId, pageId, null, null);
 
     try {
       await expect(
@@ -614,7 +685,7 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
     } finally {
       // The course is shared across this file; a leftover hero key outranks
       // the heroMediaId poster that the sell-preview tests below assert on.
-      await svc.setCourseHeroImageKey(orgAId, pageId, null);
+      await svc.setCourseHeroImageKey(orgAId, pageId, null, null);
     }
   });
 
@@ -626,7 +697,7 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
 
   it('refuses to set a cover on a foreign org’s page', async () => {
     await expect(
-      svc.setCourseCoverImageKey(orgAId, foreignPageId, 'courses/x/cover')
+      svc.setCourseCoverImageKey(orgAId, foreignPageId, 'courses/x/cover', null)
     ).rejects.toThrow(NotFoundError);
   });
 
@@ -634,7 +705,7 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
 
   it('surfaces the resolved cover URL on the published discovery cards', async () => {
     const key = `courses/${courseId}/cover`;
-    await svc.setCourseCoverImageKey(orgAId, pageId, key);
+    await svc.setCourseCoverImageKey(orgAId, pageId, key, null);
     // The card lists only surface PUBLISHED pages + courses.
     await db
       .update(courses)
@@ -661,7 +732,7 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
   });
 
   it('reports a null cover on the cards when the course has none', async () => {
-    await svc.setCourseCoverImageKey(orgAId, pageId, null);
+    await svc.setCourseCoverImageKey(orgAId, pageId, null, null);
 
     const journeys = await svc.listPublishedJourneys(orgAId, {
       r2PublicUrlBase: 'https://cdn.example.test',
@@ -788,13 +859,13 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
 
     it('resolves the UPLOADED hero still to an lg.webp CDN URL — the same still getJourneySellMedia’s panel reads', async () => {
       const key = `courses/${courseId}/hero`;
-      await svc.setCourseHeroImageKey(orgAId, pageId, key);
+      await svc.setCourseHeroImageKey(orgAId, pageId, key, null);
 
       try {
         const page = await svc.getCoursePage(orgAId, pageSlug, CDN);
         expect(page?.course.heroImageUrl).toBe(`${CDN}/${key}/lg.webp`);
       } finally {
-        await svc.setCourseHeroImageKey(orgAId, pageId, null);
+        await svc.setCourseHeroImageKey(orgAId, pageId, null, null);
       }
     });
 
