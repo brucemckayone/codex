@@ -53,6 +53,13 @@ own (see [purchases.md](purchases.md#what-can-be-bought)), so those rules never
 have to honour a purchase. A purchase keeps granting access after the content is
 unpublished.
 
+The same holds for a course taken off sale. Someone entitled to it still opens
+it, with every practice that was ever released, including practices taken off
+sale since. A course or practice that was never released stays hidden from
+everyone except the editor (`Codex-2hxff.65`). "Released" means
+`published_at` is set, or the row is `published`; unpublishing never clears
+`published_at`.
+
 ## When access ends
 
 | Event | What ends | Comes back when |

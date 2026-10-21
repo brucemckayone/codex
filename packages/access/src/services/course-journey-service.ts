@@ -93,7 +93,18 @@ import type {
   SectionDesign,
 } from '@codex/shared-types';
 import { PAGE_STYLE_IDS } from '@codex/validation';
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { pageRevision } from './page-revision';
 import { resolvePracticeThumbnail } from './practice-thumbnail';
 
@@ -902,8 +913,8 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * Build the dashboard payload (SPEC §11). Returns `null` when the course is not
-   * a published, non-deleted course. The route has already confirmed the caller
+   * Build the dashboard payload (SPEC §11). Returns `null` when the course is
+   * deleted or was never released (see {@link loadCourseSummaryById}). The route has already confirmed the caller
    * `canEnterCourse` (entitlement gate), so this only projects the data.
    *
    * NOTE (Round-D): if the entitled user has no `course_enrollments` row yet, a
@@ -969,7 +980,7 @@ export class CourseJourneyService extends BaseService {
    * signing + `canView` authority). `bodyHtml` carries the stored body for
    * `written` practices.
    *
-   * Returns `null` when the practice is not a published, non-deleted practice of
+   * Returns `null` when the practice is not a released, non-deleted practice of
    * the course.
    */
   async getInCoursePractice(
@@ -4130,7 +4141,14 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * Course summary + org slug for a PUBLISHED, non-deleted course id.
+   * Course summary + org slug for a non-deleted course that has been released.
+   *
+   * Only entitled readers reach this: every caller's route gates on
+   * `canEnterCourse` first. So a course taken off sale after someone bought it
+   * still opens for them (Codex-2hxff.65; Codex-yo4px kept it on their shelf,
+   * but the player then refused to open it). "Released" is `publishedAt` set
+   * (it is never cleared when a course goes back to draft), or `published` for
+   * a legacy row without one. A course that was never released does not open.
    */
   private async loadCourseSummaryById(
     courseId: string
@@ -4148,7 +4166,10 @@ export class CourseJourneyService extends BaseService {
       .where(
         and(
           eq(courses.id, courseId),
-          eq(courses.status, CONTENT_STATUS.PUBLISHED),
+          or(
+            eq(courses.status, CONTENT_STATUS.PUBLISHED),
+            isNotNull(courses.publishedAt)
+          ),
           isNull(courses.deletedAt)
         )
       )
@@ -4166,7 +4187,11 @@ export class CourseJourneyService extends BaseService {
 
   /**
    * Load the ordered curriculum: non-deleted stages (by `sortOrder`) each with
-   * their PUBLISHED, non-deleted practice content (by `stage_practices.sortOrder`).
+   * their released, non-deleted practice content (by `stage_practices.sortOrder`).
+   * "Released" as in {@link loadCourseSummaryById}: a practice taken off sale
+   * stays in a buyer's course, while a never-released draft does not appear.
+   * Only entitled readers reach this (dashboard, in-course player, library);
+   * the public sell page reads {@link loadPublicStages}, published only.
    * Two bounded queries (stages, then practices) so a stage with no practices
    * still appears. `durationSeconds` / `thumbnailUrl` fall back to the media item
    * (the picture resolved against `r2PublicUrlBase`, never a bare key).
@@ -4257,7 +4282,10 @@ export class CourseJourneyService extends BaseService {
       .where(
         and(
           inArray(stagePractices.stageId, stageIds),
-          eq(content.status, CONTENT_STATUS.PUBLISHED),
+          or(
+            eq(content.status, CONTENT_STATUS.PUBLISHED),
+            isNotNull(content.publishedAt)
+          ),
           isNull(content.deletedAt)
         )
       )

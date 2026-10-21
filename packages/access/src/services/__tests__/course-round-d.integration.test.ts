@@ -63,6 +63,7 @@ async function createCourse(
     status?: string;
     priceCents?: number | null;
     deletedAt?: Date | null;
+    publishedAt?: Date | null;
   } = {}
 ): Promise<{ id: string; slug: string }> {
   const [row] = await db
@@ -75,6 +76,7 @@ async function createCourse(
       status: overrides.status ?? 'published',
       priceCents: overrides.priceCents ?? 5000,
       deletedAt: overrides.deletedAt ?? null,
+      publishedAt: overrides.publishedAt ?? null,
     })
     .returning({ id: courses.id, slug: courses.slug });
   if (!row) throw new Error('failed to create course');
@@ -237,6 +239,8 @@ async function addPractice(
     sortOrder: number;
     status?: string;
     deletedAt?: Date | null;
+    /** Set to model a practice released and later taken off sale. */
+    publishedAt?: Date | null;
   }
 ): Promise<{ contentId: string; slug: string }> {
   const [row] = await db
@@ -246,6 +250,9 @@ async function addPractice(
         organizationId: opts.organizationId,
         status: opts.status ?? 'published',
         deletedAt: opts.deletedAt ?? null,
+        ...(opts.publishedAt !== undefined
+          ? { publishedAt: opts.publishedAt }
+          : {}),
       })
     )
     .returning({ id: content.id, slug: content.slug });
@@ -546,7 +553,7 @@ describe('Round-D read services (Codex-776gg)', () => {
       expect(await journey.getCourseBySlug(orgAId, deleted.slug)).toBeNull();
     });
 
-    it('getCourseDashboard: published-only; draft/deleted → null; synthesises a transient enrollment', async () => {
+    it('getCourseDashboard: a never-released draft or a deleted course → null; synthesises a transient enrollment', async () => {
       const journey = new CourseJourneyService({ db, environment: 'test' });
       const course = await createCourse(db, orgAId, creatorId, {
         status: 'published',
@@ -576,6 +583,60 @@ describe('Round-D read services (Codex-776gg)', () => {
       });
       expect(await journey.getCourseDashboard(u1, draft.id)).toBeNull();
       expect(await journey.getCourseDashboard(u1, deleted.id)).toBeNull();
+    });
+
+    // Codex-2hxff.65: Codex-yo4px kept a course on its buyer's shelf after it
+    // was taken off sale, but the player then refused to open it. Every caller
+    // is gated on canEnterCourse, so a RELEASED course (publishedAt set; never
+    // cleared by unpublishing) opens with its released practices, while a
+    // never-released draft course or practice still does not appear.
+    it('a course taken off sale after release still opens for its buyer, with every released practice', async () => {
+      const journey = new CourseJourneyService({ db, environment: 'test' });
+      const released = daysAgo(30);
+      const course = await createCourse(db, orgAId, creatorId, {
+        status: 'draft',
+        publishedAt: released,
+      });
+      const stageId = await createStage(db, course.id, 1);
+      const live = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId,
+        sortOrder: 1,
+      });
+      const offSale = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId,
+        sortOrder: 2,
+        status: 'archived',
+        publishedAt: released,
+      });
+      const neverReleased = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId,
+        sortOrder: 3,
+        status: 'draft',
+        publishedAt: null,
+      });
+
+      const dash = await journey.getCourseDashboard(u1, course.id);
+      expect(dash?.course.id).toBe(course.id);
+      expect(dash?.stages[0]?.practices.map((p) => p.contentId)).toEqual([
+        live.contentId,
+        offSale.contentId,
+      ]);
+
+      const practice = await journey.getInCoursePractice(
+        u1,
+        course.id,
+        offSale.slug
+      );
+      expect(practice?.practice.contentId).toBe(offSale.contentId);
+      expect(
+        await journey.getInCoursePractice(u1, course.id, neverReleased.slug)
+      ).toBeNull();
     });
 
     it('getInCoursePractice: resolves a slug ONLY within the given course (IDOR guard)', async () => {
