@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   coverCropSizes,
+  getShareImage,
   getThumbnailDimensions,
   getThumbnailSrcset,
   getThumbnailUrl,
@@ -130,5 +131,43 @@ describe('coverCropSizes', () => {
 
   it('keeps the slot when the size is unknown', () => {
     expect(coverCropSizes('20rem', 3 / 4, SIZED)).toBe('20rem');
+  });
+
+  it('scales every length of a sizes list and keeps its media conditions', () => {
+    // A condition cannot sit inside calc(), and commas inside min() are not
+    // entry separators.
+    expect(
+      coverCropSizes(
+        '(min-width: 64rem) min(calc((100vw - 6rem) / 3), 25rem), (min-width: 40rem) 50vw, calc(100vw - 2rem)',
+        3 / 4,
+        `${FOLDER}/md.webp`
+      )
+    ).toBe(
+      '(min-width: 64rem) calc(min(calc((100vw - 6rem) / 3), 25rem) * 2.37), (min-width: 40rem) calc(50vw * 2.37), calc(calc(100vw - 2rem) * 2.37)'
+    );
+  });
+});
+
+describe('getShareImage', () => {
+  it('is the xl file, with its own size, when the folder records the picture', () => {
+    expect(getShareImage(`${FOLDER}/md.webp`)).toEqual({
+      url: `${FOLDER}/xl.webp`,
+      width: 1600,
+      height: 900,
+    });
+    // xl is never wider than the picture.
+    const small =
+      'https://cdn.example.test/c/courses/k/cover/1200x630-0a1b2c3d';
+    expect(getShareImage(`${small}/md.webp`)).toEqual({
+      url: `${small}/xl.webp`,
+      width: 1200,
+      height: 630,
+    });
+  });
+
+  it('is the lg file, with no size, for an older upload', () => {
+    expect(getShareImage(SIZED)).toEqual({
+      url: 'https://cdn.example.test/u1/avatar/lg.webp',
+    });
   });
 });

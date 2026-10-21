@@ -116,25 +116,94 @@ export function getThumbnailDimensions(
 }
 
 /**
+ * The file a share card (`og:image`) should use: the largest a still has, xl
+ * when its address records the picture's size, else lg (Codex-kk9nv.2). That
+ * file's own width and height come with it when known, for
+ * `og:image:width`/`og:image:height`.
+ */
+export function getShareImage(url: string): {
+  url: string;
+  width?: number;
+  height?: number;
+} {
+  const shareUrl = getThumbnailUrl(url, 'xl');
+  const size = getThumbnailDimensions(url);
+  if (!size) return { url: shareUrl };
+  const width = Math.min(THUMBNAIL_WIDTHS.xl, size.width);
+  return {
+    url: shareUrl,
+    width,
+    height: Math.round((size.height * width) / size.width),
+  };
+}
+
+/**
  * A `sizes` for a picture drawn with `object-fit: cover` into a frame of
  * `frameRatio` (width / height). A picture wider than its frame is drawn
  * wider than the frame, by (picture ratio / frame ratio), and a width-only
  * `sizes` cannot say so: a 16:9 picture in a 3:4 tile needs about 2.4x the
- * tile's width. With the picture's size unknown this is `slot` unchanged.
+ * tile's width. With the picture's size unknown this is `slots` unchanged.
+ *
+ * `slots` may be a whole `sizes` list: each entry's length is scaled and its
+ * media condition kept, since a condition cannot sit inside `calc()`.
  */
 export function coverCropSizes(
-  slot: string,
+  slots: string,
   frameRatio: number,
   url: string | null | undefined
 ): string {
   const size = getThumbnailDimensions(url);
-  if (!size) return slot;
-  const scale = size.width / size.height / frameRatio;
-  return scale > 1 ? `calc(${slot} * ${Math.round(scale * 100) / 100})` : slot;
+  if (!size) return slots;
+  const scale = Math.round((size.width / size.height / frameRatio) * 100) / 100;
+  if (scale <= 1) return slots;
+  return splitTopLevel(slots)
+    .map((entry) => {
+      const { condition, length } = splitSizesEntry(entry);
+      return `${condition}calc(${length} * ${scale})`;
+    })
+    .join(', ');
+}
+
+/** A `sizes` list split on the commas that are not inside parentheses. */
+function splitTopLevel(list: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < list.length; i++) {
+    const char = list[i];
+    if (char === '(') depth++;
+    else if (char === ')') depth--;
+    else if (char === ',' && depth === 0) {
+      parts.push(list.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  parts.push(list.slice(start).trim());
+  return parts.filter(Boolean);
+}
+
+/** One `sizes` entry as its media condition (with a trailing space, or '') and its length. */
+function splitSizesEntry(entry: string): { condition: string; length: string } {
+  if (!entry.startsWith('(')) return { condition: '', length: entry };
+  let depth = 0;
+  for (let i = 0; i < entry.length; i++) {
+    if (entry[i] === '(') depth++;
+    else if (entry[i] === ')' && --depth === 0) {
+      return {
+        condition: `${entry.slice(0, i + 1)} `,
+        length: entry.slice(i + 1).trim(),
+      };
+    }
+  }
+  return { condition: '', length: entry };
 }
 
 /**
- * Default responsive sizes attribute for common layouts
+ * `sizes` for a card in the 1→2→3-column `.content-grid` (utilities.css):
+ * one column below 40rem, two from 40rem, three from 64rem in the 80rem
+ * container (Codex-kk9nv.1). It used to describe the page, not the card:
+ * 200px for a 290-360px phone card (soft), and 800px for a 210-400px desktop
+ * card (wasted). A rail or grid of another shape passes its own.
  */
 export const DEFAULT_SIZES =
-  '(max-width: 640px) 200px, (max-width: 1024px) 400px, 800px';
+  '(min-width: 64rem) min(calc((100vw - 6rem) / 3), 25rem), (min-width: 40rem) calc((100vw - 4.5rem) / 2), calc(100vw - 2rem)';
