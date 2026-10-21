@@ -626,6 +626,7 @@
             <ContentCard
               variant="resume"
               shape="16:9"
+              sizes="min(18rem, 82vw)"
               chrome="transparent"
               id={item.id}
               title={item.title}

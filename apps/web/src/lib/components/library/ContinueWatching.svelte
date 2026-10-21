@@ -72,6 +72,7 @@
   )}
   <ContentCard
     variant="resume"
+    sizes={`min(${itemMinWidth}, 82vw)`}
     id={item.content.id}
     title={item.content.title}
     thumbnail={item.content.thumbnailUrl}

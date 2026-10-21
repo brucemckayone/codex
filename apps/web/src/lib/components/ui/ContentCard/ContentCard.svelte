@@ -36,7 +36,11 @@
   import type { Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
   import * as m from '$paraglide/messages';
-  import { getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
+  import {
+    coverCropSizes,
+    DEFAULT_SIZES,
+    getThumbnailSrcset,
+  } from '$lib/utils/image';
   import { formatDuration, formatDurationHuman } from '$lib/utils/format';
   import { calculateProgressPercent } from '$lib/utils/progress';
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
@@ -182,18 +186,14 @@
      */
     normalizeRatio?: boolean;
     /**
-     * `sizes` for the cover <img>. Defaults to `DEFAULT_SIZES`, which declares
-     * 200px below a 640px viewport — measured against the org-landing rails at
-     * 390px, the real slot is 318-359 CSS px, so the browser picks the 200w
-     * srcset candidate for a 318px box on a DPR-3 phone (~200px of data across
-     * ~954 device pixels). `sizes` drives resource SELECTION, not layout, so
-     * the symptom is a soft/wrong-looking image rather than a broken one, and
-     * desktop escapes it because DEFAULT_SIZES over-declares there.
+     * How wide the card is drawn, as a `sizes` for the cover <img>. Defaults
+     * to `DEFAULT_SIZES`, a card in the 1→2→3-column `.content-grid`
+     * (Codex-kk9nv.1). `sizes` drives resource SELECTION, not layout, so a
+     * wrong one shows as a soft or heavy image rather than a broken one.
      *
-     * A caller that knows its own geometry should pass it, the way
-     * CataloguePreviewTile already does. Left as a prop rather than corrected
-     * globally because `compact`/`featured` slots are genuinely smaller and
-     * over-declaring there would download lg.webp for a thumbnail.
+     * A caller of another shape (a rail, a 4-column grid) passes its own, the
+     * way CataloguePreviewTile does. Give the CARD's width: the cover's crop is
+     * added here (`coverSizes`).
      */
     sizes?: string;
   }
@@ -288,6 +288,21 @@
   const resolvedShape = $derived<'16:9' | '1:1' | '3:4' | '3:2' | undefined>(
     shape ?? (normalizeRatio ? '16:9' : undefined),
   );
+
+  // How wide the cover's picture is drawn (Codex-kk9nv.1). The thumbnail
+  // covers its frame, so a picture wider than the frame (a 16:9 photo in a
+  // 3:4 browse tile) is drawn wider than the card, and `sizes` is scaled for
+  // it. Only the grid and resume frames have a fixed shape to scale by: the
+  // resolved shape, else the type's own (video 16:9, audio 1:1, article 3:2).
+  const SHAPE_RATIO = { '16:9': 16 / 9, '1:1': 1, '3:4': 3 / 4, '3:2': 3 / 2 };
+  const TYPE_RATIO = { video: 16 / 9, audio: 1, article: 3 / 2 };
+  const coverSizes = $derived.by(() => {
+    if (variant !== 'grid' && variant !== 'resume') return sizes;
+    const frameRatio = resolvedShape
+      ? SHAPE_RATIO[resolvedShape]
+      : TYPE_RATIO[contentType];
+    return coverCropSizes(sizes, frameRatio, thumbnail);
+  });
 
   // Title-in-cover: eyebrow + title over the cover on a scrim, each type
   // carrying its own flair (audio waveform, video play-ring, article dropcap).
@@ -519,7 +534,7 @@
           <img
             src={thumbnail}
             srcset={getThumbnailSrcset(thumbnail)}
-            {sizes}
+            sizes={coverSizes}
             alt={m.content_thumbnail_alt({ title })}
             loading="lazy"
             decoding="async"
@@ -548,7 +563,7 @@
           <img
             src={thumbnail}
             srcset={getThumbnailSrcset(thumbnail)}
-            {sizes}
+            sizes={coverSizes}
             alt={m.content_thumbnail_alt({ title })}
             loading="lazy"
             decoding="async"
@@ -566,7 +581,7 @@
         <img
           src={thumbnail}
           srcset={getThumbnailSrcset(thumbnail)}
-          {sizes}
+          sizes={coverSizes}
           alt={m.content_thumbnail_alt({ title })}
           loading="lazy"
           decoding="async"

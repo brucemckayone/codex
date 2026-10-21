@@ -48,7 +48,9 @@
     </h2>
     <div class="related-content__grid">
       {#each items as item (item.id)}
+        <!-- 1, 2, then 4 columns in the content page's ~960px column. -->
         <ContentCard
+          sizes="(min-width: 64rem) min(calc((100vw - 7rem) / 4), 14rem), (min-width: 40rem) calc((100vw - 4rem) / 2), calc(100vw - 2rem)"
           id={item.id}
           title={item.title}
           thumbnail={getDisplayThumbnail(item)}

@@ -91,8 +91,10 @@
   <section class="content-grid content-grid--masonry" aria-label="Content results">
     {#if data.content.items && data.content.items.length > 0}
       {#each data.content.items as item (item.id)}
+        <!-- Masonry columns are at least 18rem: about 27rem at the widest. -->
         <ContentCard
           shape="3:4"
+          sizes="(min-width: 40rem) 27rem, calc(100vw - 2rem)"
           titleInCover
           id={item.id}
           title={item.title}
