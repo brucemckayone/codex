@@ -14,6 +14,7 @@
   @prop {string} [className] - Optional extra class on the root section
 -->
 <script lang="ts">
+  import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
@@ -50,7 +51,7 @@
         <ContentCard
           id={item.id}
           title={item.title}
-          thumbnail={item.mediaItem?.thumbnailUrl ?? null}
+          thumbnail={getDisplayThumbnail(item)}
           description={item.description}
           contentType={item.contentType === 'written'
             ? 'article'

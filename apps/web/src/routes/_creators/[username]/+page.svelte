@@ -5,6 +5,7 @@
   stats strip, org affiliations, and a grid of their published content.
 -->
 <script lang="ts">
+  import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
@@ -198,7 +199,7 @@
           <ContentCard
             id={item.id}
             title={item.title}
-            thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
+            thumbnail={getDisplayThumbnail(item)}
             description={item.description}
             contentType={item.contentType === 'written' ? 'article' : item.contentType}
             duration={item.mediaItem?.durationSeconds ?? null}

@@ -5,6 +5,7 @@
   and SEO-friendly pagination. Uses ContentCard grid and Pagination component.
 -->
 <script lang="ts">
+  import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import { gateSearchQuery, isSearchQueryBelowFloor } from '@codex/validation';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
@@ -143,7 +144,7 @@
         <ContentCard
           id={item.id}
           title={item.title}
-          thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
+          thumbnail={getDisplayThumbnail(item)}
           description={item.description}
           contentType={item.contentType === 'written' ? 'article' : item.contentType}
           duration={item.mediaItem?.durationSeconds ?? null}

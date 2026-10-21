@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
+import { getDisplayThumbnail } from '$lib/utils/thumbnail';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, platform, cookies }) => {
@@ -45,8 +46,9 @@ export const GET: RequestHandler = async ({ url, platform, cookies }) => {
   const content =
     contentRes.status === 'fulfilled'
       ? (contentRes.value?.items ?? []).map((item) => {
-          // Prefer the resolved CDN thumbnailUrl from mediaItem (set by resolveR2Urls),
-          // then fall back to the content-level custom thumbnailUrl field.
+          // The creator's custom thumbnail first, then the video poster
+          // resolveR2Urls put on mediaItem (Codex-une9r). The base MediaItem
+          // type omits the resolved thumbnailUrl, so widen it here.
           const mediaItem = item.mediaItem as
             | (typeof item.mediaItem & { thumbnailUrl?: string | null })
             | null;
@@ -55,7 +57,7 @@ export const GET: RequestHandler = async ({ url, platform, cookies }) => {
             title: item.title,
             slug: item.slug,
             contentType: item.contentType,
-            thumbnailUrl: mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null,
+            thumbnailUrl: getDisplayThumbnail({ ...item, mediaItem }),
             organizationSlug: item.organization?.slug ?? null,
           };
         })

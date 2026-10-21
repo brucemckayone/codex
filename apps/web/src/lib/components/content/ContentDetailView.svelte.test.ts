@@ -230,3 +230,37 @@ describe('a real lock names its real reason', () => {
     expect(player().textContent).not.toContain('Purchase to watch');
   });
 });
+
+describe('the picture (Codex-une9r)', () => {
+  const CUSTOM = 'https://cdn.example.test/c1/thumbnail/lg.webp';
+  const POSTER = 'https://cdn.example.test/u1/media-thumbnails/m1/lg.webp';
+  const ogImage = () =>
+    document.head
+      .querySelector('meta[property="og:image"]')
+      ?.getAttribute('content');
+  const imageSources = () =>
+    [...document.querySelectorAll('img')].map((img) => img.getAttribute('src'));
+
+  test('the creator’s custom thumbnail wins over the video poster, on the page and in og:image', () => {
+    render({
+      content: makeContent({
+        thumbnailUrl: CUSTOM,
+        mediaItem: { id: 'm1', durationSeconds: 754, thumbnailUrl: POSTER },
+      }),
+    });
+    expect(ogImage()).toBe(CUSTOM);
+    expect(imageSources()).toContain(CUSTOM);
+    expect(imageSources()).not.toContain(POSTER);
+  });
+
+  test('the poster still shows when there is no custom thumbnail', () => {
+    render({
+      content: makeContent({
+        thumbnailUrl: null,
+        mediaItem: { id: 'm1', durationSeconds: 754, thumbnailUrl: POSTER },
+      }),
+    });
+    expect(ogImage()).toBe(POSTER);
+    expect(imageSources()).toContain(POSTER);
+  });
+});
