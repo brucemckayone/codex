@@ -167,12 +167,20 @@
 					</Table.Header>
 					<Table.Body>
 						{#each data.purchases.items as purchase (purchase.id)}
+							{@const title = purchase.contentTitle ?? purchase.courseTitle}
 							<Table.Row>
 								<Table.Cell class="date-cell">
 									{formatDate(purchase.createdAt)}
 								</Table.Cell>
 								<Table.Cell class="content-cell">
-									<span class="content-title">{purchase.contentTitle}</span>
+									{#if purchase.kind === 'course'}
+										<span class="content-title-row">
+											<span class="content-title">{title}</span>
+											<Badge variant="neutral">{m.account_payments_kind_course()}</Badge>
+										</span>
+									{:else}
+										<span class="content-title">{title}</span>
+									{/if}
 								</Table.Cell>
 								<Table.Cell class="amount-cell">
 									{formatPrice(purchase.amountCents)}
@@ -286,6 +294,18 @@
 
 	.content-title {
 		display: block;
+	}
+
+	/* A course title and its Course badge sit on one line and wrap together. */
+	.content-title-row {
+		display: inline-flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.content-title-row .content-title {
+		display: inline;
 	}
 
 	:global(.amount-cell) {

@@ -112,7 +112,7 @@ Inside the followers branch, checks run in this order:
 ## Library Query
 
 `listUserLibrary()` runs five independent query arms in parallel:
-- `queryPurchased` — content with completed purchases
+- `queryPurchased` — content with completed purchases, unioned with live support grants (`entitlements.source = 'grant'`); an item both bought and granted is one row
 - `queryMembership` — content accessible via org membership
 - `querySubscription` — content accessible via subscription tier
 - `queryFreeRelationship` — `isFree` content of followed/subscribed orgs

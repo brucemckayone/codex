@@ -366,6 +366,42 @@ export type AdminGrantAccessParams = z.infer<
   typeof adminGrantAccessParamsSchema
 >;
 
+/**
+ * Customer grants list query parameters
+ * For GET /api/admin/customers/:customerId/grants (the Studio customer drawer)
+ *
+ * Default limit 50, not the usual 20: a customer holds a handful of support
+ * grants, so one page normally carries the whole audit trail.
+ */
+export const adminCustomerGrantsQuerySchema = paginationSchema.extend({
+  limit: z.coerce
+    .number()
+    .int({ message: 'Must be a whole number' })
+    .positive({ message: 'Must be greater than 0' })
+    .max(100, { message: 'Must be 100 or less' })
+    .default(50),
+});
+
+export type AdminCustomerGrantsQueryInput = z.infer<
+  typeof adminCustomerGrantsQuerySchema
+>;
+
+/**
+ * Revoke support grant path parameters
+ * For DELETE /api/admin/customers/:customerId/grants/:entitlementId
+ *
+ * - customerId: Better Auth user ID (alphanumeric)
+ * - entitlementId: UUID of the `grant` entitlement row
+ */
+export const adminRevokeGrantParamsSchema = z.object({
+  customerId: userIdSchema,
+  entitlementId: uuidSchema,
+});
+
+export type AdminRevokeGrantParams = z.infer<
+  typeof adminRevokeGrantParamsSchema
+>;
+
 // ============================================================================
 // Activity Feed Schemas
 // ============================================================================

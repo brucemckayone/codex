@@ -38,7 +38,6 @@ fixed by PR 2 below. The production checks to run around these releases
 | `Codex-2hxff.16` | P2 | Downgrades at period end; tier reorders warn first | [subscriptions](subscriptions.md#changing-tier) |
 | `Codex-2hxff.19` | P2 | One agreement resolver for every payment path | [agreements](agreements.md#how-a-share-applies) |
 | `Codex-2hxff.20` | P2 | Revenue screens and agreement emails show the real numbers and working links | [fees-and-splits](fees-and-splits.md#reporting) |
-| `Codex-2hxff.21` | P1 | Support grants give access; orgless sales get entitlements; course purchases appear in history | [access](access.md#support-grants) |
 | `Codex-2hxff.22` | P2 | Success pages wait for our record | [purchases](purchases.md#after-payment) |
 | `Codex-2hxff.23` | P2 | Financial records are permanent; one Customer per user; GBP asserted everywhere | [README](README.md#rules-that-always-hold) |
 | `Codex-2hxff.24` | P3 | Dev and CI Stripe setup mirrors production; customer stub removed | [operations](operations.md#local-development) |

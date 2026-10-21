@@ -139,7 +139,7 @@ export type {
   NewPurchaseInput,
   Purchase,
   PurchaseListItem,
-  PurchaseWithContent,
+  PurchaseWithItem,
   SaleListItem,
   SalesStats,
 } from './types';

@@ -6,6 +6,7 @@
 
 import type {
   Content,
+  Course,
   Purchase as DbPurchase,
   NewPurchase,
 } from '@codex/database/schema';
@@ -23,13 +24,17 @@ export type Purchase = DbPurchase;
 export type NewPurchaseInput = NewPurchase;
 
 /**
- * Purchase with content details (joined query result)
+ * Purchase with the bought item's details (joined query result). A purchase
+ * targets exactly one of content or a course, so exactly one is non-null.
  */
-export interface PurchaseWithContent extends Purchase {
+export interface PurchaseWithItem extends Purchase {
+  /** `null` for a course purchase. */
   content: Pick<
     Content,
     'id' | 'title' | 'slug' | 'thumbnailUrl' | 'contentType'
-  >;
+  > | null;
+  /** `null` for a content purchase. */
+  course: Pick<Course, 'id' | 'title' | 'slug'> | null;
 }
 
 /**
@@ -107,14 +112,18 @@ export interface CompleteCoursePurchaseMetadata {
 }
 
 /**
- * Purchase list item for account payment history
+ * Purchase list item for account payment history: content AND course
+ * purchases. `kind` says which pair is set; the other pair is `null`.
  */
 export interface PurchaseListItem {
   id: string;
   customerId: string;
   createdAt: string; // ISO 8601 timestamp
-  contentId: string;
-  contentTitle: string;
+  kind: 'content' | 'course';
+  contentId: string | null;
+  contentTitle: string | null;
+  courseId: string | null;
+  courseTitle: string | null;
   amountCents: number;
   status: 'completed' | 'pending' | 'failed' | 'refunded';
 }

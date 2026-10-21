@@ -338,6 +338,51 @@ export interface DeparturePreview {
   tierSubscribersAffected: number;
 }
 
+// ─── Access grants and purchase history (Codex-2hxff.21) ──────────────────
+//
+// Mirrors the fixed API contract for the access-gaps change. Defined here
+// (not in $lib/server/api) because the studio drawer and the account page
+// read them.
+
+/**
+ * A support grant of one item to one customer, from
+ * `GET /api/admin/customers/:customerId/grants`. Live and revoked grants are
+ * both listed (newest `grantedAt` first), so the drawer keeps a record.
+ */
+export interface CustomerGrant {
+  /** The entitlement id, which the revoke route takes. */
+  id: string;
+  contentId: string;
+  contentTitle: string;
+  contentSlug: string;
+  /** ISO 8601. */
+  grantedAt: string;
+  /** The studio member who made the grant, when still known. */
+  grantedByName: string | null;
+  /** ISO 8601; `null` while the grant is live. */
+  revokedAt: string | null;
+  revokedByName: string | null;
+}
+
+/**
+ * One row of the buyer's purchase history (`GET /purchases`). Content and
+ * course purchases share the list; `kind` says which, and only that kind's
+ * id and title are set.
+ */
+export interface PurchaseListItem {
+  id: string;
+  customerId: string;
+  /** ISO 8601. */
+  createdAt: string;
+  kind: 'content' | 'course';
+  contentId: string | null;
+  contentTitle: string | null;
+  courseId: string | null;
+  courseTitle: string | null;
+  amountCents: number;
+  status: string;
+}
+
 // ─── Ownership Transfer Types (Codex-2hxff.2) ──────────────────────────────
 //
 // Mirrors the fixed API contract in

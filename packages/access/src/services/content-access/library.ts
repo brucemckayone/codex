@@ -2,9 +2,9 @@
  * User content-library aggregation for ContentAccessService.
  *
  * Extracted from ContentAccessService (Codex-2pryk.1.1) — behaviour-preserving.
- * Builds a user's library across five source arms (purchased, membership,
- * subscription, engaged-free, engaged-followers), then merges, dedupes, sorts,
- * and paginates.
+ * Builds a user's library across five source arms (purchased — purchases and
+ * support grants — membership, subscription, engaged-free, engaged-followers),
+ * then merges, dedupes, sorts, and paginates.
  */
 
 import {
@@ -19,6 +19,7 @@ import {
   content,
   courseStages,
   courses,
+  entitlements,
   mediaItems,
   organizationFollowers,
   organizationMemberships,
@@ -86,7 +87,8 @@ export type UserLibraryItem = {
   };
   /**
    * How the user has access:
-   * - `'purchased'`     — completed (or pending-webhook) purchase row exists
+   * - `'purchased'`     — completed purchase row exists, or a live support
+   *                       grant (`entitlements.source = 'grant'`)
    * - `'membership'`    — user holds an org management role (owner/admin/creator)
    * - `'subscription'`  — active subscription gates `subscribers`/tier-paid content
    * - `'free'`          — `accessType='free'` content the user has *engaged with*
@@ -182,6 +184,10 @@ export async function listUserLibrary(
   });
 
   const offset = (input.page - 1) * input.limit;
+
+  // One clock for the whole request, passed as a parameter rather than
+  // `NOW()` — Step 4c/4d below explains why.
+  const asOf = new Date();
 
   // ── Step 1: Resolve active membership org IDs ─────────────────────
   const membershipConditions = [
@@ -294,12 +300,18 @@ export async function listUserLibrary(
   const contentFilters = buildContentFilters();
   const progressFilters = buildProgressFilters();
 
-  // ── Shared cross-arm exclusion: "not already acquired by purchase" ──
+  // A support grant is live while not revoked and not past an optional
+  // expiry — the access resolver's `liveGrant`. Raw `sql`, not drizzle's
+  // `or()`, which is typed `SQL | undefined`.
+  const liveGrantAsOf = sql`(${entitlements.revokedAt} IS NULL AND (${entitlements.expiresAt} IS NULL OR ${entitlements.expiresAt} > ${asOf}))`;
+
+  // ── Shared cross-arm exclusion: "not already acquired" ─────────────
   //
   // Every non-purchase arm excludes content the user has bought (or is
-  // mid-buying) so `queryPurchased` stays the single owner of those rows and
-  // the accessType tag is never wrong. Both `completed` (webhook landed) and
-  // `pending` (Stripe redirect beat the webhook) count as "already owned".
+  // mid-buying), or holds a live support grant for, so `queryPurchased` stays
+  // the single owner of those rows and the accessType tag is never wrong.
+  // Both `completed` (webhook landed) and `pending` (Stripe redirect beat the
+  // webhook) count as "already owned".
   //
   // MUST be NOT EXISTS, never `id NOT IN (SELECT content_id ...)`.
   // `purchases.content_id` is NULL for COURSE purchases (those rows carry
@@ -310,12 +322,18 @@ export async function listUserLibrary(
   // across the membership, subscription, free, and followers arms at once.
   // The correlated NOT EXISTS below is null-safe: a NULL `content_id` simply
   // never equals `content.id`, so it matches nothing and the row survives.
-  const notAcquiredByPurchase = sql`NOT EXISTS (
+  const notAcquired = sql`(NOT EXISTS (
     SELECT 1 FROM ${purchases}
     WHERE ${purchases.customerId} = ${userId}
       AND ${purchases.contentId} = ${content.id}
       AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING})
-  )`;
+  ) AND NOT EXISTS (
+    SELECT 1 FROM ${entitlements}
+    WHERE ${entitlements.userId} = ${userId}
+      AND ${entitlements.contentId} = ${content.id}
+      AND ${entitlements.source} = 'grant'
+      AND ${liveGrantAsOf}
+  ))`;
 
   // ── Helper: map a row to UserLibraryItem ──────────────────────────
   const mapProgress = (row: {
@@ -337,6 +355,12 @@ export async function listUserLibrary(
   };
 
   // ── Step 3: Query purchased items ─────────────────────────────────
+  // "Purchased" is what the user acquired one-off: completed purchases AND
+  // live support grants (`entitlements.source = 'grant'`, Codex-2hxff.21),
+  // which stand in for a purchase. One UNION ALL feeds one paginated query, so
+  // `accessType = 'purchased'` pages over both. A grant on an item the user
+  // also bought is dropped inside the union — the purchase row carries the
+  // price paid — so the arm's count is honest.
   const queryPurchased = async () => {
     if (
       input.accessType === 'membership' ||
@@ -347,22 +371,60 @@ export async function listUserLibrary(
       return { items: [] as UserLibraryItem[], count: 0 };
     }
 
-    const conditions = [
-      eq(purchases.customerId, userId),
-      eq(purchases.status, PURCHASE_STATUS.COMPLETED),
-      ...contentFilters,
-      ...progressFilters,
-    ];
-    if (input.organizationId) {
-      conditions.push(eq(purchases.organizationId, input.organizationId));
-    }
+    const purchasedRows = db
+      .select({
+        contentId: purchases.contentId,
+        acquiredAt: purchases.createdAt,
+        amountPaidCents: purchases.amountPaidCents,
+      })
+      .from(purchases)
+      .where(
+        and(
+          eq(purchases.customerId, userId),
+          eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+          ...(input.organizationId
+            ? [eq(purchases.organizationId, input.organizationId)]
+            : [])
+        )
+      );
+
+    // Deleted content leaves the shelf.
+    const grantedRows = db
+      .select({
+        contentId: entitlements.contentId,
+        acquiredAt: entitlements.grantedAt,
+        amountPaidCents: sql<number>`0`,
+      })
+      .from(entitlements)
+      .innerJoin(content, eq(content.id, entitlements.contentId))
+      .where(
+        and(
+          eq(entitlements.userId, userId),
+          eq(entitlements.source, 'grant'),
+          liveGrantAsOf,
+          isNull(content.deletedAt),
+          ...(input.organizationId
+            ? [eq(entitlements.organizationId, input.organizationId)]
+            : []),
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${purchases}
+            WHERE ${purchases.customerId} = ${userId}
+              AND ${purchases.contentId} = ${entitlements.contentId}
+              AND ${purchases.status} = ${PURCHASE_STATUS.COMPLETED}
+          )`
+        )
+      );
+
+    const acquired = purchasedRows.unionAll(grantedRows).as('acquired');
+
+    const conditions = [...contentFilters, ...progressFilters];
 
     const sortClause =
       input.sortBy === 'title'
         ? content.title
         : input.sortBy === 'duration'
           ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
-          : purchases.createdAt;
+          : acquired.acquiredAt;
 
     const baseFrom = db
       .select({
@@ -376,15 +438,15 @@ export async function listUserLibrary(
         mediaDurationSeconds: mediaItems.durationSeconds,
         orgId: content.organizationId,
         orgSlug: organizations.slug,
-        purchasedAt: purchases.createdAt,
-        amountPaidCents: purchases.amountPaidCents,
+        purchasedAt: acquired.acquiredAt,
+        amountPaidCents: acquired.amountPaidCents,
         progressPositionSeconds: videoPlayback.positionSeconds,
         progressDurationSeconds: videoPlayback.durationSeconds,
         progressCompleted: videoPlayback.completed,
         progressUpdatedAt: videoPlayback.updatedAt,
       })
-      .from(purchases)
-      .innerJoin(content, eq(content.id, purchases.contentId))
+      .from(acquired)
+      .innerJoin(content, eq(content.id, acquired.contentId))
       .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
       .leftJoin(organizations, eq(organizations.id, content.organizationId))
       .leftJoin(
@@ -397,8 +459,8 @@ export async function listUserLibrary(
 
     const countQuery = db
       .select({ count: sql<number>`count(*)::int` })
-      .from(purchases)
-      .innerJoin(content, eq(content.id, purchases.contentId))
+      .from(acquired)
+      .innerJoin(content, eq(content.id, acquired.contentId))
       .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
       .leftJoin(
         videoPlayback,
@@ -434,6 +496,7 @@ export async function listUserLibrary(
         organizationSlug: row.orgSlug ?? null,
       },
       accessType: 'purchased' as const,
+      // A grant reads as a £0 purchase made when it was granted.
       purchase: {
         purchasedAt: row.purchasedAt.toISOString(),
         priceCents: row.amountPaidCents,
@@ -475,9 +538,9 @@ export async function listUserLibrary(
       membershipContentFilter,
       eq(content.status, CONTENT_STATUS.PUBLISHED),
       isNull(content.deletedAt),
-      // Cross-arm exclusion — see `notAcquiredByPurchase`. Without it a
+      // Cross-arm exclusion — see `notAcquired`. Without it a
       // mid-flight purchase leaks into membership with the wrong accessType.
-      notAcquiredByPurchase,
+      notAcquired,
       ...contentFilters,
       ...progressFilters,
     ];
@@ -637,11 +700,11 @@ export async function listUserLibrary(
       // and be on offer to that subscription — published, or off sale within
       // its current period (see `subConditions`).
       subscribedOrgScope,
-      // Cross-arm exclusion — see `notAcquiredByPurchase`. Matters most in
+      // Cross-arm exclusion — see `notAcquired`. Matters most in
       // this arm: paid + tier-gated content qualifies for BOTH it and the
       // purchased arm (see 1b6f14a0), so without the exclusion a mid-flight
       // purchase surfaces with the wrong accessType until the webhook lands.
-      notAcquiredByPurchase,
+      notAcquired,
       // Exclude content from management orgs (owner/admin/creator see
       // all their org's content via the membership query).
       ...(managementOrgIds.length > 0
@@ -777,8 +840,8 @@ export async function listUserLibrary(
   // where it is NOT immaterial must not copy the pattern blindly.
   //
   // Correct on the current neon-http driver too, so it does not wait for
-  // Hyperdrive (Codex-s1i7h).
-  const asOf = new Date();
+  // Hyperdrive (Codex-s1i7h). `asOf` is declared at the top of the function:
+  // the grant liveness in Step 3 and `notAcquired` read it too.
 
   const grantingStatusList = sql.join(
     ACCESS_GRANTING_SUBSCRIPTION_STATUSES.map((status) => sql`${status}`),
@@ -837,11 +900,11 @@ export async function listUserLibrary(
         : sql`((${content.status} = ${CONTENT_STATUS.PUBLISHED} AND ${relationshipPredicate}) OR ${offSaleWithinSubscribedPeriod})`,
       isNull(content.deletedAt),
       sql`${content.organizationId} IS NOT NULL`,
-      // Cross-arm exclusion — see `notAcquiredByPurchase`. Defensive here:
+      // Cross-arm exclusion — see `notAcquired`. Defensive here:
       // free/followers items shouldn't be priced, but a flag-flip
       // (paid → free) could create overlap. Keeps the priority contract
       // explicit rather than relying on the flags staying clean.
-      notAcquiredByPurchase,
+      notAcquired,
       // Cross-arm exclusion: management orgs are surfaced by queryMembership
       // which returns ALL of an org's content for owners/admins/creators.
       ...(managementOrgIds.length > 0
