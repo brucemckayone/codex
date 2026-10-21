@@ -510,6 +510,8 @@ State is managed in `$lib/brand-editor/brand-editor-store.svelte.ts` using modul
 | localStorage collection | User-owned, must survive refresh | Client | Yes |
 | QueryClient collection | Server-authoritative browsing | Client | Yes |
 
+**Image uploads MUST shrink the photo first** (Codex-kk9nv.12). Every file input that uploads a still goes through `$lib/utils/shrink-photo` before its form submits: `onchange={shrinkPhotoAndSubmit}` for an input that uploads on pick, `await shrinkPhotoInput(input)` before a separate Save, or `await shrinkPhoto(file)` for a drop. The server decodes inside a Worker's 128 MB and refuses anything over `MAX_IMAGE_PIXELS` (1600 x 1600), so an input that skips this turns every phone photo into an error. Redrawing also turns the photo upright and drops its EXIF/GPS. `shrink-photo-coverage.test.ts` is a census of every file input and fails on a new one that skips it; a logo, video or audio input goes on its allowlist with the reason.
+
 **Shell + Stream pattern** — await critical data, stream secondary:
 
 ```typescript

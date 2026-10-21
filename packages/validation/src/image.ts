@@ -30,6 +30,24 @@ export const SUPPORTED_IMAGE_MIME_TYPES = new Set([
 export const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 
 /**
+ * The widest picture a still is stored at (its `xl` variant), and so the
+ * widest the studio shrinks a photo to before uploading it (Codex-kk9nv.12).
+ */
+export const MAX_IMAGE_WIDTH = 1600;
+
+/**
+ * The most pixels the server decodes, read from the file's header before any
+ * decoding (Codex-kk9nv.12). A Worker isolate has 128 MB for the JS heap and
+ * Wasm together, and Photon's decode alone peaks at about 11 bytes a pixel: a
+ * 12 MP phone photo needs 137 MB before a single variant is made. At
+ * 1600 x 1600 the measured peak is 66 MB in the worst shape tried (a
+ * 2000 x 1280 PNG made into a page image). The studio
+ * shrinks every photo to fit before sending it, so only a caller that skips
+ * the studio ever meets this limit.
+ */
+export const MAX_IMAGE_PIXELS = MAX_IMAGE_WIDTH * MAX_IMAGE_WIDTH;
+
+/**
  * Alternate SVG magic number (files starting with <svg)
  */
 const SVG_ALTERNATE = [0x3c, 0x73, 0x76, 0x67]; // <svg
