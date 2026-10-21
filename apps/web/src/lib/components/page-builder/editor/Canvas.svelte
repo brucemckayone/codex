@@ -90,6 +90,8 @@
   let frame = $state<HTMLElement>();
   let boxes = $state<Record<string, Box>>({});
   let hoveredId = $state<string | null>(null);
+  /** Sections out of view skip layout, once each has been laid out in full. */
+  let lazy = $state(false);
 
   const inline = createInlineEditing({
     read: (sectionId, key) => {
@@ -175,13 +177,73 @@
     return () => observer.disconnect();
   });
 
+  // Every section is laid out in full first, so each has a height remembered
+  // (`contain-intrinsic-block-size: auto`) before any is skipped; the second
+  // frame is after the first one's layout and its size records
+  // (Codex-61zsk.72).
+  $effect(() => {
+    if (!frame || lazy) return;
+    let next = 0;
+    const first = requestAnimationFrame(() => {
+      next = requestAnimationFrame(() => (lazy = true));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(next);
+    };
+  });
+
+  /** A section's top, in the scroller's content. */
+  function topOf(element: HTMLElement, view: HTMLElement): number {
+    return (
+      element.getBoundingClientRect().top -
+      view.getBoundingClientRect().top +
+      view.scrollTop
+    );
+  }
+
+  /** Where the scroller must be for a section's top to sit just under its edge. */
+  function landingOf(element: HTMLElement, view: HTMLElement): number {
+    return Math.max(0, topOf(element, view) - 16);
+  }
+
+  let landing = 0;
+
+  /**
+   * A section out of view keeps the height it was last drawn at, which is
+   * stale after the canvas changes width, so a scroll aimed past it lands off
+   * by the difference. Once the scroll ends the sections at the target have
+   * been drawn: aim again, and again two frames after each correction, at
+   * most three times (Codex-61zsk.72).
+   */
+  function settle(element: HTMLElement, view: HTMLElement): void {
+    const ticket = ++landing;
+    const aim = (tries: number) => {
+      if (ticket !== landing) return;
+      const goal = landingOf(element, view);
+      if (Math.abs(view.scrollTop - goal) <= 2 || tries <= 0) return;
+      view.scrollTo({ top: goal, behavior: 'auto' });
+      requestAnimationFrame(() => requestAnimationFrame(() => aim(tries - 1)));
+    };
+    let ended = false;
+    let fallback = 0;
+    const end = () => {
+      if (ended) return;
+      ended = true;
+      view.removeEventListener('scrollend', end);
+      clearTimeout(fallback);
+      aim(3);
+    };
+    view.addEventListener('scrollend', end);
+    // No `scrollend` in this browser, or the scroll was too short to fire one.
+    fallback = window.setTimeout(end, 900);
+  }
+
   /** Bring a section's top into view, unless it already is. */
   export function scrollToSection(id: string): void {
     const element = sectionElements().find((el) => el.dataset.lpSection === id);
     if (!element || !scroller) return;
-    const view = scroller.getBoundingClientRect();
-    const top =
-      element.getBoundingClientRect().top - view.top + scroller.scrollTop;
+    const top = topOf(element, scroller);
     const visibleNow =
       top >= scroller.scrollTop &&
       top < scroller.scrollTop + scroller.clientHeight * 0.6;
@@ -191,6 +253,7 @@
       top: Math.max(0, top - 16),
       behavior: still ? 'auto' : 'smooth',
     });
+    if (lazy) settle(element, scroller);
   }
 
   function sectionIdAt(target: EventTarget | null): string | null {
@@ -283,6 +346,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="canvas__page"
+          data-lazy={lazy ? '' : undefined}
           onclick={handleClick}
           onfocusin={handleFocusIn}
           onfocusout={handleFocusOut}
@@ -463,6 +527,21 @@
 
   .canvas__frame:not([data-device='desktop']) .canvas__empty {
     min-block-size: 70vh;
+  }
+
+  /* A section away from the scroller's view is not laid out
+     (Codex-61zsk.72). On a desktop the canvas changes width on every switch
+     to or from the Page tab, and every section was laid out again however far
+     down the page: on a 28-section page, most of the switch. A skipped
+     section keeps the height it was last drawn at (`auto`), recorded while
+     it was drawn, so the scroll, the section rings and the insert points
+     hold; `scrollToSection` corrects a landing the stale heights moved. */
+  .canvas__page :global(.lp-section) {
+    contain-intrinsic-block-size: auto 40rem;
+  }
+
+  .canvas__page[data-lazy] :global(.lp-section) {
+    content-visibility: auto;
   }
 
   .canvas__page :global([contenteditable='true']) {

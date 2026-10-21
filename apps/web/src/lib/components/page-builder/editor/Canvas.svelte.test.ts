@@ -229,3 +229,65 @@ describe('Canvas', () => {
     expect(document.querySelector('.canvas__notices')).toBeNull();
   });
 });
+
+describe('Canvas: sections out of view skip layout (Codex-61zsk.72)', () => {
+  const frames = () =>
+    new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    );
+
+  it('lays every section out in full first, then lets those out of view skip it', async () => {
+    await render();
+    const page = document.querySelector('.canvas__page');
+    expect(page?.hasAttribute('data-lazy')).toBe(false);
+    await frames();
+    await frames();
+    flushSync();
+    expect(page?.hasAttribute('data-lazy')).toBe(true);
+  });
+
+  it('aims again once the scroll ends, when stale heights moved the target', async () => {
+    await render();
+    await frames();
+    await frames();
+    flushSync();
+    const scroller = document.querySelector<HTMLElement>('.canvas__scroller')!;
+    const sections = [
+      ...document.querySelectorAll<HTMLElement>('[data-lp-section]'),
+    ];
+    const target = sections[sections.length - 1];
+    let at = 0;
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => at,
+      set: (value: number) => {
+        at = value;
+      },
+    });
+    Object.defineProperty(scroller, 'clientHeight', {
+      configurable: true,
+      value: 600,
+    });
+    scroller.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+    // Where the skipped sections' remembered heights put the target.
+    let targetTop = 2000;
+    target.getBoundingClientRect = () => ({ top: targetTop - at }) as DOMRect;
+    const aims: number[] = [];
+    scroller.scrollTo = ((options: ScrollToOptions) => {
+      aims.push(options.top ?? 0);
+      at = options.top ?? 0;
+    }) as typeof scroller.scrollTo;
+
+    (
+      app as unknown as { scrollToSection: (id: string) => void }
+    ).scrollToSection(target.dataset.lpSection!);
+    expect(aims).toEqual([1984]);
+
+    // Drawn on the way down at the new width, the sections above are taller.
+    targetTop = 2300;
+    scroller.dispatchEvent(new Event('scrollend'));
+    expect(aims).toEqual([1984, 2284]);
+    await frames();
+    expect(aims).toEqual([1984, 2284]);
+  });
+});
