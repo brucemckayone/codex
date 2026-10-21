@@ -12,6 +12,8 @@
  * malformed, truncated or absent reads as 1 (already upright), never throws.
  */
 
+import { jpegSegments } from './jpeg-segments';
+
 /** EXIF orientation: 1 is upright; 2-8 are the seven flips and turns. */
 export type ExifOrientation = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
@@ -19,21 +21,10 @@ const ORIENTATION_TAG = 0x0112;
 const SHORT = 3;
 
 export function readJpegOrientation(bytes: Uint8Array): ExifOrientation {
-  // SOI, then a run of marker segments up to the start of scan.
-  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return 1;
-  let offset = 2;
-  while (offset + 4 <= bytes.length) {
-    if (bytes[offset] !== 0xff) return 1;
-    const marker = bytes[offset + 1] ?? 0;
-    // Start of scan or end of image: no metadata after this point.
-    if (marker === 0xda || marker === 0xd9) return 1;
-    const length = ((bytes[offset + 2] ?? 0) << 8) | (bytes[offset + 3] ?? 0);
-    if (length < 2) return 1;
-    if (marker === 0xe1) {
-      const found = orientationInApp1(bytes, offset + 4, offset + 2 + length);
-      if (found !== null) return found;
-    }
-    offset += 2 + length;
+  for (const { marker, start, end } of jpegSegments(bytes)) {
+    if (marker !== 0xe1) continue;
+    const found = orientationInApp1(bytes, start, end);
+    if (found !== null) return found;
   }
   return 1;
 }
@@ -79,6 +70,8 @@ function orientationInApp1(
   if (entries === null) return 1;
   for (let i = 0; i < entries; i++) {
     const entry = tiff + ifd + 2 + i * 12;
+    // An entry cut off by the segment's end: no later one can be whole either.
+    if (entry + 10 > limit) return 1;
     if (u16(entry) !== ORIENTATION_TAG) continue;
     if (u16(entry + 2) !== SHORT) return 1;
     const value = u16(entry + 8);

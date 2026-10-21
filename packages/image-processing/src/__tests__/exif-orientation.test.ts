@@ -11,7 +11,7 @@
 import { PhotonImage } from '@cf-wasm/photon';
 import { describe, expect, it } from 'vitest';
 import { readJpegOrientation } from '../exif-orientation';
-import { processPageImageVariants } from '../processor';
+import { processStillVariants } from '../processor';
 
 /** An APP1 EXIF segment holding one Orientation entry. */
 function app1(orientation: number, littleEndian = false): number[] {
@@ -137,9 +137,43 @@ describe('readJpegOrientation', () => {
     const tagged = withSegments(jpeg, app1(6));
     expect(readJpegOrientation(tagged.slice(0, 20))).toBe(1);
   });
+
+  it('skips fill bytes and standalone markers on the way to the EXIF segment', () => {
+    // 0xFF fill before a marker is legal (T.81 B.1.1.2); RST0 has no length.
+    expect(readJpegOrientation(withSegments(jpeg, [0xff, 0xff], app1(6)))).toBe(
+      6
+    );
+    expect(readJpegOrientation(withSegments(jpeg, [0xff, 0xd0], app1(8)))).toBe(
+      8
+    );
+  });
+
+  /** An EXIF APP1 around arbitrary (big-endian) TIFF bytes. */
+  function exifApp1(tiff: number[]): number[] {
+    const payload = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00, ...tiff];
+    const length = payload.length + 2;
+    return [0xff, 0xe1, length >> 8, length & 0xff, ...payload];
+  }
+
+  it.each([
+    [
+      'an IFD offset far past the segment',
+      [0x4d, 0x4d, 0x00, 0x2a, 0xff, 0xff, 0xff, 0x00],
+    ],
+    [
+      'an IFD claiming 65535 entries with none present',
+      [0x4d, 0x4d, 0x00, 0x2a, 0x00, 0x00, 0x00, 0x08, 0xff, 0xff],
+    ],
+    [
+      'an IFD offset of 0, pointing back at the TIFF header',
+      [0x4d, 0x4d, 0x00, 0x2a, 0x00, 0x00, 0x00, 0x00],
+    ],
+  ])('reads %s as upright, inside the segment, without throwing', (_name, tiff) => {
+    expect(readJpegOrientation(withSegments(jpeg, exifApp1(tiff)))).toBe(1);
+  });
 });
 
-describe('processPageImageVariants turns a tagged picture upright', () => {
+describe('processStillVariants turns a tagged picture upright', () => {
   const jpeg = fourColourJpeg();
   // Pillow's ImageOps.exif_transpose on the same picture.
   const PILLOW: Record<number, string> = {
@@ -156,9 +190,7 @@ describe('processPageImageVariants turns a tagged picture upright', () => {
   it.each([
     1, 2, 3, 4, 5, 6, 7, 8,
   ])('orientation %i matches the reference, in the pixels and the recorded size', (orientation) => {
-    const result = processPageImageVariants(
-      withSegments(jpeg, app1(orientation))
-    );
+    const result = processStillVariants(withSegments(jpeg, app1(orientation)));
     const expected = PILLOW[orientation] ?? '';
     expect(corners(result.variants.lg)).toBe(expected);
     expect(`${result.width}x${result.height}`).toBe(expected.split(' ')[0]);
