@@ -1,5 +1,6 @@
-import { PhotonImage, resize } from '@cf-wasm/photon';
+import { fliph, flipv, PhotonImage, resize, rotate } from '@cf-wasm/photon';
 import { InvalidImageError, UNREADABLE_IMAGE_MESSAGE } from './errors';
+import type { ExifOrientation } from './exif-orientation';
 
 /**
  * Safe wrapper around PhotonImage to ensure memory is freed.
@@ -50,6 +51,44 @@ export class SafePhotonImage {
     // resize returns a new PhotonImage instance
     const result = resize(this.inner, width, height, samplingMethod);
     return new SafePhotonImage(result);
+  }
+
+  /**
+   * The image turned upright for an EXIF orientation (Codex-kk9nv.11).
+   *
+   * Returns THIS instance for 1, and for the plain mirrors 2 and 4, which it
+   * flips in place. Every orientation that turns (3, 5, 6, 7, 8) returns a NEW
+   * instance, which the caller frees.
+   *
+   * Photon's `rotate` turns clockwise and keeps exact dimensions at 90, 180
+   * and 270. A negative angle adds a pixel, so none is used. 5 (transpose) is
+   * a quarter turn then a mirror, and 7 (transverse) a quarter turn then a
+   * flip.
+   */
+  orient(orientation: ExifOrientation): SafePhotonImage {
+    this.checkFreed();
+    if (orientation === 1) return this;
+    if (orientation === 2) {
+      fliph(this.inner);
+      return this;
+    }
+    if (orientation === 4) {
+      flipv(this.inner);
+      return this;
+    }
+    // Wrapped before the flip, so a trap inside it cannot strand the turned
+    // copy outside the caller's cleanup.
+    const turned = new SafePhotonImage(
+      rotate(this.inner, orientation === 3 ? 180 : orientation === 8 ? 270 : 90)
+    );
+    try {
+      if (orientation === 5) fliph(turned.inner);
+      if (orientation === 7) flipv(turned.inner);
+    } catch (error) {
+      turned.free();
+      throw error;
+    }
+    return turned;
   }
 
   /**

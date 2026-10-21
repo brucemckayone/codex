@@ -23,8 +23,9 @@ interface FakeImage {
 
 const made: FakeImage[] = [];
 const resizes: { width: number; height: number }[] = [];
-/** Each resize's source width, and each free, in the order they happened. */
+/** Each resize's source width, each turn and each free, in order. */
 const events: string[] = [];
+const orients: number[] = [];
 let source = { width: 1950, height: 1300 };
 let headerReadable = true;
 
@@ -53,6 +54,17 @@ vi.mock('../photon-wrapper', () => {
       events.push(`resize ${this.image.width} -> ${width}`);
       return new FakePhoton(width, height);
     }
+    // Like the real one: THIS for 1 and for the mirrors 2 and 4, which it
+    // flips in place; a NEW instance (swapped for a quarter turn) for 3, 5-8.
+    orient(orientation: number) {
+      orients.push(orientation);
+      events.push(`orient ${this.image.width}`);
+      if (orientation === 1 || orientation === 2 || orientation === 4)
+        return this;
+      return orientation >= 5
+        ? new FakePhoton(this.image.height, this.image.width)
+        : new FakePhoton(this.image.width, this.image.height);
+    }
     getBytesWebP() {
       return new Uint8Array([this.image.width % 256]);
     }
@@ -74,8 +86,54 @@ beforeEach(() => {
   made.length = 0;
   resizes.length = 0;
   events.length = 0;
+  orients.length = 0;
   headerReadable = true;
 });
+
+/** The smallest JPEG framing that carries an EXIF orientation (no pixels). */
+function jpegTagged(orientation: number): Uint8Array {
+  const tiff = [
+    0x4d,
+    0x4d,
+    0x00,
+    0x2a,
+    0x00,
+    0x00,
+    0x00,
+    0x08, // big-endian, IFD at 8
+    0x00,
+    0x01, // one entry
+    0x01,
+    0x12,
+    0x00,
+    0x03,
+    0x00,
+    0x00,
+    0x00,
+    0x01, // Orientation, SHORT, 1
+    0x00,
+    orientation,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00, // no next IFD
+  ];
+  const payload = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00, ...tiff];
+  const length = payload.length + 2;
+  return new Uint8Array([
+    0xff,
+    0xd8,
+    0xff,
+    0xe1,
+    length >> 8,
+    length & 0xff,
+    ...payload,
+    0xff,
+    0xd9,
+  ]);
+}
 
 describe('processPageImageVariants', () => {
   it('writes sm, md, lg and an xl at 1600 from a large picture, and returns its size', () => {
@@ -118,15 +176,20 @@ describe('processPageImageVariants', () => {
 
     // Holding the decode while every variant was made from it peaked at
     // 81 MB of Wasm on a 2000x1280 picture; this order peaks at 65.
+    // (An untagged picture's `orient` is a no-op that returns the same image.)
     expect(events).toEqual([
       'resize 1950 -> 1600',
       'free 1950',
       'resize 1600 -> 800',
+      'orient 800',
       'free 800',
       'resize 1600 -> 400',
+      'orient 400',
       'free 400',
       'resize 1600 -> 200',
+      'orient 200',
       'free 200',
+      'orient 1600',
       'free 1600',
     ]);
   });
@@ -170,6 +233,60 @@ describe('the size check, before anything is decoded', () => {
       UNREADABLE_IMAGE_MESSAGE
     );
     expect(made).toHaveLength(0);
+  });
+});
+
+describe('EXIF orientation (Codex-kk9nv.11)', () => {
+  it('measures upright, resizes in the stored orientation, and turns only the small outputs', () => {
+    // Stored landscape; the camera says to display it turned 90° (6).
+    source = { width: 1950, height: 1300 };
+    const result = processPageImageVariants(jpegTagged(6));
+
+    expect({ width: result.width, height: result.height }).toEqual({
+      width: 1300,
+      height: 1950,
+    });
+    // Upright 1300 wide is under xl's 1600, so xl keeps it: stored 1950x1300.
+    expect(resizes[0]).toEqual({ width: 1950, height: 1300 });
+    // lg is 800 x 1200 upright, so it is resized to 1200 x 800 as stored.
+    expect(resizes[1]).toEqual({ width: 1200, height: 800 });
+    // What is encoded is the TURNED copy: 800 wide, not the stored 1200.
+    expect(result.variants.lg[0]).toBe(800 % 256);
+    expect(orients).toEqual([6, 6, 6, 6]);
+    // Nothing is turned until the decode has been freed.
+    const firstTurn = events.findIndex((e) => e.startsWith('orient'));
+    expect(events.indexOf('free 1950')).toBeLessThan(firstTurn);
+    // The decode, four resizes and their four turned copies, all freed.
+    expect(made).toHaveLength(9);
+    expect(made.every((image) => image.freed)).toBe(true);
+  });
+
+  it('mirrors (2) every variant, the largest last, because a mirror flips in place', () => {
+    source = { width: 1950, height: 1300 };
+    processPageImageVariants(jpegTagged(2));
+
+    // Each smaller variant is made from xl BEFORE xl is flipped, or it
+    // would be flipped twice.
+    expect(events.filter((e) => !e.startsWith('free'))).toEqual([
+      'resize 1950 -> 1600',
+      'resize 1600 -> 800',
+      'orient 800',
+      'resize 1600 -> 400',
+      'orient 400',
+      'resize 1600 -> 200',
+      'orient 200',
+      'orient 1600',
+    ]);
+    // In place: no turned copies.
+    expect(made).toHaveLength(5);
+  });
+
+  it('leaves an untagged picture as it is', () => {
+    source = { width: 1950, height: 1300 };
+    processImageVariants(new Uint8Array([1]));
+
+    expect(orients).toEqual([1, 1, 1]);
+    expect(made).toHaveLength(4);
   });
 });
 

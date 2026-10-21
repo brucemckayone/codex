@@ -1,5 +1,6 @@
 import { MAX_IMAGE_PIXELS, MAX_IMAGE_WIDTH } from '@codex/validation';
 import { InvalidImageError, UNREADABLE_IMAGE_MESSAGE } from './errors';
+import { readJpegOrientation } from './exif-orientation';
 import { readImageDimensions } from './image-dimensions';
 import { SafePhotonImage } from './photon-wrapper';
 
@@ -52,6 +53,14 @@ function assertDecodable(inputBuffer: Uint8Array): void {
  * upscaling and always keeping its shape. The variants come back in `widths`'
  * own key order, with the picture's size.
  *
+ * Upright (Codex-kk9nv.11): a camera stores the sensor's pixels plus an EXIF
+ * tag saying how to turn them, Photon ignores the tag, and the WebP variants
+ * carry no EXIF, so a portrait phone photo was stored, measured and served
+ * sideways. Every size here is the UPRIGHT picture's. Each variant is resized
+ * in the stored orientation to the upright size's mirror image, and only that
+ * small output is turned: a quarter turn clones its image several times, so
+ * turning the decode itself would cost several full-size copies.
+ *
  * Memory (Codex-kk9nv.12): a Worker has 128 MB for the JS heap and Wasm
  * together, and Photon's `resize` clones its source and builds a float
  * intermediate as wide as the source, at 16 bytes a pixel. So the LARGEST
@@ -68,6 +77,9 @@ function withVariants<K extends string>(
   widths: Readonly<Record<K, number>>
 ): { variants: Record<K, Uint8Array>; width: number; height: number } {
   assertDecodable(inputBuffer);
+  const orientation = readJpegOrientation(inputBuffer);
+  // 5 to 8 include a quarter turn: the stored pixels are the picture on its side.
+  const sideways = orientation >= 5;
   const allocated: SafePhotonImage[] = [];
   const track = (image: SafePhotonImage): SafePhotonImage => {
     allocated.push(image);
@@ -76,31 +88,48 @@ function withVariants<K extends string>(
 
   try {
     const decoded = track(SafePhotonImage.fromBuffer(inputBuffer));
-    const width = decoded.get_width();
-    const height = decoded.get_height();
+    const width = sideways ? decoded.get_height() : decoded.get_width();
+    const height = sideways ? decoded.get_width() : decoded.get_height();
 
+    /** `source` resized, still in the stored orientation, to the upright target. */
     const resized = (source: SafePhotonImage, targetWidth: number) => {
       const finalWidth = Math.min(targetWidth, width);
       const finalHeight = Math.round(finalWidth / (width / height));
       // `resize` creates a new instance even at the original size, so every
       // variant is re-encoded with the same WebP settings.
-      return track(source.resize(finalWidth, finalHeight, 1)); // 1 = Lanczos3
+      return track(
+        sideways
+          ? source.resize(finalHeight, finalWidth, 1) // 1 = Lanczos3
+          : source.resize(finalWidth, finalHeight, 1)
+      );
+    };
+
+    /** `image` turned upright and encoded; a turned copy is freed at once. */
+    const upright = (image: SafePhotonImage): Uint8Array => {
+      const turned = image.orient(orientation);
+      if (turned === image) return image.getBytesWebP();
+      track(turned);
+      const bytes = turned.getBytesWebP();
+      turned.free();
+      return bytes;
     };
 
     const names = Object.keys(widths) as K[];
+    const [largestName, ...smaller] = [...names].sort(
+      (a, b) => widths[b] - widths[a]
+    ) as [K, ...K[]];
+    const largest = resized(decoded, widths[largestName]);
+    decoded.free();
+
     const encoded = new Map<K, Uint8Array>();
-    let largest: SafePhotonImage | undefined;
-    for (const name of [...names].sort((a, b) => widths[b] - widths[a])) {
-      if (!largest) {
-        largest = resized(decoded, widths[name]);
-        decoded.free();
-        encoded.set(name, largest.getBytesWebP());
-        continue;
-      }
+    for (const name of smaller) {
       const variant = resized(largest, widths[name]);
-      encoded.set(name, variant.getBytesWebP());
+      encoded.set(name, upright(variant));
       variant.free();
     }
+    // Turned last: a mirror (2, 4) flips in place, and every smaller variant
+    // was made from it unturned.
+    encoded.set(largestName, upright(largest));
 
     const variants = {} as Record<K, Uint8Array>;
     for (const name of names) variants[name] = encoded.get(name) as Uint8Array;
