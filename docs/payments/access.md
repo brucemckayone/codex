@@ -60,6 +60,17 @@ everyone except the editor (`Codex-2hxff.65`). "Released" means
 `published_at` is set, or the row is `published`; unpublishing never clears
 `published_at`.
 
+A tier subscription does **not** keep an unpublished item for good. It is a
+licence, not a sale. When a removed creator's items come off sale
+([agreements](agreements.md#what-comes-off-sale)), each one is stamped
+`off_sale_at`. A tier subscriber keeps it only while
+`off_sale_at >= current_period_start`, which means until their next renewal.
+Tier-derived course access (`course_tier_access`) follows the same rule. An
+item with no stamp (unpublished by hand) is not on offer to subscribers at
+all. When an item is unpublished, the purchase, entitlement and course
+sources are checked before the subscription. That way a subscriber who also
+bought the item keeps it after renewing.
+
 ## When access ends
 
 | Event | What ends | Comes back when |
@@ -76,6 +87,7 @@ everyone except the editor (`Codex-2hxff.65`). "Released" means
 | Renewal payment fails | Nothing while Stripe retries (owner decision P-3) | — |
 | Stripe gives up retrying | Everything from that subscription | The person subscribes again |
 | Full refund of the current period's subscription payment | Everything from that subscription: it is cancelled at Stripe (owner decision P-4) | The person subscribes again |
+| Creator removed from the organisation (`Codex-2hxff.64`) | For tier subscribers, that creator's items at the next renewal. For followers, at once. Course subscriptions are cancelled at period end. Buyers keep theirs. | The item is republished by hand |
 
 ## Streaming revocation
 

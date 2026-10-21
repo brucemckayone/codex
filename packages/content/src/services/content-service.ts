@@ -858,6 +858,9 @@ export class ContentService extends BaseService {
           .set({
             status: CONTENT_STATUS.PUBLISHED,
             publishedAt: new Date(),
+            // Back on sale: no longer "taken off sale on departure"
+            // (Codex-2hxff.64), so tier access follows the normal rule.
+            offSaleAt: null,
             updatedAt: new Date(),
           })
           .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))

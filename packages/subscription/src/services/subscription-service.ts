@@ -604,7 +604,8 @@ interface SubscriptionServiceConfig extends ServiceConfig {
 export type TierPriceChangeMailer = (params: {
   to: string;
   toName?: string;
-  templateName: 'subscription-tier-price-change';
+  /** `course-no-longer-offered`: a course taken off sale (Codex-2hxff.64). */
+  templateName: 'subscription-tier-price-change' | 'course-no-longer-offered';
   category: 'transactional';
   userId?: string;
   organizationId?: string | null;

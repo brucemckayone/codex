@@ -6,12 +6,18 @@
  */
 // Organization Service
 
+export {
+  type WithdrawnCatalogue,
+  withdrawCatalogueOnDeparture,
+} from './catalogue-departure';
+export type { DeparturePreview } from './departure-preview';
 // Dev-only Cloudflare Custom Domain provisioner
 export {
   DevDomainService,
   type DevDomainServiceConfig,
 } from './dev-domain-service';
 export {
+  type MemberDeparture,
   OrganizationService,
   type OrganizationServiceConfig,
   type OwnershipMailer,

@@ -57,8 +57,10 @@
 // ============================================================================
 
 export {
+  type DeparturePreview,
   DevDomainService,
   type DevDomainServiceConfig,
+  type MemberDeparture,
   OrganizationService,
   type OrganizationServiceConfig,
   OWNERSHIP_OFFER_TTL_MS,
@@ -68,6 +70,8 @@ export {
   type OwnershipTemplateName,
   type OwnershipViewCore,
   type OwnershipViewerRole,
+  type WithdrawnCatalogue,
+  withdrawCatalogueOnDeparture,
 } from './services';
 
 // ============================================================================

@@ -139,6 +139,7 @@ import type {
   ConnectOnboardResponse,
   ContentWithRelations,
   CurrentSubscription,
+  DeparturePreview,
   MediaItemWithRelations,
   MyMembershipWithOwnership,
   OrganizationData,
@@ -2071,6 +2072,19 @@ export function createServerApi(
         request<void>('org', `/api/organizations/${id}/members/${userId}`, {
           method: 'DELETE',
         }),
+
+      /**
+       * What removing a member would unwind, as counts (Codex-2hxff.64).
+       * Owner/admin only, like the removal itself. Not cached by the worker.
+       *
+       * @param id - Organization UUID
+       * @param userId - Member's user ID
+       */
+      getDeparturePreview: (id: string, userId: string) =>
+        request<DeparturePreview>(
+          'org',
+          `/api/organizations/${id}/members/${userId}/departure-preview`
+        ),
 
       /**
        * Follow an organization (idempotent)

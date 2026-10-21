@@ -18,6 +18,7 @@
   import { UserPlusIcon } from '$lib/components/ui/Icon';
   import { ownershipErrorMessage } from '$lib/components/studio/ownership/ownership-errors';
   import {
+    getDeparturePreview,
     getOrgMembers,
     inviteMember,
     updateMemberRole,
@@ -127,6 +128,9 @@
     );
   }
 
+  // Returns the command's promise, so the Remove dialog stays open and busy
+  // until the removal settles. It never rejects: a refusal lands in
+  // `memberError` once the dialog has closed.
   function handleRemove(userId: string) {
     return runMemberCommand(() =>
       removeMember({
@@ -134,6 +138,12 @@
         userId,
       })
     );
+  }
+
+  // What the removal would unwind, read when the Remove dialog opens
+  // (Codex-2hxff.64).
+  function loadDeparturePreview(userId: string) {
+    return getDeparturePreview({ orgId: data.org.id, userId });
   }
 
   const ownerAction = $derived({
@@ -201,6 +211,8 @@
         members={teamMembers}
         onChangeRole={handleChangeRole}
         onRemove={handleRemove}
+        orgName={data.org.name}
+        {loadDeparturePreview}
         onInvite={() => (inviteDialogOpen = true)}
         {revenueShareByUser}
         {ownerAction}

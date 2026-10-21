@@ -38,7 +38,10 @@ import {
 import { and, eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ConnectAccountNotReadyError } from '../../errors';
+import {
+  ConnectAccountNotReadyError,
+  SubscriptionCheckoutError,
+} from '../../errors';
 import {
   COURSE_SUBSCRIPTION_METADATA_TYPE,
   CourseSubscriptionService,
@@ -731,6 +734,158 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
         })
       ).rejects.toThrow(ConnectAccountNotReadyError);
       expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    });
+
+    // Codex-2hxff.64: a creator's removal archives their courses, and only
+    // this status gate stops a new subscription to one.
+    it('a course taken off sale on a departure: refused before Stripe is asked', async () => {
+      const { cId } = await makeCourseWithPlan();
+      await db
+        .update(courses)
+        .set({ status: 'archived', offSaleAt: new Date() })
+        .where(eq(courses.id, cId));
+      const stripe = createMockStripe();
+      const checkout = new CourseSubscriptionService(
+        { db, environment: 'test' },
+        stripe
+      );
+
+      await expect(
+        checkout.createCheckoutSession(subscriberId, {
+          courseId: cId,
+          billingInterval: 'month',
+          successUrl: 'http://lvh.me:3000/ok',
+          cancelUrl: 'http://lvh.me:3000/cancel',
+        })
+      ).rejects.toThrow(SubscriptionCheckoutError);
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // Owner decision 2026-10-21 (Codex-2hxff.64): a course taken off sale when
+  // its creator left has its live subscriptions cancelled at period end,
+  // 50 at once and the rest hourly. These pass `courseIds` (the removal's own
+  // call): the sweep's no-`courseIds` form is global, and a shared DB holds
+  // other runs' rows.
+  describe('cancelForCoursesOffSale', () => {
+    async function subscribedCourse(offSale: boolean) {
+      const { cId, pId } = await makeCourseWithPlan();
+      const stripeSubId = `sub_${randomUUID().slice(0, 8)}`;
+      await service.handleCourseSubscriptionCreated(
+        courseSubStripeObject(stripeSubId, cId, pId)
+      );
+      if (offSale) {
+        await db
+          .update(courses)
+          .set({ status: 'archived', offSaleAt: new Date() })
+          .where(eq(courses.id, cId));
+      }
+      const [row] = await db
+        .select()
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSubId));
+      if (!row) throw new Error('course subscription not written');
+      return { courseId: cId, sub: row };
+    }
+
+    function serviceWithMailer() {
+      const stripe = createMockStripe();
+      const mailer = vi.fn();
+      const svc = new CourseSubscriptionService(
+        {
+          db,
+          environment: 'test',
+          mailer,
+          webAppUrl: 'https://app.example.test',
+        },
+        stripe
+      );
+      return { svc, stripe, mailer };
+    }
+
+    it('cancels a live subscription to an off-sale course at period end, once, and tells the subscriber', async () => {
+      const offSale = await subscribedCourse(true);
+      const onSale = await subscribedCourse(false);
+      const { svc, stripe, mailer } = serviceWithMailer();
+
+      const result = await svc.cancelForCoursesOffSale({
+        courseIds: [offSale.courseId, onSale.courseId],
+        limit: 50,
+      });
+
+      expect(result).toEqual({ cancelled: 1, failed: 0, remaining: 0 });
+      expect(stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+      expect(stripe.subscriptions.update).toHaveBeenCalledWith(
+        offSale.sub.stripeSubscriptionId,
+        { cancel_at_period_end: true },
+        { idempotencyKey: `course_off_sale_cancel_${offSale.sub.id}` }
+      );
+      const [after] = await db
+        .select()
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.id, offSale.sub.id));
+      expect(after?.cancelAtPeriodEnd).toBe(true);
+      expect(after?.status).toBe('cancelling');
+      expect(mailer).toHaveBeenCalledTimes(1);
+      expect(mailer.mock.calls[0]?.[0]).toMatchObject({
+        templateName: 'course-no-longer-offered',
+        userId: subscriberId,
+      });
+
+      // A second run finds nothing: already cancelling.
+      const again = await svc.cancelForCoursesOffSale({
+        courseIds: [offSale.courseId],
+        limit: 50,
+      });
+      expect(again).toEqual({ cancelled: 0, failed: 0, remaining: 0 });
+    });
+
+    it('stops at the limit and reports what is left for the hourly sweep', async () => {
+      const first = await subscribedCourse(true);
+      const second = await subscribedCourse(true);
+      const { svc } = serviceWithMailer();
+
+      const result = await svc.cancelForCoursesOffSale({
+        courseIds: [first.courseId, second.courseId],
+        limit: 1,
+      });
+
+      expect(result).toEqual({ cancelled: 1, failed: 0, remaining: 1 });
+    });
+
+    it('a Stripe failure is counted, logged, and left for the next run', async () => {
+      const offSale = await subscribedCourse(true);
+      const { svc, stripe, mailer } = serviceWithMailer();
+      vi.mocked(stripe.subscriptions.update).mockRejectedValueOnce(
+        new Error('Stripe is down')
+      );
+
+      const result = await svc.cancelForCoursesOffSale({
+        courseIds: [offSale.courseId],
+        limit: 50,
+      });
+
+      expect(result).toEqual({ cancelled: 0, failed: 1, remaining: 1 });
+      const [after] = await db
+        .select()
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.id, offSale.sub.id));
+      expect(after?.cancelAtPeriodEnd).toBe(false);
+      expect(after?.status).toBe('active');
+      expect(mailer).not.toHaveBeenCalled();
+    });
+
+    it('the hourly sweep (no courseIds) cancels what the removal left', async () => {
+      const offSale = await subscribedCourse(true);
+      const { svc } = serviceWithMailer();
+
+      await svc.cancelForCoursesOffSale({ limit: 50 });
+
+      const [after] = await db
+        .select()
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.id, offSale.sub.id));
+      expect(after?.cancelAtPeriodEnd).toBe(true);
     });
   });
 });

@@ -185,6 +185,8 @@ export class AdminContentManagementService extends BaseService {
           .set({
             status: CONTENT_STATUS.PUBLISHED,
             publishedAt: new Date(),
+            // Back on sale: clears the departure stamp (Codex-2hxff.64).
+            offSaleAt: null,
             updatedAt: new Date(),
           })
           .where(eq(schema.content.id, contentId));

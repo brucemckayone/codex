@@ -75,7 +75,8 @@ self-fetch filters on `content.status` any more; both still filter
 |---|---|
 | `paid_purchase`, `paid_entitlement`, `subscribers_purchase`, `subscribers_entitlement` | **yes** — they paid for this item |
 | `course`, `paid_course`, `subscribers_course` | **yes** — they bought the course it sits in (course-level equivalent: Codex-yo4px) |
-| `free`, `followers_follower`, `followers_subscription`, `subscribers_subscription` | no — access lasts while it is on offer |
+| `free`, `followers_follower` | no — access lasts while it is on offer |
+| `followers_subscription`, `subscribers_subscription` | no — EXCEPT an item stamped `offSaleAt` (its creator left the org, Codex-2hxff.64): kept until the subscriber's next renewal, i.e. while `offSaleAt >= currentPeriodStart` of the granting subscription |
 | every `*_management` arm | no — unchanged from before; creators preview drafts via the studio, not a signed stream |
 
 `GRANT_SURVIVES_UNPUBLICATION` is a `Record<GrantVia, boolean>`, not a `Set`, so
@@ -83,6 +84,14 @@ adding a grant arm **fails the build** until someone classifies it. Do not
 convert it to a `Set`: a new arm would silently default to "does not survive",
 which is the safe direction but also the silent one, and this table is a
 commercial commitment.
+
+The same renewal rule applies wherever a subscription reaches an off-sale item:
+tier-derived course entry (`hasDerivedCourseTierAccess` and
+`resolveCourseEntitlementsBatch` join `courses` and require
+`off_sale_at IS NULL OR off_sale_at >= current_period_start`), and the
+library's subscription and followers arms. An item with no `offSaleAt` (an
+ordinary draft) is untouched by it. Pinned by
+`off-sale-access.integration.test.ts`.
 
 An anonymous caller is unaffected: every user-scoped arm evaluates to no-grant,
 leaving only `free`, which does not survive — so a draft stays unreadable to the

@@ -715,13 +715,15 @@ export class PurchaseService extends BaseService {
         // `findActiveCreatorAgreementShare` (reused by the course-purchase +
         // course-subscription payout paths so all three apply IDENTICAL
         // Decision-Q3 agreement math). Returns the creator's share in basis
-        // points, or null when no agreement is in force at `purchasedAt`.
+        // points, or null when no agreement is in force when the checkout
+        // started (`offerAt`; `purchasedAt` when a caller has no session).
         const agreementSharePercent = organizationId
           ? await findActiveCreatorAgreementShare(tx, {
               organizationId,
               creatorId: contentRecord.creatorId,
               revenueType: 'content_purchase',
-              at: purchasedAt,
+              // At the checkout's start (Codex-2hxff.64 Q1).
+              at: metadata.offerAt ?? purchasedAt,
               obs: this.obs,
             })
           : null;
@@ -1163,7 +1165,8 @@ export class PurchaseService extends BaseService {
             organizationId,
             creatorId: course.creatorId,
             revenueType: 'content_purchase',
-            at: purchasedAt,
+            // At the checkout's start (Codex-2hxff.64 Q1).
+            at: metadata.offerAt ?? purchasedAt,
             obs: this.obs,
           }
         );

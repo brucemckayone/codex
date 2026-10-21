@@ -450,6 +450,26 @@ export const agreementDeclinedDataSchema = z.object({
  * the full share for any invoice fired before `effectiveTerminationDate`,
  * but no share accrues afterwards.
  */
+/** A creator removed from an organisation: what it ended (Codex-2hxff.64). */
+export const removedFromOrganisationDataSchema = z.object({
+  recipientName: z.string(),
+  orgName: z.string(),
+  removedOn: z.string(),
+  agreementsEnded: z.string(),
+  contentOffSale: z.string(),
+  coursesOffSale: z.string(),
+  courseSubscriptionsEnding: z.string(),
+});
+
+/** A course taken off sale: the subscription ends at period end. */
+export const courseNoLongerOfferedDataSchema = z.object({
+  userName: z.string(),
+  courseTitle: z.string(),
+  orgName: z.string(),
+  accessUntil: z.string(),
+  manageUrl: z.string().url(),
+});
+
 export const agreementTerminatedDataSchema = z.object({
   ...agreementBaseFields,
   terminationReason: z.string().optional(),
@@ -509,6 +529,9 @@ export const templateDataSchemas = {
   'agreement-declined': agreementDeclinedDataSchema,
   'agreement-terminated': agreementTerminatedDataSchema,
   'agreement-expiring-soon': agreementExpiringSoonDataSchema,
+  // Removal from an organisation (Codex-2hxff.64)
+  'removed-from-organisation': removedFromOrganisationDataSchema,
+  'course-no-longer-offered': courseNoLongerOfferedDataSchema,
 } as const;
 
 // Type for template data keys (enables compile-time checking)

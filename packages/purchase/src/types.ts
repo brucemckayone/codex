@@ -63,11 +63,20 @@ export interface CompletePurchaseMetadata {
   stripeChargeId?: string | null;
   /**
    * When the customer paid — the webhook event's `created`, which a redelivery
-   * keeps. Becomes `purchasedAt`, the instant both the agreement lookup and the
-   * org payee resolve at, so a late or retried webhook after an ownership
-   * transfer still pays the owner at the sale (Codex-2hxff.2). Defaults to now.
+   * keeps. Becomes `purchasedAt`, the instant the org payee resolves at, so a
+   * late or retried webhook after an ownership transfer still pays the owner at
+   * the sale (Codex-2hxff.2). The agreement resolves at `offerAt` when given.
+   * Defaults to now.
    */
   paidAt?: Date;
+  /**
+   * When the checkout session was created: the moment the buyer was offered
+   * the item at its price. The creator's agreement resolves here, not at
+   * payment (owner decision 2026-10-21, Codex-2hxff.64 Q1): a checkout opened
+   * before the creator was removed, and paid after, keeps the split they held
+   * when it started. Defaults to `paidAt`.
+   */
+  offerAt?: Date;
 }
 
 /**
@@ -93,6 +102,8 @@ export interface CompleteCoursePurchaseMetadata {
   stripeChargeId?: string | null;
   /** When the customer paid — see {@link CompletePurchaseMetadata.paidAt}. */
   paidAt?: Date;
+  /** When the checkout started — see {@link CompletePurchaseMetadata.offerAt}. */
+  offerAt?: Date;
 }
 
 /**

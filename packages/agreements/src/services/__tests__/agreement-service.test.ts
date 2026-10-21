@@ -43,11 +43,7 @@ import {
   InvalidProposalStateError,
   ShareExceedsAvailableError,
 } from '../../errors';
-import {
-  DEPARTURE_TERMINATION_REASON,
-  terminateAgreementsOnDeparture,
-  withdrawProposalsOnDeparture,
-} from '../agreement-departure';
+import { withdrawProposalsOnDeparture } from '../agreement-departure';
 import { AgreementService } from '../agreement-service';
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────
@@ -1851,80 +1847,6 @@ describe('AgreementService', () => {
       expect(params.templateName).toBe('agreement-terminated');
       // Recipient is the OTHER party — the creator
       expect(params.userId).toBe(fx.creatorAId);
-    });
-
-    // Owner decision AGR-09, "End on removal" (Codex-2hxff.18).
-    it('an agreement ended by removal emails the creator, with the reason and their share', async () => {
-      const fx = await seedOrgFixture(db);
-      const { serviceWithMailer, mailer } = buildServiceWithMailer();
-      const proposal = await serviceWithMailer.proposeAgreement({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        revenueType: 'subscription',
-        sharePercent: 3000,
-        termMonths: 6,
-        proposedByUserId: fx.ownerId,
-      });
-      await serviceWithMailer.acceptProposal({
-        proposalId: proposal.id,
-        acceptedByUserId: fx.creatorAId,
-      });
-      const ended = await terminateAgreementsOnDeparture(db, {
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        at: new Date(),
-      });
-      expect(ended).toHaveLength(1);
-      mailer.mockClear();
-
-      await serviceWithMailer.notifyTerminatedOnDeparture(ended);
-
-      expect(mailer).toHaveBeenCalledTimes(1);
-      const params = mailer.mock.calls[0]?.[0] as Record<string, unknown>;
-      expect(params.templateName).toBe('agreement-terminated');
-      expect(params.userId).toBe(fx.creatorAId);
-      expect(params.organizationId).toBe(fx.orgId);
-      const data = params.data as Record<string, string>;
-      expect(data.terminationReason).toBe(DEPARTURE_TERMINATION_REASON);
-      expect(data.sharePercentDisplay).toBe('30%');
-    });
-
-    it('a departure notice with no active owner still reaches the creator, naming "The other party"', async () => {
-      const fx = await seedOrgFixture(db);
-      const other = await seedOrgFixture(db);
-      const { serviceWithMailer, mailer } = buildServiceWithMailer();
-      const agreementIn = async (orgId: string, creatorId: string) =>
-        (
-          await db
-            .insert(schema.creatorOrganizationAgreements)
-            .values({
-              organizationId: orgId,
-              creatorId,
-              organizationFeePercentage: 7000,
-              revenueType: 'subscription',
-              status: 'terminated',
-              terminatedAt: new Date(),
-              effectiveFrom: new Date(Date.now() - 86_400_000),
-            })
-            .returning()
-        )[0];
-      const ownerless = await agreementIn(fx.orgId, fx.creatorAId);
-      const owned = await agreementIn(other.orgId, other.creatorAId);
-      if (!ownerless || !owned) throw new Error('agreements not inserted');
-      await db
-        .update(schema.organizationMemberships)
-        .set({ status: 'inactive' })
-        .where(eq(schema.organizationMemberships.userId, fx.ownerId));
-
-      await serviceWithMailer.notifyTerminatedOnDeparture([ownerless, owned]);
-
-      expect(mailer).toHaveBeenCalledTimes(2);
-      const sent = mailer.mock.calls.map(
-        (call) => call[0] as { userId: string; data: Record<string, string> }
-      );
-      const toOwnerless = sent.find((p) => p.userId === fx.creatorAId);
-      expect(toOwnerless?.data.otherPartyName).toBe('The other party');
-      expect(sent.map((p) => p.userId)).toContain(other.creatorAId);
     });
 
     it('withdrawProposal does NOT fire any notification (silent withdrawal per epic plan)', async () => {

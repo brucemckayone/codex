@@ -1250,6 +1250,32 @@ describe('ContentService', () => {
       expect(secondPublish.publishedAt).toEqual(firstPublish.publishedAt);
     });
 
+    it('republishing an item taken off sale on a departure clears the stamp (Codex-2hxff.64)', async () => {
+      const created = await service.create(
+        {
+          title: 'Back on sale',
+          slug: createUniqueSlug('republish'),
+          contentType: 'written',
+          contentBody: 'Body',
+          priceCents: 0,
+          tags: [],
+        },
+        creatorId
+      );
+      await service.publish(created.id, creatorId);
+      // What a removal leaves (withdrawCatalogueOnDeparture).
+      await db
+        .update(content)
+        .set({ status: 'archived', offSaleAt: new Date() })
+        .where(eq(content.id, created.id));
+
+      const republished = await service.publish(created.id, creatorId);
+
+      // Without the clear, tier access would still end at the next renewal.
+      expect(republished.status).toBe('published');
+      expect(republished.offSaleAt).toBeNull();
+    });
+
     it.skip('should throw BusinessLogicError if video content has no media', async () => {
       // This should not happen in practice (validation prevents it),
       // but test the safeguard

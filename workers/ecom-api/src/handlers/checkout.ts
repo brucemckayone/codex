@@ -134,6 +134,12 @@ export async function handleCheckoutCompleted(
   const paidAt = Number.isFinite(event.created)
     ? new Date(event.created * 1000)
     : undefined;
+  // The checkout's start. The creator's agreement resolves at it, so a
+  // checkout opened before a creator's removal and paid after keeps the split
+  // they held when it started (owner decision 2026-10-21, Codex-2hxff.64 Q1).
+  const offerAt = Number.isFinite(session.created)
+    ? new Date(session.created * 1000)
+    : undefined;
 
   // Codex-2pryk WP-6: a `kind: 'course'` session targets a COURSE, not content.
   // Route to the course completion path and return — the content metadata schema
@@ -222,6 +228,7 @@ export async function handleCheckoutCompleted(
       stripeApplicationFeeCents,
       stripeChargeId,
       paidAt,
+      offerAt,
     });
 
     obs?.info('Purchase completed successfully', {
@@ -332,6 +339,9 @@ async function handleCourseCheckoutCompleted(
         stripeApplicationFeeCents,
         stripeChargeId,
         paidAt,
+        offerAt: Number.isFinite(session.created)
+          ? new Date(session.created * 1000)
+          : undefined,
       }
     );
 
