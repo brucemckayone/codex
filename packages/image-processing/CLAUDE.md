@@ -9,7 +9,7 @@ Image upload validation, WASM-based resizing/conversion, and R2 storage. Handles
 - **`ImageProcessingService`** — Primary service class
 - **`OrphanedFileService`** — Tracks and cleans up R2 files that lost their DB record
 - **`ImageUploadError`** — File too large or empty (400)
-- **`InvalidImageError`** — Corrupt file, wrong MIME type, magic byte mismatch (400)
+- **`InvalidImageError`** — Corrupt or undecodable file, a header whose size cannot be read, over `MAX_IMAGE_PIXELS`, wrong MIME type, magic byte mismatch (400)
 - Re-exported from `@codex/validation`: `validateImageUpload`, `validateImageSignature`, `extractMimeType`, `MAX_IMAGE_SIZE_BYTES`, `SUPPORTED_IMAGE_MIME_TYPES`
 
 ## ImageProcessingService
@@ -42,8 +42,9 @@ Returns `ImageProcessingResult: { url: string, size: number, mimeType: string }`
 ## Processing Pipeline
 
 1. **Validation**: size ≤ 5MB, MIME type must be in `SUPPORTED_IMAGE_MIME_TYPES` (PNG, JPEG, WebP, GIF — no SVG, no opt-out), magic bytes verified against MIME
-2. **Processing**: `@cf-wasm/photon` (Cloudflare-compatible WASM) — Lanczos3 resize, WebP conversion. NEVER upscales.
-3. **Storage** → R2 via `ASSETS_BUCKET` (falls back to `MEDIA_BUCKET`):
+2. **Size check, before any decode** (Codex-kk9nv.12): `readImageDimensions` (`image-dimensions.ts`) reads width x height from the JPEG/PNG/WebP/GIF header, and over `MAX_IMAGE_PIXELS` (1600 x 1600, from `@codex/validation`) is an `InvalidImageError`. A Worker isolate has **128 MB for the JS heap and Wasm together**, and Photon's decode alone peaks at about 11 bytes a pixel: a 12 MP phone photo needs 137 MB, so it killed the isolate (error 1102) where no handler or log could see it. The studio shrinks every photo in the browser first (`apps/web/src/lib/utils/shrink-photo.ts`), so only a caller that skips the studio meets the limit. **Never raise `MAX_IMAGE_PIXELS` without re-measuring the Wasm peak** (`chunk.initSync().memory.buffer.byteLength` after a run; Wasm memory never shrinks, so that is the peak).
+3. **Processing**: `@cf-wasm/photon` (Cloudflare-compatible WASM) — Lanczos3 resize, WebP conversion. NEVER upscales. The LARGEST variant is made from the decode, the decode is freed at once, and every smaller variant is made from that largest one and freed as soon as it is encoded: `resize` clones its source and builds a 16-byte-a-pixel float intermediate as wide as the source, so holding the decode while making every variant from it peaked at 81 MB on a 2000x1280 page image (this order: 65). A file that will not decode is an `InvalidImageError` (400), not a 500.
+4. **Storage** → R2 via `ASSETS_BUCKET` (falls back to `MEDIA_BUCKET`):
    - Raster variants: `cacheControl: R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` from
      `@codex/constants` — **never a string written in this package.**
    - **NEVER `immutable`, and NEVER a multi-hour window.** Every key this
@@ -56,7 +57,7 @@ Returns `ImageProcessingResult: { url: string, size: number, mimeType: string }`
      (shared with the org-logo path in `@codex/platform-settings`); the
      invariant is pinned by
      `src/__tests__/deterministic-key-cache-control.test.ts`.
-4. **DB update**: writes URL to content/user/org record
+5. **DB update**: writes URL to content/user/org record
 
 ## R2 Key Format
 

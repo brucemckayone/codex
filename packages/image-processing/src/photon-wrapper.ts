@@ -1,4 +1,5 @@
 import { PhotonImage, resize } from '@cf-wasm/photon';
+import { InvalidImageError, UNREADABLE_IMAGE_MESSAGE } from './errors';
 
 /**
  * Safe wrapper around PhotonImage to ensure memory is freed.
@@ -12,16 +13,19 @@ export class SafePhotonImage {
   private constructor(public readonly inner: PhotonImage) {}
 
   /**
-   * Create a SafePhotonImage from a byte buffer
+   * Create a SafePhotonImage from a byte buffer.
+   *
+   * A file that passes the magic-byte check but will not decode is the
+   * uploader's to fix, so it is a 400 (`InvalidImageError`), not a 500
+   * (Codex-kk9nv.12). Photon's own words stay out of the message: they name
+   * decoder internals, not anything the uploader can act on.
    */
   static fromBuffer(buffer: Uint8Array): SafePhotonImage {
     try {
       const inner = PhotonImage.new_from_byteslice(buffer);
       return new SafePhotonImage(inner);
-    } catch (e) {
-      throw new Error(
-        `Failed to load image in Photon: ${e instanceof Error ? e.message : String(e)}`
-      );
+    } catch {
+      throw new InvalidImageError(UNREADABLE_IMAGE_MESSAGE);
     }
   }
 

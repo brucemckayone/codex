@@ -13,6 +13,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { InvalidImageError, UNREADABLE_IMAGE_MESSAGE } from '../errors';
 import { SafePhotonImage } from '../photon-wrapper';
 import { VARIANT_WIDTHS } from '../processor';
 
@@ -106,14 +107,21 @@ describe('Stability Tests', () => {
   });
 
   describe('Error Handling Patterns', () => {
-    it('should wrap Photon errors with descriptive messages', () => {
-      // The fromBuffer method should wrap errors with context
-      const errorPattern = /Failed to load image in Photon/;
-
-      // Test with invalid data
-      expect(() =>
-        SafePhotonImage.fromBuffer(new Uint8Array([0, 0, 0, 0]))
-      ).toThrow(errorPattern);
+    it('turns a decode failure into a 400 the uploader can act on, not a 500', () => {
+      // Codex-kk9nv.12: a file past the magic-byte check that will not decode
+      // is the uploader's to fix. Photon's own words name decoder internals,
+      // so they stay out of the message.
+      let thrown: unknown;
+      try {
+        SafePhotonImage.fromBuffer(new Uint8Array([0, 0, 0, 0]));
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(InvalidImageError);
+      expect(thrown).toMatchObject({
+        statusCode: 400,
+        message: UNREADABLE_IMAGE_MESSAGE,
+      });
     });
 
     it('should reject empty buffers', () => {
