@@ -308,6 +308,29 @@ describe('Canvas: sections out of view skip layout (Codex-61zsk.72)', () => {
     expect(isLazy()).toBe(true);
   });
 
+  it('waits for fonts still loading before it lets any section skip', async () => {
+    let arrive = () => {};
+    const ready = new Promise<void>((resolve) => {
+      arrive = resolve;
+    });
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { status: 'loading', ready },
+    });
+    try {
+      await render();
+      await settled();
+      expect(isLazy()).toBe(false);
+
+      arrive();
+      await ready;
+      flushSync();
+      expect(isLazy()).toBe(true);
+    } finally {
+      Reflect.deleteProperty(document, 'fonts');
+    }
+  });
+
   it('lays out sections that arrive on an empty canvas before skipping any', async () => {
     const full = samplePage('bold') as KitPage;
     const { state } = await render({}, { page: { ...full, sections: [] } });

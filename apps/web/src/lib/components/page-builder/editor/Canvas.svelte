@@ -198,14 +198,27 @@
   $effect(() => {
     if (!frame || lazy || !contextSettled || ids.length === 0) return;
     const now = ids;
+    let live = true;
     let next = 0;
+    const arm = () => {
+      if (!live) return;
+      drawn = new Set(now);
+      lazy = true;
+    };
     const first = requestAnimationFrame(() => {
       next = requestAnimationFrame(() => {
-        drawn = new Set(now);
-        lazy = true;
+        // A font still on its way would reflow the words after their heights
+        // were recorded, so arm once the fonts being loaded have arrived.
+        // Not on every later font load: the Style panel's previews load
+        // other Styles' fonts on each visit, and laying the whole page out
+        // again for each cost more than skipping saved.
+        const fonts = typeof document === 'undefined' ? undefined : document.fonts;
+        if (fonts?.status === 'loading') void fonts.ready.then(arm);
+        else arm();
       });
     });
     return () => {
+      live = false;
       cancelAnimationFrame(first);
       cancelAnimationFrame(next);
     };
@@ -217,18 +230,10 @@
   $effect(() => {
     if (!contextSettled || ids.some((id) => !drawn.has(id))) lazy = false;
   });
-  // ...when the Style, its dials or the brand being edited change...
+  // ...and when the Style, its dials or the brand being edited change.
   $effect(() => {
     void designKey;
     lazy = false;
-  });
-  // ...and when a font arrives, which reflows every section's words.
-  $effect(() => {
-    const fonts = typeof document === 'undefined' ? undefined : document.fonts;
-    if (!fonts?.addEventListener) return;
-    const relayout = () => (lazy = false);
-    fonts.addEventListener('loadingdone', relayout);
-    return () => fonts.removeEventListener('loadingdone', relayout);
   });
 
   /** A section's top, in the scroller's content. */
