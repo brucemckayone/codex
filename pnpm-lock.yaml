@@ -677,6 +677,9 @@ importers:
 
   packages/identity:
     dependencies:
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../agreements
       '@codex/cache':
         specifier: workspace:*
         version: link:../cache

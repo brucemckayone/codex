@@ -3,7 +3,9 @@
  */
 
 export {
+  ACCOUNT_DELETED_TERMINATION_REASON,
   DEPARTURE_TERMINATION_REASON,
+  type DepartureScope,
   type DepartureTerminatedAgreement,
   terminateAgreementsOnDeparture,
   withdrawProposalsOnDeparture,

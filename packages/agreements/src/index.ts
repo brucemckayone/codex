@@ -26,6 +26,7 @@
 // ─── Services ─────────────────────────────────────────────────────────────
 
 export {
+  ACCOUNT_DELETED_TERMINATION_REASON,
   type AcceptProposalInput,
   type ActiveAgreementShareView,
   type AgreementInForce,
@@ -39,6 +40,7 @@ export {
   creatorShareFromLegacyOrgFee,
   DEPARTURE_TERMINATION_REASON,
   type DeclineProposalInput,
+  type DepartureScope,
   type DepartureTerminatedAgreement,
   formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,

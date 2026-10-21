@@ -103,8 +103,15 @@ Money earned before the removal is still paid to them. The resolver reads the
 termination time, not the membership. A webhook for an earlier invoice that
 lands, or is retried, after the removal still finds the agreement. A check on
 the membership as it is *now* would wrongly drop that share, so there is none.
-`removeMember` is the only way a creator's membership ends today. Any new way
-out must call `terminateAgreementsOnDeparture` too.
+A creator who deletes their own account is treated the same way, in every
+organisation at once (owner decision: "End them like a removal"). Their
+agreements end and their open proposals are withdrawn in the same transaction
+as the deletion, with the reason "The creator deleted their account". No email
+is sent, because the address is scrubbed by the deletion.
+
+`removeMember` and account deletion are the only ways a creator leaves today.
+Any new way out must call `withdrawProposalsOnDeparture` and
+`terminateAgreementsOnDeparture` too.
 
 ## How a share applies
 

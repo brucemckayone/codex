@@ -21,7 +21,10 @@ import {
 } from '@codex/test-utils';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { terminateAgreementsOnDeparture } from '../agreement-departure';
+import {
+  ACCOUNT_DELETED_TERMINATION_REASON,
+  terminateAgreementsOnDeparture,
+} from '../agreement-departure';
 import { agreementsInForce } from '../agreement-resolver';
 
 const AT = new Date('2026-06-15T12:00:00Z');
@@ -312,6 +315,39 @@ describe('agreementsInForce', () => {
       );
       expect((await rowOf(sibling.id))?.status).toBe('active');
       expect((await rowOf(elsewhere.id))?.status).toBe('active');
+    });
+
+    it("an account deletion ends the creator's agreements in every organisation, and only theirs", async () => {
+      const fx = await org();
+      const other = await org();
+      const here = await agreement(fx, { creatorId: fx.creatorA, share: 2000 });
+      const there = await agreement(other, {
+        creatorId: fx.creatorA,
+        share: 1000,
+      });
+      const colleague = await agreement(fx, {
+        creatorId: fx.creatorB,
+        share: 2500,
+      });
+
+      const ended = await terminateAgreementsOnDeparture(db, {
+        creatorId: fx.creatorA,
+        at: AT,
+        everyOrganisation: true,
+        reason: ACCOUNT_DELETED_TERMINATION_REASON,
+      });
+
+      expect(ended.map((row) => row.id).sort()).toEqual(
+        [here.id, there.id].sort()
+      );
+      for (const row of ended) {
+        expect(row.terminationReason).toBe(ACCOUNT_DELETED_TERMINATION_REASON);
+      }
+      const [colleagueRow] = await db
+        .select({ status: schema.creatorOrganizationAgreements.status })
+        .from(schema.creatorOrganizationAgreements)
+        .where(eq(schema.creatorOrganizationAgreements.id, colleague.id));
+      expect(colleagueRow?.status).toBe('active');
     });
 
     it('money earned before the removal is still paid, even when its webhook lands after; nothing after it is', async () => {
