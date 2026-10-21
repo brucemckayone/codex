@@ -63,12 +63,6 @@
     return coverUrlFor?.(cat) ?? cat.coverImageUrl ?? null;
   }
 
-  /** The tile is 5rem wide, so the 200px sm file covers it at 2x. */
-  function coverThumb(cat: StudioCategory): string | null {
-    const url = coverUrl(cat);
-    return url ? getThumbnailUrl(url, 'sm') : null;
-  }
-
   // "Cover set" badge only when a cover exists but can't be rendered (no
   // resolved URL — e.g. no CDN base configured). When the URL resolves, the
   // tile shows the image instead.
@@ -92,6 +86,7 @@
   <ul class="category-list" role="list">
     {#each categories as cat, index (cat.id)}
       {@const isActive = activeId === cat.id}
+      {@const cover = coverUrl(cat)}
       <li class="category-row" class:category-row--active={isActive}>
         <!-- Reorder (accessible up/down around the 1-based position) -->
         <div class="reorder-controls">
@@ -124,8 +119,9 @@
           onclick={() => onselect(cat)}
         >
           <span class="cover-tile">
-            {#if coverUrl(cat)}
-              <img src={coverThumb(cat)} alt="" class="cover-image" />
+            {#if cover}
+              <!-- The tile is 5rem wide: the 200px sm file covers it at 2x. -->
+              <img src={getThumbnailUrl(cover, 'sm')} alt="" class="cover-image" />
             {:else if initial(cat)}
               <span class="cover-initial" aria-hidden="true">{initial(cat)}</span>
             {:else}

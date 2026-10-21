@@ -60,6 +60,7 @@
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
   import { shrinkPhotoAndSubmit } from '$lib/utils/shrink-photo';
   import { PAGE_MEDIA_SLOTS } from './page-media-slots';
+  import { getThumbnailSrcset } from '$lib/utils/image';
   import {
     uploadJourneyCoverForm,
     uploadJourneyHeroImageForm,
@@ -67,6 +68,9 @@
   } from '$lib/remote/journeys.remote';
 
   const MAX_COVER_MB = Math.round(MAX_IMAGE_SIZE_BYTES / 1024 / 1024);
+
+  /** The previews fill BuilderShell's 23.75rem side panel (`SIDE_REM.panel`). */
+  const PREVIEW_SIZES = 'min(23.75rem, 100vw)';
 
   /** The library slots, in page order (`page-media-slots.ts`). */
   const SLOTS = PAGE_MEDIA_SLOTS;
@@ -170,7 +174,13 @@
     <div class="cover">
       <div class="cover__frame">
         {#if sellMedia.coverImageUrl}
-          <img class="cover__img" src={sellMedia.coverImageUrl} alt={m.studio_builder_media_cover_alt()} />
+          <img
+            class="cover__img"
+            src={sellMedia.coverImageUrl}
+            srcset={getThumbnailSrcset(sellMedia.coverImageUrl) || undefined}
+            sizes={PREVIEW_SIZES}
+            alt={m.studio_builder_media_cover_alt()}
+          />
         {:else}
           <span class="cover__empty">{m.studio_builder_media_cover_none()}</span>
         {/if}
@@ -288,6 +298,8 @@
           <img
             class="cover__img"
             src={sellMedia.heroImageUrl}
+            srcset={getThumbnailSrcset(sellMedia.heroImageUrl) || undefined}
+            sizes={PREVIEW_SIZES}
             alt={m.studio_builder_media_hero_image_alt()}
           />
         {:else}
@@ -392,6 +404,8 @@
           <img
             class="cover__img cover__img--contain"
             src={sellMedia.signatureImageUrl}
+            srcset={getThumbnailSrcset(sellMedia.signatureImageUrl) || undefined}
+            sizes={PREVIEW_SIZES}
             alt={m.studio_builder_media_signature_image_alt()}
           />
         {:else}
