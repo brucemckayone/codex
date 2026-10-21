@@ -11,9 +11,10 @@ import CreatorPortrait from './CreatorPortrait.svelte';
  * broken before, plus the two decisions that are easy to "helpfully" undo:
  *
  *  - the monogram fallback is REAL, visible identity, not a ghost at 30% opacity
- *  - no `srcset` is emitted: the stored variants do not reliably match the
- *    widths their filenames imply, so a descriptor would be a lie that makes the
- *    browser render the image SMALLER than it is
+ *  - no `srcset` for an older avatar: its stored variants do not reliably
+ *    match the widths their filenames imply, so a descriptor would be a lie
+ *    that makes the browser render the image SMALLER than it is. A sized
+ *    folder (Codex-kk9nv.5) has true widths, so it gets one
  *  - the requested variant is explicit per consumer (`md` cell, `lg` hero)
  *  - the image is decorative; the adjacent heading carries the name
  */
@@ -69,10 +70,21 @@ describe('CreatorPortrait', () => {
     );
   });
 
-  test('never emits a srcset — the width descriptors would be unverified', () => {
-    render({ src: AVATAR, name: 'A' });
+  test('never emits a srcset for an older avatar — the width descriptors would be unverified', () => {
+    render({ src: AVATAR, name: 'A', sizes: '13rem' });
     const img = document.querySelector('img') as HTMLImageElement;
     expect(img.hasAttribute('srcset')).toBe(false);
+  });
+
+  test('offers every stored width of a sized folder, never wider than the upload', () => {
+    // A 300px avatar: md, lg and xl were all written 300 wide.
+    const folder = 'http://localhost:4100/avatars/abc123/300x300-0a1b2c3d';
+    render({ src: `${folder}/lg.webp`, name: 'A', sizes: '13rem' });
+    const img = document.querySelector('img') as HTMLImageElement;
+    expect(img.getAttribute('srcset')).toBe(
+      `${folder}/sm.webp 200w, ${folder}/md.webp 300w`
+    );
+    expect(img.getAttribute('sizes')).toBe('13rem');
   });
 
   test('treats the photo as decorative, leaving the name to the heading', () => {

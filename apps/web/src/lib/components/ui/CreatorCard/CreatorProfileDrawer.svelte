@@ -161,6 +161,7 @@
         name={displayName}
         aspect="square"
         size="lg"
+        sizes="min(42rem, 100vw)"
         eager
       >
         <!-- Gradient overlay with name.
