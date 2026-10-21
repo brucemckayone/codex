@@ -9,11 +9,14 @@
  *    kept serving the deleted URL for up to 10 minutes.
  * 2. Each org's creators list (`ORG_CREATORS`, keyed by org SLUG, 4h) carries
  *    name, username, avatar, bio and social links, and no user write bumped
- *    it. An avatar upload showed the placeholder, and a delete a broken image,
- *    on the org's creator surfaces for up to four hours.
+ *    it. An avatar upload showed the placeholder, a delete a broken image,
+ *    and a deleted account its owner's real details, on the org's public
+ *    creator surfaces for up to four hours.
  *
- * The org lookup's filter is asserted on the SQL drizzle renders, so a
- * dropped role, status or deleted-org condition fails here.
+ * The fan-out is best-effort: it runs after the write has committed, so a
+ * failed org lookup must not report the write as failed. The org lookup's
+ * filter is asserted on the SQL drizzle renders, so a dropped role, status
+ * or deleted-org condition fails here.
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
@@ -46,12 +49,12 @@ const UPDATED_ROW = {
   emailVerified: true,
   avatarUrl: null,
   image: null,
-  username: null,
+  username: 'alice2',
   bio: null,
   socialLinks: null,
 };
 
-function harness({ withCache = true } = {}) {
+function harness({ withCache = true, existingUsername = 'alice2' } = {}) {
   const invalidated: string[] = [];
   const cache = {
     invalidate: vi.fn(async (id: string) => {
@@ -59,23 +62,38 @@ function harness({ withCache = true } = {}) {
     }),
   };
 
-  let where: SQL | undefined;
-  const select = vi.fn(() => ({
-    from: () => ({
-      innerJoin: () => ({
-        where: (clause: SQL) => {
-          where = clause;
-          return Promise.resolve(SLUGS.map((slug) => ({ slug })));
-        },
-      }),
-    }),
-  }));
+  // Each `select` answers by the columns it asks for: the listing-org lookup
+  // asks for `slug`; deleteAccount's owned-org, authored-content and session
+  // reads get no rows, so the deletion goes through.
+  const lookup = { where: undefined as SQL | undefined, fails: false };
+  const select = vi.fn((columns: Record<string, unknown>) => {
+    const isLookup = 'slug' in columns;
+    const answer = () =>
+      isLookup && lookup.fails
+        ? Promise.reject(new Error('neon unavailable'))
+        : Promise.resolve(isLookup ? SLUGS.map((slug) => ({ slug })) : []);
+    const where = (clause: SQL) => {
+      if (isLookup) lookup.where = clause;
+      const rows = answer();
+      return Object.assign(rows, { limit: () => rows });
+    };
+    return { from: () => ({ innerJoin: () => ({ where }), where }) };
+  });
 
   const db = {
     select,
     query: {
       users: {
-        findFirst: vi.fn(async () => ({ id: USER_ID, username: null })),
+        // The caller's own row first; then any username-availability probe,
+        // which excludes the caller in SQL, finds nobody.
+        findFirst: vi
+          .fn()
+          .mockResolvedValueOnce({
+            id: USER_ID,
+            role: 'customer',
+            username: existingUsername || null,
+          })
+          .mockResolvedValue(undefined),
       },
     },
     update: vi.fn(() => ({
@@ -93,14 +111,23 @@ function harness({ withCache = true } = {}) {
     // biome-ignore lint/suspicious/noExplicitAny: cache double
     cache: withCache ? (cache as any) : undefined,
   });
+  const warn = vi.spyOn(
+    (service as unknown as { obs: { warn: (m: string) => void } }).obs,
+    'warn'
+  );
 
   const whereQuery = () => {
-    if (!where) throw new Error('the org lookup never ran');
-    return new PgDialect().sqlToQuery(where);
+    if (!lookup.where) throw new Error('the org lookup never ran');
+    return new PgDialect().sqlToQuery(lookup.where);
   };
 
-  return { service, invalidated, cache, select, whereQuery };
+  return { service, invalidated, cache, select, lookup, warn, whereQuery };
 }
+
+const avatarFile = () =>
+  new File([new Uint8Array([0xff, 0xd8, 0xff])], 'a.jpg', {
+    type: 'image/jpeg',
+  });
 
 describe('IdentityService — user card writes invalidate every surface', () => {
   beforeEach(() => {
@@ -118,7 +145,7 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     await service.deleteAvatar(USER_ID);
 
     expect(mockDeleteUserAvatar).toHaveBeenCalledWith(USER_ID);
-    expect(invalidated).toEqual([USER_ID, ...SLUGS]);
+    expect([...invalidated].sort()).toEqual([USER_ID, ...SLUGS].sort());
     // Invalidate AFTER the delete, or a read in between re-caches the old URL.
     const deletedAt = mockDeleteUserAvatar.mock.invocationCallOrder[0] ?? 0;
     const firstInvalidate = cache.invalidate.mock.invocationCallOrder[0] ?? 0;
@@ -129,21 +156,16 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     const { service, invalidated } = harness();
     mockDeleteUserAvatar.mockRejectedValueOnce(new Error('db down'));
 
-    await expect(service.deleteAvatar(USER_ID)).rejects.toThrow('db down');
+    await expect(service.deleteAvatar(USER_ID)).rejects.toThrow();
     expect(invalidated).toEqual([]);
   });
 
   it('uploadAvatar invalidates the user and each listing org', async () => {
     const { service, invalidated } = harness();
 
-    await service.uploadAvatar(
-      USER_ID,
-      new File([new Uint8Array([0xff, 0xd8, 0xff])], 'a.jpg', {
-        type: 'image/jpeg',
-      })
-    );
+    await service.uploadAvatar(USER_ID, avatarFile());
 
-    expect(invalidated).toEqual([USER_ID, ...SLUGS]);
+    expect([...invalidated].sort()).toEqual([USER_ID, ...SLUGS].sort());
   });
 
   it('updateProfile invalidates each listing org (the creators list carries the name)', async () => {
@@ -151,7 +173,25 @@ describe('IdentityService — user card writes invalidate every surface', () => 
 
     await service.updateProfile(USER_ID, { displayName: 'New Name' });
 
-    expect(invalidated).toEqual([USER_ID, ...SLUGS]);
+    expect([...invalidated].sort()).toEqual([USER_ID, ...SLUGS].sort());
+  });
+
+  it('upgradeToCreator invalidates each listing org (the username, bio and links are on it)', async () => {
+    const { service, invalidated } = harness({ existingUsername: '' });
+
+    await service.upgradeToCreator(USER_ID, { username: 'alice2' });
+
+    expect([...invalidated].sort()).toEqual(
+      [USER_ID, ...SLUGS, 'alice2'].sort()
+    );
+  });
+
+  it('deleteAccount invalidates each listing org, so the scrubbed card leaves their public lists', async () => {
+    const { service, invalidated } = harness();
+
+    await service.deleteAccount(USER_ID);
+
+    expect([...invalidated].sort()).toEqual([USER_ID, ...SLUGS].sort());
   });
 
   it('looks up exactly the orgs whose creators list shows the user', async () => {
@@ -170,6 +210,45 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     expect(sql).toContain('"organization_memberships"."status" = $');
     expect(sql).toContain('"organization_memberships"."role" in (');
     expect(sql).toContain('"organizations"."deleted_at" is null');
+  });
+
+  describe('when the org lookup fails after the write committed', () => {
+    it.each([
+      [
+        'uploadAvatar',
+        (s: IdentityService) => s.uploadAvatar(USER_ID, avatarFile()),
+      ],
+      ['deleteAvatar', (s: IdentityService) => s.deleteAvatar(USER_ID)],
+      [
+        'updateProfile',
+        (s: IdentityService) => s.updateProfile(USER_ID, { displayName: 'N' }),
+      ],
+      ['deleteAccount', (s: IdentityService) => s.deleteAccount(USER_ID)],
+    ])('%s still succeeds, invalidates the user, and logs the miss', async (operation, run) => {
+      const { service, invalidated, lookup, warn } = harness();
+      lookup.fails = true;
+
+      await expect(run(service)).resolves.not.toThrow();
+
+      expect(invalidated).toEqual([USER_ID]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('org lookup failed'),
+        expect.objectContaining({ userId: USER_ID, operation })
+      );
+    });
+
+    it('updateProfile still bumps the old and new username slots', async () => {
+      const { service, invalidated, lookup } = harness({
+        existingUsername: 'alice',
+      });
+      lookup.fails = true;
+
+      await service.updateProfile(USER_ID, { username: 'alice2' });
+
+      expect(invalidated).toEqual(
+        expect.arrayContaining([USER_ID, 'alice', 'alice2'])
+      );
+    });
   });
 
   it('with no cache injected, still deletes and never queries orgs', async () => {

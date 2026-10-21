@@ -8,8 +8,10 @@
  * shelves), the creator profile and its content list, search, related
  * content, discover, and the content detail page with its og:image. A creator
  * who uploaded a custom thumbnail for a video still saw the auto-extracted
- * frame on every public page. This gate fails on any new read of the poster
- * outside the helper.
+ * frame on every public page. This gate fails on any new direct read of the
+ * poster (`mediaItem.thumbnailUrl`, optional-chained or not) outside the
+ * helper. It cannot see an aliased read (`const m = item.mediaItem;
+ * m.thumbnailUrl`) or a destructured one, so those need a reviewer's eye.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';

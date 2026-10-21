@@ -1,7 +1,11 @@
 import type { VersionedCache } from '@codex/cache';
 import { CacheType } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
-import { toIso, whereNotDeleted } from '@codex/database';
+import {
+  listedCreatorConditions,
+  toIso,
+  whereNotDeleted,
+} from '@codex/database';
 import {
   content,
   creatorOnboarding,
@@ -24,7 +28,7 @@ import {
 } from '@codex/service-errors';
 import type { PublicCreatorProfile, UserProfile } from '@codex/shared-types';
 import type { UpdateCreatorOnboardingInput } from '@codex/validation';
-import { and, eq, inArray, ne } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 
 import {
   AccountHasContentError,
@@ -81,7 +85,7 @@ export class IdentityService extends BaseService {
     // Process, upload, and update DB (cleanup handled inside ImageProcessingService)
     const result = await this.imageService().processUserAvatar(userId, file);
 
-    await this.invalidateUserSurfaces(userId);
+    await this.invalidateUserSurfaces(userId, 'uploadAvatar');
 
     return result;
   }
@@ -93,8 +97,12 @@ export class IdentityService extends BaseService {
    * deleted URL for up to 10 minutes.
    */
   async deleteAvatar(userId: string): Promise<void> {
-    await this.imageService().deleteUserAvatar(userId);
-    await this.invalidateUserSurfaces(userId);
+    try {
+      await this.imageService().deleteUserAvatar(userId);
+      await this.invalidateUserSurfaces(userId, 'deleteAvatar');
+    } catch (error) {
+      throw this.handleError(error, 'IdentityService.deleteAvatar');
+    }
   }
 
   private imageService(): ImageProcessingService {
@@ -109,37 +117,63 @@ export class IdentityService extends BaseService {
 
   /**
    * Invalidate every cache that shows this user's public card: their own
-   * profile entries (keyed by user id), and the creators list of each org
-   * that lists them (`ORG_CREATORS`, keyed by org slug, 4h TTL). The creators
-   * list carries name, username, avatar, bio and social links, so it goes
-   * stale on any of those writes, not only on an avatar (Codex-kk9nv.7).
+   * profile entries (keyed by user id), and each org that lists them on its
+   * creators list (`ORG_CREATORS`, 4h TTL). That list carries name, username,
+   * avatar, bio and social links, so it goes stale on any of those writes,
+   * not only on an avatar (Codex-kk9nv.7). An org's slug is one version for
+   * every slug-keyed entry, so this also refreshes its config and stats.
    *
-   * The org filter mirrors `OrganizationService.activeCreatorWhere`: active
-   * owner/admin/creator memberships. Both workers bind the same CACHE_KV, so
-   * bumping the slug here is the version the organization-api reads.
+   * The orgs are the ones `listedCreatorConditions` puts the user on, the
+   * same conditions the list itself is read with. Both workers bind the same
+   * CACHE_KV, so the slug bumped here is the version organization-api reads.
+   *
+   * Best-effort, like `VersionedCache.invalidate` itself: it runs after the
+   * write has committed, so a failed org lookup is logged and the lists
+   * expire with their TTL, rather than reporting a change that happened as
+   * a failure.
    */
-  private async invalidateUserSurfaces(userId: string): Promise<void> {
-    if (!this.cache) return;
-    await this.cache.invalidate(userId);
+  private async invalidateUserSurfaces(
+    userId: string,
+    operation: string
+  ): Promise<void> {
+    const cache = this.cache;
+    if (!cache) return;
 
-    const orgs = await this.db
-      .select({ slug: organizations.slug })
-      .from(organizationMemberships)
-      .innerJoin(
-        organizations,
-        eq(organizationMemberships.organizationId, organizations.id)
-      )
-      .where(
-        and(
-          eq(organizationMemberships.userId, userId),
-          eq(organizationMemberships.status, 'active'),
-          inArray(organizationMemberships.role, ['owner', 'admin', 'creator']),
-          whereNotDeleted(organizations)
-        )
-      );
-    for (const { slug } of orgs) {
-      await this.cache.invalidate(slug);
-    }
+    const listingOrgs = async (): Promise<string[]> => {
+      try {
+        const orgs = await this.db
+          .select({ slug: organizations.slug })
+          .from(organizationMemberships)
+          .innerJoin(
+            organizations,
+            eq(organizationMemberships.organizationId, organizations.id)
+          )
+          .where(
+            and(
+              eq(organizationMemberships.userId, userId),
+              ...listedCreatorConditions(),
+              whereNotDeleted(organizations)
+            )
+          );
+        return orgs.map(({ slug }) => slug);
+      } catch (error) {
+        this.obs.warn(
+          'Org creators lists not invalidated: org lookup failed; they expire with their TTL',
+          {
+            userId,
+            operation,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
+        return [];
+      }
+    };
+
+    const [, slugs] = await Promise.all([
+      cache.invalidate(userId),
+      listingOrgs(),
+    ]);
+    await Promise.all(slugs.map((slug) => cache.invalidate(slug)));
   }
 
   /**
@@ -471,7 +505,7 @@ export class IdentityService extends BaseService {
 
       // Invalidate cache after successful update
       if (this.cache) {
-        await this.invalidateUserSurfaces(userId);
+        await this.invalidateUserSurfaces(userId, 'updateProfile');
 
         // The public profile is keyed by user id, so the invalidate above
         // already covers it. The username -> id slot is NOT, and it is the one
@@ -570,7 +604,9 @@ export class IdentityService extends BaseService {
       });
 
       if (this.cache) {
-        await this.cache.invalidate(userId);
+        // The username, bio and links are on the creators list of every org
+        // that lists this user (Codex-kk9nv.7).
+        await this.invalidateUserSurfaces(userId, 'upgradeToCreator');
         // This is where a username first comes into existence, so bump its
         // slot too. `writeCacheSlot` never stores a null, so an earlier probe
         // of this name could not have cached a miss — but stating it here
@@ -694,9 +730,10 @@ export class IdentityService extends BaseService {
 
       this.obs.info('User account soft-deleted', { userId });
 
-      if (this.cache) {
-        await this.cache.invalidate(userId);
-      }
+      // The scrubbed name, avatar, bio and links are still on the cached
+      // creators list of every org that listed this user, which anyone can
+      // read, until those are invalidated too (Codex-kk9nv.7).
+      await this.invalidateUserSurfaces(userId, 'deleteAccount');
 
       // Every session this user holds, so the caller can clear the cached
       // copies. Read AFTER the tombstone lands: a session created between the

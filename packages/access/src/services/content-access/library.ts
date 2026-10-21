@@ -147,6 +147,14 @@ export async function listUserLibrary(
 ): Promise<UserLibraryResponse> {
   const { db, obs, r2PublicUrlBase } = deps;
 
+  // Without the CDN base, every tile that has only a video poster draws its
+  // no-picture state. Say so, or a config regression blanks them unnoticed.
+  if (!r2PublicUrlBase) {
+    obs.warn('Library poster thumbnails suppressed: no R2_PUBLIC_URL_BASE', {
+      userId,
+    });
+  }
+
   obs.info('Listing user library', {
     userId,
     page: input.page,

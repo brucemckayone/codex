@@ -443,8 +443,9 @@ export async function createServiceRegistry(
 
   // Orphan-record PRODUCER for the media-api OrphanedFileCleanupDO sweep
   // (Codex-r85jo.3). Every ImageProcessingService built here — directly, or
-  // inside IdentityService.uploadAvatar — must receive it: without it the
-  // orphan-recording branch in upload-pipeline.ts can only take its warn path,
+  // inside IdentityService.uploadAvatar / deleteAvatar — must receive it:
+  // without it the orphan-recording branch in upload-pipeline.ts can only take
+  // its warn path,
   // and the DO drains a table nothing writes. Private to the registry, not a
   // `ctx.services.*` entry: no route has a reason to call it directly.
   let _orphanedFiles: OrphanedFileService | undefined;

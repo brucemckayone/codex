@@ -28,6 +28,7 @@ import {
   organizationFollowers,
   organizationMemberships,
   organizations,
+  purchases,
   subscriptions,
   subscriptionTiers,
   videoPlayback,
@@ -179,6 +180,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     await db
       .insert(subscriptions)
       .values(createTestSubscriptionInput(userId, orgId, tier.id));
+    return tier;
   }
 
   describe('free bucket — relationship gate', () => {
@@ -581,6 +583,59 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
       expect(row?.accessType).toBe('membership');
       expect(row?.content.thumbnailUrl).toBe(
         `${CDN}/thumbnails/thumb-member.jpg`
+      );
+    });
+
+    it('resolves a media-only item to a CDN URL on the purchased arm', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const item = await createContentWithAccessType('free', 'thumb-bought');
+      await db
+        .update(content)
+        .set({ isFree: false, isPurchasable: true, priceCents: 999 })
+        .where(eq(content.id, item.id));
+      await db.insert(purchases).values({
+        customerId: buyer,
+        organizationId,
+        contentId: item.id,
+        amountPaidCents: 999,
+        currency: 'gbp',
+        platformFeeCents: 100,
+        organizationFeeCents: 0,
+        creatorPayoutCents: 899,
+        stripePaymentIntentId: `pi_test_${crypto.randomUUID()}`,
+        status: 'completed',
+      });
+
+      const result = await serviceWithBase(CDN).listUserLibrary(buyer, {
+        ...libraryInput,
+        organizationId,
+      });
+
+      const row = result.items.find((i) => i.content.id === item.id);
+      expect(row?.accessType).toBe('purchased');
+      expect(row?.content.thumbnailUrl).toBe(
+        `${CDN}/thumbnails/thumb-bought.jpg`
+      );
+    });
+
+    it('resolves a media-only item to a CDN URL on the subscription arm', async () => {
+      const [subscriber] = await seedTestUsers(db, 1);
+      const tier = await seedActiveSubscription(subscriber, organizationId);
+      const item = await createContentWithAccessType('free', 'thumb-tier');
+      await db
+        .update(content)
+        .set({ isFree: false, includedInTierId: tier.id })
+        .where(eq(content.id, item.id));
+
+      const result = await serviceWithBase(CDN).listUserLibrary(subscriber, {
+        ...libraryInput,
+        organizationId,
+      });
+
+      const row = result.items.find((i) => i.content.id === item.id);
+      expect(row?.accessType).toBe('subscription');
+      expect(row?.content.thumbnailUrl).toBe(
+        `${CDN}/thumbnails/thumb-tier.jpg`
       );
     });
 

@@ -32,9 +32,10 @@ Requires `R2Service` and `r2PublicUrlBase` for avatar uploads. `cache` is option
 |---|---|---|
 | `getProfile` | `(userId: string): Promise<UserProfile>` | Cache-aside: `CacheType.USER_PROFILE`, 10min TTL. Throws `UserNotFoundError` if not found. |
 | `getPublicProfileByUsername` | `(username: string): Promise<PublicCreatorProfile \| null>` | **ANONYMOUS-READABLE.** Two-hop cache-aside: `USERNAME_TO_ID` (1h) -> `USER_PUBLIC_PROFILE` (10min). Returns only `{ id, name, image, bio, socialLinks }` from an explicit column allowlist — never `email`. Returns `null` for an unknown username rather than throwing. |
-| `updateProfile` | `(userId: string, input)` | Updates name/email/username/bio/socialLinks. Email change sets `emailVerified: false`. Validates username uniqueness. Invalidates cache. |
-| `upgradeToCreator` | `(userId: string, input: { username, bio?, socialLinks? })` | Atomically sets `role: 'creator'` + username. Only works if current role is `'customer'`. Validates username availability. Invalidates cache. |
-| `uploadAvatar` | `(userId: string, file: File)` | Processes via `ImageProcessingService` (WebP, 3 sizes). Uploads to R2. Invalidates cache. Returns `ImageProcessingResult`. |
+| `updateProfile` | `(userId: string, input)` | Updates name/email/username/bio/socialLinks. Email change sets `emailVerified: false`. Validates username uniqueness. Invalidates the user's surfaces (see Cache Behaviour). |
+| `upgradeToCreator` | `(userId: string, input: { username, bio?, socialLinks? })` | Atomically sets `role: 'creator'` + username. Only works if current role is `'customer'`. Validates username availability. Invalidates the user's surfaces. |
+| `uploadAvatar` | `(userId: string, file: File)` | Processes via `ImageProcessingService` (WebP, 3 sizes). Uploads to R2. Invalidates the user's surfaces. Returns `ImageProcessingResult`. |
+| `deleteAvatar` | `(userId: string)` | Deletes the avatar's R2 files and clears `avatarUrl` via `ImageProcessingService`, then invalidates the user's surfaces. `DELETE /api/user/avatar` calls this, never the image service directly. |
 | `getMyMembership` | `(orgId: string, userId: string)` | Returns `{ role, status, joinedAt }` or nulls if not a member. Never throws. |
 | `getNotificationPreferences` | `(userId: string)` | Cache-aside: `CacheType.USER_PREFERENCES`, 10min TTL. Upserts defaults on first access. |
 | `updateNotificationPreferences` | `(userId: string, input)` | Upserts `emailMarketing`, `emailTransactional`, `emailDigest`. Invalidates cache. |
@@ -55,7 +56,16 @@ Requires `R2Service` and `r2PublicUrlBase` for avatar uploads. `cache` is option
 
 - `getProfile()` uses `CacheType.USER_PROFILE` (10min TTL)
 - `getNotificationPreferences()` uses `CacheType.USER_PREFERENCES` (10min TTL)
-- All mutation methods call `this.cache.invalidate(userId)` after success
+- Every mutation calls `this.cache.invalidate(userId)` after success
+- A write to the user's public card (`uploadAvatar`, `deleteAvatar`,
+  `updateProfile`, `upgradeToCreator`, `deleteAccount`) goes through the
+  private `invalidateUserSurfaces`. It invalidates the user id, plus the slug of
+  every org whose public creators list shows the user (`ORG_CREATORS`, 4h).
+  That list carries name, username, avatar, bio and social links. Which orgs is
+  `listedCreatorConditions` from `@codex/database`, the same conditions the
+  list is read with (Codex-kk9nv.7). It is best-effort: a failed org lookup is
+  logged as a warning, and the lists expire with their TTL. A committed write is
+  never reported as failed.
 - If `cache` is not injected, methods fall back to direct DB queries
 
 ### Why the public profile is keyed by USER ID, not username
