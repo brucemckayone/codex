@@ -7,6 +7,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -34,6 +35,12 @@ export const users = pgTable(
     image: text('image'),
     /** Custom uploaded avatar URL (R2 base path). Falls back to `image` if null. */
     avatarUrl: text('avatar_url'),
+    // The source picture's size in pixels, written in the same UPDATE as the
+    // image by the upload pipeline (Codex-kk9nv.5). Set, the stored files
+    // include xl (min(1600, width)) and the original. Null, an image from
+    // before: sm/md/lg only. The web sizes its srcset from these.
+    avatarWidth: integer('avatar_width'),
+    avatarHeight: integer('avatar_height'),
     role: text('role').default('customer').notNull(),
     /** Unique username for creator profile URLs (e.g., codex.platform/u/username) */
     username: text('username'),

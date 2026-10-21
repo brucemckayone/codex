@@ -750,6 +750,13 @@
       "when": 1792531579488,
       "tag": "0106_agreement_review_reminder_copy",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1792584243617,
+      "tag": "0107_bright_mimic",
+      "breakpoints": true
     }
   ]
 }

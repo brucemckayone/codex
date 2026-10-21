@@ -201,6 +201,12 @@ export const courses = pgTable(
     // the key, cards serve `md`). Deterministic per course id ⇒ a re-upload
     // overwrites in place, so replacing a cover never orphans an object.
     coverImageKey: varchar('cover_image_key', { length: 500 }),
+    // The source picture's size in pixels, written in the same UPDATE as the
+    // image by the upload pipeline (Codex-kk9nv.5). Set, the stored files
+    // include xl (min(1600, width)) and the original. Null, an image from
+    // before: sm/md/lg only. The web sizes its srcset from these.
+    coverImageWidth: integer('cover_image_width'),
+    coverImageHeight: integer('cover_image_height'),
 
     // Still-image HERO — an UPLOADED image, the same shape as `coverImageKey`
     // above and for the same reason (Codex-490z7, contract amendment A32).
@@ -221,6 +227,9 @@ export const courses = pgTable(
     // `md` serves a card). Deterministic per course id ⇒ a re-upload overwrites in
     // place, so replacing a hero never orphans an object.
     heroImageKey: varchar('hero_image_key', { length: 500 }),
+    // Same meaning as the cover's size, above.
+    heroImageWidth: integer('hero_image_width'),
+    heroImageHeight: integer('hero_image_height'),
 
     // Still-image SIGNATURE — the guide's sign-off mark, an UPLOADED image
     // (Codex-wqxv4's remaining named-slot half). Third instance of the same
@@ -249,6 +258,9 @@ export const courses = pgTable(
     // Deterministic per course id ⇒ a re-upload overwrites in place, so
     // replacing a signature never orphans an object.
     signatureImageKey: varchar('signature_image_key', { length: 500 }),
+    // Same meaning as the cover's size, above.
+    signatureImageWidth: integer('signature_image_width'),
+    signatureImageHeight: integer('signature_image_height'),
 
     // Sell media — media-item refs (reuse the transcoding pipeline; §10).
     introVideoMediaId: uuid('intro_video_media_id').references(
