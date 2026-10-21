@@ -68,6 +68,7 @@
   } from '$lib/components/ui/Icon';
   import { buildCreatorsUrl, buildContentUrl, buildOrgUrl } from '$lib/utils/subdomain';
   import { formatRelativeTime } from '$lib/utils/format';
+  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
 
   import type { CreatorDrawerData } from './types';
   export type { CreatorDrawerData };
@@ -110,6 +111,13 @@
       ? buildCreatorsUrl(page.url, `/@${creator.username}`)
       : null
   );
+
+  /**
+   * A "Latest" thumb: half the 28rem panel less its 1.5rem padding and the
+   * 0.75rem gap, or half the full-width sheet less 1.25rem padding below 40rem.
+   */
+  const LATEST_SIZES =
+    '(max-width: 39.9375rem) calc(50vw - 1.625rem), 12.125rem';
 
   const roleLabel = $derived.by(() => {
     switch (creator?.role) {
@@ -161,7 +169,7 @@
         name={displayName}
         aspect="square"
         size="lg"
-        sizes="min(42rem, 100vw)"
+        sizes="min(28rem, 100vw)"
         eager
       >
         <!-- Gradient overlay with name.
@@ -300,6 +308,8 @@
                   {#if item.thumbnailUrl}
                     <img
                       src={item.thumbnailUrl}
+                      srcset={getThumbnailSrcset(item.thumbnailUrl) || undefined}
+                      sizes={coverCropSizes(LATEST_SIZES, 16 / 9, item.thumbnailUrl)}
                       alt=""
                       class="drawer-content__thumb"
                       loading="lazy"

@@ -27,6 +27,7 @@
     setJourneyStatus,
   } from '$lib/remote/journeys.remote';
   import { queryErrorMessage } from '$lib/remote/query-result';
+  import { getThumbnailUrl } from '$lib/utils/image';
 
   const { data } = $props();
 
@@ -615,7 +616,7 @@
               {#if j.coverImageUrl}
                 <img
                   class="journey-row__cover-img"
-                  src={j.coverImageUrl}
+                  src={getThumbnailUrl(j.coverImageUrl, 'sm')}
                   alt=""
                   loading="lazy"
                   decoding="async"

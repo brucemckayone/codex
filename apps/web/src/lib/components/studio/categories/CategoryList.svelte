@@ -31,6 +31,7 @@
     TagIcon,
     TrashIcon,
   } from '$lib/components/ui/Icon';
+  import { getThumbnailUrl } from '$lib/utils/image';
 
   interface Props {
     categories: StudioCategory[];
@@ -60,6 +61,12 @@
   // Session upload URL (freshest) wins over the persisted list URL.
   function coverUrl(cat: StudioCategory): string | null {
     return coverUrlFor?.(cat) ?? cat.coverImageUrl ?? null;
+  }
+
+  /** The tile is 5rem wide, so the 200px sm file covers it at 2x. */
+  function coverThumb(cat: StudioCategory): string | null {
+    const url = coverUrl(cat);
+    return url ? getThumbnailUrl(url, 'sm') : null;
   }
 
   // "Cover set" badge only when a cover exists but can't be rendered (no
@@ -118,7 +125,7 @@
         >
           <span class="cover-tile">
             {#if coverUrl(cat)}
-              <img src={coverUrl(cat)} alt="" class="cover-image" />
+              <img src={coverThumb(cat)} alt="" class="cover-image" />
             {:else if initial(cat)}
               <span class="cover-initial" aria-hidden="true">{initial(cat)}</span>
             {:else}

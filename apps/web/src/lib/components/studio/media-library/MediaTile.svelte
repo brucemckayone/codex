@@ -27,6 +27,7 @@
     CheckIcon,
   } from '$lib/components/ui/Icon';
   import { formatDuration, formatFileSize, formatRelativeTime } from '$lib/utils/format';
+  import { getThumbnailSrcset } from '$lib/utils/image';
   import * as m from '$paraglide/messages';
 
   // MediaItemWithRelations doesn't declare thumbnailUrl on the base schema
@@ -56,6 +57,12 @@
   let pollErrors = 0;
   let visible = true;
   const MAX_CONSECUTIVE_ERRORS = 3;
+
+  /**
+   * MediaTileGrid's tile: one full-width column below 40rem, else
+   * `auto-fill, minmax(18rem, 1fr)`, whose columns settle at 18-27rem.
+   */
+  const TILE_SIZES = '(max-width: 39.9375rem) calc(100vw - 2rem), 24rem';
 
   function stopPolling() {
     if (pollInterval) clearInterval(pollInterval);
@@ -166,7 +173,14 @@
 <article class="tile" data-status={statusMeta.variant}>
   <div class="tile-thumb">
     {#if media.thumbnailUrl}
-      <img src={media.thumbnailUrl} alt="" class="thumb-img" loading="lazy" />
+      <img
+        src={media.thumbnailUrl}
+        srcset={getThumbnailSrcset(media.thumbnailUrl) || undefined}
+        sizes={TILE_SIZES}
+        alt=""
+        class="thumb-img"
+        loading="lazy"
+      />
     {:else}
       <span class="thumb-placeholder">
         <typeMeta.icon size={36} />
