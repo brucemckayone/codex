@@ -23,6 +23,7 @@
 -->
 <script lang="ts">
   import {
+    getShareImage,
     getThumbnailDimensions,
     getThumbnailSrcset,
     getThumbnailUrl,
@@ -263,22 +264,14 @@
    * The largest file there is: xl when the address records the picture's
    * size, else lg. A `<video poster>` takes ONE URL and the preview player
    * renders on the server, so a video page draws this one file everywhere
-   * (poster, preview images, preload) and never fetches two. It is also the
-   * share image.
+   * (poster, preview images, preload) and never fetches two.
    */
   const largestThumbnailUrl = $derived(
     thumbnailUrl ? getThumbnailUrl(thumbnailUrl, 'xl') : undefined
   );
   const isVideo = $derived(content.contentType === 'video');
-  /** The share image's own size, when the address records the picture's. */
-  const shareImageSize = $derived.by(() => {
-    if (!thumbnailSize) return null;
-    const width = Math.min(1600, thumbnailSize.width);
-    return {
-      width,
-      height: Math.round((thumbnailSize.height * width) / thumbnailSize.width),
-    };
-  });
+  /** og:image: the largest file, with its size when the address records it. */
+  const shareImage = $derived(thumbnailUrl ? getShareImage(thumbnailUrl) : null);
   /** The audio player draws its poster blurred, or at 48px: `sm` covers both. */
   const audioPosterUrl = $derived(
     thumbnailUrl ? getThumbnailUrl(thumbnailUrl, 'sm') : undefined
@@ -705,10 +698,10 @@
   <meta property="og:type" content={ogType} />
   <meta property="og:url" content={canonicalUrl} />
   {#if thumbnailUrl}
-    <meta property="og:image" content={largestThumbnailUrl} />
-    {#if shareImageSize}
-      <meta property="og:image:width" content={String(shareImageSize.width)} />
-      <meta property="og:image:height" content={String(shareImageSize.height)} />
+    <meta property="og:image" content={shareImage?.url} />
+    {#if shareImage?.width && shareImage.height}
+      <meta property="og:image:width" content={String(shareImage.width)} />
+      <meta property="og:image:height" content={String(shareImage.height)} />
     {/if}
     <!-- LCP: thumbnail is the hero on content pages (video poster,
          audio cover, or article header image). Preload prioritises
