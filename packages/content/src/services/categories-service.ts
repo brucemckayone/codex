@@ -308,18 +308,20 @@ export class CategoriesService extends BaseService {
         }
 
         // A cover's recorded size describes the files under its key. An
-        // upload measures it. A key the client sets by hand comes with no
-        // size, so a CHANGED key clears the old one (re-sending the same key
-        // leaves it alone).
-        const size = coverSize
-          ? {
-              coverImageWidth: coverSize.width,
-              coverImageHeight: coverSize.height,
-            }
-          : validated.coverImageKey !== undefined &&
-              validated.coverImageKey !== existing.coverImageKey
-            ? { coverImageWidth: null, coverImageHeight: null }
-            : {};
+        // upload measures it, and it is written only beside the key it
+        // measured: a size with no key in the same update is ignored. A key
+        // the client sets by hand comes with no size, so a CHANGED key clears
+        // the old one (re-sending the same key leaves it alone).
+        const size =
+          coverSize && validated.coverImageKey
+            ? {
+                coverImageWidth: coverSize.width,
+                coverImageHeight: coverSize.height,
+              }
+            : validated.coverImageKey !== undefined &&
+                validated.coverImageKey !== existing.coverImageKey
+              ? { coverImageWidth: null, coverImageHeight: null }
+              : {};
 
         const [updated] = await tx
           .update(categories)

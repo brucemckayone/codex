@@ -1014,6 +1014,9 @@ describe('IdentityService', () => {
       expect(setArg.username).toBeNull();
       expect(setArg.bio).toBeNull();
       expect(setArg.avatarUrl).toBeNull();
+      // The size goes with the picture it measured (Codex-kk9nv.5).
+      expect(setArg.avatarWidth).toBeNull();
+      expect(setArg.avatarHeight).toBeNull();
       expect(setArg.image).toBeNull();
       expect(setArg.socialLinks).toBeNull();
     });

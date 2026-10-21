@@ -623,7 +623,7 @@ export class ContentService extends BaseService {
             // (Codex-kk9nv.5). A URL the client sets here was never measured,
             // so a CHANGED URL clears the old size; re-sending the same URL
             // leaves it alone. The upload route writes the size itself.
-            ...('thumbnailUrl' in restValidated &&
+            ...(restValidated.thumbnailUrl !== undefined &&
             restValidated.thumbnailUrl !== existing.thumbnailUrl
               ? { thumbnailWidth: null, thumbnailHeight: null }
               : {}),

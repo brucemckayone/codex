@@ -327,6 +327,24 @@ describe('CategoriesService', () => {
         expect(updated.coverImageHeight).toBe(1600);
       });
 
+      it('ignores a size that arrives without a key: a size only goes beside the key it measured', async () => {
+        const created = await service.create(
+          { name: `Uncovered ${uniqueToken()}` },
+          { creatorId }
+        );
+
+        const updated = await service.update(
+          created.id,
+          { name: `Renamed ${uniqueToken()}` },
+          { creatorId },
+          { width: 2400, height: 1600 }
+        );
+
+        expect(updated.coverImageKey).toBeNull();
+        expect(updated.coverImageWidth).toBeNull();
+        expect(updated.coverImageHeight).toBeNull();
+      });
+
       it('clears the size when the client sets a different key by hand', async () => {
         const { id } = await measuredCover('Rekeyed');
 

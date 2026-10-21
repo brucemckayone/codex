@@ -1556,7 +1556,14 @@ async function reconcileCover(
   );
   await dbWs
     .update(courses)
-    .set({ coverImageKey, updatedAt: new Date() })
+    // A seed still has no recorded size (Codex-kk9nv.5), so any size a real
+    // upload left on this course goes with the key it measured.
+    .set({
+      coverImageKey,
+      coverImageWidth: null,
+      coverImageHeight: null,
+      updatedAt: new Date(),
+    })
     .where(eq(courses.id, courseId));
 }
 
