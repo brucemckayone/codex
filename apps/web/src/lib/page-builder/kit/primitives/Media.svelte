@@ -31,6 +31,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { HeroLoopVideo } from '$lib/components/ui/HeroLoopVideo';
+  import { getThumbnailUrl } from '$lib/utils/image';
   import type { PreviewMedia } from '../../render/types';
   import type { ColourSchemeId } from '../model/ids';
 
@@ -99,6 +100,11 @@
     const url = image ?? clip?.posterUrl ?? null;
     return url && url !== failed ? url : null;
   });
+  // A `<video poster>` takes one URL, and a clip only plays in a hero frame,
+  // so its poster is the largest file the still has: xl when the address
+  // records the picture's size, else lg (Codex-kk9nv.3). The reduced-motion
+  // still keeps its srcset.
+  const clipPoster = $derived(still ? getThumbnailUrl(still, 'xl') : null);
   const empty = $derived(!clip && !still);
   const marked = $derived(empty && Boolean(mark));
   const stoodIn = $derived(empty && !marked && Boolean(fallback));
@@ -116,7 +122,7 @@
     <!-- The sizes belong to `image`; a clip's own poster has none here. -->
     <HeroLoopVideo
       src={clip.playlistUrl}
-      posterUrl={still}
+      posterUrl={clipPoster}
       posterSrcset={still && still === image ? srcset : ''}
       posterSizes={sizes}
     />
