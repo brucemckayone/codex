@@ -466,6 +466,11 @@ export type UserProfile = {
   emailVerified: boolean;
   /** Profile image URL (also aliased as avatarUrl in some contexts) */
   image: string | null;
+  /**
+   * Whether `image` is the user's own upload, not their sign-in provider's
+   * picture. Only an upload can be removed (Codex-kk9nv.10).
+   */
+  hasCustomAvatar: boolean;
   /** Username handle */
   username: string | null;
   /** User bio/description */

@@ -29,6 +29,8 @@
     email?: string | null;
     bio?: string | null;
     image?: string | null;
+    /** `image` is the user's own upload, not their sign-in provider's. */
+    hasCustomAvatar?: boolean;
     socialLinks?: {
       website?: string;
       twitter?: string;
@@ -66,7 +68,11 @@
     }
   });
 
-  const showDeleteAvatar = $derived(!!avatarPreview && !hasSelectedFile);
+  // Only an upload can be removed: deleting with only a provider picture
+  // changed nothing, and the picture came back on refresh (Codex-kk9nv.10).
+  const showDeleteAvatar = $derived(
+    !!profile?.hasCustomAvatar && !!avatarPreview && !hasSelectedFile
+  );
 
   const initials = $derived(
     profile?.name

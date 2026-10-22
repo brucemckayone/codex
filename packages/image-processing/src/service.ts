@@ -803,25 +803,37 @@ export class ImageProcessingService extends BaseService {
    * The row is cleared first and the files deleted after, as
    * {@link deleteContentThumbnail} does.
    *
+   * The URL is read under a row lock and cleared in the same transaction
+   * (Codex-kk9nv.17). Read and cleared apart, an upload committing in between
+   * had its new URL nulled here while this deleted the folder it replaced, so
+   * the new photo stayed public with nothing pointing at it. Locked, an
+   * upload either commits first, and its photo is the one removed, or waits
+   * and lands on the cleared row.
+   *
    * On R2 failure: Records orphans for deferred cleanup instead of throwing
+   *
+   * @returns Whether there was an uploaded avatar to remove. A user whose only
+   *   picture is their sign-in provider's has none (Codex-kk9nv.10).
    */
-  async deleteUserAvatar(userId: string): Promise<void> {
-    // Get current avatar URL
-    const user = await this.db.query.users.findFirst({
-      where: eq(schema.users.id, userId),
-      columns: { avatarUrl: true },
+  async deleteUserAvatar(userId: string): Promise<boolean> {
+    const droppedUrl = await this.db.transaction(async (tx) => {
+      const [user] = await tx
+        .select({ avatarUrl: schema.users.avatarUrl })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .for('update');
+      if (!user?.avatarUrl) return null;
+
+      await tx
+        .update(schema.users)
+        .set({ avatarUrl: null, updatedAt: new Date() })
+        .where(eq(schema.users.id, userId));
+      return user.avatarUrl;
     });
+    if (!droppedUrl) return false;
 
-    if (!user?.avatarUrl) {
-      return; // Nothing to delete
-    }
-
-    await this.db
-      .update(schema.users)
-      .set({ avatarUrl: null, updatedAt: new Date() })
-      .where(eq(schema.users.id, userId));
-
-    await this.deleteDroppedAvatar(userId, user.avatarUrl, 'avatar-removed');
+    await this.deleteDroppedAvatar(userId, droppedUrl, 'avatar-removed');
+    return true;
   }
 
   /**

@@ -98,6 +98,12 @@ function whereResult(rows: unknown[]) {
   });
 }
 
+/**
+ * deleteUserAvatar's read of the avatar row, under a row lock in the
+ * transaction that clears it (Codex-kk9nv.17). Reset in `beforeEach`.
+ */
+const lockedAvatarRead = vi.fn();
+
 // Base mock implementations (will be recreated in beforeEach)
 const createMockDb = () =>
   ({
@@ -106,6 +112,13 @@ const createMockDb = () =>
         where: vi.fn(() => whereResult([{ id: 'content-1' }])),
       }),
     }),
+    select: vi.fn(() => ({
+      from: () => ({ where: () => ({ for: lockedAvatarRead }) }),
+    })),
+    // The callback runs on the db it was called on, as its `tx`.
+    transaction(fn: (tx: unknown) => unknown) {
+      return fn(this);
+    },
   }) as unknown as Database;
 
 // Mock processor. Every still goes through the page-image pipeline
@@ -191,6 +204,11 @@ describe('ImageProcessingService', () => {
 
     // Reset database mock to default implementation
     testMockDb = createMockDb();
+    lockedAvatarRead
+      .mockReset()
+      .mockResolvedValue([
+        { avatarUrl: 'https://test.r2.dev/avatars/user-1/lg.webp' },
+      ]);
 
     // Mock for delete methods that query database
     mockDbQuery = {
@@ -804,11 +822,62 @@ describe('ImageProcessingService', () => {
     });
 
     it('should handle missing avatar gracefully', async () => {
-      mockDbQuery.users.findFirst.mockResolvedValueOnce({ avatarUrl: null });
+      lockedAvatarRead.mockResolvedValueOnce([{ avatarUrl: null }]);
 
-      await service.deleteUserAvatar('user-1');
+      // Nothing to remove: a provider picture is not an upload (Codex-kk9nv.10).
+      await expect(service.deleteUserAvatar('user-1')).resolves.toBe(false);
 
+      expect(testMockDb.update).not.toHaveBeenCalled();
       expect(testMockR2Service.delete).not.toHaveBeenCalled();
+    });
+
+    it('reports that it removed an avatar', async () => {
+      await expect(service.deleteUserAvatar('user-1')).resolves.toBe(true);
+    });
+
+    // Codex-kk9nv.17: read and cleared apart, an upload committing in between
+    // had its new URL nulled while the folder it replaced was deleted, so the
+    // new photo stayed public with nothing pointing at it.
+    it('reads the avatar under a row lock and clears it in the same transaction, then deletes the files', async () => {
+      const events: string[] = [];
+      const db = { ...testMockDb, query: mockDbQuery } as unknown as Database;
+      const update = db.update;
+      Object.assign(db, {
+        async transaction(fn: (tx: unknown) => unknown) {
+          events.push('begin');
+          const result = await fn(db);
+          events.push('commit');
+          return result;
+        },
+        update: (...args: Parameters<typeof update>) => {
+          events.push('clear');
+          return update(...args);
+        },
+      });
+      lockedAvatarRead.mockImplementationOnce(async (mode: string) => {
+        events.push(`read for ${mode}`);
+        return [{ avatarUrl: 'https://test.r2.dev/avatars/user-1/lg.webp' }];
+      });
+      vi.mocked(testMockR2Service.delete).mockImplementation(async () => {
+        events.push('delete files');
+      });
+      const locked = new ImageProcessingService({
+        db,
+        environment: 'test',
+        r2Service: testMockR2Service,
+        r2PublicUrlBase: 'https://test.r2.dev',
+      });
+
+      await locked.deleteUserAvatar('user-1');
+
+      expect(events.slice(0, 4)).toEqual([
+        'begin',
+        'read for update',
+        'clear',
+        'commit',
+      ]);
+      expect(events.slice(4).every((e) => e === 'delete files')).toBe(true);
+      expect(events.length).toBeGreaterThan(4);
     });
   });
 
@@ -1057,9 +1126,7 @@ describe('ImageProcessingService', () => {
       });
 
       it('should propagate database query errors in delete operations', async () => {
-        mockDbQuery.users.findFirst.mockRejectedValue(
-          new Error('Database query failed')
-        );
+        lockedAvatarRead.mockRejectedValue(new Error('Database query failed'));
 
         await expect(service.deleteUserAvatar('user-1')).rejects.toThrow(
           /Database query failed/i

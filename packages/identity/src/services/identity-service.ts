@@ -104,12 +104,13 @@ export class IdentityService extends BaseService {
    * Remove the user's avatar (R2 files + `avatarUrl`), then invalidate every
    * cache that shows it (Codex-kk9nv.7). The route used to call the image
    * service directly, which holds no cache, so the profile kept serving the
-   * deleted URL for up to 10 minutes.
+   * deleted URL for up to 10 minutes. Nothing removed, nothing changed: no
+   * invalidation (Codex-kk9nv.10).
    */
   async deleteAvatar(userId: string): Promise<void> {
     try {
-      await this.imageService().deleteUserAvatar(userId);
-      await this.invalidateUserSurfaces(userId, 'deleteAvatar');
+      const removed = await this.imageService().deleteUserAvatar(userId);
+      if (removed) await this.invalidateUserSurfaces(userId, 'deleteAvatar');
     } catch (error) {
       throw this.handleError(error, 'IdentityService.deleteAvatar');
     }
@@ -245,6 +246,7 @@ export class IdentityService extends BaseService {
         email: user.email,
         emailVerified: user.emailVerified,
         image: user.avatarUrl ?? user.image,
+        hasCustomAvatar: user.avatarUrl !== null,
         username: user.username ?? null,
         bio: user.bio ?? null,
         socialLinks: user.socialLinks ?? null,
@@ -642,6 +644,7 @@ export class IdentityService extends BaseService {
         email: updated.email,
         emailVerified: updated.emailVerified,
         image: updated.avatarUrl ?? updated.image,
+        hasCustomAvatar: updated.avatarUrl !== null,
         username: updated.username ?? null,
         bio: updated.bio ?? null,
         socialLinks: updated.socialLinks ?? null,

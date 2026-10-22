@@ -118,6 +118,44 @@ describe('IdentityService', () => {
     });
   });
 
+  // Codex-kk9nv.10: `image` is the upload if there is one, else the sign-in
+  // provider's picture. Only an upload can be removed, so the profile says
+  // which it is.
+  describe('getProfile — hasCustomAvatar', () => {
+    const row = {
+      id: 'user-123',
+      name: 'Ada',
+      email: 'ada@example.test',
+      emailVerified: true,
+      username: null,
+      bio: null,
+      socialLinks: null,
+    };
+    const PROVIDER = 'https://lh3.googleusercontent.com/a/photo';
+    const UPLOAD =
+      'https://cdn-test.revelations.studio/avatars/user-123/300x300-ab12cd34/lg.webp';
+
+    it.each([
+      ['an upload', { avatarUrl: UPLOAD, image: PROVIDER }, UPLOAD, true],
+      [
+        "only the provider's picture",
+        { avatarUrl: null, image: PROVIDER },
+        PROVIDER,
+        false,
+      ],
+      ['no picture', { avatarUrl: null, image: null }, null, false],
+    ])('with %s', async (_case, pictures, image, hasCustomAvatar) => {
+      (
+        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce({ ...row, ...pictures });
+
+      await expect(service.getProfile('user-123')).resolves.toMatchObject({
+        image,
+        hasCustomAvatar,
+      });
+    });
+  });
+
   describe('uploadAvatar', () => {
     const userId = 'user-123';
     const file = createTestImageFile('image/jpeg', 'avatar.jpg');

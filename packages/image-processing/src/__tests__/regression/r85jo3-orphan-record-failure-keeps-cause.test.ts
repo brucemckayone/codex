@@ -78,11 +78,22 @@ function dbWithUpdate(where: ReturnType<typeof vi.fn>): Database {
             'https://test.r2.dev/user-1/content-thumbnails/content-1/lg.webp',
         }),
       },
-      users: {
-        findFirst: vi.fn().mockResolvedValue({
-          avatarUrl: 'https://test.r2.dev/avatars/user-1/lg.webp',
+    },
+    // deleteUserAvatar reads the avatar under a row lock, in the transaction
+    // that clears it (Codex-kk9nv.17); the callback runs on this same db.
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          for: vi
+            .fn()
+            .mockResolvedValue([
+              { avatarUrl: 'https://test.r2.dev/avatars/user-1/lg.webp' },
+            ]),
         }),
-      },
+      }),
+    }),
+    transaction(fn: (tx: unknown) => unknown) {
+      return fn(this);
     },
   } as unknown as Database;
 }
@@ -180,7 +191,7 @@ describe('Codex-r85jo.3 F7: orphan-record failure keeps the original outcome', (
       orphanedFileService: orphans.svc,
     });
 
-    await expect(service.deleteUserAvatar('user-1')).resolves.toBeUndefined();
+    await expect(service.deleteUserAvatar('user-1')).resolves.toBe(true);
     expect(orphans.recordOrphanedFiles).toHaveBeenCalledTimes(1);
     expect(where).toHaveBeenCalledTimes(1);
     expect(errorSpy).toHaveBeenCalledWith(

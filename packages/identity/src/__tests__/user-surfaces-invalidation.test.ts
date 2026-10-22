@@ -157,7 +157,8 @@ const avatarFile = () =>
 
 describe('IdentityService — user card writes invalidate every surface', () => {
   beforeEach(() => {
-    mockDeleteUserAvatar.mockReset().mockResolvedValue(undefined);
+    // `true`: there was an uploaded avatar to remove (Codex-kk9nv.10).
+    mockDeleteUserAvatar.mockReset().mockResolvedValue(true);
     mockProcessUserAvatar.mockReset().mockResolvedValue({
       url: `https://cdn.codex.test/avatars/${USER_ID}/lg.webp`,
       size: 1024,
@@ -176,6 +177,18 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     const deletedAt = mockDeleteUserAvatar.mock.invocationCallOrder[0] ?? 0;
     const firstInvalidate = cache.invalidate.mock.invocationCallOrder[0] ?? 0;
     expect(deletedAt).toBeLessThan(firstInvalidate);
+  });
+
+  it('deleteAvatar invalidates nothing when there was no upload to remove', async () => {
+    // A provider picture only: nothing changed, so nothing is stale
+    // (Codex-kk9nv.10).
+    const { service, invalidated, select } = harness();
+    mockDeleteUserAvatar.mockResolvedValueOnce(false);
+
+    await service.deleteAvatar(USER_ID);
+
+    expect(invalidated).toEqual([]);
+    expect(select).not.toHaveBeenCalled();
   });
 
   it('deleteAvatar invalidates nothing when the delete fails', async () => {
