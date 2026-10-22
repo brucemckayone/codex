@@ -1411,7 +1411,9 @@ async function deriveCoverKey(
     base && url.startsWith(base)
       ? url.slice(base.length + 1)
       : url.match(/^https?:\/\/[^/]+\/(.+)$/)?.[1];
-  if (!sourceKey) return null;
+  // The key goes into a shell command below, and thumbnailUrl is only
+  // validated as a URL, so anything but a plain object key is refused.
+  if (!sourceKey || !/^[A-Za-z0-9/_.-]+$/.test(sourceKey)) return null;
 
   // Already a generated variant set — the prefix is exactly what we want.
   if (sourceKey.endsWith('/md.webp')) {
