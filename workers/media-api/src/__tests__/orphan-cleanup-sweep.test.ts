@@ -19,7 +19,13 @@
  */
 import { env, runInDurableObject } from 'cloudflare:test';
 import type { R2Service } from '@codex/cloudflare-clients';
-import { closeDbPool, createDbClient, inArray, schema } from '@codex/database';
+import {
+  closeDbPool,
+  createDbClient,
+  inArray,
+  schema,
+  sql,
+} from '@codex/database';
 import type {
   OrphanedFileRecord,
   OrphanedFileService,
@@ -506,6 +512,26 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
     }
     return runs;
   }
+
+  // A real failed query, so the prefix messageForLog keys on is drizzle's own
+  // and not a copy a test made up: an upgrade that changed it fails here.
+  it("strips a real failed query's SQL and params, keeping the driver's reason", async () => {
+    const failed = await db
+      .execute(
+        sql`select 1 / 0 as boom, ${'avatars/abcdefghijklmnopqrstuvwxyz012345/x'}::text as p`
+      )
+      .then(
+        () => null,
+        (error: unknown) => error
+      );
+
+    expect(failed).toBeInstanceOf(Error);
+    const error = failed as Error;
+    expect(error.message.startsWith('Failed query:')).toBe(true);
+    expect(error.cause).toBeInstanceOf(Error);
+    expect(messageForLog(error)).toBe((error.cause as Error).message);
+    expect(messageForLog(error)).not.toContain('avatars/');
+  });
 
   // One test, not several: R2 is isolated storage, so a delete is rolled back
   // when the test that made it ends, while the database keeps its rows.

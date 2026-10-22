@@ -957,16 +957,16 @@ describe('IdentityService', () => {
 
   describe('deleteAccount (Codex-eb00a.11)', () => {
     const userId = 'user-123';
-    // THREE select shapes are used, and the third one forced this mock to
+    // FOUR select shapes are used, and the last two forced this mock to
     // dispatch on the TABLE rather than on the chain shape:
     //   org check:      select().from().innerJoin().where()  → rows
     //   content check:  select().from().where().limit()      → rows
     //   session tokens: select().from(sessions).where()      → rows   (Codex-na929)
     //   avatar lock:    select().from(users).where().for()   → rows   (Codex-kk9nv.14)
-    // The content check and the token query are both `.from().where()`, so a single `where` mock cannot
-    // serve both: the content check needs it to return `{ limit }` while the
-    // token query awaits it directly. Keying on the table is what Drizzle
-    // actually does and keeps each shape honest.
+    // The content check and the token query are both `.from().where()`, so a
+    // single `where` mock cannot serve both: the content check needs it to
+    // return `{ limit }` while the token query awaits it directly. Keying on
+    // the table is what Drizzle actually does and keeps each shape honest.
     const mockOwnedOrgsWhere = vi.fn();
     const mockExistsLimit = vi.fn();
     const mockSessionsWhere = vi.fn();

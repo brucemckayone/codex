@@ -290,6 +290,38 @@ describe('OrphanedFileService', () => {
       // Only one update call (no second call to mark as failed)
       expect(mockDb.update).toHaveBeenCalledTimes(1);
     });
+    it('keeps the whole error on the row and logs the summary it is given (Codex-kk9nv.13)', async () => {
+      // A failed query's message carries its params; the row keeps it for
+      // review, the log line says only the driver's reason.
+      mockDb._mocks.updateReturning.mockResolvedValueOnce([
+        { id: 'orphan-1', cleanupAttempts: 1 },
+      ]);
+      const warn = vi.spyOn(
+        (service as unknown as { obs: { warn: (m: string) => void } }).obs,
+        'warn'
+      );
+
+      await service.recordFailedAttempt(
+        'orphan-1',
+        'Failed query: select …\nparams: avatars/u/300x300-aaaaaaaa/',
+        'connection terminated'
+      );
+
+      expect(mockDb._mocks.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errorMessage:
+            'Failed query: select …\nparams: avatars/u/300x300-aaaaaaaa/',
+        })
+      );
+      expect(warn).toHaveBeenCalledWith(
+        'Orphaned file cleanup attempt failed',
+        {
+          orphanId: 'orphan-1',
+          attempts: 1,
+          error: 'connection terminated',
+        }
+      );
+    });
   });
 
   describe('getStats()', () => {

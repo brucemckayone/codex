@@ -428,8 +428,17 @@ export class OrphanedFileService extends BaseService {
    *
    * Increments attempt counter and records error message.
    * If max attempts reached, marks as 'failed' for manual review.
+   *
+   * @param error - Kept on the row whole, for whoever reviews it
+   * @param logged - What the log line says, when that should differ: a failed
+   *   query's message carries its params, and the caller can pass the driver's
+   *   reason instead (Codex-kk9nv.13)
    */
-  async recordFailedAttempt(id: string, error: string): Promise<void> {
+  async recordFailedAttempt(
+    id: string,
+    error: string,
+    logged: string = error
+  ): Promise<void> {
     // Use atomic increment to prevent race conditions
     const updated = await this.db
       .update(schema.orphanedImageFiles)
@@ -453,13 +462,13 @@ export class OrphanedFileService extends BaseService {
       this.obs.warn('Orphaned file cleanup failed permanently', {
         orphanId: id,
         attempts: record.cleanupAttempts,
-        error,
+        error: logged,
       });
     } else {
       this.obs.warn('Orphaned file cleanup attempt failed', {
         orphanId: id,
         attempts: record?.cleanupAttempts ?? 0,
-        error,
+        error: logged,
       });
     }
   }

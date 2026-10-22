@@ -281,8 +281,13 @@ export class OrphanedFileCleanupDO implements DurableObject {
 
       return new Response('Not Found', { status: 404 });
     } catch (error) {
-      // An internal caller's 500, still never a failed query's params.
+      // An internal caller's 500, still never a failed query's params. Logged
+      // here too: the cron's poke reports only the status, not this body.
       const message = messageForLog(error);
+      this.obs.error('Orphan cleanup DO request failed', {
+        path,
+        error: message,
+      });
       return new Response(JSON.stringify({ error: message }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -398,8 +403,13 @@ export class OrphanedFileCleanupDO implements DurableObject {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
 
-        // Record failed attempt
-        await orphanedFileService.recordFailedAttempt(orphan.id, errorMessage);
+        // The row keeps the whole message for review; its log line, like
+        // this run's, says only what messageForLog keeps.
+        await orphanedFileService.recordFailedAttempt(
+          orphan.id,
+          errorMessage,
+          messageForLog(error)
+        );
         failed++;
         errors.push({
           orphanId: orphan.id,
