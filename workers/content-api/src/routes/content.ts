@@ -536,23 +536,26 @@ app.post(
         throw new ContentNotFoundError(ctx.input.params.id);
       }
 
-      // Process image via service registry
-      const result = await ctx.services.imageProcessing.processContentThumbnail(
-        ctx.input.params.id,
-        ctx.user.id,
-        new File([ctx.files.thumbnail.buffer], ctx.files.thumbnail.name, {
-          type: ctx.files.thumbnail.type,
-        })
-      );
-
       // Thumbnail is part of the public content payload, so cached list/detail
-      // pages must pick up the new image. Bump the org content version.
-      bumpOrgContentVersion(
-        ctx.env,
-        ctx.executionCtx,
-        content.organizationId,
-        ctx.obs
-      );
+      // pages must pick up the new image: bump the org content version. Also
+      // when it throws: a write can commit and still report failure, and the
+      // thumbnail it replaced is then deleted (Codex-kk9nv.16).
+      const result = await ctx.services.imageProcessing
+        .processContentThumbnail(
+          ctx.input.params.id,
+          ctx.user.id,
+          new File([ctx.files.thumbnail.buffer], ctx.files.thumbnail.name, {
+            type: ctx.files.thumbnail.type,
+          })
+        )
+        .finally(() =>
+          bumpOrgContentVersion(
+            ctx.env,
+            ctx.executionCtx,
+            content.organizationId,
+            ctx.obs
+          )
+        );
 
       return {
         thumbnailUrl: result.url,

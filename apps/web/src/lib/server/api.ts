@@ -55,6 +55,7 @@ import type {
   PublicCreatorProfile,
   SessionData,
   UserData,
+  UserProfile,
 } from '@codex/shared-types';
 import type {
   CreatorEarningsSummary,
@@ -580,9 +581,11 @@ export function createServerApi(
      */
     account: {
       /**
-       * Get user profile
+       * Get user profile. `UserProfile`, not the session's `UserData`: this is
+       * what identity-api returns, and `hasCustomAvatar` decides whether the
+       * account forms offer Remove (Codex-kk9nv.10).
        */
-      getProfile: () => request<UserData>('identity', '/api/user/profile'),
+      getProfile: () => request<UserProfile>('identity', '/api/user/profile'),
 
       /**
        * Public creator profile by username — anonymous, no session needed.
@@ -609,10 +612,11 @@ export function createServerApi(
       },
 
       /**
-       * Update user profile
+       * Update user profile. Answers with the updated `UserProfile`, as
+       * `getProfile` does.
        */
       updateProfile: (data: UpdateProfileInput) =>
-        request<UserData>('identity', '/api/user/profile', {
+        request<UserProfile>('identity', '/api/user/profile', {
           method: 'PATCH',
           body: JSON.stringify(data),
         }),

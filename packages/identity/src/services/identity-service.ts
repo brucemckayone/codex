@@ -64,6 +64,39 @@ export interface IdentityServiceConfig extends ServiceConfig {
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
 
+/**
+ * A user row as the profile API returns it, from `getProfile`,
+ * `updateProfile` and `upgradeToCreator` alike, so the three cannot drift.
+ */
+function toUserProfile(
+  user: Pick<
+    typeof users.$inferSelect,
+    | 'id'
+    | 'name'
+    | 'email'
+    | 'emailVerified'
+    | 'avatarUrl'
+    | 'image'
+    | 'username'
+    | 'bio'
+    | 'socialLinks'
+  >
+): UserProfile {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    emailVerified: user.emailVerified,
+    // A custom upload wins over the sign-in provider's picture, and only an
+    // upload can be removed (Codex-kk9nv.10).
+    image: user.avatarUrl ?? user.image,
+    hasCustomAvatar: user.avatarUrl != null,
+    username: user.username ?? null,
+    bio: user.bio ?? null,
+    socialLinks: user.socialLinks ?? null,
+  };
+}
+
 export class IdentityService extends BaseService {
   private r2Service: R2Service;
   private r2PublicUrlBase: string;
@@ -99,12 +132,14 @@ export class IdentityService extends BaseService {
       throw new UserNotFoundError(userId);
     }
 
-    // Process, upload, and update DB (cleanup handled inside ImageProcessingService)
-    const result = await this.imageService().processUserAvatar(userId, file);
-
-    await this.invalidateUserSurfaces(userId, 'uploadAvatar');
-
-    return result;
+    // Process, upload, and update DB (cleanup handled inside ImageProcessingService).
+    // Invalidated even when it throws: a write can commit and still report
+    // failure, and the folder it replaced is then deleted (Codex-kk9nv.16),
+    // so a cached copy of the old URL would show a broken image. It never
+    // rejects, so it cannot replace the upload's own error.
+    return await this.imageService()
+      .processUserAvatar(userId, file)
+      .finally(() => this.invalidateUserSurfaces(userId, 'uploadAvatar'));
   }
 
   /**
@@ -284,17 +319,7 @@ export class IdentityService extends BaseService {
         throw new UserNotFoundError(userId);
       }
 
-      return {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        emailVerified: user.emailVerified,
-        image: user.avatarUrl ?? user.image,
-        hasCustomAvatar: user.avatarUrl !== null,
-        username: user.username ?? null,
-        bio: user.bio ?? null,
-        socialLinks: user.socialLinks ?? null,
-      };
+      return toUserProfile(user);
     } catch (error) {
       throw this.handleError(error, 'IdentityService.fetchProfileFromDB');
     }
@@ -339,7 +364,7 @@ export class IdentityService extends BaseService {
     }
 
     const userId = await this.cache.get(
-      username.toLowerCase(),
+      CacheType.USERNAME_LOOKUP(username.toLowerCase()),
       CacheType.USERNAME_TO_ID,
       () => this.resolveUsernameFromDB(username),
       // Long TTL: a username changes far less often than a profile.
@@ -482,21 +507,7 @@ export class IdentityService extends BaseService {
         instagram?: string;
       } | null;
     }
-  ): Promise<{
-    id: string;
-    name: string;
-    email: string;
-    emailVerified: boolean;
-    image: string | null;
-    username: string | null;
-    bio: string | null;
-    socialLinks: {
-      website?: string;
-      twitter?: string;
-      youtube?: string;
-      instagram?: string;
-    } | null;
-  }> {
+  ): Promise<UserProfile> {
     try {
       // First, fetch the current user to check if email or username is changing
       const existing = await this.db.query.users.findFirst({
@@ -586,21 +597,16 @@ export class IdentityService extends BaseService {
         const nextUsername = updated.username;
         if (previousUsername !== nextUsername) {
           for (const name of [previousUsername, nextUsername]) {
-            if (name) await this.cache.invalidate(name.toLowerCase());
+            if (name) {
+              await this.cache.invalidate(
+                CacheType.USERNAME_LOOKUP(name.toLowerCase())
+              );
+            }
           }
         }
       }
 
-      return {
-        id: updated.id,
-        name: updated.name,
-        email: updated.email,
-        emailVerified: updated.emailVerified,
-        image: updated.avatarUrl ?? updated.image,
-        username: updated.username ?? null,
-        bio: updated.bio ?? null,
-        socialLinks: updated.socialLinks ?? null,
-      };
+      return toUserProfile(updated);
     } catch (error) {
       throw this.handleError(error, 'IdentityService.updateProfile');
     }
@@ -679,21 +685,12 @@ export class IdentityService extends BaseService {
         // of this name could not have cached a miss — but stating it here
         // keeps the public-profile invariant local to the writes that affect
         // it, instead of resting on a guard in another package.
-        await this.cache.invalidate(input.username.toLowerCase());
+        await this.cache.invalidate(
+          CacheType.USERNAME_LOOKUP(input.username.toLowerCase())
+        );
       }
 
-      return {
-        id: updated.id,
-        name: updated.name,
-        email: updated.email,
-        emailVerified: updated.emailVerified,
-        image: updated.avatarUrl ?? updated.image,
-        hasCustomAvatar: updated.avatarUrl !== null,
-        username: updated.username ?? null,
-        bio: updated.bio ?? null,
-        socialLinks: updated.socialLinks ?? null,
-        role: updated.role,
-      };
+      return { ...toUserProfile(updated), role: updated.role };
     } catch (error) {
       throw this.handleError(error, 'IdentityService.upgradeToCreator');
     }

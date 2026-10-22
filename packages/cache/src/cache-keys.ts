@@ -60,6 +60,16 @@ export const CacheType = {
    */
   USERNAME_TO_ID: 'user:username-to-id',
 
+  /**
+   * Server KV only — the id the `USERNAME_TO_ID` slot is read and invalidated
+   * under, for a lowercased username. Prefixed because version ids share one
+   * namespace and a username and an org slug use the same characters: bare, a
+   * user taking an org's slug as their username bumped that org's config and
+   * stats, and an org renamed to a username bumped that user's lookup
+   * (Codex-kk9nv.9). Neither can contain `:`, so this never collides.
+   */
+  USERNAME_LOOKUP: (username: string): string => `username:${username}`,
+
   /** User notification preferences */
   USER_PREFERENCES: 'user:preferences',
 

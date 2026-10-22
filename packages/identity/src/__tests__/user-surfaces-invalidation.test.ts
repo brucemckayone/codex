@@ -223,7 +223,7 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     await service.upgradeToCreator(USER_ID, { username: 'alice2' });
 
     expect([...invalidated].sort()).toEqual(
-      [USER_ID, ...CREATORS_IDS, 'alice2'].sort()
+      [USER_ID, ...CREATORS_IDS, 'username:alice2'].sort()
     );
   });
 
@@ -337,7 +337,7 @@ describe('IdentityService — user card writes invalidate every surface', () => 
       await service.updateProfile(USER_ID, { username: 'alice2' });
 
       expect(invalidated).toEqual(
-        expect.arrayContaining([USER_ID, 'alice', 'alice2'])
+        expect.arrayContaining([USER_ID, 'username:alice', 'username:alice2'])
       );
     });
   });

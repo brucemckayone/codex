@@ -110,6 +110,26 @@ const lockedAvatarRead = vi.fn();
  */
 const folderProbe = vi.fn();
 
+/** Every condition a `select(...).where()` on the mock db was given. */
+const selectWhere = vi.fn();
+
+/**
+ * The strings a drizzle condition binds: raw template values and `Param`
+ * values, walked through nested `SQL`. This package has no dialect to render
+ * the query with, and a column (which points back at its table) is skipped.
+ */
+function boundStrings(node: unknown): string[] {
+  if (typeof node === 'string') return [node];
+  if (!node || typeof node !== 'object') return [];
+  if ('queryChunks' in node && Array.isArray(node.queryChunks)) {
+    return node.queryChunks.flatMap(boundStrings);
+  }
+  if ('encoder' in node && 'value' in node) {
+    return typeof node.value === 'string' ? [node.value] : [];
+  }
+  return [];
+}
+
 // Base mock implementations (will be recreated in beforeEach)
 const createMockDb = () =>
   ({
@@ -120,7 +140,10 @@ const createMockDb = () =>
     }),
     select: vi.fn(() => ({
       from: () => ({
-        where: () => ({ for: lockedAvatarRead, limit: folderProbe }),
+        where: (clause: unknown) => {
+          selectWhere(clause);
+          return { for: lockedAvatarRead, limit: folderProbe };
+        },
       }),
     })),
     // The callback runs on the db it was called on, as its `tx`.
@@ -213,6 +236,7 @@ describe('ImageProcessingService', () => {
     // Reset database mock to default implementation
     testMockDb = createMockDb();
     folderProbe.mockReset().mockResolvedValue([]);
+    selectWhere.mockReset();
     lockedAvatarRead
       .mockReset()
       .mockResolvedValue([
@@ -324,6 +348,42 @@ describe('ImageProcessingService', () => {
       const firstDelete = vi.mocked(testMockR2Service.delete).mock
         .invocationCallOrder[0];
       expect(firstDelete).toBeGreaterThan(writeOrder ?? Infinity);
+    });
+
+    it('asks its row before discarding the new folder after a failed write (a uuid-owned row)', async () => {
+      // The fixtures elsewhere use 'content-1', which is not a uuid, so the
+      // probe returns "cannot place" without a query. A real content id runs
+      // it (Codex-kk9nv.16).
+      const contentId = '0b6a3c2e-4f5d-4e7a-9b1c-2d3e4f5a6b7c';
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants()
+      );
+      vi.mocked(testMockDb.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn(() =>
+            Promise.reject(new Error('Connection terminated'))
+          ),
+        }),
+      } as never);
+
+      await expect(
+        service.processContentThumbnail(
+          contentId,
+          'user-1',
+          createTestImageFile('image/png', 'new.png')
+        )
+      ).rejects.toThrow('Connection terminated');
+
+      expect(folderProbe).toHaveBeenCalledTimes(1);
+      const keys = putKeys(testMockR2Service);
+      const folder = keys[0]?.replace(/\/sm\.webp$/, '') ?? '';
+      expect(folder).toMatch(
+        new RegExp(
+          `^user-1/content-thumbnails/${contentId}/2400x1600-[0-9a-f]{8}$`
+        )
+      );
+      // No row names it, so it is discarded inline, as before.
+      expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
     });
 
     it("never deletes a poster frame the row points at — it is the transcoding pipeline's", async () => {
@@ -773,11 +833,17 @@ describe('ImageProcessingService', () => {
           )
         ).rejects.toThrow('Connection terminated');
 
-        newFolderOf(testMockR2Service, 'avatars/user-1', {
+        const folder = newFolderOf(testMockR2Service, 'avatars/user-1', {
           width: 640,
           height: 640,
         });
         expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(OLD));
+        // It asked about the NEW folder: probing the replaced one would read
+        // "referenced" off a write that did not land, and delete a live photo.
+        const probed = boundStrings(selectWhere.mock.calls.at(-1)?.[0]);
+        expect(probed).toContain(`${folder}/`);
+        expect(probed).toContain('user-1');
+        expect(probed).not.toContain(`${OLD}/`);
       });
 
       it('discards the new folder when its row does not name it', async () => {
@@ -987,20 +1053,37 @@ describe('ImageProcessingService', () => {
     // new photo stayed public with nothing pointing at it.
     it('reads the avatar under a row lock and clears it in the same transaction, then deletes the files', async () => {
       const events: string[] = [];
-      const db = { ...testMockDb, query: mockDbQuery } as unknown as Database;
-      const update = db.update;
-      Object.assign(db, {
-        async transaction(fn: (tx: unknown) => unknown) {
+      const base = testMockDb as unknown as {
+        select: (...args: unknown[]) => unknown;
+        update: (...args: unknown[]) => unknown;
+      };
+      // Its own `tx`, so a statement sent through the db instead of the
+      // transaction shows up: on a real pool it would wait on this
+      // transaction's own row lock.
+      const tx = {
+        select: base.select,
+        update: (...args: unknown[]) => {
+          events.push('clear');
+          return base.update(...args);
+        },
+      };
+      const db = {
+        query: mockDbQuery,
+        async transaction(fn: (t: unknown) => unknown) {
           events.push('begin');
-          const result = await fn(db);
+          const result = await fn(tx);
           events.push('commit');
           return result;
         },
-        update: (...args: Parameters<typeof update>) => {
-          events.push('clear');
-          return update(...args);
+        select: (...args: unknown[]) => {
+          events.push('read outside the transaction');
+          return base.select(...args);
         },
-      });
+        update: (...args: unknown[]) => {
+          events.push('clear outside the transaction');
+          return base.update(...args);
+        },
+      } as unknown as Database;
       lockedAvatarRead.mockImplementationOnce(async (mode: string) => {
         events.push(`read for ${mode}`);
         return [{ avatarUrl: 'https://test.r2.dev/avatars/user-1/lg.webp' }];

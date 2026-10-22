@@ -6,6 +6,7 @@
   bio, avatar upload/delete, and social links.
 -->
 <script lang="ts">
+  import type { UserProfile } from '@codex/shared-types';
   import type { Snippet } from 'svelte';
   import * as m from '$paraglide/messages';
   import { updateProfileForm } from '$lib/remote/account.remote';
@@ -23,21 +24,17 @@
   import { onDestroy } from 'svelte';
   import { invalidateAll } from '$app/navigation';
 
-  interface ProfileData {
-    name?: string | null;
-    username?: string | null;
-    email?: string | null;
-    bio?: string | null;
-    image?: string | null;
-    /** `image` is the user's own upload, not their sign-in provider's. */
-    hasCustomAvatar?: boolean;
-    socialLinks?: {
-      website?: string;
-      twitter?: string;
-      youtube?: string;
-      instagram?: string;
-    } | null;
-  }
+  /**
+   * The fields this form reads, from the profile identity-api returns, so a
+   * renamed or dropped field (`hasCustomAvatar` decides whether Remove shows)
+   * fails the typecheck instead of quietly hiding the button.
+   */
+  type ProfileData = Partial<
+    Pick<
+      UserProfile,
+      'name' | 'username' | 'email' | 'bio' | 'image' | 'hasCustomAvatar' | 'socialLinks'
+    >
+  >;
 
   interface Props {
     /** Profile data from server load */

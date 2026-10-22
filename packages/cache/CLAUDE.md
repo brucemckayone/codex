@@ -62,7 +62,7 @@ ctx.executionCtx.waitUntil(
 ```ts
 CacheType.USER_PROFILE         // 'user:profile'      — CARRIES email; never public
 CacheType.USER_PUBLIC_PROFILE  // 'user:public-profile' — public subset, keyed by USER ID
-CacheType.USERNAME_TO_ID       // 'user:username-to-id' — keyed by username, 1h
+CacheType.USERNAME_TO_ID       // 'user:username-to-id' — keyed by USERNAME_LOOKUP(username) = 'username:{name}', 1h
 CacheType.USER_PREFERENCES     // 'user:preferences'
 CacheType.ORG_CONFIG           // 'org:config'
 CacheType.ORG_STATS            // 'org:stats:v2'
@@ -76,12 +76,15 @@ CacheType.USER_SESSION         // 'user:session'
 CacheType.COLLECTION_CONTENT_PUBLISHED        // 'content:published'
 CacheType.COLLECTION_ORG_CONTENT(orgId)       // 'org:{orgId}:content'
 CacheType.COLLECTION_ORG_CREATORS(slug)       // 'org:{slug}:creators' — server KV only
+CacheType.USERNAME_LOOKUP(username)           // 'username:{name}' — the USERNAME_TO_ID slot's id
 CacheType.COLLECTION_USER_LIBRARY(userId)     // 'user:{userId}:library'
 ```
 
 The `COLLECTION_*` types are version IDs only — they're passed to `cache.invalidate()` to bump a version that the web app client manifest tracks, not to store data.
 
 `COLLECTION_ORG_CREATORS(slug)` is the exception: it is the server-side `id` the org's public creators list (`ORG_CREATORS`) is read under. The list changes on every listed member's profile write, and when it shared the org slug's version, each of those writes evicted the org's config and stats with it (Codex-kk9nv.9). A member's own write bumps only this id. A change to the org or its membership bumps both, through `invalidateOrgPublicCaches`.
+
+`USERNAME_LOOKUP(username)` exists for the same namespace reason. Version ids are bare strings in one namespace, and a username and an org slug use the same characters, so a bare username id let a user who took an org's slug bump that org's config and stats. Neither can contain `:`, so a prefixed id can never collide with a slug. Give any new caller-controlled id a prefix.
 
 ## Key Structure
 

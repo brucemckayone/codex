@@ -238,7 +238,8 @@ the cache call.
 - `IdentityService.getProfile()` → `USER_PROFILE`, 10 min TTL
 - `IdentityService.getNotificationPreferences()` → `USER_PREFERENCES`, 10 min TTL
 - `IdentityService.getPublicProfileByUsername()` → two hops:
-  `USERNAME_TO_ID` (1 h, keyed by lowercased username) then
+  `USERNAME_TO_ID` (1 h, keyed by `USERNAME_LOOKUP(lowercased username)` =
+  `username:{name}`, prefixed so it cannot share a version with an org slug) then
   `USER_PUBLIC_PROFILE` (10 min, keyed by **user id**). The profile is keyed by
   id so the three existing `invalidate(userId)` calls clear it for free; only a
   username *rename* needs its own bump, which `updateProfile` does for the old
