@@ -54,6 +54,7 @@
   import { followOrganization } from '$lib/remote/org.remote';
   import { MediaLiveRegion } from '$lib/components/media-a11y';
   import { extractPlainText } from '@codex/validation';
+  import { canBeSold } from '@codex/constants';
   import { updateLocalProgress } from '$lib/collections/progress';
   import type { ContentWithRelations } from '$lib/types';
 
@@ -311,7 +312,18 @@
   const priceCents = $derived(content.priceCents ?? null);
   const isPaid = $derived(!!priceCents && priceCents > 0);
   const isFree = $derived(!priceCents || priceCents === 0);
-  const needsPurchase = $derived(!hasAccess && isPaid && !requiresSubscription);
+  // Buy is offered only when a purchase would open the content
+  // (Codex-2hxff.14). A price alone is not enough: course-only, team-only and
+  // followers-only content ignore a purchase, so the buyer paid and got nothing.
+  const isSellable = $derived(canBeSold(content));
+  const needsPurchase = $derived(
+    !hasAccess && isSellable && !requiresSubscription
+  );
+  // A priced practice that only opens inside its course gets a plain note in
+  // place of Buy, like the team-only one.
+  const isCourseOnly = $derived(
+    !hasAccess && content.courseOnly === true && isPaid
+  );
   const needsSubscription = $derived(
     !hasAccess && requiresSubscription && !subscriptionCoversContent
   );
@@ -383,6 +395,7 @@
       if (accessCheckFailed) return 'Could not check access.';
       if (isFollowersOnly) return 'Follow to unlock this content.';
       if (isTeamOnly) return 'Team-only content.';
+      if (isCourseOnly) return 'Part of a course.';
       if (needsSubscription) return 'Subscription required.';
       if (!isAuthenticated) return 'Sign in required.';
       return needsPurchase ? 'Purchase required.' : 'Access required.';
@@ -408,13 +421,15 @@
 
   /**
    * Media-lock copy, branched by the real reason in the gate chain's order
-   * (team, followers, subscription, then purchase). "Purchase to watch" only
-   * when there is something to buy; a lock with no named reason says access
-   * is required. A failed check names no reason at all (Codex-h3ipg).
+   * (team, course, followers, subscription, then purchase). "Purchase to
+   * watch" only when there is something to buy; a lock with no named reason
+   * says access is required. A failed check names no reason at all
+   * (Codex-h3ipg).
    */
   const lockCtaText = $derived.by<string>(() => {
     if (accessCheckFailed) return m.content_detail_access_check_failed_cta();
     if (isTeamOnly) return m.team_only_cta_title();
+    if (isCourseOnly) return m.course_only_cta_title();
     if (isFollowersOnly) return m.followers_only_cta_title();
     if (needsSubscription) {
       return hasSubscription ? m.upgrade_cta_title() : m.subscribe_cta_title();
@@ -431,6 +446,7 @@
   const lockCtaSubtext = $derived.by<string>(() => {
     if (accessCheckFailed) return m.content_detail_refresh_description();
     if (isTeamOnly) return m.team_only_cta_description();
+    if (isCourseOnly) return m.course_only_cta_description();
     if (isFollowersOnly) {
       return isAudio
         ? m.content_detail_followers_listen_description()
@@ -483,6 +499,7 @@
     if (accessCheckFailed) return m.content_detail_refresh_description();
     if (isFollowersOnly) return m.followers_only_cta_description();
     if (isTeamOnly) return m.team_only_cta_description();
+    if (isCourseOnly) return m.course_only_cta_description();
     if (needsSubscription) {
       return hasSubscription
         ? m.upgrade_cta_description()
@@ -848,6 +865,7 @@
           contentId={content.id}
           contentTitle={content.title}
           {accessState}
+          canPurchase={isSellable}
           autoplay={true}
         />
         {#snippet failed(_error, _reset)}
@@ -1028,6 +1046,13 @@
             <span class="content-detail__price-label">{m.team_only_cta_description()}</span>
           </div>
         </section>
+      {:else if isCourseOnly}
+        <section class="content-detail__purchase" aria-labelledby="purchase-label-course">
+          <div class="content-detail__price">
+            <span id="purchase-label-course" class="content-detail__price-amount">{m.course_only_cta_title()}</span>
+            <span class="content-detail__price-label">{m.course_only_cta_description()}</span>
+          </div>
+        </section>
       {:else if isFollowersOnly}
         <section class="content-detail__purchase" aria-labelledby="purchase-label-followers">
           <div class="content-detail__price">
@@ -1084,7 +1109,7 @@
             </a>
           {/if}
 
-          {#if isPaid}
+          {#if isSellable}
             <span class="content-detail__or-divider">or purchase for {displayPrice(priceCents)}</span>
             {#if isAuthenticated && purchaseForm}
               {@render purchaseForm()}

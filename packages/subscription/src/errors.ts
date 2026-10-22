@@ -190,10 +190,16 @@ export class ConnectAccountNotReadyError extends BusinessLogicError {
   }
 }
 
+/**
+ * A live course's creator can't be paid yet, so it can't take a new way to
+ * pay: a course plan, or one put back on sale (Codex-2hxff.14, owner decision
+ * "Yes, same rule"). Same code and message as `@codex/content`'s
+ * `CreatorPayoutsRequiredError`, so the Studio shows one message for all.
+ */
 export class CreatorConnectRequiredError extends BusinessLogicError {
   constructor(creatorId: string) {
     super(
-      'Creator must have an active Stripe Connect account to assign subscription-gated content',
+      'Set up payouts before publishing paid or subscriber content. Complete Stripe Connect onboarding to receive payments.',
       {
         creatorId,
         code: 'CREATOR_CONNECT_REQUIRED',

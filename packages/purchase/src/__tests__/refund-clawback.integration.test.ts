@@ -295,7 +295,12 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
 
     const result = await refundEvent(seeded, `re_part_${seeded.tag}`, 300);
 
-    expect(result).toEqual({ userId: buyerId, accessEnded: false });
+    expect(result).toEqual({
+      userId: buyerId,
+      accessEnded: false,
+      duplicatePayment: false,
+      itemTitle: expect.any(String),
+    });
     expect(stripe.refunds.list).toHaveBeenCalledWith(
       expect.objectContaining({ charge: seeded.charge.id })
     );
@@ -419,7 +424,12 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
 
     await expect(
       refundEvent(seeded, `re_refused_${seeded.tag}`, 1000)
-    ).resolves.toEqual({ userId: buyerId, accessEnded: true });
+    ).resolves.toEqual({
+      userId: buyerId,
+      accessEnded: true,
+      duplicatePayment: false,
+      itemTitle: expect.any(String),
+    });
   });
 
   it("a debt's refund_reviews row carries the purchase id and the reversal it is for", async () => {

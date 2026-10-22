@@ -46,6 +46,13 @@ export {
   settleTransfer,
   type UnpaidCancelOutcome,
 } from './payout-ledger';
+// Refund a payment the platform decides to give back; the charge.refunded
+// webhook then does the rest (architecture C5, Codex-2hxff.14)
+export {
+  type IssueRefundInput,
+  type IssueRefundResult,
+  issueRefund,
+} from './refund';
 // A won dispute's clawback paid back by new pending payout rows the sweep
 // pays (Codex-2hxff.9)
 export { type DisputeRepayResult, repayDispute } from './repay';

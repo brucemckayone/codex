@@ -23,15 +23,25 @@
 
 import {
   ACCESS_TYPES,
+  CHECKOUT_SESSION_STATUS,
+  CHECKOUT_SESSION_TIMING,
   CONTENT_STATUS,
   CURRENCY,
+  canBeSold,
   FEES,
   PRICE_LIMITS,
   PURCHASE_STATUS,
   stripeEnvMetadata,
 } from '@codex/constants';
-import { isUniqueViolation, toIso, withPagination } from '@codex/database';
 import {
+  type DatabaseClient,
+  isUniqueViolation,
+  toIso,
+  withPagination,
+} from '@codex/database';
+import {
+  type CheckoutSession,
+  checkoutSessions,
   content,
   contentAccess,
   courses,
@@ -46,6 +56,7 @@ import {
 } from '@codex/database/schema';
 import {
   type ClawbackCharge,
+  issueRefund,
   type LedgerDeps,
   listChargeRefunds,
   listClawableRefunds,
@@ -58,6 +69,7 @@ import {
 import {
   BaseService,
   type ServiceConfig,
+  ServiceUnavailableError,
   StripeNotConfiguredError,
 } from '@codex/service-errors';
 import type {
@@ -89,6 +101,7 @@ import {
   isNull,
   lt,
   lte,
+  ne,
   or,
   type SQL,
   sql,
@@ -96,6 +109,7 @@ import {
 import type Stripe from 'stripe';
 import {
   AlreadyPurchasedError,
+  ConflictError,
   ContentNotPurchasableError,
   CourseAlreadyOwnedError,
   CourseNotPurchasableError,
@@ -277,6 +291,65 @@ const PURCHASE_LIST_STATUSES = [
 
 type PurchaseListStatus = (typeof PURCHASE_LIST_STATUSES)[number];
 
+type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
+
+/** Stripe takes timestamps in whole epoch seconds. */
+function toStripeTime(at: Date): number {
+  return Math.floor(at.getTime() / 1000);
+}
+
+/**
+ * One key per reserved checkout session AND resolved Stripe Customer
+ * (Codex-2hxff.14). Two tabs on the same reservation send identical
+ * parameters and get the same session back. `withStaleCustomerRecovery`'s
+ * retry with a recreated Customer gets a new key: Stripe compares a reused
+ * key's parameters and would refuse the changed customer.
+ */
+function checkoutIdempotencyKey(
+  reserved: CheckoutSession,
+  stripeCustomerId: string
+): string {
+  return `checkout_${reserved.id}_${stripeCustomerId}`;
+}
+
+/**
+ * A new purchase row's outcome: completed, or, for a second payment for an
+ * item the buyer owns, a duplicate of that purchase (Codex-2hxff.14). A
+ * duplicate stays `pending` until Stripe has refunded it, so no reader counts
+ * money as returned that is not. Its split columns keep what the sale would
+ * have paid; no slice is ever recorded for it.
+ */
+function purchaseOutcomeFields(duplicateOfPurchaseId: string | undefined) {
+  return duplicateOfPurchaseId
+    ? { status: PURCHASE_STATUS.PENDING, duplicateOfPurchaseId }
+    : { status: PURCHASE_STATUS.COMPLETED };
+}
+
+/**
+ * A second payment for an item the buyer already owned (Codex-2hxff.14):
+ * `pending` while its refund is owed, `refunded` once Stripe has made it.
+ */
+export function isDuplicatePayment(
+  purchase: Pick<Purchase, 'duplicateOfPurchaseId'>
+): boolean {
+  return purchase.duplicateOfPurchaseId != null;
+}
+
+/**
+ * Another request is creating a session under the same idempotency key: 409
+ * while it runs, or Stripe's idempotency error when its parameters differ.
+ */
+function isConcurrentCreate(error: unknown): boolean {
+  const e = error as { statusCode?: unknown; type?: unknown } | null;
+  return e?.statusCode === 409 || e?.type === 'StripeIdempotencyError';
+}
+
+/** A Stripe error's `code`, for logs (`charge_disputed`, ...). */
+function stripeErrorCode(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
 function coercePurchaseStatus(s: string): PurchaseListStatus {
   return (PURCHASE_LIST_STATUSES as readonly string[]).includes(s)
     ? (s as PurchaseListStatus)
@@ -395,6 +468,15 @@ export class PurchaseService extends BaseService {
           { priceCents: contentRecord.priceCents }
         );
       }
+      // Only what a purchase would open is sold (Codex-2hxff.14): marked
+      // purchasable, and not course-only, team-only, followers-only or orgless
+      // with a tier. Before this a buyer could pay and then be refused access.
+      if (!canBeSold(contentRecord)) {
+        throw new ContentNotPurchasableError(
+          validated.contentId,
+          'not_sold_separately'
+        );
+      }
 
       // Step 2: Check for existing purchase
       const existingPurchase = await this.db.query.purchases.findFirst({
@@ -474,87 +556,101 @@ export class PurchaseService extends BaseService {
         });
       }
 
+      // One open session per buyer and item (Codex-2hxff.14): a second tab
+      // gets the first tab's Stripe page back.
+      const reserved = await this.reserveCheckoutSession({
+        customerId,
+        contentId: validated.contentId,
+        amountCents: priceCents,
+      });
+      if (reserved.url && reserved.stripeSessionId) {
+        return {
+          sessionUrl: reserved.url,
+          sessionId: reserved.stripeSessionId,
+        };
+      }
+
       // `withStaleCustomerRecovery` resolves a customer id and self-heals
       // a stale `users.stripe_customer_id` (deleted-in-Stripe or seed-only
       // synthetic) by clearing the cache and recreating once. Same pattern
       // as `SubscriptionService.createCheckoutSession`.
-      const session = await withStaleCustomerRecovery(
-        { db: this.db, stripe: this.stripe },
-        {
-          userId: customerId,
-          email: user.email,
-          environment: this.environment,
-        },
-        (resolvedCustomerId) =>
-          this.stripe.checkout.sessions.create({
-            mode: 'payment',
-            payment_method_types: ['card'],
-            customer: resolvedCustomerId,
-            line_items: [
+      return await this.createReservedSession(reserved, () =>
+        withStaleCustomerRecovery(
+          { db: this.db, stripe: this.stripe },
+          {
+            userId: customerId,
+            email: user.email,
+            environment: this.environment,
+          },
+          (resolvedCustomerId) =>
+            this.stripe.checkout.sessions.create(
               {
-                price_data: {
-                  currency: CURRENCY.GBP,
-                  unit_amount: priceCents,
-                  product_data: {
-                    name: contentRecord.title,
-                    description: plainDescription
-                      ? plainDescription.slice(0, 500)
-                      : undefined,
-                    images: contentRecord.thumbnailUrl
-                      ? [contentRecord.thumbnailUrl]
-                      : undefined,
+                mode: 'payment',
+                payment_method_types: ['card'],
+                customer: resolvedCustomerId,
+                line_items: [
+                  {
+                    price_data: {
+                      currency: CURRENCY.GBP,
+                      unit_amount: priceCents,
+                      product_data: {
+                        name: contentRecord.title,
+                        description: plainDescription
+                          ? plainDescription.slice(0, 500)
+                          : undefined,
+                        images: contentRecord.thumbnailUrl
+                          ? [contentRecord.thumbnailUrl]
+                          : undefined,
+                      },
+                    },
+                    quantity: 1,
                   },
+                ],
+                // Codex-h69cg Option B: platform charge — no transfer_data,
+                // no application_fee_amount. Funds land on the platform's
+                // balance and are split via secondary transfers in
+                // `writePurchasePayouts` (creator + org), each linked to the
+                // charge via `source_transaction`.
+                success_url: validated.successUrl,
+                cancel_url: validated.cancelUrl,
+                // Codex-69t7c WP5: `organizationId` is OMITTED for orgless
+                // (bi-party) content. Stripe metadata values must be strings, so
+                // we cannot pass `null`; and an empty string would fail the
+                // webhook's `uuidSchema` round-trip in checkoutSessionMetadataSchema.
+                // Omitting the key lets that schema's `.default(null)` re-derive
+                // `null` on the completePurchase side.
+                metadata: {
+                  contentId: validated.contentId,
+                  customerId,
+                  ...(organizationId !== null ? { organizationId } : {}),
+                  creatorId: contentRecord.creatorId,
+                  contentTitle: contentRecord.title,
+                  ...stripeEnvMetadata(this.environment),
                 },
-                quantity: 1,
+                // Onto the PaymentIntent, from which Stripe snapshots it onto the
+                // Charge — so charge.refunded and friends carry the tag too.
+                payment_intent_data: {
+                  metadata: stripeEnvMetadata(this.environment),
+                },
+                client_reference_id: customerId,
+                expires_at: toStripeTime(reserved.expiresAt),
               },
-            ],
-            // Codex-h69cg Option B: platform charge — no transfer_data,
-            // no application_fee_amount. Funds land on the platform's
-            // balance and are split via secondary transfers in
-            // `writePurchasePayouts` (creator + org), each linked to the
-            // charge via `source_transaction`.
-            success_url: validated.successUrl,
-            cancel_url: validated.cancelUrl,
-            // Codex-69t7c WP5: `organizationId` is OMITTED for orgless
-            // (bi-party) content. Stripe metadata values must be strings, so
-            // we cannot pass `null`; and an empty string would fail the
-            // webhook's `uuidSchema` round-trip in checkoutSessionMetadataSchema.
-            // Omitting the key lets that schema's `.default(null)` re-derive
-            // `null` on the completePurchase side.
-            metadata: {
-              contentId: validated.contentId,
-              customerId,
-              ...(organizationId !== null ? { organizationId } : {}),
-              creatorId: contentRecord.creatorId,
-              contentTitle: contentRecord.title,
-              ...stripeEnvMetadata(this.environment),
-            },
-            // Onto the PaymentIntent, from which Stripe snapshots it onto the
-            // Charge — so charge.refunded and friends carry the tag too.
-            payment_intent_data: {
-              metadata: stripeEnvMetadata(this.environment),
-            },
-            client_reference_id: customerId,
-          }),
-        {
-          onStaleRecovery: (info) =>
-            this.obs.warn(
-              'Stale users.stripe_customer_id detected; clearing and retrying',
-              { ...info, contentId: validated.contentId }
+              {
+                idempotencyKey: checkoutIdempotencyKey(
+                  reserved,
+                  resolvedCustomerId
+                ),
+              }
             ),
-        }
+          {
+            onStaleRecovery: (info) =>
+              this.obs.warn(
+                'Stale users.stripe_customer_id detected; clearing and retrying',
+                { ...info, contentId: validated.contentId }
+              ),
+          }
+        )
       );
-
-      if (!session.url) {
-        throw new PaymentProcessingError('Checkout session URL not generated', {
-          sessionId: session.id,
-        });
-      }
-
-      return {
-        sessionUrl: session.url,
-        sessionId: session.id,
-      };
     } catch (error) {
       if (
         error instanceof ContentNotPurchasableError ||
@@ -575,6 +671,394 @@ export class PurchaseService extends BaseService {
 
       this.handleError(error, 'createCheckoutSession');
     }
+  }
+
+  // ─── One open checkout per buyer and item (Codex-2hxff.14) ─────────────────
+
+  /**
+   * Find or make the buyer's open checkout session for one item, so a second
+   * tab or a double click lands on the same Stripe page rather than a second
+   * one that could also take payment (owner decision "Block, then refund").
+   *
+   * Serialised per buyer and item by an advisory lock, which the partial
+   * unique index on open rows backs. An open session is reused when it was
+   * made at today's price and has at least `MIN_REMAINING_TO_REUSE_MS` left.
+   * Otherwise it is marked expired and its Stripe session expired too, and a
+   * new reservation is made, its expiry fixed now (30 minutes, plus the slack
+   * Stripe's 30-minute floor needs).
+   */
+  private async reserveCheckoutSession(
+    target: { customerId: string; amountCents: number } & (
+      | { contentId: string }
+      | { courseId: string }
+    )
+  ): Promise<CheckoutSession> {
+    const [item, contentId, courseId] =
+      'contentId' in target
+        ? [
+            eq(checkoutSessions.contentId, target.contentId),
+            target.contentId,
+            null,
+          ]
+        : [
+            eq(checkoutSessions.courseId, target.courseId),
+            null,
+            target.courseId,
+          ];
+    const lockKey = `checkout:${target.customerId}:${contentId ?? courseId}`;
+
+    const { reserved, replaced } = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`);
+      const [open] = await tx
+        .select()
+        .from(checkoutSessions)
+        .where(
+          and(
+            eq(checkoutSessions.customerId, target.customerId),
+            item,
+            eq(checkoutSessions.status, CHECKOUT_SESSION_STATUS.OPEN)
+          )
+        )
+        .limit(1);
+
+      const now = Date.now();
+      // A row with no URL yet is another caller's session in flight; once it
+      // is older than the slack its stored expiry is under Stripe's floor, so
+      // its creator must have failed and it is replaced.
+      if (
+        open &&
+        open.amountCents === target.amountCents &&
+        open.expiresAt.getTime() - now >=
+          CHECKOUT_SESSION_TIMING.MIN_REMAINING_TO_REUSE_MS &&
+        (open.url !== null ||
+          now - open.createdAt.getTime() <
+            CHECKOUT_SESSION_TIMING.STRIPE_FLOOR_SLACK_MS)
+      ) {
+        return { reserved: open, replaced: null };
+      }
+      if (open) {
+        await tx
+          .update(checkoutSessions)
+          .set({ status: CHECKOUT_SESSION_STATUS.EXPIRED })
+          .where(eq(checkoutSessions.id, open.id));
+      }
+      const [row] = await tx
+        .insert(checkoutSessions)
+        .values({
+          customerId: target.customerId,
+          contentId,
+          courseId,
+          amountCents: target.amountCents,
+          expiresAt: new Date(
+            now +
+              CHECKOUT_SESSION_TIMING.TTL_MS +
+              CHECKOUT_SESSION_TIMING.STRIPE_FLOOR_SLACK_MS
+          ),
+        })
+        .returning();
+      if (!row) {
+        throw new PaymentProcessingError('Failed to reserve checkout session', {
+          contentId,
+          courseId,
+        });
+      }
+      return { reserved: row, replaced: open?.stripeSessionId ?? null };
+    });
+
+    if (replaced) await this.expireReplacedSession(replaced);
+    return reserved;
+  }
+
+  /**
+   * Stop a replaced session taking payment. Best effort: Stripe refuses when
+   * it was paid or has expired already. A payment made on it still completes,
+   * and the buyer's payment on the new session is then refunded as a
+   * duplicate, so nothing is lost by carrying on.
+   */
+  private async expireReplacedSession(stripeSessionId: string): Promise<void> {
+    try {
+      await this.stripe.checkout.sessions.expire(stripeSessionId);
+    } catch (error) {
+      const details = {
+        stripeSessionId,
+        code: stripeErrorCode(error),
+        error: error instanceof Error ? error.message : String(error),
+      };
+      // Refused because it is no longer open: expected. Anything else (auth,
+      // network) means it may still take payment, so it is loud.
+      if (
+        (error as { type?: unknown } | null)?.type ===
+        'StripeInvalidRequestError'
+      ) {
+        this.obs.info('Replaced checkout session was no longer open', details);
+      } else {
+        this.obs.error('Replaced checkout session could not be expired', {
+          errorId: crypto.randomUUID(),
+          ...details,
+        });
+      }
+    }
+  }
+
+  /**
+   * Create the reserved session at Stripe and record it.
+   *
+   * - A failure frees the reservation, so the next attempt starts afresh
+   *   rather than replaying Stripe's stored answer for the key. The Stripe
+   *   error is the one thrown, even if freeing the row fails too.
+   * - A 409, or an idempotency error, means another caller (the other tab of
+   *   a double click) is creating this session under the same key; the
+   *   idempotency error when its parameters differ (the content page and the
+   *   preview player send different cancel URLs). The session is theirs to
+   *   record, so this waits briefly for it and returns it; if it never
+   *   appears, the buyer is asked to try again in a moment.
+   */
+  private async createReservedSession(
+    reserved: CheckoutSession,
+    create: () => Promise<Stripe.Checkout.Session>
+  ): Promise<CheckoutSessionResult> {
+    let session: Stripe.Checkout.Session;
+    try {
+      session = await create();
+    } catch (error) {
+      if (isConcurrentCreate(error)) {
+        return this.awaitConcurrentSession(reserved.id);
+      }
+      try {
+        await this.db
+          .update(checkoutSessions)
+          .set({ status: CHECKOUT_SESSION_STATUS.EXPIRED })
+          .where(
+            and(
+              eq(checkoutSessions.id, reserved.id),
+              isNull(checkoutSessions.stripeSessionId)
+            )
+          );
+      } catch (cleanupError) {
+        // The row then stays open with no session until it is replaced at
+        // its expiry; the Stripe error below is the one that matters.
+        this.obs.error('Checkout reservation could not be freed', {
+          errorId: crypto.randomUUID(),
+          reservationId: reserved.id,
+          error:
+            cleanupError instanceof Error
+              ? cleanupError.message
+              : String(cleanupError),
+        });
+      }
+      throw error;
+    }
+    if (!session.url) {
+      throw new PaymentProcessingError('Checkout session URL not generated', {
+        sessionId: session.id,
+      });
+    }
+    await this.db
+      .update(checkoutSessions)
+      .set({ stripeSessionId: session.id, url: session.url })
+      .where(eq(checkoutSessions.id, reserved.id));
+    return { sessionUrl: session.url, sessionId: session.id };
+  }
+
+  /** The other caller's session, once it has recorded it (up to ~3 s). */
+  private async awaitConcurrentSession(
+    reservationId: string
+  ): Promise<CheckoutSessionResult> {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const [row] = await this.db
+        .select({
+          url: checkoutSessions.url,
+          stripeSessionId: checkoutSessions.stripeSessionId,
+        })
+        .from(checkoutSessions)
+        .where(eq(checkoutSessions.id, reservationId))
+        .limit(1);
+      if (row?.url && row.stripeSessionId) {
+        return { sessionUrl: row.url, sessionId: row.stripeSessionId };
+      }
+    }
+    throw new ConflictError(
+      'Your checkout is still being prepared. Please try again in a moment.',
+      { reservationId }
+    );
+  }
+
+  /**
+   * The booking webhook: this session was paid (Codex-2hxff.14). The buyer's
+   * next checkout for the item is refused because they own it, so this is a
+   * record, not a gate.
+   */
+  async markCheckoutSessionCompleted(stripeSessionId: string): Promise<void> {
+    try {
+      await this.db
+        .update(checkoutSessions)
+        .set({ status: CHECKOUT_SESSION_STATUS.COMPLETED })
+        .where(eq(checkoutSessions.stripeSessionId, stripeSessionId));
+    } catch (error) {
+      this.handleError(error, 'markCheckoutSessionCompleted');
+    }
+  }
+
+  // ─── A second payment for an owned item (Codex-2hxff.14) ───────────────────
+
+  /**
+   * Take the per-buyer, per-item advisory lock, then look again. The lock
+   * serialises payments for the same buyer and item landing at once, so
+   * exactly one completes; the partial unique index on completed purchases
+   * backs it.
+   *
+   * - `replay`: this PaymentIntent's own row, written by a concurrent delivery
+   *   of the same event while this one waited for the lock.
+   * - `ownerId`: the buyer's completed purchase of the item, if they own it.
+   */
+  private async lockForItem(
+    tx: Tx,
+    customerId: string,
+    target: { contentId: string } | { courseId: string },
+    paymentIntentId: string
+  ): Promise<{ replay?: Purchase; ownerId?: string }> {
+    const [item, itemId] =
+      'contentId' in target
+        ? [eq(purchases.contentId, target.contentId), target.contentId]
+        : [eq(purchases.courseId, target.courseId), target.courseId];
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`purchase:${customerId}:${itemId}`}))`
+    );
+    const replay = await tx.query.purchases.findFirst({
+      where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+    });
+    if (replay) return { replay };
+    const owner = await tx.query.purchases.findFirst({
+      where: and(
+        eq(purchases.customerId, customerId),
+        item,
+        eq(purchases.status, PURCHASE_STATUS.COMPLETED)
+      ),
+      columns: { id: true },
+    });
+    return { ownerId: owner?.id };
+  }
+
+  /**
+   * Refund a duplicate payment in full (owner decision "Block, then refund")
+   * and mark it `refunded`. Safe to repeat: a replayed webhook asks Stripe
+   * again under the same key, and a charge already refunded counts as done.
+   * Its `charge.refunded` then records the refund and emails the buyer that
+   * they keep the item.
+   *
+   * If Stripe refuses, the row stays `pending`: the buyer is owed the money,
+   * and nothing reports it as returned. The failure is logged with Stripe's
+   * code and thrown as retryable whatever its cause, so Stripe redelivers the
+   * event through its retry window: a refusal such as a low platform balance
+   * can clear. One that never clears (a disputed charge) ends with the
+   * dispute, or with support (owner decision: a failed refund is held for
+   * support).
+   */
+  private async refundDuplicatePayment(purchase: Purchase): Promise<Purchase> {
+    let refundId: string | null;
+    try {
+      ({ refundId } = await issueRefund(this.stripe, {
+        paymentIntentId: purchase.stripePaymentIntentId,
+        reason: 'duplicate',
+        idempotencyKey: `refund_duplicate_${purchase.stripePaymentIntentId}`,
+        environment: this.environment,
+      }));
+    } catch (error) {
+      this.obs.error('Duplicate payment could not be refunded', {
+        errorId: crypto.randomUUID(),
+        purchaseId: purchase.id,
+        stripePaymentIntentId: purchase.stripePaymentIntentId,
+        code: stripeErrorCode(error),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new ServiceUnavailableError(
+        'Duplicate payment refund failed; it will be retried',
+        { purchaseId: purchase.id }
+      );
+    }
+    // A bound instant, not now(): the query text stays the same on every
+    // request, so Hyperdrive can cache it (data-access contract, rule 6).
+    const refundedAt = new Date();
+    const [refunded] = await this.db
+      .update(purchases)
+      .set({
+        status: PURCHASE_STATUS.REFUNDED,
+        refundedAt: sql`COALESCE(${purchases.refundedAt}, ${refundedAt})`,
+        refundAmountCents: sql`COALESCE(${purchases.refundAmountCents}, ${purchases.amountPaidCents})`,
+        stripeRefundId: sql`COALESCE(${purchases.stripeRefundId}, ${refundId})`,
+      })
+      .where(eq(purchases.id, purchase.id))
+      .returning();
+    this.obs.warn('Duplicate payment refunded', {
+      purchaseId: purchase.id,
+      stripePaymentIntentId: purchase.stripePaymentIntentId,
+      contentId: purchase.contentId,
+      courseId: purchase.courseId,
+      alreadyRefunded: refundId === null,
+    });
+    return refunded ?? purchase;
+  }
+
+  /**
+   * After the commit: a duplicate payment is refunded unless it already has
+   * been, and pays no one, so it never reaches the payout slices.
+   */
+  private async settleDuplicatePayment(purchase: Purchase): Promise<Purchase> {
+    return purchase.status === PURCHASE_STATUS.REFUNDED
+      ? purchase
+      : this.refundDuplicatePayment(purchase);
+  }
+
+  /** The title of the content or course a purchase is for. */
+  private async itemTitle(
+    purchase: Pick<Purchase, 'contentId' | 'courseId'>
+  ): Promise<string | null> {
+    if (purchase.contentId) {
+      const row = await this.db.query.content.findFirst({
+        where: eq(content.id, purchase.contentId),
+        columns: { title: true },
+      });
+      return row?.title ?? null;
+    }
+    if (purchase.courseId) {
+      const row = await this.db.query.courses.findFirst({
+        where: eq(courses.id, purchase.courseId),
+        columns: { title: true },
+      });
+      return row?.title ?? null;
+    }
+    return null;
+  }
+
+  /**
+   * Does the buyer hold another completed purchase of this purchase's item?
+   * Then a refund or dispute of this one leaves their access alone: the
+   * shared `content_access` row and the item are still theirs.
+   */
+  private async keepsItemElsewhere(
+    db: Tx | DatabaseClient,
+    purchase: Pick<Purchase, 'id' | 'customerId' | 'contentId' | 'courseId'>
+  ): Promise<boolean> {
+    const item = purchase.contentId
+      ? eq(purchases.contentId, purchase.contentId)
+      : purchase.courseId
+        ? eq(purchases.courseId, purchase.courseId)
+        : undefined;
+    if (!item) return false;
+    const [other] = await db
+      .select({ id: purchases.id })
+      .from(purchases)
+      .where(
+        and(
+          eq(purchases.customerId, purchase.customerId),
+          item,
+          eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+          ne(purchases.id, purchase.id)
+        )
+      )
+      .limit(1);
+    return other !== undefined;
   }
 
   /**
@@ -648,6 +1132,18 @@ export class PurchaseService extends BaseService {
             }
           );
         }
+
+        // A second payment for content the buyer already owns is recorded
+        // refunded and grants nothing; it is refunded after the commit
+        // (Codex-2hxff.14, "Block, then refund").
+        const { replay, ownerId: duplicateOf } = await this.lockForItem(
+          tx,
+          metadata.customerId,
+          { contentId: metadata.contentId },
+          stripePaymentIntentId
+        );
+        if (replay) return { purchase: replay, isNew: false } as const;
+        const isDuplicate = duplicateOf !== undefined;
 
         // Codex-69t7c WP5: `organizationId` is legitimately nullable now.
         // Org-scoped purchases populate it (from metadata or the content row);
@@ -790,6 +1286,8 @@ export class PurchaseService extends BaseService {
           creatorPayoutCents: revenueSplit.creatorPayoutCents,
           agreementApplied: agreementSharePercent != null,
           source: 'content_purchase',
+          // Computed for the record; a duplicate is refunded, never paid out.
+          duplicatePayment: isDuplicate,
         });
 
         // Step 4a: Reconcile Stripe-collected fee against calculated split.
@@ -821,7 +1319,6 @@ export class PurchaseService extends BaseService {
             amountPaidCents: metadata.amountPaidCents,
             currency: metadata.currency || CURRENCY.GBP,
             stripePaymentIntentId,
-            status: PURCHASE_STATUS.COMPLETED,
             purchasedAt,
             platformFeeCents: revenueSplit.platformFeeCents,
             organizationFeeCents: revenueSplit.organizationFeeCents,
@@ -829,6 +1326,7 @@ export class PurchaseService extends BaseService {
             // Phase 1: No agreement IDs (using defaults)
             platformAgreementId: null,
             creatorOrgAgreementId: null,
+            ...purchaseOutcomeFields(duplicateOf),
           })
           .returning();
 
@@ -836,6 +1334,12 @@ export class PurchaseService extends BaseService {
           throw new PaymentProcessingError('Failed to create purchase record', {
             stripePaymentIntentId,
           });
+        }
+
+        // A duplicate grants nothing (the first purchase did) and pays no
+        // one; the post-commit step refunds it, as for a replay of it.
+        if (isDuplicate) {
+          return { purchase, isNew: false } as const;
         }
 
         // Step 5: Grant content access atomically (upsert handles re-purchase after refund)
@@ -877,6 +1381,12 @@ export class PurchaseService extends BaseService {
           organizationId,
         } as const;
       });
+
+      // A duplicate payment, first delivery or replay, is refunded and pays
+      // no one: no slices, and no repair of slices it never had.
+      if (isDuplicatePayment(txResult.purchase)) {
+        return this.settleDuplicatePayment(txResult.purchase);
+      }
 
       // Step 6 (post-commit): record the slices in the payouts ledger and
       // transfer the payable ones. Out-of-transaction so a Stripe API failure
@@ -989,17 +1499,30 @@ export class PurchaseService extends BaseService {
         );
       }
 
-      // Double-purchase guard: a completed course purchase already grants a
-      // permanent entitlement, so block a second checkout (mirrors the content
-      // path's AlreadyPurchasedError guard).
-      const existing = await this.db.query.purchases.findFirst({
-        where: and(
-          eq(purchases.customerId, customerId),
-          eq(purchases.courseId, validated.courseId),
-          eq(purchases.status, PURCHASE_STATUS.COMPLETED)
-        ),
-      });
-      if (existing) {
+      // Double-purchase guard: a buyer who owns the course cannot check out
+      // for it again (purchases.md; Codex-2hxff.14). Owning is a completed
+      // purchase or a live purchase or support-grant entitlement. A course
+      // plan subscriber rents it, so they may still buy it outright.
+      const [existing, liveEntitlement] = await Promise.all([
+        this.db.query.purchases.findFirst({
+          where: and(
+            eq(purchases.customerId, customerId),
+            eq(purchases.courseId, validated.courseId),
+            eq(purchases.status, PURCHASE_STATUS.COMPLETED)
+          ),
+          columns: { id: true },
+        }),
+        this.db.query.entitlements.findFirst({
+          where: and(
+            eq(entitlements.userId, customerId),
+            eq(entitlements.courseId, validated.courseId),
+            inArray(entitlements.source, ['course_purchase', 'grant']),
+            isNull(entitlements.revokedAt)
+          ),
+          columns: { id: true },
+        }),
+      ]);
+      if (existing || liveEntitlement) {
         throw new CourseAlreadyOwnedError(validated.courseId, customerId);
       }
 
@@ -1019,66 +1542,81 @@ export class PurchaseService extends BaseService {
       // property narrowing inside the callback — same reason as the content path).
       const priceCents = course.priceCents;
 
-      const session = await withStaleCustomerRecovery(
-        { db: this.db, stripe: this.stripe },
-        {
-          userId: customerId,
-          email: user.email,
-          environment: this.environment,
-        },
-        (resolvedCustomerId) =>
-          this.stripe.checkout.sessions.create({
-            mode: 'payment',
-            payment_method_types: ['card'],
-            customer: resolvedCustomerId,
-            line_items: [
-              {
-                price_data: {
-                  currency: CURRENCY.GBP,
-                  unit_amount: priceCents,
-                  product_data: {
-                    name: course.title,
-                    description: course.lede
-                      ? course.lede.slice(0, 500)
-                      : undefined,
-                  },
-                },
-                quantity: 1,
-              },
-            ],
-            success_url: validated.successUrl,
-            cancel_url: validated.cancelUrl,
-            // `kind: 'course'` discriminates this from a content purchase at the
-            // webhook. organizationId is deliberately omitted (re-derived server
-            // side from the course row).
-            metadata: {
-              kind: 'course',
-              courseId: validated.courseId,
-              customerId,
-              courseTitle: course.title,
-              ...stripeEnvMetadata(this.environment),
-            },
-            payment_intent_data: {
-              metadata: stripeEnvMetadata(this.environment),
-            },
-            client_reference_id: customerId,
-          }),
-        {
-          onStaleRecovery: (info) =>
-            this.obs.warn(
-              'Stale users.stripe_customer_id detected; clearing and retrying',
-              { ...info, courseId: validated.courseId }
-            ),
-        }
-      );
-
-      if (!session.url) {
-        throw new PaymentProcessingError('Checkout session URL not generated', {
-          sessionId: session.id,
-        });
+      const reserved = await this.reserveCheckoutSession({
+        customerId,
+        courseId: validated.courseId,
+        amountCents: priceCents,
+      });
+      if (reserved.url && reserved.stripeSessionId) {
+        return {
+          sessionUrl: reserved.url,
+          sessionId: reserved.stripeSessionId,
+        };
       }
 
-      return { sessionUrl: session.url, sessionId: session.id };
+      return await this.createReservedSession(reserved, () =>
+        withStaleCustomerRecovery(
+          { db: this.db, stripe: this.stripe },
+          {
+            userId: customerId,
+            email: user.email,
+            environment: this.environment,
+          },
+          (resolvedCustomerId) =>
+            this.stripe.checkout.sessions.create(
+              {
+                mode: 'payment',
+                payment_method_types: ['card'],
+                customer: resolvedCustomerId,
+                line_items: [
+                  {
+                    price_data: {
+                      currency: CURRENCY.GBP,
+                      unit_amount: priceCents,
+                      product_data: {
+                        name: course.title,
+                        description: course.lede
+                          ? course.lede.slice(0, 500)
+                          : undefined,
+                      },
+                    },
+                    quantity: 1,
+                  },
+                ],
+                success_url: validated.successUrl,
+                cancel_url: validated.cancelUrl,
+                // `kind: 'course'` discriminates this from a content purchase at the
+                // webhook. organizationId is deliberately omitted (re-derived server
+                // side from the course row).
+                metadata: {
+                  kind: 'course',
+                  courseId: validated.courseId,
+                  customerId,
+                  courseTitle: course.title,
+                  ...stripeEnvMetadata(this.environment),
+                },
+                payment_intent_data: {
+                  metadata: stripeEnvMetadata(this.environment),
+                },
+                client_reference_id: customerId,
+                expires_at: toStripeTime(reserved.expiresAt),
+              },
+              {
+                idempotencyKey: checkoutIdempotencyKey(
+                  reserved,
+                  resolvedCustomerId
+                ),
+              }
+            ),
+          {
+            onStaleRecovery: (info) =>
+              this.obs.warn(
+                'Stale users.stripe_customer_id detected; clearing and retrying',
+                { ...info, courseId: validated.courseId }
+              ),
+          }
+        )
+      );
     } catch (error) {
       if (
         error instanceof CourseNotPurchasableError ||
@@ -1138,6 +1676,17 @@ export class PurchaseService extends BaseService {
           );
         }
 
+        // A second payment for a course the buyer already bought is recorded
+        // refunded and grants nothing (Codex-2hxff.14, "Block, then refund").
+        const { replay, ownerId: duplicateOf } = await this.lockForItem(
+          tx,
+          metadata.customerId,
+          { courseId: metadata.courseId },
+          stripePaymentIntentId
+        );
+        if (replay) return { purchase: replay, isNew: false } as const;
+        const isDuplicate = duplicateOf !== undefined;
+
         // Courses are ALWAYS org-owned — the org is authoritative from the row.
         const organizationId = course.organizationId;
 
@@ -1195,6 +1744,8 @@ export class PurchaseService extends BaseService {
           creatorPayoutCents: revenueSplit.creatorPayoutCents,
           agreementApplied: agreementSharePercent != null,
           source: 'course_purchase',
+          // Computed for the record; a duplicate is refunded, never paid out.
+          duplicatePayment: isDuplicate,
         });
 
         if (
@@ -1223,13 +1774,13 @@ export class PurchaseService extends BaseService {
             amountPaidCents: metadata.amountPaidCents,
             currency: metadata.currency || CURRENCY.GBP,
             stripePaymentIntentId,
-            status: PURCHASE_STATUS.COMPLETED,
             purchasedAt,
             platformFeeCents: revenueSplit.platformFeeCents,
             organizationFeeCents: revenueSplit.organizationFeeCents,
             creatorPayoutCents: revenueSplit.creatorPayoutCents,
             platformAgreementId: null,
             creatorOrgAgreementId: null,
+            ...purchaseOutcomeFields(duplicateOf),
           })
           .returning();
 
@@ -1237,6 +1788,11 @@ export class PurchaseService extends BaseService {
           throw new PaymentProcessingError('Failed to create purchase record', {
             stripePaymentIntentId,
           });
+        }
+
+        // A duplicate grants nothing and pays no one; refunded post-commit.
+        if (isDuplicate) {
+          return { purchase, isNew: false } as const;
         }
 
         // Grant the course entitlement (the resolver's READ target) + auto-enroll,
@@ -1256,6 +1812,11 @@ export class PurchaseService extends BaseService {
           organizationId,
         } as const;
       });
+
+      // A duplicate payment, first delivery or replay: refund it, pay no one.
+      if (isDuplicatePayment(txResult.purchase)) {
+        return this.settleDuplicatePayment(txResult.purchase);
+      }
 
       // Post-commit payouts — REUSE the Option-B fan-out verbatim. A course
       // purchase row carries a `courseId` target; `writePurchasePayouts` only
@@ -1875,25 +2436,38 @@ export class PurchaseService extends BaseService {
     );
 
     try {
-      const [inserted] = await this.db
-        .insert(purchases)
-        .values({
+      // Under the same lock as completion (Codex-2hxff.14), so a rebuild and
+      // a completion of the buyer's other payment for the item cannot both
+      // write a completed purchase. A buyer who already owns the item paid
+      // twice: this one is rebuilt as the duplicate it is.
+      return await this.db.transaction(async (tx) => {
+        const { replay, ownerId } = await this.lockForItem(
+          tx,
           customerId,
-          contentId,
-          organizationId,
-          amountPaidCents,
-          currency: CURRENCY.GBP,
-          stripePaymentIntentId: paymentIntentId,
-          status: PURCHASE_STATUS.COMPLETED,
-          purchasedAt: new Date(),
-          platformFeeCents: split.platformFeeCents,
-          organizationFeeCents: split.organizationFeeCents,
-          creatorPayoutCents: split.creatorPayoutCents,
-        })
-        .returning();
-      // `.returning()` always yields the inserted row here; `?? null` only
-      // satisfies the array-index `| undefined` that TS infers.
-      return inserted ?? null;
+          { contentId },
+          paymentIntentId
+        );
+        if (replay) return replay;
+        const [inserted] = await tx
+          .insert(purchases)
+          .values({
+            customerId,
+            contentId,
+            organizationId,
+            amountPaidCents,
+            currency: CURRENCY.GBP,
+            stripePaymentIntentId: paymentIntentId,
+            purchasedAt: new Date(),
+            platformFeeCents: split.platformFeeCents,
+            organizationFeeCents: split.organizationFeeCents,
+            creatorPayoutCents: split.creatorPayoutCents,
+            ...purchaseOutcomeFields(ownerId),
+          })
+          .returning();
+        // `.returning()` always yields the inserted row here; `?? null` only
+        // satisfies the array-index `| undefined` that TS infers.
+        return inserted ?? null;
+      });
     } catch (error) {
       if (isUniqueViolation(error)) {
         // Concurrent completePurchase / self-heal raced us to insert — re-select.
@@ -1939,7 +2513,16 @@ export class PurchaseService extends BaseService {
       refundAmountCents?: number;
       refundReason?: string;
     }
-  ): Promise<{ userId: string; accessEnded: boolean } | undefined> {
+  ): Promise<
+    | {
+        userId: string;
+        accessEnded: boolean;
+        duplicatePayment: boolean;
+        /** The item's title, for the refund email (charges carry none). */
+        itemTitle: string | null;
+      }
+    | undefined
+  > {
     try {
       // Self-heal ordering race #4 (Codex-aa08z): if charge.refunded beat
       // checkout.session.completed, the row won't exist yet — rebuild it from
@@ -1961,7 +2544,14 @@ export class PurchaseService extends BaseService {
         });
         // The purchase is recorded; the clawback is not gated by it.
         await this.clawBackRefunds(purchase.id, refundDetails.charge);
-        return { userId: purchase.customerId, accessEnded: true };
+        // A duplicate payment's buyer keeps the item through their first
+        // purchase, and so does anyone who bought it again (Codex-2hxff.14).
+        return {
+          userId: purchase.customerId,
+          accessEnded: !(await this.keepsItemElsewhere(this.db, purchase)),
+          duplicatePayment: isDuplicatePayment(purchase),
+          itemTitle: await this.itemTitle(purchase),
+        };
       }
 
       const refundedCents =
@@ -1990,7 +2580,9 @@ export class PurchaseService extends BaseService {
               )
             )
           );
-      } else {
+      }
+      let keptElsewhere = false;
+      if (isFull) {
         // Atomically update purchase status AND revoke content access
         await this.db.transaction(async (tx) => {
           // Update purchase status to refunded with tracking fields
@@ -2004,8 +2596,12 @@ export class PurchaseService extends BaseService {
             .where(eq(purchases.id, purchase.id));
 
           // Revoke content access (soft delete) — content purchases only. Course
-          // purchases grant no contentAccess row (they use entitlements).
-          if (purchase.contentId) {
+          // purchases grant no contentAccess row (they use entitlements). The
+          // row is per buyer and item, shared by every purchase of it, so it
+          // stays while another completed purchase still grants it
+          // (Codex-2hxff.14).
+          keptElsewhere = await this.keepsItemElsewhere(tx, purchase);
+          if (purchase.contentId && !keptElsewhere) {
             await tx
               .update(contentAccess)
               .set({ deletedAt: new Date() })
@@ -2047,14 +2643,19 @@ export class PurchaseService extends BaseService {
         customerId: purchase.customerId,
         paymentIntentId,
         refundedCents,
-        accessEnded: isFull,
+        accessEnded: isFull && !keptElsewhere,
       });
 
       // Return the purchaser's userId so the webhook route can bump
       // COLLECTION_USER_LIBRARY — refunded content disappears from the
       // user's library on their next fetch. No orgId: one-time purchases
       // are content-scoped, not org-scoped, so only the library cache bumps.
-      return { userId: purchase.customerId, accessEnded: isFull };
+      return {
+        userId: purchase.customerId,
+        accessEnded: isFull && !keptElsewhere,
+        duplicatePayment: isDuplicatePayment(purchase),
+        itemTitle: await this.itemTitle(purchase),
+      };
     } catch (error) {
       this.handleError(error, 'processRefund');
     }
@@ -2252,7 +2853,19 @@ export class PurchaseService extends BaseService {
       stripeDisputeId?: string;
       disputeReason?: string;
     }
-  ): Promise<{ userId: string; orgId: string | null } | undefined> {
+  ): Promise<
+    | {
+        userId: string;
+        orgId: string | null;
+        /**
+         * False when the buyer keeps the item through another purchase (a
+         * dispute of a duplicate payment, say): the caller then writes no
+         * org-wide streaming block (Codex-2hxff.14).
+         */
+        accessEnded: boolean;
+      }
+    | undefined
+  > {
     try {
       const purchase = await this.db.query.purchases.findFirst({
         where: eq(purchases.stripePaymentIntentId, paymentIntentId),
@@ -2273,10 +2886,12 @@ export class PurchaseService extends BaseService {
         return {
           userId: purchase.customerId,
           orgId: purchase.organizationId,
+          accessEnded: !(await this.keepsItemElsewhere(this.db, purchase)),
         };
       }
 
       // Atomically mark the purchase as disputed AND revoke content access.
+      let keptElsewhere = false;
       await this.db.transaction(async (tx) => {
         await tx
           .update(purchases)
@@ -2289,7 +2904,10 @@ export class PurchaseService extends BaseService {
           .where(eq(purchases.id, purchase.id));
 
         // Content purchases only — course purchases grant no contentAccess row.
-        if (purchase.contentId) {
+        // The row is shared by every purchase of the item, so it stays while
+        // another completed purchase still grants it (Codex-2hxff.14).
+        keptElsewhere = await this.keepsItemElsewhere(tx, purchase);
+        if (purchase.contentId && !keptElsewhere) {
           await tx
             .update(contentAccess)
             .set({ deletedAt: new Date() })
@@ -2323,11 +2941,13 @@ export class PurchaseService extends BaseService {
         organizationId: purchase.organizationId,
         paymentIntentId,
         stripeDisputeId: disputeDetails?.stripeDisputeId,
+        accessEnded: !keptElsewhere,
       });
 
       return {
         userId: purchase.customerId,
         orgId: purchase.organizationId,
+        accessEnded: !keptElsewhere,
       };
     } catch (error) {
       this.handleError(error, 'processDispute');
@@ -2490,15 +3110,22 @@ export class PurchaseService extends BaseService {
   async processLostDispute(
     paymentIntentId: string,
     disputedCents: number
-  ): Promise<{ userId: string; orgId: string | null } | undefined> {
+  ): Promise<
+    { userId: string; orgId: string | null; accessEnded: boolean } | undefined
+  > {
     try {
       const purchase = await this.db.query.purchases.findFirst({
         where: eq(purchases.stripePaymentIntentId, paymentIntentId),
       });
       if (!purchase) return undefined;
+      // A buyer who keeps the item through another purchase (the lost dispute
+      // was of a duplicate payment) keeps its access row and gets no
+      // org-wide streaming block (Codex-2hxff.14).
+      const keptElsewhere = await this.keepsItemElsewhere(this.db, purchase);
       const scope = {
         userId: purchase.customerId,
         orgId: purchase.organizationId,
+        accessEnded: !keptElsewhere,
       };
       if (purchase.status === PURCHASE_STATUS.REFUNDED) return scope;
 
@@ -2517,7 +3144,8 @@ export class PurchaseService extends BaseService {
           })
           .where(eq(purchases.id, purchase.id));
         // Revoked when the dispute opened; again here, in case it never was.
-        if (purchase.contentId) {
+        // Not while another completed purchase still grants it.
+        if (purchase.contentId && !keptElsewhere) {
           await tx
             .update(contentAccess)
             .set({ deletedAt: now })
@@ -2941,7 +3569,13 @@ export class PurchaseService extends BaseService {
     // shaped (contentTitle/contentSlug). Scope to content purchases so the
     // `content` join is always present; course sales get their own reporting
     // surface (WP-7) rather than being force-fit into the content columns.
-    const conditions = [...scope, isNotNull(purchases.contentId)];
+    // A duplicate payment is no sale: it is refunded and pays no one
+    // (Codex-2hxff.14).
+    const conditions = [
+      ...scope,
+      isNotNull(purchases.contentId),
+      isNull(purchases.duplicateOfPurchaseId),
+    ];
 
     if (validated.status === 'disputed') {
       conditions.push(isNotNull(purchases.disputedAt));
@@ -3046,10 +3680,12 @@ export class PurchaseService extends BaseService {
     validated: SalesStatsQueryInput
   ): Promise<SalesStats> {
     // Content-only, to match the ledger (course sales report separately, WP-7)
-    // so the header tiles and the table below them agree.
+    // so the header tiles and the table below them agree. Duplicate payments
+    // are excluded there too: refunded, they would inflate gross and refunds.
     const conditions = [
       ...scope,
       isNotNull(purchases.contentId),
+      isNull(purchases.duplicateOfPurchaseId),
       ...purchaseDateWindow(validated.fromDate, validated.toDate),
     ];
 

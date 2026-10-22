@@ -46,7 +46,7 @@ service.setCache(cache); // Optional: inject VersionedCache for invalidation
 | Method | Signature | Notes |
 |---|---|---|
 | `listAllContent` | `(organizationId: string, options?)` | Paginated. Optional `status` filter. Returns `AdminContentItem` with creator info. |
-| `publishContent` | `(contentId: string, organizationId: string)` | Transaction. Admin publish bypass (does NOT require media ready). |
+| `publishContent` | `(contentId: string, organizationId: string)` | Transaction. Video and audio need ready media, as for a creator's publish. Content that earns money (`requiresPayoutsToPublish`) still needs its creator payout-ready — else this package's `CreatorPayoutsRequiredError`, a twin of `@codex/content`'s with the same message and code. |
 | `unpublishContent` | `(contentId: string, organizationId: string)` | Transaction. Returns to draft. |
 | `deleteContent` | `(contentId: string, organizationId: string)` | Transaction. Soft delete. |
 
@@ -76,7 +76,7 @@ A comp is never a `purchases` row, so it never inflates purchase counts or reven
 
 - **MUST** scope ALL queries by `organizationId` — admin sees one org at a time
 - **MUST** require `platform_owner` role for all admin-api endpoints (enforced in the worker, not the service)
-- `publishContent()` bypasses the media-ready check — this is intentional for admin override capability
+- `publishContent()` checks media readiness and the creator's payouts, as a creator's publish does. It is scoped to the organisation, not the creator, so an admin can publish any of the organisation's content
 - Organization existence is validated by middleware (via org membership FK), not inside service methods
 
 ## Integration

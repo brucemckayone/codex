@@ -96,6 +96,7 @@ export {
   BusinessLogicError,
   ConflictError,
   ContentNotGrantableError,
+  CreatorPayoutsRequiredError,
   ForbiddenError,
   InternalServiceError,
   isAdminServiceError,

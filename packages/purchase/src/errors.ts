@@ -69,7 +69,8 @@ export class ContentNotPurchasableError extends BusinessLogicError {
       | 'not_published'
       | 'deleted'
       | 'no_price'
-      | 'below_minimum_price',
+      | 'below_minimum_price'
+      | 'not_sold_separately',
     context?: Record<string, unknown>
   ) {
     const messages = {
@@ -79,6 +80,9 @@ export class ContentNotPurchasableError extends BusinessLogicError {
       no_price: 'Content does not have a price set',
       below_minimum_price:
         'Content is priced below the £1.00 minimum, so it cannot be sold',
+      // Not marked purchasable, or a purchase would not open it: course-only,
+      // team-only, followers-only, or orgless with a tier (Codex-2hxff.14).
+      not_sold_separately: 'This content is not sold on its own',
     };
 
     super(messages[reason], {

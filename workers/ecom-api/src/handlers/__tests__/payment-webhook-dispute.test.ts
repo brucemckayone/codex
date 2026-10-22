@@ -260,6 +260,7 @@ describe('handlePaymentWebhook — disputes', () => {
     purchase.processDispute?.mockResolvedValueOnce({
       userId: 'user_disp',
       orgId: 'org_disp',
+      accessEnded: true,
     });
     const bundle = buildContext();
 
@@ -287,6 +288,30 @@ describe('handlePaymentWebhook — disputes', () => {
       charge
     );
     expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+  });
+
+  it('a chargeback on an item the buyer keeps (a duplicate payment) bumps the library but writes no org-wide block (Codex-2hxff.14)', async () => {
+    purchase.processDispute?.mockResolvedValueOnce({
+      userId: 'user_kept',
+      orgId: 'org_kept',
+      accessEnded: false,
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createDisputeEvent(),
+      mockStripe,
+      bundle.context
+    );
+    await drainWaitUntil(bundle);
+
+    expect(invalidateForUser).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      expect.objectContaining({ userId: 'user_kept' }),
+      expect.anything()
+    );
+    expect(mockRevoke).not.toHaveBeenCalled();
   });
 
   it('the RECORDED status is acted on: a stale "opened" event after the dispute was won takes the won path', async () => {
@@ -378,6 +403,7 @@ describe('handlePaymentWebhook — disputes', () => {
     purchase.processLostDispute?.mockResolvedValueOnce({
       userId: 'user_lost',
       orgId: 'org_lost',
+      accessEnded: true,
     });
     const bundle = buildContext();
 
@@ -532,6 +558,7 @@ describe('handlePaymentWebhook — disputes', () => {
     purchase.processDispute?.mockResolvedValueOnce({
       userId: 'user_fire',
       orgId: 'org_fire',
+      accessEnded: true,
     });
     mockRevoke.mockRejectedValueOnce(new Error('KV unreachable'));
     const bundle = buildContext();

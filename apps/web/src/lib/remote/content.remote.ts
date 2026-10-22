@@ -18,6 +18,7 @@ import {
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
+import { forwardClientErrors } from '$lib/server/forward-client-errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Content List Query
@@ -335,11 +336,15 @@ export const deleteContent = command(z.string().uuid(), async (id) => {
  *
  * Calls POST /api/content/:id/publish. The backend enforces business rules
  * (e.g., media must be ready for video/audio content before publishing).
+ *
+ * A refusal the creator can act on keeps its message, such as "Set up payouts
+ * before publishing…" (Codex-2hxff.14): a bare `ApiError` would read "An
+ * unexpected error occurred" in production. A 5xx stays sanitised.
  */
 export const publishContent = command(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.content.publish(id);
+  return forwardClientErrors(() => api.content.publish(id));
 });
 
 /**
@@ -350,7 +355,7 @@ export const publishContent = command(z.string().uuid(), async (id) => {
 export const unpublishContent = command(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.content.unpublish(id);
+  return forwardClientErrors(() => api.content.unpublish(id));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

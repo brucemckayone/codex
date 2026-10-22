@@ -50,6 +50,7 @@ import {
 import {
   ConnectAccountNotReadyError,
   CourseSubscriptionPlanExistsError,
+  CreatorConnectRequiredError,
 } from '../../errors';
 import { CourseSubscriptionService } from '../course-subscription-service';
 
@@ -460,6 +461,67 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
     expect(relisted.id).toBe(plan.id);
     expect(relisted.isActive).toBe(true);
     expect(await service.getPlanForCourse(courseId)).not.toBeNull();
+  });
+
+  // A live course takes a new way to pay only if its CREATOR can be paid, as
+  // publishing a priced course does (Codex-2hxff.14, "Yes, same rule"). The
+  // org's account is ready in all three; the creator has none.
+  describe('9. a live course whose creator cannot be paid', () => {
+    it('is refused a plan, and nothing is created at Stripe', async () => {
+      const [unpaidCreator] = await seedTestUsers(db, 1);
+      const courseId = await newCourse(orgId, unpaidCreator);
+      spies.products.create.mockClear();
+
+      await expect(
+        service.upsertPlan(orgId, courseId, {
+          priceMonthly: 800,
+          priceAnnual: 8000,
+        })
+      ).rejects.toBeInstanceOf(CreatorConnectRequiredError);
+      expect(spies.products.create).not.toHaveBeenCalled();
+      expect(await planRows(courseId)).toHaveLength(0);
+    });
+
+    it('a draft may take one: publishing is checked when it goes live', async () => {
+      const [unpaidCreator] = await seedTestUsers(db, 1);
+      const courseId = await newCourse(orgId, unpaidCreator);
+      await db
+        .update(courses)
+        .set({ status: 'draft' })
+        .where(eq(courses.id, courseId));
+
+      const plan = await service.upsertPlan(orgId, courseId, {
+        priceMonthly: 800,
+        priceAnnual: 8000,
+      });
+      expect(plan.isActive).toBe(true);
+    });
+
+    it('a withdrawn plan is not put back on sale', async () => {
+      const [unpaidCreator] = await seedTestUsers(db, 1);
+      const courseId = await newCourse(orgId, unpaidCreator);
+      await db
+        .update(courses)
+        .set({ status: 'draft' })
+        .where(eq(courses.id, courseId));
+      await service.upsertPlan(orgId, courseId, {
+        priceMonthly: 800,
+        priceAnnual: 8000,
+      });
+      await service.deactivatePlan(orgId, courseId);
+      await db
+        .update(courses)
+        .set({ status: 'published' })
+        .where(eq(courses.id, courseId));
+
+      await expect(
+        service.upsertPlan(orgId, courseId, {
+          priceMonthly: 800,
+          priceAnnual: 8000,
+        })
+      ).rejects.toBeInstanceOf(CreatorConnectRequiredError);
+      expect(await service.getPlanForCourse(courseId)).toBeNull();
+    });
   });
 
   afterAll(async () => {

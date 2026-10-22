@@ -33,7 +33,6 @@ fixed by PR 2 below. The production checks to run around these releases
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
 | `Codex-2hxff.13` | P2 | Pending money is released as soon as the payee becomes payable | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
-| `Codex-2hxff.14` | P1 | Checkout only for content a purchase can unlock; no double purchases | [purchases](purchases.md#checkout) |
 | `Codex-2hxff.15` | P1 | Our subscription row always follows Stripe; duplicates are cancelled and refunded | [subscriptions](subscriptions.md#lifecycle-and-access) |
 | `Codex-2hxff.16` | P2 | Downgrades at period end; tier reorders warn first | [subscriptions](subscriptions.md#changing-tier) |
 | `Codex-2hxff.19` | P2 | One agreement resolver for every payment path | [agreements](agreements.md#how-a-share-applies) |
@@ -142,6 +141,7 @@ option chosen. All dated 2026-10-13 unless noted.
 | Agreements (2026-05-17) | One-off sales use only the uploading creator's agreement; the creator's share is fixed at acceptance while the platform fee is read at each sale; no pro-rating — whoever is active at the invoice gets its full share |
 | Cancellation (2026-04-21) | Cancelling keeps access until the end of the paid period |
 | Free offers | "We don't do free journeys." — a £0 price is refused |
+| Checkout (2026-10-21/22, `Codex-2hxff.14`) | Paying twice: "Block, then refund". Session expiry: "30 minutes". Checkout only for items a purchase opens; any priced item, courses included ("Yes, same rule"), needs payouts to publish; only a paid session completes. A priced course-only item shows a "Part of a course" note instead of Buy |
 
 The customer webhook endpoint was disabled on 2026-10-13 after the owner asked
 whether it had a purpose: it has no handler, and stale customers already

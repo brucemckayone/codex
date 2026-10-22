@@ -105,6 +105,10 @@ import {
   or,
   sql,
 } from 'drizzle-orm';
+import {
+  assertCourseCreatorCanBePaid,
+  courseEarnsMoney,
+} from './course-payouts';
 import { pageRevision } from './page-revision';
 import { resolvePracticeThumbnail } from './practice-thumbnail';
 
@@ -2371,6 +2375,15 @@ export class CourseJourneyService extends BaseService {
    * page would then claim a subject whose status/slug it cannot govern, which is
    * the divergence this method exists to close, so it throws (mirrors
    * {@link updateJourneyOffer}'s zero-row guard) and rolls the save back.
+   *
+   * PAYOUTS (Codex-2hxff.14) — this is the one place a course goes live, so a
+   * course that earns money (`courseEarnsMoney`) is refused here with
+   * `CreatorPayoutsRequiredError` unless its creator can be paid, rolling the
+   * page save back with it. Only the move INTO published is checked: every
+   * autosave of a live page re-sends `published`, and it must not start failing
+   * because the creator's payouts lapsed afterwards. A price or tier added to a
+   * course that is already live is refused where it is written
+   * ({@link updateJourneyOffer}, `CourseAccessService.setTierAccess`).
    */
   private async cascadeCourseFromPage(
     tx: Parameters<Parameters<typeof this.txDb.transaction>[0]>[0],
@@ -2402,6 +2415,35 @@ export class CourseJourneyService extends BaseService {
         )
         .limit(1);
       if (otherLivePage) courseStatus = CONTENT_STATUS.PUBLISHED;
+    }
+
+    if (courseStatus === CONTENT_STATUS.PUBLISHED) {
+      const [course] = await tx
+        .select({
+          status: courses.status,
+          creatorId: courses.creatorId,
+          priceCents: courses.priceCents,
+        })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.id, input.courseId),
+            eq(courses.organizationId, input.organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        .limit(1);
+      // A missing course falls through to the zero-row guard below.
+      if (
+        course &&
+        course.status !== CONTENT_STATUS.PUBLISHED &&
+        (await courseEarnsMoney(tx, input.organizationId, {
+          id: input.courseId,
+          priceCents: course.priceCents,
+        }))
+      ) {
+        await assertCourseCreatorCanBePaid(tx, course.creatorId);
+      }
     }
 
     const updated = await tx
@@ -2451,6 +2493,12 @@ export class CourseJourneyService extends BaseService {
    * transaction: a soft-deleted or foreign course would make the price update
    * match zero rows, re-opening the very divergence this method closes, so it
    * throws instead.
+   *
+   * A one-off price set or changed on a course that is already LIVE needs its
+   * creator to be payable (Codex-2hxff.14), as publishing a priced course does
+   * ({@link cascadeCourseFromPage}) — else the whole write is refused with
+   * `CreatorPayoutsRequiredError`. Turning the price off, or leaving it as it
+   * is, is never refused, and a draft is left to the publish check.
    *
    * @returns the persisted offer (the caller's saved baseline).
    */
@@ -2529,11 +2577,37 @@ export class CourseJourneyService extends BaseService {
           );
 
         if (isCoursePage && existing.subjectId) {
+          const nextPriceCents = offer.oneOffEnabled
+            ? offer.oneOffPriceCents
+            : null;
+
+          const [course] = await tx
+            .select({
+              status: courses.status,
+              creatorId: courses.creatorId,
+              priceCents: courses.priceCents,
+            })
+            .from(courses)
+            .where(
+              and(
+                eq(courses.id, existing.subjectId),
+                eq(courses.organizationId, organizationId),
+                isNull(courses.deletedAt)
+              )
+            )
+            .limit(1);
+          // A missing course falls through to the zero-row guard below.
+          if (
+            course?.status === CONTENT_STATUS.PUBLISHED &&
+            (nextPriceCents ?? 0) > 0 &&
+            nextPriceCents !== course.priceCents
+          ) {
+            await assertCourseCreatorCanBePaid(tx, course.creatorId);
+          }
+
           const updated = await tx
             .update(courses)
-            .set({
-              priceCents: offer.oneOffEnabled ? offer.oneOffPriceCents : null,
-            })
+            .set({ priceCents: nextPriceCents })
             .where(
               and(
                 eq(courses.id, existing.subjectId),

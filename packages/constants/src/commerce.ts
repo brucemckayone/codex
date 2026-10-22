@@ -108,6 +108,25 @@ export const PURCHASE_STATUS = {
   REFUNDED: 'refunded',
 } as const;
 
+/** `checkout_sessions.status` (Codex-2hxff.14). */
+export const CHECKOUT_SESSION_STATUS = {
+  OPEN: 'open',
+  COMPLETED: 'completed',
+  EXPIRED: 'expired',
+} as const;
+
+export const CHECKOUT_SESSION_TIMING = {
+  /** How long a buyer has to pay (owner decision 2026-10-21, "30 minutes"). */
+  TTL_MS: 30 * 60 * 1000,
+  /**
+   * Added to the expiry sent to Stripe, which must be at least 30 minutes
+   * after ITS creation time; ours is computed a moment earlier.
+   */
+  STRIPE_FLOOR_SLACK_MS: 60 * 1000,
+  /** An open session with less left than this is replaced, not reused. */
+  MIN_REMAINING_TO_REUSE_MS: 5 * 60 * 1000,
+} as const;
+
 export const SUBSCRIPTION_STATUS = {
   ACTIVE: 'active',
   PAST_DUE: 'past_due',

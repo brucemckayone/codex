@@ -128,6 +128,24 @@ describe('AdminCustomerManagementService', () => {
           .returning()
       );
 
+      // Customer 1's second purchase is of another item: a buyer holds at
+      // most one completed purchase per item (Codex-2hxff.14).
+      const otherContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            title: 'Customer Test Content 2',
+            slug: createUniqueSlug('customer-list-test-2'),
+            contentType: 'written',
+            contentBody: 'Body',
+            status: 'published',
+            priceCents: 1000,
+          })
+          .returning()
+      );
+
       // Customer 1: 2 purchases totaling $20
       await db.insert(purchases).values([
         {
@@ -144,7 +162,7 @@ describe('AdminCustomerManagementService', () => {
         },
         {
           customerId: customer1,
-          contentId: testContent.id,
+          contentId: otherContent.id,
           organizationId: testOrg.id,
           amountPaidCents: 1000,
           platformFeeCents: 100,

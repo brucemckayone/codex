@@ -10,9 +10,13 @@
  *   - access with nothing to play → a plain note, no lock, no purchase copy;
  *   - a FAILED check → "couldn't check your access", and no purchase gate;
  *   - a real lock → copy that names the real reason, purchase only when paid.
+ *
+ * And Buy is offered only when a purchase would open the item (Codex-2hxff.14):
+ * `canBeSold`, not a price alone, decides it, on the page and in the preview.
  */
 
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { PRICE_LIMITS } from '@codex/constants';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   createRawSnippet,
   flushSync,
@@ -25,7 +29,15 @@ vi.mock('$app/state', () => ({
 }));
 vi.mock('$app/navigation', () => ({ invalidate: vi.fn() }));
 vi.mock('$lib/remote/org.remote', () => ({ followOrganization: vi.fn() }));
-vi.mock('$lib/remote/checkout.remote', () => ({}));
+vi.mock('$lib/remote/checkout.remote', async () => {
+  const { createFakeRemoteForm } = await import(
+    '$tests/utils/fake-remote-form.svelte'
+  );
+  return { createCheckout: createFakeRemoteForm() };
+});
+vi.mock('$lib/components/VideoPlayer/hls', () => ({
+  createHlsPlayer: vi.fn(async () => ({ hls: null, cleanup: () => {} })),
+}));
 vi.mock('$lib/remote/subscription.remote', () => ({
   reactivateSubscription: vi.fn(),
 }));
@@ -60,12 +72,18 @@ function makeContent(overrides: Record<string, unknown> = {}): Content {
     description: 'A gentle start.',
     organizationId: 'org-1',
     priceCents: 0,
+    isPurchasable: false,
+    courseOnly: false,
+    includedInTierId: null,
     isFollowerGated: false,
     isTeamOnly: false,
     mediaItem: { id: 'm1', durationSeconds: 754, thumbnailUrl: null },
     ...overrides,
   } as unknown as Content;
 }
+
+/** Marked for sale at a price checkout accepts. */
+const SELLABLE = { isPurchasable: true, priceCents: 900 };
 
 let component: ReturnType<typeof mount> | null = null;
 
@@ -189,7 +207,7 @@ describe('a failed access check', () => {
 
 describe('a real lock names its real reason', () => {
   test('paid content still says purchase, with the purchase gate', () => {
-    render({ content: makeContent({ priceCents: 900 }), hasAccess: false });
+    render({ content: makeContent(SELLABLE), hasAccess: false });
     expect(player().textContent).toContain('Purchase to watch');
     expect(document.getElementById('purchase-label-buy')).not.toBeNull();
     expect(document.querySelector(`.${PURCHASE_FORM}`)).not.toBeNull();
@@ -228,6 +246,186 @@ describe('a real lock names its real reason', () => {
     render({ content: makeContent(), hasAccess: false });
     expect(player().textContent).toContain('Access required');
     expect(player().textContent).not.toContain('Purchase to watch');
+  });
+});
+
+describe('Buy only when a purchase opens the item (Codex-2hxff.14)', () => {
+  const buyGate = () => document.getElementById('purchase-label-buy');
+  const purchaseForm = () => document.querySelector(`.${PURCHASE_FORM}`);
+
+  test('a price the seller has not put on sale offers no Buy', () => {
+    render({ content: makeContent({ priceCents: 900 }), hasAccess: false });
+    expect(buyGate()).toBeNull();
+    expect(purchaseForm()).toBeNull();
+    expect(player().textContent).toContain('Access required');
+    expect(player().textContent).not.toContain('Purchase to watch');
+  });
+
+  test('a price below the checkout minimum offers no Buy', () => {
+    render({
+      content: makeContent({
+        ...SELLABLE,
+        priceCents: PRICE_LIMITS.MIN_CENTS - 1,
+      }),
+      hasAccess: false,
+    });
+    expect(buyGate()).toBeNull();
+    expect(purchaseForm()).toBeNull();
+  });
+
+  test('a priced course-only item shows the course note in place of Buy', () => {
+    render({
+      content: makeContent({ ...SELLABLE, courseOnly: true }),
+      hasAccess: false,
+    });
+    const title = document.getElementById('purchase-label-course');
+    const gate = title?.closest('section');
+    // Same markup as the team-only note: a title and a line, no link.
+    expect(gate).toHaveClass('content-detail__purchase');
+    expect(title).toHaveClass('content-detail__price-amount');
+    expect(title?.textContent).toBe('Part of a course');
+    expect(
+      gate?.querySelector('.content-detail__price-label')?.textContent
+    ).toBe('This lesson is available to people enrolled in its course.');
+    expect(gate?.querySelector('a, button, form')).toBeNull();
+    expect(buyGate()).toBeNull();
+    expect(purchaseForm()).toBeNull();
+    expect(player().textContent).toContain('Part of a course');
+    expect(bodyText()).not.toContain('Purchase to watch');
+  });
+
+  test('an enrolled viewer sees no course note', () => {
+    render({
+      content: makeContent({ ...SELLABLE, courseOnly: true }),
+      hasAccess: true,
+    });
+    expect(document.getElementById('purchase-label-course')).toBeNull();
+    expect(purchaseForm()).toBeNull();
+  });
+
+  test('team-only content keeps its note and offers no Buy', () => {
+    render({
+      content: makeContent({ ...SELLABLE, isTeamOnly: true }),
+      hasAccess: false,
+    });
+    expect(document.getElementById('purchase-label-team')).not.toBeNull();
+    expect(buyGate()).toBeNull();
+    expect(purchaseForm()).toBeNull();
+  });
+
+  test('followers-only content keeps its follow gate and offers no Buy', () => {
+    render({
+      content: makeContent({ ...SELLABLE, isFollowerGated: true }),
+      hasAccess: false,
+    });
+    expect(document.getElementById('purchase-label-followers')).not.toBeNull();
+    expect(buyGate()).toBeNull();
+    expect(purchaseForm()).toBeNull();
+  });
+
+  describe('beside a subscription', () => {
+    const tierGated = { requiresSubscription: true, hasSubscription: false };
+
+    test('tier content that is also on sale offers the purchase', () => {
+      render({
+        content: makeContent({ ...SELLABLE, includedInTierId: 'tier-1' }),
+        hasAccess: false,
+        ...tierGated,
+      });
+      expect(bodyText()).toContain('or purchase for');
+      expect(purchaseForm()).not.toBeNull();
+    });
+
+    test('tier content with a price but not on sale offers no purchase', () => {
+      render({
+        content: makeContent({ priceCents: 900, includedInTierId: 'tier-1' }),
+        hasAccess: false,
+        ...tierGated,
+      });
+      expect(document.getElementById('purchase-label-sub')).not.toBeNull();
+      expect(bodyText()).not.toContain('or purchase for');
+      expect(purchaseForm()).toBeNull();
+    });
+
+    test('orgless tier content, which no purchase opens, offers no purchase', () => {
+      render({
+        content: makeContent({
+          ...SELLABLE,
+          organizationId: null,
+          includedInTierId: 'tier-1',
+        }),
+        hasAccess: false,
+        ...tierGated,
+      });
+      expect(bodyText()).not.toContain('or purchase for');
+      expect(purchaseForm()).toBeNull();
+    });
+  });
+
+  describe('in the preview player', () => {
+    const PREVIEW_URL = 'https://cdn.example.test/c1/preview/master.m3u8';
+    let playSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+    // The view autoplays the preview, and jsdom's play() returns nothing, so
+    // the player's `.catch` throws and it renders its error state instead of
+    // the video. Resolve it, so the overlay these tests read is really there.
+    beforeEach(() => {
+      playSpy = vi
+        .spyOn(HTMLMediaElement.prototype, 'play')
+        .mockResolvedValue(undefined);
+    });
+    afterEach(() => {
+      playSpy?.mockRestore();
+      playSpy = null;
+    });
+
+    function withPreview(overrides: Record<string, unknown>): Content {
+      return makeContent({
+        mediaItem: {
+          id: 'm1',
+          durationSeconds: 754,
+          thumbnailUrl: null,
+          hlsPreviewUrl: PREVIEW_URL,
+        },
+        ...overrides,
+      });
+    }
+
+    /** Let the player's async init settle, then play the clip to its end. */
+    async function endPreview(): Promise<HTMLElement> {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const video = document.querySelector('.preview-player video');
+      if (!video) throw new Error('no preview video rendered');
+      video.dispatchEvent(new Event('ended'));
+      flushSync();
+      const overlay = document.querySelector<HTMLElement>(
+        '.preview-player__overlay'
+      );
+      if (!overlay) throw new Error('no preview overlay rendered');
+      expect(overlay.textContent).toContain('Preview ended');
+      return overlay;
+    }
+
+    test('sellable content is offered for sale when the preview ends', async () => {
+      render({ content: withPreview(SELLABLE), hasAccess: false });
+      const overlay = await endPreview();
+      expect(overlay.querySelector('form')).not.toBeNull();
+    });
+
+    test.each([
+      ['course-only', { courseOnly: true }],
+      ['team-only', { isTeamOnly: true }],
+      ['followers-only', { isFollowerGated: true }],
+      ['not on sale', { isPurchasable: false }],
+    ])('%s content is not offered for sale when the preview ends', async (_label, flags) => {
+      render({
+        content: withPreview({ ...SELLABLE, ...flags }),
+        hasAccess: false,
+      });
+      const overlay = await endPreview();
+      expect(overlay.querySelector('form')).toBeNull();
+      expect(overlay.textContent).not.toContain('Purchase to Watch');
+    });
   });
 });
 

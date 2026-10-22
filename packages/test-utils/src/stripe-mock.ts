@@ -148,6 +148,11 @@ export function createMockStripe(): Stripe {
             url: `https://checkout.stripe.com/pay/${id}`,
           };
         }),
+        // An open session replaced by a new one (Codex-2hxff.14).
+        expire: vi.fn().mockImplementation(async (id: string) => ({
+          id,
+          status: 'expired',
+        })),
       },
     },
 
@@ -356,6 +361,12 @@ export function createMockStripe(): Stripe {
         object: 'list',
         data: [],
         has_more: false,
+      })),
+      // issueRefund (@codex/payments, Codex-2hxff.14): a refund Stripe made.
+      create: vi.fn().mockImplementation(async () => ({
+        id: nextId('re'),
+        object: 'refund',
+        status: 'succeeded',
       })),
     },
   };

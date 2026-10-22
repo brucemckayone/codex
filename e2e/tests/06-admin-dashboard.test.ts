@@ -208,6 +208,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin.organization.id,
               accessType: 'paid',
               priceCents: 2999, // $29.99
+              isPurchasable: true,
             },
           }
         );
@@ -370,6 +371,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin1.organization.id, // Admin1's org
               accessType: 'paid',
               priceCents: 1999,
+              isPurchasable: true,
             },
           }
         );
@@ -520,6 +522,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin.organization.id,
               accessType: 'paid',
               priceCents: 999,
+              isPurchasable: true,
             },
           }
         );
@@ -574,6 +577,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin.organization.id,
               accessType: 'paid',
               priceCents: 999,
+              isPurchasable: true,
             },
           }
         );
@@ -1154,6 +1158,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin.organization.id,
               accessType: 'paid',
               priceCents: 1999,
+              isPurchasable: true,
             },
           }
         );
@@ -1293,6 +1298,7 @@ describe('Admin Dashboard', () => {
               organizationId: admin.organization.id,
               accessType: 'paid',
               priceCents: 2499,
+              isPurchasable: true,
             },
           }
         );
@@ -1432,6 +1438,7 @@ describe('Admin Dashboard', () => {
             organizationId: admin.organization.id,
             accessType: 'paid',
             priceCents: 999,
+            isPurchasable: true,
           },
         }
       );
@@ -1661,6 +1668,7 @@ describe('Admin Dashboard', () => {
             organizationId: admin.organization.id,
             accessType: 'paid',
             priceCents: 1999,
+            isPurchasable: true,
           },
         }
       );

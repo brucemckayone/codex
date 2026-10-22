@@ -39,7 +39,7 @@ import {
   teardownTestDatabase,
 } from '@codex/test-utils';
 import type { CreateContentInput } from '@codex/validation';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import {
   afterAll,
   afterEach,
@@ -1346,9 +1346,12 @@ describe('ContentService', () => {
   describe('publish — Stripe Connect payout gate (Codex-eb00a.10)', () => {
     // Each test controls its own Connect precondition; reset between tests so a
     // seeded ready-account from one test can't leak into the "no account" cases
-    // (uq_stripe_connect_user makes double-inserts fail otherwise).
+    // (uq_stripe_connect_user makes double-inserts fail otherwise). Scoped to
+    // this creator: the table is shared with every other suite on the branch.
     afterEach(async () => {
-      await db.delete(stripeConnectAccounts);
+      await db
+        .delete(stripeConnectAccounts)
+        .where(eq(stripeConnectAccounts.userId, creatorId));
     });
 
     async function createPaidWritten(slugPrefix: string): Promise<string> {
@@ -1479,6 +1482,253 @@ describe('ContentService', () => {
       const published = await service.publish(created.id, creatorId);
 
       expect(published.status).toBe('published');
+    });
+  });
+
+  describe('payout gate covers any price or tier, on publish AND on update (Codex-2hxff.14)', () => {
+    let orgId: string;
+    let tierId: string;
+    let otherTierId: string;
+    const contentIds: string[] = [];
+
+    beforeAll(async () => {
+      orgId = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      ).id;
+      tierId = takeFirst(
+        await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(orgId, { sortOrder: 1 }))
+          .returning()
+      ).id;
+      otherTierId = takeFirst(
+        await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(orgId, { sortOrder: 2 }))
+          .returning()
+      ).id;
+    });
+
+    afterEach(async () => {
+      await db
+        .delete(stripeConnectAccounts)
+        .where(eq(stripeConnectAccounts.userId, creatorId));
+    });
+
+    afterAll(async () => {
+      if (contentIds.length > 0) {
+        await db.delete(content).where(inArray(content.id, contentIds));
+      }
+      await db
+        .delete(subscriptionTiers)
+        .where(eq(subscriptionTiers.organizationId, orgId));
+      await db.delete(organizations).where(eq(organizations.id, orgId));
+    });
+
+    /**
+     * Seed an org row directly, so each test sets exactly the policy flags it
+     * is about (and a LIVE row can exist without passing publish's gate, as
+     * legacy rows published before it do).
+     */
+    async function seed(
+      flags: Partial<typeof content.$inferInsert>
+    ): Promise<string> {
+      const row = takeFirst(
+        await db
+          .insert(content)
+          .values({
+            creatorId,
+            organizationId: orgId,
+            title: 'Gate Article',
+            slug: createUniqueSlug('payout-gate'),
+            contentType: 'written',
+            contentBody: 'Body',
+            status: 'draft',
+            ...flags,
+          })
+          .returning()
+      );
+      contentIds.push(row.id);
+      return row.id;
+    }
+
+    const live = { status: 'published', publishedAt: new Date() } as const;
+
+    async function makeCreatorPayable(): Promise<void> {
+      await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(null, creatorId));
+    }
+
+    describe('publish', () => {
+      it('refuses PRICED content that is not marked purchasable', async () => {
+        // The old gate saw a price only on a row marked purchasable.
+        const id = await seed({
+          isFree: false,
+          isPurchasable: false,
+          priceCents: 500,
+        });
+
+        await expect(service.publish(id, creatorId)).rejects.toBeInstanceOf(
+          CreatorPayoutsRequiredError
+        );
+        expect((await service.get(id, creatorId))?.status).toBe('draft');
+      });
+
+      it('refuses TIER-only content (no price)', async () => {
+        const id = await seed({ isFree: false, includedInTierId: tierId });
+
+        await expect(service.publish(id, creatorId)).rejects.toBeInstanceOf(
+          CreatorPayoutsRequiredError
+        );
+      });
+
+      it('publishes priced-not-purchasable and tier-only content once the creator is payout-ready', async () => {
+        await makeCreatorPayable();
+        const priced = await seed({
+          isFree: false,
+          isPurchasable: false,
+          priceCents: 500,
+        });
+        const tiered = await seed({ isFree: false, includedInTierId: tierId });
+
+        expect((await service.publish(priced, creatorId)).status).toBe(
+          'published'
+        );
+        expect((await service.publish(tiered, creatorId)).status).toBe(
+          'published'
+        );
+      });
+    });
+
+    describe('update of published content', () => {
+      it('refuses a price added to free content when the creator has no Connect account', async () => {
+        const id = await seed({ ...live, isFree: true, priceCents: 0 });
+
+        await expect(
+          service.update(id, { priceCents: 900 }, creatorId)
+        ).rejects.toBeInstanceOf(CreatorPayoutsRequiredError);
+
+        // Rolled back with the transaction: the row is still free.
+        expect((await service.get(id, creatorId))?.priceCents).toBe(0);
+      });
+
+      it('refuses a tier added to free content', async () => {
+        const id = await seed({ ...live, isFree: true });
+
+        await expect(
+          service.update(id, { includedInTierId: tierId }, creatorId)
+        ).rejects.toBeInstanceOf(CreatorPayoutsRequiredError);
+        expect((await service.get(id, creatorId))?.includedInTierId).toBeNull();
+      });
+
+      it('refuses a changed price, a changed tier, and turning a priced row purchasable', async () => {
+        const priced = await seed({
+          ...live,
+          isFree: false,
+          isPurchasable: true,
+          priceCents: 500,
+        });
+        const tiered = await seed({
+          ...live,
+          isFree: false,
+          includedInTierId: tierId,
+        });
+        const notPurchasable = await seed({
+          ...live,
+          isFree: false,
+          isPurchasable: false,
+          priceCents: 500,
+        });
+
+        await expect(
+          service.update(priced, { priceCents: 700 }, creatorId)
+        ).rejects.toBeInstanceOf(CreatorPayoutsRequiredError);
+        await expect(
+          service.update(tiered, { includedInTierId: otherTierId }, creatorId)
+        ).rejects.toBeInstanceOf(CreatorPayoutsRequiredError);
+        await expect(
+          service.update(notPurchasable, { isPurchasable: true }, creatorId)
+        ).rejects.toBeInstanceOf(CreatorPayoutsRequiredError);
+      });
+
+      it('allows a title edit with a not-ready creator, even when the form resends the unchanged price and tier', async () => {
+        const id = await seed({
+          ...live,
+          isFree: false,
+          isPurchasable: true,
+          priceCents: 500,
+          includedInTierId: tierId,
+        });
+
+        // The studio form submits the whole flag set on every save.
+        const updated = await service.update(
+          id,
+          {
+            title: 'Renamed Article',
+            isFree: false,
+            isPurchasable: true,
+            priceCents: 500,
+            includedInTierId: tierId,
+          },
+          creatorId
+        );
+
+        expect(updated.title).toBe('Renamed Article');
+      });
+
+      it('allows removing the price and the tier with a not-ready creator', async () => {
+        const id = await seed({
+          ...live,
+          isFree: false,
+          isPurchasable: true,
+          priceCents: 500,
+          includedInTierId: tierId,
+        });
+
+        const updated = await service.update(
+          id,
+          {
+            isFree: true,
+            isPurchasable: false,
+            priceCents: 0,
+            includedInTierId: null,
+          },
+          creatorId
+        );
+
+        expect(updated.priceCents).toBe(0);
+        expect(updated.includedInTierId).toBeNull();
+      });
+
+      it('does not check a DRAFT — publish() does', async () => {
+        const id = await seed({ isFree: true, priceCents: 0 });
+
+        const updated = await service.update(
+          id,
+          { priceCents: 900 },
+          creatorId
+        );
+
+        expect(updated.priceCents).toBe(900);
+      });
+
+      it('allows a price and a tier added once the creator is payout-ready', async () => {
+        await makeCreatorPayable();
+        const id = await seed({ ...live, isFree: true, priceCents: 0 });
+
+        const updated = await service.update(
+          id,
+          { priceCents: 900, includedInTierId: tierId },
+          creatorId
+        );
+
+        expect(updated.priceCents).toBe(900);
+        expect(updated.includedInTierId).toBe(tierId);
+      });
     });
   });
 

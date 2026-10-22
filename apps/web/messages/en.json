@@ -192,6 +192,8 @@
   "followers_only_cta_description": "This piece is free for followers. Follow to read the full article and get more like it in your feed.",
   "team_only_cta_title": "Team Only",
   "team_only_cta_description": "This content is only available to team members",
+  "course_only_cta_title": "Part of a course",
+  "course_only_cta_description": "This lesson is available to people enrolled in its course.",
   "org_continue_watching_title": "Continue Watching",
   "org_continue_watching_view_library": "View Library",
   "org_new_releases_title": "New Releases",

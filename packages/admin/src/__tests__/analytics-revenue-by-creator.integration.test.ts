@@ -49,14 +49,15 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
   let db: Database;
   let service: AdminAnalyticsService;
   let customerId: string;
+  let secondCustomerId: string;
 
   beforeAll(async () => {
     db = setupTestDatabase();
     service = new AdminAnalyticsService({ db, environment: 'test' });
-    // Single customer reused across tests — purchases are scoped by content
-    // and org, not customer, so a shared row is safe.
-    const [c] = await seedTestUsers(db, 1);
-    customerId = c;
+    // Customers reused across tests — every test seeds its own content. A
+    // test buying one item twice needs the second customer: a buyer holds at
+    // most one completed purchase per item (Codex-2hxff.14).
+    [customerId, secondCustomerId] = await seedTestUsers(db, 2);
   });
 
   afterAll(async () => {
@@ -182,7 +183,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         purchasedAt: new Date(),
       },
       {
-        customerId,
+        customerId: secondCustomerId,
         contentId: contentByCreator.get(creatorA)!,
         organizationId: orgId,
         amountPaidCents: 2000,
@@ -275,7 +276,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         status: 'paid',
         reason: null,
         resolvedAt: resolvedDate,
-        stripeTransferId: 'tr_old',
+        stripeTransferId: `tr_old_${Date.now()}`,
       },
       {
         userId: creatorId,
@@ -286,7 +287,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         status: 'paid',
         reason: null,
         resolvedAt: moreRecentResolvedDate,
-        stripeTransferId: 'tr_new',
+        stripeTransferId: `tr_new_${Date.now()}`,
       },
       {
         userId: creatorId,
@@ -380,7 +381,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         purchasedAt: now,
       },
       {
-        customerId,
+        customerId: secondCustomerId,
         contentId: contentByCreator.get(creatorId)!,
         organizationId: orgId,
         amountPaidCents: 1000,
@@ -517,7 +518,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         status: 'paid',
         reason: null,
         resolvedAt: new Date('2026-04-01T00:00:00Z'),
-        stripeTransferId: 'tr_paid_excluded',
+        stripeTransferId: `tr_paid_excluded_${Date.now()}`,
       },
     ]);
 

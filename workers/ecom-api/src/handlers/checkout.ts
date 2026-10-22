@@ -19,6 +19,7 @@
 import { invalidateUserLibrary } from '@codex/cache';
 import { CURRENCY } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
+import { isDuplicatePayment } from '@codex/purchase';
 import {
   checkoutSessionMetadataSchema,
   courseCheckoutSessionMetadataSchema,
@@ -100,6 +101,22 @@ export async function handleCheckoutCompleted(
     obs?.info('Skipping non-payment checkout session', {
       sessionId: session.id,
       mode: session.mode,
+    });
+    return;
+  }
+
+  // Only a paid session completes a purchase (Codex-2hxff.14). Checkout is
+  // card-only, and a card session is always `paid` by the time it completes,
+  // so this guards the future: a delayed method (a bank debit) completes
+  // `unpaid` and is paid later, on `checkout.session.async_payment_succeeded`,
+  // which nothing handles yet. Adding one means handling that event first.
+  if (session.payment_status !== 'paid') {
+    // Loud: with card-only checkout this should never happen, and if a
+    // delayed method was ever enabled the buyer will be charged with nothing
+    // here to grant what they paid for.
+    obs?.error('Skipping unpaid checkout session', {
+      sessionId: session.id,
+      paymentStatus: session.payment_status,
     });
     return;
   }
@@ -230,6 +247,18 @@ export async function handleCheckoutCompleted(
       paidAt,
       offerAt,
     });
+    await recordSessionPaid(purchaseService, session.id, obs);
+
+    // A second payment for content the buyer owns was refunded, not sold.
+    // Its refund email tells them; a receipt would say they bought it again.
+    if (isDuplicatePayment(purchase)) {
+      obs?.warn('Duplicate payment refunded instead of completed', {
+        purchaseId: purchase.id,
+        customerId: validatedMetadata.customerId,
+        contentId: validatedMetadata.contentId,
+      });
+      return;
+    }
 
     obs?.info('Purchase completed successfully', {
       purchaseId: purchase.id,
@@ -275,6 +304,28 @@ export async function handleCheckoutCompleted(
     }
   } finally {
     release();
+  }
+}
+
+/**
+ * Mark the paid checkout session completed (Codex-2hxff.14). A record, not a
+ * gate: the buyer's next checkout is refused because they own the item. So a
+ * failure here is logged, not thrown: thrown after the purchase committed, a
+ * transient one would resend the receipt on the redelivery, and a permanent
+ * one would skip the receipt for good.
+ */
+async function recordSessionPaid(
+  purchaseService: { markCheckoutSessionCompleted(id: string): Promise<void> },
+  sessionId: string,
+  obs: ObservabilityClient | undefined
+): Promise<void> {
+  try {
+    await purchaseService.markCheckoutSessionCompleted(sessionId);
+  } catch (error) {
+    obs?.error('Paid checkout session could not be marked completed', {
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -344,6 +395,16 @@ async function handleCourseCheckoutCompleted(
           : undefined,
       }
     );
+    await recordSessionPaid(purchaseService, session.id, obs);
+
+    if (isDuplicatePayment(purchase)) {
+      obs?.warn('Duplicate course payment refunded instead of completed', {
+        purchaseId: purchase.id,
+        customerId: metadata.customerId,
+        courseId: metadata.courseId,
+      });
+      return;
+    }
 
     obs?.info('Course purchase completed successfully', {
       purchaseId: purchase.id,

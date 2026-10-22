@@ -46,14 +46,17 @@ describe('AdminAnalyticsService', () => {
   let service: AdminAnalyticsService;
   let creatorId: string;
   let customerId: string;
+  // A buyer holds at most one completed purchase per item (Codex-2hxff.14).
+  let secondCustomerId: string;
+  let thirdCustomerId: string;
 
   beforeAll(async () => {
     db = setupTestDatabase();
     service = new AdminAnalyticsService({ db, environment: 'test' });
 
     // Create test users
-    const userIds = await seedTestUsers(db, 2);
-    [creatorId, customerId] = userIds;
+    const userIds = await seedTestUsers(db, 4);
+    [creatorId, customerId, secondCustomerId, thirdCustomerId] = userIds;
 
     // Create organization (result not needed beyond creation)
     await db
@@ -140,7 +143,8 @@ describe('AdminAnalyticsService', () => {
           purchasedAt: new Date(),
         },
         {
-          customerId,
+          // One completed purchase per buyer per item (Codex-2hxff.14).
+          customerId: secondCustomerId,
           contentId: testContent.id,
           organizationId: testOrg.id,
           amountPaidCents: 2999,
@@ -301,7 +305,8 @@ describe('AdminAnalyticsService', () => {
           purchasedAt: now,
         },
         {
-          customerId,
+          // One completed purchase per buyer per item (Codex-2hxff.14).
+          customerId: secondCustomerId,
           contentId: testContent.id,
           organizationId: testOrg.id,
           amountPaidCents: 500,
@@ -487,7 +492,8 @@ describe('AdminAnalyticsService', () => {
           purchasedAt: twoDaysAgo,
         },
         {
-          customerId,
+          // One completed purchase per buyer per item (Codex-2hxff.14).
+          customerId: secondCustomerId,
           contentId: testContent.id,
           organizationId: testOrg.id,
           amountPaidCents: 1500,
@@ -577,7 +583,8 @@ describe('AdminAnalyticsService', () => {
           purchasedAt: now,
         },
         {
-          customerId,
+          // One completed purchase per buyer per item (Codex-2hxff.14).
+          customerId: secondCustomerId,
           contentId: testContent.id,
           organizationId: testOrg.id,
           amountPaidCents: 2000,
@@ -589,7 +596,7 @@ describe('AdminAnalyticsService', () => {
           purchasedAt: now,
         },
         {
-          customerId,
+          customerId: thirdCustomerId,
           contentId: testContent.id,
           organizationId: testOrg.id,
           amountPaidCents: 2000,
@@ -1277,6 +1284,24 @@ describe('AdminAnalyticsService', () => {
           .returning()
       );
 
+      // customer1's second purchase is of another item: a buyer holds at most
+      // one completed purchase per item (Codex-2hxff.14).
+      const otherContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            title: 'Customer Stats Test 2',
+            slug: createUniqueSlug('customer-stats-2'),
+            contentType: 'written',
+            contentBody: 'Body',
+            status: 'published',
+            priceCents: 500,
+          })
+          .returning()
+      );
+
       // Multiple purchases from two customers
       await db.insert(purchases).values([
         {
@@ -1293,7 +1318,7 @@ describe('AdminAnalyticsService', () => {
         },
         {
           customerId: customer1,
-          contentId: testContent.id,
+          contentId: otherContent.id,
           organizationId: testOrg.id,
           amountPaidCents: 500,
           platformFeeCents: 50,
@@ -1682,7 +1707,8 @@ describe('AdminAnalyticsService', () => {
           purchasedAt: threeDaysAgo,
         },
         {
-          customerId,
+          // One completed purchase per buyer per item (Codex-2hxff.14).
+          customerId: secondCustomerId,
           contentId: growing.id,
           organizationId: testOrg.id,
           amountPaidCents: 1000,
@@ -2340,6 +2366,8 @@ describe('AdminAnalyticsService', () => {
           purchasedAt: new Date(),
         },
         {
+          // A second payment for an owned item is recorded refunded
+          // (Codex-2hxff.14: one completed purchase per buyer per item).
           customerId,
           contentId: testContent.id,
           organizationId: testOrg.id,
@@ -2348,7 +2376,8 @@ describe('AdminAnalyticsService', () => {
           organizationFeeCents: 0,
           creatorPayoutCents: 900,
           stripePaymentIntentId: `pi_dashboard_${Date.now()}_2`,
-          status: PURCHASE_STATUS.COMPLETED,
+          status: PURCHASE_STATUS.REFUNDED,
+          refundReason: 'duplicate_payment',
           purchasedAt: new Date(),
         },
       ]);
@@ -2356,8 +2385,8 @@ describe('AdminAnalyticsService', () => {
       const stats = await service.getDashboardStats(testOrg.id);
 
       // Verify all three data sections are present
-      expect(stats.revenue.totalRevenueCents).toBe(2000);
-      expect(stats.revenue.totalPurchases).toBe(2);
+      expect(stats.revenue.totalRevenueCents).toBe(1000);
+      expect(stats.revenue.totalPurchases).toBe(1);
       expect(stats.customers.totalCustomers).toBe(1);
       expect(stats.customers.newCustomersLast30Days).toBe(1);
       expect(stats.topContent.items).toHaveLength(1);

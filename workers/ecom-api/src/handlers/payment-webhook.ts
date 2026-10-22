@@ -170,18 +170,30 @@ async function sendRefundEmails(
   c: Context<StripeWebhookEnv>,
   service: PurchaseService,
   charge: Stripe.Charge,
-  purchase: { accessEnded: boolean } | undefined
+  purchase:
+    | {
+        accessEnded: boolean;
+        duplicatePayment?: boolean;
+        itemTitle?: string | null;
+      }
+    | undefined
 ): Promise<void> {
   const to = charge.billing_details?.email || charge.receipt_email;
   if (!to) return;
 
   const claimed = await service.claimRefundEmails(charge.id);
-  const contentTitle = charge.metadata?.contentTitle || 'Content';
+  // The purchase's own title: a charge carries none of ours.
+  const contentTitle =
+    purchase?.itemTitle || charge.metadata?.contentTitle || 'Content';
+  // A second payment for an item the buyer owned was refunded automatically
+  // (Codex-2hxff.14): say why, and that the first purchase stands.
   const accessNote = !purchase
     ? ''
-    : purchase.accessEnded
-      ? `Your access to ${contentTitle} has ended.`
-      : `You keep access to ${contentTitle}.`;
+    : purchase.duplicatePayment
+      ? `You still have ${contentTitle}. This refunds a second payment for it.`
+      : purchase.accessEnded
+        ? `Your access to ${contentTitle} has ended.`
+        : `You keep access to ${contentTitle}.`;
   for (const refund of claimed) {
     sendEmailToWorker(c.env, c.executionCtx, {
       to,
@@ -530,7 +542,10 @@ async function handleDispute(
         disputeReason: dispute.reason ?? undefined,
       });
       invalidateLibrary(c, paused?.userId);
-      if (paused?.userId && paused.orgId) {
+      // Not when the buyer keeps the item through another purchase (a dispute
+      // of a duplicate payment): the block would stop every stream in the
+      // org, including the copy they own (Codex-2hxff.14).
+      if (paused?.userId && paused.orgId && paused.accessEnded) {
         revokeAccess(c, paused.userId, paused.orgId);
       }
     }
@@ -585,7 +600,8 @@ async function handleDispute(
       );
       invalidateLibrary(c, ended?.userId);
       // Written when it opened, unless it opened already lost: again here.
-      if (ended?.userId && ended.orgId) {
+      // Not when the buyer keeps the item through another purchase.
+      if (ended?.userId && ended.orgId && ended.accessEnded) {
         revokeAccess(c, ended.userId, ended.orgId);
       }
     }
