@@ -686,7 +686,11 @@
       name: content.title,
       url: canonicalUrl,
       ...(description && { description }),
-      ...(thumbnailUrl && { thumbnailUrl, image: thumbnailUrl }),
+      // The same file og:image names: the largest the still has.
+      ...(shareImage && {
+        thumbnailUrl: shareImage.url,
+        image: shareImage.url,
+      }),
       ...(publishedDate && { uploadDate: publishedDate, datePublished: publishedDate }),
       ...(creatorName && {
         author: { '@type': 'Person', name: creatorName },

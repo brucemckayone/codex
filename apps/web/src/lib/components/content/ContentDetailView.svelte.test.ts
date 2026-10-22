@@ -263,4 +263,17 @@ describe('the picture (Codex-une9r)', () => {
     expect(ogImage()).toBe(POSTER);
     expect(imageSources()).toContain(POSTER);
   });
+
+  test('the structured data names the same file as og:image, not the one the page drew', () => {
+    const SIZED =
+      'https://cdn.example.test/c1/thumbnail/2400x1350-0a1b2c3d/md.webp';
+    render({ content: makeContent({ thumbnailUrl: SIZED }) });
+    const jsonLd = JSON.parse(
+      document.head.querySelector('script[type="application/ld+json"]')
+        ?.textContent ?? '{}'
+    );
+    expect(ogImage()).toBe(SIZED.replace('/md.webp', '/xl.webp'));
+    expect(jsonLd.image).toBe(ogImage());
+    expect(jsonLd.thumbnailUrl).toBe(ogImage());
+  });
 });

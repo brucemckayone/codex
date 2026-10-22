@@ -57,11 +57,20 @@ function svelteFiles(dir: string): string[] {
   });
 }
 
+/**
+ * The source without comments: markup and block comments anywhere, line
+ * comments only inside `<script>`. In markup a ` // ` is text (an alt, a
+ * caption), and cutting the line there would hide the `<img>` after it.
+ */
 function withoutComments(source: string): string {
   return source
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+    .replace(
+      /(<script\b[^>]*>)([\s\S]*?)(<\/script>)/g,
+      (_script, open: string, body: string, close: string) =>
+        open + body.replace(/(^|[^:'"`])\/\/.*$/gm, '$1') + close
+    );
 }
 
 /** The end of the `{…}` expression that opens at `start`. */
@@ -134,7 +143,8 @@ function choosesItsFile({
   src: string;
   tag: string;
 }): boolean {
-  const offersSizes = /\ssrcset=/.test(tag) && /\s(sizes=|\{sizes\})/.test(tag);
+  const offersSizes =
+    /\s(srcset=|\{srcset\})/.test(tag) && /\s(sizes=|\{sizes\})/.test(tag);
   return (
     offersSizes ||
     SIZE_HELPER.test(src) ||
