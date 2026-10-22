@@ -165,13 +165,18 @@ interface OrphanOutcome {
 /**
  * An error's message without a failed query's parameters. drizzle's error
  * reads `Failed query: … params: …`, and a parameter can be a folder holding a
- * user id; the driver's own error, its `cause`, says what went wrong.
+ * user id; the driver's own error, its `cause`, says what went wrong. Only
+ * that shape is unwrapped: any other error's own message is the specific one.
  */
 export function messageForLog(error: unknown): string {
-  const reported =
-    error instanceof Error && error.cause instanceof Error
-      ? error.cause
-      : error;
+  let reported = error;
+  while (
+    reported instanceof Error &&
+    reported.message.startsWith('Failed query:') &&
+    reported.cause instanceof Error
+  ) {
+    reported = reported.cause;
+  }
   return reported instanceof Error ? reported.message : String(reported);
 }
 
@@ -276,7 +281,8 @@ export class OrphanedFileCleanupDO implements DurableObject {
 
       return new Response('Not Found', { status: 404 });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      // An internal caller's 500, still never a failed query's params.
+      const message = messageForLog(error);
       return new Response(JSON.stringify({ error: message }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -292,13 +298,12 @@ export class OrphanedFileCleanupDO implements DurableObject {
    */
   // fallow-ignore-next-line unused-class-member
   async alarm(): Promise<void> {
-    const obs = this.obs;
-    obs.info('Orphan cleanup alarm triggered');
+    this.obs.info('Orphan cleanup alarm triggered');
 
     try {
       const result = await this.runCleanup();
 
-      obs.info('Orphan cleanup completed', {
+      this.obs.info('Orphan cleanup completed', {
         processed: result.processed,
         deleted: result.deleted,
         retained: result.retained,
@@ -307,7 +312,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
       });
       // A failure is otherwise only a count here and an entry in DO storage.
       if (result.failed > 0) {
-        obs.error('Orphan cleanup had failures', {
+        this.obs.error('Orphan cleanup had failures', {
           failed: result.failed,
           errors: result.errors.slice(0, 10),
         });
@@ -316,7 +321,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
       await this.state.storage.put('lastRunResult', result);
       await this.state.storage.put('lastRunAt', new Date().toISOString());
     } catch (error) {
-      obs.error('Orphan cleanup failed', { error: messageForLog(error) });
+      this.obs.error('Orphan cleanup failed', { error: messageForLog(error) });
     } finally {
       // Always reschedule next alarm
       await this.state.storage.setAlarm(Date.now() + CLEANUP_INTERVAL_MS);
@@ -330,7 +335,6 @@ export class OrphanedFileCleanupDO implements DurableObject {
     const startTime = Date.now();
     const errors: OrphanOutcome[] = [];
     const leftForReview: OrphanOutcome[] = [];
-    const obs = this.obs;
 
     if (!this.env.ASSETS_BUCKET) {
       // Checked before any orphan is read, so nothing is marked deleted.
@@ -378,7 +382,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
             // Retained is terminal, so this is the one time the orphan is
             // named: now, as it is kept, not when the run ends, which a run
             // that stops early never reaches.
-            obs.warn('Orphan left for review', outcome);
+            this.obs.warn('Orphan left for review', outcome);
           }
           continue;
         }

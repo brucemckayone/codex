@@ -213,8 +213,32 @@ describe('messageForLog (Codex-kk9nv.13)', () => {
     );
   });
 
-  it('logs any other error as it is', () => {
+  it('unwraps a failed query wrapped in another failed query, to the driver', () => {
+    const driver = new Error('connection terminated');
+    const inner = Object.assign(
+      new Error('Failed query: update …\nparams: …'),
+      {
+        cause: driver,
+      }
+    );
+    const outer = Object.assign(
+      new Error('Failed query: select …\nparams: …'),
+      {
+        cause: inner,
+      }
+    );
+    expect(messageForLog(outer)).toBe('connection terminated');
+  });
+
+  it('logs any other error as it is, even one with a cause: its own message is the specific one', () => {
     expect(messageForLog(new Error('R2 unavailable'))).toBe('R2 unavailable');
+    expect(
+      messageForLog(
+        Object.assign(new Error('ASSETS_BUCKET not bound'), {
+          cause: new Error('binding missing'),
+        })
+      )
+    ).toBe('ASSETS_BUCKET not bound');
     expect(messageForLog('not an error')).toBe('not an error');
   });
 });
@@ -486,13 +510,19 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
   // One test, not several: R2 is isolated storage, so a delete is rolled back
   // when the test that made it ends, while the database keeps its rows.
   it('keeps what a re-upload or a live row still holds, and deletes the rest', async () => {
-    // The logger writes through console, which the test and the DO share.
+    // The logger writes through console, which the test and the DO share,
+    // as do the files that run after this one: restore it however this ends.
     const warn = vi.spyOn(console, 'warn');
-    const runs = await sweepUntilReached();
-    const reviewWarnings = warn.mock.calls
-      .map(([line]) => String(line))
-      .filter((line) => line.includes('Orphan left for review'));
-    warn.mockRestore();
+    let runs: Awaited<ReturnType<typeof sweepUntilReached>>;
+    let reviewWarnings: string[];
+    try {
+      runs = await sweepUntilReached();
+      reviewWarnings = warn.mock.calls
+        .map(([line]) => String(line))
+        .filter((line) => line.includes('Orphan left for review'));
+    } finally {
+      warn.mockRestore();
+    }
 
     expect(await outcomeOf(ids.reused)).toMatchObject({ status: 'retained' });
     expect(await testEnv.ASSETS_BUCKET.head(keys.reused)).not.toBeNull();

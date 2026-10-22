@@ -381,10 +381,11 @@ export class ImageProcessingService extends BaseService {
 
   /**
    * Delete the files of a caller-owned still that its row no longer
-   * references: a cleared course still, a category cover a PATCH changed by
-   * hand, or a deleted category's cover (Codex-kk9nv.14). Call it AFTER the
-   * write that dropped the reference. A later upload
-   * goes to a new folder, so nothing would ever overwrite these files.
+   * references, or whose row was deleted: a cleared course still, a category
+   * cover a PATCH changed by hand, or a deleted category's cover
+   * (Codex-kk9nv.14). Call it AFTER the write that dropped the reference or
+   * the row. A later upload goes to a new folder, so nothing would ever
+   * overwrite these files.
    *
    * Only a folder of this entity's own is deleted ({@link ownedStillFolder}),
    * and a failed delete is recorded for the sweep, never thrown.
