@@ -144,6 +144,28 @@ describe('JourneyEntryCard', () => {
     expect(document.querySelector('.jec__dropcap')).not.toBeNull();
   });
 
+  test("a featured row's phone cover is sized to its own width, not the card's (Codex-kk9nv.3)", () => {
+    // On a phone the featured width rule beats the full-width one on
+    // specificity, so the cover stays a small 16:9 box; declared as the card,
+    // it fetched about 3x the pixels it draws.
+    const url =
+      'http://localhost:4100/courses/abc/cover/1600x900-0a1b2c3d/md.webp';
+    const sizes = () =>
+      cover()?.querySelector('.jec__cover-img')?.getAttribute('sizes');
+
+    render({ layout: 'row', featured: true, coverImageUrl: url });
+    expect(sizes()).toMatch(
+      /^\(max-width: 39\.9375rem\) clamp\(7\.5rem, 30vw, 12\.5rem\), /
+    );
+
+    reset();
+
+    render({ layout: 'row', featured: false, coverImageUrl: url });
+    expect(sizes()).toMatch(
+      /^\(max-width: 39\.9375rem\) calc\(100vw - 2rem\), /
+    );
+  });
+
   test('the flair character is the KICKER initial on a tile, falling back to the title initial', () => {
     render({ layout: 'tile', kicker: 'Foundation course' });
     expect(document.querySelector('.jec__dropcap')?.textContent?.trim()).toBe(

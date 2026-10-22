@@ -140,9 +140,11 @@
   /**
    * How wide the cover is drawn, for choosing from its stored sizes
    * (Codex-kk9nv.3). A tile is a 3:4 portrait in a 15-17rem rail; a row's
-   * cover is a narrow column the row stretches tall, and full width at 16:9
-   * on a phone. Both crop, so a landscape picture is drawn wider than its box
-   * (`coverCropSizes`), taken here as about 3:4.
+   * cover is a narrow column the row stretches tall, taken here as about 3:4.
+   * On a phone the row stacks and its cover is a 16:9 frame: full width,
+   * except a featured row's, whose own width wins on specificity (the
+   * `.jec--featured .jec__cover` rule). Every frame crops, so a picture wider
+   * than its box is drawn wider than it (`coverCropSizes`).
    */
   const coverSrcset = $derived(
     coverImageUrl ? getThumbnailSrcset(coverImageUrl) : ''
@@ -160,7 +162,8 @@
     const column = featured
       ? 'clamp(7.5rem, 30vw, 12.5rem)'
       : 'clamp(6rem, 22vw, 7.5rem)';
-    return `(max-width: 39.9375rem) calc(100vw - 2rem), ${coverCropSizes(column, 3 / 4, coverImageUrl, COVER_RATIO)}`;
+    const phone = featured ? column : 'calc(100vw - 2rem)';
+    return `(max-width: 39.9375rem) ${coverCropSizes(phone, 16 / 9, coverImageUrl, COVER_RATIO)}, ${coverCropSizes(column, 3 / 4, coverImageUrl, COVER_RATIO)}`;
   });
 
   /**

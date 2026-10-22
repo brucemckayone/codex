@@ -163,6 +163,20 @@ describe('coverCropSizes', () => {
       '(min-width: 64rem) calc(min(calc((100vw - 6rem) / 3), 25rem) * 2.37), (min-width: 40rem) calc(50vw * 2.37), calc(calc(100vw - 2rem) * 2.37)'
     );
   });
+
+  it('keeps a condition of more than one group whole', () => {
+    // Taking only the first group put the rest inside calc(), which the
+    // browser drops without a word.
+    expect(
+      coverCropSizes(
+        '(min-width: 40rem) and (max-width: 63.9375rem) 50vw, not (min-width: 40rem) 100vw, 20rem',
+        3 / 4,
+        `${FOLDER}/md.webp`
+      )
+    ).toBe(
+      '(min-width: 40rem) and (max-width: 63.9375rem) calc(50vw * 2.37), not (min-width: 40rem) calc(100vw * 2.37), calc(20rem * 2.37)'
+    );
+  });
 });
 
 describe('getShareImage', () => {

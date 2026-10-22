@@ -189,20 +189,24 @@ function splitTopLevel(list: string): string[] {
   return parts.filter(Boolean);
 }
 
-/** One `sizes` entry as its media condition (with a trailing space, or '') and its length. */
+/**
+ * One `sizes` entry as its media condition (with its trailing space, or '')
+ * and its length. The length is the last token outside parentheses, so a
+ * condition of any shape is kept whole: `(a) and (b)`, `not (a)`.
+ */
 function splitSizesEntry(entry: string): { condition: string; length: string } {
-  if (!entry.startsWith('(')) return { condition: '', length: entry };
   let depth = 0;
+  let lastSpace = -1;
   for (let i = 0; i < entry.length; i++) {
-    if (entry[i] === '(') depth++;
-    else if (entry[i] === ')' && --depth === 0) {
-      return {
-        condition: `${entry.slice(0, i + 1)} `,
-        length: entry.slice(i + 1).trim(),
-      };
-    }
+    const char = entry.charAt(i);
+    if (char === '(') depth++;
+    else if (char === ')') depth--;
+    else if (depth === 0 && /\s/.test(char)) lastSpace = i;
   }
-  return { condition: '', length: entry };
+  return {
+    condition: entry.slice(0, lastSpace + 1),
+    length: entry.slice(lastSpace + 1),
+  };
 }
 
 /**
