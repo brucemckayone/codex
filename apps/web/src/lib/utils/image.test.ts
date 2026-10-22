@@ -208,7 +208,9 @@ describe('containSizes', () => {
   });
 
   it('takes the assumed ratio for a picture that does not record its size', () => {
-    expect(containSizes(SIZED, 3.5, '100vw', 4)).toBe('min(14rem, 100vw)');
+    // An upload from before kk9nv.5: sized files, but no size in the folder.
+    const unsized = 'https://cdn.example.test/c/signature/md.webp';
+    expect(containSizes(unsized, 3.5, '100vw', 4)).toBe('min(14rem, 100vw)');
   });
 });
 

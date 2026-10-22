@@ -369,11 +369,17 @@
                 >
                   <span class="subscribe-cta__preview-thumb">
                     {#if item.thumbnail}
-                      <!-- 144px at 16:9 (Codex-kk9nv.3). -->
+                      <!-- 16:9, 144px from 48rem and 7.3rem (117px) below,
+                           where the tile is 7.8rem less its padding
+                           (Codex-kk9nv.3). -->
                       <img
                         src={item.thumbnail}
                         srcset={getThumbnailSrcset(item.thumbnail) || undefined}
-                        sizes={coverCropSizes('9rem', 16 / 9, item.thumbnail)}
+                        sizes={coverCropSizes(
+                          '(max-width: 47.9375rem) 7.3rem, 9rem',
+                          16 / 9,
+                          item.thumbnail
+                        )}
                         alt=""
                         loading="lazy"
                         decoding="async"

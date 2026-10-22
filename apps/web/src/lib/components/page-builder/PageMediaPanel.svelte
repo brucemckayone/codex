@@ -60,7 +60,11 @@
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
   import { shrinkPhotoAndSubmit } from '$lib/utils/shrink-photo';
   import { PAGE_MEDIA_SLOTS } from './page-media-slots';
-  import { containSizes, getThumbnailSrcset } from '$lib/utils/image';
+  import {
+    containSizes,
+    coverCropSizes,
+    getThumbnailSrcset,
+  } from '$lib/utils/image';
   import {
     uploadJourneyCoverForm,
     uploadJourneyHeroImageForm,
@@ -189,7 +193,7 @@
             class="cover__img"
             src={sellMedia.coverImageUrl}
             srcset={getThumbnailSrcset(sellMedia.coverImageUrl) || undefined}
-            sizes={PREVIEW_SIZES}
+            sizes={coverCropSizes(PREVIEW_SIZES, 16 / 9, sellMedia.coverImageUrl)}
             alt={m.studio_builder_media_cover_alt()}
           />
         {:else}
