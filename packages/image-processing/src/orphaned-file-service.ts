@@ -34,42 +34,50 @@ import { CALLER_OWNED_STILL_BASE } from './still-bases';
 
 /**
  * Each sized still, by image type: the base its folders sit under for one
- * entity, the table that entity is a row of, and the column that addresses
- * the folder. A content thumbnail's base starts with its creator's id, which
- * an orphan row does not record, so that segment is taken from the folder;
- * the rest must still be this content's.
+ * entity, and its `row`: the table that entity is a row of and the column that
+ * addresses the folder. A content thumbnail's base starts with its creator's
+ * id, which an orphan row does not record, so that segment is taken from the
+ * folder; the rest must still be this content's.
+ *
+ * `row` is read when a sweep asks, not when this module loads: everything that
+ * imports this package would otherwise touch `schema` on load, and a test that
+ * mocks `@codex/database` without it (ecom-api's webhook handlers) fails
+ * before it runs.
  */
 const STILL_OWNER = {
   avatar: {
     base: (userId: string) => getUserAvatarBaseKey(userId),
-    table: schema.users,
-    column: schema.users.avatarUrl,
+    row: () => ({ table: schema.users, column: schema.users.avatarUrl }),
   },
   content_thumbnail: {
     base: (contentId: string, folder: string) =>
       getContentThumbnailBaseKey(folder.split('/', 1)[0] ?? '', contentId),
-    table: schema.content,
-    column: schema.content.thumbnailUrl,
+    row: () => ({ table: schema.content, column: schema.content.thumbnailUrl }),
   },
   category_cover: {
     base: CALLER_OWNED_STILL_BASE.category_cover,
-    table: schema.categories,
-    column: schema.categories.coverImageKey,
+    row: () => ({
+      table: schema.categories,
+      column: schema.categories.coverImageKey,
+    }),
   },
   course_cover: {
     base: CALLER_OWNED_STILL_BASE.course_cover,
-    table: schema.courses,
-    column: schema.courses.coverImageKey,
+    row: () => ({
+      table: schema.courses,
+      column: schema.courses.coverImageKey,
+    }),
   },
   course_hero: {
     base: CALLER_OWNED_STILL_BASE.course_hero,
-    table: schema.courses,
-    column: schema.courses.heroImageKey,
+    row: () => ({ table: schema.courses, column: schema.courses.heroImageKey }),
   },
   course_signature: {
     base: CALLER_OWNED_STILL_BASE.course_signature,
-    table: schema.courses,
-    column: schema.courses.signatureImageKey,
+    row: () => ({
+      table: schema.courses,
+      column: schema.courses.signatureImageKey,
+    }),
   },
 } as const;
 
@@ -327,14 +335,15 @@ export class OrphanedFileService extends BaseService {
     const textId = imageType === 'avatar';
     if (!textId && !uuidSchema.safeParse(entityId).success) return null;
 
+    const { table, column } = owner.row();
     const references = await this.db
-      .select({ id: owner.table.id })
-      .from(owner.table)
+      .select({ id: table.id })
+      .from(table)
       .where(
         and(
-          eq(owner.table.id, entityId),
-          whereNotDeleted(owner.table),
-          addressesFolder(owner.column, folder)
+          eq(table.id, entityId),
+          whereNotDeleted(table),
+          addressesFolder(column, folder)
         )
       )
       .limit(1);
