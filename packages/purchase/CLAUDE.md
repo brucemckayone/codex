@@ -50,7 +50,8 @@ emails — the open defect `Codex-2hxff.7`.
 | `createCheckoutSession(input, customerId)` / course equivalent | Gate the item, resolve the buyer's Stripe Customer, create a `mode: 'payment'` Checkout Session with server-side `price_data` |
 | `completePurchase(paymentIntentId, metadata)` / `completeCoursePurchase` | Called by the booking webhook. One transaction: purchase row + split snapshot + entitlement. Then the payouts (platform fee row, creator and organisation transfers). Idempotent on the payment intent. |
 | `verifyPurchase(contentId, customerId)` | A completed, undisputed purchase exists. Used by `@codex/access`. |
-| `getPurchaseHistory`, `getPurchase` | The buyer's own purchases |
+| `getPurchaseHistory`, `getPurchase` | The buyer's own purchases, content and course |
+| `listSales`, `getSalesStats` / `listMySales`, `getMySalesStats` | An organisation's sales ledger / a solo creator's own orgless sales; one shared query, so both have the same rows and filters |
 | `verifyCheckoutSession(sessionId, customerId)` | Success-page check; only the buyer who started the session |
 | `processRefund(paymentIntentId, details?)` | Called by the `charge.refunded` webhook. **Records** a refund made in Stripe and reverses transfers — it never issues one. |
 | `processDispute(...)` | Called by the dispute webhook |

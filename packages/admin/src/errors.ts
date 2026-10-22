@@ -8,6 +8,8 @@
  * most admin operations reuse existing domain errors (NotFoundError, etc.)
  */
 
+import { BusinessLogicError } from '@codex/service-errors';
+
 // Re-export base error classes for convenience
 export {
   BusinessLogicError,
@@ -21,5 +23,18 @@ export {
   wrapError,
 } from '@codex/service-errors';
 
-// Admin-specific errors can be added here as needed
-// For now, base errors are sufficient for admin operations
+/**
+ * A support grant was asked for content a grant cannot open (422): free,
+ * followers-only, team-only or course-only content, where the access decision
+ * never reads an entitlement (`isGrantableContent`, `@codex/constants`;
+ * Codex-2hxff.21). The context is client-facing — the error mapper serialises
+ * it — so it carries the content id only.
+ */
+export class ContentNotGrantableError extends BusinessLogicError {
+  constructor(contentId: string) {
+    super(
+      "This item can't be granted: a grant only opens paid or subscriber content.",
+      { contentId }
+    );
+  }
+}

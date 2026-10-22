@@ -56,6 +56,45 @@ export const listContent = query(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Org Browse Query
+// ─────────────────────────────────────────────────────────────────────────────
+
+const browseContentSchema = z.object({
+  organizationId: z.string().uuid(),
+  page: z.coerce.number().int().min(1).max(1000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(100),
+});
+
+/**
+ * One page of an organisation's published content, from every creator
+ * (`GET /api/content/browse`, the read behind /explore's signed-in sorts).
+ * Unlike `listContent`, which is scoped to the signed-in creator, this spans
+ * the whole org catalogue; course-only content is never in it. Backs the
+ * Studio grant picker (Codex-2hxff.21).
+ *
+ * Usage in Svelte:
+ * ```svelte
+ * <script>
+ *   const page1 = browseContent({ organizationId: orgId, page: 1 });
+ * </script>
+ * ```
+ */
+export const browseContent = query(
+  browseContentSchema,
+  async ({ organizationId, page, limit }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.content.browse(
+      new URLSearchParams({
+        organizationId,
+        page: String(page),
+        limit: String(limit),
+      })
+    );
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Single Content Query
 // ─────────────────────────────────────────────────────────────────────────────
 

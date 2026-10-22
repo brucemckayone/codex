@@ -153,4 +153,29 @@ describe('Admin API Worker', () => {
       expect(JSON.stringify(json)).not.toMatch(/ownerUserId/);
     });
   });
+
+  // Codex-2hxff.21: the support-grant list and revoke are rejected at the
+  // real procedure() boundary without a session, before any read or write.
+  // The 403-for-a-member half is pinned in customer-grants-routes.test.ts.
+  describe('Support grant routes — auth gate (Codex-2hxff.21)', () => {
+    const ORG = '00000000-0000-0000-0000-000000000001';
+    const ENTITLEMENT = '00000000-0000-0000-0000-000000000002';
+
+    it.each([
+      { method: 'GET', path: `/api/admin/customers/user9/grants` },
+      {
+        method: 'DELETE',
+        path: `/api/admin/customers/user9/grants/${ENTITLEMENT}`,
+      },
+    ])('rejects anonymous $method $path with 401', async ({ method, path }) => {
+      const response = await SELF.fetch(
+        `http://localhost${path}?organizationId=${ORG}`,
+        { method }
+      );
+
+      expect(response.status).toBe(401);
+      const json = (await response.json()) as { error?: { code: string } };
+      expect(json.error?.code).toBe('UNAUTHORIZED');
+    });
+  });
 });

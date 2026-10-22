@@ -33,7 +33,9 @@ All endpoints EXCEPT `/api/admin/fees/*` require `auth: 'required'` + `requireOr
 |---|---|---|---|---|
 | GET | `/api/admin/customers` | query: `adminCustomerListQuerySchema` | 200 | `{ items, pagination }` |
 | GET | `/api/admin/customers/:id` | params: id | 200 | `{ data: CustomerDetails }` |
-| POST | `/api/admin/customers/:customerId/grant-access/:contentId` | params: customerId + contentId | 200 | `{ success: true }` |
+| POST | `/api/admin/customers/:customerId/grant-access/:contentId` | params: customerId + contentId | 200 | `{ success: true }` — writes a `grant` entitlement |
+| GET | `/api/admin/customers/:customerId/grants` | params: customerId; query: `adminCustomerGrantsQuerySchema` (limit default 50) | 200 | `{ items: CustomerGrant[], pagination }` — live and revoked |
+| DELETE | `/api/admin/customers/:customerId/grants/:entitlementId` | params: `adminRevokeGrantParamsSchema` | 204 | — (404 unless this org's `grant` for this customer) |
 
 ### Status
 
@@ -47,7 +49,7 @@ All endpoints EXCEPT `/api/admin/fees/*` require `auth: 'required'` + `requireOr
 |---|---|---|
 | `AdminAnalyticsService` (`adminAnalytics`) | `@codex/admin` | Revenue, customer, top-content, dashboard, activity feed |
 | `AdminContentManagementService` (`adminContent`) | `@codex/admin` | List, publish, unpublish, delete content (admin scope) |
-| `AdminCustomerManagementService` (`adminCustomer`) | `@codex/admin` | List customers, get details, grant access |
+| `AdminCustomerManagementService` (`adminCustomer`) | `@codex/admin` | List customers, get details, grant, list and revoke support grants |
 
 ## Auth Pattern
 

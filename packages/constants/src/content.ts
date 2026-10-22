@@ -129,6 +129,38 @@ export function contentAccessKindToPolicy(
 }
 
 /**
+ * Can a support grant (a `grant` entitlement) open this content? Only paid or
+ * subscriber content: owner decision 2026-10-21, "only items it can open"
+ * (Codex-2hxff.21). The admin grant writer refuses anything else, and the
+ * Studio's grant pickers offer only these items.
+ *
+ * Mirrors the branch order of `decideContentAccess`
+ * (`packages/access/src/services/content-access/access-decision.ts`):
+ * courseOnly → team-only → followers-only → tier → paid → free. The first
+ * three branches return before any entitlement is read, and free content is
+ * open to everyone, so only the tier arm (`subscribers_entitlement`, :348) and
+ * the paid arm (`paid_entitlement`, :364) read an entitlement. If that order
+ * changes, change this too; `@codex/access` has a test that ties the two.
+ */
+export function isGrantableContent(
+  c: Pick<
+    ContentAccessFlags,
+    | 'courseOnly'
+    | 'isTeamOnly'
+    | 'isFollowerGated'
+    | 'includedInTierId'
+    | 'priceCents'
+  >
+): boolean {
+  return (
+    !c.courseOnly &&
+    !c.isTeamOnly &&
+    !c.isFollowerGated &&
+    (c.includedInTierId != null || (c.priceCents ?? 0) > 0)
+  );
+}
+
+/**
  * Content-access GRANT records — how a user *obtained* access to a piece of
  * content. One row per (user, content) in the `content_access` table
  * (`database/schema/ecommerce.ts`).

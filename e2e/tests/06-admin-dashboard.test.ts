@@ -1567,8 +1567,27 @@ describe('Admin Dashboard', () => {
       );
       expect(granted).toBe(true);
 
-      // Verify access was granted in database
-      const accessRecords = await dbHttp
+      // A grant is a live `grant` entitlement, the record the access decision
+      // and the library read (Codex-2hxff.21). It used to be a content_access
+      // 'complimentary' row that nothing read, so the grant did nothing.
+      const grants = await dbHttp
+        .select()
+        .from(schema.entitlements)
+        .where(
+          and(
+            eq(schema.entitlements.userId, buyer.id),
+            eq(schema.entitlements.contentId, content2.id),
+            eq(schema.entitlements.source, 'grant')
+          )
+        );
+
+      expect(grants).toHaveLength(1);
+      expect(grants[0]?.organizationId).toBe(admin.organization.id);
+      expect(grants[0]?.grantedByUserId).toBe(admin.user.id);
+      expect(grants[0]?.revokedAt).toBeNull();
+
+      // The dead table is no longer written.
+      const legacyRows = await dbHttp
         .select()
         .from(schema.contentAccess)
         .where(
@@ -1577,9 +1596,7 @@ describe('Admin Dashboard', () => {
             eq(schema.contentAccess.contentId, content2.id)
           )
         );
-
-      expect(accessRecords).toHaveLength(1);
-      expect(accessRecords[0].accessType).toBe('complimentary');
+      expect(legacyRows).toHaveLength(0);
     }, 180000);
 
     test('should handle duplicate access grant (idempotent)', async () => {
@@ -1722,18 +1739,19 @@ describe('Admin Dashboard', () => {
       );
       expect(second).toBe(true);
 
-      // Should still have only one access record
-      const accessRecords = await dbHttp
+      // Still exactly one live grant: a re-grant is a no-op (Codex-2hxff.21).
+      const grants = await dbHttp
         .select()
-        .from(schema.contentAccess)
+        .from(schema.entitlements)
         .where(
           and(
-            eq(schema.contentAccess.userId, buyer.id),
-            eq(schema.contentAccess.contentId, content.id)
+            eq(schema.entitlements.userId, buyer.id),
+            eq(schema.entitlements.contentId, content.id),
+            eq(schema.entitlements.source, 'grant')
           )
         );
 
-      expect(accessRecords).toHaveLength(1);
+      expect(grants).toHaveLength(1);
     }, 180000);
   });
 

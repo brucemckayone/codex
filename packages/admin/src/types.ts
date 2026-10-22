@@ -395,6 +395,23 @@ export interface CustomerDetails {
   purchaseHistory: PurchaseHistoryItem[];
 }
 
+/**
+ * A support grant in the Studio customer drawer (a `grant` entitlement).
+ * Revoked grants are listed too, as the audit trail. Dates are ISO 8601.
+ * A name is `null` when that person's account has been deleted.
+ */
+export interface CustomerGrant {
+  /** The entitlement id — what the revoke route takes. */
+  id: string;
+  contentId: string;
+  contentTitle: string;
+  contentSlug: string;
+  grantedAt: string;
+  grantedByName: string | null;
+  revokedAt: string | null;
+  revokedByName: string | null;
+}
+
 // ============================================================================
 // Analytics Response Types (canonical home — moved from @codex/shared-types)
 // ============================================================================

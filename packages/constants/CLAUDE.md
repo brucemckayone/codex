@@ -173,6 +173,7 @@ MEDIA_TYPES          // { VIDEO, AUDIO }
 VISIBILITY           // { PUBLIC, MEMBERS, PURCHASERS, PRIVATE }
 ACCESS_TYPES         // { FREE, PAID, MEMBERS_ONLY, ... }
 CONTENT_ACCESS_TYPE  // content access type constants
+isGrantableContent(c) // can a support grant open it? paid or tier only — mirrors decideContentAccess (Codex-2hxff.21)
 
 ORGANIZATION_ROLES   // { OWNER, ADMIN, CREATOR, SUBSCRIBER, MEMBER }
 ORGANIZATION_STATUS  // org status constants
