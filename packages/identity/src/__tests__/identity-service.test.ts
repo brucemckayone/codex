@@ -1197,9 +1197,10 @@ describe('IdentityService', () => {
         await expect(service.deleteAccount(userId)).resolves.toEqual([
           'tok-current',
         ]);
+        // `avatarUrl` is already null: the folder is named here or nowhere.
         expect(error).toHaveBeenCalledWith(
           'Avatar files not deleted after account deletion',
-          expect.objectContaining({ userId })
+          expect.objectContaining({ userId, avatarFolder: '300x300-ffffffff' })
         );
       });
     });

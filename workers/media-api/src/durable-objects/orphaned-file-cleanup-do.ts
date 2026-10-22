@@ -167,7 +167,7 @@ interface OrphanOutcome {
  * reads `Failed query: … params: …`, and a parameter can be a folder holding a
  * user id; the driver's own error, its `cause`, says what went wrong.
  */
-function messageForLog(error: unknown): string {
+export function messageForLog(error: unknown): string {
   const reported =
     error instanceof Error && error.cause instanceof Error
       ? error.cause
@@ -218,10 +218,16 @@ interface Env {
 export class OrphanedFileCleanupDO implements DurableObject {
   private state: DurableObjectState;
   private env: Env;
+  /** One logger for the alarm and every run it or `/trigger` starts. */
+  private readonly obs: ObservabilityClient;
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.env = env;
+    this.obs = new ObservabilityClient(
+      'OrphanedFileCleanupDO',
+      env.ENVIRONMENT ?? 'development'
+    );
 
     // Schedule first alarm on construction if not already scheduled
     this.state.blockConcurrencyWhile(async () => {
@@ -286,11 +292,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
    */
   // fallow-ignore-next-line unused-class-member
   async alarm(): Promise<void> {
-    const obs = new ObservabilityClient(
-      'OrphanedFileCleanupDO',
-      this.env.ENVIRONMENT ?? 'development'
-    );
-
+    const obs = this.obs;
     obs.info('Orphan cleanup alarm triggered');
 
     try {
@@ -314,9 +316,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
       await this.state.storage.put('lastRunResult', result);
       await this.state.storage.put('lastRunAt', new Date().toISOString());
     } catch (error) {
-      obs.error('Orphan cleanup failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      obs.error('Orphan cleanup failed', { error: messageForLog(error) });
     } finally {
       // Always reschedule next alarm
       await this.state.storage.setAlarm(Date.now() + CLEANUP_INTERVAL_MS);
@@ -330,10 +330,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
     const startTime = Date.now();
     const errors: OrphanOutcome[] = [];
     const leftForReview: OrphanOutcome[] = [];
-    const obs = new ObservabilityClient(
-      'OrphanedFileCleanupDO',
-      this.env.ENVIRONMENT ?? 'development'
-    );
+    const obs = this.obs;
 
     if (!this.env.ASSETS_BUCKET) {
       // Checked before any orphan is read, so nothing is marked deleted.

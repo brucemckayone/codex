@@ -675,9 +675,9 @@ export class IdentityService extends BaseService {
    * The tokens are read after the commit (and after the avatar delete) and
    * returned rather than deleted here: `AUTH_SESSION_KV` is BetterAuth's
    * namespace and this service has no binding to it, so the route owns that
-   * write. Session ROWS
-   * are deliberately left alone — BetterAuth owns their lifecycle, and with the
-   * KV entries gone the `deletedAt` gate on the DB path is what stops them.
+   * write. Session ROWS are deliberately left alone — BetterAuth owns their
+   * lifecycle, and with the KV entries gone the `deletedAt` gate on the DB
+   * path is what stops them.
    *
    * @param userId - Authenticated user ID (never a client-supplied value)
    * @returns Every session token belonging to the user, for KV invalidation
@@ -795,8 +795,10 @@ export class IdentityService extends BaseService {
         );
       } catch (error) {
         // `avatarUrl` is already null, so this log is the folder's only
-        // record. Its last segment, unlike the whole URL, holds no user id
-        // for production redaction to hash.
+        // record. A sized folder's own name holds no user id for production
+        // redaction to hash; an avatar from before Codex-kk9nv.5 has its
+        // files in the base, `avatars/{userId}`, so this is the id, hashed
+        // like `userId` beside it, and the folder follows from the id.
         this.obs.error('Avatar files not deleted after account deletion', {
           userId,
           avatarFolder: droppedAvatarUrl?.split('/').at(-2),

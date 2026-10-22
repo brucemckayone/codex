@@ -27,6 +27,7 @@ import type {
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   isFreshStillObject,
+  messageForLog,
   type OrphanedFileCleanupDO,
   reasonToKeep,
   wasRewrittenAfterOrphaning,
@@ -194,6 +195,27 @@ describe('isFreshStillObject (Codex-kk9nv.13)', () => {
       )
     ).toBe('sized folder with no owning row to check; left for review');
     expect(s.head).not.toHaveBeenCalled();
+  });
+});
+
+describe('messageForLog (Codex-kk9nv.13)', () => {
+  it("logs a failed query's driver error, not the query and its params", () => {
+    // drizzle's shape: the params can hold a folder with a 32-character user
+    // id, and production redaction would hash the whole message for it.
+    const failed = Object.assign(
+      new Error(
+        'Failed query: select "id" from "users"\nparams: avatars/abcdefghijklmnopqrstuvwxyz012345/300x300-aaaaaaaa/'
+      ),
+      { cause: new Error('Error connecting to database: fetch failed') }
+    );
+    expect(messageForLog(failed)).toBe(
+      'Error connecting to database: fetch failed'
+    );
+  });
+
+  it('logs any other error as it is', () => {
+    expect(messageForLog(new Error('R2 unavailable'))).toBe('R2 unavailable');
+    expect(messageForLog('not an error')).toBe('not an error');
   });
 });
 
@@ -464,7 +486,13 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
   // One test, not several: R2 is isolated storage, so a delete is rolled back
   // when the test that made it ends, while the database keeps its rows.
   it('keeps what a re-upload or a live row still holds, and deletes the rest', async () => {
+    // The logger writes through console, which the test and the DO share.
+    const warn = vi.spyOn(console, 'warn');
     const runs = await sweepUntilReached();
+    const reviewWarnings = warn.mock.calls
+      .map(([line]) => String(line))
+      .filter((line) => line.includes('Orphan left for review'));
+    warn.mockRestore();
 
     expect(await outcomeOf(ids.reused)).toMatchObject({ status: 'retained' });
     expect(await testEnv.ASSETS_BUCKET.head(keys.reused)).not.toBeNull();
@@ -476,14 +504,15 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
 
     // A sized folder is decided by its own row (Codex-kk9nv.13), in every
     // column shape, and kept for that reason, not by the re-upload timing.
-    for (const name of [
+    const keptReferenced = [
       'referenced',
       'avatar',
       'courseHero',
       'courseCover',
       'courseSignature',
       'content',
-    ] as const) {
+    ] as const;
+    for (const name of keptReferenced) {
       expect(await outcomeOf(ids[name])).toEqual({
         status: 'retained',
         reason: REFERENCED,
@@ -496,7 +525,8 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
     }
 
     // Each row one guard refuses to place is kept on the first try, object
-    // and all, and the run that kept it names it.
+    // and all, and named twice: in the run's result, and in a warning logged
+    // as it is kept, the one a person sees.
     const forReview = [
       'unplaced',
       'otherEntity',
@@ -516,16 +546,18 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
     expect(named).toEqual(
       expect.arrayContaining(forReview.map((name) => ids[name]))
     );
+    for (const name of forReview) {
+      expect(
+        reviewWarnings.filter((line) => line.includes(ids[name]))
+      ).toHaveLength(1);
+    }
     // And only those: a key kept for a live reference or a re-upload is not
     // one a person needs to look at.
-    for (const name of [
-      'reused',
-      'referenced',
-      'avatar',
-      'courseHero',
-      'content',
-    ] as const) {
+    for (const name of ['reused', ...keptReferenced] as const) {
       expect(named).not.toContain(ids[name]);
+      expect(reviewWarnings.some((line) => line.includes(ids[name]))).toBe(
+        false
+      );
     }
     // Up to five sweeps of a shared database, each a query or more per row.
   }, 30_000);
