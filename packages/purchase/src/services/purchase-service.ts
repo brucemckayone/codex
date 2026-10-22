@@ -23,8 +23,7 @@
 
 import {
   ACCESS_TYPES,
-  CHECKOUT_SESSION_STATUS,
-  CHECKOUT_SESSION_TIMING,
+  CHECKOUT_SESSION_KIND,
   CONTENT_STATUS,
   CURRENCY,
   canBeSold,
@@ -40,8 +39,6 @@ import {
   withPagination,
 } from '@codex/database';
 import {
-  type CheckoutSession,
-  checkoutSessions,
   content,
   contentAccess,
   courses,
@@ -109,7 +106,6 @@ import {
 import type Stripe from 'stripe';
 import {
   AlreadyPurchasedError,
-  ConflictError,
   ContentNotPurchasableError,
   CourseAlreadyOwnedError,
   CourseNotPurchasableError,
@@ -119,6 +115,12 @@ import {
   PurchaseNotFoundError,
 } from '../errors';
 import { findActiveCreatorAgreementShare } from './agreement-share';
+import {
+  CheckoutReservations,
+  checkoutIdempotencyKey,
+  stripeErrorCode,
+  toStripeTime,
+} from './checkout-reservations';
 import {
   writeContentPurchaseEntitlement,
   writeCoursePurchaseEntitlement,
@@ -293,25 +295,6 @@ type PurchaseListStatus = (typeof PURCHASE_LIST_STATUSES)[number];
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
 
-/** Stripe takes timestamps in whole epoch seconds. */
-function toStripeTime(at: Date): number {
-  return Math.floor(at.getTime() / 1000);
-}
-
-/**
- * One key per reserved checkout session AND resolved Stripe Customer
- * (Codex-2hxff.14). Two tabs on the same reservation send identical
- * parameters and get the same session back. `withStaleCustomerRecovery`'s
- * retry with a recreated Customer gets a new key: Stripe compares a reused
- * key's parameters and would refuse the changed customer.
- */
-function checkoutIdempotencyKey(
-  reserved: CheckoutSession,
-  stripeCustomerId: string
-): string {
-  return `checkout_${reserved.id}_${stripeCustomerId}`;
-}
-
 /**
  * A new purchase row's outcome: completed, or, for a second payment for an
  * item the buyer owns, a duplicate of that purchase (Codex-2hxff.14). A
@@ -335,21 +318,6 @@ export function isDuplicatePayment(
   return purchase.duplicateOfPurchaseId != null;
 }
 
-/**
- * Another request is creating a session under the same idempotency key: 409
- * while it runs, or Stripe's idempotency error when its parameters differ.
- */
-function isConcurrentCreate(error: unknown): boolean {
-  const e = error as { statusCode?: unknown; type?: unknown } | null;
-  return e?.statusCode === 409 || e?.type === 'StripeIdempotencyError';
-}
-
-/** A Stripe error's `code`, for logs (`charge_disputed`, ...). */
-function stripeErrorCode(error: unknown): string | undefined {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === 'string' ? code : undefined;
-}
-
 function coercePurchaseStatus(s: string): PurchaseListStatus {
   return (PURCHASE_LIST_STATUSES as readonly string[]).includes(s)
     ? (s as PurchaseListStatus)
@@ -367,6 +335,7 @@ export class PurchaseService extends BaseService {
   private readonly mailer: PurchaseMailer | undefined;
   private readonly webAppUrl: string | undefined;
   private readonly portalConfigurationId: string | undefined;
+  private readonly checkoutReservations: CheckoutReservations;
 
   /**
    * Initialize purchase service
@@ -381,6 +350,11 @@ export class PurchaseService extends BaseService {
     this.mailer = config.mailer;
     this.webAppUrl = config.webAppUrl;
     this.portalConfigurationId = config.portalConfigurationId;
+    this.checkoutReservations = new CheckoutReservations(
+      this.db,
+      stripe,
+      this.obs
+    );
   }
 
   /**
@@ -558,7 +532,8 @@ export class PurchaseService extends BaseService {
 
       // One open session per buyer and item (Codex-2hxff.14): a second tab
       // gets the first tab's Stripe page back.
-      const reserved = await this.reserveCheckoutSession({
+      const reserved = await this.checkoutReservations.reserve({
+        kind: CHECKOUT_SESSION_KIND.PURCHASE,
         customerId,
         contentId: validated.contentId,
         amountCents: priceCents,
@@ -574,7 +549,7 @@ export class PurchaseService extends BaseService {
       // a stale `users.stripe_customer_id` (deleted-in-Stripe or seed-only
       // synthetic) by clearing the cache and recreating once. Same pattern
       // as `SubscriptionService.createCheckoutSession`.
-      return await this.createReservedSession(reserved, () =>
+      return await this.checkoutReservations.create(reserved, () =>
         withStaleCustomerRecovery(
           { db: this.db, stripe: this.stripe },
           {
@@ -676,225 +651,13 @@ export class PurchaseService extends BaseService {
   // ─── One open checkout per buyer and item (Codex-2hxff.14) ─────────────────
 
   /**
-   * Find or make the buyer's open checkout session for one item, so a second
-   * tab or a double click lands on the same Stripe page rather than a second
-   * one that could also take payment (owner decision "Block, then refund").
-   *
-   * Serialised per buyer and item by an advisory lock, which the partial
-   * unique index on open rows backs. An open session is reused when it was
-   * made at today's price and has at least `MIN_REMAINING_TO_REUSE_MS` left.
-   * Otherwise it is marked expired and its Stripe session expired too, and a
-   * new reservation is made, its expiry fixed now (30 minutes, plus the slack
-   * Stripe's 30-minute floor needs).
-   */
-  private async reserveCheckoutSession(
-    target: { customerId: string; amountCents: number } & (
-      | { contentId: string }
-      | { courseId: string }
-    )
-  ): Promise<CheckoutSession> {
-    const [item, contentId, courseId] =
-      'contentId' in target
-        ? [
-            eq(checkoutSessions.contentId, target.contentId),
-            target.contentId,
-            null,
-          ]
-        : [
-            eq(checkoutSessions.courseId, target.courseId),
-            null,
-            target.courseId,
-          ];
-    const lockKey = `checkout:${target.customerId}:${contentId ?? courseId}`;
-
-    const { reserved, replaced } = await this.db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`);
-      const [open] = await tx
-        .select()
-        .from(checkoutSessions)
-        .where(
-          and(
-            eq(checkoutSessions.customerId, target.customerId),
-            item,
-            eq(checkoutSessions.status, CHECKOUT_SESSION_STATUS.OPEN)
-          )
-        )
-        .limit(1);
-
-      const now = Date.now();
-      // A row with no URL yet is another caller's session in flight; once it
-      // is older than the slack its stored expiry is under Stripe's floor, so
-      // its creator must have failed and it is replaced.
-      if (
-        open &&
-        open.amountCents === target.amountCents &&
-        open.expiresAt.getTime() - now >=
-          CHECKOUT_SESSION_TIMING.MIN_REMAINING_TO_REUSE_MS &&
-        (open.url !== null ||
-          now - open.createdAt.getTime() <
-            CHECKOUT_SESSION_TIMING.STRIPE_FLOOR_SLACK_MS)
-      ) {
-        return { reserved: open, replaced: null };
-      }
-      if (open) {
-        await tx
-          .update(checkoutSessions)
-          .set({ status: CHECKOUT_SESSION_STATUS.EXPIRED })
-          .where(eq(checkoutSessions.id, open.id));
-      }
-      const [row] = await tx
-        .insert(checkoutSessions)
-        .values({
-          customerId: target.customerId,
-          contentId,
-          courseId,
-          amountCents: target.amountCents,
-          expiresAt: new Date(
-            now +
-              CHECKOUT_SESSION_TIMING.TTL_MS +
-              CHECKOUT_SESSION_TIMING.STRIPE_FLOOR_SLACK_MS
-          ),
-        })
-        .returning();
-      if (!row) {
-        throw new PaymentProcessingError('Failed to reserve checkout session', {
-          contentId,
-          courseId,
-        });
-      }
-      return { reserved: row, replaced: open?.stripeSessionId ?? null };
-    });
-
-    if (replaced) await this.expireReplacedSession(replaced);
-    return reserved;
-  }
-
-  /**
-   * Stop a replaced session taking payment. Best effort: Stripe refuses when
-   * it was paid or has expired already. A payment made on it still completes,
-   * and the buyer's payment on the new session is then refunded as a
-   * duplicate, so nothing is lost by carrying on.
-   */
-  private async expireReplacedSession(stripeSessionId: string): Promise<void> {
-    try {
-      await this.stripe.checkout.sessions.expire(stripeSessionId);
-    } catch (error) {
-      const details = {
-        stripeSessionId,
-        code: stripeErrorCode(error),
-        error: error instanceof Error ? error.message : String(error),
-      };
-      // Refused because it is no longer open: expected. Anything else (auth,
-      // network) means it may still take payment, so it is loud.
-      if (
-        (error as { type?: unknown } | null)?.type ===
-        'StripeInvalidRequestError'
-      ) {
-        this.obs.info('Replaced checkout session was no longer open', details);
-      } else {
-        this.obs.error('Replaced checkout session could not be expired', {
-          errorId: crypto.randomUUID(),
-          ...details,
-        });
-      }
-    }
-  }
-
-  /**
-   * Create the reserved session at Stripe and record it.
-   *
-   * - A failure frees the reservation, so the next attempt starts afresh
-   *   rather than replaying Stripe's stored answer for the key. The Stripe
-   *   error is the one thrown, even if freeing the row fails too.
-   * - A 409, or an idempotency error, means another caller (the other tab of
-   *   a double click) is creating this session under the same key; the
-   *   idempotency error when its parameters differ (the content page and the
-   *   preview player send different cancel URLs). The session is theirs to
-   *   record, so this waits briefly for it and returns it; if it never
-   *   appears, the buyer is asked to try again in a moment.
-   */
-  private async createReservedSession(
-    reserved: CheckoutSession,
-    create: () => Promise<Stripe.Checkout.Session>
-  ): Promise<CheckoutSessionResult> {
-    let session: Stripe.Checkout.Session;
-    try {
-      session = await create();
-    } catch (error) {
-      if (isConcurrentCreate(error)) {
-        return this.awaitConcurrentSession(reserved.id);
-      }
-      try {
-        await this.db
-          .update(checkoutSessions)
-          .set({ status: CHECKOUT_SESSION_STATUS.EXPIRED })
-          .where(
-            and(
-              eq(checkoutSessions.id, reserved.id),
-              isNull(checkoutSessions.stripeSessionId)
-            )
-          );
-      } catch (cleanupError) {
-        // The row then stays open with no session until it is replaced at
-        // its expiry; the Stripe error below is the one that matters.
-        this.obs.error('Checkout reservation could not be freed', {
-          errorId: crypto.randomUUID(),
-          reservationId: reserved.id,
-          error:
-            cleanupError instanceof Error
-              ? cleanupError.message
-              : String(cleanupError),
-        });
-      }
-      throw error;
-    }
-    if (!session.url) {
-      throw new PaymentProcessingError('Checkout session URL not generated', {
-        sessionId: session.id,
-      });
-    }
-    await this.db
-      .update(checkoutSessions)
-      .set({ stripeSessionId: session.id, url: session.url })
-      .where(eq(checkoutSessions.id, reserved.id));
-    return { sessionUrl: session.url, sessionId: session.id };
-  }
-
-  /** The other caller's session, once it has recorded it (up to ~3 s). */
-  private async awaitConcurrentSession(
-    reservationId: string
-  ): Promise<CheckoutSessionResult> {
-    for (let attempt = 0; attempt < 12; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      const [row] = await this.db
-        .select({
-          url: checkoutSessions.url,
-          stripeSessionId: checkoutSessions.stripeSessionId,
-        })
-        .from(checkoutSessions)
-        .where(eq(checkoutSessions.id, reservationId))
-        .limit(1);
-      if (row?.url && row.stripeSessionId) {
-        return { sessionUrl: row.url, sessionId: row.stripeSessionId };
-      }
-    }
-    throw new ConflictError(
-      'Your checkout is still being prepared. Please try again in a moment.',
-      { reservationId }
-    );
-  }
-
-  /**
    * The booking webhook: this session was paid (Codex-2hxff.14). The buyer's
    * next checkout for the item is refused because they own it, so this is a
    * record, not a gate.
    */
   async markCheckoutSessionCompleted(stripeSessionId: string): Promise<void> {
     try {
-      await this.db
-        .update(checkoutSessions)
-        .set({ status: CHECKOUT_SESSION_STATUS.COMPLETED })
-        .where(eq(checkoutSessions.stripeSessionId, stripeSessionId));
+      await this.checkoutReservations.markCompleted(stripeSessionId);
     } catch (error) {
       this.handleError(error, 'markCheckoutSessionCompleted');
     }
@@ -1542,7 +1305,8 @@ export class PurchaseService extends BaseService {
       // property narrowing inside the callback — same reason as the content path).
       const priceCents = course.priceCents;
 
-      const reserved = await this.reserveCheckoutSession({
+      const reserved = await this.checkoutReservations.reserve({
+        kind: CHECKOUT_SESSION_KIND.PURCHASE,
         customerId,
         courseId: validated.courseId,
         amountCents: priceCents,
@@ -1554,7 +1318,7 @@ export class PurchaseService extends BaseService {
         };
       }
 
-      return await this.createReservedSession(reserved, () =>
+      return await this.checkoutReservations.create(reserved, () =>
         withStaleCustomerRecovery(
           { db: this.db, stripe: this.stripe },
           {

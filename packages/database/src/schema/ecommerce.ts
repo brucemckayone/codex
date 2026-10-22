@@ -627,16 +627,26 @@ export const checkoutSessions = pgTable(
     customerId: text('customer_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    // Exactly one target, as on `purchases` (CHECK below).
+    // A one-off `purchase` of content or a course, or a `subscription` to
+    // an org's tiers or a course plan (Codex-2hxff.15).
+    kind: varchar('kind', { length: 20 }).notNull().default('purchase'),
+    // Exactly one target (CHECK below): content or course for a purchase;
+    // the organisation (tiers) or the course (its plan) for a subscription.
     contentId: uuid('content_id').references(() => content.id, {
       onDelete: 'cascade',
     }),
     courseId: uuid('course_id').references(() => courses.id, {
       onDelete: 'cascade',
     }),
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'cascade',
+    }),
     // The price the session was made at. A price change since means the
     // open session is replaced rather than reused.
     amountCents: integer('amount_cents').notNull(),
+    // A subscription session's Stripe price: another tier or billing
+    // interval is another item at the same amount, so it replaces too.
+    stripePriceId: varchar('stripe_price_id', { length: 255 }),
     // Filled once Stripe answers; NULL while the first caller is creating it.
     stripeSessionId: varchar('stripe_session_id', { length: 255 }).unique(),
     url: text('url'),
@@ -655,12 +665,22 @@ export const checkoutSessions = pgTable(
     uniqueIndex('uq_checkout_sessions_open_customer_content')
       .on(table.customerId, table.contentId)
       .where(sql`${table.status} = 'open' AND ${table.contentId} IS NOT NULL`),
+    // A course's one-off purchase and its plan are different items.
     uniqueIndex('uq_checkout_sessions_open_customer_course')
-      .on(table.customerId, table.courseId)
+      .on(table.customerId, table.courseId, table.kind)
       .where(sql`${table.status} = 'open' AND ${table.courseId} IS NOT NULL`),
+    uniqueIndex('uq_checkout_sessions_open_customer_org')
+      .on(table.customerId, table.organizationId)
+      .where(
+        sql`${table.status} = 'open' AND ${table.organizationId} IS NOT NULL`
+      ),
     check(
       'check_checkout_session_target_one',
-      sql`(CASE WHEN ${table.contentId} IS NULL THEN 0 ELSE 1 END) + (CASE WHEN ${table.courseId} IS NULL THEN 0 ELSE 1 END) = 1`
+      sql`(CASE WHEN ${table.contentId} IS NULL THEN 0 ELSE 1 END) + (CASE WHEN ${table.courseId} IS NULL THEN 0 ELSE 1 END) + (CASE WHEN ${table.organizationId} IS NULL THEN 0 ELSE 1 END) = 1`
+    ),
+    check(
+      'check_checkout_session_kind',
+      sql`(${table.kind} = 'purchase' AND ${table.organizationId} IS NULL AND ${table.stripePriceId} IS NULL) OR (${table.kind} = 'subscription' AND ${table.contentId} IS NULL AND ${table.stripePriceId} IS NOT NULL)`
     ),
     check(
       'check_checkout_session_status',

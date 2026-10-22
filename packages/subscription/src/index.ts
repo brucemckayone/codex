@@ -83,6 +83,11 @@ export {
   calculateRevenueSplit,
   type RevenueSplit,
 } from './services/revenue-split';
+// A second subscription the user already had (Codex-2hxff.15)
+export {
+  cancelAndRefundDuplicate,
+  isDuplicateSubscription,
+} from './services/subscription-duplicates';
 export {
   type InvalidateForUserArgs,
   type InvalidateForUserOptions,
