@@ -145,3 +145,26 @@ export function getErrorDetail(error: unknown): string | null {
   }
   return null;
 }
+
+/**
+ * An error's message for a log line, without a failed query's SQL and
+ * parameters. drizzle wraps every failed query as `Failed query: <sql>\nparams:
+ * <params>`, with the driver's error as its `cause`, and a parameter can be a
+ * key holding a 32-character user id, for which production redaction hashes
+ * the whole line. This walks that chain to the driver's reason. Any other
+ * error keeps its own message, the specific one, even when it has a cause.
+ *
+ * drizzle's real prefix is pinned by media-api's orphan sweep test, which runs
+ * a failed query (Codex-kk9nv.13).
+ */
+export function messageForLog(error: unknown): string {
+  let reported = error;
+  while (
+    reported instanceof Error &&
+    reported.message.startsWith('Failed query:') &&
+    reported.cause instanceof Error
+  ) {
+    reported = reported.cause;
+  }
+  return reported instanceof Error ? reported.message : String(reported);
+}

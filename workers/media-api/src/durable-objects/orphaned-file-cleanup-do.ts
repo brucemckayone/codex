@@ -20,7 +20,7 @@
 
 import type { DurableObjectState } from '@cloudflare/workers-types';
 import { R2Service } from '@codex/cloudflare-clients';
-import { createDbClient } from '@codex/database';
+import { createDbClient, messageForLog } from '@codex/database';
 import {
   type OrphanedFileRecord,
   OrphanedFileService,
@@ -160,24 +160,6 @@ interface OrphanOutcome {
   orphanId: string;
   imageType: OrphanedFileRecord['imageType'];
   detail: string;
-}
-
-/**
- * An error's message without a failed query's parameters. drizzle's error
- * reads `Failed query: … params: …`, and a parameter can be a folder holding a
- * user id; the driver's own error, its `cause`, says what went wrong. Only
- * that shape is unwrapped: any other error's own message is the specific one.
- */
-export function messageForLog(error: unknown): string {
-  let reported = error;
-  while (
-    reported instanceof Error &&
-    reported.message.startsWith('Failed query:') &&
-    reported.cause instanceof Error
-  ) {
-    reported = reported.cause;
-  }
-  return reported instanceof Error ? reported.message : String(reported);
 }
 
 interface CleanupRunResult {
@@ -400,16 +382,9 @@ export class OrphanedFileCleanupDO implements DurableObject {
         await orphanedFileService.markDeleted(orphan.id);
         deleted++;
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-
-        // The row keeps the whole message for review; its log line, like
-        // this run's, says only what messageForLog keeps.
-        await orphanedFileService.recordFailedAttempt(
-          orphan.id,
-          errorMessage,
-          messageForLog(error)
-        );
+        // The service keeps the whole message on the row and logs only
+        // messageForLog's, as this run's own record does.
+        await orphanedFileService.recordFailedAttempt(orphan.id, error);
         failed++;
         errors.push({
           orphanId: orphan.id,

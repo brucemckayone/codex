@@ -290,37 +290,71 @@ describe('OrphanedFileService', () => {
       // Only one update call (no second call to mark as failed)
       expect(mockDb.update).toHaveBeenCalledTimes(1);
     });
-    it('keeps the whole error on the row and logs the summary it is given (Codex-kk9nv.13)', async () => {
-      // A failed query's message carries its params; the row keeps it for
-      // review, the log line says only the driver's reason.
-      mockDb._mocks.updateReturning.mockResolvedValueOnce([
-        { id: 'orphan-1', cleanupAttempts: 1 },
-      ]);
-      const warn = vi.spyOn(
-        (service as unknown as { obs: { warn: (m: string) => void } }).obs,
-        'warn'
-      );
+    describe("a failed query: the row keeps it whole, the log only the driver's reason (Codex-kk9nv.13)", () => {
+      const ROW_TEXT =
+        'Failed query: select …\nparams: avatars/u/300x300-aaaaaaaa/';
+      const failed = () =>
+        Object.assign(new Error(ROW_TEXT), {
+          cause: new Error('connection terminated'),
+        });
+      const warnOf = (target: OrphanedFileService) =>
+        vi.spyOn(
+          (target as unknown as { obs: { warn: (m: string) => void } }).obs,
+          'warn'
+        );
 
-      await service.recordFailedAttempt(
-        'orphan-1',
-        'Failed query: select …\nparams: avatars/u/300x300-aaaaaaaa/',
-        'connection terminated'
-      );
+      it('on an attempt that will be retried', async () => {
+        mockDb._mocks.updateReturning.mockResolvedValueOnce([
+          { id: 'orphan-1', cleanupAttempts: 1 },
+        ]);
+        const warn = warnOf(service);
 
-      expect(mockDb._mocks.set).toHaveBeenCalledWith(
-        expect.objectContaining({
-          errorMessage:
-            'Failed query: select …\nparams: avatars/u/300x300-aaaaaaaa/',
-        })
-      );
-      expect(warn).toHaveBeenCalledWith(
-        'Orphaned file cleanup attempt failed',
-        {
-          orphanId: 'orphan-1',
-          attempts: 1,
-          error: 'connection terminated',
-        }
-      );
+        await service.recordFailedAttempt('orphan-1', failed());
+
+        expect(mockDb._mocks.set).toHaveBeenCalledWith(
+          expect.objectContaining({ errorMessage: ROW_TEXT })
+        );
+        expect(warn).toHaveBeenCalledWith(
+          'Orphaned file cleanup attempt failed',
+          { orphanId: 'orphan-1', attempts: 1, error: 'connection terminated' }
+        );
+      });
+
+      it('on the last attempt, which marks the row failed', async () => {
+        const firstSet = vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            returning: vi
+              .fn()
+              .mockResolvedValueOnce([{ id: 'orphan-1', cleanupAttempts: 3 }]),
+          }),
+        });
+        const secondSet = vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValueOnce([{ id: 'orphan-1' }]),
+        });
+        const update = vi
+          .fn()
+          .mockReturnValueOnce({ set: firstSet })
+          .mockReturnValueOnce({ set: secondSet });
+        const lastTry = new OrphanedFileService({
+          db: {
+            update,
+            insert: vi.fn(),
+            select: vi.fn(),
+          } as unknown as Database,
+          environment: 'test',
+        });
+        const warn = warnOf(lastTry);
+
+        await lastTry.recordFailedAttempt('orphan-1', failed());
+
+        expect(firstSet).toHaveBeenCalledWith(
+          expect.objectContaining({ errorMessage: ROW_TEXT })
+        );
+        expect(warn).toHaveBeenCalledWith(
+          'Orphaned file cleanup failed permanently',
+          { orphanId: 'orphan-1', attempts: 3, error: 'connection terminated' }
+        );
+      });
     });
   });
 

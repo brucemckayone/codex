@@ -16,6 +16,7 @@ import {
   eq,
   inArray,
   lt,
+  messageForLog,
   type SQL,
   schema,
   sql,
@@ -429,23 +430,21 @@ export class OrphanedFileService extends BaseService {
    * Increments attempt counter and records error message.
    * If max attempts reached, marks as 'failed' for manual review.
    *
-   * @param error - Kept on the row whole, for whoever reviews it
-   * @param logged - What the log line says, when that should differ: a failed
-   *   query's message carries its params, and the caller can pass the driver's
-   *   reason instead (Codex-kk9nv.13)
+   * The row keeps the error's whole message, for whoever reviews it; the log
+   * line says only {@link messageForLog}'s, since a failed query's message
+   * carries its parameters (Codex-kk9nv.13). Both come from the error itself,
+   * so no caller can hand the log the wrong one.
    */
-  async recordFailedAttempt(
-    id: string,
-    error: string,
-    logged: string = error
-  ): Promise<void> {
+  async recordFailedAttempt(id: string, error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    const logged = messageForLog(error);
     // Use atomic increment to prevent race conditions
     const updated = await this.db
       .update(schema.orphanedImageFiles)
       .set({
         cleanupAttempts: sql`${schema.orphanedImageFiles.cleanupAttempts} + 1`,
         lastAttemptAt: new Date(),
-        errorMessage: error,
+        errorMessage: message,
       })
       .where(eq(schema.orphanedImageFiles.id, id))
       .returning();

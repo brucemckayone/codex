@@ -23,6 +23,7 @@ import {
   closeDbPool,
   createDbClient,
   inArray,
+  messageForLog,
   schema,
   sql,
 } from '@codex/database';
@@ -33,7 +34,6 @@ import type {
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   isFreshStillObject,
-  messageForLog,
   type OrphanedFileCleanupDO,
   reasonToKeep,
   wasRewrittenAfterOrphaning,
@@ -201,51 +201,6 @@ describe('isFreshStillObject (Codex-kk9nv.13)', () => {
       )
     ).toBe('sized folder with no owning row to check; left for review');
     expect(s.head).not.toHaveBeenCalled();
-  });
-});
-
-describe('messageForLog (Codex-kk9nv.13)', () => {
-  it("logs a failed query's driver error, not the query and its params", () => {
-    // drizzle's shape: the params can hold a folder with a 32-character user
-    // id, and production redaction would hash the whole message for it.
-    const failed = Object.assign(
-      new Error(
-        'Failed query: select "id" from "users"\nparams: avatars/abcdefghijklmnopqrstuvwxyz012345/300x300-aaaaaaaa/'
-      ),
-      { cause: new Error('Error connecting to database: fetch failed') }
-    );
-    expect(messageForLog(failed)).toBe(
-      'Error connecting to database: fetch failed'
-    );
-  });
-
-  it('unwraps a failed query wrapped in another failed query, to the driver', () => {
-    const driver = new Error('connection terminated');
-    const inner = Object.assign(
-      new Error('Failed query: update …\nparams: …'),
-      {
-        cause: driver,
-      }
-    );
-    const outer = Object.assign(
-      new Error('Failed query: select …\nparams: …'),
-      {
-        cause: inner,
-      }
-    );
-    expect(messageForLog(outer)).toBe('connection terminated');
-  });
-
-  it('logs any other error as it is, even one with a cause: its own message is the specific one', () => {
-    expect(messageForLog(new Error('R2 unavailable'))).toBe('R2 unavailable');
-    expect(
-      messageForLog(
-        Object.assign(new Error('ASSETS_BUCKET not bound'), {
-          cause: new Error('binding missing'),
-        })
-      )
-    ).toBe('ASSETS_BUCKET not bound');
-    expect(messageForLog('not an error')).toBe('not an error');
   });
 });
 
@@ -528,6 +483,8 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
     expect(failed).toBeInstanceOf(Error);
     const error = failed as Error;
     expect(error.message.startsWith('Failed query:')).toBe(true);
+    // The param is in drizzle's message, so its absence below means something.
+    expect(error.message).toContain('avatars/');
     expect(error.cause).toBeInstanceOf(Error);
     expect(messageForLog(error)).toBe((error.cause as Error).message);
     expect(messageForLog(error)).not.toContain('avatars/');

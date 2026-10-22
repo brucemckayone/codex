@@ -8,6 +8,7 @@ import { CacheType } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
 import {
   listedCreatorConditions,
+  messageForLog,
   toIso,
   whereNotDeleted,
 } from '@codex/database';
@@ -164,11 +165,7 @@ export class IdentityService extends BaseService {
       } catch (error) {
         this.obs.warn(
           'Org creators lists not invalidated: org lookup failed; they expire with their TTL',
-          {
-            userId,
-            operation,
-            error: error instanceof Error ? error.message : String(error),
-          }
+          { userId, operation, error: messageForLog(error) }
         );
         return [];
       }
