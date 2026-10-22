@@ -11,9 +11,93 @@ import type {
   OrphanStatus,
 } from '@codex/database';
 
-import { and, eq, inArray, lt, schema, sql } from '@codex/database';
+import {
+  and,
+  eq,
+  inArray,
+  isFailedQuery,
+  lt,
+  messageForLog,
+  type SQL,
+  schema,
+  sql,
+  whereNotDeleted,
+} from '@codex/database';
 import { BaseService } from '@codex/service-errors';
+import {
+  getContentThumbnailBaseKey,
+  getUserAvatarBaseKey,
+} from '@codex/transcoding';
+import { uuidSchema } from '@codex/validation';
 import { pageIdOfPageImageKey } from './page-image-keys';
+import { CALLER_OWNED_STILL_BASE } from './still-bases';
+
+/**
+ * Each sized still, by image type: the base its folders sit under for one
+ * entity, and its `row`: the table that entity is a row of and the column that
+ * addresses the folder. A content thumbnail's base starts with its creator's
+ * id, which an orphan row does not record, so that segment is taken from the
+ * folder; the rest must still be this content's.
+ *
+ * `row` is read when a sweep asks, not when this module loads: everything that
+ * imports this package would otherwise touch `schema` on load, and a test that
+ * mocks `@codex/database` without it (ecom-api's webhook handlers) fails
+ * before it runs.
+ */
+const STILL_OWNER = {
+  avatar: {
+    base: (userId: string) => getUserAvatarBaseKey(userId),
+    row: () => ({ table: schema.users, column: schema.users.avatarUrl }),
+  },
+  content_thumbnail: {
+    base: (contentId: string, folder: string) =>
+      getContentThumbnailBaseKey(folder.split('/', 1)[0] ?? '', contentId),
+    row: () => ({ table: schema.content, column: schema.content.thumbnailUrl }),
+  },
+  category_cover: {
+    base: CALLER_OWNED_STILL_BASE.category_cover,
+    row: () => ({
+      table: schema.categories,
+      column: schema.categories.coverImageKey,
+    }),
+  },
+  course_cover: {
+    base: CALLER_OWNED_STILL_BASE.course_cover,
+    row: () => ({
+      table: schema.courses,
+      column: schema.courses.coverImageKey,
+    }),
+  },
+  course_hero: {
+    base: CALLER_OWNED_STILL_BASE.course_hero,
+    row: () => ({ table: schema.courses, column: schema.courses.heroImageKey }),
+  },
+  course_signature: {
+    base: CALLER_OWNED_STILL_BASE.course_signature,
+    row: () => ({
+      table: schema.courses,
+      column: schema.courses.signatureImageKey,
+    }),
+  },
+} as const;
+
+type SizedStillType = keyof typeof STILL_OWNER;
+
+function isSizedStillType(type: OrphanedImageType): type is SizedStillType {
+  return Object.hasOwn(STILL_OWNER, type);
+}
+
+/**
+ * `column` addresses `folder`: a key that is the folder itself, or the URL of
+ * a file in it. The trailing slash on both sides stops one nonce matching a
+ * longer one.
+ */
+function addressesFolder(
+  column: Parameters<typeof eq>[0],
+  folder: string
+): SQL {
+  return sql`strpos(${column} || '/', ${`${folder}/`}) > 0`;
+}
 
 export interface RecordOrphanInput {
   r2Key: string;
@@ -41,6 +125,8 @@ export interface CleanupStats {
   processed: number;
   deleted: number;
   failed: number;
+  /** Kept, terminally: a live reference, or left for a person to review. */
+  retained: number;
   remaining: number;
 }
 
@@ -216,6 +302,55 @@ export class OrphanedFileService extends BaseService {
   }
 
   /**
+   * Whether a live row still addresses a sized still folder (Codex-kk9nv.13).
+   * The owning row is found by the orphan's own type and entity id, and only a
+   * live one counts: a deleted entity's stills go with it (Codex-kk9nv.14).
+   *
+   * A sized folder is never re-written, so this, not the re-upload check, is
+   * what decides it. It matters when a write committed but reported failure:
+   * the upload then discards a folder its row does point at, and if that
+   * delete also fails the sweep must not finish the job.
+   *
+   * An orphan is placed only when its folder sits under its own type's base
+   * for its own entity (`STILL_OWNER`), so a row whose key and entity or type
+   * disagree is never decided by another row or another column: a cover row
+   * pointing into the course's hero folder must not read the cover column,
+   * find nothing, and delete a live hero. And only when the id is a uuid
+   * wherever the owning id is one, so the lookup cannot throw.
+   *
+   * @param folder - The folder the orphaned object sits in
+   * @returns `null` when the orphan cannot be placed (no entity id, a type
+   *   with no sized still, a folder outside that type's base for the id, or an
+   *   id that is not the owning column's type), so the caller decides it some
+   *   other way
+   */
+  async isStillFolderReferenced(
+    orphan: Pick<OrphanedFileRecord, 'imageType' | 'originalEntityId'>,
+    folder: string
+  ): Promise<boolean | null> {
+    const { imageType, originalEntityId: entityId } = orphan;
+    if (!entityId || !isSizedStillType(imageType)) return null;
+    const owner = STILL_OWNER[imageType];
+    if (!folder.startsWith(`${owner.base(entityId, folder)}/`)) return null;
+    const textId = imageType === 'avatar';
+    if (!textId && !uuidSchema.safeParse(entityId).success) return null;
+
+    const { table, column } = owner.row();
+    const references = await this.db
+      .select({ id: table.id })
+      .from(table)
+      .where(
+        and(
+          eq(table.id, entityId),
+          whereNotDeleted(table),
+          addressesFolder(column, folder)
+        )
+      )
+      .limit(1);
+    return references.length > 0;
+  }
+
+  /**
    * Which of these page-image objects an upload minted (Codex-61zsk.17).
    *
    * A save nominates the objects behind each key it drops, and a key is only
@@ -304,15 +439,26 @@ export class OrphanedFileService extends BaseService {
    *
    * Increments attempt counter and records error message.
    * If max attempts reached, marks as 'failed' for manual review.
+   *
+   * The log line says {@link messageForLog}'s message, and so does the row,
+   * except for a failed query: its own message is only its SQL and
+   * parameters, which the row keeps for whoever reviews it, with the driver's
+   * reason after them. Those parameters can hold a user id, so the log never
+   * carries them (Codex-kk9nv.13). Both texts come from the error itself, so
+   * no caller can hand the log the wrong one.
    */
-  async recordFailedAttempt(id: string, error: string): Promise<void> {
+  async recordFailedAttempt(id: string, error: unknown): Promise<void> {
+    const logged = messageForLog(error);
+    const recorded = isFailedQuery(error)
+      ? `${error.message}\ncause: ${logged}`
+      : logged;
     // Use atomic increment to prevent race conditions
     const updated = await this.db
       .update(schema.orphanedImageFiles)
       .set({
         cleanupAttempts: sql`${schema.orphanedImageFiles.cleanupAttempts} + 1`,
         lastAttemptAt: new Date(),
-        errorMessage: error,
+        errorMessage: recorded,
       })
       .where(eq(schema.orphanedImageFiles.id, id))
       .returning();
@@ -329,13 +475,13 @@ export class OrphanedFileService extends BaseService {
       this.obs.warn('Orphaned file cleanup failed permanently', {
         orphanId: id,
         attempts: record.cleanupAttempts,
-        error,
+        error: logged,
       });
     } else {
       this.obs.warn('Orphaned file cleanup attempt failed', {
         orphanId: id,
         attempts: record?.cleanupAttempts ?? 0,
-        error,
+        error: logged,
       });
     }
   }
@@ -364,6 +510,7 @@ export class OrphanedFileService extends BaseService {
       processed: Number(stats.deleted) + Number(stats.failed),
       deleted: Number(stats.deleted),
       failed: Number(stats.failed),
+      retained: Number(stats.retained),
       remaining: Number(stats.pending),
     };
   }

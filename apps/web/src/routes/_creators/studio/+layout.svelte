@@ -9,6 +9,7 @@
   @prop {Snippet} children - Studio sub-route content
 -->
 <script lang="ts">
+  import { getThumbnailUrl } from '$lib/utils/image';
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
   import StudioSidebar from '$lib/components/layout/StudioSidebar/StudioSidebar.svelte';
@@ -65,7 +66,7 @@
 
     <a href="/studio" class="studio-topbar__brand">
       {#if data.creator.avatarUrl}
-        <img src={data.creator.avatarUrl} alt="" class="studio-topbar__logo" />
+        <img src={getThumbnailUrl(data.creator.avatarUrl, 'sm')} alt="" class="studio-topbar__logo" />
       {/if}
       <span class="studio-topbar__name">{data.creator.name}</span>
     </a>

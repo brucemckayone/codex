@@ -40,7 +40,11 @@
  */
 import type { R2Service } from '@codex/cloudflare-clients';
 import { R2_IMMUTABLE_OBJECT_CACHE_CONTROL } from '@codex/constants';
-import type { OrphanedEntityType, OrphanedImageType } from '@codex/database';
+import {
+  messageForLog,
+  type OrphanedEntityType,
+  type OrphanedImageType,
+} from '@codex/database';
 import type { Logger } from '@codex/observability';
 import { InternalServiceError } from '@codex/service-errors';
 import { readStillFolderName, stillFolderName } from '@codex/validation';
@@ -323,10 +327,8 @@ export async function recordOrphansOrLog(
     obs.error('Failed to record orphaned R2 files; keys are untracked', {
       context,
       r2Keys: inputs.map((i) => i.r2Key),
-      error:
-        recordError instanceof Error
-          ? recordError.message
-          : String(recordError),
+      // The driver's reason: the insert's own message carries every key.
+      error: messageForLog(recordError),
     });
   }
 }

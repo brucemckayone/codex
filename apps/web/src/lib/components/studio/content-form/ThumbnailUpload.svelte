@@ -25,6 +25,7 @@
   import { uploadThumbnailForm, deleteThumbnailCommand } from '$lib/remote/content.remote';
   import { shrinkPhoto } from '$lib/utils/shrink-photo';
   import { toast } from '$lib/components/ui/Toast/toast-store';
+  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
   import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
 
   type ContentForm = typeof createContentForm | typeof updateContentForm;
@@ -44,6 +45,15 @@
 
   const thumbnailValue = $derived(form.fields.thumbnailUrl?.value() ?? '');
   const hasCustomThumbnail = $derived(!!thumbnailValue);
+
+  /**
+   * The 16:9 preview fills the form card in the form's body column: the page
+   * less the shell's, the section's and the card's padding; from 64rem also
+   * less the 4rem studio rail and the form's rail and gap (14rem + 2rem, then
+   * 16rem + 2.5rem from 80rem), inside the 120rem studio column.
+   */
+  const PREVIEW_SIZES =
+    '(min-width: 124rem) calc(124rem - 32.5rem), (min-width: 80rem) calc(100vw - 32.5rem), (min-width: 64rem) calc(100vw - 30rem), (min-width: 48rem) calc(100vw - 9rem), calc(100vw - 8rem)';
   const canUploadFile = $derived(!!contentId);
 
   const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
@@ -161,7 +171,13 @@
     {#if hasCustomThumbnail}
       <!-- Thumbnail preview with change/remove overlay -->
       <div class="thumbnail-preview">
-        <img src={thumbnailValue} alt="Content thumbnail" class="thumbnail-image" />
+        <img
+          src={thumbnailValue}
+          srcset={getThumbnailSrcset(thumbnailValue) || undefined}
+          sizes={coverCropSizes(PREVIEW_SIZES, 16 / 9, thumbnailValue)}
+          alt="Content thumbnail"
+          class="thumbnail-image"
+        />
         <div class="thumbnail-overlay">
           {#if canUploadFile}
             <button type="button" class="overlay-btn" onclick={handleBrowseClick}>

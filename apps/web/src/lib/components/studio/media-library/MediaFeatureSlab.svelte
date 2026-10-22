@@ -21,6 +21,7 @@
     CheckIcon,
   } from '$lib/components/ui/Icon';
   import { formatDuration, formatFileSize, formatRelativeTime } from '$lib/utils/format';
+  import { getThumbnailSrcset } from '$lib/utils/image';
   import * as m from '$paraglide/messages';
 
   type MediaSlabItem = MediaItemWithRelations & { thumbnailUrl?: string | null };
@@ -32,6 +33,14 @@
   }
 
   const { media, onEdit, onDelete }: Props = $props();
+
+  /**
+   * The thumb: the full width less the shell's and the slab's 1rem padding
+   * below 48rem, else the 1.1fr of the 1.1fr/1fr split, inside the 120rem
+   * studio column less its 3rem padding, the slab's 2.5rem and the 1.5rem gap.
+   */
+  const THUMB_SIZES =
+    '(max-width: 47.9375rem) calc(100vw - 4rem), (min-width: 124rem) calc((124rem - 7rem) * 0.53), calc((100vw - 7rem) * 0.53)';
 
   const isVideo = $derived(media.mediaType === 'video');
   const typeMeta = $derived(
@@ -81,7 +90,14 @@
 <article class="slab" data-status={statusVariant}>
   <div class="slab-thumb">
     {#if media.thumbnailUrl}
-      <img src={media.thumbnailUrl} alt="" class="thumb-img" loading="lazy" />
+      <img
+        src={media.thumbnailUrl}
+        srcset={getThumbnailSrcset(media.thumbnailUrl) || undefined}
+        sizes={THUMB_SIZES}
+        alt=""
+        class="thumb-img"
+        loading="lazy"
+      />
     {:else}
       <span class="thumb-placeholder" aria-hidden="true">
         <typeMeta.icon size={44} />

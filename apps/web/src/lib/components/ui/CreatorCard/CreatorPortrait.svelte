@@ -21,22 +21,21 @@
   `portrait` (4:5) stays available for the landing carousel, whose editorial
   rhythm predates this and is deliberately unchanged.
 
-  ## Why there is no srcset
+  ## A srcset only where its widths are true
 
-  It is tempting to wire `getThumbnailSrcset()` here, and it is wrong for
-  avatars. That helper asserts the fixed descriptors `200w / 400w / 800w` from
-  the FILENAMES alone, while the pipeline that writes those files never upscales
-  — so an avatar uploaded at 150px is stored, identically, as `sm.webp`,
-  `md.webp` AND `lg.webp`, all 150px wide. The descriptors are then lies, and a
-  browser that believes them derives a pixel density from
-  `descriptor ÷ intrinsic` and renders the image SMALLER than its real size:
-  measured here, a 128px avatar resolved to 71px of effective resolution, worse
-  than the plain `src` it replaced. So the size is chosen explicitly per consumer
-  instead — `md` for a contact-sheet cell, `lg` for the drawer hero.
+  For an older avatar, `getThumbnailSrcset()` can only assume the nominal
+  `200w / 400w / 800w` from the FILENAMES, while the pipeline never upscales: an
+  avatar uploaded at 150px is stored as `sm.webp`, `md.webp` AND `lg.webp`, all
+  150px wide. The descriptors are then lies, and a browser that believes them
+  derives a pixel density from `descriptor ÷ intrinsic` and renders the image
+  SMALLER than its real size: measured here, a 128px avatar resolved to 71px of
+  effective resolution. So an older avatar gets one variant, chosen per
+  consumer by `size` — `md` for a contact-sheet cell, `lg` for the drawer hero.
 
-  There is deliberately no `sizes` prop either: `sizes` only means anything
-  alongside a `srcset`, so accepting one would be a promise this component
-  cannot keep. `CreatorPortrait.svelte.test.ts` pins the absence of `srcset`.
+  An avatar uploaded since Codex-kk9nv.5 has its size in its address, so every
+  descriptor is the width actually written. Given `sizes` (how wide the caller
+  draws the portrait), it offers them all. `CreatorPortrait.svelte.test.ts` pins
+  both: no `srcset` for an older avatar, an honest one for a sized folder.
 
   ## Hover / focus is driven from the parent
 
@@ -54,19 +53,27 @@
   @prop {string} name - Used for the monogram only. The image is decorative.
   @prop {'square' | 'portrait'} [aspect='square'] - Frame ratio.
   @prop {'sm' | 'md' | 'lg'} [size='md'] - Which stored variant to request.
+  @prop {string} [sizes] - How wide the portrait is drawn; with an avatar that
+    records its size, enables the srcset described above.
   @prop {boolean} [eager=false] - Skip lazy-loading (above-the-fold heroes).
   @prop {Snippet} [children] - Overlay content stacked on the photo.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
-  import { getThumbnailUrl } from '$lib/utils/image';
+  import {
+    coverCropSizes,
+    getThumbnailDimensions,
+    getThumbnailSrcset,
+    getThumbnailUrl,
+  } from '$lib/utils/image';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
     src?: string | null;
     name: string;
     aspect?: 'square' | 'portrait';
     size?: 'sm' | 'md' | 'lg';
+    sizes?: string;
     eager?: boolean;
     children?: Snippet;
   }
@@ -76,6 +83,7 @@
     name,
     aspect = 'square',
     size = 'md',
+    sizes,
     eager = false,
     children,
     class: className,
@@ -84,6 +92,15 @@
 
   const initial = $derived(name.trim().charAt(0).toUpperCase());
   const url = $derived(src ? getThumbnailUrl(src, size) : null);
+  const srcset = $derived(
+    src && sizes && getThumbnailDimensions(src) ? getThumbnailSrcset(src) : ''
+  );
+  /** The frame's width / height, for a picture cropped into it by `cover`. */
+  const FRAME_RATIO = { square: 1, portrait: 4 / 5 } as const;
+  /** A landscape avatar is drawn wider than its frame, so say so. */
+  const coverSizes = $derived(
+    srcset && sizes ? coverCropSizes(sizes, FRAME_RATIO[aspect], src) : undefined
+  );
 </script>
 
 <div class="portrait {className ?? ''}" data-aspect={aspect} {...restProps}>
@@ -91,6 +108,8 @@
     <img
       class="portrait__img"
       src={url}
+      srcset={srcset || undefined}
+      sizes={coverSizes}
       alt=""
       loading={eager ? 'eager' : 'lazy'}
       decoding="async"

@@ -188,4 +188,35 @@ describe('Codex-r85jo.3 F7: orphan-record failure keeps the original outcome', (
       expect.objectContaining({ context: 'user-avatar-delete' })
     );
   });
+  it("logs a failed insert by its driver's reason, not the query and its keys (Codex-kk9nv.13)", async () => {
+    // drizzle's failed-query message carries the insert's params: every key,
+    // each with the user id production redaction hashes the whole line for.
+    // The keys are logged as their own field; the error says why.
+    const recordOrphanedFiles = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(
+          new Error(
+            'Failed query: insert into "orphaned_image_files" …\nparams: avatars/user-1/lg.webp,…'
+          ),
+          { cause: new Error('connection terminated') }
+        )
+      );
+    const service = new ImageProcessingService({
+      db: dbWithUpdate(vi.fn().mockResolvedValue(undefined)),
+      environment: 'test',
+      r2Service: r2DeletesReject(),
+      r2PublicUrlBase: 'https://test.r2.dev',
+      orphanedFileService: {
+        recordOrphanedFiles,
+      } as unknown as OrphanedFileService,
+    });
+
+    await service.deleteUserAvatar('user-1');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Failed to record orphaned R2 files; keys are untracked',
+      expect.objectContaining({ error: 'connection terminated' })
+    );
+  });
 });

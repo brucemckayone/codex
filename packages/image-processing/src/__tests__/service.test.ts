@@ -1,5 +1,11 @@
 import type { R2Service } from '@codex/cloudflare-clients';
-import type { Database } from '@codex/database';
+import {
+  and,
+  type Database,
+  eq,
+  schema,
+  whereNotDeleted,
+} from '@codex/database';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrphanedFileService } from '../orphaned-file-service';
@@ -82,12 +88,22 @@ function createTestImageFile(mimeType: string, filename: string): File {
   return new File([new Uint8Array(jpegBuffer)], filename, { type: mimeType });
 }
 
+/**
+ * What `update().set().where()` returns: awaited, the matched rows, and with
+ * `.returning()` on it the same rows, as drizzle's builder does.
+ */
+function whereResult(rows: unknown[]) {
+  return Object.assign(Promise.resolve(rows), {
+    returning: vi.fn().mockResolvedValue(rows),
+  });
+}
+
 // Base mock implementations (will be recreated in beforeEach)
 const createMockDb = () =>
   ({
     update: vi.fn().mockReturnValue({
       set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue([{ id: 'content-1' }]),
+        where: vi.fn(() => whereResult([{ id: 'content-1' }])),
       }),
     }),
   }) as unknown as Database;
@@ -654,6 +670,47 @@ describe('ImageProcessingService', () => {
         ),
       });
     });
+
+    it('writes only onto a live account: the WHERE excludes a deleted user (Codex-kk9nv.14)', async () => {
+      // An upload still in flight when the account is deleted must not put
+      // the photo back on the scrubbed row.
+      const file = createTestImageFile('image/jpeg', 'avatar.jpg');
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants({}, 640, 640)
+      );
+      const where = vi.fn((_condition: unknown) =>
+        whereResult([{ id: 'user-1' }])
+      );
+      vi.mocked(testMockDb.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValue({ where }),
+      } as never);
+
+      await service.processUserAvatar('user-1', file);
+
+      // The whole condition, so a missing or an inverted filter both fail.
+      expect(where.mock.calls[0]?.[0]).toEqual(
+        and(eq(schema.users.id, 'user-1'), whereNotDeleted(schema.users))
+      );
+    });
+
+    it('discards the new folder when no live row matched', async () => {
+      const file = createTestImageFile('image/jpeg', 'avatar.jpg');
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants({}, 640, 640)
+      );
+      vi.mocked(testMockDb.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValue({ where: vi.fn(() => whereResult([])) }),
+      } as never);
+
+      await expect(service.processUserAvatar('user-1', file)).rejects.toThrow(
+        'User not found'
+      );
+      const folder = newFolderOf(testMockR2Service, 'avatars/user-1', {
+        width: 640,
+        height: 640,
+      });
+      expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
+    });
   });
 
   describe('deleteContentThumbnail', () => {
@@ -752,6 +809,70 @@ describe('ImageProcessingService', () => {
       await service.deleteUserAvatar('user-1');
 
       expect(testMockR2Service.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deleteDroppedAvatar (Codex-kk9nv.14)', () => {
+    const logsOf = (target: ImageProcessingService) =>
+      (
+        target as unknown as {
+          obs: Record<'warn' | 'error', (...args: unknown[]) => void>;
+        }
+      ).obs;
+    const NOT_OWN =
+      "Avatar files not deleted: the URL is not one of this user's own folders";
+
+    it('names a folder on another host without deleting it, at error when the account was deleted', async () => {
+      const error = vi.spyOn(logsOf(service), 'error');
+      const warn = vi.spyOn(logsOf(service), 'warn');
+      const url =
+        'https://old-cdn.test/avatars/user-1/300x300-aaaaaaaa/lg.webp';
+
+      await service.deleteDroppedAvatar('user-1', url, 'account-deleted');
+      await service.deleteDroppedAvatar('user-1', url, 'avatar-removed');
+
+      // The path under the base as its own field: the whole folder holds the
+      // user id, which production redaction hashes.
+      const named = {
+        userId: 'user-1',
+        host: 'old-cdn.test',
+        underBase: '300x300-aaaaaaaa',
+      };
+      expect(error).toHaveBeenCalledWith(NOT_OWN, {
+        ...named,
+        cause: 'account-deleted',
+      });
+      expect(warn).toHaveBeenCalledWith(NOT_OWN, {
+        ...named,
+        cause: 'avatar-removed',
+      });
+      expect(testMockR2Service.delete).not.toHaveBeenCalled();
+    });
+
+    it('labels a failed delete with why the avatar was dropped', async () => {
+      const untracked = new ImageProcessingService({
+        db: testMockDb,
+        environment: 'test',
+        r2Service: {
+          delete: vi.fn().mockRejectedValue(new Error('R2 unavailable')),
+        } as unknown as R2Service,
+        r2PublicUrlBase: 'https://test.r2.dev',
+      });
+      const warn = vi.spyOn(logsOf(untracked), 'warn');
+
+      await untracked.deleteDroppedAvatar(
+        'user-1',
+        'https://test.r2.dev/avatars/user-1/300x300-aaaaaaaa/lg.webp',
+        'account-deleted'
+      );
+
+      expect(warn).toHaveBeenCalledWith(
+        'R2 still delete failed, no orphan service',
+        expect.objectContaining({
+          context: 'user-avatar-account-deleted',
+          resourceId: 'user-1',
+        })
+      );
     });
   });
 

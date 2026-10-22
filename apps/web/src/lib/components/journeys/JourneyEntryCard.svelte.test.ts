@@ -144,6 +144,30 @@ describe('JourneyEntryCard', () => {
     expect(document.querySelector('.jec__dropcap')).not.toBeNull();
   });
 
+  test("a row's cover is sized as drawn, featured or not (Codex-kk9nv.3)", () => {
+    // Measured in the compiled CSS: on a phone the featured width rule beats
+    // the full-width one on specificity, so that cover stays a small 16:9 box;
+    // a plain row's is the card, capped by its rails. Above 40rem a featured
+    // row's cover is about 6:5, not the plain row's 3:4, so a 16:9 picture is
+    // drawn 1.48x its column, not 2.37x. Each was 1.5-3x over-declared.
+    const url =
+      'http://localhost:4100/courses/abc/cover/1600x900-0a1b2c3d/md.webp';
+    const sizes = () =>
+      cover()?.querySelector('.jec__cover-img')?.getAttribute('sizes');
+
+    render({ layout: 'row', featured: true, coverImageUrl: url });
+    expect(sizes()).toBe(
+      '(max-width: 24.9375rem) 7.5rem, (max-width: 39.9375rem) 30vw, (min-width: 41.6667rem) calc(12.5rem * 1.48), calc(30vw * 1.48)'
+    );
+
+    reset();
+
+    render({ layout: 'row', featured: false, coverImageUrl: url });
+    expect(sizes()).toBe(
+      '(max-width: 25.9375rem) calc(100vw - 2rem), (max-width: 39.9375rem) 24rem, calc(7.5rem * 2.37)'
+    );
+  });
+
   test('the flair character is the KICKER initial on a tile, falling back to the title initial', () => {
     render({ layout: 'tile', kicker: 'Foundation course' });
     expect(document.querySelector('.jec__dropcap')?.textContent?.trim()).toBe(

@@ -48,7 +48,11 @@
     </h2>
     <div class="related-content__grid">
       {#each items as item (item.id)}
+        <!-- 1, 2, then 4 columns. The section caps at --container-max (80rem)
+             beside the 4rem rail, which it reaches at 84rem, less its 1.5rem
+             padding and three 1rem gaps. -->
         <ContentCard
+          sizes="(min-width: 84rem) calc((80rem - 6rem) / 4), (min-width: 64rem) calc((100vw - 4rem - 6rem) / 4), (min-width: 40rem) calc((100vw - 4rem) / 2), calc(100vw - 2rem)"
           id={item.id}
           title={item.title}
           thumbnail={getDisplayThumbnail(item)}

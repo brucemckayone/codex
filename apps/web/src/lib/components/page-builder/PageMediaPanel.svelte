@@ -61,12 +61,32 @@
   import { shrinkPhotoAndSubmit } from '$lib/utils/shrink-photo';
   import { PAGE_MEDIA_SLOTS } from './page-media-slots';
   import {
+    cappedSizes,
+    containSizes,
+    coverCropSizes,
+    getThumbnailSrcset,
+  } from '$lib/utils/image';
+  import {
     uploadJourneyCoverForm,
     uploadJourneyHeroImageForm,
     uploadJourneySignatureImageForm,
   } from '$lib/remote/journeys.remote';
 
   const MAX_COVER_MB = Math.round(MAX_IMAGE_SIZE_BYTES / 1024 / 1024);
+
+  /** The cover and hero previews fill BuilderShell's 23.75rem side panel (`SIDE_REM.panel`). */
+  const PREVIEW_SIZES = cappedSizes(100, '23.75rem');
+
+  /**
+   * The signature is contained in a 4:1 frame across the panel, so it is drawn
+   * at the frame's height times its own ratio, up to the frame's width: inside
+   * its 0.5rem padding about 4.3rem tall and 20.5rem wide (Codex-kk9nv.3). As
+   * the panel's width it was up to 5.5x over. A folder that does not record
+   * the picture's size is taken as a 4:1 mark, as the page's Signature is.
+   */
+  const signatureSizes = $derived(
+    containSizes(sellMedia.signatureImageUrl, 4.3, '20.5rem', 4)
+  );
 
   /** The library slots, in page order (`page-media-slots.ts`). */
   const SLOTS = PAGE_MEDIA_SLOTS;
@@ -170,7 +190,13 @@
     <div class="cover">
       <div class="cover__frame">
         {#if sellMedia.coverImageUrl}
-          <img class="cover__img" src={sellMedia.coverImageUrl} alt={m.studio_builder_media_cover_alt()} />
+          <img
+            class="cover__img"
+            src={sellMedia.coverImageUrl}
+            srcset={getThumbnailSrcset(sellMedia.coverImageUrl) || undefined}
+            sizes={coverCropSizes(PREVIEW_SIZES, 16 / 9, sellMedia.coverImageUrl)}
+            alt={m.studio_builder_media_cover_alt()}
+          />
         {:else}
           <span class="cover__empty">{m.studio_builder_media_cover_none()}</span>
         {/if}
@@ -288,6 +314,8 @@
           <img
             class="cover__img"
             src={sellMedia.heroImageUrl}
+            srcset={getThumbnailSrcset(sellMedia.heroImageUrl) || undefined}
+            sizes={coverCropSizes(PREVIEW_SIZES, 21 / 9, sellMedia.heroImageUrl)}
             alt={m.studio_builder_media_hero_image_alt()}
           />
         {:else}
@@ -392,6 +420,8 @@
           <img
             class="cover__img cover__img--contain"
             src={sellMedia.signatureImageUrl}
+            srcset={getThumbnailSrcset(sellMedia.signatureImageUrl) || undefined}
+            sizes={signatureSizes}
             alt={m.studio_builder_media_signature_image_alt()}
           />
         {:else}

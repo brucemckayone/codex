@@ -308,8 +308,22 @@ describe('journey sell page <svelte:head>', () => {
       course: { coverImageUrl: 'http://cdn.test/courses/c1/cover/md.webp' },
     });
 
-    expect(meta('og:image')).toBe('http://cdn.test/courses/c1/cover/md.webp');
+    // The cover URL names its md (400px); a large card gets the largest file
+    // an older cover has, lg (Codex-kk9nv.2). Its size is not in the address,
+    // so no og:image:width/height is claimed.
+    expect(meta('og:image')).toBe('http://cdn.test/courses/c1/cover/lg.webp');
+    expect(meta('og:image:width')).toBeNull();
     expect(meta('twitter:card')).toBe('summary_large_image');
+  });
+
+  it('shares a sized cover at xl, with the size that file was written at', () => {
+    const folder = 'http://cdn.test/courses/c1/cover/2000x1050-0a1b2c3d';
+    render({ course: { coverImageUrl: `${folder}/md.webp` } });
+
+    // xl is min(1600, width): the 2000px picture's xl is 1600x840.
+    expect(meta('og:image')).toBe(`${folder}/xl.webp`);
+    expect(meta('og:image:width')).toBe('1600');
+    expect(meta('og:image:height')).toBe('840');
   });
 
   it('omits og:image and falls back to a small card with no cover', () => {
@@ -541,7 +555,7 @@ describe('journey sell page <svelte:head>', () => {
 
       const ld = jsonLd();
       expect(ld?.url).toBe(CANONICAL);
-      expect(ld?.image).toBe('http://cdn.test/courses/c1/cover/md.webp');
+      expect(ld?.image).toBe('http://cdn.test/courses/c1/cover/lg.webp');
       expect(ld?.provider).toEqual({
         '@type': 'Organization',
         name: 'Of Blood & Bones',

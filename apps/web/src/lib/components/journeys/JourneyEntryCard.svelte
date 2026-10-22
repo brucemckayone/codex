@@ -68,6 +68,11 @@
 -->
 <script lang="ts">
   import { formatPrice } from '$lib/utils/format';
+  import {
+    cappedSizes,
+    coverCropSizes,
+    getThumbnailSrcset,
+  } from '$lib/utils/image';
   import type { JourneyEntryCardProps } from './journey-entry-card';
 
   const {
@@ -128,6 +133,65 @@
    * off, so string discriminants are the narrowing that actually works here.
    */
   const showFlair = $derived(!(layout === 'row' && Boolean(coverImageUrl)));
+
+  /**
+   * A cover that does not record its size is taken as 16:9, the shape covers
+   * were made for. It is the picture's ratio, not the frame's: the tile is
+   * 3:4.
+   */
+  const COVER_RATIO = 16 / 9;
+
+  /**
+   * A row's cover, plain or featured: its width on a phone, below 40rem,
+   * where the row stacks into a 16:9 frame; its column's width from 40rem;
+   * and the shape the row stretches that column to, as measured (a plain
+   * row's is about 3:4, a featured row's wider column beside a title of one
+   * or two lines about 6:5). Each is the width its CSS gives, written as the
+   * viewport widths where it changes, since Safari before 26.4 ignores
+   * min() and clamp() in `sizes`:
+   * - a plain row's cover is the card on a phone, `calc(100vw - 2rem)` up to
+   *   its rails' 24rem; its column, `clamp(6rem, 22vw, 7.5rem)`, is 7.5rem at
+   *   every width from 40rem;
+   * - a featured row's is `clamp(7.5rem, 30vw, 12.5rem)` at every width: its
+   *   own width rule wins on specificity (`.jec--featured .jec__cover`,
+   *   Codex-32van).
+   */
+  const ROW_COVER = {
+    plain: {
+      phone:
+        '(max-width: 25.9375rem) calc(100vw - 2rem), (max-width: 39.9375rem) 24rem',
+      column: '7.5rem',
+      frame: 3 / 4,
+    },
+    featured: {
+      phone: '(max-width: 24.9375rem) 7.5rem, (max-width: 39.9375rem) 30vw',
+      column: '(min-width: 41.6667rem) 12.5rem, 30vw',
+      frame: 6 / 5,
+    },
+  } as const;
+
+  /**
+   * How wide the cover is drawn, for choosing from its stored sizes
+   * (Codex-kk9nv.3): a tile is a 3:4 portrait in a 15-17rem rail, and a row's
+   * is `ROW_COVER`. Every frame crops, so a picture wider than its box is
+   * drawn wider than it (`coverCropSizes`).
+   */
+  const coverSrcset = $derived(
+    coverImageUrl ? getThumbnailSrcset(coverImageUrl) : ''
+  );
+  const coverSizes = $derived.by(() => {
+    if (!coverSrcset) return undefined;
+    if (layout === 'tile') {
+      return coverCropSizes(
+        cappedSizes(82, '17rem'),
+        3 / 4,
+        coverImageUrl,
+        COVER_RATIO
+      );
+    }
+    const row = ROW_COVER[featured ? 'featured' : 'plain'];
+    return `${coverCropSizes(row.phone, 16 / 9, coverImageUrl, COVER_RATIO)}, ${coverCropSizes(row.column, row.frame, coverImageUrl, COVER_RATIO)}`;
+  });
 
   /**
    * The bar's value, sanitised to an integer in 0–100.
@@ -213,6 +277,8 @@
       <img
         class="jec__cover-img"
         src={coverImageUrl}
+        srcset={coverSrcset || undefined}
+        sizes={coverSizes}
         alt=""
         loading="lazy"
         decoding="async"

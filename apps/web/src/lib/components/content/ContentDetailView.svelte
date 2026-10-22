@@ -22,6 +22,12 @@
   @prop {Snippet} [purchaseForm] - Purchase form with use:enhance
 -->
 <script lang="ts">
+  import {
+    getShareImage,
+    getThumbnailDimensions,
+    getThumbnailSrcset,
+    getThumbnailUrl,
+  } from '$lib/utils/image';
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
@@ -243,6 +249,64 @@
   );
 
   const thumbnailUrl = $derived(getDisplayThumbnail(content) ?? undefined);
+
+  const thumbnailSrcset = $derived(
+    thumbnailUrl ? getThumbnailSrcset(thumbnailUrl) : ''
+  );
+  const thumbnailSize = $derived(getThumbnailDimensions(thumbnailUrl));
+  /**
+   * The thumbnail is this page's picture, drawn across the column: 960px less
+   * its 1rem gutters (Codex-kk9nv.3). The audio card offers every stored file
+   * so the browser fetches the one the column needs. The card is also at least
+   * 12rem tall (`--player-height-audio`) and the picture covers it, so where
+   * the column is narrower than the picture's shape (a phone, a wide picture)
+   * it is drawn as wide as that height times its ratio. A picture whose size
+   * is unknown is taken as 16:9, as FeatureCarousel's slides are. The wider
+   * of the two is written as the viewport width where they meet, since
+   * Safari before 26.4 ignores max() in `sizes`.
+   */
+  const previewSizes = $derived.by(() => {
+    const ratio = thumbnailSize
+      ? thumbnailSize.width / thumbnailSize.height
+      : 16 / 9;
+    const covered = Math.round(12 * ratio * 100) / 100;
+    const meet = Math.round((covered + 2) * 100) / 100;
+    return `(min-width: 60rem) ${Math.max(58, covered)}rem, (min-width: ${meet}rem) calc(100vw - 2rem), ${covered}rem`;
+  });
+  /**
+   * The largest file there is: xl when the address records the picture's
+   * size, else lg. A `<video poster>` takes ONE URL and the preview player
+   * renders on the server, so a video page draws this one file everywhere
+   * (poster, preview images, preload) and never fetches two.
+   */
+  const largestThumbnailUrl = $derived(
+    thumbnailUrl ? getThumbnailUrl(thumbnailUrl, 'xl') : undefined
+  );
+  const isVideo = $derived(content.contentType === 'video');
+  /** og:image: the largest file, with its size when the address records it. */
+  const shareImage = $derived(thumbnailUrl ? getShareImage(thumbnailUrl) : null);
+  /** The audio player draws its poster blurred, or at 48px: `sm` covers both. */
+  const audioPosterUrl = $derived(
+    thumbnailUrl ? getThumbnailUrl(thumbnailUrl, 'sm') : undefined
+  );
+  /**
+   * The file the head preloads (LCP): the one this page will certainly draw,
+   * or nothing. An article draws no thumbnail, and an audio page whose access
+   * is still loading may become either the player (sm) or the card (srcset).
+   */
+  const heroPreload = $derived.by(():
+    | { href: string | undefined; srcset?: string; sizes?: string }
+    | null => {
+    if (!thumbnailUrl) return null;
+    if (isVideo) return { href: largestThumbnailUrl };
+    if (content.contentType !== 'audio' || accessLoading) return null;
+    if (hasAccess && streamingUrl) return { href: audioPosterUrl };
+    return {
+      href: thumbnailUrl,
+      srcset: thumbnailSrcset || undefined,
+      sizes: thumbnailSrcset ? previewSizes : undefined,
+    };
+  });
   const duration = $derived(content.mediaItem?.durationSeconds ?? 0);
   const priceCents = $derived(content.priceCents ?? null);
   const isPaid = $derived(!!priceCents && priceCents > 0);
@@ -635,7 +699,11 @@
       name: content.title,
       url: canonicalUrl,
       ...(description && { description }),
-      ...(thumbnailUrl && { thumbnailUrl, image: thumbnailUrl }),
+      // The same file og:image names: the largest the still has.
+      ...(shareImage && {
+        thumbnailUrl: shareImage.url,
+        image: shareImage.url,
+      }),
       ...(publishedDate && { uploadDate: publishedDate, datePublished: publishedDate }),
       ...(creatorName && {
         author: { '@type': 'Person', name: creatorName },
@@ -665,11 +733,23 @@
   <meta property="og:type" content={ogType} />
   <meta property="og:url" content={canonicalUrl} />
   {#if thumbnailUrl}
-    <meta property="og:image" content={thumbnailUrl} />
-    <!-- LCP: thumbnail is the hero on content pages (video poster,
-         audio cover, or article header image). Preload prioritises
-         it in the critical chain so the above-fold paint is faster. -->
-    <link rel="preload" as="image" href={thumbnailUrl} fetchpriority="high" />
+    <meta property="og:image" content={shareImage?.url} />
+    {#if shareImage?.width && shareImage.height}
+      <meta property="og:image:width" content={String(shareImage.width)} />
+      <meta property="og:image:height" content={String(shareImage.height)} />
+    {/if}
+  {/if}
+  {#if heroPreload}
+    <!-- LCP: the video poster or the audio picture, preloaded so the
+         above-fold paint is faster (heroPreload says which file). -->
+    <link
+      rel="preload"
+      as="image"
+      href={heroPreload.href}
+      imagesrcset={heroPreload.srcset}
+      imagesizes={heroPreload.sizes}
+      fetchpriority="high"
+    />
   {/if}
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content={content.title} />
@@ -679,6 +759,24 @@
 </svelte:head>
 
 <StructuredData data={contentSchema} />
+
+<!--
+  The thumbnail where it is the page's picture. Over a video it is the one
+  file the poster also uses (largestThumbnailUrl); in the audio card it offers
+  every stored file (previewSizes).
+-->
+{#snippet thumbnailImage(audio: boolean)}
+  <img
+    class:content-detail__preview-image={!audio}
+    class:content-detail__audio-locked-image={audio}
+    src={audio ? thumbnailUrl : largestThumbnailUrl}
+    srcset={audio && thumbnailSrcset ? thumbnailSrcset : undefined}
+    sizes={audio && thumbnailSrcset ? previewSizes : undefined}
+    width={thumbnailSize?.width}
+    height={thumbnailSize?.height}
+    alt={m.content_thumbnail_alt({ title: content.title })}
+  />
+{/snippet}
 
 <!--
   Root is an <article> (Codex-jo819 O1) — this is the semantic owner of the
@@ -717,11 +815,7 @@
       <!-- Revoked overlay sits over the poster / preview so the user sees
            "why" without losing the thumbnail context (Codex-zdf2u). -->
       {#if thumbnailUrl}
-        <img
-          class="content-detail__preview-image"
-          src={thumbnailUrl}
-          alt={m.content_thumbnail_alt({ title: content.title })}
-        />
+        {@render thumbnailImage(false)}
       {/if}
       <AccessRevokedOverlay
         reason={revocationReason}
@@ -734,7 +828,7 @@
           src={streamingUrl}
           contentId={content.id}
           initialProgress={progress?.positionSeconds ?? 0}
-          poster={thumbnailUrl}
+          poster={largestThumbnailUrl}
           captions={content.mediaItem?.captions ?? []}
           expiresAt={streamingExpiresAt ?? null}
           readyVariants={readyVariants ?? null}
@@ -750,7 +844,7 @@
       <svelte:boundary>
         <PreviewPlayer
           previewUrl={previewUrl}
-          poster={thumbnailUrl}
+          poster={largestThumbnailUrl}
           contentId={content.id}
           contentTitle={content.title}
           {accessState}
@@ -759,11 +853,7 @@
         {#snippet failed(_error, _reset)}
           <div class="content-detail__preview">
             {#if thumbnailUrl}
-              <img
-                class="content-detail__preview-image"
-                src={thumbnailUrl}
-                alt={m.content_thumbnail_alt({ title: content.title })}
-              />
+              {@render thumbnailImage(false)}
             {/if}
             <div class="content-detail__preview-overlay">
               <div class="content-detail__preview-cta">
@@ -783,11 +873,7 @@
            and no paywall copy (Codex-h3ipg). -->
       <div class="content-detail__preview content-detail__preview--unplayable">
         {#if thumbnailUrl}
-          <img
-            class="content-detail__preview-image"
-            src={thumbnailUrl}
-            alt={m.content_thumbnail_alt({ title: content.title })}
-          />
+          {@render thumbnailImage(false)}
         {/if}
         <div class="content-detail__preview-overlay">
           <div class="content-detail__preview-cta">
@@ -799,11 +885,7 @@
     {:else}
       <div class="content-detail__preview">
         {#if thumbnailUrl}
-          <img
-            class="content-detail__preview-image"
-            src={thumbnailUrl}
-            alt={m.content_thumbnail_alt({ title: content.title })}
-          />
+          {@render thumbnailImage(false)}
         {/if}
         <div class="content-detail__preview-overlay">
           <div class="content-detail__preview-cta">
@@ -865,11 +947,7 @@
         {#if showRevokedOverlay}
           <div class="content-detail__audio-locked">
             {#if thumbnailUrl}
-              <img
-                class="content-detail__audio-locked-image"
-                src={thumbnailUrl}
-                alt={m.content_thumbnail_alt({ title: content.title })}
-              />
+              {@render thumbnailImage(true)}
             {/if}
             <AccessRevokedOverlay
               reason={revocationReason}
@@ -884,7 +962,7 @@
               contentId={content.id}
               initialProgress={progress?.positionSeconds ?? 0}
               waveformUrl={waveformUrl}
-              poster={thumbnailUrl}
+              poster={audioPosterUrl}
               title={content.title}
               shaderPreset={content.shaderPreset ?? null}
               expiresAt={streamingExpiresAt ?? null}
@@ -903,11 +981,7 @@
                frame without the lock or the paywall copy. -->
           <div class="content-detail__audio-locked content-detail__audio-locked--unplayable">
             {#if thumbnailUrl}
-              <img
-                class="content-detail__audio-locked-image"
-                src={thumbnailUrl}
-                alt={m.content_thumbnail_alt({ title: content.title })}
-              />
+              {@render thumbnailImage(true)}
             {/if}
             <div class="content-detail__audio-locked-overlay">
               <p class="content-detail__cta-text">{unplayableText}</p>
@@ -918,11 +992,7 @@
           <!-- Locked audio preview card (Codex-066ye) -->
           <div class="content-detail__audio-locked">
             {#if thumbnailUrl}
-              <img
-                class="content-detail__audio-locked-image"
-                src={thumbnailUrl}
-                alt={m.content_thumbnail_alt({ title: content.title })}
-              />
+              {@render thumbnailImage(true)}
             {/if}
             <div class="content-detail__audio-locked-overlay">
               <LockIcon size={32} class="content-detail__lock-icon" stroke-width="1.5" />

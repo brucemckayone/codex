@@ -83,7 +83,12 @@ describe('Cache-Control on fresh image keys (Codex-p3rre, Codex-kk9nv.5)', () =>
     const db = {
       update: vi.fn().mockReturnValue({
         set: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ id: 'row-1' }]),
+          // Awaited, the matched rows; `.returning()` resolves them too.
+          where: vi.fn(() =>
+            Object.assign(Promise.resolve([{ id: 'row-1' }]), {
+              returning: vi.fn().mockResolvedValue([{ id: 'row-1' }]),
+            })
+          ),
         }),
       }),
       // The thumbnail and avatar paths read the row's current image URL to

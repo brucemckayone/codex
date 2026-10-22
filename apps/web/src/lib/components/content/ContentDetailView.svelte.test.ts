@@ -263,4 +263,73 @@ describe('the picture (Codex-une9r)', () => {
     expect(ogImage()).toBe(POSTER);
     expect(imageSources()).toContain(POSTER);
   });
+
+  test("the audio card's picture is sized for the 12rem-tall card it covers, not only the column (Codex-kk9nv.3)", () => {
+    // A 2.4:1 picture covering a card at least 12rem tall is drawn 28.8rem
+    // wide on a phone, past the column; declared as the column it was 0.63x.
+    const WIDE =
+      'https://cdn.example.test/c1/thumbnail/2400x1000-0a1b2c3d/md.webp';
+    render({
+      content: makeContent({ contentType: 'audio', thumbnailUrl: WIDE }),
+      hasAccess: false,
+    });
+    expect(
+      document
+        .querySelector('.content-detail__audio-locked-image')
+        ?.getAttribute('sizes')
+    ).toBe(
+      '(min-width: 60rem) 58rem, (min-width: 30.8rem) calc(100vw - 2rem), 28.8rem'
+    );
+  });
+
+  describe('the head preloads the file the page draws (Codex-kk9nv.3)', () => {
+    const SIZED =
+      'https://cdn.example.test/c1/thumbnail/2400x1000-0a1b2c3d/md.webp';
+    const preload = () =>
+      document.head.querySelector('link[rel="preload"][as="image"]');
+
+    test("for the audio card: the card's own src, srcset and sizes, so it is fetched once", () => {
+      render({
+        content: makeContent({ contentType: 'audio', thumbnailUrl: SIZED }),
+        hasAccess: false,
+      });
+      const img = document.querySelector('.content-detail__audio-locked-image');
+      const link = preload();
+      expect(img?.getAttribute('srcset')).toBeTruthy();
+      expect(link?.getAttribute('href')).toBe(img?.getAttribute('src'));
+      expect(link?.getAttribute('imagesrcset')).toBe(
+        img?.getAttribute('srcset')
+      );
+      expect(link?.getAttribute('imagesizes')).toBe(img?.getAttribute('sizes'));
+    });
+
+    test('for a video: the one largest file its poster uses, with no srcset', () => {
+      render({ content: makeContent({ thumbnailUrl: SIZED }) });
+      expect(preload()?.getAttribute('href')).toBe(
+        SIZED.replace('/md.webp', '/xl.webp')
+      );
+      expect(preload()?.hasAttribute('imagesrcset')).toBe(false);
+    });
+
+    test('for an audio page whose access is still loading: nothing, since either file may follow', () => {
+      render({
+        content: makeContent({ contentType: 'audio', thumbnailUrl: SIZED }),
+        accessLoading: true,
+      });
+      expect(preload()).toBeNull();
+    });
+  });
+
+  test('the structured data names the same file as og:image, not the one the page drew', () => {
+    const SIZED =
+      'https://cdn.example.test/c1/thumbnail/2400x1350-0a1b2c3d/md.webp';
+    render({ content: makeContent({ thumbnailUrl: SIZED }) });
+    const jsonLd = JSON.parse(
+      document.head.querySelector('script[type="application/ld+json"]')
+        ?.textContent ?? '{}'
+    );
+    expect(ogImage()).toBe(SIZED.replace('/md.webp', '/xl.webp'));
+    expect(jsonLd.image).toBe(ogImage());
+    expect(jsonLd.thumbnailUrl).toBe(ogImage());
+  });
 });

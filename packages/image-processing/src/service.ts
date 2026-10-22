@@ -6,10 +6,11 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
-import { and, eq, schema } from '@codex/database';
+import { and, eq, schema, whereNotDeleted } from '@codex/database';
 import {
   BaseService,
   InternalServiceError,
+  NotFoundError,
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
@@ -30,6 +31,7 @@ import {
   pageImageVariantKeys,
 } from './page-image-keys';
 import { processStillVariants, type StillVariants } from './processor';
+import { CALLER_OWNED_STILL_BASE } from './still-bases';
 import {
   deleteStillFiles,
   newStillFolder,
@@ -138,19 +140,11 @@ type CallerOwnedStill =
       entityType: 'course';
     };
 
-/**
- * The base key every folder of a caller-owned still lives under. An upload
- * from before Codex-kk9nv.5 has its files directly in it.
- */
-const CALLER_OWNED_STILL_BASE: Record<
-  CallerOwnedStill['imageType'],
-  (entityId: string) => string
-> = {
-  category_cover: (categoryId) => `categories/${categoryId}/cover`,
-  course_cover: (courseId) => `courses/${courseId}/cover`,
-  course_hero: (courseId) => `courses/${courseId}/hero`,
-  course_signature: (courseId) => `courses/${courseId}/signature`,
-};
+/** The log/orphan context of a dropped avatar, by why it was dropped. */
+const AVATAR_DROP_CONTEXT = {
+  'avatar-removed': 'user-avatar-delete',
+  'account-deleted': 'user-avatar-account-deleted',
+} as const;
 
 /**
  * The folder a content thumbnail URL names, if it is one of that content's own
@@ -387,9 +381,11 @@ export class ImageProcessingService extends BaseService {
 
   /**
    * Delete the files of a caller-owned still that its row no longer
-   * references: a cleared course still, or a category cover a PATCH changed by
-   * hand. Call it AFTER the write that dropped the reference. A later upload
-   * goes to a new folder, so nothing would ever overwrite these files.
+   * references, or whose row was deleted: a cleared course still, a category
+   * cover a PATCH changed by hand, or a deleted category's cover
+   * (Codex-kk9nv.14). Call it AFTER the write that dropped the reference or
+   * the row. A later upload goes to a new folder, so nothing would ever
+   * overwrite these files.
    *
    * Only a folder of this entity's own is deleted ({@link ownedStillFolder}),
    * and a failed delete is recorded for the sweep, never thrown.
@@ -712,10 +708,19 @@ export class ImageProcessingService extends BaseService {
         ),
       },
       async () => {
-        await this.db
+        // Never onto a deleted account: an upload still in flight when the
+        // account is deleted would put the photo back on the scrubbed row
+        // (Codex-kk9nv.14). Matching no row throws, so the new folder is
+        // discarded like any failed write.
+        const [written] = await this.db
           .update(schema.users)
           .set({ avatarUrl: url })
-          .where(eq(schema.users.id, userId));
+          .where(
+            and(eq(schema.users.id, userId), whereNotDeleted(schema.users))
+          )
+          // Whole rows: on the http|ws union `returning` takes no field map.
+          .returning();
+        if (!written) throw new NotFoundError('User not found', { userId });
       }
     );
 
@@ -816,16 +821,59 @@ export class ImageProcessingService extends BaseService {
       .set({ avatarUrl: null, updatedAt: new Date() })
       .where(eq(schema.users.id, userId));
 
-    const folder = ownedStillFolder(
-      user.avatarUrl,
-      getUserAvatarBaseKey(userId),
-      this.r2PublicUrlBase
-    );
-    if (!folder) return;
+    await this.deleteDroppedAvatar(userId, user.avatarUrl, 'avatar-removed');
+  }
+
+  /**
+   * Delete an avatar's files after the row dropped `avatarUrl`: a removed
+   * avatar, or a deleted account's scrub (Codex-kk9nv.14). A later upload goes
+   * to a new folder, so nothing would ever overwrite these.
+   *
+   * Only this user's own folder is deleted ({@link ownedStillFolder}), so a
+   * provider's picture is left alone. A URL that names this user's avatar
+   * folder but is not one of its own folders here (an older CDN host, or a
+   * file or subfolder this service never writes) cannot be deleted from here,
+   * and is logged so it is not lost silently. A failed delete is recorded for
+   * the sweep, never thrown.
+   *
+   * @param cause - Why the avatar was dropped, which labels the logs
+   */
+  async deleteDroppedAvatar(
+    userId: string,
+    droppedUrl: string | null,
+    cause: keyof typeof AVATAR_DROP_CONTEXT
+  ): Promise<void> {
+    const base = getUserAvatarBaseKey(userId);
+    const folder = ownedStillFolder(droppedUrl, base, this.r2PublicUrlBase);
+    if (!folder) {
+      const at = droppedUrl?.indexOf(`/${base}/`) ?? -1;
+      if (droppedUrl && at >= 0) {
+        // A deleted account's photo left public is worth an alert. The host
+        // and the path under the user's base go as their own fields: a whole
+        // folder holds the 32-character user id, which production redaction
+        // hashes, and the nonce with it. `userId` arrives hashed too, but the
+        // hash is deterministic: hashing the accounts deleted (or changed) at
+        // the log's time finds the one, and with it the folder to purge.
+        const level = cause === 'account-deleted' ? 'error' : 'warn';
+        this.obs[level](
+          "Avatar files not deleted: the URL is not one of this user's own folders",
+          {
+            userId,
+            cause,
+            host: /^[a-z]+:\/\/([^/]+)/i.exec(droppedUrl)?.[1],
+            underBase: droppedUrl.slice(
+              at + base.length + 2,
+              droppedUrl.lastIndexOf('/')
+            ),
+          }
+        );
+      }
+      return;
+    }
     await this.deleteStill(
       folder,
       { imageType: 'avatar', entityType: 'user', entityId: userId },
-      'user-avatar-delete'
+      AVATAR_DROP_CONTEXT[cause]
     );
   }
 

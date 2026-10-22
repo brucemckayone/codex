@@ -31,6 +31,7 @@
   @prop {string} orgName - For the copy, and for the type-the-name check.
 -->
 <script lang="ts">
+  import { getThumbnailUrl } from '$lib/utils/image';
   import { goto, invalidate } from '$app/navigation';
   import * as m from '$paraglide/messages';
   import { Alert, Badge, Button, Card } from '$lib/components/ui';
@@ -187,7 +188,7 @@
   <div class="ownership-owner">
     <span class="ownership-owner__avatar" aria-hidden="true">
       {#if v.owner.avatarUrl}
-        <img src={v.owner.avatarUrl} alt="" class="ownership-owner__img" loading="lazy" />
+        <img src={getThumbnailUrl(v.owner.avatarUrl, 'sm')} alt="" class="ownership-owner__img" loading="lazy" />
       {:else}
         {getInitials(v.owner.name)}
       {/if}

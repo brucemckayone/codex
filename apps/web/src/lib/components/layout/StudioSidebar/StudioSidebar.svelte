@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
   import { navigating, page } from '$app/state';
+  import { getThumbnailUrl } from '$lib/utils/image';
   import { submitFormPost } from '$lib/utils/navigation';
   import { buildPlatformUrl, buildOrgUrl, buildCreatorsUrl } from '$lib/utils/subdomain';
   import {
@@ -182,6 +183,11 @@
   }
 
   const brandInitial = $derived(brand.initial ?? brand.name[0] ?? '?');
+  // The brand mark is drawn at about 32px: an avatar's `sm` is plenty, and an
+  // org logo (one file, no stored sizes) is left as it is (Codex-kk9nv.3).
+  const brandImageUrl = $derived(
+    brand.imageUrl ? getThumbnailUrl(brand.imageUrl, 'sm') : null
+  );
 
   interface NavSection {
     id: string;
@@ -260,7 +266,7 @@
         use:melt={$brandTrigger}
       >
         {#if brand.imageUrl}
-          <img src={brand.imageUrl} alt="" class="studio-rail__brand-image" />
+          <img src={brandImageUrl} alt="" class="studio-rail__brand-image" />
         {:else}
           <span class="studio-rail__brand-initial">{brandInitial}</span>
         {/if}
@@ -277,7 +283,7 @@
     {:else}
       <a href="/studio" class="studio-rail__brand-link" aria-label={brand.name}>
         {#if brand.imageUrl}
-          <img src={brand.imageUrl} alt="" class="studio-rail__brand-image" />
+          <img src={brandImageUrl} alt="" class="studio-rail__brand-image" />
         {:else}
           <span class="studio-rail__brand-initial">{brandInitial}</span>
         {/if}

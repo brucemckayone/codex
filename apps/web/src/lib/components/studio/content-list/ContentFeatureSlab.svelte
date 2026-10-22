@@ -24,6 +24,7 @@
   } from '$lib/components/ui/Icon';
   import Spinner from '$lib/components/ui/Feedback/Spinner/Spinner.svelte';
   import { formatRelativeTime } from '$lib/utils/format';
+  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
   import { extractPlainText } from '@codex/validation';
   import * as m from '$paraglide/messages';
@@ -35,6 +36,16 @@
   }
 
   const { item, publishing = false, onPublishToggle }: Props = $props();
+
+  /**
+   * The 16:9 thumb: the full width less the shell's and the slab's 1rem
+   * padding below 48rem, else 0.55 of the studio's main column (up to 124rem,
+   * less its 4rem rail and 1.5rem padding each side). That leaves out the
+   * slab's own padding and gap, so from 64rem it runs 5-9% over the 1.2fr of
+   * the 1.2fr/1fr split; exact at 48-64rem.
+   */
+  const THUMB_SIZES =
+    '(max-width: 47.9375rem) calc(100vw - 4rem), (min-width: 124rem) calc((124rem - 7rem) * 0.55), calc((100vw - 7rem) * 0.55)';
 
   // Single display kind for the Access meta cell + its `data-access` selector,
   // collapsed from the SPEC §6.1 policy flags (WP-1).
@@ -102,7 +113,14 @@
 <article class="slab" data-status={statusMeta.variant}>
   <a class="slab-thumb" href="/studio/content/{item.id}/edit" aria-label="Open {item.title}">
     {#if item.thumbnailUrl}
-      <img src={item.thumbnailUrl} alt="" class="thumb-img" loading="lazy" />
+      <img
+        src={item.thumbnailUrl}
+        srcset={getThumbnailSrcset(item.thumbnailUrl) || undefined}
+        sizes={coverCropSizes(THUMB_SIZES, 16 / 9, item.thumbnailUrl)}
+        alt=""
+        class="thumb-img"
+        loading="lazy"
+      />
     {:else}
       <span class="thumb-placeholder" aria-hidden="true">
         <typeMeta.icon size={36} />

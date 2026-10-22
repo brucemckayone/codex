@@ -31,6 +31,7 @@ const mockProcessUserAvatar = vi.fn();
 
 vi.mock('@codex/image-processing', () => ({
   ImageProcessingService: class {
+    deleteDroppedAvatar = vi.fn();
     deleteUserAvatar = mockDeleteUserAvatar;
     processUserAvatar = mockProcessUserAvatar;
   },
@@ -79,12 +80,18 @@ function harness({ withCache = true, existingUsername = 'alice2' } = {}) {
     const isLookup = 'slug' in columns;
     const answer = () =>
       isLookup && lookup.fails
-        ? Promise.reject(new Error('neon unavailable'))
+        ? Promise.reject(
+            Object.assign(
+              new Error(`Failed query: select "slug" …\nparams: ${USER_ID}`),
+              { cause: new Error('neon unavailable') }
+            )
+          )
         : Promise.resolve(isLookup ? SLUGS.map((slug) => ({ slug })) : []);
     const where = (clause: SQL) => {
       if (isLookup) lookup.where = clause;
       const rows = answer();
-      return Object.assign(rows, { limit: () => rows });
+      // `for` answers deleteAccount's locking read of the avatar.
+      return Object.assign(rows, { limit: () => rows, for: () => rows });
     };
     return { from: () => ({ innerJoin: () => ({ where }), where }) };
   });
@@ -244,7 +251,12 @@ describe('IdentityService — user card writes invalidate every surface', () => 
       expect(invalidated).toEqual([USER_ID]);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('org lookup failed'),
-        expect.objectContaining({ userId: USER_ID, operation })
+        // The driver's reason, not the query: its params hold the user id.
+        expect.objectContaining({
+          userId: USER_ID,
+          operation,
+          error: 'neon unavailable',
+        })
       );
     });
 

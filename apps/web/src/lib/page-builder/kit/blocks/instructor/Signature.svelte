@@ -9,6 +9,8 @@
   scheme in both themes. Decorative: the name is set in type beside it.
 -->
 <script lang="ts">
+  import { containSizes, getThumbnailSrcset } from '$lib/utils/image';
+
   interface Props {
     src: string;
   }
@@ -16,6 +18,12 @@
   const { src }: Props = $props();
 
   const id = $props.id();
+
+  /**
+   * Drawn 3.5rem tall at its own ratio. A folder that does not record the
+   * picture's size is taken as a 4:1 mark, 14rem wide.
+   */
+  const sizes = $derived(containSizes(src, 3.5, '100vw', 4));
 </script>
 
 <svg class="sig__defs" aria-hidden="true" focusable="false">
@@ -33,7 +41,16 @@
     <feComposite in2="mark" operator="in" />
   </filter>
 </svg>
-<img class="sig" {src} alt="" loading="lazy" decoding="async" style:filter="url(#sig-{id})" />
+<img
+  class="sig"
+  {src}
+  srcset={getThumbnailSrcset(src) || undefined}
+  {sizes}
+  alt=""
+  loading="lazy"
+  decoding="async"
+  style:filter="url(#sig-{id})"
+/>
 
 <style>
   .sig__defs {

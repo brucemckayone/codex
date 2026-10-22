@@ -326,8 +326,9 @@ describe('portals list — lifecycle row actions', () => {
     expect(block).toContain('{:else}');
     expect(block).toContain('{coverInitial(j.title)}');
     // A real <img>, lazily loaded, with an empty alt — the title is right beside
-    // it and the tile is decoration.
-    expect(block).toContain('src={j.coverImageUrl}');
+    // it and the tile is decoration. The 5rem tile draws the cover's sm file
+    // (Codex-kk9nv.3).
+    expect(block).toContain("src={getThumbnailUrl(j.coverImageUrl, 'sm')}");
     expect(block).toContain('alt=""');
     expect(block).toContain('loading="lazy"');
     expect(block).toContain('aria-hidden="true"');

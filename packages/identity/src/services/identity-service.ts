@@ -8,6 +8,8 @@ import { CacheType } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
 import {
   listedCreatorConditions,
+  messageForLog,
+  stackForLog,
   toIso,
   whereNotDeleted,
 } from '@codex/database';
@@ -164,11 +166,7 @@ export class IdentityService extends BaseService {
       } catch (error) {
         this.obs.warn(
           'Org creators lists not invalidated: org lookup failed; they expire with their TTL',
-          {
-            userId,
-            operation,
-            error: error instanceof Error ? error.message : String(error),
-          }
+          { userId, operation, error: messageForLog(error) }
         );
         return [];
       }
@@ -645,7 +643,9 @@ export class IdentityService extends BaseService {
    * email becomes a per-user tombstone (the email column has a global UNIQUE
    * constraint, so it must stay distinct across deletions, and this frees the
    * real address for future re-registration), and name/username/bio/avatar/
-   * socialLinks are cleared.
+   * socialLinks are cleared. After the commit, the dropped avatar's files are
+   * deleted too (Codex-kk9nv.14); a failure is recorded for the sweep or
+   * logged, and never undoes the deletion.
    *
    * RETURNS THIS USER'S SESSION TOKENS so the caller can invalidate every
    * cached session, not just the current one.
@@ -670,11 +670,12 @@ export class IdentityService extends BaseService {
    * the opposite direction from `Codex-kgrdp.4`, which exists to reduce the two
    * reads a cache HIT already costs.
    *
-   * The tokens are read BEFORE the soft-delete would matter and returned rather
-   * than deleted here: `AUTH_SESSION_KV` is BetterAuth's namespace and this
-   * service has no binding to it, so the route owns that write. Session ROWS
-   * are deliberately left alone — BetterAuth owns their lifecycle, and with the
-   * KV entries gone the `deletedAt` gate on the DB path is what stops them.
+   * The tokens are read after the commit (and after the avatar delete) and
+   * returned rather than deleted here: `AUTH_SESSION_KV` is BetterAuth's
+   * namespace and this service has no binding to it, so the route owns that
+   * write. Session ROWS are deliberately left alone — BetterAuth owns their
+   * lifecycle, and with the KV entries gone the `deletedAt` gate on the DB
+   * path is what stops them.
    *
    * @param userId - Authenticated user ID (never a client-supplied value)
    * @returns Every session token belonging to the user, for KV invalidation
@@ -717,9 +718,18 @@ export class IdentityService extends BaseService {
       // ended in every organisation (owner decision AGR-09, "End them like a
       // removal"), in one transaction. Money earned before is still paid; no
       // email, since the address is scrubbed here.
-      const { endedAgreements, withdrawnProposals } = await this.db.transaction(
-        async (tx) => {
+      const { endedAgreements, withdrawnProposals, droppedAvatarUrl } =
+        await this.db.transaction(async (tx) => {
           const now = new Date();
+          // The avatar the scrub drops, so its files can go after the commit.
+          // Locked: an avatar upload committing now waits for the scrub, and
+          // its write then matches no row (processUserAvatar skips a deleted
+          // user), so the URL read here is the one the scrub drops.
+          const [before] = await tx
+            .select({ avatarUrl: users.avatarUrl })
+            .from(users)
+            .where(and(eq(users.id, userId), whereNotDeleted(users)))
+            .for('update');
           const [deleted] = await tx
             .update(users)
             .set({
@@ -750,9 +760,12 @@ export class IdentityService extends BaseService {
             everyOrganisation: true,
             reason: ACCOUNT_DELETED_TERMINATION_REASON,
           });
-          return { endedAgreements: ended, withdrawnProposals: withdrawn };
-        }
-      );
+          return {
+            endedAgreements: ended,
+            withdrawnProposals: withdrawn,
+            droppedAvatarUrl: before?.avatarUrl ?? null,
+          };
+        });
 
       this.obs.info('User account soft-deleted', {
         userId,
@@ -764,6 +777,33 @@ export class IdentityService extends BaseService {
       // creators list of every org that listed this user, which anyone can
       // read, until those are invalidated too (Codex-kk9nv.7).
       await this.invalidateUserSurfaces(userId, 'deleteAccount');
+
+      // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
+      // carries this user's id (Codex-kk9nv.14). After the commit and the
+      // best-effort cache invalidation (which never throws), before the token
+      // read below: if that read failed, a retry would find no live user, so
+      // this would be the only chance to name the folder. Nothing here can
+      // undo the deletion: a failed R2 delete is recorded for the sweep
+      // inside, and anything else is logged.
+      try {
+        await this.imageService().deleteDroppedAvatar(
+          userId,
+          droppedAvatarUrl,
+          'account-deleted'
+        );
+      } catch (error) {
+        // `avatarUrl` is already null, so this log is the folder's only
+        // record. A sized folder's own name holds no user id for production
+        // redaction to hash; an avatar from before Codex-kk9nv.5 has its
+        // files in the base, `avatars/{userId}`, so this is the id, hashed
+        // like `userId` beside it, and the folder follows from the id.
+        this.obs.error('Avatar files not deleted after account deletion', {
+          userId,
+          avatarFolder: droppedAvatarUrl?.split('/').at(-2),
+          error: messageForLog(error),
+          stack: stackForLog(error),
+        });
+      }
 
       // Every session this user holds, so the caller can clear the cached
       // copies. Read AFTER the tombstone lands: a session created between the
