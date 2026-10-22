@@ -368,12 +368,16 @@
             <!-- Live preview of the real public card -->
             <div class="preview">
               <div class="preview__frame" aria-hidden="true">
+                <!-- From lg the inspector pane is at most 26rem less the
+                     card's 1.5rem padding; below it, the full width less the
+                     shell's and the card's padding. -->
                 <TopicCard
                   name={previewName}
                   slug={previewSlug}
                   href="/explore?category={encodeURIComponent(previewSlug)}"
                   coverImageUrl={previewCover}
                   description={previewDescription}
+                  sizes="(max-width: 63.9375rem) calc(100vw - 5rem), 23rem"
                 />
               </div>
               <p class="preview__caption">

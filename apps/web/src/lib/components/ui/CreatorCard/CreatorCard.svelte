@@ -116,11 +116,12 @@
        outside a list; the directory supplies the <li> wrapper.
        ══════════════════════════════════════════════════════════ -->
   <article class="showcase {className ?? ''}" {...rest}>
-    <!-- A contact-sheet cell: half the page on a phone, at most ~19rem. -->
+    <!-- A contact-sheet cell (creators page grid): 2 columns of at least
+         9.5rem below 32rem, 3 up to 40rem, then 13-15.5rem cells. -->
     <CreatorPortrait
       src={avatar}
       name={displayName}
-      sizes="(max-width: 39.9375rem) calc((100vw - 3rem) / 2), 19rem"
+      sizes="(max-width: 31.9375rem) calc((100vw - 2.75rem) / 2), (max-width: 39.9375rem) calc((100vw - 3.5rem) / 3), 16rem"
     />
 
     <div class="showcase__details">

@@ -41,6 +41,7 @@
   @prop {string | null} [coverImageUrl] - md-variant CDN URL; null → gradient + initial.
   @prop {string | null} [description] - Optional short blurb under the name.
   @prop {(slug: string) => void} [onselect] - Optional inline-filter hook (WP-10).
+  @prop {string} [sizes] - How wide the card is drawn; the topic rail's by default.
 -->
 <script lang="ts">
   import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
@@ -52,6 +53,8 @@
     coverImageUrl?: string | null;
     description?: string | null;
     onselect?: (slug: string) => void;
+    /** How wide the card is drawn. The topic rail's items by default. */
+    sizes?: string;
   }
 
   const {
@@ -61,6 +64,7 @@
     coverImageUrl = null,
     description = null,
     onselect,
+    sizes = 'min(21rem, 82vw)',
   }: Props = $props();
 
   /**
@@ -71,16 +75,17 @@
   const markGlyph = $derived(name.trim().charAt(0).toUpperCase());
 
   /**
-   * The cover's stored sizes, and how wide it is drawn: a 16:9 frame in the
-   * topic rail's `min(21rem, 82vw)` items (Codex-kk9nv.3). A picture wider
-   * than 16:9 is cropped, and so drawn wider than the card.
+   * The cover's stored sizes, and how wide it is drawn: a 16:9 frame, in the
+   * topic rail's `min(21rem, 82vw)` items unless the caller says otherwise
+   * (Codex-kk9nv.3). A picture wider than 16:9 is cropped, and so drawn wider
+   * than the card.
    */
   const coverSrcset = $derived(
     coverImageUrl ? getThumbnailSrcset(coverImageUrl) : ''
   );
   const coverSizes = $derived(
     coverSrcset
-      ? coverCropSizes('min(21rem, 82vw)', 16 / 9, coverImageUrl)
+      ? coverCropSizes(sizes, 16 / 9, coverImageUrl)
       : undefined
   );
 

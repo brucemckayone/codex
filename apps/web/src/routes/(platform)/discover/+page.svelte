@@ -92,10 +92,10 @@
     {#if data.content.items && data.content.items.length > 0}
       {#each data.content.items as item (item.id)}
         <!-- `column-width: 18rem` masonry, measured per range: 4 columns from
-             83rem, 3 from 64rem, 2 from 40rem, beside the rail and padding. -->
+             83rem, 3 from 63rem, 2 from 40rem, beside the rail and padding. -->
         <ContentCard
           shape="3:4"
-          sizes="(min-width: 83rem) 18.25rem, (min-width: 64rem) calc((100vw - 10rem) / 3), (min-width: 48rem) calc((100vw - 8rem) / 2), (min-width: 40rem) calc((100vw - 4rem) / 2), calc(100vw - 2rem)"
+          sizes="(min-width: 83rem) 18.25rem, (min-width: 64rem) calc((100vw - 10rem) / 3), (min-width: 63rem) calc((100vw - 9rem) / 3), (min-width: 48rem) calc((100vw - 8rem) / 2), (min-width: 40rem) calc((100vw - 4rem) / 2), calc(100vw - 2rem)"
           titleInCover
           id={item.id}
           title={item.title}
