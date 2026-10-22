@@ -261,14 +261,17 @@
    * 12rem tall (`--player-height-audio`) and the picture covers it, so where
    * the column is narrower than the picture's shape (a phone, a wide picture)
    * it is drawn as wide as that height times its ratio. A picture whose size
-   * is unknown is taken as 16:9, as FeatureCarousel's slides are.
+   * is unknown is taken as 16:9, as FeatureCarousel's slides are. The wider
+   * of the two is written as the viewport width where they meet, since
+   * Safari before 26.4 ignores max() in `sizes`.
    */
   const previewSizes = $derived.by(() => {
     const ratio = thumbnailSize
       ? thumbnailSize.width / thumbnailSize.height
       : 16 / 9;
-    const covered = `calc(12rem * ${Math.round(ratio * 100) / 100})`;
-    return `(min-width: 60rem) max(58rem, ${covered}), max(calc(100vw - 2rem), ${covered})`;
+    const covered = Math.round(12 * ratio * 100) / 100;
+    const meet = Math.round((covered + 2) * 100) / 100;
+    return `(min-width: 60rem) ${Math.max(58, covered)}rem, (min-width: ${meet}rem) calc(100vw - 2rem), ${covered}rem`;
   });
   /**
    * The largest file there is: xl when the address records the picture's

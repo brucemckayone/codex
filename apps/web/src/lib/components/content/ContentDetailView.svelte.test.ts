@@ -278,7 +278,7 @@ describe('the picture (Codex-une9r)', () => {
         .querySelector('.content-detail__audio-locked-image')
         ?.getAttribute('sizes')
     ).toBe(
-      '(min-width: 60rem) max(58rem, calc(12rem * 2.4)), max(calc(100vw - 2rem), calc(12rem * 2.4))'
+      '(min-width: 60rem) 58rem, (min-width: 30.8rem) calc(100vw - 2rem), 28.8rem'
     );
   });
 

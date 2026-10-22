@@ -40,7 +40,7 @@
    * studio column less its 3rem padding, the slab's 2.5rem and the 1.5rem gap.
    */
   const THUMB_SIZES =
-    '(max-width: 47.9375rem) calc(100vw - 4rem), calc((min(100vw, 124rem) - 7rem) * 0.53)';
+    '(max-width: 47.9375rem) calc(100vw - 4rem), (min-width: 124rem) calc((124rem - 7rem) * 0.53), calc((100vw - 7rem) * 0.53)';
 
   const isVideo = $derived(media.mediaType === 'video');
   const typeMeta = $derived(

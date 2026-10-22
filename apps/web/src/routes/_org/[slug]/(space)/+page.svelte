@@ -8,6 +8,7 @@
 <script lang="ts">
   import { subscriptionStatusGrantsAccess } from '@codex/constants';
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
+  import { cappedSizes } from '$lib/utils/image';
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { replaceState } from '$app/navigation';
@@ -626,7 +627,7 @@
             <ContentCard
               variant="resume"
               shape="16:9"
-              sizes="min(18rem, 82vw)"
+              sizes={cappedSizes(82, '18rem')}
               chrome="transparent"
               id={item.id}
               title={item.title}
@@ -709,7 +710,7 @@
     <ContentCard
       variant="grid"
       {shape}
-      sizes="min(24rem, 82vw)"
+      sizes={cappedSizes(82, '24rem')}
       titleInCover
       chrome="transparent"
       id={c.id}

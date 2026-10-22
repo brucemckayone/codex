@@ -138,6 +138,29 @@ export function getShareImage(url: string): {
 }
 
 /**
+ * No `sizes` here uses min(), max() or clamp(). Safari before 26.4 ignores an
+ * entry that does and falls back to 100vw (WebKit bug 304915), so each one is
+ * written as the media conditions it stands for, which every engine reads
+ * (Codex-kk9nv.3).
+ */
+type CssLength = `${number}rem` | `${number}px`;
+
+/** `value` to the hundredth, as `sizes` lengths are written here. */
+function hundredths(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * A `sizes` for a slot `vw` of the viewport wide, up to `max`: what
+ * `min(max, vw)` says, as the viewport width where the two meet.
+ */
+export function cappedSizes(vw: number, max: CssLength): string {
+  const unit = max.endsWith('rem') ? 'rem' : 'px';
+  const meet = hundredths((Number.parseFloat(max) * 100) / vw);
+  return `(min-width: ${meet}${unit}) ${max}, ${vw}vw`;
+}
+
+/**
  * A `sizes` for a picture drawn with `object-fit: cover` into a frame of
  * `frameRatio` (width / height). A picture wider than its frame is drawn
  * wider than the frame, by (picture ratio / frame ratio), and a width-only
@@ -174,19 +197,21 @@ export function coverCropSizes(
 
 /**
  * A `sizes` for a picture drawn at a fixed height and its own width, up to
- * `maxWidth`: a signature mark, or any picture `object-fit: contain`ed in a
- * box `heightRem` tall. A picture that does not record its size is taken as
- * `assumedRatio` (width / height).
+ * `maxWidth`, a box's width or the viewport's: a signature mark, or any
+ * picture `object-fit: contain`ed in a box `heightRem` tall. A picture that
+ * does not record its size is taken as `assumedRatio` (width / height).
  */
 export function containSizes(
   url: string | null | undefined,
   heightRem: number,
-  maxWidth: string,
+  maxWidth: `${number}rem` | '100vw',
   assumedRatio: number
 ): string {
   const size = getThumbnailDimensions(url);
   const ratio = size ? size.width / size.height : assumedRatio;
-  return `min(${Math.round(heightRem * ratio * 100) / 100}rem, ${maxWidth})`;
+  const width = hundredths(heightRem * ratio);
+  if (maxWidth === '100vw') return cappedSizes(100, `${width}rem`);
+  return `${Math.min(width, Number.parseFloat(maxWidth))}rem`;
 }
 
 /** A `sizes` list split on the commas that are not inside parentheses. */
@@ -230,9 +255,10 @@ function splitSizesEntry(entry: string): { condition: string; length: string } {
 /**
  * `sizes` for a card in the 1→2→3-column `.content-grid` (utilities.css):
  * one column below 40rem, two from 40rem, three from 64rem in the 80rem
- * container (Codex-kk9nv.1). It used to describe the page, not the card:
- * 200px for a 290-360px phone card (soft), and 800px for a 210-400px desktop
- * card (wasted). A rail or grid of another shape passes its own.
+ * container, whose cards reach their 25rem at 81rem (Codex-kk9nv.1). It used
+ * to describe the page, not the card: 200px for a 290-360px phone card
+ * (soft), and 800px for a 210-400px desktop card (wasted). A rail or grid of
+ * another shape passes its own.
  */
 export const DEFAULT_SIZES =
-  '(min-width: 64rem) min(calc((100vw - 6rem) / 3), 25rem), (min-width: 40rem) calc((100vw - 4.5rem) / 2), calc(100vw - 2rem)';
+  '(min-width: 81rem) 25rem, (min-width: 64rem) calc((100vw - 6rem) / 3), (min-width: 40rem) calc((100vw - 4.5rem) / 2), calc(100vw - 2rem)';

@@ -157,14 +157,14 @@ describe('JourneyEntryCard', () => {
 
     render({ layout: 'row', featured: true, coverImageUrl: url });
     expect(sizes()).toBe(
-      '(max-width: 39.9375rem) clamp(7.5rem, 30vw, 12.5rem), calc(clamp(7.5rem, 30vw, 12.5rem) * 1.48)'
+      '(max-width: 24.9375rem) 7.5rem, (max-width: 39.9375rem) 30vw, (min-width: 41.6667rem) calc(12.5rem * 1.48), calc(30vw * 1.48)'
     );
 
     reset();
 
     render({ layout: 'row', featured: false, coverImageUrl: url });
     expect(sizes()).toBe(
-      '(max-width: 39.9375rem) min(calc(100vw - 2rem), 24rem), calc(clamp(6rem, 22vw, 7.5rem) * 2.37)'
+      '(max-width: 25.9375rem) calc(100vw - 2rem), (max-width: 39.9375rem) 24rem, calc(7.5rem * 2.37)'
     );
   });
 

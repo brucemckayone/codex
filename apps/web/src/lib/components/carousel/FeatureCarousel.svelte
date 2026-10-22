@@ -45,17 +45,28 @@
 
   const { items, ariaLabel = "Editor's picks" }: Props = $props();
 
+  /** The tallest a slide stands: `clamp(20rem, 44vh, 28.75rem)` at its cap. */
+  const SLIDE_MAX_HEIGHT_REM = 28.75;
+
   /**
    * How wide a slide's picture is drawn (Codex-kk9nv.3). The slide spans the
-   * section, up to 77rem, but stands only `clamp(20rem, 44vh, 28.75rem)`
-   * tall, and the picture covers it: where the slide is narrower than the
-   * picture's shape (a phone), the picture is drawn as wide as the slide's
-   * height times its ratio. A picture whose size is unknown is taken as 16:9.
+   * section, up to 77rem, and the picture covers it: where the slide is
+   * narrower than the picture's shape (a phone), the picture is drawn as wide
+   * as the slide's height times its ratio. A picture whose size is unknown is
+   * taken as 16:9.
+   *
+   * The slide's height follows the viewport's height, which a `sizes` cannot
+   * weigh against its width without max() and clamp(), and Safari before 26.4
+   * ignores those. So the height is taken at its tallest: never under what is
+   * drawn, and at most 28.75/20, about 1.44x, over it on a short phone.
    */
   function slideSizes(image: string): string {
     const size = getThumbnailDimensions(image);
-    const ratio = Math.round((size ? size.width / size.height : 16 / 9) * 100) / 100;
-    return `max(min(calc(100vw - 2rem), 77rem), calc(clamp(20rem, 44vh, 28.75rem) * ${ratio}))`;
+    const ratio = size ? size.width / size.height : 16 / 9;
+    const covered = Math.round(SLIDE_MAX_HEIGHT_REM * ratio * 100) / 100;
+    if (covered >= 77) return `${covered}rem`;
+    const meet = Math.round((covered + 2) * 100) / 100;
+    return `(min-width: 79rem) 77rem, (min-width: ${meet}rem) calc(100vw - 2rem), ${covered}rem`;
   }
 
   // Per-type presentation: the top-left badge glyph/label + the CTA verb. The

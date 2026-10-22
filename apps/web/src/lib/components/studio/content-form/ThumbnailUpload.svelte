@@ -53,7 +53,7 @@
    * 16rem + 2.5rem from 80rem), inside the 120rem studio column.
    */
   const PREVIEW_SIZES =
-    '(min-width: 80rem) calc(min(100vw, 124rem) - 32.5rem), (min-width: 64rem) calc(100vw - 30rem), (min-width: 48rem) calc(100vw - 9rem), calc(100vw - 8rem)';
+    '(min-width: 124rem) calc(124rem - 32.5rem), (min-width: 80rem) calc(100vw - 32.5rem), (min-width: 64rem) calc(100vw - 30rem), (min-width: 48rem) calc(100vw - 9rem), calc(100vw - 8rem)';
   const canUploadFile = $derived(!!contentId);
 
   const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];

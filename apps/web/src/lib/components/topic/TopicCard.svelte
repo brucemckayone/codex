@@ -44,7 +44,11 @@
   @prop {string} [sizes] - How wide the card is drawn; the topic rail's by default.
 -->
 <script lang="ts">
-  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
+  import {
+    cappedSizes,
+    coverCropSizes,
+    getThumbnailSrcset,
+  } from '$lib/utils/image';
 
   interface Props {
     name: string;
@@ -64,7 +68,7 @@
     coverImageUrl = null,
     description = null,
     onselect,
-    sizes = 'min(21rem, 82vw)',
+    sizes = cappedSizes(82, '21rem'),
   }: Props = $props();
 
   /**
@@ -76,7 +80,7 @@
 
   /**
    * The cover's stored sizes, and how wide it is drawn: a 16:9 frame, in the
-   * topic rail's `min(21rem, 82vw)` items unless the caller says otherwise
+   * topic rail's items, 82vw up to 21rem, unless the caller says otherwise
    * (Codex-kk9nv.3). A picture wider than 16:9 is cropped, and so drawn wider
    * than the card.
    */

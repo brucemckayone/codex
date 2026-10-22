@@ -57,8 +57,29 @@ function svelteFiles(dir: string): string[] {
   });
 }
 
+/** Every `.svelte` and `.ts` file a page is built from: no tests, no generated messages. */
+function codeFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return entry.name === '__tests__' || entry.name === 'paraglide'
+        ? []
+        : codeFiles(path);
+    }
+    const isCode = /\.(svelte|ts)$/.test(entry.name);
+    return isCode && !/\.(test|spec)\.ts$/.test(entry.name) ? [path] : [];
+  });
+}
+
 /** A `<script>` or `<style>` block: its opening tag, tag name, body and close. */
 const CODE_BLOCK = /(<(script|style)\b[^>]*>)([\s\S]*?)(<\/\2>)/g;
+
+/** Script without its `/* … *\/` and `//` comments. */
+function codeWithoutComments(code: string): string {
+  return code
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+}
 
 /**
  * The source without comments: markup comments anywhere, and code comments
@@ -73,9 +94,10 @@ function withoutComments(source: string): string {
     .replace(
       CODE_BLOCK,
       (_block, open: string, tag: string, body: string, close: string) => {
-        const code = body.replace(/\/\*[\s\S]*?\*\//g, '');
         const stripped =
-          tag === 'script' ? code.replace(/(^|[^:'"`])\/\/.*$/gm, '$1') : code;
+          tag === 'script'
+            ? codeWithoutComments(body)
+            : body.replace(/\/\*[\s\S]*?\*\//g, '');
         return open + stripped + close;
       }
     );
@@ -182,5 +204,68 @@ describe('every stored still chooses the file for its slot', () => {
         expect(found.map((image) => image.src)).toContain(src);
       }
     }
+  });
+});
+
+/**
+ * No `sizes` value uses min(), max() or clamp(). Safari before 26.4 ignores an
+ * entry that does, and calc() around one, and falls back to 100vw (WebKit bug
+ * 304915): the file for the whole viewport, in every slot (Codex-kk9nv.3).
+ * Outside `<style>` blocks and `style` attributes, a CSS math function with a
+ * length in it is a `sizes` value in this app, so every one is a failure.
+ *
+ * The page builder's own generators are Codex-sntzy, so its folder is exempt
+ * until that lands, except the Signature this PR sizes.
+ */
+describe('no sizes value uses a math function', () => {
+  const MATH_FUNCTION = /(?<![.\w$-])(min|max|clamp)\(/g;
+  /** A length in the arguments, written out or after a `${…}`. */
+  const LENGTH = /[\d}](rem|px|vw|vh|svh|dvh|lvh|em|cqi|%)/;
+  const isExempt = (file: string) =>
+    file.startsWith('lib/page-builder/') &&
+    file !== 'lib/page-builder/kit/blocks/instructor/Signature.svelte';
+
+  /** The code a `sizes` value can be written in: no styles, no comments. */
+  function sizesSource(path: string): string {
+    const source = readFileSync(path, 'utf8');
+    if (path.endsWith('.ts')) return codeWithoutComments(source);
+    return withoutComments(source)
+      .replace(CODE_BLOCK, (block, open: string, tag: string) =>
+        tag === 'style' ? open : block
+      )
+      .replace(/\sstyle(:[\w-]+)?="[^"]*"/g, '');
+  }
+
+  /** The `(…)` that opens at `start`, with what it holds. */
+  function parenthesised(source: string, start: number): string {
+    let depth = 0;
+    for (let i = start; i < source.length; i++) {
+      if (source[i] === '(') depth++;
+      else if (source[i] === ')' && --depth === 0) {
+        return source.slice(start, i + 1);
+      }
+    }
+    return source.slice(start);
+  }
+
+  const uses = codeFiles(SRC).flatMap((path) => {
+    const file = relative(SRC, path);
+    const source = sizesSource(path);
+    return [...source.matchAll(MATH_FUNCTION)].flatMap((match) => {
+      const args = parenthesised(source, match.index + match[0].length - 1);
+      return LENGTH.test(args) ? [{ file, use: `${match[1]}${args}` }] : [];
+    });
+  });
+
+  it('finds them where they still are (the census is not blind)', () => {
+    expect(uses.filter(({ file }) => isExempt(file)).length).toBeGreaterThan(0);
+  });
+
+  it('finds none outside the page builder', () => {
+    expect(
+      uses
+        .filter(({ file }) => !isExempt(file))
+        .map(({ file, use }) => `${file}: ${use}`)
+    ).toEqual([]);
   });
 });

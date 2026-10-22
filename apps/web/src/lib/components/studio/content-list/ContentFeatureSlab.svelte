@@ -45,7 +45,7 @@
    * the 1.2fr/1fr split; exact at 48-64rem.
    */
   const THUMB_SIZES =
-    '(max-width: 47.9375rem) calc(100vw - 4rem), calc((min(100vw, 124rem) - 7rem) * 0.55)';
+    '(max-width: 47.9375rem) calc(100vw - 4rem), (min-width: 124rem) calc((124rem - 7rem) * 0.55), calc((100vw - 7rem) * 0.55)';
 
   // Single display kind for the Access meta cell + its `data-access` selector,
   // collapsed from the SPEC §6.1 policy flags (WP-1).

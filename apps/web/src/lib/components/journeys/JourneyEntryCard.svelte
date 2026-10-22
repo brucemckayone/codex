@@ -68,7 +68,11 @@
 -->
 <script lang="ts">
   import { formatPrice } from '$lib/utils/format';
-  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
+  import {
+    cappedSizes,
+    coverCropSizes,
+    getThumbnailSrcset,
+  } from '$lib/utils/image';
   import type { JourneyEntryCardProps } from './journey-entry-card';
 
   const {
@@ -138,24 +142,31 @@
   const COVER_RATIO = 16 / 9;
 
   /**
-   * A row's cover, plain or featured: its column's width; the shape the row
-   * stretches that column to, as measured (a plain row's is about 3:4, a
-   * featured row's wider column beside a title of one or two lines about
-   * 6:5); and its width on a phone, where the row stacks into a 16:9 frame.
-   * There a plain row's cover is the card, which its rails cap at about 24rem,
-   * and a featured row's keeps its column width: its own width rule wins on
-   * specificity (`.jec--featured .jec__cover`, Codex-32van).
+   * A row's cover, plain or featured: its width on a phone, below 40rem,
+   * where the row stacks into a 16:9 frame; its column's width from 40rem;
+   * and the shape the row stretches that column to, as measured (a plain
+   * row's is about 3:4, a featured row's wider column beside a title of one
+   * or two lines about 6:5). Each is the width its CSS gives, written as the
+   * viewport widths where it changes, since Safari before 26.4 ignores
+   * min() and clamp() in `sizes`:
+   * - a plain row's cover is the card on a phone, `calc(100vw - 2rem)` up to
+   *   its rails' 24rem; its column, `clamp(6rem, 22vw, 7.5rem)`, is 7.5rem at
+   *   every width from 40rem;
+   * - a featured row's is `clamp(7.5rem, 30vw, 12.5rem)` at every width: its
+   *   own width rule wins on specificity (`.jec--featured .jec__cover`,
+   *   Codex-32van).
    */
   const ROW_COVER = {
     plain: {
-      column: 'clamp(6rem, 22vw, 7.5rem)',
+      phone:
+        '(max-width: 25.9375rem) calc(100vw - 2rem), (max-width: 39.9375rem) 24rem',
+      column: '7.5rem',
       frame: 3 / 4,
-      phone: 'min(calc(100vw - 2rem), 24rem)',
     },
     featured: {
-      column: 'clamp(7.5rem, 30vw, 12.5rem)',
+      phone: '(max-width: 24.9375rem) 7.5rem, (max-width: 39.9375rem) 30vw',
+      column: '(min-width: 41.6667rem) 12.5rem, 30vw',
       frame: 6 / 5,
-      phone: 'clamp(7.5rem, 30vw, 12.5rem)',
     },
   } as const;
 
@@ -172,14 +183,14 @@
     if (!coverSrcset) return undefined;
     if (layout === 'tile') {
       return coverCropSizes(
-        'min(17rem, 82vw)',
+        cappedSizes(82, '17rem'),
         3 / 4,
         coverImageUrl,
         COVER_RATIO
       );
     }
     const row = ROW_COVER[featured ? 'featured' : 'plain'];
-    return `(max-width: 39.9375rem) ${coverCropSizes(row.phone, 16 / 9, coverImageUrl, COVER_RATIO)}, ${coverCropSizes(row.column, row.frame, coverImageUrl, COVER_RATIO)}`;
+    return `${coverCropSizes(row.phone, 16 / 9, coverImageUrl, COVER_RATIO)}, ${coverCropSizes(row.column, row.frame, coverImageUrl, COVER_RATIO)}`;
   });
 
   /**

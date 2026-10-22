@@ -61,6 +61,7 @@
   import { shrinkPhotoAndSubmit } from '$lib/utils/shrink-photo';
   import { PAGE_MEDIA_SLOTS } from './page-media-slots';
   import {
+    cappedSizes,
     containSizes,
     coverCropSizes,
     getThumbnailSrcset,
@@ -74,7 +75,7 @@
   const MAX_COVER_MB = Math.round(MAX_IMAGE_SIZE_BYTES / 1024 / 1024);
 
   /** The cover and hero previews fill BuilderShell's 23.75rem side panel (`SIDE_REM.panel`). */
-  const PREVIEW_SIZES = 'min(23.75rem, 100vw)';
+  const PREVIEW_SIZES = cappedSizes(100, '23.75rem');
 
   /**
    * The signature is contained in a 4:1 frame across the panel, so it is drawn

@@ -68,7 +68,11 @@
   } from '$lib/components/ui/Icon';
   import { buildCreatorsUrl, buildContentUrl, buildOrgUrl } from '$lib/utils/subdomain';
   import { formatRelativeTime } from '$lib/utils/format';
-  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
+  import {
+    cappedSizes,
+    coverCropSizes,
+    getThumbnailSrcset,
+  } from '$lib/utils/image';
 
   import type { CreatorDrawerData } from './types';
   export type { CreatorDrawerData };
@@ -169,7 +173,7 @@
         name={displayName}
         aspect="square"
         size="lg"
-        sizes="min(28rem, 100vw)"
+        sizes={cappedSizes(100, '28rem')}
         eager
       >
         <!-- Gradient overlay with name.

@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  cappedSizes,
   containSizes,
   coverCropSizes,
   getShareImage,
@@ -196,7 +197,7 @@ describe('containSizes', () => {
         '20.5rem',
         4
       )
-    ).toBe('min(17.2rem, 20.5rem)');
+    ).toBe('17.2rem');
     expect(
       containSizes(
         'https://cdn.example.test/c/signature/1200x1200-0a1b2c3d/md.webp',
@@ -204,13 +205,29 @@ describe('containSizes', () => {
         '20.5rem',
         4
       )
-    ).toBe('min(4.3rem, 20.5rem)');
+    ).toBe('4.3rem');
   });
 
   it('takes the assumed ratio for a picture that does not record its size', () => {
     // An upload from before kk9nv.5: sized files, but no size in the folder.
     const unsized = 'https://cdn.example.test/c/signature/md.webp';
-    expect(containSizes(unsized, 3.5, '100vw', 4)).toBe('min(14rem, 100vw)');
+    expect(containSizes(unsized, 3.5, '100vw', 4)).toBe(
+      '(min-width: 14rem) 14rem, 100vw'
+    );
+  });
+});
+
+describe('cappedSizes', () => {
+  // Safari before 26.4 ignores min() in `sizes` (WebKit bug 304915), so the
+  // slot is written as the viewport width where its two lengths meet.
+  it('is vw of the viewport up to the cap, switching where they meet', () => {
+    // 82vw is 24rem at 24 / 0.82 = 29.27rem.
+    expect(cappedSizes(82, '24rem')).toBe('(min-width: 29.27rem) 24rem, 82vw');
+    expect(cappedSizes(100, '28rem')).toBe('(min-width: 28rem) 28rem, 100vw');
+  });
+
+  it('keeps a px cap in px', () => {
+    expect(cappedSizes(82, '280px')).toBe('(min-width: 341.46px) 280px, 82vw');
   });
 });
 
