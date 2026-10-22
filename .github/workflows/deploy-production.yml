@@ -255,6 +255,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+          # The account-deletion CDN purge (Codex-kk9nv.15): the zone serving
+          # R2_PUBLIC_URL_BASE, and a token with ONLY that zone's Cache Purge
+          # permission. Unset, deletions log the skipped purge at error.
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
           R2_BUCKET_PLATFORM: ${{ vars.R2_BUCKET_PLATFORM }}

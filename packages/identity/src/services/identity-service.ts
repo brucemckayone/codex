@@ -111,13 +111,21 @@ export class IdentityService extends BaseService {
    * Remove the user's avatar (R2 files + `avatarUrl`), then invalidate every
    * cache that shows it (Codex-kk9nv.7). The route used to call the image
    * service directly, which holds no cache, so the profile kept serving the
-   * deleted URL for up to 10 minutes. Nothing removed, nothing changed: no
-   * invalidation (Codex-kk9nv.10).
+   * deleted URL for up to 10 minutes. With nothing to remove, only the user's
+   * own profile is refreshed: the orgs' creators lists did not change
+   * (Codex-kk9nv.10).
    */
   async deleteAvatar(userId: string): Promise<void> {
     try {
       const removed = await this.imageService().deleteUserAvatar(userId);
-      if (removed) await this.invalidateUserSurfaces(userId, 'deleteAvatar');
+      if (removed) {
+        await this.invalidateUserSurfaces(userId, 'deleteAvatar');
+      } else if (this.cache) {
+        // Nothing to remove. Remove is offered only for an upload, so the
+        // usual way here is a cached profile left stale by a failed
+        // invalidation; refreshing it is what lets this retry heal it.
+        await this.cache.invalidate(userId);
+      }
     } catch (error) {
       throw this.handleError(error, 'IdentityService.deleteAvatar');
     }
@@ -192,7 +200,10 @@ export class IdentityService extends BaseService {
   private async purgeAvatarEdgeCache(userId: string): Promise<void> {
     const skipped = 'Avatar edge cache not purged after account deletion';
     if (!this.cdnPurger) {
-      this.obs.warn(`${skipped}: no CDN purge configured`, { userId });
+      // In production this is the photo left public, worth an alert, as
+      // deleteDroppedAvatar treats it. Locally nothing is configured.
+      const level = this.environment === 'production' ? 'error' : 'warn';
+      this.obs[level](`${skipped}: no CDN purge configured`, { userId });
       return;
     }
     try {
@@ -830,14 +841,18 @@ export class IdentityService extends BaseService {
         });
         // A deleted account belongs to no org, so every member list drops
         // it, not only the creators list (owner: "Both", Codex-kk9nv.8).
-        // An owner cannot get here: AccountOwnsOrganizationError above.
+        // Never an owner's: AccountOwnsOrganizationError above refuses an
+        // owner, but that check runs before this transaction, and an
+        // ownership transfer committing in between must not leave its org
+        // with no active owner.
         await tx
           .update(organizationMemberships)
           .set({ status: 'inactive', updatedAt: now })
           .where(
             and(
               eq(organizationMemberships.userId, userId),
-              inArray(organizationMemberships.status, ['active', 'invited'])
+              inArray(organizationMemberships.status, ['active', 'invited']),
+              ne(organizationMemberships.role, 'owner')
             )
           );
         return {
@@ -895,24 +910,32 @@ export class IdentityService extends BaseService {
       }
 
       // After the files are gone, or a request in between caches them again.
-      await this.purgeAvatarEdgeCache(userId);
+      // Started, not awaited first: the session-token read below must never
+      // wait on an external API. A purge that hung past the web's 10s abort
+      // would leave every device signed in to the deleted account, since the
+      // route clears the cached sessions with these tokens (Codex-na929).
+      const purged = this.purgeAvatarEdgeCache(userId);
+      try {
+        // Every session this user holds, so the caller can clear the cached
+        // copies. Read AFTER the tombstone lands: a session created between
+        // the UPDATE and this SELECT would still be returned here, whereas
+        // reading first could miss one. No `whereNotDeleted` — `sessions` has
+        // no `deletedAt`, BetterAuth hard-deletes on sign-out.
+        const rows = await this.db
+          .select({ token: sessions.token })
+          .from(sessions)
+          .where(eq(sessions.userId, userId));
 
-      // Every session this user holds, so the caller can clear the cached
-      // copies. Read AFTER the tombstone lands: a session created between the
-      // UPDATE and this SELECT would still be returned here, whereas reading
-      // first could miss one. No `whereNotDeleted` — `sessions` has no
-      // `deletedAt`, BetterAuth hard-deletes on sign-out.
-      const rows = await this.db
-        .select({ token: sessions.token })
-        .from(sessions)
-        .where(eq(sessions.userId, userId));
+        this.obs.info('Session tokens collected for invalidation', {
+          userId,
+          sessionCount: rows.length,
+        });
 
-      this.obs.info('Session tokens collected for invalidation', {
-        userId,
-        sessionCount: rows.length,
-      });
-
-      return rows.map((r) => r.token);
+        return rows.map((r) => r.token);
+      } finally {
+        // Bounded by the purger's timeout, and it never rejects.
+        await purged;
+      }
     } catch (error) {
       throw this.handleError(error, 'IdentityService.deleteAccount');
     }

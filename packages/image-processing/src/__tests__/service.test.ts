@@ -795,10 +795,17 @@ describe('ImageProcessingService', () => {
         expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
       });
 
-      it('leaves the new folder to the sweep when its row cannot be read, and rethrows the write error', async () => {
-        folderProbe.mockRejectedValueOnce(new Error('neon unavailable'));
+      const orphanRows = (folders: string[]) =>
+        folders.flatMap(folderFiles).map((r2Key) => ({
+          r2Key,
+          imageType: 'avatar',
+          entityType: 'user',
+          entityId: 'user-1',
+        }));
+
+      function withSweep() {
         const recordOrphanedFiles = vi.fn().mockResolvedValue([]);
-        const withSweep = new ImageProcessingService({
+        const target = new ImageProcessingService({
           db: { ...testMockDb, query: mockDbQuery } as unknown as Database,
           environment: 'test',
           r2Service: testMockR2Service,
@@ -807,9 +814,21 @@ describe('ImageProcessingService', () => {
             recordOrphanedFiles,
           } as unknown as OrphanedFileService,
         });
+        const logs = (
+          target as unknown as {
+            obs: Record<'warn' | 'error', (...args: unknown[]) => void>;
+          }
+        ).obs;
+        return { target, recordOrphanedFiles, logs };
+      }
+
+      it('leaves both folders to the sweep when its row cannot be read, and rethrows the write error', async () => {
+        // It may have landed or not, so either folder may be the dropped one.
+        folderProbe.mockRejectedValueOnce(new Error('neon unavailable'));
+        const { target, recordOrphanedFiles } = withSweep();
 
         await expect(
-          withSweep.processUserAvatar(
+          target.processUserAvatar(
             'user-1',
             createTestImageFile('image/jpeg', 'a.jpg')
           )
@@ -820,14 +839,40 @@ describe('ImageProcessingService', () => {
           height: 640,
         });
         expect(deleteKeys(testMockR2Service)).toEqual([]);
-        // The sweep checks the row again before it deletes anything.
+        // The sweep asks the row again before it deletes anything.
         expect(recordOrphanedFiles).toHaveBeenCalledWith(
-          folderFiles(folder).map((r2Key) => ({
-            r2Key,
-            imageType: 'avatar',
-            entityType: 'user',
-            entityId: 'user-1',
-          }))
+          orphanRows([folder, OLD])
+        );
+      });
+
+      it('only names an unsized replaced folder, at error, since the sweep cannot decide it', async () => {
+        // An avatar from before Codex-kk9nv.5: its files sit in the base.
+        mockDbQuery.users.findFirst.mockReset().mockResolvedValue({
+          avatarUrl: 'https://test.r2.dev/avatars/user-1/lg.webp',
+        });
+        folderProbe.mockRejectedValueOnce(new Error('neon unavailable'));
+        const { target, recordOrphanedFiles, logs } = withSweep();
+        const error = vi.spyOn(logs, 'error');
+
+        await expect(
+          target.processUserAvatar(
+            'user-1',
+            createTestImageFile('image/jpeg', 'a.jpg')
+          )
+        ).rejects.toThrow('Connection terminated');
+
+        const folder = newFolderOf(testMockR2Service, 'avatars/user-1', {
+          width: 640,
+          height: 640,
+        });
+        expect(recordOrphanedFiles).toHaveBeenCalledWith(orphanRows([folder]));
+        expect(error).toHaveBeenCalledWith(
+          'Still write failed and its row could not be read; kept',
+          expect.objectContaining({
+            r2Keys: folderFiles(folder),
+            untrackedR2Keys: folderFiles('avatars/user-1'),
+            error: 'neon unavailable',
+          })
         );
       });
     });

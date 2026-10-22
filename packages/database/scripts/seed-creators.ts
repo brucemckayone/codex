@@ -794,12 +794,15 @@ async function deactivateMemberships(): Promise<number> {
 /**
  * Bust the org's KV cache.
  *
- * TWO version keys, because the mutated data lives behind both.
+ * THREE version keys, because the mutated data lives behind all of them.
  *
- * `cache:version:<slug>` covers `ORG_CONFIG`, `ORG_STATS` and every
- * `ORG_CREATORS:<page>:<limit>` entry — all three call `cache.get(slug, …)` in
- * `workers/organization-api/src/routes/organizations.ts`, and `buildVersionKey`
- * is `cache:version:<id>`, so one bump busts all three.
+ * `cache:version:<slug>` covers `ORG_CONFIG` and `ORG_STATS`, which call
+ * `cache.get(slug, …)` in `workers/organization-api/src/routes/organizations.ts`
+ * (`buildVersionKey` is `cache:version:<id>`). Every
+ * `ORG_CREATORS:<page>:<limit>` entry is read under its own id,
+ * `CacheType.COLLECTION_ORG_CREATORS(slug)` = `org:<slug>:creators`
+ * (Codex-kk9nv.9), so it needs `cache:version:org:<slug>:creators` too, or the
+ * seeded creators stay hidden for the list's 4h TTL.
  *
  * The public content list is NOT under that key. `workers/content-api`'s
  * `public-cache.ts` caches it under `CacheType.COLLECTION_ORG_CONTENT(orgId)`,
@@ -815,12 +818,14 @@ async function deactivateMemberships(): Promise<number> {
  * `--binding` resolves from a worker's own wrangler config, hence the cwd.
  */
 function bumpCacheVersion(slug: string, orgId: string): void {
-  bumpKey(`cache:version:${slug}`);
+  bumpSlugVersion(slug);
   bumpKey(`cache:version:org:${orgId}:content`);
 }
 
+/** What `invalidateOrgPublicCaches(cache, slug)` bumps, as raw KV keys. */
 function bumpSlugVersion(slug: string): void {
   bumpKey(`cache:version:${slug}`);
+  bumpKey(`cache:version:org:${slug}:creators`);
 }
 
 function bumpKey(key: string): void {

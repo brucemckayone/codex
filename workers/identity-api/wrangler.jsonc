@@ -266,10 +266,11 @@
   // Required Variables:
   //   - DATABASE_URL: PostgreSQL connection string
   //
-  // Cache Purge Secrets (set via wrangler CLI), so a deleted account's
-  // avatars leave the CDN edge (Codex-kk9nv.15). Unset, account deletion
-  // logs that it skipped the purge. The token needs only the zone's
-  // Cache Purge permission:
-  //   wrangler secret put CF_ZONE_ID --env production
-  //   wrangler secret put CF_API_TOKEN --env production
+  // Cache Purge Secrets, so a deleted account's avatars leave the CDN edge
+  // (Codex-kk9nv.15). Uploaded by the production deploy
+  // (.github/scripts/upload-worker-secrets.sh) from the GitHub secrets
+  // CLOUDFLARE_ZONE_ID and CLOUDFLARE_CACHE_PURGE_TOKEN. The token needs only
+  // the zone's Cache Purge permission. Never `wrangler secret put` them: the
+  // next deploy re-uploads and blanks a manual value. Unset, account deletion
+  // logs the skipped purge (at error in production).
 }

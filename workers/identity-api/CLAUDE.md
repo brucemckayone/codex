@@ -40,7 +40,7 @@ User identity, profiles, avatar management, role upgrades, notification preferen
 | `WEB_APP_URL` | No | Web app base URL |
 | `API_URL` | No | API base URL |
 | `MEDIA_BUCKET` | No | R2 bucket for avatar storage |
-| `CF_ZONE_ID` / `CF_API_TOKEN` | No (secrets) | CDN cache purge: account deletion purges the user's avatars from the edge (Codex-kk9nv.15). The token needs only the zone's Cache Purge permission. Unset, deletion logs that it skipped the purge |
+| `CF_ZONE_ID` / `CF_API_TOKEN` | No (secrets) | CDN cache purge: account deletion purges the user's avatars from the edge (Codex-kk9nv.15). Uploaded by the production deploy from the GitHub secrets `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_CACHE_PURGE_TOKEN` (a token with ONLY the zone's Cache Purge permission); never `wrangler secret put`, the next deploy blanks it. Unset, deletion logs the skipped purge, at error in production |
 
 ## Key Packages
 

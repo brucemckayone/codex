@@ -179,15 +179,17 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     expect(deletedAt).toBeLessThan(firstInvalidate);
   });
 
-  it('deleteAvatar invalidates nothing when there was no upload to remove', async () => {
-    // A provider picture only: nothing changed, so nothing is stale
-    // (Codex-kk9nv.10).
+  it("deleteAvatar with no upload to remove refreshes only the user's profile", async () => {
+    // Remove is offered only for an upload (Codex-kk9nv.10), so a no-op
+    // delete usually means the profile that offered it was stale: an earlier
+    // invalidation failed. Refreshing it lets the retry heal that. The orgs'
+    // creators lists did not change, so they are not looked up.
     const { service, invalidated, select } = harness();
     mockDeleteUserAvatar.mockResolvedValueOnce(false);
 
     await service.deleteAvatar(USER_ID);
 
-    expect(invalidated).toEqual([]);
+    expect(invalidated).toEqual([USER_ID]);
     expect(select).not.toHaveBeenCalled();
   });
 

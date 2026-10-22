@@ -1148,10 +1148,12 @@ describe('IdentityService', () => {
         mockUpdateWhere.mock.calls[at]?.[0] as SQL
       );
       expect(sql).toBe(
-        '("organization_memberships"."user_id" = $1 and "organization_memberships"."status" in ($2, $3))'
+        '("organization_memberships"."user_id" = $1 and "organization_memberships"."status" in ($2, $3) and "organization_memberships"."role" <> $4)'
       );
       // Only live rows: an ended membership keeps the status it ended with.
-      expect(params).toEqual([userId, 'active', 'invited']);
+      // Never an owner's, even if a transfer made the user one after the
+      // owner check: the org must keep an active owner.
+      expect(params).toEqual([userId, 'active', 'invited', 'owner']);
     });
 
     describe("the avatar's files (Codex-kk9nv.14)", () => {
@@ -1364,6 +1366,45 @@ describe('IdentityService', () => {
         expect(error).toHaveBeenCalledWith(
           'Avatar edge cache not purged after account deletion',
           { userId, error: 'HTTP 429: rate limited' }
+        );
+      });
+
+      it('reads the session tokens without waiting for the purge', async () => {
+        // The route clears the cached sessions with these tokens. A purge the
+        // token read waited on could hang past the web's 10s abort and leave
+        // every device signed in (Codex-na929). Here the purge answers only
+        // once the tokens are read: a read that waits on it never finishes.
+        let answerPurge: (result: { ok: true }) => void = () => {};
+        purgePrefixes.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              answerPurge = resolve;
+            })
+        );
+        mockSessionsWhere.mockImplementationOnce(async () => {
+          answerPurge({ ok: true });
+          return [{ token: 'tok-current' }];
+        });
+
+        await expect(withPurger().deleteAccount(userId)).resolves.toEqual([
+          'tok-current',
+        ]);
+      });
+
+      it('logs a missing purge config at error in production', async () => {
+        const production = new IdentityService({
+          db: mockDb,
+          environment: 'production',
+          r2Service: mockR2Service,
+          r2PublicUrlBase: 'https://cdn-test.revelations.studio',
+        });
+        const error = vi.spyOn(logsOf(production), 'error');
+
+        await production.deleteAccount(userId);
+
+        expect(error).toHaveBeenCalledWith(
+          'Avatar edge cache not purged after account deletion: no CDN purge configured',
+          { userId }
         );
       });
 

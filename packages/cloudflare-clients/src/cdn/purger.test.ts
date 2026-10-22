@@ -37,6 +37,7 @@ describe('CdnCachePurger.purgePrefixes', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ prefixes: ['cdn.example.com/avatars/u1'] }),
+        signal: expect.any(AbortSignal),
       }
     );
   });
@@ -89,6 +90,29 @@ describe('CdnCachePurger.purgePrefixes', () => {
     await expect(purger.purgePrefixes(['cdn.test/a'])).resolves.toEqual({
       ok: false,
       reason: 'fetch failed',
+    });
+  });
+
+  it('gives up on a purge that never answers, never hangs', async () => {
+    // A fetch that settles only when its signal aborts, as a real one does.
+    const fetch = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () =>
+            reject(init.signal?.reason)
+          );
+        })
+    );
+    const purger = new CdnCachePurger({
+      zoneId: ZONE,
+      apiToken: TOKEN,
+      timeoutMs: 20,
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    });
+
+    await expect(purger.purgePrefixes(['cdn.test/a'])).resolves.toEqual({
+      ok: false,
+      reason: 'timed out after 20ms',
     });
   });
 });

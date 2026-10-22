@@ -27,6 +27,7 @@ import {
 import {
   extractMimeType,
   MAX_IMAGE_SIZE_BYTES,
+  readStillFolderName,
   SUPPORTED_IMAGE_MIME_TYPES,
   validateImageSignature,
 } from '@codex/validation';
@@ -257,7 +258,7 @@ export class ImageProcessingService extends BaseService {
       result = await write();
     } catch (error) {
       // Committed after all: the folder it replaced is dropped, as on success.
-      if (await this.discardUnlessAddressed(folder, target)) {
+      if (await this.discardUnlessAddressed(folder, replaced, target)) {
         await this.deleteReplaced(replaced, folder, target);
       }
       throw error;
@@ -282,13 +283,19 @@ export class ImageProcessingService extends BaseService {
    * report failure (a COMMIT whose ack was lost, a timeout after the commit),
    * and deleting then breaks the picture the row now names.
    *
-   * When the row cannot be read either, the folder is recorded for the sweep
-   * instead, which makes the same check before it deletes anything.
+   * When the row cannot be read either, the write may or may not have landed,
+   * so either folder may be the dropped one: the new folder if it did not,
+   * the one it replaced if it did. Both are recorded for the sweep, which
+   * asks the row again before it deletes anything. A replaced folder from
+   * before Codex-kk9nv.5 (files directly under the base) is only named in the
+   * log: the sweep decides an unsized folder by its re-upload check alone,
+   * and would delete it while the row still uses it.
    *
    * @returns Whether the row addresses the new folder: the write landed
    */
   private async discardUnlessAddressed(
     folder: string,
+    replaced: string | null,
     target: StillOrphanTarget
   ): Promise<boolean> {
     const context = `${target.imageType}-write-failed`;
@@ -300,13 +307,25 @@ export class ImageProcessingService extends BaseService {
         folder
       );
     } catch (probeError) {
-      const r2Keys = variantKeyList(stillVariantKeys(folder));
-      this.obs.warn('Still write failed and its row could not be read; kept', {
-        context,
-        resourceId: target.entityId,
-        r2Keys,
-        error: messageForLog(probeError),
-      });
+      const keysOf = (f: string) => variantKeyList(stillVariantKeys(f));
+      const sweepable = [folder];
+      let untracked: string[] = [];
+      if (replaced && replaced !== folder) {
+        const sized = readStillFolderName(replaced.split('/').at(-1) ?? '');
+        if (sized) sweepable.push(replaced);
+        else untracked = keysOf(replaced);
+      }
+      const r2Keys = sweepable.flatMap(keysOf);
+      this.obs[untracked.length > 0 ? 'error' : 'warn'](
+        'Still write failed and its row could not be read; kept',
+        {
+          context,
+          resourceId: target.entityId,
+          r2Keys,
+          ...(untracked.length > 0 && { untrackedR2Keys: untracked }),
+          error: messageForLog(probeError),
+        }
+      );
       if (this.orphanedFileService) {
         await recordOrphansOrLog(
           this.orphanedFileService,

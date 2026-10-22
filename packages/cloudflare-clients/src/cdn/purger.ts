@@ -13,11 +13,20 @@
 /** The API's own limit on prefixes in one purge request. */
 const MAX_PREFIXES_PER_PURGE = 100;
 
+/**
+ * How long a purge may take before it is given up. A Workers subrequest has
+ * no time limit of its own, and a purge runs inside a request that has more
+ * to do after it (account deletion still has to clear the user's sessions).
+ */
+const DEFAULT_PURGE_TIMEOUT_MS = 5_000;
+
 export type CdnPurgeResult = { ok: true } | { ok: false; reason: string };
 
 export interface CdnCachePurgerConfig {
   zoneId: string;
   apiToken: string;
+  /** Default {@link DEFAULT_PURGE_TIMEOUT_MS}. */
+  timeoutMs?: number;
   /** Test seam; the global `fetch` otherwise. */
   fetch?: typeof fetch;
 }
@@ -29,8 +38,9 @@ export class CdnCachePurger {
    * Purge everything cached under each prefix: a hostname and path with no
    * scheme, such as `cdn.example.com/avatars/u1`.
    *
-   * Never throws. A purge follows a change that has already happened, so a
-   * failure is returned for the caller to log, never raised over that change.
+   * Never throws, and never takes longer than the timeout. A purge follows a
+   * change that has already happened, so a failure is returned for the caller
+   * to log, never raised over that change.
    */
   async purgePrefixes(prefixes: readonly string[]): Promise<CdnPurgeResult> {
     if (prefixes.length === 0) return { ok: true };
@@ -43,6 +53,7 @@ export class CdnCachePurger {
 
     // Called bare: workerd rejects a `fetch` invoked as another object's method.
     const send = this.config.fetch ?? fetch;
+    const timeoutMs = this.config.timeoutMs ?? DEFAULT_PURGE_TIMEOUT_MS;
     try {
       const res = await send(
         `https://api.cloudflare.com/client/v4/zones/${encodeURIComponent(this.config.zoneId)}/purge_cache`,
@@ -53,6 +64,7 @@ export class CdnCachePurger {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ prefixes }),
+          signal: AbortSignal.timeout(timeoutMs),
         }
       );
       const body = (await res.json().catch(() => null)) as {
@@ -65,6 +77,9 @@ export class CdnCachePurger {
         reason: `HTTP ${res.status}: ${JSON.stringify(body?.errors ?? body).slice(0, 300)}`,
       };
     } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        return { ok: false, reason: `timed out after ${timeoutMs}ms` };
+      }
       return {
         ok: false,
         reason: error instanceof Error ? error.message : String(error),
