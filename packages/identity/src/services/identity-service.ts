@@ -7,6 +7,7 @@ import type { VersionedCache } from '@codex/cache';
 import { CacheType } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
 import {
+  isFailedQuery,
   listedCreatorConditions,
   messageForLog,
   toIso,
@@ -799,8 +800,12 @@ export class IdentityService extends BaseService {
         this.obs.error('Avatar files not deleted after account deletion', {
           userId,
           avatarFolder: droppedAvatarUrl?.split('/').at(-2),
-          error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
+          error: messageForLog(error),
+          // A failed query's stack opens with its SQL and params.
+          stack:
+            error instanceof Error && !isFailedQuery(error)
+              ? error.stack
+              : undefined,
         });
       }
 

@@ -148,14 +148,27 @@ export function getErrorDetail(error: unknown): string | null {
 
 const FAILED_QUERY = 'Failed query:';
 const NO_DRIVER_REASON = 'Query failed; the driver gave no reason';
+const UNPRINTABLE = 'An error that could not be printed';
+/** drizzle wraps once; the bound only stops a chain that loops back on itself. */
+const MAX_CAUSE_HOPS = 8;
 
 /**
- * Whether this is drizzle's wrapper for a failed query, whose message is only
- * `Failed query: <sql>\nparams: <params>` and whose `cause` is what the
- * driver rejected with.
+ * drizzle's wrapper for a failed query: its message is only
+ * `Failed query: <sql>\nparams: <params>`, and its `cause`, always set, is what
+ * the driver rejected with. A plain Error is not one, so `!isFailedQuery(e)`
+ * leaves an Error an Error.
  */
-export function isFailedQuery(error: unknown): error is Error {
-  return error instanceof Error && error.message.startsWith(FAILED_QUERY);
+export interface FailedQueryError extends Error {
+  cause: unknown;
+}
+
+/** Whether this is drizzle's wrapper for a failed query. */
+export function isFailedQuery(error: unknown): error is FailedQueryError {
+  return (
+    error instanceof Error &&
+    typeof error.message === 'string' &&
+    error.message.startsWith(FAILED_QUERY)
+  );
 }
 
 /**
@@ -168,19 +181,33 @@ export function isFailedQuery(error: unknown): error is Error {
  * it has a cause.
  *
  * The driver's reason is not always an Error: neon's WebSocket shim rejects
- * with the socket's error Event. A query's own text is never returned, even
- * when nothing else says what went wrong.
+ * with the socket's error Event. A query's text is never returned, even when
+ * nothing else says what went wrong, and even inside another string: a
+ * stringified error, its stack, or a wrapper's message.
+ *
+ * It runs in catch blocks, so it never throws: an error it cannot read is
+ * logged as that, rather than replacing the error being handled.
  *
  * drizzle's real prefix is pinned by media-api's orphan sweep test, which runs
  * a failed query (Codex-kk9nv.13).
  */
 export function messageForLog(error: unknown): string {
-  let reported = error;
-  while (isFailedQuery(reported) && reported.cause !== undefined) {
-    reported = reported.cause;
+  try {
+    let reported = error;
+    for (let hop = 0; hop < MAX_CAUSE_HOPS; hop++) {
+      if (!isFailedQuery(reported) || !isReason(reported.cause)) break;
+      reported = reported.cause;
+    }
+    const message = describeForLog(reported);
+    return message.includes(FAILED_QUERY) ? NO_DRIVER_REASON : message;
+  } catch {
+    return UNPRINTABLE;
   }
-  const message = describeForLog(reported);
-  return message.startsWith(FAILED_QUERY) ? NO_DRIVER_REASON : message;
+}
+
+/** A cause that can say what went wrong: anything but nothing or ''. */
+function isReason(cause: unknown): boolean {
+  return cause !== undefined && cause !== null && cause !== '';
 }
 
 /** An Error's message, else its name; a non-Error's own message, else itself. */

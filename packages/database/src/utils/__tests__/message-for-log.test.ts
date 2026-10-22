@@ -53,6 +53,40 @@ describe('messageForLog', () => {
     expect(
       messageForLog(failedQuery(AVATAR_PARAM, failedQuery(AVATAR_PARAM)))
     ).toBe(noReason);
+    expect(messageForLog(failedQuery(AVATAR_PARAM, null))).toBe(noReason);
+    expect(messageForLog(failedQuery(AVATAR_PARAM, ''))).toBe(noReason);
+  });
+
+  it('never logs the query from inside another string: the error stringified, its stack, a wrapper', () => {
+    const noReason = 'Query failed; the driver gave no reason';
+    const failed = failedQuery(AVATAR_PARAM);
+    expect(messageForLog(String(failed))).toBe(noReason);
+    expect(messageForLog(failed.stack)).toBe(noReason);
+    expect(
+      messageForLog(new Error(`Avatar not saved: ${failed.message}`))
+    ).toBe(noReason);
+  });
+
+  it('ends on a chain that loops back on itself', () => {
+    const looped = failedQuery(AVATAR_PARAM);
+    looped.cause = looped;
+    expect(messageForLog(looped)).toBe(
+      'Query failed; the driver gave no reason'
+    );
+  });
+
+  it('never throws from the catch block it runs in', () => {
+    const unreadable = Object.defineProperty(new Error(), 'message', {
+      get() {
+        throw new Error('no message');
+      },
+    });
+    expect(messageForLog(unreadable)).toBe(
+      'An error that could not be printed'
+    );
+    expect(messageForLog(Object.create(null))).toBe(
+      'An error that could not be printed'
+    );
   });
 
   it('names an error that has no message', () => {

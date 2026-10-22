@@ -321,18 +321,6 @@ describe('OrphanedFileService', () => {
         );
       });
 
-      it('and any other error is recorded as it is logged, with no cause line', async () => {
-        mockDb._mocks.updateReturning.mockResolvedValueOnce([
-          { id: 'orphan-1', cleanupAttempts: 1 },
-        ]);
-
-        await service.recordFailedAttempt('orphan-1', new TypeError(''));
-
-        expect(mockDb._mocks.set).toHaveBeenCalledWith(
-          expect.objectContaining({ errorMessage: 'TypeError' })
-        );
-      });
-
       it('on the last attempt, which marks the row failed', async () => {
         const firstSet = vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
@@ -368,6 +356,30 @@ describe('OrphanedFileService', () => {
           { orphanId: 'orphan-1', attempts: 3, error: 'connection terminated' }
         );
       });
+    });
+
+    it('records any other error as it logs it, with no cause line', async () => {
+      mockDb._mocks.updateReturning.mockResolvedValueOnce([
+        { id: 'orphan-1', cleanupAttempts: 1 },
+      ]);
+      const warn = vi.spyOn(
+        (service as unknown as { obs: { warn: (m: string) => void } }).obs,
+        'warn'
+      );
+
+      await service.recordFailedAttempt('orphan-1', new TypeError(''));
+
+      expect(mockDb._mocks.set).toHaveBeenCalledWith(
+        expect.objectContaining({ errorMessage: 'TypeError' })
+      );
+      expect(warn).toHaveBeenCalledWith(
+        'Orphaned file cleanup attempt failed',
+        {
+          orphanId: 'orphan-1',
+          attempts: 1,
+          error: 'TypeError',
+        }
+      );
     });
   });
 

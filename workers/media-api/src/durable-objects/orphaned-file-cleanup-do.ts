@@ -382,8 +382,9 @@ export class OrphanedFileCleanupDO implements DurableObject {
         await orphanedFileService.markDeleted(orphan.id);
         deleted++;
       } catch (error) {
-        // The service keeps the whole message on the row and logs only
-        // messageForLog's, as this run's own record does.
+        // The service keeps a failed query whole on the row, with the
+        // driver's reason after it, and logs only messageForLog's, as this
+        // run's own record does.
         await orphanedFileService.recordFailedAttempt(orphan.id, error);
         failed++;
         errors.push({
