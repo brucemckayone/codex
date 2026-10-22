@@ -1079,8 +1079,8 @@ describe('IdentityService', () => {
 
     describe("the avatar's files (Codex-kk9nv.14)", () => {
       // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
-      // carries the user's id. They go last: after the commit, and after the
-      // token read the route needs to sign every device out.
+      // carries the user's id. They go straight after the commit, before the
+      // token read: if that read failed, a retry would find no live user.
       const avatarUrl = `https://cdn-test.revelations.studio/avatars/${userId}/300x300-ffffffff/md.webp`;
       const started = vi.fn();
       const committed = vi.fn();
@@ -1109,6 +1109,8 @@ describe('IdentityService', () => {
 
       it('reads the avatar under a row lock, so a concurrent upload waits for the scrub', async () => {
         mockReturning.mockResolvedValue([{ id: userId }]);
+        const update = mockDb.update as ReturnType<typeof vi.fn>;
+        const updatesBefore = update.mock.calls.length;
 
         await service.deleteAccount(userId);
 
@@ -1122,9 +1124,14 @@ describe('IdentityService', () => {
         expect(lockedAt).toBeLessThan(
           committed.mock.invocationCallOrder[0] ?? 0
         );
+        // And before the scrub: read after it, the row is deleted, the read
+        // matches nothing, and the folder is never named.
+        expect(lockedAt).toBeLessThan(
+          update.mock.invocationCallOrder[updatesBefore] ?? 0
+        );
       });
 
-      it('deletes the dropped folder after the commit and after the token read', async () => {
+      it('deletes the dropped folder after the commit and before the token read', async () => {
         mockReturning.mockResolvedValue([{ id: userId }]);
 
         await service.deleteAccount(userId);
@@ -1135,10 +1142,23 @@ describe('IdentityService', () => {
           'account-deleted'
         );
         const [committedAt] = committed.mock.invocationCallOrder;
-        const [tokensReadAt] = mockSessionsWhere.mock.invocationCallOrder;
         const [deletedAt] = mockDeleteDroppedAvatar.mock.invocationCallOrder;
-        expect(tokensReadAt).toBeGreaterThan(committedAt ?? Infinity);
-        expect(deletedAt).toBeGreaterThan(tokensReadAt ?? Infinity);
+        const [tokensReadAt] = mockSessionsWhere.mock.invocationCallOrder;
+        expect(deletedAt).toBeGreaterThan(committedAt ?? Infinity);
+        expect(tokensReadAt).toBeGreaterThan(deletedAt ?? Infinity);
+      });
+
+      it('still deletes the files when the token read fails', async () => {
+        // A retry would find no live user, so this is the only chance.
+        mockReturning.mockResolvedValue([{ id: userId }]);
+        mockSessionsWhere.mockRejectedValueOnce(new Error('neon unavailable'));
+
+        await expect(service.deleteAccount(userId)).rejects.toThrow();
+        expect(mockDeleteDroppedAvatar).toHaveBeenCalledWith(
+          userId,
+          avatarUrl,
+          'account-deleted'
+        );
       });
 
       it('keeps the files when the transaction fails after the scrub', async () => {

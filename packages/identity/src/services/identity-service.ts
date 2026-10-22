@@ -645,7 +645,9 @@ export class IdentityService extends BaseService {
    * email becomes a per-user tombstone (the email column has a global UNIQUE
    * constraint, so it must stay distinct across deletions, and this frees the
    * real address for future re-registration), and name/username/bio/avatar/
-   * socialLinks are cleared.
+   * socialLinks are cleared. After the commit, the dropped avatar's files are
+   * deleted too (Codex-kk9nv.14); a failure is recorded for the sweep or
+   * logged, and never undoes the deletion.
    *
    * RETURNS THIS USER'S SESSION TOKENS so the caller can invalidate every
    * cached session, not just the current one.
@@ -777,6 +779,26 @@ export class IdentityService extends BaseService {
       // read, until those are invalidated too (Codex-kk9nv.7).
       await this.invalidateUserSurfaces(userId, 'deleteAccount');
 
+      // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
+      // carries this user's id (Codex-kk9nv.14). Straight after the commit,
+      // before the token read below: if that read failed, a retry would find
+      // no live user, so this would be the only chance to name the folder.
+      // Nothing here can undo the deletion: a failed R2 delete is recorded for
+      // the sweep inside, and anything else is logged.
+      try {
+        await this.imageService().deleteDroppedAvatar(
+          userId,
+          droppedAvatarUrl,
+          'account-deleted'
+        );
+      } catch (error) {
+        this.obs.error('Avatar files not deleted after account deletion', {
+          userId,
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        });
+      }
+
       // Every session this user holds, so the caller can clear the cached
       // copies. Read AFTER the tombstone lands: a session created between the
       // UPDATE and this SELECT would still be returned here, whereas reading
@@ -791,25 +813,6 @@ export class IdentityService extends BaseService {
         userId,
         sessionCount: rows.length,
       });
-
-      // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
-      // carries this user's id (Codex-kk9nv.14). Last of all: the deletion has
-      // committed and the tokens the route needs are read, so a failure here
-      // can only cost the files. A failed R2 delete is recorded for the sweep
-      // inside; anything else is logged, never allowed to undo the deletion.
-      try {
-        await this.imageService().deleteDroppedAvatar(
-          userId,
-          droppedAvatarUrl,
-          'account-deleted'
-        );
-      } catch (error) {
-        this.obs.error('Avatar files not deleted after account deletion', {
-          userId,
-          error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-        });
-      }
 
       return rows.map((r) => r.token);
     } catch (error) {

@@ -31,6 +31,7 @@ import {
   pageImageVariantKeys,
 } from './page-image-keys';
 import { processStillVariants, type StillVariants } from './processor';
+import { CALLER_OWNED_STILL_BASE } from './still-bases';
 import {
   deleteStillFiles,
   newStillFolder,
@@ -144,20 +145,6 @@ const AVATAR_DROP_CONTEXT = {
   'avatar-removed': 'user-avatar-delete',
   'account-deleted': 'user-avatar-account-deleted',
 } as const;
-
-/**
- * The base key every folder of a caller-owned still lives under. An upload
- * from before Codex-kk9nv.5 has its files directly in it.
- */
-const CALLER_OWNED_STILL_BASE: Record<
-  CallerOwnedStill['imageType'],
-  (entityId: string) => string
-> = {
-  category_cover: (categoryId) => `categories/${categoryId}/cover`,
-  course_cover: (courseId) => `courses/${courseId}/cover`,
-  course_hero: (courseId) => `courses/${courseId}/hero`,
-  course_signature: (courseId) => `courses/${courseId}/signature`,
-};
 
 /**
  * The folder a content thumbnail URL names, if it is one of that content's own
@@ -842,7 +829,8 @@ export class ImageProcessingService extends BaseService {
    *
    * Only this user's own folder is deleted ({@link ownedStillFolder}), so a
    * provider's picture is left alone. A URL that names this user's avatar
-   * folder on another host (an older CDN base) cannot be deleted from here,
+   * folder but is not one of its own folders here (an older CDN host, or a
+   * file or subfolder this service never writes) cannot be deleted from here,
    * and is logged so it is not lost silently. A failed delete is recorded for
    * the sweep, never thrown.
    *
@@ -858,15 +846,23 @@ export class ImageProcessingService extends BaseService {
     if (!folder) {
       const at = droppedUrl?.indexOf(`/${base}/`) ?? -1;
       if (droppedUrl && at >= 0) {
-        // A deleted account's photo left public is worth an alert; name the
-        // host and folder so it can be purged by hand.
+        // A deleted account's photo left public is worth an alert. Enough to
+        // purge it by hand: the host, and the path under the user's base as
+        // its own field. A whole folder holds the 32-character user id, which
+        // production redaction hashes, and the nonce with it.
         const level = cause === 'account-deleted' ? 'error' : 'warn';
-        this.obs[level]('Avatar files not deleted: not under the CDN base', {
-          userId,
-          cause,
-          host: /^[a-z]+:\/\/([^/]+)/i.exec(droppedUrl)?.[1],
-          folder: droppedUrl.slice(at + 1, droppedUrl.lastIndexOf('/')),
-        });
+        this.obs[level](
+          "Avatar files not deleted: the URL is not one of this user's own folders",
+          {
+            userId,
+            cause,
+            host: /^[a-z]+:\/\/([^/]+)/i.exec(droppedUrl)?.[1],
+            underBase: droppedUrl.slice(
+              at + base.length + 2,
+              droppedUrl.lastIndexOf('/')
+            ),
+          }
+        );
       }
       return;
     }

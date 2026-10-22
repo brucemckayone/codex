@@ -1413,7 +1413,11 @@ async function deriveCoverKey(
       : url.match(/^https?:\/\/[^/]+\/(.+)$/)?.[1];
   // The key goes into a shell command below, and thumbnailUrl is only
   // validated as a URL, so anything but a plain object key is refused.
-  if (!sourceKey || !/^[A-Za-z0-9/_.-]+$/.test(sourceKey)) return null;
+  if (!sourceKey) return null;
+  if (!/^[A-Za-z0-9/_.-]+$/.test(sourceKey)) {
+    console.log(`    (no cover for ${portalSlug}: key refused)`);
+    return null;
+  }
 
   // Already a generated variant set — the prefix is exactly what we want.
   if (sourceKey.endsWith('/md.webp')) {

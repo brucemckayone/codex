@@ -1,5 +1,11 @@
 import type { R2Service } from '@codex/cloudflare-clients';
-import { type Database, schema } from '@codex/database';
+import {
+  and,
+  type Database,
+  eq,
+  schema,
+  whereNotDeleted,
+} from '@codex/database';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrphanedFileService } from '../orphaned-file-service';
@@ -80,19 +86,6 @@ function createTestImageFile(mimeType: string, filename: string): File {
     ...new Array(100).fill(0), // Padding to make file realistic
   ]).buffer;
   return new File([new Uint8Array(jpegBuffer)], filename, { type: mimeType });
-}
-
-/**
- * Whether a drizzle SQL tree names `column` anywhere: how a test proves a
- * WHERE carries a predicate without a dialect to render it.
- */
-function sqlReferences(node: unknown, column: unknown): boolean {
-  if (node === column) return true;
-  const chunks = (node as { queryChunks?: unknown[] } | null)?.queryChunks;
-  return (
-    Array.isArray(chunks) &&
-    chunks.some((chunk) => sqlReferences(chunk, column))
-  );
 }
 
 /**
@@ -694,9 +687,10 @@ describe('ImageProcessingService', () => {
 
       await service.processUserAvatar('user-1', file);
 
-      expect(
-        sqlReferences(where.mock.calls[0]?.[0], schema.users.deletedAt)
-      ).toBe(true);
+      // The whole condition, so a missing or an inverted filter both fail.
+      expect(where.mock.calls[0]?.[0]).toEqual(
+        and(eq(schema.users.id, 'user-1'), whereNotDeleted(schema.users))
+      );
     });
 
     it('discards the new folder when no live row matched', async () => {
@@ -815,6 +809,70 @@ describe('ImageProcessingService', () => {
       await service.deleteUserAvatar('user-1');
 
       expect(testMockR2Service.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deleteDroppedAvatar (Codex-kk9nv.14)', () => {
+    const logsOf = (target: ImageProcessingService) =>
+      (
+        target as unknown as {
+          obs: Record<'warn' | 'error', (...args: unknown[]) => void>;
+        }
+      ).obs;
+    const NOT_OWN =
+      "Avatar files not deleted: the URL is not one of this user's own folders";
+
+    it('names a folder on another host without deleting it, at error when the account was deleted', async () => {
+      const error = vi.spyOn(logsOf(service), 'error');
+      const warn = vi.spyOn(logsOf(service), 'warn');
+      const url =
+        'https://old-cdn.test/avatars/user-1/300x300-aaaaaaaa/lg.webp';
+
+      await service.deleteDroppedAvatar('user-1', url, 'account-deleted');
+      await service.deleteDroppedAvatar('user-1', url, 'avatar-removed');
+
+      // The path under the base as its own field: the whole folder holds the
+      // user id, which production redaction hashes.
+      const named = {
+        userId: 'user-1',
+        host: 'old-cdn.test',
+        underBase: '300x300-aaaaaaaa',
+      };
+      expect(error).toHaveBeenCalledWith(NOT_OWN, {
+        ...named,
+        cause: 'account-deleted',
+      });
+      expect(warn).toHaveBeenCalledWith(NOT_OWN, {
+        ...named,
+        cause: 'avatar-removed',
+      });
+      expect(testMockR2Service.delete).not.toHaveBeenCalled();
+    });
+
+    it('labels a failed delete with why the avatar was dropped', async () => {
+      const untracked = new ImageProcessingService({
+        db: testMockDb,
+        environment: 'test',
+        r2Service: {
+          delete: vi.fn().mockRejectedValue(new Error('R2 unavailable')),
+        } as unknown as R2Service,
+        r2PublicUrlBase: 'https://test.r2.dev',
+      });
+      const warn = vi.spyOn(logsOf(untracked), 'warn');
+
+      await untracked.deleteDroppedAvatar(
+        'user-1',
+        'https://test.r2.dev/avatars/user-1/300x300-aaaaaaaa/lg.webp',
+        'account-deleted'
+      );
+
+      expect(warn).toHaveBeenCalledWith(
+        'R2 still delete failed, no orphan service',
+        expect.objectContaining({
+          context: 'user-avatar-account-deleted',
+          resourceId: 'user-1',
+        })
+      );
     });
   });
 
