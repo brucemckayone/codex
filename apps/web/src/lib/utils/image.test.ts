@@ -133,6 +133,23 @@ describe('coverCropSizes', () => {
     expect(coverCropSizes('20rem', 3 / 4, SIZED)).toBe('20rem');
   });
 
+  it("takes the slot's assumed ratio for a picture that does not record its size", () => {
+    // A video poster is 16:9 but never records it: in a 3:4 tile it is still
+    // drawn 2.37x the tile's width.
+    expect(coverCropSizes('20rem', 3 / 4, SIZED, 16 / 9)).toBe(
+      'calc(20rem * 2.37)'
+    );
+    // A recorded size wins over the assumption.
+    expect(
+      coverCropSizes(
+        '20rem',
+        3 / 4,
+        'https://cdn.example.test/a/900x1600-0a1b2c3d/md.webp',
+        16 / 9
+      )
+    ).toBe('20rem');
+  });
+
   it('scales every length of a sizes list and keeps its media conditions', () => {
     // A condition cannot sit inside calc(), and commas inside min() are not
     // entry separators.

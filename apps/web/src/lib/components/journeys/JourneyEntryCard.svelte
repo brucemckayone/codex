@@ -137,18 +137,25 @@
    * on a phone. Both crop, so a landscape picture is drawn wider than its box
    * (`coverCropSizes`), taken here as about 3:4.
    */
+  /** A cover that does not record its size is the card's 16:9 shape. */
+  const COVER_RATIO = 16 / 9;
   const coverSrcset = $derived(
     coverImageUrl ? getThumbnailSrcset(coverImageUrl) : ''
   );
   const coverSizes = $derived.by(() => {
     if (!coverSrcset) return undefined;
     if (layout === 'tile') {
-      return coverCropSizes('min(17rem, 82vw)', 3 / 4, coverImageUrl);
+      return coverCropSizes(
+        'min(17rem, 82vw)',
+        3 / 4,
+        coverImageUrl,
+        COVER_RATIO
+      );
     }
     const column = featured
       ? 'clamp(7.5rem, 30vw, 12.5rem)'
       : 'clamp(6rem, 22vw, 7.5rem)';
-    return `(max-width: 39.9375rem) calc(100vw - 2rem), ${coverCropSizes(column, 3 / 4, coverImageUrl)}`;
+    return `(max-width: 39.9375rem) calc(100vw - 2rem), ${coverCropSizes(column, 3 / 4, coverImageUrl, COVER_RATIO)}`;
   });
 
   /**

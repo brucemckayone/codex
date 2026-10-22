@@ -142,7 +142,12 @@ export function getShareImage(url: string): {
  * `frameRatio` (width / height). A picture wider than its frame is drawn
  * wider than the frame, by (picture ratio / frame ratio), and a width-only
  * `sizes` cannot say so: a 16:9 picture in a 3:4 tile needs about 2.4x the
- * tile's width. With the picture's size unknown this is `slots` unchanged.
+ * tile's width.
+ *
+ * When the address does not record the picture's size (every video poster,
+ * every upload from before Codex-kk9nv.5), `assumedRatio` stands in: what
+ * that slot's pictures are drawn as, e.g. 16:9 for a poster. Without one this
+ * is `slots` unchanged.
  *
  * `slots` may be a whole `sizes` list: each entry's length is scaled and its
  * media condition kept, since a condition cannot sit inside `calc()`.
@@ -150,11 +155,13 @@ export function getShareImage(url: string): {
 export function coverCropSizes(
   slots: string,
   frameRatio: number,
-  url: string | null | undefined
+  url: string | null | undefined,
+  assumedRatio?: number
 ): string {
   const size = getThumbnailDimensions(url);
-  if (!size) return slots;
-  const scale = Math.round((size.width / size.height / frameRatio) * 100) / 100;
+  const pictureRatio = size ? size.width / size.height : assumedRatio;
+  if (pictureRatio === undefined) return slots;
+  const scale = Math.round((pictureRatio / frameRatio) * 100) / 100;
   if (scale <= 1) return slots;
   return splitTopLevel(slots)
     .map((entry) => {

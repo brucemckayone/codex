@@ -294,6 +294,8 @@
   // 3:4 browse tile) is drawn wider than the card, and `sizes` is scaled for
   // it. Only the grid and resume frames have a fixed shape to scale by: the
   // resolved shape, else the type's own (video 16:9, audio 1:1, article 3:2).
+  // A picture that does not record its size is taken as its type's own shape:
+  // a video poster is 16:9 even in a 3:4 tile.
   const SHAPE_RATIO = { '16:9': 16 / 9, '1:1': 1, '3:4': 3 / 4, '3:2': 3 / 2 };
   const TYPE_RATIO = { video: 16 / 9, audio: 1, article: 3 / 2 };
   const coverSizes = $derived.by(() => {
@@ -301,7 +303,7 @@
     const frameRatio = resolvedShape
       ? SHAPE_RATIO[resolvedShape]
       : TYPE_RATIO[contentType];
-    return coverCropSizes(sizes, frameRatio, thumbnail);
+    return coverCropSizes(sizes, frameRatio, thumbnail, TYPE_RATIO[contentType]);
   });
 
   // Title-in-cover: eyebrow + title over the cover on a scrim, each type
