@@ -57,8 +57,13 @@
    *
    * The slide's height follows the viewport's height, which a `sizes` cannot
    * weigh against its width without max() and clamp(), and Safari before 26.4
-   * ignores those. So the height is taken at its tallest: never under what is
-   * drawn, and at most 28.75/20, about 1.44x, over it on a short phone.
+   * ignores those. So its min-height is taken at its tallest: at most
+   * 28.75/20, about 1.44x, over on a short phone. Copy long enough to grow a
+   * slide past that, which stretches every slide in the track with it, is
+   * under-declared: a height set by the copy is one no `sizes` can know. It
+   * costs little, since a slide that tall is declared wide enough for the
+   * 1600w file in most shapes, and a square or portrait picture beside a very
+   * long title drops one file size.
    */
   function slideSizes(image: string): string {
     const size = getThumbnailDimensions(image);

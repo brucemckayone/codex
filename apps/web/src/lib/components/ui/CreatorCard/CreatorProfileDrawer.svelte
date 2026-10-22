@@ -68,11 +68,7 @@
   } from '$lib/components/ui/Icon';
   import { buildCreatorsUrl, buildContentUrl, buildOrgUrl } from '$lib/utils/subdomain';
   import { formatRelativeTime } from '$lib/utils/format';
-  import {
-    cappedSizes,
-    coverCropSizes,
-    getThumbnailSrcset,
-  } from '$lib/utils/image';
+  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
 
   import type { CreatorDrawerData } from './types';
   export type { CreatorDrawerData };
@@ -167,13 +163,14 @@
       <!-- ═══ HERO PHOTO ═══
            Square, so the body starts above the fold. It was 3:4, which at the
            panel's real 672px width rendered 671×895 and filled a 900px viewport
-           on its own. -->
+           on its own. Below 40rem the sheet is full-bleed, as LATEST_SIZES
+           has it; from 40rem the panel is 28rem. -->
       <CreatorPortrait
         src={creator.avatarUrl}
         name={displayName}
         aspect="square"
         size="lg"
-        sizes={cappedSizes(100, '28rem')}
+        sizes="(max-width: 39.9375rem) 100vw, 28rem"
         eager
       >
         <!-- Gradient overlay with name.

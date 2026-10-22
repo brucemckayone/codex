@@ -219,8 +219,8 @@ describe('every stored still chooses the file for its slot', () => {
  */
 describe('no sizes value uses a math function', () => {
   const MATH_FUNCTION = /(?<![.\w$-])(min|max|clamp)\(/g;
-  /** A length in the arguments, written out or after a `${…}`. */
-  const LENGTH = /[\d}](rem|px|vw|vh|svh|dvh|lvh|em|cqi|%)/;
+  /** A length in the arguments, written out or after a `${…}`, or a `${…}` itself. */
+  const LENGTH = /[\d}](r?em|px|[sdl]?v[whib]|vmin|vmax|ch|ex|cq[whib]|%)|\$\{/;
   const isExempt = (file: string) =>
     file.startsWith('lib/page-builder/') &&
     file !== 'lib/page-builder/kit/blocks/instructor/Signature.svelte';
