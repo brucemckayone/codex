@@ -49,7 +49,6 @@ describe('messageForLog', () => {
   it('never logs the query itself, even when nothing else says what went wrong', () => {
     const noReason = 'Query failed; the driver gave no reason';
     expect(messageForLog(failedQuery(AVATAR_PARAM))).toBe(noReason);
-    expect(messageForLog(failedQuery(AVATAR_PARAM).message)).toBe(noReason);
     expect(
       messageForLog(failedQuery(AVATAR_PARAM, failedQuery(AVATAR_PARAM)))
     ).toBe(noReason);
@@ -65,6 +64,7 @@ describe('messageForLog', () => {
       AVATAR_PARAM,
       new Error('connection terminated')
     );
+    expect(messageForLog(failed.message)).toBe(withheld);
     expect(messageForLog(String(failed))).toBe(withheld);
     expect(messageForLog(failed.stack)).toBe(withheld);
     expect(
@@ -72,11 +72,15 @@ describe('messageForLog', () => {
     ).toBe(withheld);
   });
 
-  it('reads only a string message: an array holding a query is not one', () => {
-    const odd = Object.assign(new Error(), {
-      message: [failedQuery(AVATAR_PARAM).message],
-    });
-    expect(messageForLog(odd)).toBe('Error');
+  it('reads only a string message, and names the error as a string: an array holding a query is neither', () => {
+    const query = failedQuery(AVATAR_PARAM).message;
+    expect(
+      messageForLog(Object.assign(new Error(), { message: [query] }))
+    ).toBe('Error');
+    // Its name, read as a string, holds a query, so it is withheld.
+    expect(messageForLog(Object.assign(new Error(''), { name: [query] }))).toBe(
+      'Message withheld: it holds a failed query'
+    );
   });
 
   it('ends on a chain that loops back on itself', () => {
@@ -161,6 +165,13 @@ describe('stackForLog', () => {
       },
     });
     expect(stackForLog('Failed query: select 1')).toBeUndefined();
+    expect(
+      stackForLog(
+        Object.assign(new Error('x'), {
+          stack: [failedQuery(AVATAR_PARAM).message],
+        })
+      )
+    ).toBeUndefined();
     expect(stackForLog(unreadable)).toBeUndefined();
   });
 });

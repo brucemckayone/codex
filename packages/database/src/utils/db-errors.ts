@@ -190,9 +190,9 @@ export function isFailedQuery(error: unknown): error is FailedQueryError {
  *
  * The driver's reason is not always an Error: neon's WebSocket shim rejects
  * with the socket's error Event. A query's text is never returned: a failed
- * query with no reason under it says so, and a query inside other text (a
- * stringified error, a stack, a wrapper's message) is withheld, since nothing
- * there says whether the driver gave a reason.
+ * query reached with no reason under it says so, and a query inside anything
+ * else (its bare message, a stringified error, a stack, a wrapper's message)
+ * is withheld, since nothing there says whether the driver gave a reason.
  *
  * It runs in catch blocks, so it never throws: an error it cannot read is
  * logged as that, rather than replacing the error being handled.
@@ -209,7 +209,7 @@ export function messageForLog(error: unknown): string {
     }
     const message = describeForLog(reported);
     if (!message.includes(FAILED_QUERY)) return message;
-    return message.startsWith(FAILED_QUERY) ? NO_DRIVER_REASON : QUERY_WITHHELD;
+    return isFailedQuery(reported) ? NO_DRIVER_REASON : QUERY_WITHHELD;
   } catch {
     return UNPRINTABLE;
   }
@@ -223,10 +223,12 @@ export function messageForLog(error: unknown): string {
  */
 export function stackForLog(error: unknown): string | undefined {
   try {
-    if (!(error instanceof Error) || typeof error.stack !== 'string') {
-      return undefined;
-    }
-    return error.stack.includes(FAILED_QUERY) ? undefined : error.stack;
+    if (!(error instanceof Error)) return undefined;
+    // Read once: a getter could answer differently each time it is asked.
+    const { stack } = error;
+    return typeof stack === 'string' && !stack.includes(FAILED_QUERY)
+      ? stack
+      : undefined;
   } catch {
     return undefined;
   }
