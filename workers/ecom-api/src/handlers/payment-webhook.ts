@@ -159,41 +159,56 @@ function clearRevocation(
   }
 }
 
+/** A refunded purchase, as `processRefund` returns it. */
+interface RefundedPurchase {
+  accessEnded: boolean;
+  duplicatePayment?: boolean;
+  itemTitle?: string | null;
+}
+
+type RefundCancellation = NonNullable<
+  Awaited<ReturnType<SubscriptionService['cancelForFullRefund']>>
+>;
+/** A duplicate subscription's refund, as `cancelForFullRefund` describes it. */
+type DuplicateSubscriptionRefund = NonNullable<RefundCancellation['duplicate']>;
+/** An ended old subscription's refund beside the one that stands, likewise. */
+type SupersededSubscriptionRefund = NonNullable<
+  RefundCancellation['superseded']
+>;
+
+/**
+ * A subscription charge's refund that ends nothing of the buyer's, and what
+ * its email says instead (Codex-2hxff.15).
+ */
+type SubscriptionRefundNote =
+  | { duplicate: DuplicateSubscriptionRefund; superseded?: never }
+  | { superseded: SupersededSubscriptionRefund; duplicate?: never };
+
 /**
  * Email the payer about each refund of the charge not yet emailed, once per
  * refund, with that refund's amount (owner decision 2026-10-19, "One per
  * refund"). `claimRefundEmails` marks them first, so a redelivery sends
  * nothing. For a purchase, the email says whether the buyer keeps access
- * (P-1); a subscription charge's says neither.
+ * (P-1); a subscription charge's says neither, unless it paid for a second
+ * subscription the buyer already had, or for an old one ended beside the one
+ * that stands (Codex-2hxff.15).
  */
 async function sendRefundEmails(
   c: Context<StripeWebhookEnv>,
   service: PurchaseService,
   charge: Stripe.Charge,
-  purchase:
-    | {
-        accessEnded: boolean;
-        duplicatePayment?: boolean;
-        itemTitle?: string | null;
-      }
-    | undefined
+  purchase: RefundedPurchase | undefined,
+  subscriptionNote?: SubscriptionRefundNote
 ): Promise<void> {
   const to = charge.billing_details?.email || charge.receipt_email;
   if (!to) return;
 
   const claimed = await service.claimRefundEmails(charge.id);
-  // The purchase's own title: a charge carries none of ours.
-  const contentTitle =
-    purchase?.itemTitle || charge.metadata?.contentTitle || 'Content';
-  // A second payment for an item the buyer owned was refunded automatically
-  // (Codex-2hxff.14): say why, and that the first purchase stands.
-  const accessNote = !purchase
-    ? ''
-    : purchase.duplicatePayment
-      ? `You still have ${contentTitle}. This refunds a second payment for it.`
-      : purchase.accessEnded
-        ? `Your access to ${contentTitle} has ended.`
-        : `You keep access to ${contentTitle}.`;
+  const { contentTitle, accessNote } = subscriptionNote?.duplicate
+    ? duplicateSubscriptionNote(subscriptionNote.duplicate)
+    : subscriptionNote?.superseded
+      ? supersededSubscriptionNote(subscriptionNote.superseded)
+      : purchaseNote(charge, purchase);
   for (const refund of claimed) {
     sendEmailToWorker(c.env, c.executionCtx, {
       to,
@@ -209,6 +224,73 @@ async function sendRefundEmails(
       },
     });
   }
+}
+
+function purchaseNote(
+  charge: Stripe.Charge,
+  purchase: RefundedPurchase | undefined
+): { contentTitle: string; accessNote: string } {
+  // The purchase's own title: a charge carries none of ours.
+  const contentTitle =
+    purchase?.itemTitle || charge.metadata?.contentTitle || 'Content';
+  // A second payment for an item the buyer owned was refunded automatically
+  // (Codex-2hxff.14): say why, and that the first purchase stands.
+  const accessNote = !purchase
+    ? ''
+    : purchase.duplicatePayment
+      ? `You still have ${contentTitle}. This refunds a second payment for it.`
+      : purchase.accessEnded
+        ? `Your access to ${contentTitle} has ended.`
+        : `You keep access to ${contentTitle}.`;
+  return { contentTitle, accessNote };
+}
+
+/**
+ * A second subscription the buyer already had was cancelled and refunded
+ * (owner decision 2026-10-22): say so, and for another tier than the one that
+ * stands, that Change plan switches to it.
+ */
+function duplicateSubscriptionNote(duplicate: DuplicateSubscriptionRefund): {
+  contentTitle: string;
+  accessNote: string;
+} {
+  const settled = 'We cancelled the second subscription and refunded it.';
+  if (duplicate.kind === 'course') {
+    return {
+      contentTitle: `${duplicate.courseTitle} subscription`,
+      accessNote: `You were already subscribed to ${duplicate.courseTitle}. ${settled}`,
+    };
+  }
+  const switchTo = duplicate.otherTier
+    ? ` You can switch to ${duplicate.tierName} with Change plan.`
+    : '';
+  return {
+    contentTitle: `${duplicate.tierName} subscription to ${duplicate.organizationName}`,
+    accessNote: `You were already subscribed to ${duplicate.organizationName}. ${settled}${switchTo}`,
+  };
+}
+
+/**
+ * An old subscription, revived next to the newer one that stands, was ended
+ * and the payment that revived it refunded (owner decision 7): say the buyer
+ * still subscribes, and what this refunds.
+ */
+function supersededSubscriptionNote(superseded: SupersededSubscriptionRefund): {
+  contentTitle: string;
+  accessNote: string;
+} {
+  const refunds =
+    'This refunds a payment on your old subscription, which has ended.';
+  if (superseded.kind === 'course') {
+    return {
+      contentTitle: `${superseded.courseTitle} subscription`,
+      accessNote: `You still subscribe to ${superseded.courseTitle}. ${refunds}`,
+    };
+  }
+  return {
+    contentTitle: `${superseded.tierName} subscription to ${superseded.organizationName}`,
+    accessNote: `You still subscribe to ${superseded.organizationName}. ${refunds}`,
+  };
 }
 
 function extractPaymentIntentId(
@@ -275,33 +357,49 @@ async function handleChargeRefunded(
   // a cancelled subscription below.
   invalidateLibrary(c, refundResult?.userId);
 
-  await sendRefundEmails(c, service, charge, refundResult);
+  // After the clawback and the purchase, so a Stripe failure here never holds
+  // those up, and before the emails, so a refund that ends nothing of the
+  // buyer's says why it was made (Codex-2hxff.15). A failure still lets the
+  // emails go, then is rethrown: a redelivery repeats only steps that are safe
+  // to repeat.
+  let subscriptionNote: SubscriptionRefundNote | undefined;
+  let endFailure: unknown;
+  try {
+    subscriptionNote = await endSubscriptionForFullRefund(
+      c,
+      subscriptionService,
+      courseSubscriptionService,
+      {
+        chargeId: charge.id,
+        paymentIntentId,
+        amountCents: charge.amount,
+        amountRefundedCents: charge.amount_refunded,
+      }
+    );
+  } catch (error) {
+    endFailure = error;
+  }
 
-  // Last, so a Stripe failure here never holds up the clawback, the purchase
-  // or the emails; a redelivery repeats only steps that are safe to repeat.
-  await endSubscriptionForFullRefund(
-    c,
-    subscriptionService,
-    courseSubscriptionService,
-    {
-      chargeId: charge.id,
-      paymentIntentId,
-      amountCents: charge.amount,
-      amountRefundedCents: charge.amount_refunded,
-    }
-  );
+  await sendRefundEmails(c, service, charge, refundResult, subscriptionNote);
+  if (endFailure) throw endFailure;
 }
 
 /**
  * A full refund of the current period's subscription payment cancels the
  * subscription and ends access now (owner decision P-4; a partial refund, or
  * one of another payment, leaves it running). It is cancelled at Stripe, then
- * ended here as `customer.subscription.deleted` ends it — that event
- * re-applies the same state when it lands, and sends the cancellation email.
+ * ended here as `customer.subscription.deleted` would end it, cancellation
+ * email included: this is its first end, so that event finds it already ended
+ * when it lands and sends nothing (Codex-2hxff.15).
  *
  * A tier subscription's streaming block is written too. A course plan's grant
  * is revoked instead, as on deletion: the org-wide block would also stop the
  * subscriber's purchases and tier content (owner decision 2026-10-20).
+ *
+ * A refund of a second subscription the user already had, or of an old one
+ * ended beside the one that stands (owner decision 7), ends nothing of
+ * theirs (Codex-2hxff.15): no block, no ending. What its email says is
+ * returned.
  *
  * A failure is alerted with what support needs, then rethrown: a transient one
  * makes Stripe redeliver, and a permanent one would otherwise end as a quiet
@@ -312,23 +410,32 @@ async function endSubscriptionForFullRefund(
   subscriptionService: SubscriptionService,
   courseSubscriptionService: CourseSubscriptionService,
   charge: Parameters<SubscriptionService['cancelForFullRefund']>[0]
-): Promise<void> {
+): Promise<SubscriptionRefundNote | undefined> {
   try {
     const ended = await subscriptionService.cancelForFullRefund(charge);
-    if (!ended) return;
+    if (!ended) return undefined;
+    if (ended.duplicate) return { duplicate: ended.duplicate };
+    if (ended.superseded) return { superseded: ended.superseded };
     const { subscription, cancelled } = ended;
     if (subscription.kind === 'course') {
       await courseSubscriptionService.handleCourseSubscriptionDeleted(
         cancelled
       );
       invalidateLibrary(c, subscription.userId);
-      return;
+      return undefined;
     }
-    await subscriptionService.handleSubscriptionDeleted(cancelled);
+    const deleted = await subscriptionService.handleSubscriptionDeleted(
+      cancelled,
+      c.env.WEB_APP_URL || ''
+    );
     invalidateLibrary(c, subscription.userId);
     if (subscription.organizationId) {
       revokeAccess(c, subscription.userId, subscription.organizationId);
     }
+    if (deleted?.email) {
+      sendEmailToWorker(c.env, c.executionCtx, deleted.email);
+    }
+    return undefined;
   } catch (error) {
     c.get('obs')?.error(
       "A subscription payment was refunded in full but the subscription could not be ended: check it at Stripe and the subscriber's access by hand",

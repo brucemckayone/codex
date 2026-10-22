@@ -244,21 +244,19 @@ describe('Course monetization round-trip (WP-6)', () => {
       priceCents: null,
     });
     const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const courseSubscriptionId = randomUUID();
 
     await writeCourseSubscriptionEntitlement(db, {
       userId: buyerId,
       organizationId: orgAId,
       courseId,
-      courseSubscriptionId: randomUUID(),
+      courseSubscriptionId,
       expiresAt: future,
     });
     expect(await hasCourseEntitlement(db, buyerId, courseId)).toBe(true);
 
     // Revoke (subscription cancelled) → resolver stops granting.
-    await revokeCourseSubscriptionEntitlement(db, {
-      userId: buyerId,
-      courseId,
-    });
+    await revokeCourseSubscriptionEntitlement(db, { courseSubscriptionId });
     expect(await hasCourseEntitlement(db, buyerId, courseId)).toBe(false);
 
     // A grant already expired fails closed (never grants).

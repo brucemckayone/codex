@@ -135,6 +135,28 @@ export class SubscriptionPaymentRequiredError extends ServiceError {
   }
 }
 
+/**
+ * A tier change confirmed with a preview's `prorationDate` the server no
+ * longer honours (Codex-2hxff.15, SUB-12; owner decision 2026-10-22): older
+ * than `TIER_CHANGE_PREVIEW_TTL_MS`, in the future, or before the current
+ * billing period. Nothing was changed at Stripe.
+ *
+ * Maps to HTTP 409 with its own top-level code, as
+ * `SubscriptionPaymentRequiredError` does, so the pricing dialog can tell it
+ * apart: it shows "Prices changed, review again" and fetches a fresh preview
+ * for the subscriber to confirm.
+ */
+export class TierChangePreviewExpiredError extends ServiceError {
+  constructor(context: { prorationDate: number; newTierId: string }) {
+    super(
+      'Prices changed. Review the change again.',
+      'TIER_CHANGE_PREVIEW_EXPIRED',
+      409,
+      context
+    );
+  }
+}
+
 // ============================================================================
 // Course Subscription Errors (Codex-2pryk WP-6 · SPEC §7)
 // ============================================================================

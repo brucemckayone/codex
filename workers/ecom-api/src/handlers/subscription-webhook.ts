@@ -2,7 +2,8 @@
  * Subscription Webhook Handlers
  *
  * Processes Stripe subscription lifecycle events:
- * - checkout.session.completed (mode=subscription) → create subscription record
+ * - checkout.session.completed (mode=subscription) → create subscription record,
+ *   then mark the buyer's open checkout session completed
  * - customer.subscription.updated → handle tier changes, status changes
  * - customer.subscription.deleted → mark cancelled
  * - invoice.payment_succeeded → extend period, execute revenue transfers
@@ -333,6 +334,8 @@ export async function handleSubscriptionWebhook(
               subscription
             );
           invalidateCourseBuyer(courseResult);
+          // The open checkout is paid, as for an org subscription below.
+          await service.markCheckoutSessionCompleted(session.id);
           obs?.info('Course subscription created from checkout', {
             sessionId: session.id,
             subscriptionId,
@@ -348,6 +351,10 @@ export async function handleSubscriptionWebhook(
         );
 
         dispatchEmail(c, result);
+        // The buyer's open checkout for the org is paid, so a new one is
+        // never handed this session again (Codex-2hxff.15). After the row, as
+        // for a purchase: the reservation is a record, not a gate.
+        await service.markCheckoutSessionCompleted(session.id);
 
         obs?.info('Subscription created from checkout', {
           sessionId: session.id,

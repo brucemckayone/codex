@@ -19,7 +19,14 @@
  * Entitlement seam: activation writes a `course_subscription` entitlement (the
  * READ target of the WP-2 resolver) with `expiresAt = currentPeriodEnd`, so a
  * missed renewal fails closed even before a delete webhook lands; renewals bump
- * it, a delete/unpaid revokes it. Auto-enrollment (D-G) rides along.
+ * it, a delete/unpaid revokes it. Auto-enrollment (D-G) rides along. Each grant
+ * belongs to one subscription (`sourceRef`), and is written only while that
+ * subscription grants access.
+ *
+ * Drift (Codex-2hxff.15): a second subscription to a course the buyer already
+ * holds is recorded as a duplicate, then cancelled and refunded in full, and
+ * grants nothing. A deletion leaves a tombstone (`endedAt`) that no later or
+ * replayed event changes.
  *
  * Payouts: recurring-invoice revenue REUSES the h69cg payout LEDGER (`payouts`)
  * — Option B platform-charge fan-out (creator + org secondary transfers linked
@@ -31,14 +38,17 @@
 import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   BILLING_INTERVAL,
+  CHECKOUT_SESSION_KIND,
   CONTENT_STATUS,
   CURRENCY,
   FEES,
   OFF_SALE_CANCELLABLE_COURSE_SUBSCRIPTION_STATUSES,
+  STRIPE_ENV_METADATA_KEY,
+  SUBSCRIPTION_STATUS,
   stripeEnvMetadata,
   subscriptionStatusGrantsAccess,
 } from '@codex/constants';
-import { isUniqueViolation } from '@codex/database';
+import type { DatabaseClient } from '@codex/database';
 import {
   type CourseSubscription,
   courseSubscriptionPlans,
@@ -49,6 +59,7 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  issueRefund,
   type LedgerDeps,
   recordPlatformFee,
   recordSlice,
@@ -57,13 +68,16 @@ import {
 } from '@codex/payments';
 import {
   applyMinPlatformFeeFloor,
+  CheckoutReservations,
   calculateRevenueSplit,
+  checkoutIdempotencyKey,
   DEFAULT_ORG_FEE_PERCENTAGE,
   DEFAULT_PLATFORM_FEE_PERCENTAGE,
   type FeeConfigService,
   findActiveCreatorAgreementShare,
-  refreshCourseSubscriptionEntitlementExpiry,
   revokeCourseSubscriptionEntitlement,
+  stripeErrorCode,
+  toStripeTime,
   withStaleCustomerRecovery,
   writeCourseSubscriptionEntitlement,
 } from '@codex/purchase';
@@ -72,9 +86,19 @@ import {
   InternalServiceError,
   NotFoundError,
   type ServiceConfig,
+  ServiceUnavailableError,
 } from '@codex/service-errors';
 import type { CreateCourseSubscriptionCheckoutInput } from '@codex/validation';
-import { and, count, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import {
+  and,
+  count,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  sql,
+} from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadyCourseSubscribedError,
@@ -86,10 +110,16 @@ import {
 } from '../errors';
 import { schedulePriceChange } from './pending-price-change';
 import { resolveStatus } from './stripe-status-mapper';
+import {
+  cancelAndRefundDuplicate,
+  isDuplicateSubscription,
+} from './subscription-duplicates';
 import type { TierPriceChangeMailer } from './subscription-service';
 
 /** Marks a Stripe subscription as a course sub (vs. an org tier sub). */
 export const COURSE_SUBSCRIPTION_METADATA_TYPE = 'course_subscription';
+
+type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
 
 interface CourseSubscriptionServiceConfig extends ServiceConfig {
   /** Injected so invoice payouts resolve fees via the 3-tier fallback chain. */
@@ -125,6 +155,7 @@ export class CourseSubscriptionService extends BaseService {
   private readonly mailer: TierPriceChangeMailer | undefined;
   private readonly webAppUrl: string | undefined;
   private readonly waitUntil: ((promise: Promise<unknown>) => void) | undefined;
+  private readonly checkoutReservations: CheckoutReservations;
 
   constructor(config: CourseSubscriptionServiceConfig, stripe: Stripe) {
     super(config);
@@ -133,6 +164,11 @@ export class CourseSubscriptionService extends BaseService {
     this.mailer = config.mailer;
     this.webAppUrl = config.webAppUrl;
     this.waitUntil = config.waitUntil;
+    this.checkoutReservations = new CheckoutReservations(
+      this.db,
+      stripe,
+      this.obs
+    );
   }
 
   // ─── Plan management (Stripe Product + 2 Prices, per course) ─────────────────
@@ -943,6 +979,11 @@ export class CourseSubscriptionService extends BaseService {
    * Create a Stripe Checkout session (`mode: 'subscription'`) for a course sub.
    * Platform-charge model (no `transfer_data`) so `invoice.payment_succeeded`
    * fans out the split via `source_transaction`, exactly like org subs.
+   *
+   * One open session per buyer and course plan (Codex-2hxff.15, owner
+   * decision "Block early, same as purchases"): a second tab gets the first
+   * tab's Stripe page, and the other interval replaces it. It expires after 30
+   * minutes.
    */
   async createCheckoutSession(
     userId: string,
@@ -999,10 +1040,10 @@ export class CourseSubscriptionService extends BaseService {
         throw new ConnectAccountNotReadyError(course.organizationId);
       }
 
-      const stripePriceId =
-        input.billingInterval === BILLING_INTERVAL.MONTH
-          ? plan.stripePriceMonthlyId
-          : plan.stripePriceAnnualId;
+      const monthly = input.billingInterval === BILLING_INTERVAL.MONTH;
+      const stripePriceId = monthly
+        ? plan.stripePriceMonthlyId
+        : plan.stripePriceAnnualId;
       if (!stripePriceId) {
         throw new SubscriptionCheckoutError(
           'Stripe Price not configured for this plan and interval',
@@ -1032,34 +1073,53 @@ export class CourseSubscriptionService extends BaseService {
         ...stripeEnvMetadata(this.environment),
       };
 
-      const session = await withStaleCustomerRecovery(
-        { db: this.db, stripe: this.stripe },
-        { userId, email: user.email, environment: this.environment },
-        (stripeCustomerId) =>
-          this.stripe.checkout.sessions.create({
-            mode: 'subscription',
-            customer: stripeCustomerId,
-            line_items: [{ price: stripePriceId, quantity: 1 }],
-            success_url: input.successUrl,
-            cancel_url: input.cancelUrl,
-            metadata,
-            subscription_data: { metadata },
-          }),
-        {
-          onStaleRecovery: (info) =>
-            this.obs.warn(
-              'Stale users.stripe_customer_id detected; clearing and retrying',
-              { ...info, courseId: input.courseId }
-            ),
-        }
-      );
-
-      if (!session.url) {
-        throw new SubscriptionCheckoutError(
-          'Failed to create checkout session URL'
-        );
+      const reserved = await this.checkoutReservations.reserve({
+        kind: CHECKOUT_SESSION_KIND.SUBSCRIPTION,
+        customerId: userId,
+        courseId: input.courseId,
+        stripePriceId,
+        amountCents: monthly ? plan.priceMonthly : plan.priceAnnual,
+      });
+      if (reserved.url && reserved.stripeSessionId) {
+        return {
+          sessionUrl: reserved.url,
+          sessionId: reserved.stripeSessionId,
+        };
       }
-      return { sessionUrl: session.url, sessionId: session.id };
+
+      const email = user.email;
+      return await this.checkoutReservations.create(reserved, () =>
+        withStaleCustomerRecovery(
+          { db: this.db, stripe: this.stripe },
+          { userId, email, environment: this.environment },
+          (stripeCustomerId) =>
+            this.stripe.checkout.sessions.create(
+              {
+                mode: 'subscription',
+                customer: stripeCustomerId,
+                line_items: [{ price: stripePriceId, quantity: 1 }],
+                success_url: input.successUrl,
+                cancel_url: input.cancelUrl,
+                metadata,
+                subscription_data: { metadata },
+                expires_at: toStripeTime(reserved.expiresAt),
+              },
+              {
+                idempotencyKey: checkoutIdempotencyKey(
+                  reserved,
+                  stripeCustomerId
+                ),
+              }
+            ),
+          {
+            onStaleRecovery: (info) =>
+              this.obs.warn(
+                'Stale users.stripe_customer_id detected; clearing and retrying',
+                { ...info, courseId: input.courseId }
+              ),
+          }
+        )
+      );
     } catch (error) {
       this.handleError(error, 'createCheckoutSession');
     }
@@ -1077,21 +1137,25 @@ export class CourseSubscriptionService extends BaseService {
     );
   }
 
-  /**
-   * Ensure the `course_subscriptions` row exists (self-heal on webhook-ordering
-   * races, mirroring `ensureSubscriptionDataPresent`). Returns null when the
-   * subscription lacks course metadata or Stripe reports it not-found.
-   */
-  private async ensureDataPresent(
-    stripeSub: Stripe.Subscription
-  ): Promise<{ row: CourseSubscription; justInserted: boolean } | null> {
-    const [existing] = await this.db
+  /** The row a Stripe subscription is recorded as, if any. */
+  private async findByStripeId(
+    stripeSubscriptionId: string
+  ): Promise<CourseSubscription | undefined> {
+    const [row] = await this.db
       .select()
       .from(courseSubscriptions)
-      .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSub.id))
+      .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSubscriptionId))
       .limit(1);
-    if (existing) return { row: existing, justInserted: false };
+    return row;
+  }
 
+  /**
+   * The row a Stripe subscription describes, from its course metadata and
+   * first item. Null, logged, when the metadata is missing.
+   */
+  private rowFromStripe(
+    stripeSub: Stripe.Subscription
+  ): typeof courseSubscriptions.$inferInsert | null {
     const metadata = stripeSub.metadata ?? {};
     const userId = metadata.codex_user_id;
     const courseId = metadata.codex_course_id;
@@ -1106,64 +1170,396 @@ export class CourseSubscriptionService extends BaseService {
     }
 
     const item = stripeSub.items.data[0];
-    const billingInterval =
-      item?.price?.recurring?.interval === 'year'
-        ? BILLING_INTERVAL.YEAR
-        : BILLING_INTERVAL.MONTH;
     const periodStart = item?.current_period_start ?? 0;
     const periodEnd = item?.current_period_end ?? 0;
-    const status = resolveStatus(
-      stripeSub.status,
-      stripeSub.cancel_at_period_end ?? false,
-      'active'
-    );
-
-    try {
-      await this.db.insert(courseSubscriptions).values({
-        userId,
-        courseId,
-        planId,
-        organizationId,
-        stripeSubscriptionId: stripeSub.id,
-        stripeCustomerId:
-          typeof stripeSub.customer === 'string'
-            ? stripeSub.customer
-            : stripeSub.customer.id,
-        status,
-        billingInterval,
-        currentPeriodStart: new Date(periodStart * 1000),
-        currentPeriodEnd: new Date(periodEnd * 1000),
-        cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? false,
-      });
-    } catch (error) {
-      if (isUniqueViolation(error)) {
-        const [raced] = await this.db
-          .select()
-          .from(courseSubscriptions)
-          .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSub.id))
-          .limit(1);
-        if (raced) return { row: raced, justInserted: false };
-      }
-      throw error;
-    }
-
-    const [inserted] = await this.db
-      .select()
-      .from(courseSubscriptions)
-      .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSub.id))
-      .limit(1);
-    if (!inserted) {
-      throw new InternalServiceError(
-        'course subscription row missing after insert',
-        { stripeSubscriptionId: stripeSub.id }
-      );
-    }
-    return { row: inserted, justInserted: true };
+    return {
+      userId,
+      courseId,
+      planId,
+      organizationId,
+      stripeSubscriptionId: stripeSub.id,
+      stripeCustomerId:
+        typeof stripeSub.customer === 'string'
+          ? stripeSub.customer
+          : stripeSub.customer.id,
+      status: resolveStatus(
+        stripeSub.status,
+        stripeSub.cancel_at_period_end ?? false,
+        'active'
+      ),
+      billingInterval:
+        item?.price?.recurring?.interval === 'year'
+          ? BILLING_INTERVAL.YEAR
+          : BILLING_INTERVAL.MONTH,
+      currentPeriodStart: new Date(periodStart * 1000),
+      currentPeriodEnd: new Date(periodEnd * 1000),
+      cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? false,
+    };
   }
 
   /**
-   * customer.subscription.created (course sub): ensure the row + write the
+   * Ensure the `course_subscriptions` row exists (self-heal on webhook-ordering
+   * races, mirroring `ensureSubscriptionDataPresent`). Returns null when the
+   * subscription lacks course metadata.
+   */
+  private async ensureDataPresent(
+    stripeSub: Stripe.Subscription
+  ): Promise<{ row: CourseSubscription; justInserted: boolean } | null> {
+    const existing = await this.findByStripeId(stripeSub.id);
+    if (existing) return { row: existing, justInserted: false };
+    const values = this.rowFromStripe(stripeSub);
+    return values ? this.recordUnderLock(values) : null;
+  }
+
+  /**
+   * Run `fn` in a transaction holding the per-buyer, per-course advisory lock
+   * (Codex-2hxff.15). Every write that records a course subscription, ends
+   * it, or writes or revokes its grant takes it, so a deletion cannot
+   * interleave with a grant for the same buyer and course: a grant written
+   * after it sees the tombstone, and one written before it is revoked by it.
+   */
+  private withCourseLock<T>(
+    key: { userId: string; courseId: string },
+    fn: (tx: Tx) => Promise<T>
+  ): Promise<T> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`course-subscription:${key.userId}:${key.courseId}`}))`
+      );
+      return fn(tx);
+    });
+  }
+
+  /**
+   * Inside the lock: the buyer's live subscription to the course, other than
+   * `exceptId`, if any.
+   */
+  private async liveRow(
+    tx: Tx,
+    key: { userId: string; courseId: string },
+    exceptId?: string
+  ): Promise<{ id: string } | undefined> {
+    const [live] = await tx
+      .select({ id: courseSubscriptions.id })
+      .from(courseSubscriptions)
+      .where(
+        and(
+          eq(courseSubscriptions.userId, key.userId),
+          eq(courseSubscriptions.courseId, key.courseId),
+          inArray(courseSubscriptions.status, [
+            ...ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
+          ]),
+          ...(exceptId ? [ne(courseSubscriptions.id, exceptId)] : [])
+        )
+      )
+      .limit(1);
+    return live;
+  }
+
+  /**
+   * Insert a subscription's row under the lock, then look again, as
+   * `PurchaseService.lockForItem` does. The lock serialises the events of
+   * one buyer's subscriptions to one course, so:
+   *
+   * - this subscription's own row, written by a concurrent event while this
+   *   one waited, is returned as it is;
+   * - a second subscription to a course the buyer holds live (two payment
+   *   pages paid before either was recorded) is recorded `cancelled`, a
+   *   duplicate of the live one (owner decision 2026-10-22, "Keep the
+   *   first"). Cancelled, it is outside the one-live-per-course index. It
+   *   grants and pays nothing; the caller settles it after the commit.
+   */
+  private async recordUnderLock(
+    values: typeof courseSubscriptions.$inferInsert
+  ): Promise<{ row: CourseSubscription; justInserted: boolean }> {
+    const recorded = await this.withCourseLock(values, async (tx) => {
+      const [replay] = await tx
+        .select()
+        .from(courseSubscriptions)
+        .where(
+          eq(
+            courseSubscriptions.stripeSubscriptionId,
+            values.stripeSubscriptionId
+          )
+        )
+        .limit(1);
+      if (replay) return { row: replay, justInserted: false };
+
+      const live = await this.liveRow(tx, values);
+      const [row] = await tx
+        .insert(courseSubscriptions)
+        .values(
+          live
+            ? {
+                ...values,
+                status: SUBSCRIPTION_STATUS.CANCELLED,
+                cancelledAt: values.cancelledAt ?? new Date(),
+                duplicateOfCourseSubscriptionId: live.id,
+              }
+            : values
+        )
+        .returning();
+      if (!row) {
+        throw new InternalServiceError(
+          'course subscription row missing after insert',
+          { stripeSubscriptionId: values.stripeSubscriptionId }
+        );
+      }
+      return { row, justInserted: true };
+    });
+
+    if (recorded.justInserted && isDuplicateSubscription(recorded.row)) {
+      this.obs.warn('Second course subscription recorded as a duplicate', {
+        courseSubscriptionId: recorded.row.id,
+        duplicateOfCourseSubscriptionId:
+          recorded.row.duplicateOfCourseSubscriptionId,
+        stripeSubscriptionId: recorded.row.stripeSubscriptionId,
+        courseId: recorded.row.courseId,
+      });
+    }
+    return recorded;
+  }
+
+  /**
+   * Settle a duplicate after the commit: cancel it at Stripe and refund every
+   * payment it took, once (`duplicateSettledAt`), so a later event for it asks
+   * Stripe nothing. Each refund's `charge.refunded` emails the buyer.
+   *
+   * If Stripe refuses, the row stays unsettled: the buyer is owed the money.
+   * The failure is logged with Stripe's code and thrown as retryable whatever
+   * its cause, so Stripe redelivers the event through its retry window, as
+   * `PurchaseService.refundDuplicatePayment` does. One that never clears is
+   * held for support (owner decision: a failed refund is held for support).
+   */
+  private async settleDuplicate(row: CourseSubscription): Promise<void> {
+    if (row.duplicateSettledAt) return;
+    let refundedInvoices: number;
+    try {
+      ({ refundedInvoices } = await cancelAndRefundDuplicate(this.stripe, {
+        stripeSubscriptionId: row.stripeSubscriptionId,
+        environment: this.environment,
+      }));
+    } catch (error) {
+      this.obs.error(
+        'Duplicate course subscription could not be cancelled and refunded',
+        {
+          errorId: crypto.randomUUID(),
+          courseSubscriptionId: row.id,
+          duplicateOfCourseSubscriptionId: row.duplicateOfCourseSubscriptionId,
+          stripeSubscriptionId: row.stripeSubscriptionId,
+          code: stripeErrorCode(error),
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      throw new ServiceUnavailableError(
+        'Duplicate course subscription refund failed; it will be retried',
+        { courseSubscriptionId: row.id }
+      );
+    }
+    await this.db
+      .update(courseSubscriptions)
+      .set({ duplicateSettledAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(courseSubscriptions.id, row.id),
+          isNull(courseSubscriptions.duplicateSettledAt)
+        )
+      );
+    this.obs.warn('Duplicate course subscription cancelled and refunded', {
+      courseSubscriptionId: row.id,
+      duplicateOfCourseSubscriptionId: row.duplicateOfCourseSubscriptionId,
+      stripeSubscriptionId: row.stripeSubscriptionId,
+      refundedInvoices,
+    });
+  }
+
+  /**
+   * Inside the lock: write or extend the subscription's grant to `expiresAt`
+   * if its row, read again now, still grants access — not ended, not a
+   * duplicate, and in an access-granting status. Returns whether it did.
+   */
+  private async grantIfLive(
+    tx: Tx,
+    courseSubscriptionId: string,
+    expiresAt: Date
+  ): Promise<boolean> {
+    const [row] = await tx
+      .select()
+      .from(courseSubscriptions)
+      .where(eq(courseSubscriptions.id, courseSubscriptionId))
+      .limit(1);
+    if (
+      !row ||
+      row.endedAt ||
+      isDuplicateSubscription(row) ||
+      !subscriptionStatusGrantsAccess(row.status)
+    ) {
+      return false;
+    }
+    await writeCourseSubscriptionEntitlement(tx, {
+      userId: row.userId,
+      organizationId: row.organizationId,
+      courseId: row.courseId,
+      courseSubscriptionId: row.id,
+      expiresAt,
+    });
+    return true;
+  }
+
+  /**
+   * Stripe ended it: cancelled, with the tombstone (`endedAt`) no later event
+   * changes, and its own grant revoked, under the lock. Safe to repeat.
+   */
+  private async endCourseSubscription(
+    row: CourseSubscription
+  ): Promise<CourseSubscriptionWebhookResult> {
+    const at = new Date();
+    await this.withCourseLock(row, async (tx) => {
+      await tx
+        .update(courseSubscriptions)
+        .set({
+          status: SUBSCRIPTION_STATUS.CANCELLED,
+          cancelledAt: sql`COALESCE(${courseSubscriptions.cancelledAt}, ${at})`,
+          endedAt: sql`COALESCE(${courseSubscriptions.endedAt}, ${at})`,
+          updatedAt: at,
+        })
+        .where(eq(courseSubscriptions.id, row.id));
+      await revokeCourseSubscriptionEntitlement(tx, {
+        courseSubscriptionId: row.id,
+      });
+    });
+
+    this.obs.info('Course subscription cancelled', {
+      courseSubscriptionId: row.id,
+      courseId: row.courseId,
+      userId: row.userId,
+    });
+    return { userId: row.userId, organizationId: row.organizationId ?? '' };
+  }
+
+  /**
+   * An old subscription paid back to life (an `unpaid` one whose open invoice
+   * was paid) while the buyer holds a newer live one to the course (owner
+   * decision 7, "Cancel old, refund it"). The newer one stays.
+   *
+   * Stripe first, both steps idempotent: the old one is cancelled now with no
+   * proration (unless Stripe has ended it), then ONLY the invoice that
+   * revived it is refunded — earlier invoices really bought access. Then its
+   * row is tombstoned under the lock; it keeps no grant and pays no one. If
+   * Stripe refuses, the row is left unchanged and the failure is retryable,
+   * so the redelivery repeats the Stripe steps and then writes the row.
+   *
+   * `revivingInvoice` is the paid invoice, or (from `updated`) the
+   * subscription's `latest_invoice`, refunded only if it was paid.
+   */
+  private async endRevived(
+    row: CourseSubscription,
+    supersededById: string,
+    revivingInvoice: Stripe.Invoice | string | null
+  ): Promise<void> {
+    let refundedInvoiceId: string | null = null;
+    try {
+      const live = await this.stripe.subscriptions.retrieve(
+        row.stripeSubscriptionId
+      );
+      if (live.status !== 'canceled' && live.status !== 'incomplete_expired') {
+        await this.stripe.subscriptions.cancel(
+          row.stripeSubscriptionId,
+          {
+            prorate: false,
+            cancellation_details: {
+              comment: 'Revived next to a newer subscription to the course',
+            },
+          },
+          { idempotencyKey: `revived_cancel_${row.stripeSubscriptionId}` }
+        );
+      }
+
+      const invoice =
+        typeof revivingInvoice === 'string'
+          ? await this.stripe.invoices.retrieve(revivingInvoice)
+          : revivingInvoice;
+      if (invoice?.id && invoice.status === 'paid' && invoice.amount_paid > 0) {
+        const chargeId = await resolveInvoiceCharge(this.stripe, invoice);
+        if (!chargeId) {
+          throw new InternalServiceError(
+            'The invoice that revived an old course subscription has no charge to refund',
+            { courseSubscriptionId: row.id, invoiceId: invoice.id }
+          );
+        }
+        await issueRefund(this.stripe, {
+          chargeId,
+          reason: 'requested_by_customer',
+          idempotencyKey: `refund_revived_${invoice.id}`,
+          environment: this.environment,
+        });
+        refundedInvoiceId = invoice.id;
+      }
+    } catch (error) {
+      this.obs.error(
+        'Revived course subscription could not be cancelled and refunded',
+        {
+          errorId: crypto.randomUUID(),
+          courseSubscriptionId: row.id,
+          supersededByCourseSubscriptionId: supersededById,
+          stripeSubscriptionId: row.stripeSubscriptionId,
+          code: stripeErrorCode(error),
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      throw new ServiceUnavailableError(
+        'Revived course subscription refund failed; it will be retried',
+        { courseSubscriptionId: row.id }
+      );
+    }
+
+    const at = new Date();
+    await this.withCourseLock(row, async (tx) => {
+      await tx
+        .update(courseSubscriptions)
+        .set({
+          status: SUBSCRIPTION_STATUS.CANCELLED,
+          cancelledAt: sql`COALESCE(${courseSubscriptions.cancelledAt}, ${at})`,
+          endedAt: sql`COALESCE(${courseSubscriptions.endedAt}, ${at})`,
+          updatedAt: at,
+        })
+        .where(eq(courseSubscriptions.id, row.id));
+      await revokeCourseSubscriptionEntitlement(tx, {
+        courseSubscriptionId: row.id,
+      });
+    });
+    this.obs.warn(
+      'Old course subscription revived next to a newer one: cancelled and refunded',
+      {
+        courseSubscriptionId: row.id,
+        supersededByCourseSubscriptionId: supersededById,
+        stripeSubscriptionId: row.stripeSubscriptionId,
+        refundedInvoiceId,
+      }
+    );
+  }
+
+  /**
+   * Whether a charge has been refunded in full. A slice written after the
+   * refund's clawback ran is never reversed (the clawback reverses only the
+   * slices a charge has when its refund arrives), so a late invoice on an
+   * ended subscription must not pay out a refunded charge.
+   */
+  private async chargeRefundedInFull(chargeId: string): Promise<boolean> {
+    const charge = await this.stripe.charges.retrieve(chargeId);
+    return (
+      charge.refunded === true ||
+      (charge.amount > 0 && charge.amount_refunded >= charge.amount)
+    );
+  }
+
+  /**
+   * checkout.session.completed (course sub): ensure the row + write the
    * `course_subscription` entitlement (expiresAt = currentPeriodEnd) + auto-enroll.
+   *
+   * A duplicate is settled and grants nothing. Nor does a row Stripe has
+   * ended (a redelivery after the deletion), or one whose status grants no
+   * access (`incomplete`).
    */
   async handleCourseSubscriptionCreated(
     stripeSub: Stripe.Subscription
@@ -1171,14 +1567,20 @@ export class CourseSubscriptionService extends BaseService {
     const presence = await this.ensureDataPresent(stripeSub);
     if (!presence) return;
     const { row } = presence;
-
-    await writeCourseSubscriptionEntitlement(this.db, {
-      userId: row.userId,
-      organizationId: row.organizationId ?? '',
-      courseId: row.courseId,
-      courseSubscriptionId: row.id,
-      expiresAt: row.currentPeriodEnd,
-    });
+    if (isDuplicateSubscription(row)) {
+      await this.settleDuplicate(row);
+      return;
+    }
+    const granted = await this.withCourseLock(row, (tx) =>
+      this.grantIfLive(tx, row.id, row.currentPeriodEnd)
+    );
+    if (!granted) {
+      this.obs.info('Course subscription not granted: ended or not live', {
+        courseSubscriptionId: row.id,
+        status: row.status,
+      });
+      return;
+    }
 
     this.obs.info('Course subscription activated', {
       courseSubscriptionId: row.id,
@@ -1189,8 +1591,18 @@ export class CourseSubscriptionService extends BaseService {
   }
 
   /**
-   * invoice.payment_succeeded (course sub): refresh the period + entitlement
-   * expiry, then fan out the recurring-revenue payout for the invoice charge.
+   * invoice.payment_succeeded (course sub): refresh the period + status, write
+   * or extend the grant to the new period end, then fan out the
+   * recurring-revenue payout for the invoice charge.
+   *
+   * `stripeSub` is the live subscription (the webhook retrieves it), so an
+   * `unpaid` subscription whose open invoice the customer paid, which Stripe
+   * reports active again, gets its access back (owner decision 2026-10-22,
+   * "Yes, like tiers") — unless the buyer has since taken a newer one, when
+   * the old one is cancelled and this invoice refunded instead
+   * ({@link endRevived}). A duplicate is settled and pays no one. A row
+   * Stripe has ended is left as it is, grant included, but the invoice was
+   * paid, so it still pays out — unless its charge was refunded in full.
    */
   async handleCourseInvoicePaymentSucceeded(
     stripeInvoice: Stripe.Invoice,
@@ -1199,32 +1611,63 @@ export class CourseSubscriptionService extends BaseService {
     const presence = await this.ensureDataPresent(stripeSub);
     if (!presence) return;
     const { row } = presence;
+    if (isDuplicateSubscription(row)) {
+      await this.settleDuplicate(row);
+      return;
+    }
 
-    const item = stripeSub.items.data[0];
-    const periodStart = item?.current_period_start ?? 0;
-    const periodEnd = item?.current_period_end ?? 0;
-    const newPeriodEnd = new Date(periodEnd * 1000);
-
-    await this.db
-      .update(courseSubscriptions)
-      .set({
-        currentPeriodStart: new Date(periodStart * 1000),
-        currentPeriodEnd: newPeriodEnd,
-        status: resolveStatus(
-          stripeSub.status,
-          stripeSub.cancel_at_period_end ?? false,
-          'active'
-        ),
-        updatedAt: new Date(),
-      })
-      .where(eq(courseSubscriptions.id, row.id));
-
-    // Extend the stored grant to the new period end (fail-closed between renewals).
-    await refreshCourseSubscriptionEntitlementExpiry(this.db, {
+    const result = {
       userId: row.userId,
-      courseId: row.courseId,
-      expiresAt: newPeriodEnd,
-    });
+      organizationId: row.organizationId ?? '',
+    };
+    if (row.endedAt) {
+      this.obs.info('Invoice for an ended course subscription: row kept', {
+        courseSubscriptionId: row.id,
+        invoiceId: stripeInvoice.id,
+      });
+    } else {
+      const item = stripeSub.items.data[0];
+      const periodStart = item?.current_period_start ?? 0;
+      const periodEnd = item?.current_period_end ?? 0;
+      const newPeriodEnd = new Date(periodEnd * 1000);
+      const status = resolveStatus(
+        stripeSub.status,
+        stripeSub.cancel_at_period_end ?? false,
+        'active'
+      );
+
+      // Under the lock, and only while the row has not ended: a deletion that
+      // won the lock leaves it as it is. Then extend the stored grant to the
+      // new period end (fail-closed between renewals), or write it afresh
+      // when `unpaid` had revoked it. A revival next to a newer live
+      // subscription writes nothing here.
+      const supersededBy = await this.withCourseLock(row, async (tx) => {
+        const newer = subscriptionStatusGrantsAccess(status)
+          ? await this.liveRow(tx, row, row.id)
+          : undefined;
+        if (newer) return newer.id;
+        await tx
+          .update(courseSubscriptions)
+          .set({
+            currentPeriodStart: new Date(periodStart * 1000),
+            currentPeriodEnd: newPeriodEnd,
+            status,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(courseSubscriptions.id, row.id),
+              isNull(courseSubscriptions.endedAt)
+            )
+          );
+        await this.grantIfLive(tx, row.id, newPeriodEnd);
+        return null;
+      });
+      if (supersededBy) {
+        await this.endRevived(row, supersededBy, stripeInvoice);
+        return;
+      }
+    }
 
     // GBP-only: the fan-out is hardcoded to GBP transfers (same invariant as
     // the org-subscription pipeline). Reject a non-GBP invoice loudly.
@@ -1234,7 +1677,7 @@ export class CourseSubscriptionService extends BaseService {
         invoiceId: stripeInvoice.id,
         currency: stripeInvoice.currency,
       });
-      return { userId: row.userId, organizationId: row.organizationId ?? '' };
+      return result;
     }
 
     const chargeId = await resolveInvoiceCharge(this.stripe, stripeInvoice);
@@ -1243,7 +1686,14 @@ export class CourseSubscriptionService extends BaseService {
         'Course subscription invoice has no charge — skipping payouts',
         { courseSubscriptionId: row.id, invoiceId: stripeInvoice.id }
       );
-      return { userId: row.userId, organizationId: row.organizationId ?? '' };
+      return result;
+    }
+    if (row.endedAt && (await this.chargeRefundedInFull(chargeId))) {
+      this.obs.info(
+        'Invoice for an ended course subscription was refunded in full — skipping payouts',
+        { courseSubscriptionId: row.id, invoiceId: stripeInvoice.id, chargeId }
+      );
+      return result;
     }
 
     // The invoice's creation time decides the split (Codex-2hxff.2) — the
@@ -1259,15 +1709,25 @@ export class CourseSubscriptionService extends BaseService {
       invoiceCreatedAt
     );
 
-    return { userId: row.userId, organizationId: row.organizationId ?? '' };
+    return result;
   }
 
   /**
    * customer.subscription.updated (course sub): mirror status/period. While the
    * status grants access — including `past_due`, as Stripe retries a failed
-   * renewal (owner decision P-3) — the stored grant follows the period end;
-   * otherwise it would lapse at the old one, since only a PAID renewal moves it
-   * on. `unpaid` is access-reducing → revoke the grant immediately.
+   * renewal (owner decision P-3) — the grant is written or extended to the
+   * period end; otherwise it would lapse at the old one, since only a PAID
+   * renewal moves it on. That write is also what gives an `unpaid`
+   * subscription, paid again, its access back (owner decision 2026-10-22).
+   * `unpaid` is access-reducing → revoke the grant immediately.
+   *
+   * Stripe does not order events, so the payload can be stale. A CANCELLED
+   * row comes back only if the live subscription says so: an `updated` from
+   * before it went `unpaid` can arrive after the one that took access away.
+   * Ended at Stripe, it is tombstoned; tombstoned, it is never changed. A
+   * duplicate is settled and changes nothing. Revived next to a newer live
+   * subscription, it is cancelled and its latest invoice refunded
+   * ({@link endRevived}).
    */
   async handleCourseSubscriptionUpdated(
     stripeSub: Stripe.Subscription
@@ -1275,77 +1735,118 @@ export class CourseSubscriptionService extends BaseService {
     const presence = await this.ensureDataPresent(stripeSub);
     if (!presence) return;
     const { row } = presence;
+    if (isDuplicateSubscription(row)) {
+      await this.settleDuplicate(row);
+      return;
+    }
+    if (row.endedAt) {
+      this.obs.info('Late course subscription event ignored: it has ended', {
+        courseSubscriptionId: row.id,
+        eventStatus: stripeSub.status,
+      });
+      return;
+    }
 
-    const item = stripeSub.items.data[0];
+    const priorStatus = row.status as Parameters<typeof resolveStatus>[2];
+    const reviving =
+      row.status === SUBSCRIPTION_STATUS.CANCELLED &&
+      resolveStatus(
+        stripeSub.status,
+        stripeSub.cancel_at_period_end ?? false,
+        priorStatus
+      ) !== SUBSCRIPTION_STATUS.CANCELLED;
+    const current = reviving
+      ? await this.stripe.subscriptions.retrieve(stripeSub.id)
+      : stripeSub;
+    if (
+      current.status === 'canceled' ||
+      current.status === 'incomplete_expired'
+    ) {
+      return this.endCourseSubscription(row);
+    }
+
+    const item = current.items.data[0];
     const status = resolveStatus(
-      stripeSub.status,
-      stripeSub.cancel_at_period_end ?? false,
-      row.status as Parameters<typeof resolveStatus>[2]
+      current.status,
+      current.cancel_at_period_end ?? false,
+      priorStatus
     );
     const currentPeriodEnd = item?.current_period_end
       ? new Date(item.current_period_end * 1000)
       : row.currentPeriodEnd;
-    await this.db
-      .update(courseSubscriptions)
-      .set({
-        status,
-        cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? false,
-        currentPeriodEnd,
-        updatedAt: new Date(),
-      })
-      .where(eq(courseSubscriptions.id, row.id));
-
-    if (subscriptionStatusGrantsAccess(status) && currentPeriodEnd) {
-      await refreshCourseSubscriptionEntitlementExpiry(this.db, {
-        userId: row.userId,
-        courseId: row.courseId,
-        expiresAt: currentPeriodEnd,
-      });
-    }
-
-    if (stripeSub.status === 'unpaid') {
-      await revokeCourseSubscriptionEntitlement(this.db, {
-        userId: row.userId,
-        courseId: row.courseId,
-      });
+    // Under the lock, and only while the row has not ended, as for invoices.
+    const supersededBy = await this.withCourseLock(row, async (tx) => {
+      const newer = subscriptionStatusGrantsAccess(status)
+        ? await this.liveRow(tx, row, row.id)
+        : undefined;
+      if (newer) return newer.id;
+      await tx
+        .update(courseSubscriptions)
+        .set({
+          status,
+          cancelAtPeriodEnd: current.cancel_at_period_end ?? false,
+          currentPeriodEnd,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(courseSubscriptions.id, row.id),
+            isNull(courseSubscriptions.endedAt)
+          )
+        );
+      const granted = await this.grantIfLive(tx, row.id, currentPeriodEnd);
+      if (!granted && current.status === 'unpaid') {
+        await revokeCourseSubscriptionEntitlement(tx, {
+          courseSubscriptionId: row.id,
+        });
+      }
+      return null;
+    });
+    if (supersededBy) {
+      await this.endRevived(row, supersededBy, current.latest_invoice ?? null);
+      return;
     }
     return { userId: row.userId, organizationId: row.organizationId ?? '' };
   }
 
   /**
-   * customer.subscription.deleted (course sub): mark cancelled + REVOKE the
-   * stored grant so the resolver stops granting immediately.
+   * customer.subscription.deleted (course sub): mark cancelled + REVOKE this
+   * subscription's grant so the resolver stops granting immediately, leaving
+   * the tombstone every later event respects (Codex-2hxff.15).
+   *
+   * Deleted before we recorded it, the tombstone is written from its metadata
+   * (only when it is tagged with this environment), so a late
+   * `checkout.session.completed` or `updated` cannot record it live. A
+   * duplicate is settled and changes nothing.
    */
   async handleCourseSubscriptionDeleted(
     stripeSub: Stripe.Subscription
   ): Promise<CourseSubscriptionWebhookResult | undefined> {
-    const [row] = await this.db
-      .select()
-      .from(courseSubscriptions)
-      .where(eq(courseSubscriptions.stripeSubscriptionId, stripeSub.id))
-      .limit(1);
-    if (!row) return;
-
-    await this.db
-      .update(courseSubscriptions)
-      .set({
-        status: 'cancelled',
-        cancelledAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(courseSubscriptions.id, row.id));
-
-    await revokeCourseSubscriptionEntitlement(this.db, {
-      userId: row.userId,
-      courseId: row.courseId,
-    });
-
-    this.obs.info('Course subscription cancelled', {
-      courseSubscriptionId: row.id,
-      courseId: row.courseId,
-      userId: row.userId,
-    });
-    return { userId: row.userId, organizationId: row.organizationId ?? '' };
+    let row = await this.findByStripeId(stripeSub.id);
+    if (!row) {
+      const tagged =
+        stripeSub.metadata?.[STRIPE_ENV_METADATA_KEY] === this.environment;
+      const values = tagged ? this.rowFromStripe(stripeSub) : null;
+      if (!values) {
+        this.obs.warn(
+          'Course subscription deleted before it was recorded; no tombstone',
+          { stripeSubscriptionId: stripeSub.id, tagged }
+        );
+        return;
+      }
+      const endedAt = new Date();
+      ({ row } = await this.recordUnderLock({
+        ...values,
+        status: SUBSCRIPTION_STATUS.CANCELLED,
+        cancelledAt: endedAt,
+        endedAt,
+      }));
+    }
+    if (isDuplicateSubscription(row)) {
+      await this.settleDuplicate(row);
+      return;
+    }
+    return this.endCourseSubscription(row);
   }
 
   // ─── Payout fan-out (Option B platform charge — mirrors writePurchasePayouts) ─
