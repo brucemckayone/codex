@@ -294,16 +294,19 @@
   // 3:4 browse tile) is drawn wider than the card, and `sizes` is scaled for
   // it. Only the grid and resume frames have a fixed shape to scale by: the
   // resolved shape, else the type's own (video 16:9, audio 1:1, article 3:2).
-  // A picture that does not record its size is taken as its type's own shape:
-  // a video poster is 16:9 even in a 3:4 tile.
+  // A picture that does not record its size is taken as 16:9 whatever the
+  // type: a video poster is the video's frame, and an upload is made in the
+  // thumbnail field's 16:9 preview. A square one is then over-declared, which
+  // costs bytes, never sharpness.
   const SHAPE_RATIO = { '16:9': 16 / 9, '1:1': 1, '3:4': 3 / 4, '3:2': 3 / 2 };
   const TYPE_RATIO = { video: 16 / 9, audio: 1, article: 3 / 2 };
+  const UPLOAD_RATIO = 16 / 9;
   const coverSizes = $derived.by(() => {
     if (variant !== 'grid' && variant !== 'resume') return sizes;
     const frameRatio = resolvedShape
       ? SHAPE_RATIO[resolvedShape]
       : TYPE_RATIO[contentType];
-    return coverCropSizes(sizes, frameRatio, thumbnail, TYPE_RATIO[contentType]);
+    return coverCropSizes(sizes, frameRatio, thumbnail, UPLOAD_RATIO);
   });
 
   // Title-in-cover: eyebrow + title over the cover on a scrim, each type

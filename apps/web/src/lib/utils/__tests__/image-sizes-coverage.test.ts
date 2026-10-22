@@ -57,19 +57,27 @@ function svelteFiles(dir: string): string[] {
   });
 }
 
+/** A `<script>` or `<style>` block: its opening tag, tag name, body and close. */
+const CODE_BLOCK = /(<(script|style)\b[^>]*>)([\s\S]*?)(<\/\2>)/g;
+
 /**
- * The source without comments: markup and block comments anywhere, line
- * comments only inside `<script>`. In markup a ` // ` is text (an alt, a
- * caption), and cutting the line there would hide the `<img>` after it.
+ * The source without comments: markup comments anywhere, and code comments
+ * only where they can be, `/* … *\/` in `<script>` and `<style>`, `//` in
+ * `<script>`. In markup both are text: a ` // ` in an alt, or the `/*` in
+ * `accept="image/*"`, which would otherwise run to the next `*\/` in the file
+ * and hide every `<img>` between them.
  */
 function withoutComments(source: string): string {
   return source
     .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(
-      /(<script\b[^>]*>)([\s\S]*?)(<\/script>)/g,
-      (_script, open: string, body: string, close: string) =>
-        open + body.replace(/(^|[^:'"`])\/\/.*$/gm, '$1') + close
+      CODE_BLOCK,
+      (_block, open: string, tag: string, body: string, close: string) => {
+        const code = body.replace(/\/\*[\s\S]*?\*\//g, '');
+        const stripped =
+          tag === 'script' ? code.replace(/(^|[^:'"`])\/\/.*$/gm, '$1') : code;
+        return open + stripped + close;
+      }
     );
 }
 

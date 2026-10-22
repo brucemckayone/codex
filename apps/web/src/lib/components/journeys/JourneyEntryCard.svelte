@@ -131,14 +131,19 @@
   const showFlair = $derived(!(layout === 'row' && Boolean(coverImageUrl)));
 
   /**
+   * A cover that does not record its size is taken as 16:9, the shape covers
+   * were made for. It is the picture's ratio, not the frame's: the tile is
+   * 3:4.
+   */
+  const COVER_RATIO = 16 / 9;
+
+  /**
    * How wide the cover is drawn, for choosing from its stored sizes
    * (Codex-kk9nv.3). A tile is a 3:4 portrait in a 15-17rem rail; a row's
    * cover is a narrow column the row stretches tall, and full width at 16:9
    * on a phone. Both crop, so a landscape picture is drawn wider than its box
    * (`coverCropSizes`), taken here as about 3:4.
    */
-  /** A cover that does not record its size is the card's 16:9 shape. */
-  const COVER_RATIO = 16 / 9;
   const coverSrcset = $derived(
     coverImageUrl ? getThumbnailSrcset(coverImageUrl) : ''
   );
