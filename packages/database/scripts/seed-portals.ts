@@ -1389,6 +1389,10 @@ const R2_PERSIST_PATH = path.resolve(__dirname, '../../../.wrangler/state');
  * is file-style, COPY the object to a portal-owned variant path so the `/md.webp`
  * the resolver demands exists. Returns null if neither is possible, which is the
  * card's designed no-cover path.
+ *
+ * The copy is written as sm, md AND lg: the web offers all three in a srcset
+ * (Codex-kk9nv.1-.3), and a candidate that 404s renders as a broken image, not
+ * as a fallback to `src`.
  */
 async function deriveCoverKey(
   contentId: string,
@@ -1427,9 +1431,11 @@ async function deriveCoverKey(
     run(
       `npx wrangler r2 object get "${DEV_R2_BUCKET}/${sourceKey}" --file "${tmp}" --local --persist-to "${R2_PERSIST_PATH}"`
     );
-    run(
-      `npx wrangler r2 object put "${DEV_R2_BUCKET}/${coverKey}/md.webp" --file "${tmp}" --content-type image/jpeg --local --persist-to "${R2_PERSIST_PATH}"`
-    );
+    for (const size of ['sm', 'md', 'lg'] as const) {
+      run(
+        `npx wrangler r2 object put "${DEV_R2_BUCKET}/${coverKey}/${size}.webp" --file "${tmp}" --content-type image/jpeg --local --persist-to "${R2_PERSIST_PATH}"`
+      );
+    }
     fs.rmSync(tmp, { force: true });
     return coverKey;
   } catch (error) {
