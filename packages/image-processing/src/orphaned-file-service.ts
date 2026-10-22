@@ -11,9 +11,37 @@ import type {
   OrphanStatus,
 } from '@codex/database';
 
-import { and, eq, inArray, lt, schema, sql } from '@codex/database';
+import {
+  and,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  type SQL,
+  schema,
+  sql,
+} from '@codex/database';
 import { BaseService } from '@codex/service-errors';
 import { pageIdOfPageImageKey } from './page-image-keys';
+
+/** The course column that addresses each course still. */
+const COURSE_STILL_COLUMN = {
+  course_cover: schema.courses.coverImageKey,
+  course_hero: schema.courses.heroImageKey,
+  course_signature: schema.courses.signatureImageKey,
+} as const;
+
+/**
+ * `column` addresses `folder`: a key that is the folder itself, or the URL of
+ * a file in it. The trailing slash on both sides stops one nonce matching a
+ * longer one.
+ */
+function addressesFolder(
+  column: Parameters<typeof eq>[0],
+  folder: string
+): SQL {
+  return sql`strpos(${column} || '/', ${`${folder}/`}) > 0`;
+}
 
 export interface RecordOrphanInput {
   r2Key: string;
@@ -213,6 +241,94 @@ export class OrphanedFileService extends BaseService {
       .limit(1);
 
     return references.length > 0;
+  }
+
+  /**
+   * Whether a live row still addresses a sized still folder (Codex-kk9nv.13).
+   * The owning row is found by the orphan's own type and entity id, and only a
+   * live one counts: a deleted entity's stills go with it (Codex-kk9nv.14).
+   *
+   * A sized folder is never re-written, so this, not the re-upload check, is
+   * what decides it. It matters when a write committed but reported failure:
+   * the upload then discards a folder its row does point at, and if that
+   * delete also fails the sweep must not finish the job.
+   *
+   * @param folder - The folder the orphaned object sits in
+   * @returns `null` when the orphan cannot be placed (no entity id, or a type
+   *   with no still column), so the caller keeps its own check
+   */
+  async isStillFolderReferenced(
+    orphan: Pick<OrphanedFileRecord, 'imageType' | 'originalEntityId'>,
+    folder: string
+  ): Promise<boolean | null> {
+    const entityId = orphan.originalEntityId;
+    if (!entityId) return null;
+    const references = this.stillReferences(orphan.imageType, entityId, folder);
+    if (!references) return null;
+    return (await references).length > 0;
+  }
+
+  /** The live row of this type and id that addresses `folder`, at most one. */
+  private stillReferences(
+    imageType: OrphanedImageType,
+    entityId: string,
+    folder: string
+  ) {
+    const { users, content, categories, courses } = schema;
+    switch (imageType) {
+      case 'avatar':
+        return this.db
+          .select({ id: users.id })
+          .from(users)
+          .where(
+            and(
+              eq(users.id, entityId),
+              isNull(users.deletedAt),
+              addressesFolder(users.avatarUrl, folder)
+            )
+          )
+          .limit(1);
+      case 'content_thumbnail':
+        return this.db
+          .select({ id: content.id })
+          .from(content)
+          .where(
+            and(
+              eq(content.id, entityId),
+              isNull(content.deletedAt),
+              addressesFolder(content.thumbnailUrl, folder)
+            )
+          )
+          .limit(1);
+      case 'category_cover':
+        return this.db
+          .select({ id: categories.id })
+          .from(categories)
+          .where(
+            and(
+              eq(categories.id, entityId),
+              isNull(categories.deletedAt),
+              addressesFolder(categories.coverImageKey, folder)
+            )
+          )
+          .limit(1);
+      case 'course_cover':
+      case 'course_hero':
+      case 'course_signature':
+        return this.db
+          .select({ id: courses.id })
+          .from(courses)
+          .where(
+            and(
+              eq(courses.id, entityId),
+              isNull(courses.deletedAt),
+              addressesFolder(COURSE_STILL_COLUMN[imageType], folder)
+            )
+          )
+          .limit(1);
+      default:
+        return null;
+    }
   }
 
   /**

@@ -45,7 +45,33 @@ const keys = {
   orphan: `${prefix}/orphan.webp`,
   absent: `${prefix}/absent.webp`,
   fresh: `${prefix}/1600x900-0a1b2c3d/lg.webp`,
+  // Sized folders whose category row names them (Codex-kk9nv.13): live, and
+  // soft-deleted. The folder is the key without its file name.
+  referenced: `${prefix}/live/800x600-11111111/lg.webp`,
+  deletedRow: `${prefix}/gone/800x600-22222222/lg.webp`,
 };
+
+/** The folder an object key sits in, as a still column stores it. */
+const folderOf = (key: string) => key.slice(0, key.lastIndexOf('/'));
+
+function orphanRecord(
+  overrides: Partial<OrphanedFileRecord>
+): OrphanedFileRecord {
+  return {
+    id: 'orphan-1',
+    r2Key: keys.fresh,
+    imageType: 'content_thumbnail',
+    originalEntityId: crypto.randomUUID(),
+    originalEntityType: 'content',
+    orphanedAt: new Date(Date.now() - 60 * 1000),
+    cleanupAttempts: 0,
+    lastAttemptAt: null,
+    status: 'pending',
+    errorMessage: null,
+    fileSizeBytes: null,
+    ...overrides,
+  };
+}
 
 describe('wasRewrittenAfterOrphaning', () => {
   const orphanedAt = new Date('2026-09-23T12:00:00Z');
@@ -87,32 +113,52 @@ describe('isFreshStillObject (Codex-kk9nv.13)', () => {
     expect(isFreshStillObject(key)).toBe(false);
   });
 
-  it('decides a sized-folder orphan without asking R2 when it was written', async () => {
-    // `head` reports a write after the row, which the re-upload check reads
-    // as a live upload. A sized folder cannot have one.
+  /**
+   * `head` reports a write after the row, which the re-upload check reads as
+   * a live upload. A sized folder cannot have one, so its own row decides.
+   */
+  function stubs(referenced: boolean | null) {
     const head = vi.fn().mockResolvedValue({ uploaded: new Date() });
-    const record: OrphanedFileRecord = {
-      id: 'orphan-1',
-      r2Key: keys.fresh,
-      imageType: 'content_thumbnail',
-      originalEntityId: null,
-      originalEntityType: null,
-      orphanedAt: new Date(Date.now() - 60 * 1000),
-      cleanupAttempts: 0,
-      lastAttemptAt: null,
-      status: 'pending',
-      errorMessage: null,
-      fileSizeBytes: null,
+    const isStillFolderReferenced = vi.fn().mockResolvedValue(referenced);
+    return {
+      head,
+      isStillFolderReferenced,
+      r2: { head } as unknown as R2Service,
+      orphans: { isStillFolderReferenced } as unknown as OrphanedFileService,
     };
+  }
+
+  it('deletes a sized-folder orphan its row no longer addresses, without asking R2', async () => {
+    const s = stubs(false);
+    const record = orphanRecord({});
+
+    expect(await reasonToKeep(record, s.r2, s.orphans)).toBeNull();
+    expect(s.isStillFolderReferenced).toHaveBeenCalledWith(
+      record,
+      folderOf(keys.fresh)
+    );
+    expect(s.head).not.toHaveBeenCalled();
+  });
+
+  it('keeps one its row still addresses: a write that committed but reported failure', async () => {
+    const s = stubs(true);
+
+    expect(await reasonToKeep(orphanRecord({}), s.r2, s.orphans)).toBe(
+      'its row still addresses this folder'
+    );
+    expect(s.head).not.toHaveBeenCalled();
+  });
+
+  it('keeps the re-upload check for one the service cannot place', async () => {
+    const s = stubs(null);
 
     expect(
       await reasonToKeep(
-        record,
-        { head } as unknown as R2Service,
-        {} as OrphanedFileService
+        orphanRecord({ originalEntityId: null }),
+        s.r2,
+        s.orphans
       )
-    ).toBeNull();
-    expect(head).not.toHaveBeenCalled();
+    ).toBe('key re-written after it was orphaned; it holds a live upload');
   });
 });
 
@@ -123,9 +169,40 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
     orphan: '',
     absent: '',
     fresh: '',
+    referenced: '',
+    deletedRow: '',
   };
+  const userId = `test-kk9nv13-${crypto.randomUUID()}`;
+  const categoryIds: string[] = [];
 
   beforeAll(async () => {
+    // Two categories naming a sized folder: one live, one soft-deleted.
+    await db.insert(schema.users).values({
+      id: userId,
+      name: 'Sweep test',
+      email: `${userId}@test.invalid`,
+    });
+    const categories = await db
+      .insert(schema.categories)
+      .values([
+        {
+          creatorId: userId,
+          name: 'Live cover',
+          slug: `${userId}-live`,
+          coverImageKey: folderOf(keys.referenced),
+        },
+        {
+          creatorId: userId,
+          name: 'Deleted cover',
+          slug: `${userId}-gone`,
+          coverImageKey: folderOf(keys.deletedRow),
+          deletedAt: new Date(),
+        },
+      ])
+      .returning({ id: schema.categories.id });
+    categoryIds.push(...categories.map((row) => row.id));
+    const [liveCategory, deletedCategory] = categoryIds;
+
     // A genuine orphan: its bytes were written long before the key was
     // orphaned. R2's `uploaded` cannot be backdated, so the ROW is dated
     // after it instead — the same ordering.
@@ -150,8 +227,25 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
           orphanedAt: new Date(Date.now() - 60 * MINUTE),
         },
         {
+          // A content id no row has: nothing addresses this folder.
           r2Key: keys.fresh,
           imageType: 'content_thumbnail',
+          originalEntityId: crypto.randomUUID(),
+          originalEntityType: 'content',
+          orphanedAt: new Date(Date.now() - 60 * MINUTE),
+        },
+        {
+          r2Key: keys.referenced,
+          imageType: 'category_cover',
+          originalEntityId: liveCategory,
+          originalEntityType: 'category',
+          orphanedAt: new Date(Date.now() - 60 * MINUTE),
+        },
+        {
+          r2Key: keys.deletedRow,
+          imageType: 'category_cover',
+          originalEntityId: deletedCategory,
+          originalEntityType: 'category',
           orphanedAt: new Date(Date.now() - 60 * MINUTE),
         },
       ])
@@ -168,9 +262,11 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
 
     // The re-upload lands at the orphaned key AFTER the row was written.
     await testEnv.ASSETS_BUCKET.put(keys.reused, 'new live bytes');
-    // The same timing at a sized folder (Codex-kk9nv.13), so only the key's
-    // shape can tell the two apart.
+    // The same timing at sized folders (Codex-kk9nv.13), so only the key's
+    // shape and its row can tell them apart.
     await testEnv.ASSETS_BUCKET.put(keys.fresh, 'orphaned bytes');
+    await testEnv.ASSETS_BUCKET.put(keys.referenced, 'live cover bytes');
+    await testEnv.ASSETS_BUCKET.put(keys.deletedRow, 'deleted cover bytes');
   });
 
   afterAll(async () => {
@@ -178,6 +274,10 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
       .delete(schema.orphanedImageFiles)
       .where(inArray(schema.orphanedImageFiles.id, Object.values(ids)));
     await testEnv.ASSETS_BUCKET.delete(Object.values(keys));
+    await db
+      .delete(schema.categories)
+      .where(inArray(schema.categories.id, categoryIds));
+    await db.delete(schema.users).where(inArray(schema.users.id, [userId]));
     await closeDbPool();
   });
 
@@ -201,18 +301,23 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
     return row?.status;
   }
 
-  it('keeps a re-uploaded key, deletes a genuine orphan and a sized-folder one, and marks an absent one deleted', async () => {
+  /**
+   * The sweep takes the 50 OLDEST pending rows. A shared test database can
+   * hold older rows from other suites, so sweep until every one of ours has
+   * been reached rather than assuming the first batch contains them.
+   */
+  async function sweepUntilReached() {
     const ns = testEnv.ORPHAN_CLEANUP_DO;
     const stub = ns.get(ns.idFromName('singleton'));
-
-    // The sweep takes the 50 OLDEST pending rows. A shared test database can
-    // hold older rows from other suites, so trigger until all three of ours
-    // have been reached rather than assuming the first batch contains them.
     for (let run = 0; run < 5; run++) {
       await sweep(stub);
       const pending = await Promise.all(Object.values(ids).map(statusOf));
       if (!pending.includes('pending')) break;
     }
+  }
+
+  it('keeps a re-uploaded key and a referenced sized folder, deletes a genuine orphan and unreferenced sized folders, and marks an absent one deleted', async () => {
+    await sweepUntilReached();
 
     expect(await statusOf(ids.reused)).toBe('retained');
     expect(await testEnv.ASSETS_BUCKET.head(keys.reused)).not.toBeNull();
@@ -224,5 +329,15 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
 
     expect(await statusOf(ids.fresh)).toBe('deleted');
     expect(await testEnv.ASSETS_BUCKET.head(keys.fresh)).toBeNull();
+
+    // A sized folder is decided by its row (Codex-kk9nv.13): kept while a
+    // live category names it, deleted once the category is deleted. In this
+    // test, not a second one: R2 is isolated storage, so a delete is rolled
+    // back when the test that made it ends, while the database keeps its rows.
+    expect(await statusOf(ids.referenced)).toBe('retained');
+    expect(await testEnv.ASSETS_BUCKET.head(keys.referenced)).not.toBeNull();
+
+    expect(await statusOf(ids.deletedRow)).toBe('deleted');
+    expect(await testEnv.ASSETS_BUCKET.head(keys.deletedRow)).toBeNull();
   });
 });

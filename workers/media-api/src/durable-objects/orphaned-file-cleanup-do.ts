@@ -101,10 +101,12 @@ export function isFreshStillObject(r2Key: string): boolean {
  * the row that queued it cannot say: undo, duplicated pages and overlapping
  * saves all put a reference back after the save that dropped it.
  *
- * A sized still folder is never re-written either, so the check can only
- * misfire on it, and it is deleted without one (Codex-kk9nv.13). It misfired
- * on every upload whose row write and discard both failed: orphaned seconds
- * after its put, the object read as a re-upload and was kept for good.
+ * A sized still folder is never re-written either, so the re-upload check can
+ * only misfire on it (Codex-kk9nv.13). It misfired on every upload whose row
+ * write and discard both failed: orphaned seconds after its put, the object
+ * read as a re-upload and was kept for good. What decides it instead is
+ * whether its own row, live, still addresses the folder. An orphan the
+ * service cannot place keeps the re-upload check.
  */
 export async function reasonToKeep(
   orphan: OrphanedFileRecord,
@@ -118,7 +120,16 @@ export async function reasonToKeep(
       ? 'still referenced by a landing page'
       : null;
   }
-  if (isFreshStillObject(orphan.r2Key)) return null;
+  if (isFreshStillObject(orphan.r2Key)) {
+    const folder = orphan.r2Key.slice(0, orphan.r2Key.lastIndexOf('/'));
+    const referenced = await orphanedFileService.isStillFolderReferenced(
+      orphan,
+      folder
+    );
+    if (referenced !== null) {
+      return referenced ? 'its row still addresses this folder' : null;
+    }
+  }
 
   const current = await r2Service.head(orphan.r2Key);
   return current &&
