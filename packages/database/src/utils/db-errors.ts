@@ -148,6 +148,7 @@ export function getErrorDetail(error: unknown): string | null {
 
 const FAILED_QUERY = 'Failed query:';
 const NO_DRIVER_REASON = 'Query failed; the driver gave no reason';
+const QUERY_WITHHELD = 'Message withheld: it holds a failed query';
 const UNPRINTABLE = 'An error that could not be printed';
 /** drizzle wraps once; the bound only stops a chain that loops back on itself. */
 const MAX_CAUSE_HOPS = 8;
@@ -162,13 +163,20 @@ export interface FailedQueryError extends Error {
   cause: unknown;
 }
 
-/** Whether this is drizzle's wrapper for a failed query. */
+/**
+ * Whether this is drizzle's wrapper for a failed query. It runs on failure
+ * paths, so an error it cannot read is not one, rather than a new throw.
+ */
 export function isFailedQuery(error: unknown): error is FailedQueryError {
-  return (
-    error instanceof Error &&
-    typeof error.message === 'string' &&
-    error.message.startsWith(FAILED_QUERY)
-  );
+  try {
+    return (
+      error instanceof Error &&
+      typeof error.message === 'string' &&
+      error.message.startsWith(FAILED_QUERY)
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -181,9 +189,10 @@ export function isFailedQuery(error: unknown): error is FailedQueryError {
  * it has a cause.
  *
  * The driver's reason is not always an Error: neon's WebSocket shim rejects
- * with the socket's error Event. A query's text is never returned, even when
- * nothing else says what went wrong, and even inside another string: a
- * stringified error, its stack, or a wrapper's message.
+ * with the socket's error Event. A query's text is never returned: a failed
+ * query with no reason under it says so, and a query inside other text (a
+ * stringified error, a stack, a wrapper's message) is withheld, since nothing
+ * there says whether the driver gave a reason.
  *
  * It runs in catch blocks, so it never throws: an error it cannot read is
  * logged as that, rather than replacing the error being handled.
@@ -199,9 +208,27 @@ export function messageForLog(error: unknown): string {
       reported = reported.cause;
     }
     const message = describeForLog(reported);
-    return message.includes(FAILED_QUERY) ? NO_DRIVER_REASON : message;
+    if (!message.includes(FAILED_QUERY)) return message;
+    return message.startsWith(FAILED_QUERY) ? NO_DRIVER_REASON : QUERY_WITHHELD;
   } catch {
     return UNPRINTABLE;
+  }
+}
+
+/**
+ * An error's stack for a log line, or nothing when it holds a failed query: a
+ * stack opens with its error's message, so a failed query's, or a wrapper's
+ * that embeds one, carries the SQL and params. Like {@link messageForLog}, it
+ * never throws.
+ */
+export function stackForLog(error: unknown): string | undefined {
+  try {
+    if (!(error instanceof Error) || typeof error.stack !== 'string') {
+      return undefined;
+    }
+    return error.stack.includes(FAILED_QUERY) ? undefined : error.stack;
+  } catch {
+    return undefined;
   }
 }
 
@@ -213,7 +240,10 @@ function isReason(cause: unknown): boolean {
 /** An Error's message, else its name; a non-Error's own message, else itself. */
 function describeForLog(reported: unknown): string {
   if (reported instanceof Error) {
-    return reported.message || reported.name;
+    const { message, name } = reported;
+    return typeof message === 'string' && message !== ''
+      ? message
+      : String(name);
   }
   const { message } = (reported ?? {}) as { message?: unknown };
   if (typeof message === 'string' && message !== '') {

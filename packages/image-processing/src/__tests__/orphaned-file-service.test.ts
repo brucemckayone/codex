@@ -216,6 +216,12 @@ describe('OrphanedFileService', () => {
   });
 
   describe('recordFailedAttempt()', () => {
+    const warnOf = (target: OrphanedFileService) =>
+      vi.spyOn(
+        (target as unknown as { obs: { warn: (m: string) => void } }).obs,
+        'warn'
+      );
+
     it('should increment cleanupAttempts and record error', async () => {
       // First update returns record with attempts < MAX
       mockDb._mocks.updateReturning.mockResolvedValueOnce([
@@ -298,12 +304,6 @@ describe('OrphanedFileService', () => {
         Object.assign(new Error(QUERY_TEXT), {
           cause: new Error('connection terminated'),
         });
-      const warnOf = (target: OrphanedFileService) =>
-        vi.spyOn(
-          (target as unknown as { obs: { warn: (m: string) => void } }).obs,
-          'warn'
-        );
-
       it('on an attempt that will be retried', async () => {
         mockDb._mocks.updateReturning.mockResolvedValueOnce([
           { id: 'orphan-1', cleanupAttempts: 1 },
@@ -362,10 +362,7 @@ describe('OrphanedFileService', () => {
       mockDb._mocks.updateReturning.mockResolvedValueOnce([
         { id: 'orphan-1', cleanupAttempts: 1 },
       ]);
-      const warn = vi.spyOn(
-        (service as unknown as { obs: { warn: (m: string) => void } }).obs,
-        'warn'
-      );
+      const warn = warnOf(service);
 
       await service.recordFailedAttempt('orphan-1', new TypeError(''));
 

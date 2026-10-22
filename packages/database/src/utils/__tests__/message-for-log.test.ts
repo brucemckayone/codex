@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { messageForLog } from '../db-errors';
+import { isFailedQuery, messageForLog, stackForLog } from '../db-errors';
 
 /**
  * drizzle's failed-query shape, built by hand here; media-api's orphan sweep
@@ -57,14 +57,26 @@ describe('messageForLog', () => {
     expect(messageForLog(failedQuery(AVATAR_PARAM, ''))).toBe(noReason);
   });
 
-  it('never logs the query from inside another string: the error stringified, its stack, a wrapper', () => {
-    const noReason = 'Query failed; the driver gave no reason';
-    const failed = failedQuery(AVATAR_PARAM);
-    expect(messageForLog(String(failed))).toBe(noReason);
-    expect(messageForLog(failed.stack)).toBe(noReason);
+  it('withholds a query found inside other text: the error stringified, its stack, a wrapper', () => {
+    // Nothing in that text says whether the driver gave a reason, so it is
+    // withheld, not reported as having none.
+    const withheld = 'Message withheld: it holds a failed query';
+    const failed = failedQuery(
+      AVATAR_PARAM,
+      new Error('connection terminated')
+    );
+    expect(messageForLog(String(failed))).toBe(withheld);
+    expect(messageForLog(failed.stack)).toBe(withheld);
     expect(
       messageForLog(new Error(`Avatar not saved: ${failed.message}`))
-    ).toBe(noReason);
+    ).toBe(withheld);
+  });
+
+  it('reads only a string message: an array holding a query is not one', () => {
+    const odd = Object.assign(new Error(), {
+      message: [failedQuery(AVATAR_PARAM).message],
+    });
+    expect(messageForLog(odd)).toBe('Error');
   });
 
   it('ends on a chain that loops back on itself', () => {
@@ -103,5 +115,52 @@ describe('messageForLog', () => {
       )
     ).toBe('ASSETS_BUCKET not bound');
     expect(messageForLog('not an error')).toBe('not an error');
+  });
+});
+
+describe('isFailedQuery', () => {
+  it("is drizzle's wrapper, by its message's prefix", () => {
+    expect(isFailedQuery(failedQuery(AVATAR_PARAM))).toBe(true);
+    expect(isFailedQuery(new Error('connection terminated'))).toBe(false);
+    expect(isFailedQuery(failedQuery(AVATAR_PARAM).message)).toBe(false);
+  });
+
+  it('is false, never a throw, for an error it cannot read', () => {
+    const numbered = Object.assign(new Error(), { message: 42 });
+    const unreadable = Object.defineProperty(new Error(), 'message', {
+      get() {
+        throw new Error('no message');
+      },
+    });
+    expect(isFailedQuery(numbered)).toBe(false);
+    expect(isFailedQuery(unreadable)).toBe(false);
+  });
+});
+
+describe('stackForLog', () => {
+  it("is any other error's stack", () => {
+    const error = new Error('R2 unavailable');
+    expect(stackForLog(error)).toBe(error.stack);
+  });
+
+  it("is nothing for a stack that holds a failed query, its own or a wrapper's", () => {
+    const failed = failedQuery(
+      AVATAR_PARAM,
+      new Error('connection terminated')
+    );
+    expect(stackForLog(failed)).toBeUndefined();
+    expect(
+      stackForLog(new Error(`Avatar not saved: ${failed.message}`))
+    ).toBeUndefined();
+  });
+
+  it('is nothing for a non-Error, or one it cannot read', () => {
+    const unreadable = Object.defineProperty(new Error(), 'stack', {
+      get() {
+        throw new Error('no stack');
+      },
+    });
+    expect(stackForLog('Failed query: select 1')).toBeUndefined();
+    expect(stackForLog(unreadable)).toBeUndefined();
   });
 });

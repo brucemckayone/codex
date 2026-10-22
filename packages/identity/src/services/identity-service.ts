@@ -7,9 +7,9 @@ import type { VersionedCache } from '@codex/cache';
 import { CacheType } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
 import {
-  isFailedQuery,
   listedCreatorConditions,
   messageForLog,
+  stackForLog,
   toIso,
   whereNotDeleted,
 } from '@codex/database';
@@ -801,11 +801,7 @@ export class IdentityService extends BaseService {
           userId,
           avatarFolder: droppedAvatarUrl?.split('/').at(-2),
           error: messageForLog(error),
-          // A failed query's stack opens with its SQL and params.
-          stack:
-            error instanceof Error && !isFailedQuery(error)
-              ? error.stack
-              : undefined,
+          stack: stackForLog(error),
         });
       }
 

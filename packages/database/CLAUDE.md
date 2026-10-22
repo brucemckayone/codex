@@ -64,6 +64,7 @@ Import from `@codex/database` (re-exported from `utils`):
 | `getConstraintName(error)` | `(unknown) → string\|null` | Extracts constraint name from Postgres error |
 | `isFailedQuery(error)` | `(unknown) → error is FailedQueryError` | Whether it is drizzle's `Failed query: <sql>\nparams: <params>` wrapper, with the driver's reason on `cause` |
 | `messageForLog(error)` | `(unknown) → string` | An error's message for a log line: a failed query's SQL and params replaced by the driver's reason, never the query itself |
+| `stackForLog(error)` | `(unknown) → string\|undefined` | An error's stack for a log line, or nothing when it holds a failed query |
 
 Drizzle operators (`and`, `eq`, `or`, `desc`, `asc`, `count`, `sql`, etc.) are also re-exported directly from `@codex/database`.
 
@@ -120,5 +121,5 @@ import type { Database, DatabaseWs } from '@codex/database';
 
 - `packages/database/src/schema/` — all table definitions
 - `packages/database/src/utils/query-helpers.ts` — `scopedNotDeleted`, `withPagination`, etc.
-- `packages/database/src/utils/db-errors.ts` — `isUniqueViolation`, `isForeignKeyViolation`, `isFailedQuery`, `messageForLog`
+- `packages/database/src/utils/db-errors.ts` — `isUniqueViolation`, `isForeignKeyViolation`, `isFailedQuery`, `messageForLog`, `stackForLog`
 - `packages/database/src/client.ts` — client factories and exports

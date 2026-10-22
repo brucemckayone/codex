@@ -1200,7 +1200,38 @@ describe('IdentityService', () => {
         // `avatarUrl` is already null: the folder is named here or nowhere.
         expect(error).toHaveBeenCalledWith(
           'Avatar files not deleted after account deletion',
-          expect.objectContaining({ userId, avatarFolder: '300x300-ffffffff' })
+          expect.objectContaining({
+            userId,
+            avatarFolder: '300x300-ffffffff',
+            error: 'ASSETS_BUCKET not configured',
+            stack: expect.stringContaining('ASSETS_BUCKET not configured'),
+          })
+        );
+      });
+
+      it("logs a failed query by its driver's reason, with no stack", async () => {
+        // A failed query's message and stack both open with its SQL and
+        // params, which hold this user's avatar folder (Codex-kk9nv.13).
+        mockReturning.mockResolvedValue([{ id: userId }]);
+        mockDeleteDroppedAvatar.mockRejectedValueOnce(
+          Object.assign(
+            new Error(`Failed query: insert …\nparams: avatars/${userId}/`),
+            { cause: new Error('neon unavailable') }
+          )
+        );
+        const error = vi.spyOn(
+          (service as unknown as { obs: { error: (m: string) => void } }).obs,
+          'error'
+        );
+
+        await service.deleteAccount(userId);
+
+        expect(error).toHaveBeenCalledWith(
+          'Avatar files not deleted after account deletion',
+          expect.objectContaining({
+            error: 'neon unavailable',
+            stack: undefined,
+          })
         );
       });
     });
