@@ -62,6 +62,7 @@
   import type { Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
   import {
+    coverCropSizes,
     getThumbnailDimensions,
     getThumbnailSrcset,
     getThumbnailUrl,
@@ -94,6 +95,12 @@
   const srcset = $derived(
     src && sizes && getThumbnailDimensions(src) ? getThumbnailSrcset(src) : ''
   );
+  /** The frame's width / height, for a picture cropped into it by `cover`. */
+  const FRAME_RATIO = { square: 1, portrait: 4 / 5 } as const;
+  /** A landscape avatar is drawn wider than its frame, so say so. */
+  const coverSizes = $derived(
+    srcset && sizes ? coverCropSizes(sizes, FRAME_RATIO[aspect], src) : undefined
+  );
 </script>
 
 <div class="portrait {className ?? ''}" data-aspect={aspect} {...restProps}>
@@ -102,7 +109,7 @@
       class="portrait__img"
       src={url}
       srcset={srcset || undefined}
-      sizes={srcset ? sizes : undefined}
+      sizes={coverSizes}
       alt=""
       loading={eager ? 'eager' : 'lazy'}
       decoding="async"

@@ -47,12 +47,13 @@
   const hasCustomThumbnail = $derived(!!thumbnailValue);
 
   /**
-   * The 16:9 preview spans the form's body column: the page less the shell's
-   * and the section's padding below 64rem, else less the 4rem studio rail,
-   * the 16rem form rail and the paddings, inside the 120rem studio column.
+   * The 16:9 preview fills the form card in the form's body column: the page
+   * less the shell's, the section's and the card's padding; from 64rem also
+   * less the 4rem studio rail and the form's rail and gap (14rem + 2rem, then
+   * 16rem + 2.5rem from 80rem), inside the 120rem studio column.
    */
   const PREVIEW_SIZES =
-    '(min-width: 64rem) calc(min(100vw, 124rem) - 23rem), calc(100vw - 4rem)';
+    '(min-width: 80rem) calc(min(100vw, 124rem) - 32.5rem), (min-width: 64rem) calc(100vw - 30rem), (min-width: 48rem) calc(100vw - 9rem), calc(100vw - 8rem)';
   const canUploadFile = $derived(!!contentId);
 
   const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];

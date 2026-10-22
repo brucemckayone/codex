@@ -276,6 +276,24 @@
   const audioPosterUrl = $derived(
     thumbnailUrl ? getThumbnailUrl(thumbnailUrl, 'sm') : undefined
   );
+  /**
+   * The file the head preloads (LCP): the one this page will certainly draw,
+   * or nothing. An article draws no thumbnail, and an audio page whose access
+   * is still loading may become either the player (sm) or the card (srcset).
+   */
+  const heroPreload = $derived.by(():
+    | { href: string | undefined; srcset?: string; sizes?: string }
+    | null => {
+    if (!thumbnailUrl) return null;
+    if (isVideo) return { href: largestThumbnailUrl };
+    if (content.contentType !== 'audio' || accessLoading) return null;
+    if (hasAccess && streamingUrl) return { href: audioPosterUrl };
+    return {
+      href: thumbnailUrl,
+      srcset: thumbnailSrcset || undefined,
+      sizes: thumbnailSrcset ? PREVIEW_SIZES : undefined,
+    };
+  });
   const duration = $derived(content.mediaItem?.durationSeconds ?? 0);
   const priceCents = $derived(content.priceCents ?? null);
   const isPaid = $derived(!!priceCents && priceCents > 0);
@@ -703,15 +721,16 @@
       <meta property="og:image:width" content={String(shareImage.width)} />
       <meta property="og:image:height" content={String(shareImage.height)} />
     {/if}
-    <!-- LCP: thumbnail is the hero on content pages (video poster,
-         audio cover, or article header image). Preload prioritises
-         it in the critical chain so the above-fold paint is faster. -->
+  {/if}
+  {#if heroPreload}
+    <!-- LCP: the video poster or the audio picture, preloaded so the
+         above-fold paint is faster (heroPreload says which file). -->
     <link
       rel="preload"
       as="image"
-      href={isVideo ? largestThumbnailUrl : thumbnailUrl}
-      imagesrcset={!isVideo && thumbnailSrcset ? thumbnailSrcset : undefined}
-      imagesizes={!isVideo && thumbnailSrcset ? PREVIEW_SIZES : undefined}
+      href={heroPreload.href}
+      imagesrcset={heroPreload.srcset}
+      imagesizes={heroPreload.sizes}
       fetchpriority="high"
     />
   {/if}

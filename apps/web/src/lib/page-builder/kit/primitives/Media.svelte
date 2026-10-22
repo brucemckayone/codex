@@ -101,9 +101,10 @@
     return url && url !== failed ? url : null;
   });
   // A `<video poster>` takes one URL, and a clip only plays in a hero frame,
-  // so its poster is the largest file the still has: xl when the address
-  // records the picture's size, else lg (Codex-kk9nv.3). The reduced-motion
-  // still keeps its srcset.
+  // so its poster is the largest file the still has: xl when the folder
+  // records the picture's size (a course or media still), else lg
+  // (Codex-kk9nv.3). A page image's folder never records it, so the hero's
+  // own picture stays lg here. The reduced-motion still keeps its srcset.
   const clipPoster = $derived(still ? getThumbnailUrl(still, 'xl') : null);
   const empty = $derived(!clip && !still);
   const marked = $derived(empty && Boolean(mark));

@@ -87,6 +87,15 @@ describe('CreatorPortrait', () => {
     expect(img.getAttribute('sizes')).toBe('13rem');
   });
 
+  test('says how much wider than the frame a landscape avatar is drawn', () => {
+    // Avatars are not cropped on upload: a 16:9 photo in the square frame is
+    // drawn 1.78x the frame's width by `object-fit: cover`.
+    const folder = 'http://localhost:4100/avatars/abc123/1600x900-0a1b2c3d';
+    render({ src: `${folder}/lg.webp`, name: 'A', sizes: '13rem' });
+    const img = document.querySelector('img') as HTMLImageElement;
+    expect(img.getAttribute('sizes')).toBe('calc(13rem * 1.78)');
+  });
+
   test('treats the photo as decorative, leaving the name to the heading', () => {
     render({ src: AVATAR, name: 'Mairead Nic an Bhaird' });
     const img = document.querySelector('img') as HTMLImageElement;
