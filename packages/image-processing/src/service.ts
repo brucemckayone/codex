@@ -139,16 +139,16 @@ type CallerOwnedStill =
       entityType: 'course';
     };
 
-/**
- * The base key every folder of a caller-owned still lives under. An upload
- * from before Codex-kk9nv.5 has its files directly in it.
- */
 /** The log/orphan context of a dropped avatar, by why it was dropped. */
 const AVATAR_DROP_CONTEXT = {
   'avatar-removed': 'user-avatar-delete',
   'account-deleted': 'user-avatar-account-deleted',
 } as const;
 
+/**
+ * The base key every folder of a caller-owned still lives under. An upload
+ * from before Codex-kk9nv.5 has its files directly in it.
+ */
 const CALLER_OWNED_STILL_BASE: Record<
   CallerOwnedStill['imageType'],
   (entityId: string) => string
@@ -856,10 +856,16 @@ export class ImageProcessingService extends BaseService {
     const base = getUserAvatarBaseKey(userId);
     const folder = ownedStillFolder(droppedUrl, base, this.r2PublicUrlBase);
     if (!folder) {
-      if (droppedUrl?.includes(`/${base}/`)) {
-        this.obs.warn('Avatar files not deleted: not under the CDN base', {
+      const at = droppedUrl?.indexOf(`/${base}/`) ?? -1;
+      if (droppedUrl && at >= 0) {
+        // A deleted account's photo left public is worth an alert; name the
+        // host and folder so it can be purged by hand.
+        const level = cause === 'account-deleted' ? 'error' : 'warn';
+        this.obs[level]('Avatar files not deleted: not under the CDN base', {
           userId,
           cause,
+          host: /^[a-z]+:\/\/([^/]+)/i.exec(droppedUrl)?.[1],
+          folder: droppedUrl.slice(at + 1, droppedUrl.lastIndexOf('/')),
         });
       }
       return;

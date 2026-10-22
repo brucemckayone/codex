@@ -807,6 +807,7 @@ export class IdentityService extends BaseService {
         this.obs.error('Avatar files not deleted after account deletion', {
           userId,
           error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
         });
       }
 

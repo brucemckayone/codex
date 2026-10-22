@@ -1082,15 +1082,18 @@ describe('IdentityService', () => {
       // carries the user's id. They go last: after the commit, and after the
       // token read the route needs to sign every device out.
       const avatarUrl = `https://cdn-test.revelations.studio/avatars/${userId}/300x300-ffffffff/md.webp`;
+      const started = vi.fn();
       const committed = vi.fn();
 
       beforeEach(() => {
+        started.mockClear();
         committed.mockClear();
         mockUserFor.mockResolvedValue([{ avatarUrl }]);
         // A commit point to order against: the mock transaction otherwise
         // just runs its callback.
         (mockDb.transaction as ReturnType<typeof vi.fn>).mockImplementation(
           async (fn: (tx: unknown) => unknown) => {
+            started();
             const result = await fn(mockDb);
             committed();
             return result;
@@ -1110,6 +1113,15 @@ describe('IdentityService', () => {
         await service.deleteAccount(userId);
 
         expect(mockUserFor).toHaveBeenCalledWith('update');
+        // Inside the scrub's transaction: an autocommit read would drop the
+        // lock at once.
+        const [lockedAt] = mockUserFor.mock.invocationCallOrder;
+        expect(lockedAt).toBeGreaterThan(
+          started.mock.invocationCallOrder[0] ?? Infinity
+        );
+        expect(lockedAt).toBeLessThan(
+          committed.mock.invocationCallOrder[0] ?? 0
+        );
       });
 
       it('deletes the dropped folder after the commit and after the token read', async () => {

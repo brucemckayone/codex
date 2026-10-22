@@ -1,5 +1,5 @@
 import type { R2Service } from '@codex/cloudflare-clients';
-import type { Database } from '@codex/database';
+import { type Database, schema } from '@codex/database';
 import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrphanedFileService } from '../orphaned-file-service';
@@ -80,6 +80,19 @@ function createTestImageFile(mimeType: string, filename: string): File {
     ...new Array(100).fill(0), // Padding to make file realistic
   ]).buffer;
   return new File([new Uint8Array(jpegBuffer)], filename, { type: mimeType });
+}
+
+/**
+ * Whether a drizzle SQL tree names `column` anywhere: how a test proves a
+ * WHERE carries a predicate without a dialect to render it.
+ */
+function sqlReferences(node: unknown, column: unknown): boolean {
+  if (node === column) return true;
+  const chunks = (node as { queryChunks?: unknown[] } | null)?.queryChunks;
+  return (
+    Array.isArray(chunks) &&
+    chunks.some((chunk) => sqlReferences(chunk, column))
+  );
 }
 
 /**
@@ -665,9 +678,28 @@ describe('ImageProcessingService', () => {
       });
     });
 
-    it('never writes onto a deleted account, and discards the new folder (Codex-kk9nv.14)', async () => {
-      // An upload still in flight when the account is deleted: the write's
-      // `deletedAt IS NULL` matches no row, so the photo cannot come back.
+    it('writes only onto a live account: the WHERE excludes a deleted user (Codex-kk9nv.14)', async () => {
+      // An upload still in flight when the account is deleted must not put
+      // the photo back on the scrubbed row.
+      const file = createTestImageFile('image/jpeg', 'avatar.jpg');
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants({}, 640, 640)
+      );
+      const where = vi.fn((_condition: unknown) =>
+        whereResult([{ id: 'user-1' }])
+      );
+      vi.mocked(testMockDb.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValue({ where }),
+      } as never);
+
+      await service.processUserAvatar('user-1', file);
+
+      expect(
+        sqlReferences(where.mock.calls[0]?.[0], schema.users.deletedAt)
+      ).toBe(true);
+    });
+
+    it('discards the new folder when no live row matched', async () => {
       const file = createTestImageFile('image/jpeg', 'avatar.jpg');
       vi.mocked(processor.processStillVariants).mockReturnValueOnce(
         pageVariants({}, 640, 640)

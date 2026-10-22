@@ -333,14 +333,14 @@ export class CategoriesService extends BaseService {
    * listings via the `deletedAt IS NULL` filter, and its slug frees up for
    * reuse.
    *
-   * @param id - Category ID
-   * @param space - Resolved space (org → any org actor; personal → creator)
    * The cover key comes from the UPDATE's own RETURNING, not from a read
    * before it: a cover upload committing in between would otherwise report
    * the folder it replaced and leave the new one in place (Codex-kk9nv.14).
    * The soft delete never writes `coverImageKey`, so RETURNING gives the key
    * the deleted row held.
    *
+   * @param id - Category ID
+   * @param space - Resolved space (org → any org actor; personal → creator)
    * @returns The cover key the category held, so the caller can delete its
    *   files (Codex-kk9nv.14)
    * @throws {CategoryNotFoundError} If absent / out of space
