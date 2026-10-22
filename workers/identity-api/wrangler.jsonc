@@ -265,4 +265,11 @@
   //
   // Required Variables:
   //   - DATABASE_URL: PostgreSQL connection string
+  //
+  // Cache Purge Secrets (set via wrangler CLI), so a deleted account's
+  // avatars leave the CDN edge (Codex-kk9nv.15). Unset, account deletion
+  // logs that it skipped the purge. The token needs only the zone's
+  // Cache Purge permission:
+  //   wrangler secret put CF_ZONE_ID --env production
+  //   wrangler secret put CF_API_TOKEN --env production
 }

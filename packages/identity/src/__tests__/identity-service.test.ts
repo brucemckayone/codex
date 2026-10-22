@@ -63,6 +63,8 @@ vi.mock('@codex/image-processing', () => ({
   ImageProcessingService: class {
     processUserAvatar = mockProcessUserAvatar;
     deleteDroppedAvatar = mockDeleteDroppedAvatar;
+    avatarCachePrefix = (userId: string) =>
+      `cdn-test.revelations.studio/avatars/${userId}`;
   },
   // Preserve other exports
   extractMimeType: (mimeType: string) => mimeType,
@@ -1308,6 +1310,80 @@ describe('IdentityService', () => {
             stack: undefined,
           })
         );
+      });
+    });
+
+    // Codex-kk9nv.15 (owner: "Purge on account deletion"). Stills are stored
+    // immutable for a year, and an R2 delete does not evict the edge's copies.
+    describe("the avatars' edge cache (Codex-kk9nv.15)", () => {
+      const purgePrefixes = vi.fn();
+      const logsOf = (target: IdentityService) =>
+        (
+          target as unknown as {
+            obs: Record<'warn' | 'error', (...args: unknown[]) => void>;
+          }
+        ).obs;
+      const withPurger = () =>
+        new IdentityService({
+          db: mockDb,
+          environment: 'test',
+          r2Service: mockR2Service,
+          r2PublicUrlBase: 'https://cdn-test.revelations.studio',
+          cdnPurger: { purgePrefixes },
+        });
+
+      beforeEach(() => {
+        purgePrefixes.mockReset().mockResolvedValue({ ok: true });
+        mockReturning.mockResolvedValue([{ id: userId }]);
+      });
+
+      it("purges every avatar under the user's prefix after the files are deleted, before the token read", async () => {
+        await withPurger().deleteAccount(userId);
+
+        expect(purgePrefixes).toHaveBeenCalledWith([
+          `cdn-test.revelations.studio/avatars/${userId}`,
+        ]);
+        const [purgedAt] = purgePrefixes.mock.invocationCallOrder;
+        const [deletedAt] = mockDeleteDroppedAvatar.mock.invocationCallOrder;
+        const [tokensReadAt] = mockSessionsWhere.mock.invocationCallOrder;
+        expect(purgedAt).toBeGreaterThan(deletedAt ?? Infinity);
+        expect(tokensReadAt).toBeGreaterThan(purgedAt ?? Infinity);
+      });
+
+      it('still returns the session tokens when the purge fails, and logs why', async () => {
+        purgePrefixes.mockResolvedValueOnce({
+          ok: false,
+          reason: 'HTTP 429: rate limited',
+        });
+        const target = withPurger();
+        const error = vi.spyOn(logsOf(target), 'error');
+
+        await expect(target.deleteAccount(userId)).resolves.toEqual([
+          'tok-current',
+        ]);
+        expect(error).toHaveBeenCalledWith(
+          'Avatar edge cache not purged after account deletion',
+          { userId, error: 'HTTP 429: rate limited' }
+        );
+      });
+
+      it('skips the purge with a warning when none is configured', async () => {
+        const warn = vi.spyOn(logsOf(service), 'warn');
+
+        await expect(service.deleteAccount(userId)).resolves.toEqual([
+          'tok-current',
+        ]);
+        expect(warn).toHaveBeenCalledWith(
+          'Avatar edge cache not purged after account deletion: no CDN purge configured',
+          { userId }
+        );
+      });
+
+      it('does not purge when the deletion is refused', async () => {
+        mockOwnedOrgsWhere.mockResolvedValue([{ name: 'Acme' }]);
+
+        await expect(withPurger().deleteAccount(userId)).rejects.toThrow();
+        expect(purgePrefixes).not.toHaveBeenCalled();
       });
     });
 

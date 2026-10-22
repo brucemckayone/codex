@@ -5,7 +5,7 @@ import {
 } from '@codex/agreements';
 import type { VersionedCache } from '@codex/cache';
 import { CacheType, invalidateOrgPublicCaches } from '@codex/cache';
-import type { R2Service } from '@codex/cloudflare-clients';
+import type { CdnCachePurger, R2Service } from '@codex/cloudflare-clients';
 import {
   type DatabaseClient,
   listedCreatorConditions,
@@ -55,6 +55,11 @@ export interface IdentityServiceConfig extends ServiceConfig {
    * OrphanedFileCleanupDO sweep instead of only logged (Codex-r85jo.3).
    */
   orphanedFileService?: OrphanedFileService;
+  /**
+   * Purges a deleted account's avatars from Cloudflare's edge cache
+   * (Codex-kk9nv.15). Absent, deletion logs that it skipped the purge.
+   */
+  cdnPurger?: Pick<CdnCachePurger, 'purgePrefixes'>;
 }
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
@@ -64,6 +69,7 @@ export class IdentityService extends BaseService {
   private r2PublicUrlBase: string;
   private cache?: VersionedCache;
   private orphanedFileService?: OrphanedFileService;
+  private cdnPurger?: Pick<CdnCachePurger, 'purgePrefixes'>;
 
   constructor(config: IdentityServiceConfig) {
     super(config);
@@ -71,6 +77,7 @@ export class IdentityService extends BaseService {
     this.r2PublicUrlBase = config.r2PublicUrlBase;
     this.cache = config.cache;
     this.orphanedFileService = config.orphanedFileService;
+    this.cdnPurger = config.cdnPurger;
   }
 
   /**
@@ -170,6 +177,32 @@ export class IdentityService extends BaseService {
         cache.invalidate(CacheType.COLLECTION_ORG_CREATORS(slug))
       )
     );
+  }
+
+  /**
+   * Purge Cloudflare's edge copies of every avatar this user ever had
+   * (Codex-kk9nv.15; owner: "Purge on account deletion"). Stills are stored
+   * immutable for a year and deleting the R2 objects does not evict them, so
+   * a deleted account's photo kept loading for anyone holding the URL. One
+   * prefix covers the current folder and every one it replaced. Browser
+   * caches cannot be purged.
+   *
+   * Best-effort and never throws: the deletion has committed.
+   */
+  private async purgeAvatarEdgeCache(userId: string): Promise<void> {
+    const skipped = 'Avatar edge cache not purged after account deletion';
+    if (!this.cdnPurger) {
+      this.obs.warn(`${skipped}: no CDN purge configured`, { userId });
+      return;
+    }
+    try {
+      const result = await this.cdnPurger.purgePrefixes([
+        this.imageService().avatarCachePrefix(userId),
+      ]);
+      if (!result.ok) this.obs.error(skipped, { userId, error: result.reason });
+    } catch (error) {
+      this.obs.error(skipped, { userId, error: messageForLog(error) });
+    }
   }
 
   /**
@@ -860,6 +893,9 @@ export class IdentityService extends BaseService {
           stack: stackForLog(error),
         });
       }
+
+      // After the files are gone, or a request in between caches them again.
+      await this.purgeAvatarEdgeCache(userId);
 
       // Every session this user holds, so the caller can clear the cached
       // copies. Read AFTER the tombstone lands: a session created between the

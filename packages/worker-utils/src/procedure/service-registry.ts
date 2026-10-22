@@ -25,7 +25,11 @@ import {
   VersionedCache,
   type VersionedCacheConfig,
 } from '@codex/cache';
-import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
+import {
+  CdnCachePurger,
+  R2Service,
+  type R2SigningConfig,
+} from '@codex/cloudflare-clients';
 import type { CachePresetName } from '@codex/constants';
 // Service imports
 import {
@@ -1420,6 +1424,14 @@ export async function createServiceRegistry(
           r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
           cache,
           orphanedFileService: getOrphanedFileService(),
+          // A deleted account's avatars leave the CDN edge (Codex-kk9nv.15).
+          cdnPurger:
+            env.CF_ZONE_ID && env.CF_API_TOKEN
+              ? new CdnCachePurger({
+                  zoneId: env.CF_ZONE_ID,
+                  apiToken: env.CF_API_TOKEN,
+                })
+              : undefined,
         });
       }
       return _identity;

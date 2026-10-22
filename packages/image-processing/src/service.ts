@@ -905,6 +905,16 @@ export class ImageProcessingService extends BaseService {
   }
 
   /**
+   * The CDN cache prefix every avatar of this user is served under, current
+   * and replaced: `{host}{path}/avatars/{userId}` with no scheme, the form a
+   * prefix purge takes (Codex-kk9nv.15).
+   */
+  avatarCachePrefix(userId: string): string {
+    const { host, pathname } = new URL(this.r2PublicUrlBase);
+    return `${host}${pathname.replace(/\/+$/, '')}/${getUserAvatarBaseKey(userId)}`;
+  }
+
+  /**
    * Delete an avatar's files after the row dropped `avatarUrl`: a removed
    * avatar, or a deleted account's scrub (Codex-kk9nv.14). A later upload goes
    * to a new folder, so nothing would ever overwrite these.

@@ -983,6 +983,28 @@ describe('ImageProcessingService', () => {
     });
   });
 
+  // Codex-kk9nv.15: the prefix a purge of a deleted account's avatars takes.
+  describe('avatarCachePrefix', () => {
+    it('is the CDN host and the avatar base, with no scheme', () => {
+      expect(service.avatarCachePrefix('user-1')).toBe(
+        'test.r2.dev/avatars/user-1'
+      );
+    });
+
+    it('keeps a path the CDN base carries', () => {
+      const underPath = new ImageProcessingService({
+        db: testMockDb,
+        environment: 'test',
+        r2Service: testMockR2Service,
+        r2PublicUrlBase: 'https://cdn.test/assets/',
+      });
+
+      expect(underPath.avatarCachePrefix('user-1')).toBe(
+        'cdn.test/assets/avatars/user-1'
+      );
+    });
+  });
+
   describe('deleteDroppedAvatar (Codex-kk9nv.14)', () => {
     const logsOf = (target: ImageProcessingService) =>
       (
