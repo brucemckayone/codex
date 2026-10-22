@@ -76,6 +76,7 @@ import {
   resolveOrganisationPayee,
   retryFailedClawbacks,
   reverseCharge,
+  reverseEarlierRefunds,
   settlePayoutPaid,
   settleTransfer,
 } from '@codex/payments';
@@ -2097,9 +2098,11 @@ export class SubscriptionService extends BaseService {
 
     // Before paying out, the row as it stands now, read under the lock: a
     // revival another event is retiring at once may have ended it. Ended, or
-    // not live at Stripe, the charge is checked too: a refund that lands
-    // before the payouts exist reverses nothing, so paying out after it
-    // would pay for money handed back.
+    // not live at Stripe, the charge is checked too, and one refunded in full
+    // pays no one rather than paying out only to be reversed. Stripe is asked
+    // because the refund may be that revival's, made a moment ago and not
+    // recorded yet. Every other refund before the payout is clawed back once
+    // the slices exist (reverseEarlierRefunds, below).
     const current = (await this.rereadUnderLock(sub)) ?? sub;
     const ended = current.endedAt != null;
     if (
@@ -2132,6 +2135,13 @@ export class SubscriptionService extends BaseService {
       split.organizationFeeCents,
       split.creatorPayoutCents,
       invoiceCreatedAt
+    );
+    // A refund handled before this invoice found no slices to claw back
+    // (Codex-2hxff.67): it is clawed back now, as if it had come after. A
+    // redelivery runs it too, so a delivery that died in between catches up.
+    await reverseEarlierRefunds(
+      { ...this.ledger(), obs: this.obs },
+      { chargeId: sourceTransaction, source: { sourceType: 'subscription' } }
     );
 
     this.obs.info('Invoice payment processed', {

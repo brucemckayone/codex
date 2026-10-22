@@ -360,7 +360,13 @@ Stripe does not return its processing fee on a refund; the platform bears it.
 
 A refund that arrives before the purchase it belongs to is recorded (courses as
 well as content) and applied when the purchase completes — **gap**:
-`Codex-2hxff.8` (course refunds are dropped).
+`Codex-2hxff.8` (course refunds are dropped), and `Codex-2hxff.68` (after a
+partial refund, the completed purchase never records the creator's and the
+organisation's remaining share).
+
+A refund processed after the purchase exists but before its payouts are
+recorded is applied the moment they are, through the same reversal as a later
+refund, so the net is the same whichever comes first (`Codex-2hxff.67`).
 
 **The refund email.** Each refund is emailed to the buyer once, with that
 refund's amount (owner decision 2026-10-19, "One per refund"). The refund's row

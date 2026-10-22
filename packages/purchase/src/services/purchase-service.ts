@@ -62,6 +62,7 @@ import {
   repayDispute,
   resolveOrganisationPayee,
   reverseCharge,
+  reverseEarlierRefunds,
 } from '@codex/payments';
 import {
   BaseService,
@@ -1807,6 +1808,10 @@ export class PurchaseService extends BaseService {
    * webhook answers by its cause, and a redelivery's replay re-records the
    * missing slices. Acknowledged (a permanent cause), the slices stay
    * missing until someone replays the event, so the errorId is the handle.
+   *
+   * Then any refund of the charge is clawed back from them (Codex-2hxff.67):
+   * one handled between the purchase's commit and this write found no slices
+   * to claw back.
    */
   private async recordPayoutsAfterCommit(
     purchase: Purchase,
@@ -1827,6 +1832,13 @@ export class PurchaseService extends BaseService {
       );
       throw error;
     }
+    await reverseEarlierRefunds(
+      { ...this.ledger(), obs: this.obs },
+      {
+        chargeId: stripeChargeId,
+        source: { sourceType: 'purchase', purchaseId: purchase.id },
+      }
+    );
   }
 
   private ledger(): LedgerDeps {

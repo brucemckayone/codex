@@ -31,6 +31,7 @@ import {
   payoutReversals,
   payouts,
   refundReviews,
+  refunds,
 } from '@codex/database/schema';
 import {
   InternalServiceError,
@@ -43,6 +44,7 @@ import {
   inArray,
   isNull,
   lt,
+  ne,
   or,
   type SQL,
   sql,
@@ -382,6 +384,51 @@ export async function reverseCharge(
       }
     );
   }
+}
+
+/**
+ * Claw back the refunds a charge already had when the source's slices of it
+ * were recorded (Codex-2hxff.67). The flow that records them calls this right
+ * after, so a payment's payouts reflect every refund of it, whatever order
+ * Stripe's events arrive in.
+ *
+ * Stripe does not order them: `charge.refunded` can be handled before the
+ * event that records the slices (`invoice.payment_succeeded`, or a purchase's
+ * completion), and its clawback then finds no slices and does nothing. This
+ * runs that same clawback once they exist, so they end as they would had the
+ * refund come second: a full refund nets the payees nothing, a partial one the
+ * reduced amounts. Each step is recorded per slice and cause, so a refund both
+ * runs handle is clawed back once.
+ *
+ * One of the two always sees the other: the refund handlers record the refund
+ * (`refunds`) before they read the slices, and this reads `refunds` after the
+ * slices are committed. A charge with no refund recorded asks Stripe nothing.
+ */
+export async function reverseEarlierRefunds(
+  deps: ClawbackDeps,
+  input: { chargeId: string; source: ClawbackSource }
+): Promise<void> {
+  const [recorded] = await deps.db
+    .select({ id: refunds.id })
+    .from(refunds)
+    .where(
+      and(
+        eq(refunds.stripeChargeId, input.chargeId),
+        // Final, and never clawed back.
+        ne(refunds.status, 'canceled')
+      )
+    )
+    .limit(1);
+  if (!recorded) return;
+
+  // As the refund webhook calls it: the charge's own amount is the
+  // denominator (D1), and its refunds are read from Stripe.
+  const charge = await deps.stripe.charges.retrieve(input.chargeId);
+  await reverseCharge(deps, {
+    charge: { id: charge.id, amountCents: charge.amount },
+    source: input.source,
+    refunds: () => listClawableRefunds(deps.stripe, charge.id),
+  });
 }
 
 async function clawBackShare(

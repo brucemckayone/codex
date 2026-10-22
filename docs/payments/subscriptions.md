@@ -272,6 +272,10 @@ Owner decision P-4, "Cancel + end access".
   exactly as for one-off purchases ([purchases.md](purchases.md#refunds)). A
   shortfall on the payee's balance goes to `refund_reviews`, which holds
   subscription debts as well as purchase ones (one row per reversal).
+- The order of Stripe's events does not change that. A refund handled before
+  its invoice's payout reverses nothing then, and is clawed back as soon as
+  the invoice's slices are recorded, so the payees net the same either way
+  (`Codex-2hxff.67`).
 
 The current period's payment is the newest **paid** invoice Stripe raised to
 buy a period (`billing_reason` `subscription_create` or `subscription_cycle`),

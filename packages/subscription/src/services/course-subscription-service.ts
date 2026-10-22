@@ -65,6 +65,7 @@ import {
   recordSlice,
   resolveInvoiceCharge,
   resolveOrganisationPayee,
+  reverseEarlierRefunds,
 } from '@codex/payments';
 import {
   applyMinPlatformFeeFloor,
@@ -1648,10 +1649,12 @@ export class CourseSubscriptionService extends BaseService {
   }
 
   /**
-   * Whether a charge has been refunded in full. A slice written after the
-   * refund's clawback ran is never reversed (the clawback reverses only the
-   * slices a charge has when its refund arrives), so a late invoice on an
-   * ended subscription must not pay out a refunded charge.
+   * Whether a charge has been refunded in full, so a late invoice on an ended
+   * subscription pays no one rather than paying out only to be reversed.
+   * Slices recorded after a refund are clawed back anyway
+   * (`reverseEarlierRefunds`), but that reads the refunds we have recorded,
+   * and a refund just made (a revival's) may not be recorded yet: Stripe is
+   * asked here.
    */
   private async chargeRefundedInFull(chargeId: string): Promise<boolean> {
     const charge = await this.stripe.charges.retrieve(chargeId);
@@ -1841,6 +1844,17 @@ export class CourseSubscriptionService extends BaseService {
       stripeInvoice.amount_paid,
       chargeId,
       invoiceCreatedAt
+    );
+    // A refund handled before this invoice found no slices to claw back
+    // (Codex-2hxff.67): it is clawed back now, as if it had come after.
+    await reverseEarlierRefunds(
+      {
+        db: this.db,
+        stripe: this.stripe,
+        obs: this.obs,
+        environment: this.environment,
+      },
+      { chargeId, source: { sourceType: 'subscription' } }
     );
 
     return result;
