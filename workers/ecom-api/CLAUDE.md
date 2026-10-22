@@ -19,7 +19,7 @@ All routes use `procedure()`. Mounted in `src/index.ts`:
 |---|---|---|
 | `/checkout` | `routes/checkout.ts` | `POST /create`, `/course`, `/course-subscription`, `/portal-session` · `GET /verify` |
 | `/purchases` | `routes/purchases.ts` | `GET /`, `/:id` (the buyer's own) |
-| `/sales` | `routes/sales.ts` | `GET /`, `/stats` (organisation management) |
+| `/sales` | `routes/sales.ts` | `GET /`, `/stats` (organisation management); `GET /me`, `/me/stats` (a session only: the creator's own orgless sales) |
 | `/subscriptions` | `routes/subscriptions.ts` | `POST /checkout`, `/preview-tier-change`, `/change-tier`, `/cancel`, `/reactivate`, `/resume` · `GET /verify`, `/current`, `/mine` · organisation management: `GET /stats`, `/subscribers`, `/payouts`, `/payouts/summary`, `/payouts/by-creator` · self: `GET /me/payouts`, `/me/earnings-summary` |
 | `/courses` | `routes/courses.ts` | `GET /:courseId/offer` |
 | `/studio/courses` | `routes/course-monetisation.ts` | `PUT`/`DELETE /:courseId/subscription-plan`, `PUT /:courseId/tier-access` |

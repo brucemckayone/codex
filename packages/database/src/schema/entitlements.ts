@@ -48,9 +48,11 @@ export const entitlements = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    organizationId: uuid('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
+    // NULL for an orgless sale: a creator selling their own content outside any
+    // organisation (Codex-2hxff.21). Courses always belong to an organisation.
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'cascade',
+    }),
 
     // Split-FK resource target — EXACTLY ONE is non-null (CHECK below).
     contentId: uuid('content_id').references(() => content.id, {
@@ -70,6 +72,15 @@ export const entitlements = pgTable(
       .notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    // Who gave a support `grant`, and who took it back (Codex-2hxff.21). The
+    // Studio's customer drawer shows both. NULL for every other source, and
+    // when that person's account is deleted.
+    grantedByUserId: text('granted_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    revokedByUserId: text('revoked_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
   },
   (table) => [
     index('idx_entitlements_user_id').on(table.userId),

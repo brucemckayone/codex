@@ -64,11 +64,13 @@ const service = new AdminCustomerManagementService({ db, environment });
 |---|---|---|
 | `listCustomers` | `(organizationId: string, options?)` | Paginated customers (users with completed purchases). Filters: search, contentId, joinedWithin, minSpendCents, maxSpendCents. |
 | `getCustomerDetails` | `(customerId: string, organizationId: string)` | Full customer profile with purchase history. |
-| `grantContentAccess` | `(customerId: string, contentId: string, organizationId: string)` | Complimentary access — NOT a purchase record. Must write a `grant` entitlement (see below). |
+| `grantContentAccess` | `(organizationId, customerId, contentId, grantedByUserId)` | Complimentary access — NOT a purchase record. Writes a `grant` entitlement; a re-grant of a live one is a no-op. Only paid or tier content (`isGrantableContent`, `@codex/constants`), else `ContentNotGrantableError` (422). |
+| `listCustomerGrants` | `(organizationId, customerId, options?)` | The org's grants for the customer, newest first, live and revoked, with granter/revoker names. Paginated. |
+| `revokeGrant` | `(organizationId, customerId, entitlementId, revokedByUserId)` | Sets `revokedAt`/`revokedByUserId`. Scoped to id + customer + org + `source = 'grant'`, else `NotFoundError`. Idempotent: returns `revoked: false` when already revoked. |
 
 ## Important: Complimentary Access vs Purchases
 
-A comp is never a `purchases` row, so it never inflates purchase counts or revenue. It must write an `entitlements` row with source `grant` — that is what `@codex/access` reads. Today it writes only `contentAccess`, which nothing reads for access, so a grant gives **no** access (`Codex-2hxff.21`). Rules: [docs/payments/access.md](../../docs/payments/access.md#support-grants). Revenue analytics must count every revenue type, not only one-off purchases (`Codex-2hxff.20`).
+A comp is never a `purchases` row, so it never inflates purchase counts or revenue. It writes an `entitlements` row with source `grant` — that is what `@codex/access` reads. It never writes `contentAccess`, which nothing reads for access. A revoke never touches another source's entitlement. Rules: [docs/payments/access.md](../../docs/payments/access.md#support-grants). Revenue analytics must count every revenue type, not only one-off purchases (`Codex-2hxff.20`).
 
 ## Rules
 

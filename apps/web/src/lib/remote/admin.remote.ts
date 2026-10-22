@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
+import { forwardClientErrors } from '$lib/server/forward-client-errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dashboard Stats (Combined)
@@ -507,8 +508,13 @@ const grantAccessSchema = z.object({
 /**
  * Grant complimentary content access to a customer
  *
- * Creates a contentAccess record (not a purchase) so revenue analytics
- * remain accurate. Idempotent — returns success if access already exists.
+ * Writes a `grant` entitlement (not a purchase) so revenue analytics remain
+ * accurate. Idempotent — a re-grant of a live grant is a no-op.
+ *
+ * Only content a grant can open (`isGrantableContent`) is accepted; anything
+ * else is a 422 whose message is meant for the person granting. A 4xx is
+ * forwarded with its message and code so the dialog can show it — otherwise
+ * `handleError` would turn it into a generic 500 (Codex-2hxff.21).
  *
  * Usage:
  * ```typescript
@@ -522,6 +528,73 @@ export const grantContentAccess = command(
     const api = createServerApi(platform, cookies);
     const searchParams = new URLSearchParams();
     searchParams.set('organizationId', organizationId);
-    return api.admin.grantContentAccess(customerId, contentId, searchParams);
+    return forwardClientErrors(() =>
+      api.admin.grantContentAccess(customerId, contentId, searchParams)
+    );
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Customer Access Grants (Codex-2hxff.21)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const customerGrantsSchema = z.object({
+  customerId: z.string(),
+  organizationId: z.string().uuid(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+/**
+ * This organisation's support grants for one customer, newest first, live
+ * and revoked both. Not cached anywhere: it is a support view and must be
+ * current.
+ *
+ * Usage:
+ * ```svelte
+ * <script>
+ *   const grants = getCustomerGrants({ customerId, organizationId: orgId });
+ * </script>
+ *
+ * {#each grants.current?.items ?? [] as grant (grant.id)}…{/each}
+ * ```
+ */
+export const getCustomerGrants = query(
+  customerGrantsSchema,
+  async ({ customerId, organizationId, page, limit }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.admin.listCustomerGrants(customerId, organizationId, {
+      page,
+      limit,
+    });
+  }
+);
+
+const revokeGrantSchema = z.object({
+  customerId: z.string(),
+  entitlementId: z.string().uuid(),
+  organizationId: z.string().uuid(),
+});
+
+/**
+ * Revoke one support grant. The customer's purchases are untouched, and
+ * revoking twice is a no-op. The caller refreshes `getCustomerGrants`.
+ *
+ * Usage:
+ * ```typescript
+ * await revokeCustomerGrant({ customerId, entitlementId, organizationId });
+ * ```
+ */
+export const revokeCustomerGrant = command(
+  revokeGrantSchema,
+  async ({ customerId, entitlementId, organizationId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.admin.revokeCustomerGrant(
+      customerId,
+      entitlementId,
+      organizationId
+    );
   }
 );

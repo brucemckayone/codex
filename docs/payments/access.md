@@ -23,7 +23,8 @@ A **gap** marker means the code does not behave this way yet; see
 
 An entitlement is live while `revokedAt` is empty and `expiresAt` (if set) is
 in the future. Each person holds at most one live entitlement per resource and
-source.
+source. It records the organisation that sold or granted the item; a creator's
+own sale outside any organisation stores no organisation.
 
 **A tier subscription grants access** while its status is `active` or
 `cancelling` — and `past_due` while Stripe is still retrying the payment —
@@ -88,6 +89,7 @@ bought the item keeps it after renewing.
 | Stripe gives up retrying | Everything from that subscription | The person subscribes again |
 | Full refund of the current period's subscription payment | Everything from that subscription: it is cancelled at Stripe (owner decision P-4) | The person subscribes again |
 | Creator removed from the organisation (`Codex-2hxff.64`) | For tier subscribers, that creator's items at the next renewal. For followers, at once. Course subscriptions are cancelled at period end. Buyers keep theirs. | The item is republished by hand |
+| Support revokes a grant | That grant only; a purchase of the item still grants | Support grants it again |
 
 ## Streaming revocation
 
@@ -110,7 +112,8 @@ whatever happens to access in the meantime. Two layers close that gap:
 | | A dispute is won (a purchase's; a subscription's — **gap**: `Codex-2hxff.9`) |
 
 The block is **not** written when a subscriber cancels at period end (they have
-paid for the period) or when a renewal payment fails and Stripe is retrying it.
+paid for the period), when a renewal payment fails and Stripe is retrying it, or
+when support revokes a grant (see [Support grants](#support-grants)).
 
 ## Playback progress
 
@@ -120,18 +123,49 @@ progress and bring back "continue watching" entries that look like access.
 
 ## Support grants
 
-Support can give a customer complimentary access to content
-(`POST /api/admin/customers/:customerId/grant-access/:contentId`, organisation
-owner or admin). This writes a `grant` entitlement, which the access decision and
-the library both honour — **gap**: `Codex-2hxff.21` (today it writes only
-`content_access`, so a grant does nothing).
+Support can give a customer complimentary access to one item of the
+organisation's content, and take it back. The routes are on admin-api, for the
+organisation's owner or admins, and the Studio customer drawer uses them.
+
+| Route | What it does |
+|---|---|
+| `POST /api/admin/customers/:customerId/grant-access/:contentId` | Writes a `grant` entitlement, recording who granted it (`granted_by_user_id`). A re-grant while one is live does nothing. |
+| `GET /api/admin/customers/:customerId/grants` | The organisation's grants for the customer, newest first, live and revoked, with the names of who granted and who revoked each. |
+| `DELETE /api/admin/customers/:customerId/grants/:entitlementId` | Revokes that grant: sets `revoked_at` and `revoked_by_user_id`. Returns 204, and again if it was already revoked. |
+
+- **What a grant needs.** The customer has a purchase or a membership in the
+  organisation; the content belongs to the organisation and is not deleted.
+- **What can be granted.** Only an item a grant can open: priced content or
+  content in a tier (owner decision, 2026-10-21). The access decision reads an
+  entitlement only on those two branches, so a grant of free, followers-only,
+  team-only or course-only content would open nothing; it is refused with a
+  422. The rule is `isGrantableContent` (`@codex/constants`), which the Studio's
+  pickers use too.
+- **What a grant does.** The access decision honours it wherever it honours a
+  `content_purchase` entitlement, and, like a purchase, it survives
+  unpublication. The library lists it with the purchases. It is not a
+  purchase: it adds nothing to sales or revenue.
+- **What a revoke touches.** Only that grant. It must match the id, the
+  customer, the organisation and `source = 'grant'`; anything else, such as a
+  purchase entitlement or another organisation's grant, is a 404. A purchase of
+  the same item keeps granting.
+- **When access ends.** The next access decision denies the item. A revoke does
+  not write the `revoked:user:` block, because that block would also cut the
+  customer off from everything else they hold in the organisation (the rule
+  for a course-plan refund, `Codex-2hxff.10`). A stream URL already issued
+  plays until it expires, within 600 seconds.
+- **No email** is sent for a grant or a revoke; support tells the customer.
+- **Caches.** Both bump the customer's library version (`invalidateUserLibrary`).
+  The access decision is read live, so nothing else is cached.
 
 ## The library
 
 A person's library lists everything they can access through purchases,
-entitlements (including grants and courses) and subscriptions. Content under an
-open dispute is hidden — **gap**: `Codex-2hxff.9`. Purchase history (`GET
-/purchases`) lists content and course purchases — **gap**: `Codex-2hxff.21`.
+entitlements (including grants and courses) and subscriptions. A live support
+grant is listed with the purchases, under the `purchased` filter; an item both
+bought and granted is listed once. Content under an open dispute is hidden —
+**gap**: `Codex-2hxff.9`. Purchase history (`GET /purchases`) lists content and
+course purchases.
 
 ## Keeping caches in step
 

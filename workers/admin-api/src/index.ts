@@ -32,6 +32,7 @@ import {
   adminContentIdParamsSchema,
   adminContentListQuerySchema,
   adminContentPerformanceQuerySchema,
+  adminCustomerGrantsQuerySchema,
   adminCustomerIdParamsSchema,
   adminCustomerListQuerySchema,
   adminDashboardStatsQuerySchema,
@@ -39,6 +40,7 @@ import {
   adminGrantAccessParamsSchema,
   adminRevenueByCreatorQuerySchema,
   adminRevenueQuerySchema,
+  adminRevokeGrantParamsSchema,
   adminSubscribersQuerySchema,
   adminTopContentQuerySchema,
   feeAuditLogQuerySchema,
@@ -497,6 +499,9 @@ app.get(
 /**
  * POST /api/admin/customers/:customerId/grant-access/:contentId
  * Grant complimentary content access (for refunds/support)
+ *
+ * Writes a `grant` entitlement recording the acting user; a re-grant is a
+ * no-op. Rules: docs/payments/access.md#support-grants.
  */
 app.post(
   '/api/admin/customers/:customerId/grant-access/:contentId',
@@ -508,12 +513,92 @@ app.post(
     },
     input: { params: adminGrantAccessParamsSchema },
     handler: async (ctx) => {
+      const { customerId, contentId } = ctx.input.params;
       await ctx.services.adminCustomer.grantContentAccess(
         ctx.organizationId,
-        ctx.input.params.customerId,
-        ctx.input.params.contentId
+        customerId,
+        contentId,
+        ctx.user.id
       );
+      // The item joins the customer's library shelf. The access decision
+      // itself is read live, so nothing else is cached.
+      invalidateUserLibrary({
+        kv: ctx.env.CACHE_KV,
+        waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+        userId: customerId,
+        logger: ctx.obs,
+      });
       return { success: true };
+    },
+  })
+);
+
+/**
+ * GET /api/admin/customers/:customerId/grants
+ * This organization's support grants for the customer, newest first, live and
+ * revoked (the drawer's audit trail). Not cached: a support view must be
+ * current.
+ */
+app.get(
+  '/api/admin/customers/:customerId/grants',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
+    input: {
+      params: adminCustomerIdParamsSchema,
+      query: adminCustomerGrantsQuerySchema,
+    },
+    handler: async (ctx) => {
+      const result = await ctx.services.adminCustomer.listCustomerGrants(
+        ctx.organizationId,
+        ctx.input.params.customerId,
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * DELETE /api/admin/customers/:customerId/grants/:entitlementId
+ * Revoke one support grant. 404 unless it is this organization's `grant` for
+ * this customer; 204 when revoked, and again when it already was.
+ *
+ * It does NOT write the org-wide `revoked:user:` streaming block — that would
+ * also cut the customer off from everything else they hold here. A stream URL
+ * already issued plays out its expiry. No email: support tells the customer.
+ */
+app.delete(
+  '/api/admin/customers/:customerId/grants/:entitlementId',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
+    input: { params: adminRevokeGrantParamsSchema },
+    successStatus: 204,
+    handler: async (ctx) => {
+      const { customerId, entitlementId } = ctx.input.params;
+      const { revoked } = await ctx.services.adminCustomer.revokeGrant(
+        ctx.organizationId,
+        customerId,
+        entitlementId,
+        ctx.user.id
+      );
+      if (revoked) {
+        // The item leaves the customer's library shelf.
+        invalidateUserLibrary({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+          userId: customerId,
+          logger: ctx.obs,
+        });
+      }
+      return null;
     },
   })
 );

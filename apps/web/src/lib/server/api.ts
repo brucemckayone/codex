@@ -38,11 +38,7 @@ import type {
 } from '@codex/database/schema';
 import type { AvatarUploadResponse } from '@codex/identity';
 import type { NotificationPreferencesResponse } from '@codex/notifications';
-import type {
-  PurchaseListItem,
-  SaleListItem,
-  SalesStats,
-} from '@codex/purchase';
+import type { SaleListItem, SalesStats } from '@codex/purchase';
 // `import type` from @codex/shared-types is sanctioned for apps/web — it pulls
 // no runtime value, so the vite server-only module guard is not tripped.
 import type {
@@ -139,6 +135,7 @@ import type {
   ConnectOnboardResponse,
   ContentWithRelations,
   CurrentSubscription,
+  CustomerGrant,
   DeparturePreview,
   MediaItemWithRelations,
   MyMembershipWithOwnership,
@@ -148,6 +145,7 @@ import type {
   OwnershipAccepted,
   OwnershipOffer,
   OwnershipView,
+  PurchaseListItem,
   SubscriptionCheckoutResponse,
   SubscriptionStats,
   SubscriptionTier,
@@ -2683,7 +2681,8 @@ export function createServerApi(
        * Grant complimentary content access to a customer
        *
        * Used for refunds, promotions, and support.
-       * Creates a contentAccess record (not a purchase), so revenue analytics stay accurate.
+       * Writes a `grant` entitlement (not a purchase), so revenue analytics stay
+       * accurate. Content a grant cannot open is refused with a 422.
        *
        * @param customerId - Customer's user UUID
        * @param contentId - Content UUID to grant access to
@@ -2698,6 +2697,51 @@ export function createServerApi(
           'admin',
           `/api/admin/customers/${customerId}/grant-access/${contentId}${params ? `?${params}` : ''}`,
           { method: 'POST' }
+        ),
+
+      /**
+       * List this organisation's support grants for one customer, newest
+       * first, live and revoked both (Codex-2hxff.21). Backs the "Access
+       * grants" section of the Studio customer drawer.
+       *
+       * @param customerId - Customer's user UUID
+       * @param organizationId - The studio's organisation (resolves the policy)
+       */
+      listCustomerGrants: (
+        customerId: string,
+        organizationId: string,
+        { page, limit }: { page: number; limit: number }
+      ) =>
+        request<PaginatedListResponse<CustomerGrant>>(
+          'admin',
+          withOrg(
+            `/api/admin/customers/${customerId}/grants`,
+            organizationId,
+            new URLSearchParams({ page: String(page), limit: String(limit) })
+          )
+        ),
+
+      /**
+       * Revoke one support grant (Codex-2hxff.21). 204 with no body, so it
+       * resolves to `null`; revoking an already revoked grant is the same 204.
+       * A purchase entitlement or another organisation's grant is a 404.
+       *
+       * @param customerId - Customer's user UUID
+       * @param entitlementId - The grant's id, from `listCustomerGrants`
+       * @param organizationId - The studio's organisation (resolves the policy)
+       */
+      revokeCustomerGrant: (
+        customerId: string,
+        entitlementId: string,
+        organizationId: string
+      ) =>
+        request<null>(
+          'admin',
+          withOrg(
+            `/api/admin/customers/${customerId}/grants/${entitlementId}`,
+            organizationId
+          ),
+          { method: 'DELETE' }
         ),
     },
 
@@ -2896,6 +2940,29 @@ export function createServerApi(
         request<SalesStats>(
           'ecom',
           withOrg('/sales/stats', organizationId, params)
+        ),
+
+      /**
+       * The signed-in creator's own sales outside any organisation
+       * (Codex-2hxff.21): `GET /sales/me`. The same `SaleListItem` and the
+       * same filters as `listSales`, but no org context — the worker scopes
+       * to orgless purchases of the caller's content.
+       */
+      listMySales: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<SaleListItem>>(
+          'ecom',
+          `/sales/me${params?.toString() ? `?${params.toString()}` : ''}`
+        ),
+
+      /**
+       * KPI tiles for the solo-creator Sales page (Codex-2hxff.21):
+       * `GET /sales/me/stats`, the `getSalesStats` shape under the
+       * `listMySales` scope.
+       */
+      getMySalesStats: (params?: URLSearchParams) =>
+        request<SalesStats>(
+          'ecom',
+          `/sales/me/stats${params?.toString() ? `?${params.toString()}` : ''}`
         ),
 
       /**

@@ -426,7 +426,8 @@ export interface Entitlement {
   id: string;
   /** TEXT — `users.id` is `text('id')`, not uuid ([H]). */
   userId: string;
-  organizationId: string;
+  /** `null` for an orgless sale: a creator's own content outside any organisation. */
+  organizationId: string | null;
   resourceType: ResourceType;
   resourceId: string;
   source: EntitlementSource;

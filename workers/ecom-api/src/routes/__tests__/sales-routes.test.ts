@@ -10,6 +10,9 @@
  *     the query to another org's ledger.
  *   - /sales response envelope is `{ items, pagination }` via PaginatedResult.
  *   - /sales/stats response envelope is `{ data }`.
+ *   - GET /sales/me and /sales/me/stats (Codex-2hxff.21) need only a session,
+ *     no organisation, and forward `ctx.user.id` — never a client value — as
+ *     the creator whose orgless sales are listed.
  *   - Service-layer errors propagate through `mapErrorToResponse`.
  *
  * Harness mirrors the procedure() shim from
@@ -171,6 +174,8 @@ import sales from '../sales';
 interface PurchaseServiceMock {
   listSales: ReturnType<typeof vi.fn>;
   getSalesStats: ReturnType<typeof vi.fn>;
+  listMySales: ReturnType<typeof vi.fn>;
+  getMySalesStats: ReturnType<typeof vi.fn>;
 }
 
 function createPurchaseServiceMock(): PurchaseServiceMock {
@@ -184,6 +189,17 @@ function createPurchaseServiceMock(): PurchaseServiceMock {
       netCents: 2700,
       refundedCents: 500,
       count: 3,
+      currency: 'gbp',
+    }),
+    listMySales: vi.fn().mockResolvedValue({
+      items: [{ id: 'solo_sale_a', amountPaidCents: 2000 }],
+      pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+    }),
+    getMySalesStats: vi.fn().mockResolvedValue({
+      grossCents: 2000,
+      netCents: 1800,
+      refundedCents: 0,
+      count: 1,
       currency: 'gbp',
     }),
   };
@@ -322,5 +338,86 @@ describe('GET /sales/stats — route → service contract', () => {
     const res = await bundle.app.request(getReq('/sales/stats'));
     expect(res.status).toBe(403);
     expect(services.purchase.getSalesStats).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /sales/me — solo creator ledger (Codex-2hxff.21)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('a session alone → 200; listMySales gets ctx.user.id, never the org ledger', async () => {
+    const services = { purchase: createPurchaseServiceMock() };
+    // No organisation at all, and a plain member role elsewhere: neither
+    // matters, because the route declares no org policy.
+    const bundle = buildApp({
+      services,
+      organizationId: '',
+      orgRole: 'member',
+    });
+    const res = await bundle.app.request(getReq('/sales/me?page=1&limit=20'));
+    expect(res.status).toBe(200);
+
+    const payload = (await res.json()) as {
+      items: Array<{ id: string }>;
+      pagination: { total: number };
+    };
+    expect(payload.items[0]!.id).toBe('solo_sale_a');
+    expect(payload.pagination.total).toBe(1);
+
+    const [creatorArg, queryArg] = services.purchase.listMySales.mock.calls[0]!;
+    expect(creatorArg).toBe('user_1');
+    expect(queryArg).toMatchObject({ page: 1, limit: 20 });
+    expect(services.purchase.listSales).not.toHaveBeenCalled();
+  });
+
+  it('a client-supplied creator or org cannot redirect the query', async () => {
+    const services = { purchase: createPurchaseServiceMock() };
+    const bundle = buildApp({ services });
+    const res = await bundle.app.request(
+      getReq(`/sales/me?creatorId=rogue&organizationId=${ROGUE_ORG_ID}`)
+    );
+    expect(res.status).toBe(200);
+    const [creatorArg] = services.purchase.listMySales.mock.calls[0]!;
+    expect(creatorArg).toBe('user_1');
+  });
+
+  it('negative auth: no session → 401, service NOT called', async () => {
+    const services = { purchase: createPurchaseServiceMock() };
+    const bundle = buildApp({ user: null, services });
+    const res = await bundle.app.request(getReq('/sales/me'));
+    expect(res.status).toBe(401);
+    expect(services.purchase.listMySales).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /sales/me/stats — solo creator KPIs (Codex-2hxff.21)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('a session alone → 200 { data }; getMySalesStats gets ctx.user.id', async () => {
+    const services = { purchase: createPurchaseServiceMock() };
+    const bundle = buildApp({
+      services,
+      organizationId: '',
+      orgRole: 'member',
+    });
+    const res = await bundle.app.request(getReq('/sales/me/stats'));
+    expect(res.status).toBe(200);
+
+    const payload = (await res.json()) as {
+      data: { grossCents: number; netCents: number };
+    };
+    expect(payload.data.grossCents).toBe(2000);
+    expect(payload.data.netCents).toBe(1800);
+
+    const [creatorArg] = services.purchase.getMySalesStats.mock.calls[0]!;
+    expect(creatorArg).toBe('user_1');
+    expect(services.purchase.getSalesStats).not.toHaveBeenCalled();
+  });
+
+  it('negative auth: no session → 401', async () => {
+    const services = { purchase: createPurchaseServiceMock() };
+    const bundle = buildApp({ user: null, services });
+    const res = await bundle.app.request(getReq('/sales/me/stats'));
+    expect(res.status).toBe(401);
+    expect(services.purchase.getMySalesStats).not.toHaveBeenCalled();
   });
 });

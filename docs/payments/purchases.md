@@ -92,8 +92,8 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
      before a creator was removed still completes at the old split (owner
      decision, `Codex-2hxff.64`). `purchasedAt` is still the payment time;
    - an entitlement is written — `content_purchase`, or `course_purchase` plus
-     course enrolment — for organisation **and** orgless sales — **gap**:
-     `Codex-2hxff.21` (orgless sales get none).
+     course enrolment — for organisation **and** orgless sales. An orgless
+     sale's entitlement has no organisation.
 5. After the transaction the split is paid out (see
    [the payouts ledger](connect-and-payouts.md#the-payouts-ledger)). A
    redelivered event re-records the purchase's slices from its stored split:
@@ -138,12 +138,19 @@ the library and subscription collections itself — **gap**: `Codex-2hxff.22`.
 ## Purchase history and sales
 
 - `GET /purchases` lists the buyer's content **and** course purchases, paginated
-  with `withPagination` — **gap**: `Codex-2hxff.21` (course purchases hidden).
+  with `withPagination`; the total counts both. Each item says its `kind`
+  (`content` or `course`) and carries that item's id and title; the other pair
+  is `null`.
 - `GET /purchases/:id` returns 404 for someone else's purchase.
 - `GET /checkout/verify` only reveals a session to the buyer who started it.
 - `GET /sales` and `GET /sales/stats` show an organisation's content sales to
-  its owner and admins. A creator's orgless sales are shown to that creator —
-  **gap**: `Codex-2hxff.21`.
+  its owner and admins.
+- `GET /sales/me` and `GET /sales/me/stats` show a creator their own orgless
+  sales: purchases with no organisation, of content they created. They need
+  only a session. The rows, filters and totals are the same as `/sales`, and
+  the creator sees the buyer's name and email, as an organisation owner does.
+  An organisation's sale of the same creator's content is on the
+  organisation's ledger, not this one.
 
 ---
 

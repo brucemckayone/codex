@@ -30,7 +30,7 @@ import {
   PURCHASE_STATUS,
   stripeEnvMetadata,
 } from '@codex/constants';
-import { isUniqueViolation, toIso } from '@codex/database';
+import { isUniqueViolation, toIso, withPagination } from '@codex/database';
 import {
   content,
   contentAccess,
@@ -170,7 +170,7 @@ import type {
   CompletePurchaseMetadata,
   Purchase,
   PurchaseListItem,
-  PurchaseWithContent,
+  PurchaseWithItem,
   SaleListItem,
   SalesStats,
 } from '../types';
@@ -859,17 +859,15 @@ export class PurchaseService extends BaseService {
 
         // Step 5a (Codex-2pryk WP-6): write the greenfield `entitlements` grant
         // the resolver reads. Additive to `contentAccess` + `verifyPurchase`
-        // (the resolver unions all three). Org-scoped ONLY — `entitlements`
-        // requires a non-null org, so orgless (bi-party) content writes no grant
-        // row and stays covered by `verifyPurchase` alone. Idempotent on replay.
-        if (organizationId) {
-          await writeContentPurchaseEntitlement(tx, {
-            userId: metadata.customerId,
-            organizationId,
-            contentId: metadata.contentId,
-            purchaseId: purchase.id,
-          });
-        }
+        // (the resolver unions all three). An orgless (bi-party) sale writes
+        // its grant with `organization_id` NULL (Codex-2hxff.21). Idempotent
+        // on replay.
+        await writeContentPurchaseEntitlement(tx, {
+          userId: metadata.customerId,
+          organizationId,
+          contentId: metadata.contentId,
+          purchaseId: purchase.id,
+        });
 
         return {
           purchase,
@@ -1640,12 +1638,12 @@ export class PurchaseService extends BaseService {
    * - Pagination (page, limit)
    * - Filter by status
    * - Filter by contentId
-   * - Join with content for details
+   * - Content AND course purchases, each joined with its item
    * - Sort by purchasedAt DESC
    *
    * @param customerId - Customer ID
    * @param filters - Query filters
-   * @returns Paginated purchase history with content details
+   * @returns Paginated purchase history with the bought item's details
    *
    * @example
    * const history = await purchaseService.getPurchaseHistory('customer-123', {
@@ -1658,18 +1656,13 @@ export class PurchaseService extends BaseService {
   async getPurchaseHistory(
     customerId: string,
     filters: PurchaseQueryInput
-  ): Promise<PaginatedListResponse<PurchaseWithContent>> {
+  ): Promise<PaginatedListResponse<PurchaseWithItem>> {
     const validated = purchaseQuerySchema.parse(filters);
 
     try {
-      // Build WHERE conditions. Codex-2pryk WP-6: this is the CONTENT purchase
-      // history (joins + returns content). Course purchases (contentId NULL) are
-      // a distinct shape surfaced via the library/enrollments shelf, not here —
-      // scope them out so the `content` join is always present.
-      const conditions = [
-        eq(purchases.customerId, customerId),
-        isNotNull(purchases.contentId),
-      ];
+      // Both kinds (Codex-2hxff.21). A row targets exactly one of content or a
+      // course (the split-FK CHECK), so exactly one of the two joins is filled.
+      const conditions = [eq(purchases.customerId, customerId)];
 
       if (validated.status) {
         conditions.push(eq(purchases.status, validated.status));
@@ -1679,14 +1672,16 @@ export class PurchaseService extends BaseService {
         conditions.push(eq(purchases.contentId, validated.contentId));
       }
 
-      // Calculate offset
-      const offset = (validated.page - 1) * validated.limit;
+      const { limit, offset } = withPagination({
+        page: validated.page,
+        limit: validated.limit,
+      });
 
       // Run paginated SELECT and COUNT in parallel to cut one DB round-trip
       const [items, countResult] = await Promise.all([
         this.db.query.purchases.findMany({
           where: and(...conditions),
-          limit: validated.limit,
+          limit,
           offset,
           orderBy: [desc(purchases.purchasedAt)],
           with: {
@@ -1699,6 +1694,9 @@ export class PurchaseService extends BaseService {
                 contentType: true,
               },
             },
+            course: {
+              columns: { id: true, title: true, slug: true },
+            },
           },
         }),
         this.db
@@ -1709,12 +1707,12 @@ export class PurchaseService extends BaseService {
       const total = countResult[0]?.total ?? 0;
 
       return {
-        items: items as PurchaseWithContent[],
+        items,
         pagination: {
           page: validated.page,
-          limit: validated.limit,
+          limit,
           total,
-          totalPages: Math.ceil(total / validated.limit),
+          totalPages: Math.ceil(total / limit),
         },
       };
     } catch (error) {
@@ -1725,14 +1723,14 @@ export class PurchaseService extends BaseService {
   /**
    * Format purchase history for client consumption
    *
-   * Maps raw PurchaseWithContent records into PurchaseListItem DTOs
+   * Maps raw PurchaseWithItem records into PurchaseListItem DTOs
    * with validated status values and ISO date strings.
    *
    * @param result - Raw purchase history from getPurchaseHistory()
    * @returns Paginated response with formatted PurchaseListItem items
    */
   formatPurchasesForClient(
-    result: PaginatedListResponse<PurchaseWithContent>
+    result: PaginatedListResponse<PurchaseWithItem>
   ): PaginatedListResponse<PurchaseListItem> {
     return {
       items: result.items.map(
@@ -1740,10 +1738,11 @@ export class PurchaseService extends BaseService {
           id: p.id,
           customerId: p.customerId,
           createdAt: toIso(p.createdAt),
-          // `content` is guaranteed present — getPurchaseHistory scopes to
-          // content purchases (contentId NOT NULL) — so its id is the target.
-          contentId: p.content.id,
-          contentTitle: p.content.title,
+          kind: p.courseId !== null ? 'course' : 'content',
+          contentId: p.contentId,
+          contentTitle: p.content?.title ?? null,
+          courseId: p.courseId,
+          courseTitle: p.course?.title ?? null,
           amountCents: p.amountPaidCents,
           status: coercePurchaseStatus(p.status),
         })
@@ -2820,10 +2819,6 @@ export class PurchaseService extends BaseService {
    * (orgId, status, purchasedAt) access pattern; date-range filters use the
    * `idx_purchases_org_status_created` fallback when only `createdAt` is
    * meaningful (pending rows have no `purchasedAt`).
-   *
-   * `status: 'disputed'` is a query convenience — it's not a DB status, so we
-   * map it to `disputedAt IS NOT NULL` regardless of the underlying status
-   * (a row can be both completed AND disputed).
    */
   async listSales(
     orgId: string,
@@ -2832,108 +2827,33 @@ export class PurchaseService extends BaseService {
     const validated = salesQuerySchema.parse(filters);
 
     try {
-      // Codex-2pryk WP-6: the Sales ledger's SaleListItem shape is content-
-      // shaped (contentTitle/contentSlug). Scope to content purchases so the
-      // `content` join is always present; course sales get their own reporting
-      // surface (WP-7) rather than being force-fit into the content columns.
-      const conditions = [
-        eq(purchases.organizationId, orgId),
-        isNotNull(purchases.contentId),
-      ];
-
-      if (validated.status === 'disputed') {
-        conditions.push(isNotNull(purchases.disputedAt));
-      } else if (validated.status) {
-        conditions.push(eq(purchases.status, validated.status));
-      }
-
-      if (validated.contentId) {
-        conditions.push(eq(purchases.contentId, validated.contentId));
-      }
-      if (validated.customerId) {
-        conditions.push(eq(purchases.customerId, validated.customerId));
-      }
-
-      // Date range applies to `purchasedAt` for completed rows. We OR against
-      // `createdAt` so pending/failed rows (which never set `purchasedAt`)
-      // still surface inside the window — useful for support triage where the
-      // operator is looking for a row by the date the customer attempted to pay.
-      conditions.push(
-        ...purchaseDateWindow(validated.fromDate, validated.toDate)
+      return await this.querySalesLedger(
+        [eq(purchases.organizationId, orgId)],
+        validated
       );
-
-      const offset = (validated.page - 1) * validated.limit;
-
-      const [items, countResult] = await Promise.all([
-        this.db.query.purchases.findMany({
-          where: and(...conditions),
-          limit: validated.limit,
-          offset,
-          // Completed rows sort by purchasedAt; pending/failed rows fall back
-          // to createdAt via coalesce so the most-recent row is always first.
-          orderBy: [
-            desc(
-              sql`COALESCE(${purchases.purchasedAt}, ${purchases.createdAt})`
-            ),
-          ],
-          with: {
-            content: {
-              columns: { id: true, title: true, slug: true },
-            },
-            customer: {
-              columns: { id: true, name: true, email: true },
-            },
-          },
-        }),
-        this.db
-          .select({ total: count() })
-          .from(purchases)
-          .where(and(...conditions)),
-      ]);
-      const total = countResult[0]?.total ?? 0;
-
-      // `content` is guaranteed present (conditions filter contentId NOT NULL);
-      // the type predicate narrows the relation to non-null without an `as` cast.
-      const formatted: SaleListItem[] = items
-        .filter(
-          (p): p is typeof p & { content: NonNullable<typeof p.content> } =>
-            p.content !== null
-        )
-        .map((p) => ({
-          id: p.id,
-          purchasedAt: toIso(p.purchasedAt),
-          createdAt: toIso(p.createdAt),
-          customerId: p.customerId,
-          customerName: p.customer.name,
-          customerEmail: p.customer.email,
-          contentId: p.content.id,
-          contentTitle: p.content.title,
-          contentSlug: p.content.slug,
-          amountPaidCents: p.amountPaidCents,
-          currency: p.currency,
-          status: coercePurchaseStatus(p.status) as SaleListItem['status'],
-          platformFeeCents: p.platformFeeCents,
-          organizationFeeCents: p.organizationFeeCents,
-          creatorPayoutCents: p.creatorPayoutCents,
-          refundedAt: toIso(p.refundedAt),
-          refundAmountCents: p.refundAmountCents,
-          refundReason: p.refundReason,
-          disputedAt: toIso(p.disputedAt),
-          disputeReason: p.disputeReason,
-          stripePaymentIntentId: p.stripePaymentIntentId,
-        }));
-
-      return {
-        items: formatted,
-        pagination: {
-          page: validated.page,
-          limit: validated.limit,
-          total,
-          totalPages: Math.ceil(total / validated.limit),
-        },
-      };
     } catch (error) {
       this.handleError(error, 'listSales');
+    }
+  }
+
+  /**
+   * List a solo creator's own sales: their content sold outside any
+   * organisation (Codex-2hxff.21). The same rows, filters and shape as
+   * {@link listSales}, so the creator's Sales page reuses the org page's code.
+   */
+  async listMySales(
+    creatorId: string,
+    filters: SalesQueryInput
+  ): Promise<PaginatedListResponse<SaleListItem>> {
+    const validated = salesQuerySchema.parse(filters);
+
+    try {
+      return await this.querySalesLedger(
+        this.soloSalesScope(creatorId),
+        validated
+      );
+    } catch (error) {
+      this.handleError(error, 'listMySales');
     }
   }
 
@@ -2956,41 +2876,204 @@ export class PurchaseService extends BaseService {
     const validated = salesStatsQuerySchema.parse(filters);
 
     try {
-      // Content-only, to match `listSales` (course sales report separately, WP-7)
-      // so the header tiles and the table below them agree.
-      const conditions = [
-        eq(purchases.organizationId, orgId),
-        isNotNull(purchases.contentId),
-      ];
-
-      conditions.push(
-        ...purchaseDateWindow(validated.fromDate, validated.toDate)
+      return await this.aggregateSalesStats(
+        [eq(purchases.organizationId, orgId)],
+        validated
       );
-
-      const [agg] = await this.db
-        .select({
-          // Gross: amount collected on completed OR refunded rows (refunded
-          // rows reflect money that *was* collected before being given back).
-          grossCents: sql<number>`COALESCE(SUM(${purchases.amountPaidCents}) FILTER (WHERE ${purchases.status} IN ('completed','refunded')), 0)::int`,
-          // Net to org: their share on completed rows only. Refunded rows
-          // already returned the customer's money so they zero out for net.
-          netCents: sql<number>`COALESCE(SUM(${purchases.creatorPayoutCents} + ${purchases.organizationFeeCents}) FILTER (WHERE ${purchases.status} = 'completed'), 0)::int`,
-          // Partial refunds too: they leave the purchase completed (P-1).
-          refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}), 0)::int`,
-          count: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'completed')::int`,
-        })
-        .from(purchases)
-        .where(and(...conditions));
-
-      return {
-        grossCents: agg?.grossCents ?? 0,
-        netCents: agg?.netCents ?? 0,
-        refundedCents: agg?.refundedCents ?? 0,
-        count: agg?.count ?? 0,
-        currency: CURRENCY.GBP,
-      };
     } catch (error) {
       this.handleError(error, 'getSalesStats');
     }
+  }
+
+  /**
+   * The header KPIs for a solo creator's own sales, under the scope of
+   * {@link listMySales}. An orgless sale has no organisation fee, so the net
+   * is the creator's payout.
+   */
+  async getMySalesStats(
+    creatorId: string,
+    filters: SalesStatsQueryInput
+  ): Promise<SalesStats> {
+    const validated = salesStatsQuerySchema.parse(filters);
+
+    try {
+      return await this.aggregateSalesStats(
+        this.soloSalesScope(creatorId),
+        validated
+      );
+    } catch (error) {
+      this.handleError(error, 'getMySalesStats');
+    }
+  }
+
+  /**
+   * Which purchases are a solo creator's sales: orgless, and of content they
+   * created. `organization_id IS NULL` is what keeps an organisation's sale of
+   * the same creator's content out — that sale is on the organisation's ledger.
+   */
+  private soloSalesScope(creatorId: string): SQL[] {
+    return [
+      isNull(purchases.organizationId),
+      inArray(
+        purchases.contentId,
+        this.db
+          .select({ id: content.id })
+          .from(content)
+          .where(eq(content.creatorId, creatorId))
+      ),
+    ];
+  }
+
+  /**
+   * The Sales ledger rows under one seller's `scope`: an organisation's, or a
+   * solo creator's. Shared by {@link listSales} and {@link listMySales}, so
+   * the filters, ordering and row shape cannot drift apart.
+   *
+   * `status: 'disputed'` is a query convenience — it's not a DB status, so we
+   * map it to `disputedAt IS NOT NULL` regardless of the underlying status
+   * (a row can be both completed AND disputed).
+   */
+  private async querySalesLedger(
+    scope: SQL[],
+    validated: SalesQueryInput
+  ): Promise<PaginatedListResponse<SaleListItem>> {
+    // Codex-2pryk WP-6: the Sales ledger's SaleListItem shape is content-
+    // shaped (contentTitle/contentSlug). Scope to content purchases so the
+    // `content` join is always present; course sales get their own reporting
+    // surface (WP-7) rather than being force-fit into the content columns.
+    const conditions = [...scope, isNotNull(purchases.contentId)];
+
+    if (validated.status === 'disputed') {
+      conditions.push(isNotNull(purchases.disputedAt));
+    } else if (validated.status) {
+      conditions.push(eq(purchases.status, validated.status));
+    }
+
+    if (validated.contentId) {
+      conditions.push(eq(purchases.contentId, validated.contentId));
+    }
+    if (validated.customerId) {
+      conditions.push(eq(purchases.customerId, validated.customerId));
+    }
+
+    // Date range applies to `purchasedAt` for completed rows. We OR against
+    // `createdAt` so pending/failed rows (which never set `purchasedAt`)
+    // still surface inside the window — useful for support triage where the
+    // operator is looking for a row by the date the customer attempted to pay.
+    conditions.push(
+      ...purchaseDateWindow(validated.fromDate, validated.toDate)
+    );
+
+    const { limit, offset } = withPagination({
+      page: validated.page,
+      limit: validated.limit,
+    });
+
+    const [items, countResult] = await Promise.all([
+      this.db.query.purchases.findMany({
+        where: and(...conditions),
+        limit,
+        offset,
+        // Completed rows sort by purchasedAt; pending/failed rows fall back
+        // to createdAt via coalesce so the most-recent row is always first.
+        orderBy: [
+          desc(sql`COALESCE(${purchases.purchasedAt}, ${purchases.createdAt})`),
+        ],
+        with: {
+          content: {
+            columns: { id: true, title: true, slug: true },
+          },
+          customer: {
+            columns: { id: true, name: true, email: true },
+          },
+        },
+      }),
+      this.db
+        .select({ total: count() })
+        .from(purchases)
+        .where(and(...conditions)),
+    ]);
+    const total = countResult[0]?.total ?? 0;
+
+    // `content` is guaranteed present (conditions filter contentId NOT NULL);
+    // the type predicate narrows the relation to non-null without an `as` cast.
+    const formatted: SaleListItem[] = items
+      .filter(
+        (p): p is typeof p & { content: NonNullable<typeof p.content> } =>
+          p.content !== null
+      )
+      .map((p) => ({
+        id: p.id,
+        purchasedAt: toIso(p.purchasedAt),
+        createdAt: toIso(p.createdAt),
+        customerId: p.customerId,
+        customerName: p.customer.name,
+        customerEmail: p.customer.email,
+        contentId: p.content.id,
+        contentTitle: p.content.title,
+        contentSlug: p.content.slug,
+        amountPaidCents: p.amountPaidCents,
+        currency: p.currency,
+        status: coercePurchaseStatus(p.status) as SaleListItem['status'],
+        platformFeeCents: p.platformFeeCents,
+        organizationFeeCents: p.organizationFeeCents,
+        creatorPayoutCents: p.creatorPayoutCents,
+        refundedAt: toIso(p.refundedAt),
+        refundAmountCents: p.refundAmountCents,
+        refundReason: p.refundReason,
+        disputedAt: toIso(p.disputedAt),
+        disputeReason: p.disputeReason,
+        stripePaymentIntentId: p.stripePaymentIntentId,
+      }));
+
+    return {
+      items: formatted,
+      pagination: {
+        page: validated.page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * The Sales header KPIs under one seller's `scope`. Shared by
+   * {@link getSalesStats} and {@link getMySalesStats}.
+   */
+  private async aggregateSalesStats(
+    scope: SQL[],
+    validated: SalesStatsQueryInput
+  ): Promise<SalesStats> {
+    // Content-only, to match the ledger (course sales report separately, WP-7)
+    // so the header tiles and the table below them agree.
+    const conditions = [
+      ...scope,
+      isNotNull(purchases.contentId),
+      ...purchaseDateWindow(validated.fromDate, validated.toDate),
+    ];
+
+    const [agg] = await this.db
+      .select({
+        // Gross: amount collected on completed OR refunded rows (refunded
+        // rows reflect money that *was* collected before being given back).
+        grossCents: sql<number>`COALESCE(SUM(${purchases.amountPaidCents}) FILTER (WHERE ${purchases.status} IN ('completed','refunded')), 0)::int`,
+        // Net to the seller: their share on completed rows only. Refunded rows
+        // already returned the customer's money so they zero out for net.
+        netCents: sql<number>`COALESCE(SUM(${purchases.creatorPayoutCents} + ${purchases.organizationFeeCents}) FILTER (WHERE ${purchases.status} = 'completed'), 0)::int`,
+        // Partial refunds too: they leave the purchase completed (P-1).
+        refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}), 0)::int`,
+        count: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'completed')::int`,
+      })
+      .from(purchases)
+      .where(and(...conditions));
+
+    return {
+      grossCents: agg?.grossCents ?? 0,
+      netCents: agg?.netCents ?? 0,
+      refundedCents: agg?.refundedCents ?? 0,
+      count: agg?.count ?? 0,
+      currency: CURRENCY.GBP,
+    };
   }
 }

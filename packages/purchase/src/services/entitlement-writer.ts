@@ -45,16 +45,15 @@ export type EntitlementWriteClient = DatabaseClient | Tx;
  * row + `verifyPurchase` — the resolver unions the two, so this is the
  * forward-compatible grant the resolver reads directly.
  *
- * `organizationId` is REQUIRED (the `entitlements` table's org FK is NOT NULL,
- * and the frozen `Entitlement.organizationId` is non-nullable). Orgless
- * (bi-party) content purchases therefore write NO entitlement row and rely on
- * `verifyPurchase` alone — the caller must skip this write when org is null.
+ * `organizationId` is `null` for an orgless (bi-party) sale: a creator selling
+ * their own content outside any organisation. It still writes its entitlement
+ * (migration 0108 made the column nullable, Codex-2hxff.21).
  */
 export async function writeContentPurchaseEntitlement(
   client: EntitlementWriteClient,
   params: {
     userId: string;
-    organizationId: string;
+    organizationId: string | null;
     contentId: string;
     purchaseId: string;
   }
