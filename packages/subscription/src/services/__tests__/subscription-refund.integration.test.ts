@@ -583,6 +583,50 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
     expect(obs.error).not.toHaveBeenCalled();
   });
 
+  // Review R3 (with T1): the revival refunds FIRST, then cancels, so the
+  // refund's own charge.refunded can find A still active at Stripe and its
+  // row cancelled, not yet ended. Our row says A is not live: nothing to
+  // cancel, and B is never touched.
+  it('a cancelled-not-ended subscription beside a live one, still active at Stripe, is superseded and cancels nothing', async () => {
+    const [subscriberId] = await seedTestUsers(db, 1);
+    const userId = subscriberId ?? '';
+    const old = takeFirst(
+      await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(userId, orgId, otherTierId, {
+            status: 'cancelled',
+          })
+        )
+        .returning()
+    );
+    await db
+      .insert(subscriptions)
+      .values(createTestSubscriptionInput(userId, orgId, tierId));
+    stripeKnows({
+      stripeSubscriptionId: old.stripeSubscriptionId,
+      invoiceId: 'in_revived_first',
+      paidInvoices: [
+        { id: 'in_revived_first', billing_reason: 'subscription_cycle' },
+      ],
+      status: 'active',
+    });
+    const obs = spyOnObs();
+
+    const ended = await service.cancelForFullRefund(fullRefund());
+
+    expect(ended).toEqual({
+      superseded: {
+        kind: 'tier',
+        organizationName: orgName,
+        tierName: otherTierName,
+      },
+    });
+    expect(stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(obs.error).not.toHaveBeenCalled();
+  });
+
   it('an ended subscription with no live one beside it is not superseded', async () => {
     const [subscriberId] = await seedTestUsers(db, 1);
     const old = takeFirst(

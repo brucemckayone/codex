@@ -176,8 +176,12 @@ const LIVE_STATUSES = [
  * subscription revived (an `unpaid` one paid), or a first payment completing.
  */
 function revives(from: string, to: string): boolean {
+  return !isLiveStatus(from) && isLiveStatus(to);
+}
+
+function isLiveStatus(status: string): boolean {
   const live: readonly string[] = LIVE_STATUSES;
-  return !live.includes(from) && live.includes(to);
+  return live.includes(status);
 }
 
 /** A tier-change preview's `prorationDate` may run ahead of our clock by this much. */
@@ -443,11 +447,12 @@ const CREATOR_EARNING_PAYOUT_TYPES = [
 
 /**
  * "Needs attention" counts stuck charges, not ledger rows (Codex-2hxff.15,
- * SUB-20): a charge's slices share a transfer group, so one stuck sale reads
- * 1 in the summaries as it does in the by-creator table. A row from before
- * transfer groups counts on its own.
+ * SUB-20): a charge's slices share its id, so one stuck sale reads 1, and two
+ * stuck renewals of one subscription (one transfer group) read 2 — in both
+ * summaries and the by-creator table alike. A row with no charge id falls
+ * back to its transfer group, then to itself.
  */
-const NEEDS_ATTENTION_CHARGES = sql<number>`count(DISTINCT COALESCE(${payouts.transferGroup}, ${payouts.id}::text))::int`;
+const NEEDS_ATTENTION_CHARGES = sql<number>`count(DISTINCT COALESCE(${payouts.stripeChargeId}, ${payouts.transferGroup}, ${payouts.id}::text))::int`;
 
 /**
  * Map the persisted `payouts.status` column to the UI display vocabulary.
@@ -1393,7 +1398,19 @@ export class SubscriptionService extends BaseService {
         if (raced) {
           return { subscription: raced, justInserted: false };
         }
-        throw error;
+        // The one-live-per-user index, by a live row written outside the
+        // lock. Retryable rather than a quiet 200: the retry runs under the
+        // lock and records this one as its duplicate (review T6).
+        this.obs.error('Subscription insert hit the one-live index', {
+          errorId: crypto.randomUUID(),
+          stripeSubscriptionId: stripeSubId,
+          organizationId: orgId,
+          eventType: context.eventType,
+        });
+        throw new ServiceUnavailableError(
+          'Subscription could not be recorded; it will be retried',
+          { stripeSubscriptionId: stripeSubId }
+        );
       }
       throw error;
     }
@@ -1493,37 +1510,49 @@ export class SubscriptionService extends BaseService {
     return (this.db as typeof import('@codex/database').dbWs).transaction(
       async (tx) => {
         await this.lockSubscriber(tx, row.userId, row.organizationId);
-        const [other] = await tx
-          .select({ id: subscriptions.id })
-          .from(subscriptions)
-          .where(
-            and(
-              eq(subscriptions.userId, row.userId),
-              eq(subscriptions.organizationId, row.organizationId),
-              ne(subscriptions.id, row.id),
-              inArray(subscriptions.status, LIVE_STATUSES)
-            )
-          )
-          .limit(1);
-        if (other) return other.id;
+        const otherId = await this.otherLiveId(tx, row);
+        if (otherId) return otherId;
         await write(tx);
         return undefined;
       }
     );
   }
 
+  /** The user's live subscription to the row's org other than this row. */
+  private async otherLiveId(
+    db: Pick<Tx, 'select'>,
+    row: Pick<Subscription, 'id' | 'userId' | 'organizationId'>
+  ): Promise<string | undefined> {
+    const [other] = await db
+      .select({ id: subscriptions.id })
+      .from(subscriptions)
+      .where(
+        and(
+          eq(subscriptions.userId, row.userId),
+          eq(subscriptions.organizationId, row.organizationId),
+          ne(subscriptions.id, row.id),
+          inArray(subscriptions.status, LIVE_STATUSES)
+        )
+      )
+      .limit(1);
+    return other?.id;
+  }
+
   /**
    * An old subscription Stripe brought back to life (its open invoice paid
    * after `unpaid`) while the user had subscribed again (Codex-2hxff.15, owner
-   * decision 7: "Cancel old, refund it"). The newer one is kept. This one is
-   * cancelled at Stripe at once and ONLY the invoice that revived it is
-   * refunded: earlier invoices bought real access.
+   * decision 7: "Cancel old, refund it"). The newer one is kept. ONLY the
+   * invoice that revived this one is refunded (earlier invoices bought real
+   * access), and it is cancelled at Stripe at once.
    *
-   * Stripe first, both calls idempotent; then the row becomes a tombstone.
-   * If Stripe refuses, the row is left as it was and the failure is
-   * retryable, so the redelivery repeats the calls and then writes the row.
-   * The reviving invoice pays no one; the refund's own `charge.refunded`
-   * emails the buyer.
+   * Stripe first, both calls idempotent, and the REFUND before the cancel: a
+   * cancel that went through ahead of a refused refund would end it at
+   * Stripe, so the retry would no longer see a revival and the refund would
+   * be lost. A refund refused leaves Stripe as it was; a cancel refused
+   * after a good refund repeats that refund under its key. Then the row
+   * becomes a tombstone. Any Stripe failure leaves the row as it was and is
+   * retryable. The reviving invoice pays no one; the refund's own
+   * `charge.refunded` emails the buyer.
    */
   private async retireRevived(
     row: Subscription,
@@ -1541,6 +1570,16 @@ export class SubscriptionService extends BaseService {
       const atStripe =
         live ??
         (await this.stripe.subscriptions.retrieve(row.stripeSubscriptionId));
+      // On `updated` the reviving payment is the latest invoice, if paid.
+      refunded = reviving ?? (await this.paidLatestInvoice(atStripe));
+      if (refunded) {
+        await issueRefund(this.stripe, {
+          chargeId: refunded.chargeId,
+          reason: 'requested_by_customer',
+          idempotencyKey: `refund_revived_${refunded.invoiceId}`,
+          environment: this.environment,
+        });
+      }
       if (!endedAtStripeStatus(atStripe.status)) {
         await this.stripe.subscriptions.cancel(
           row.stripeSubscriptionId,
@@ -1552,16 +1591,6 @@ export class SubscriptionService extends BaseService {
           },
           { idempotencyKey: `revived_cancel_${row.stripeSubscriptionId}` }
         );
-      }
-      // On `updated` the reviving payment is the latest invoice, if paid.
-      refunded = reviving ?? (await this.paidLatestInvoice(atStripe));
-      if (refunded) {
-        await issueRefund(this.stripe, {
-          chargeId: refunded.chargeId,
-          reason: 'requested_by_customer',
-          idempotencyKey: `refund_revived_${refunded.invoiceId}`,
-          environment: this.environment,
-        });
       }
     } catch (error) {
       this.obs.error(
@@ -1578,20 +1607,79 @@ export class SubscriptionService extends BaseService {
         { subscriptionId: row.id }
       );
     }
+    // Under the lock, so an invoice event re-reading the row before paying
+    // out sees it ended.
     const at = new Date();
-    await this.db
-      .update(subscriptions)
-      .set({
-        status: SUBSCRIPTION_STATUS.CANCELLED,
-        cancelledAt: sql`COALESCE(${subscriptions.cancelledAt}, ${at})`,
-        endedAt: sql`COALESCE(${subscriptions.endedAt}, ${at})`,
-        updatedAt: at,
-      })
-      .where(eq(subscriptions.id, row.id));
+    await (this.db as typeof import('@codex/database').dbWs).transaction(
+      async (tx) => {
+        await this.lockSubscriber(tx, row.userId, row.organizationId);
+        await tx
+          .update(subscriptions)
+          .set({
+            status: SUBSCRIPTION_STATUS.CANCELLED,
+            cancelledAt: sql`COALESCE(${subscriptions.cancelledAt}, ${at})`,
+            endedAt: sql`COALESCE(${subscriptions.endedAt}, ${at})`,
+            updatedAt: at,
+          })
+          .where(eq(subscriptions.id, row.id));
+      }
+    );
     this.obs.warn(
       'Old subscription revived next to a newer one: cancelled, its reviving payment refunded',
       { ...context, refundedInvoiceId: refunded?.invoiceId }
     );
+  }
+
+  /** The row as it stands now, read under the per-user, per-org lock. */
+  private async rereadUnderLock(
+    row: Subscription
+  ): Promise<Subscription | undefined> {
+    return (this.db as typeof import('@codex/database').dbWs).transaction(
+      async (tx) => {
+        await this.lockSubscriber(tx, row.userId, row.organizationId);
+        const [current] = await tx
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.id, row.id))
+          .limit(1);
+        return current;
+      }
+    );
+  }
+
+  /**
+   * A duplicate's invoice paid after it was settled — a delayed method such
+   * as Bacs Direct Debit clears days later, and subscription checkouts don't
+   * restrict the methods — is refunded too: always THAT invoice, under the
+   * key `cancelAndRefundDuplicate` uses for it, so it is never refunded
+   * twice (review T4).
+   */
+  private async refundDuplicateInvoice(
+    row: Subscription,
+    invoiceId: string,
+    chargeId: string
+  ): Promise<void> {
+    try {
+      await issueRefund(this.stripe, {
+        chargeId,
+        reason: 'duplicate',
+        idempotencyKey: `refund_duplicate_${invoiceId}`,
+        environment: this.environment,
+      });
+    } catch (error) {
+      this.obs.error('Duplicate subscription invoice could not be refunded', {
+        errorId: crypto.randomUUID(),
+        subscriptionId: row.id,
+        stripeSubscriptionId: row.stripeSubscriptionId,
+        invoiceId,
+        code: stripeErrorCode(error),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new ServiceUnavailableError(
+        'Duplicate subscription refund failed; it will be retried',
+        { subscriptionId: row.id }
+      );
+    }
   }
 
   /** Whether Stripe has handed the whole charge back. */
@@ -1601,6 +1689,12 @@ export class SubscriptionService extends BaseService {
       charge.refunded ||
       (charge.amount > 0 && charge.amount_refunded >= charge.amount)
     );
+  }
+
+  /** The id of the subscription's latest invoice, expanded or not. */
+  private latestInvoiceId(stripeSub: Stripe.Subscription): string | undefined {
+    const latest = stripeSub.latest_invoice;
+    return typeof latest === 'string' ? latest : (latest?.id ?? undefined);
   }
 
   /** The subscription's latest invoice with its charge, when it is paid. */
@@ -1912,9 +2006,15 @@ export class SubscriptionService extends BaseService {
     const { subscription: sub } = presence;
 
     // A duplicate pays no one and restores nothing: every payment it took is
-    // refunded (Codex-2hxff.15).
+    // refunded (Codex-2hxff.15) — this one too, though it cleared after the
+    // duplicate was settled.
     if (isDuplicateSubscription(sub)) {
       await this.settleDuplicate(sub);
+      await this.refundDuplicateInvoice(
+        sub,
+        stripeInvoice.id,
+        sourceTransaction
+      );
       return {};
     }
 
@@ -1934,25 +2034,24 @@ export class SubscriptionService extends BaseService {
       amountCents
     );
 
+    // The live subscription's status, not a blanket ACTIVE: a late or
+    // replayed invoice never revives one Stripe has cancelled (a refund, a
+    // lost dispute), and a renewal keeps `cancel_at_period_end`.
+    const status = resolveStatus(
+      stripeSub.status,
+      stripeSub.cancel_at_period_end ?? false,
+      SUBSCRIPTION_STATUS.ACTIVE
+    );
+
     // An ended subscription is a tombstone: a late or replayed invoice
     // changes nothing on the row and restores no access. Its charge is real,
-    // so it is still split below — unless it was refunded in full first: a
-    // refund that lands before the payouts exist reverses nothing, so paying
-    // out after it would pay for money handed back.
+    // so it is still split below, unless it was refunded in full.
     if (!sub.endedAt) {
       const priceCents = subItem?.price?.unit_amount ?? sub.amountCents;
       const rowSplit =
         priceCents === amountCents
           ? split
           : await this.computeSubscriptionSplit(sub.organizationId, priceCents);
-      // The live subscription's status, not a blanket ACTIVE: a late or
-      // replayed invoice never revives one Stripe has cancelled (a refund, a
-      // lost dispute), and a renewal keeps `cancel_at_period_end`.
-      const status = resolveStatus(
-        stripeSub.status,
-        stripeSub.cancel_at_period_end ?? false,
-        SUBSCRIPTION_STATUS.ACTIVE
-      );
       const values = {
         currentPeriodStart: new Date(periodStart * 1000),
         currentPeriodEnd: new Date(periodEnd * 1000),
@@ -1971,27 +2070,46 @@ export class SubscriptionService extends BaseService {
             .where(eq(subscriptions.id, sub.id))
         );
         if (keptId) {
-          // This invoice revived it next to a newer subscription: refunded,
-          // and it pays no one (owner decision 7).
+          // Revived next to a newer subscription (owner decision 7). Only the
+          // invoice that revived it — its latest — is refunded, and pays no
+          // one. An older invoice redelivered now is not refunded and pays
+          // out as usual, while the revival is retired all the same.
+          const reviving = this.latestInvoiceId(stripeSub) === stripeInvoice.id;
           await this.retireRevived(
             sub,
             keptId,
-            { invoiceId: stripeInvoice.id, chargeId: sourceTransaction },
+            reviving
+              ? { invoiceId: stripeInvoice.id, chargeId: sourceTransaction }
+              : undefined,
             stripeSub
           );
-          return {};
+          if (reviving) return {};
         }
       } else {
         await this.db
           .update(subscriptions)
           .set(values)
-          .where(eq(subscriptions.id, sub.id));
+          .where(
+            and(eq(subscriptions.id, sub.id), isNull(subscriptions.endedAt))
+          );
       }
-    } else if (await this.refundedInFull(sourceTransaction)) {
-      this.obs.info(
-        'Late invoice on an ended subscription was refunded in full; no payout',
-        { subscriptionId: sub.id, invoiceId: stripeInvoice.id }
-      );
+    }
+
+    // Before paying out, the row as it stands now, read under the lock: a
+    // revival another event is retiring at once may have ended it. Ended, or
+    // not live at Stripe, the charge is checked too: a refund that lands
+    // before the payouts exist reverses nothing, so paying out after it
+    // would pay for money handed back.
+    const current = (await this.rereadUnderLock(sub)) ?? sub;
+    const ended = current.endedAt != null;
+    if (
+      (ended || !isLiveStatus(status)) &&
+      (await this.refundedInFull(sourceTransaction))
+    ) {
+      this.obs.info('Invoice refunded in full before its payout; no payout', {
+        subscriptionId: sub.id,
+        invoiceId: stripeInvoice.id,
+      });
       return {};
     }
 
@@ -2023,7 +2141,7 @@ export class SubscriptionService extends BaseService {
     });
 
     // No renewal email and no access cleared for an ended subscription.
-    if (sub.endedAt) return {};
+    if (ended) return {};
 
     // Build renewal email only for recurring invoices (not first payment)
     let email: WebhookEmailPayload | undefined;
@@ -2416,6 +2534,18 @@ export class SubscriptionService extends BaseService {
       'subscription_updated'
     );
 
+    // The ids drive the webhook's streaming block (on `unpaid`) and clear,
+    // which are per user and org: an OLD row's update must not block or
+    // clear the user's live subscription (review T5).
+    if (
+      !isLiveStatus(mapped.status) &&
+      (await this.otherLiveId(
+        this.db as typeof import('@codex/database').dbWs,
+        sub
+      ))
+    ) {
+      return {};
+    }
     return { userId: sub.userId, orgId: sub.organizationId };
   }
 
@@ -2499,19 +2629,7 @@ export class SubscriptionService extends BaseService {
       // Ended already: a redelivery, or the refund path ended it first.
       if (!ended) return false;
 
-      const [otherLive] = await tx
-        .select({ id: subscriptions.id })
-        .from(subscriptions)
-        .where(
-          and(
-            eq(subscriptions.userId, userId),
-            eq(subscriptions.organizationId, orgId),
-            ne(subscriptions.id, row.id),
-            inArray(subscriptions.status, LIVE_STATUSES)
-          )
-        )
-        .limit(1);
-      if (otherLive) return false;
+      if (await this.otherLiveId(tx, row)) return false;
 
       // BUG-016: Deactivate membership only when the role is 'subscriber'
       // — preserves the team roles (owner/admin/creator/member).
@@ -3351,6 +3469,19 @@ export class SubscriptionService extends BaseService {
         });
       }
 
+      // Resuming would make it a second live subscription to the org if the
+      // user has subscribed again since: refused before Stripe is asked, so
+      // nothing resumes there either (review T6).
+      const otherLive = await (
+        this.db as typeof import('@codex/database').dbWs
+      ).transaction(async (tx) => {
+        await this.lockSubscriber(tx, userId, organizationId);
+        return this.otherLiveId(tx, sub);
+      });
+      if (otherLive) {
+        throw new AlreadySubscribedError(userId, organizationId);
+      }
+
       // One key per pause (Codex-2hxff.15, SUB-13): the row's `updatedAt`
       // moves when it is paused and again when it resumes, so a double click
       // replays while the next pause's resume is a new request. A key per
@@ -4163,6 +4294,7 @@ export class SubscriptionService extends BaseService {
         payoutType: payouts.payoutType,
         reason: payouts.reason,
         transferGroup: payouts.transferGroup,
+        stripeChargeId: payouts.stripeChargeId,
         resolvedAt: payouts.resolvedAt,
       })
       .from(payouts)
@@ -4244,17 +4376,19 @@ export class SubscriptionService extends BaseService {
         }
       }
 
-      // Pre-h69cg historical rows have no `transferGroup`. Falling back to
-      // the row id keeps the dedup correct (1 row = 1 transaction) rather
-      // than collapsing all ungrouped rows into a single bucket.
-      const groupKey = row.transferGroup ?? row.payoutId;
-      acc._transferGroups.add(groupKey);
+      // One transaction is one charge (Codex-2hxff.15): a subscription's
+      // transfer group spans every renewal, so two renewals are two. A row
+      // with no charge id falls back to its transfer group, and a pre-h69cg
+      // row with neither to its own id (1 row = 1 transaction) rather than
+      // collapsing all ungrouped rows into a single bucket.
+      const chargeKey = row.stripeChargeId ?? row.transferGroup ?? row.payoutId;
+      acc._transferGroups.add(chargeKey);
 
-      // `needsAttentionCount` dedupes by the SAME key as `transactionCount`
-      // — under h69cg's 3-sibling-row model, one failed charge produces 3
-      // pending/failed rows that share a transferGroup. Counting per-row
-      // would render "1 transaction · 3 needs attention" for one stuck
-      // payout, which reads as 3 separate problems.
+      // `needsAttentionCount` counts stuck charges by the SAME key as
+      // `transactionCount`, as the summaries' NEEDS_ATTENTION_CHARGES does,
+      // so all three agree — under h69cg's 3-sibling-row model, one failed
+      // charge produces 3 pending/failed rows, which per-row would read as 3
+      // separate problems.
       //
       // `min_transfer_floor` is excluded: rows below Stripe's minimum
       // transfer threshold are held as pending until aggregate-and-sweep
@@ -4264,7 +4398,7 @@ export class SubscriptionService extends BaseService {
         (row.status === 'pending' || row.status === 'failed') &&
         row.reason !== 'min_transfer_floor'
       ) {
-        acc._needsAttentionGroups.add(groupKey);
+        acc._needsAttentionGroups.add(chargeKey);
       }
     }
 
@@ -5198,6 +5332,61 @@ export class SubscriptionService extends BaseService {
       { ...this.ledger(), obs: this.obs },
       { olderThanMinutes }
     );
+  }
+
+  /**
+   * The hourly retry of duplicate subscriptions still owed their refund
+   * (Codex-2hxff.15, review T8): a settle Stripe refused, and every retry of
+   * its event refused too, leaves the duplicate unsettled once Stripe stops
+   * redelivering. Settles the ones recorded more than `olderThanMs` ago, up to
+   * `limit`. One row's failure never stops the batch: `settleDuplicate` logs
+   * it (errorId, Stripe code) and it is returned in `stillOwed`.
+   */
+  async settleOwedDuplicates(options: {
+    olderThanMs: number;
+    limit: number;
+  }): Promise<{
+    settled: number;
+    stillOwed: Array<{ id: string; stripeSubscriptionId: string }>;
+  }> {
+    const recordedBefore = new Date(Date.now() - options.olderThanMs);
+    const owed = await this.db
+      .select()
+      .from(subscriptions)
+      .where(
+        and(
+          isNotNull(subscriptions.duplicateOfSubscriptionId),
+          isNull(subscriptions.duplicateSettledAt),
+          lt(subscriptions.createdAt, recordedBefore)
+        )
+      )
+      .orderBy(subscriptions.createdAt)
+      .limit(options.limit);
+
+    let settled = 0;
+    const stillOwed: Array<{ id: string; stripeSubscriptionId: string }> = [];
+    for (const row of owed) {
+      try {
+        await this.settleDuplicate(row);
+        settled++;
+      } catch (error) {
+        // A Stripe refusal is logged inside settleDuplicate; anything else
+        // (the settle write) is logged here.
+        if (!(error instanceof ServiceUnavailableError)) {
+          this.obs.error('Owed duplicate subscription could not be settled', {
+            errorId: crypto.randomUUID(),
+            subscriptionId: row.id,
+            stripeSubscriptionId: row.stripeSubscriptionId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        stillOwed.push({
+          id: row.id,
+          stripeSubscriptionId: row.stripeSubscriptionId,
+        });
+      }
+    }
+    return { settled, stillOwed };
   }
 
   // ── Disputes (Codex-2hxff.9; docs/payments/subscription-disputes.md) ──

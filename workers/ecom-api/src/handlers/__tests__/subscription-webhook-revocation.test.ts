@@ -1286,7 +1286,11 @@ describe('handlePaymentWebhook — access revocation on charge.refunded', () => 
 
     mockProcessRefund = vi.fn().mockResolvedValue({ userId: 'user_refund' });
     mockCancelForFullRefund = vi.fn().mockResolvedValue(undefined);
-    mockTierDeleted = vi.fn().mockResolvedValue(undefined);
+    // The deletion's own result names whom to block (Codex-2hxff.15): by
+    // default, the user's current subscription for the org ended.
+    mockTierDeleted = vi
+      .fn()
+      .mockResolvedValue({ userId: 'user_refund', orgId: 'org_refund' });
     mockCleanup = vi.fn();
     mockStripe = {} as Stripe;
 
@@ -1427,6 +1431,22 @@ describe('handlePaymentWebhook — access revocation on charge.refunded', () => 
     expect(mockRevoke).toHaveBeenCalledTimes(1);
   });
 
+  // Codex-2hxff.15 (review R1): the block follows the deletion's result, not
+  // the refunded subscription. A full refund of old A while B is live ends A,
+  // and the deletion names no one: B keeps streaming.
+  it('a full refund of an old subscription while another is live writes no block', async () => {
+    mockCancelForFullRefund.mockResolvedValueOnce(tierEnded);
+    mockTierDeleted.mockResolvedValueOnce({});
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+    await drainWaitUntil(bundle);
+
+    expect(mockTierDeleted).toHaveBeenCalledOnce();
+    expect(AccessRevocation).not.toHaveBeenCalled();
+    expect(mockRevoke).not.toHaveBeenCalled();
+  });
+
   // Owner decision 2026-10-20: a course plan's grant is revoked (as on
   // deletion), and the org-wide block — which would also stop the subscriber's
   // purchases and tier content — is NOT written.
@@ -1463,6 +1483,7 @@ describe('handlePaymentWebhook — access revocation on charge.refunded', () => 
       ...tierEnded,
       subscription: { ...tierEnded.subscription, organizationId: null },
     });
+    mockTierDeleted.mockResolvedValueOnce({ userId: 'user_refund' });
     const bundle = buildContext();
 
     await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);

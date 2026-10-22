@@ -91,11 +91,13 @@ import {
 import type { CreateCourseSubscriptionCheckoutInput } from '@codex/validation';
 import {
   and,
+  asc,
   count,
   eq,
   inArray,
   isNotNull,
   isNull,
+  lt,
   ne,
   sql,
 } from 'drizzle-orm';
@@ -1374,6 +1376,105 @@ export class CourseSubscriptionService extends BaseService {
   }
 
   /**
+   * Refund one paid invoice of a duplicate by its charge, whether or not the
+   * duplicate is settled. A delayed payment method (Bacs Direct Debit and
+   * others; subscription checkouts don't restrict `payment_method_types`)
+   * can be paid after the settle found nothing to refund. The key is the one
+   * `cancelAndRefundDuplicate` uses, so a refund it made is not made twice. A
+   * failure is retryable, as in {@link settleDuplicate}.
+   */
+  private async refundDuplicateInvoice(
+    row: CourseSubscription,
+    invoice: Stripe.Invoice
+  ): Promise<void> {
+    if (!invoice.id || invoice.amount_paid <= 0) return;
+    try {
+      const chargeId = await resolveInvoiceCharge(this.stripe, invoice);
+      if (!chargeId) {
+        throw new InternalServiceError(
+          'A paid invoice of a duplicate course subscription has no charge to refund',
+          { courseSubscriptionId: row.id, invoiceId: invoice.id }
+        );
+      }
+      await issueRefund(this.stripe, {
+        chargeId,
+        reason: 'duplicate',
+        idempotencyKey: `refund_duplicate_${invoice.id}`,
+        environment: this.environment,
+      });
+    } catch (error) {
+      this.obs.error('Duplicate course subscription invoice not refunded', {
+        errorId: crypto.randomUUID(),
+        courseSubscriptionId: row.id,
+        duplicateOfCourseSubscriptionId: row.duplicateOfCourseSubscriptionId,
+        invoiceId: invoice.id,
+        code: stripeErrorCode(error),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new ServiceUnavailableError(
+        'Duplicate course subscription refund failed; it will be retried',
+        { courseSubscriptionId: row.id }
+      );
+    }
+  }
+
+  /**
+   * Settle the duplicates still owed to their buyers: recorded more than
+   * `olderThanMs` ago and never settled, because Stripe refused every
+   * delivery's attempt. For the hourly sweep (the owner decision holds a
+   * failed refund for support; this makes it visible). One row's failure is
+   * logged by {@link settleDuplicate} and the rest carry on; the rows that
+   * stay owed are returned.
+   */
+  async settleOwedDuplicates(params: {
+    olderThanMs: number;
+    limit: number;
+  }): Promise<{
+    settled: number;
+    stillOwed: Array<{ id: string; stripeSubscriptionId: string }>;
+  }> {
+    const recordedBefore = new Date(Date.now() - params.olderThanMs);
+    const owed = await this.db
+      .select()
+      .from(courseSubscriptions)
+      .where(
+        and(
+          isNotNull(courseSubscriptions.duplicateOfCourseSubscriptionId),
+          isNull(courseSubscriptions.duplicateSettledAt),
+          lt(courseSubscriptions.createdAt, recordedBefore)
+        )
+      )
+      .orderBy(asc(courseSubscriptions.createdAt))
+      .limit(params.limit);
+
+    let settled = 0;
+    const stillOwed: Array<{ id: string; stripeSubscriptionId: string }> = [];
+    for (const row of owed) {
+      try {
+        await this.settleDuplicate(row);
+        settled += 1;
+      } catch (error) {
+        // A refused Stripe step is logged by settleDuplicate, with its
+        // errorId and Stripe's code; anything else (its row write) is here.
+        if (!(error instanceof ServiceUnavailableError)) {
+          this.obs.error('Owed duplicate course subscription not settled', {
+            errorId: crypto.randomUUID(),
+            courseSubscriptionId: row.id,
+            stripeSubscriptionId: row.stripeSubscriptionId,
+            code: stripeErrorCode(error),
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        stillOwed.push({
+          id: row.id,
+          stripeSubscriptionId: row.stripeSubscriptionId,
+        });
+      }
+    }
+    return { settled, stillOwed };
+  }
+
+  /**
    * Inside the lock: write or extend the subscription's grant to `expiresAt`
    * if its row, read again now, still grants access — not ended, not a
    * duplicate, and in an access-granting status. Returns whether it did.
@@ -1442,12 +1543,19 @@ export class CourseSubscriptionService extends BaseService {
    * was paid) while the buyer holds a newer live one to the course (owner
    * decision 7, "Cancel old, refund it"). The newer one stays.
    *
-   * Stripe first, both steps idempotent: the old one is cancelled now with no
-   * proration (unless Stripe has ended it), then ONLY the invoice that
-   * revived it is refunded — earlier invoices really bought access. Then its
-   * row is tombstoned under the lock; it keeps no grant and pays no one. If
-   * Stripe refuses, the row is left unchanged and the failure is retryable,
-   * so the redelivery repeats the Stripe steps and then writes the row.
+   * Stripe first, each step idempotent, in this order:
+   * 1. ONLY the invoice that revived it is refunded — earlier invoices really
+   *    bought access;
+   * 2. then it is cancelled now with no proration (unless Stripe has ended
+   *    it);
+   * 3. then its row is tombstoned under the lock; it keeps no grant and pays
+   *    no one.
+   * Refunding first is what makes a retry safe. Cancelled first, a refused
+   * refund would leave it ended at Stripe, and the redelivery would no longer
+   * see a revival: it would pay out the invoice instead of refunding it. A
+   * refused step leaves the row unchanged and is retryable, so the
+   * redelivery repeats the steps (the refund under the same key, or Stripe
+   * answers that the charge is refunded already) and then writes the row.
    *
    * `revivingInvoice` is the paid invoice, or (from `updated`) the
    * subscription's `latest_invoice`, refunded only if it was paid.
@@ -1459,22 +1567,6 @@ export class CourseSubscriptionService extends BaseService {
   ): Promise<void> {
     let refundedInvoiceId: string | null = null;
     try {
-      const live = await this.stripe.subscriptions.retrieve(
-        row.stripeSubscriptionId
-      );
-      if (live.status !== 'canceled' && live.status !== 'incomplete_expired') {
-        await this.stripe.subscriptions.cancel(
-          row.stripeSubscriptionId,
-          {
-            prorate: false,
-            cancellation_details: {
-              comment: 'Revived next to a newer subscription to the course',
-            },
-          },
-          { idempotencyKey: `revived_cancel_${row.stripeSubscriptionId}` }
-        );
-      }
-
       const invoice =
         typeof revivingInvoice === 'string'
           ? await this.stripe.invoices.retrieve(revivingInvoice)
@@ -1495,9 +1587,25 @@ export class CourseSubscriptionService extends BaseService {
         });
         refundedInvoiceId = invoice.id;
       }
+
+      const live = await this.stripe.subscriptions.retrieve(
+        row.stripeSubscriptionId
+      );
+      if (live.status !== 'canceled' && live.status !== 'incomplete_expired') {
+        await this.stripe.subscriptions.cancel(
+          row.stripeSubscriptionId,
+          {
+            prorate: false,
+            cancellation_details: {
+              comment: 'Revived next to a newer subscription to the course',
+            },
+          },
+          { idempotencyKey: `revived_cancel_${row.stripeSubscriptionId}` }
+        );
+      }
     } catch (error) {
       this.obs.error(
-        'Revived course subscription could not be cancelled and refunded',
+        'Revived course subscription could not be refunded and cancelled',
         {
           errorId: crypto.randomUUID(),
           courseSubscriptionId: row.id,
@@ -1529,7 +1637,7 @@ export class CourseSubscriptionService extends BaseService {
       });
     });
     this.obs.warn(
-      'Old course subscription revived next to a newer one: cancelled and refunded',
+      'Old course subscription revived next to a newer one: refunded and cancelled',
       {
         courseSubscriptionId: row.id,
         supersededByCourseSubscriptionId: supersededById,
@@ -1600,9 +1708,16 @@ export class CourseSubscriptionService extends BaseService {
    * reports active again, gets its access back (owner decision 2026-10-22,
    * "Yes, like tiers") — unless the buyer has since taken a newer one, when
    * the old one is cancelled and this invoice refunded instead
-   * ({@link endRevived}). A duplicate is settled and pays no one. A row
-   * Stripe has ended is left as it is, grant included, but the invoice was
-   * paid, so it still pays out — unless its charge was refunded in full.
+   * ({@link endRevived}). Only the subscription's latest invoice revives it:
+   * a redelivered earlier one retires it too, refunding the latest, but it
+   * bought real access, so it is not refunded and pays out as usual.
+   *
+   * A duplicate is settled, and this invoice refunded, and it pays no one. A
+   * row Stripe has ended is left as it is, grant included, but the invoice
+   * was paid, so it still pays out — unless its charge was refunded in full.
+   * That is checked whenever the row has ended (read again under the lock)
+   * or the subscription is not live: a revival being refunded by a
+   * concurrent event must not be paid out.
    */
   async handleCourseInvoicePaymentSucceeded(
     stripeInvoice: Stripe.Invoice,
@@ -1613,6 +1728,7 @@ export class CourseSubscriptionService extends BaseService {
     const { row } = presence;
     if (isDuplicateSubscription(row)) {
       await this.settleDuplicate(row);
+      await this.refundDuplicateInvoice(row, stripeInvoice);
       return;
     }
 
@@ -1620,6 +1736,11 @@ export class CourseSubscriptionService extends BaseService {
       userId: row.userId,
       organizationId: row.organizationId ?? '',
     };
+    const status = resolveStatus(
+      stripeSub.status,
+      stripeSub.cancel_at_period_end ?? false,
+      'active'
+    );
     if (row.endedAt) {
       this.obs.info('Invoice for an ended course subscription: row kept', {
         courseSubscriptionId: row.id,
@@ -1630,11 +1751,6 @@ export class CourseSubscriptionService extends BaseService {
       const periodStart = item?.current_period_start ?? 0;
       const periodEnd = item?.current_period_end ?? 0;
       const newPeriodEnd = new Date(periodEnd * 1000);
-      const status = resolveStatus(
-        stripeSub.status,
-        stripeSub.cancel_at_period_end ?? false,
-        'active'
-      );
 
       // Under the lock, and only while the row has not ended: a deletion that
       // won the lock leaves it as it is. Then extend the stored grant to the
@@ -1664,8 +1780,16 @@ export class CourseSubscriptionService extends BaseService {
         return null;
       });
       if (supersededBy) {
-        await this.endRevived(row, supersededBy, stripeInvoice);
-        return;
+        const latest = stripeSub.latest_invoice;
+        const latestId = typeof latest === 'string' ? latest : latest?.id;
+        if (latestId === stripeInvoice.id) {
+          await this.endRevived(row, supersededBy, stripeInvoice);
+          return;
+        }
+        // An earlier invoice: retired here too, as tiers do, refunding the
+        // latest invoice that revived it. This one bought real access, so it
+        // is not refunded and pays out below.
+        await this.endRevived(row, supersededBy, latest ?? null);
       }
     }
 
@@ -1688,9 +1812,19 @@ export class CourseSubscriptionService extends BaseService {
       );
       return result;
     }
-    if (row.endedAt && (await this.chargeRefundedInFull(chargeId))) {
+    const [current] = await this.withCourseLock(row, (tx) =>
+      tx
+        .select({ endedAt: courseSubscriptions.endedAt })
+        .from(courseSubscriptions)
+        .where(eq(courseSubscriptions.id, row.id))
+        .limit(1)
+    );
+    if (
+      (current?.endedAt || !subscriptionStatusGrantsAccess(status)) &&
+      (await this.chargeRefundedInFull(chargeId))
+    ) {
       this.obs.info(
-        'Invoice for an ended course subscription was refunded in full — skipping payouts',
+        'Invoice for a course subscription that is not live was refunded in full — skipping payouts',
         { courseSubscriptionId: row.id, invoiceId: stripeInvoice.id, chargeId }
       );
       return result;

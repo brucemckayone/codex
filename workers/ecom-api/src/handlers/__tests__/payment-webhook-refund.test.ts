@@ -42,6 +42,7 @@
  */
 
 import { STRIPE_EVENTS } from '@codex/constants';
+import { ServiceUnavailableError } from '@codex/service-errors';
 import { createMockHonoContext, type MockHonoContext } from '@codex/test-utils';
 import type { WebhookServices } from '@codex/worker-utils';
 import type { Context } from 'hono';
@@ -289,6 +290,11 @@ describe('handlePaymentWebhook — charge.refunded', () => {
       },
       cancelled,
     });
+    // The deletion names the user's current subscription for the org ended.
+    mockTierDeleted.mockResolvedValueOnce({
+      userId: 'user_sub',
+      orgId: 'org_sub',
+    });
 
     const bundle = buildContext();
     const event = createRefundEvent();
@@ -417,6 +423,10 @@ describe('handlePaymentWebhook — charge.refunded', () => {
         status: 'active',
       },
       cancelled: { id: 'sub_fire', status: 'canceled' },
+    });
+    mockTierDeleted.mockResolvedValueOnce({
+      userId: 'user_fire',
+      orgId: 'org_fire',
     });
     mockRevoke.mockRejectedValueOnce(new Error('KV unreachable'));
 
@@ -711,7 +721,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     expect(mockRevoke).not.toHaveBeenCalled();
   });
 
-  it('a full-refund cancel that fails still lets the refund email go, then is rethrown', async () => {
+  it('a full-refund cancel that fails for good still lets the generic refund email go, then is rethrown', async () => {
+    // Permanent: no retry would send it.
     mockCancelForFullRefund.mockRejectedValueOnce(new Error('Stripe is down'));
     const bundle = buildContext();
 
@@ -719,8 +730,76 @@ describe('handlePaymentWebhook — charge.refunded', () => {
       handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context)
     ).rejects.toThrow('Stripe is down');
 
+    expect(mockClaimRefundEmails).toHaveBeenCalledOnce();
     expect(emails()).toEqual([expect.objectContaining({ accessNote: '' })]);
     expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  // Codex-2hxff.15 (review R2): the redelivery sends the one email, worded
+  // for what it refunds; claiming it now would send the generic one.
+  it('a full-refund step that fails transiently is rethrown before any email is claimed or sent', async () => {
+    mockCancelForFullRefund.mockRejectedValueOnce(
+      new ServiceUnavailableError('Stripe timed out')
+    );
+    const bundle = buildContext();
+
+    await expect(
+      handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context)
+    ).rejects.toThrow('Stripe timed out');
+
+    expect(mockClaimRefundEmails).not.toHaveBeenCalled();
+    expect(sendEmailToWorker).not.toHaveBeenCalled();
+    expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  // Review R4: the cancellation email's links are built from WEB_APP_URL.
+  it('a full refund with WEB_APP_URL unset is alerted once, and still ends the subscription', async () => {
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      subscription: {
+        kind: 'tier',
+        id: 'local_sub',
+        stripeSubscriptionId: 'sub_no_url',
+        userId: 'user_no_url',
+        organizationId: 'org_no_url',
+        status: 'active',
+      },
+      cancelled: { id: 'sub_no_url', status: 'canceled' },
+    });
+    const bundle = buildContext({ WEB_APP_URL: undefined });
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(mockTierDeleted).toHaveBeenCalledWith(
+      { id: 'sub_no_url', status: 'canceled' },
+      ''
+    );
+    expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining('WEB_APP_URL is not set'),
+      expect.objectContaining({ errorId: expect.any(String) })
+    );
+  });
+
+  it('a full refund with WEB_APP_URL set raises no alert', async () => {
+    mockCancelForFullRefund.mockResolvedValueOnce({
+      subscription: {
+        kind: 'tier',
+        id: 'local_sub',
+        stripeSubscriptionId: 'sub_url',
+        userId: 'user_url',
+        organizationId: 'org_url',
+        status: 'active',
+      },
+      cancelled: { id: 'sub_url', status: 'canceled' },
+    });
+    const bundle = buildContext({ WEB_APP_URL: 'https://revelations.studio' });
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(mockTierDeleted).toHaveBeenCalledWith(
+      { id: 'sub_url', status: 'canceled' },
+      'https://revelations.studio'
+    );
+    expect(bundle.mock._obs.error).not.toHaveBeenCalled();
   });
 
   // ── refund.updated / refund.failed (Codex-2hxff.8) ───────────────────

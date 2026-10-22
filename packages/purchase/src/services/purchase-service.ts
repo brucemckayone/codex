@@ -773,6 +773,58 @@ export class PurchaseService extends BaseService {
       : this.refundDuplicatePayment(purchase);
   }
 
+  /**
+   * The hourly sweep's retry of duplicate refunds still owed (Codex-2hxff.15).
+   * The webhook retries a refused one only while Stripe redelivers; after that
+   * a `pending` duplicate would sit unseen. Each is tried once and one failure
+   * never stops the rest (`refundDuplicatePayment` has logged it). What stays
+   * owed is returned for the sweep to alert on and support to settle.
+   */
+  async settleOwedDuplicates(params: {
+    olderThanMs: number;
+    limit: number;
+  }): Promise<{
+    settled: number;
+    stillOwed: Array<{ id: string; stripePaymentIntentId: string }>;
+  }> {
+    const owed = await this.db
+      .select()
+      .from(purchases)
+      .where(
+        and(
+          isNotNull(purchases.duplicateOfPurchaseId),
+          eq(purchases.status, PURCHASE_STATUS.PENDING),
+          lt(purchases.createdAt, new Date(Date.now() - params.olderThanMs))
+        )
+      )
+      .orderBy(purchases.createdAt)
+      .limit(params.limit);
+
+    let settled = 0;
+    const stillOwed: Array<{ id: string; stripePaymentIntentId: string }> = [];
+    for (const purchase of owed) {
+      try {
+        await this.refundDuplicatePayment(purchase);
+        settled++;
+      } catch (error) {
+        // A refused refund was logged as it was thrown; anything else (the
+        // row update after a refund Stripe made) is logged here.
+        if (!(error instanceof ServiceUnavailableError)) {
+          this.obs.error('Owed duplicate refund could not be settled', {
+            errorId: crypto.randomUUID(),
+            purchaseId: purchase.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        stillOwed.push({
+          id: purchase.id,
+          stripePaymentIntentId: purchase.stripePaymentIntentId,
+        });
+      }
+    }
+    return { settled, stillOwed };
+  }
+
   /** The title of the content or course a purchase is for. */
   private async itemTitle(
     purchase: Pick<Purchase, 'contentId' | 'courseId'>

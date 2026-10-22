@@ -36,6 +36,29 @@ import { runCourseOffSaleSweep } from './course-off-sale-sweep';
  *  going to. The webhook owns fresh rows; the sweep owns dropped events. */
 const DEFAULT_OLDER_THAN_MINUTES = 15;
 
+/** A duplicate's refund is retried here once it is this old; a younger one is
+ *  still the webhook's, which Stripe redelivers (Codex-2hxff.15). */
+export const OWED_DUPLICATES_OLDER_THAN_MS = 60 * 60 * 1000;
+
+/** Per kind of duplicate, per hourly run; anything left waits an hour. */
+export const OWED_DUPLICATES_SWEEP_LIMIT = 50;
+
+/** The one contract the purchase, tier and course-plan services share. */
+interface OwedDuplicatesSettler {
+  settleOwedDuplicates(params: {
+    olderThanMs: number;
+    limit: number;
+  }): Promise<{
+    settled: number;
+    stillOwed: ReadonlyArray<{ id: string }>;
+  }>;
+}
+
+interface SweepLogger {
+  info(message: string, metadata?: Record<string, unknown>): void;
+  error(message: string, metadata?: Record<string, unknown>): void;
+}
+
 export interface RunSweepDeps {
   /** The registry's SubscriptionService (see runScheduledPayoutsSweep). */
   subscription: Pick<
@@ -107,6 +130,53 @@ async function retryClawbacks(
 }
 
 /**
+ * Retry the refunds still owed on duplicates (Codex-2hxff.15): a second
+ * purchase of an item, or a second subscription to an org or course plan,
+ * whose refund was refused while Stripe redelivered its event, and then
+ * stopped. Each kind runs on its own, so one failing never stops the others,
+ * and nothing here fails the cron. What is still owed afterwards is alerted
+ * with its ids, for support to settle.
+ */
+export async function runOwedDuplicatesSweep(
+  services: Record<
+    'purchase' | 'subscription' | 'courseSubscription',
+    OwedDuplicatesSettler
+  >,
+  obs: SweepLogger
+): Promise<void> {
+  for (const kind of [
+    'purchase',
+    'subscription',
+    'courseSubscription',
+  ] as const) {
+    try {
+      const result = await services[kind].settleOwedDuplicates({
+        olderThanMs: OWED_DUPLICATES_OLDER_THAN_MS,
+        limit: OWED_DUPLICATES_SWEEP_LIMIT,
+      });
+      if (result.settled > 0) {
+        obs.info('owed duplicate refunds settled', {
+          kind,
+          settled: result.settled,
+        });
+      }
+      if (result.stillOwed.length > 0) {
+        obs.error(
+          'Duplicate refunds are still owed after the hourly retry: refund them by hand',
+          { errorId: crypto.randomUUID(), kind, stillOwed: result.stillOwed }
+        );
+      }
+    } catch (error) {
+      obs.error('owed duplicate refunds could not be retried', {
+        errorId: crypto.randomUUID(),
+        kind,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
+
+/**
  * Scheduled-handler entry point. Validates required env vars (logs and exits
  * cleanly on missing config), builds the registry's services through the
  * webhook composition root (Codex-2hxff.54) — so the drain carries fee config
@@ -158,9 +228,10 @@ export async function runScheduledPayoutsSweep(
       olderThanMinutes: deps?.olderThanMinutes,
     });
   } finally {
-    // Same hourly wake (Codex-2hxff.64): never throws, so the pool is always
-    // released below.
+    // Same hourly wake (Codex-2hxff.64, Codex-2hxff.15): neither throws, so
+    // the pool is always released below.
     await runCourseOffSaleSweep(webhookServices.services, obs);
+    await runOwedDuplicatesSweep(webhookServices.services, obs);
     webhookServices.release();
   }
 }

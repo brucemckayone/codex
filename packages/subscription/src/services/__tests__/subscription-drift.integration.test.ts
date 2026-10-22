@@ -53,7 +53,10 @@ import {
   it,
   vi,
 } from 'vitest';
-import { TierChangePreviewExpiredError } from '../../errors';
+import {
+  AlreadySubscribedError,
+  TierChangePreviewExpiredError,
+} from '../../errors';
 import { SubscriptionService } from '../subscription-service';
 
 /** A vi.fn() behind one of Stripe's overloaded methods. */
@@ -69,6 +72,10 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
   let subscriberId: string;
   let otherId: string;
   const orgIds: string[] = [];
+  // Stripe's own state, so a retry reads back what an earlier call changed
+  // (a refund made, a subscription cancelled), as it would at Stripe.
+  const refundedCharges = new Set<string>();
+  const paidInvoicesBySub = new Map<string, Array<Record<string, unknown>>>();
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -89,6 +96,32 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
         metadata: {},
       })),
     };
+    refundedCharges.clear();
+    paidInvoicesBySub.clear();
+    asMock(stripe.refunds.create).mockImplementation(
+      async (params: { charge?: string }) => {
+        if (params.charge) refundedCharges.add(params.charge);
+        return {
+          id: `re_drift_${randomUUID().slice(0, 8)}`,
+          object: 'refund',
+          status: 'succeeded',
+        };
+      }
+    );
+    asMock(stripe.charges.retrieve).mockImplementation(async (id: string) => ({
+      id,
+      object: 'charge',
+      amount: 499,
+      amount_refunded: refundedCharges.has(id) ? 499 : 0,
+      refunded: refundedCharges.has(id),
+    }));
+    asMock(stripe.invoices.list).mockImplementation(
+      async (params: { subscription?: string }) => ({
+        object: 'list',
+        has_more: false,
+        data: paidInvoicesBySub.get(params.subscription ?? '') ?? [],
+      })
+    );
     service = new SubscriptionService({ db, environment: 'test' }, stripe);
     await db
       .update(users)
@@ -180,7 +213,10 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
     }) as unknown as Stripe.Subscription;
   }
 
-  /** What `subscriptions.retrieve` answers for these ids. */
+  /**
+   * What `subscriptions.retrieve` answers for these ids. A cancel changes it:
+   * the subscription reads back `canceled` afterwards, as at Stripe.
+   */
   function liveAtStripe(...subs: Stripe.Subscription[]) {
     const byId = new Map(subs.map((sub) => [sub.id, sub]));
     asMock(stripe.subscriptions.retrieve).mockImplementation(
@@ -192,28 +228,30 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
           items: { data: [] },
         }
     );
+    asMock(stripe.subscriptions.cancel).mockImplementation(
+      async (id: string) => {
+        const cancelled = {
+          ...(byId.get(id) ?? { id, metadata: {}, items: { data: [] } }),
+          status: 'canceled',
+        } as Stripe.Subscription;
+        byId.set(id, cancelled);
+        return cancelled;
+      }
+    );
   }
 
   /** One paid invoice on the subscription, as `invoices.list` returns it. */
   function paidInvoice(stripeSubId: string, amountPaid: number) {
     const invoiceId = `in_dup_${randomUUID().slice(0, 8)}`;
     const chargeId = `ch_dup_${randomUUID().slice(0, 8)}`;
-    asMock(stripe.invoices.list).mockImplementation(
-      async (params: { subscription?: string }) => ({
-        object: 'list',
-        has_more: false,
-        data:
-          params.subscription === stripeSubId
-            ? [
-                {
-                  id: invoiceId,
-                  amount_paid: amountPaid,
-                  payments: { data: [{ payment: { charge: chargeId } }] },
-                },
-              ]
-            : [],
-      })
-    );
+    paidInvoicesBySub.set(stripeSubId, [
+      ...(paidInvoicesBySub.get(stripeSubId) ?? []),
+      {
+        id: invoiceId,
+        amount_paid: amountPaid,
+        payments: { data: [{ payment: { charge: chargeId } }] },
+      },
+    ]);
     return { invoiceId, chargeId };
   }
 
@@ -363,6 +401,31 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
         .where(eq(payoutsTable.subscriptionId, settled?.id ?? ''));
       expect(slices).toHaveLength(0);
       expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
+    });
+
+    it('its invoice paid after it was settled (a delayed method) is refunded too, under its own key', async () => {
+      const { second } = await subscribeTwice('dup-late-paid');
+      await service.handleSubscriptionCreated(second);
+      expect((await rowFor(second.id))?.duplicateSettledAt).not.toBeNull();
+      const lateChargeId = `ch_late_${randomUUID().slice(0, 8)}`;
+      const late = invoiceFor(second.id, {
+        amount_paid: 999,
+        payments: {
+          data: [{ payment: { payment_intent: null, charge: lateChargeId } }],
+        },
+      });
+
+      expect(await service.handleInvoicePaymentSucceeded(late)).toEqual({});
+
+      expect(stripe.refunds.create).toHaveBeenCalledWith(
+        expect.objectContaining({ charge: lateChargeId, reason: 'duplicate' }),
+        { idempotencyKey: `refund_duplicate_${late.id}` }
+      );
+      const slices = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.stripeChargeId, lateChargeId));
+      expect(slices).toHaveLength(0);
     });
 
     it('its customer.subscription.deleted leaves the first subscription and the membership alone', async () => {
@@ -645,6 +708,28 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
       expect(membership?.status).toBe('active');
     });
 
+    it("an old row's update, while a newer subscription is live, carries no ids: it cannot block or clear that one", async () => {
+      const { org, tier1 } = await createFullOrg('old-update');
+      const old = stripeSub(org.id, tier1.id);
+      liveAtStripe(old);
+      await service.handleSubscriptionCreated(old);
+      await service.handleSubscriptionUpdated({ ...old, status: 'unpaid' });
+      const current = stripeSub(org.id, tier1.id);
+      liveAtStripe(old, current);
+      await service.handleSubscriptionCreated(current);
+
+      // A redelivered `unpaid` for the old one: on ids, the webhook would
+      // block the user's streaming for the org.
+      const result = await service.handleSubscriptionUpdated({
+        ...old,
+        status: 'unpaid',
+      });
+
+      expect(result?.userId).toBeUndefined();
+      expect(result?.orgId).toBeUndefined();
+      expect((await rowFor(current.id))?.status).toBe('active');
+    });
+
     it('an invited member who subscribes, then cancels, stays an active member (SUB-20)', async () => {
       const { org, tier1 } = await createFullOrg('member-kept');
       await db.insert(organizationMemberships).values({
@@ -677,7 +762,7 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
   describe('an old subscription revived next to a newer one (decision 7: "Cancel old, refund it")', () => {
     /**
      * Old A goes `unpaid`, the buyer subscribes again (B, live), then pays
-     * A's open invoice: Stripe has A active again.
+     * A's open invoice: Stripe has A active again, that invoice its latest.
      */
     async function reviveNextToNewer(slug: string) {
       const { org, tier1, tier2 } = await createFullOrg(slug);
@@ -703,7 +788,9 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
           data: [{ payment: { payment_intent: null, charge: chargeId } }],
         },
       });
-      return { org, a, b, aRow, bRow, invoice, chargeId };
+      const revivedA = { ...a, latest_invoice: invoice } as Stripe.Subscription;
+      liveAtStripe(revivedA, b);
+      return { org, a, b, aRow, bRow, invoice, chargeId, revivedA };
     }
 
     async function slicesFor(chargeId: string) {
@@ -713,7 +800,17 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
         .where(eq(payoutsTable.stripeChargeId, chargeId));
     }
 
-    it('its reviving invoice: one cancel, one refund of THAT invoice, A tombstoned, B untouched, no payout', async () => {
+    /** Stripe refuses the next call to `method`, once. */
+    function refuseOnce(method: unknown) {
+      asMock(method).mockRejectedValueOnce(
+        Object.assign(new Error('Stripe refused'), {
+          type: 'StripeInvalidRequestError',
+          code: 'balance_insufficient',
+        })
+      );
+    }
+
+    it('its reviving invoice: the refund, THEN one cancel, A tombstoned, B untouched, no payout', async () => {
       const { org, a, b, bRow, invoice, chargeId } =
         await reviveNextToNewer('revive-invoice');
 
@@ -738,6 +835,12 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
         }),
         { idempotencyKey: `refund_revived_${invoice.id}` }
       );
+      // Refund first: a refused refund must never follow a cancel.
+      expect(
+        asMock(stripe.refunds.create).mock.invocationCallOrder[0]
+      ).toBeLessThan(
+        asMock(stripe.subscriptions.cancel).mock.invocationCallOrder[0] ?? 0
+      );
       expect(await slicesFor(chargeId)).toHaveLength(0);
       expect(stripe.transfers.create).not.toHaveBeenCalled();
       // B's access is untouched: the membership stays active.
@@ -745,11 +848,8 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
     });
 
     it('revived by an update first: retired there, and its invoice after is inert with no second Stripe call', async () => {
-      const { a, b, bRow, invoice, chargeId } =
+      const { a, b, bRow, invoice, chargeId, revivedA } =
         await reviveNextToNewer('revive-update');
-      // A's latest invoice is the paid one that revived it.
-      const revivedA = { ...a, latest_invoice: invoice } as Stripe.Subscription;
-      liveAtStripe(revivedA, b);
 
       expect(await service.handleSubscriptionUpdated(revivedA)).toBeUndefined();
 
@@ -763,33 +863,24 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
       );
 
       // That invoice's own event lands after: its charge is refunded in full.
-      asMock(stripe.charges.retrieve).mockResolvedValue({
-        id: chargeId,
-        object: 'charge',
-        amount: 499,
-        amount_refunded: 499,
-        refunded: true,
-      });
       expect(await service.handleInvoicePaymentSucceeded(invoice)).toEqual({});
       expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
       expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
       expect(await slicesFor(chargeId)).toHaveLength(0);
     });
 
-    it('a refund Stripe refuses leaves A as it was and the event retryable; the retry completes', async () => {
-      const { a, aRow, invoice, chargeId } =
-        await reviveNextToNewer('revive-refused');
-      asMock(stripe.refunds.create).mockRejectedValueOnce(
-        Object.assign(new Error('Insufficient platform balance'), {
-          type: 'StripeInvalidRequestError',
-          code: 'balance_insufficient',
-        })
+    it('a refund Stripe refuses changes nothing anywhere; the retry refunds, cancels and pays no one', async () => {
+      const { a, aRow, invoice, chargeId } = await reviveNextToNewer(
+        'revive-refund-refused'
       );
+      refuseOnce(stripe.refunds.create);
 
       await expect(
         service.handleInvoicePaymentSucceeded(invoice)
       ).rejects.toBeInstanceOf(ServiceUnavailableError);
       expect(await rowFor(a.id)).toEqual(aRow);
+      // Not cancelled: the retry still sees the revival.
+      expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
 
       // Stripe redelivers the event.
       expect(await service.handleInvoicePaymentSucceeded(invoice)).toEqual({});
@@ -801,6 +892,78 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
         `refund_revived_${invoice.id}`,
         `refund_revived_${invoice.id}`,
       ]);
+      expect(refundedCharges).toContain(chargeId);
+      expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
+      expect(await slicesFor(chargeId)).toHaveLength(0);
+    });
+
+    it('a cancel Stripe refuses after a good refund: the retry repeats the refund under its key and completes', async () => {
+      const { a, aRow, invoice, chargeId } = await reviveNextToNewer(
+        'revive-cancel-refused'
+      );
+      refuseOnce(stripe.subscriptions.cancel);
+
+      await expect(
+        service.handleInvoicePaymentSucceeded(invoice)
+      ).rejects.toBeInstanceOf(ServiceUnavailableError);
+      expect(await rowFor(a.id)).toEqual(aRow);
+
+      expect(await service.handleInvoicePaymentSucceeded(invoice)).toEqual({});
+      expect((await rowFor(a.id))?.endedAt).not.toBeNull();
+      const keys = asMock(stripe.refunds.create).mock.calls.map(
+        (call) => (call[1] as { idempotencyKey: string }).idempotencyKey
+      );
+      expect(new Set(keys)).toEqual(new Set([`refund_revived_${invoice.id}`]));
+      expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(2);
+      expect(await slicesFor(chargeId)).toHaveLength(0);
+    });
+
+    it('an OLDER invoice redelivered is not refunded and pays out; the revival is retired on its latest invoice', async () => {
+      const { a, invoice, chargeId } =
+        await reviveNextToNewer('revive-old-invoice');
+      const oldChargeId = `ch_old_${randomUUID().slice(0, 8)}`;
+      const oldInvoice = invoiceFor(a.id, {
+        amount_paid: 499,
+        payments: {
+          data: [{ payment: { payment_intent: null, charge: oldChargeId } }],
+        },
+      });
+
+      expect(await service.handleInvoicePaymentSucceeded(oldInvoice)).toEqual(
+        {}
+      );
+
+      // Only the reviving (latest) invoice is refunded.
+      expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
+      expect(stripe.refunds.create).toHaveBeenCalledWith(
+        expect.objectContaining({ charge: chargeId }),
+        { idempotencyKey: `refund_revived_${invoice.id}` }
+      );
+      expect((await rowFor(a.id))?.endedAt).not.toBeNull();
+      expect(await slicesFor(chargeId)).toHaveLength(0);
+      // The older payment bought real access: it pays out.
+      expect((await slicesFor(oldChargeId)).length).toBeGreaterThan(0);
+    });
+
+    it('an update and its invoice processed at once: A retired, one refund, no payout', async () => {
+      const { a, b, bRow, invoice, chargeId, revivedA } =
+        await reviveNextToNewer('revive-concurrent');
+
+      const results = await Promise.all([
+        service.handleSubscriptionUpdated(revivedA),
+        service.handleInvoicePaymentSucceeded(invoice),
+      ]);
+
+      expect(results[0]?.userId).toBeUndefined();
+      expect(results[1]).toEqual({});
+      expect((await rowFor(a.id))?.endedAt).not.toBeNull();
+      expect(await rowFor(b.id)).toEqual(bRow);
+      expect(refundedCharges).toContain(chargeId);
+      // Each Stripe call carries one key, however many events made it.
+      const keys = asMock(stripe.refunds.create).mock.calls.map(
+        (call) => (call[1] as { idempotencyKey: string }).idempotencyKey
+      );
+      expect(new Set(keys)).toEqual(new Set([`refund_revived_${invoice.id}`]));
       expect(await slicesFor(chargeId)).toHaveLength(0);
     });
 
@@ -847,6 +1010,131 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
       expect(result).toEqual({});
       expect(await slicesFor(chargeId)).toHaveLength(0);
       expect(stripe.transfers.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Review round 1: T6, T8 ──────────────────────────────────────────────
+
+  describe('the one-live index never fails quietly (review T6)', () => {
+    it('a unique violation with no row of its own is retryable, and the retry records it', async () => {
+      const { org, tier1 } = await createFullOrg('t6-index');
+      const sub = stripeSub(org.id, tier1.id);
+      liveAtStripe(sub);
+      // The insert meets the index (a live row written outside the lock):
+      // the first transaction fails as Postgres would fail it.
+      let violated = false;
+      const violatingDb = new Proxy(db, {
+        get(target, prop, receiver) {
+          if (prop === 'transaction' && !violated) {
+            violated = true;
+            return async () => {
+              throw Object.assign(new Error('duplicate key value'), {
+                code: '23505',
+              });
+            };
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      });
+      const violating = new SubscriptionService(
+        { db: violatingDb, environment: 'test' },
+        stripe
+      );
+
+      await expect(
+        violating.handleSubscriptionCreated(sub)
+      ).rejects.toBeInstanceOf(ServiceUnavailableError);
+      expect(await rowFor(sub.id)).toBeUndefined();
+
+      // Stripe redelivers it.
+      expect(await service.handleSubscriptionCreated(sub)).toMatchObject({
+        userId: subscriberId,
+      });
+    });
+
+    it('resuming a paused subscription while a newer one is live is refused before Stripe is asked', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('t6-resume');
+      await db.insert(subscriptions).values([
+        createTestSubscriptionInput(subscriberId, org.id, tier1.id, {
+          status: 'paused',
+        }),
+        createTestSubscriptionInput(subscriberId, org.id, tier2.id),
+      ]);
+
+      await expect(
+        service.resumeSubscription(subscriberId, org.id)
+      ).rejects.toBeInstanceOf(AlreadySubscribedError);
+      expect(stripe.subscriptions.resume).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('owed duplicates are retried by the sweep (review T8)', () => {
+    it('settles the owed ones, reports those Stripe still refuses, and never throws', async () => {
+      const good = await subscribeTwice('t8-good');
+      // One Connect account per user: the second org's owner is re-seeded.
+      await db
+        .delete(stripeConnectAccounts)
+        .where(eq(stripeConnectAccounts.userId, ownerId));
+      const bad = await subscribeTwice('t8-bad');
+      for (const duplicate of [good.second, bad.second]) {
+        asMock(stripe.refunds.create).mockRejectedValueOnce(
+          Object.assign(new Error('Stripe refused'), {
+            type: 'StripeInvalidRequestError',
+            code: 'balance_insufficient',
+          })
+        );
+        await expect(
+          service.handleSubscriptionCreated(duplicate)
+        ).rejects.toBeInstanceOf(ServiceUnavailableError);
+      }
+      // Owed for two hours now, past Stripe's redeliveries.
+      await db
+        .update(subscriptions)
+        .set({ createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000) })
+        .where(
+          inArray(subscriptions.stripeSubscriptionId, [
+            good.second.id,
+            bad.second.id,
+          ])
+        );
+      const badRow = await rowFor(bad.second.id);
+      // Stripe still refuses the bad one's refund.
+      asMock(stripe.refunds.create).mockImplementation(
+        async (params: { charge?: string }) => {
+          if (params.charge === bad.chargeId) {
+            throw Object.assign(new Error('Stripe refused'), {
+              type: 'StripeInvalidRequestError',
+              code: 'balance_insufficient',
+            });
+          }
+          return { id: `re_${randomUUID().slice(0, 8)}`, object: 'refund' };
+        }
+      );
+
+      const result = await service.settleOwedDuplicates({
+        olderThanMs: 60 * 60 * 1000,
+        limit: 500,
+      });
+
+      expect(result.settled).toBeGreaterThanOrEqual(1);
+      expect((await rowFor(good.second.id))?.duplicateSettledAt).not.toBeNull();
+      expect(result.stillOwed).toContainEqual({
+        id: badRow?.id,
+        stripeSubscriptionId: bad.second.id,
+      });
+      expect((await rowFor(bad.second.id))?.duplicateSettledAt).toBeNull();
+
+      // Stripe accepts it at last: nothing is left owed.
+      asMock(stripe.refunds.create).mockResolvedValue({
+        id: `re_${randomUUID().slice(0, 8)}`,
+        object: 'refund',
+      });
+      const after = await service.settleOwedDuplicates({
+        olderThanMs: 60 * 60 * 1000,
+        limit: 500,
+      });
+      expect(after.stillOwed.map((row) => row.id)).not.toContain(badRow?.id);
+      expect((await rowFor(bad.second.id))?.duplicateSettledAt).not.toBeNull();
     });
   });
 
@@ -1124,6 +1412,42 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
       expect(
         table.find((row) => row.userId === ownerId)?.needsAttentionCount
       ).toBe(1);
+    });
+
+    it('needs attention counts two stuck renewals of one subscription as two, everywhere', async () => {
+      const { org, sub, transferGroup } = await seedCharge('sum-renewals');
+      const renewal = (chargeId: string) =>
+        ({
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          userId: otherId,
+          currency: 'gbp',
+          status: 'pending',
+          reason: 'connect_not_ready',
+          sourceType: 'subscription',
+          stripeChargeId: chargeId,
+          transferGroup,
+          payoutType: 'creator_payout',
+          amountCents: 400,
+        }) as const;
+      await db
+        .insert(payoutsTable)
+        .values([
+          renewal(`ch_r1_${randomUUID().slice(0, 8)}`),
+          renewal(`ch_r2_${randomUUID().slice(0, 8)}`),
+        ]);
+
+      const orgSummary = await service.getPayoutSummary(org.id);
+      const creatorSummary =
+        await service.getEarningsSummaryForCreator(otherId);
+      const table = await service.getPayoutsByCreatorBreakdown(org.id);
+
+      expect(orgSummary.needsAttentionCount).toBe(2);
+      expect(creatorSummary.needsAttentionCount).toBe(2);
+      const creatorRow = table.find((row) => row.userId === otherId);
+      // "2 transactions · 2 need attention", not "1 · 2".
+      expect(creatorRow?.transactionCount).toBe(2);
+      expect(creatorRow?.needsAttentionCount).toBe(2);
     });
   });
 });

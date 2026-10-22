@@ -15,9 +15,11 @@
  *
  * A refund of a second subscription the user already had (Codex-2hxff.15)
  * cancels nothing: it was cancelled when it was recorded, and refunded by us.
- * Nor does the refund of the payment that revived an old subscription next to
- * the newer one that stands (owner decision 7, "Cancel old, refund it"): it
- * was ended then. Either result says what the buyer's email needs instead.
+ * Nor does the refund of a payment on an old subscription that is no longer
+ * live next to the newer one that stands, such as the payment that revived it
+ * (owner decision 7, "Cancel old, refund it"): the revival refunds it first
+ * and cancels it after. Either result says what the buyer's email needs
+ * instead.
  */
 
 import { ACCESS_GRANTING_SUBSCRIPTION_STATUSES } from '@codex/constants';
@@ -28,8 +30,18 @@ import {
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
-import { and, eq, inArray, isNotNull, ne } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/pg-core';
+import { InternalServiceError } from '@codex/service-errors';
+import {
+  and,
+  eq,
+  inArray,
+  isNotNull,
+  ne,
+  notInArray,
+  or,
+  type SQL,
+} from 'drizzle-orm';
+import { type AnyPgColumn, alias } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import {
   type ChargedSubscription,
@@ -135,8 +147,8 @@ export function isFullRefund(
  * subscription that has already ended (its `customer.subscription.deleted`
  * ends it here). A duplicate's refund, any of its payments, cancels nothing
  * and asks Stripe no more: it returns what the buyer's email says. So does
- * the refund of an ended subscription while the user holds a live one for
- * the same org or course.
+ * the refund of a subscription that is not live (ended, or in a status that
+ * grants nothing) while the user holds a live one for the same org or course.
  */
 export async function cancelForFullRefund(
   deps: SubscriptionRefundDeps,
@@ -292,10 +304,13 @@ async function duplicateRefund(
 }
 
 /**
- * What the refund email of an ended subscription says while the user holds
- * a live one for the same org (course plan: the same course); undefined
- * otherwise. The payment that revived it next to the newer one was refunded
- * when it was ended (owner decision 7).
+ * What the refund email of a subscription that is not live says while the
+ * user holds a live one for the same org (course plan: the same course);
+ * undefined otherwise (owner decision 7). The revival refunds BEFORE it
+ * cancels, so the refund's own event can find the old subscription still
+ * active at Stripe: our row, not Stripe, says it is not live. (Our row live
+ * and canceled at Stripe cannot sit beside another live row: the one-live
+ * index forbids two.)
  */
 async function supersededRefund(
   deps: SubscriptionRefundDeps,
@@ -321,7 +336,7 @@ async function supersededRefund(
       .where(
         and(
           eq(courseSubscriptions.id, subscription.id),
-          isNotNull(courseSubscriptions.endedAt)
+          notLive(courseSubscriptions.endedAt, courseSubscriptions.status)
         )
       )
       .limit(1);
@@ -356,7 +371,7 @@ async function supersededRefund(
     .where(
       and(
         eq(subscriptions.id, subscription.id),
-        isNotNull(subscriptions.endedAt)
+        notLive(subscriptions.endedAt, subscriptions.status)
       )
     )
     .limit(1);
@@ -367,6 +382,21 @@ async function supersededRefund(
         tierName: row.tierName,
       }
     : undefined;
+}
+
+/**
+ * Not live in our records: ended, or in a status that grants nothing. Never
+ * left undefined: `and()` would drop a missing filter without a word.
+ */
+function notLive(endedAt: AnyPgColumn, status: AnyPgColumn): SQL {
+  const condition = or(
+    isNotNull(endedAt),
+    notInArray(status, [...ACCESS_GRANTING_SUBSCRIPTION_STATUSES])
+  );
+  if (!condition) {
+    throw new InternalServiceError('The not-live filter could not be built');
+  }
+  return condition;
 }
 
 /** The newest paid invoice that bought a billing period, newest first. */

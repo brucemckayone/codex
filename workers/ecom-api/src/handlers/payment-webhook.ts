@@ -40,6 +40,7 @@ import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
+import { isTransientError } from '../utils/error-classification';
 
 /**
  * Fire-and-forget bump of the user's library collection version. Called
@@ -359,9 +360,10 @@ async function handleChargeRefunded(
 
   // After the clawback and the purchase, so a Stripe failure here never holds
   // those up, and before the emails, so a refund that ends nothing of the
-  // buyer's says why it was made (Codex-2hxff.15). A failure still lets the
-  // emails go, then is rethrown: a redelivery repeats only steps that are safe
-  // to repeat.
+  // buyer's says why it was made (Codex-2hxff.15). A transient failure is
+  // rethrown before any email: the redelivery sends the one email, worded
+  // right. A permanent one still lets the generic email go, then is rethrown.
+  // A redelivery repeats only steps that are safe to repeat.
   let subscriptionNote: SubscriptionRefundNote | undefined;
   let endFailure: unknown;
   try {
@@ -377,6 +379,7 @@ async function handleChargeRefunded(
       }
     );
   } catch (error) {
+    if (isTransientError(error)) throw error;
     endFailure = error;
   }
 
@@ -392,9 +395,12 @@ async function handleChargeRefunded(
  * email included: this is its first end, so that event finds it already ended
  * when it lands and sends nothing (Codex-2hxff.15).
  *
- * A tier subscription's streaming block is written too. A course plan's grant
- * is revoked instead, as on deletion: the org-wide block would also stop the
- * subscriber's purchases and tier content (owner decision 2026-10-20).
+ * A tier subscription's streaming block is written too, from the deletion's
+ * own result: only when this was the user's current subscription for the
+ * org, so an old one ending never blocks the one they still pay for. A
+ * course plan's grant is revoked instead, as on deletion: the org-wide block
+ * would also stop the subscriber's purchases and tier content (owner
+ * decision 2026-10-20).
  *
  * A refund of a second subscription the user already had, or of an old one
  * ended beside the one that stands (owner decision 7), ends nothing of
@@ -424,13 +430,22 @@ async function endSubscriptionForFullRefund(
       invalidateLibrary(c, subscription.userId);
       return undefined;
     }
+    const webAppUrl = c.env.WEB_APP_URL;
+    if (!webAppUrl) {
+      // The cancellation email's links are built from it: without it they
+      // point nowhere, or the email is refused.
+      c.get('obs')?.error(
+        'WEB_APP_URL is not set: the cancellation email after a full refund has no working links',
+        { errorId: crypto.randomUUID(), chargeId: charge.chargeId }
+      );
+    }
     const deleted = await subscriptionService.handleSubscriptionDeleted(
       cancelled,
-      c.env.WEB_APP_URL || ''
+      webAppUrl || ''
     );
     invalidateLibrary(c, subscription.userId);
-    if (subscription.organizationId) {
-      revokeAccess(c, subscription.userId, subscription.organizationId);
+    if (deleted?.userId && deleted.orgId) {
+      revokeAccess(c, deleted.userId, deleted.orgId);
     }
     if (deleted?.email) {
       sendEmailToWorker(c.env, c.executionCtx, deleted.email);

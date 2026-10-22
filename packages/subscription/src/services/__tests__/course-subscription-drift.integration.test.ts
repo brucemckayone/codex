@@ -183,6 +183,38 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
     } as Stripe.Subscription;
   }
 
+  /**
+   * A service whose first transaction waits for `first` (another event,
+   * handled by another service) to commit: the interleaving is fixed rather
+   * than left to timing.
+   */
+  function serviceRacing(
+    first: () => Promise<unknown>,
+    stripe: Stripe = stripeWithStableCharges()
+  ) {
+    let raced = false;
+    const racing = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === 'transaction') {
+          return async (fn: Parameters<Database['transaction']>[0]) => {
+            if (!raced) {
+              raced = true;
+              await first();
+            }
+            return target.transaction(fn);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const service = new CourseSubscriptionService(
+      { db: racing, environment: 'test' },
+      stripe
+    );
+    return { service, raced: () => raced };
+  }
+
   function serviceWith(stripe: Stripe = stripeWithStableCharges()) {
     return {
       stripe,
@@ -280,7 +312,7 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
       );
     });
 
-    it('a redelivery, its invoice and its updates ask Stripe nothing more and change nothing', async () => {
+    it('a redelivery and its updates ask Stripe nothing more and change nothing', async () => {
       const { cId, pId, stripe, service, firstRow } = await liveThenDuplicate();
       const second = courseSub(cId, pId);
       await service.handleCourseSubscriptionCreated(second);
@@ -288,6 +320,37 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
       const retrieves = vi.mocked(stripe.subscriptions.retrieve).mock.calls
         .length;
 
+      const results = [
+        await service.handleCourseSubscriptionCreated(second),
+        await service.handleCourseSubscriptionUpdated(as(second, 'active')),
+      ];
+
+      expect(results).toEqual([undefined, undefined]);
+      expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
+      expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(stripe.subscriptions.retrieve).mock.calls).toHaveLength(
+        retrieves
+      );
+      expect(await rowFor(second.id)).toEqual(settled);
+      expect((await grantsOn(cId)).map((g) => g.sourceRef)).toEqual([
+        firstRow.id,
+      ]);
+    });
+
+    // A delayed payment method (Bacs Direct Debit and others) can be paid
+    // after the settle found nothing paid to refund.
+    it('paid after it was settled: that invoice is refunded by its charge, and pays no one', async () => {
+      const { cId, pId } = await makeCourseWithPlan();
+      const { stripe, service } = serviceWith();
+      await service.handleCourseSubscriptionCreated(courseSub(cId, pId));
+      const second = courseSub(cId, pId);
+      // Settled while its first payment was still pending: nothing to refund.
+      await service.handleCourseSubscriptionCreated(second);
+      const settled = await rowFor(second.id);
+      expect(settled?.duplicateSettledAt).not.toBeNull();
+      expect(stripe.refunds.create).not.toHaveBeenCalled();
+
+      const piId = `pi_${randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 5000,
         currency: 'gbp',
@@ -297,28 +360,30 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
             metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
           },
         },
+        payments: {
+          data: [{ payment: { type: 'payment_intent', payment_intent: piId } }],
+        },
       }) as unknown as Stripe.Invoice;
-      const results = [
-        await service.handleCourseSubscriptionCreated(second),
-        await service.handleCourseInvoicePaymentSucceeded(invoice, second),
-        await service.handleCourseSubscriptionUpdated(as(second, 'active')),
-      ];
-
-      expect(results).toEqual([undefined, undefined, undefined]);
-      expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
-      expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(stripe.subscriptions.retrieve).mock.calls).toHaveLength(
-        retrieves
+      const result = await service.handleCourseInvoicePaymentSucceeded(
+        invoice,
+        as(second, 'canceled')
       );
-      expect(await rowFor(second.id)).toEqual(settled);
+
+      expect(result).toBeUndefined();
+      expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
+      expect(stripe.refunds.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          charge: piId.replace(/^pi_/, 'ch_'),
+          reason: 'duplicate',
+        }),
+        { idempotencyKey: `refund_duplicate_${invoice.id}` }
+      );
       const dupPayouts = await db
         .select()
         .from(payouts)
         .where(eq(payouts.courseSubscriptionId, settled?.id ?? ''));
       expect(dupPayouts).toHaveLength(0);
-      expect((await grantsOn(cId)).map((g) => g.sourceRef)).toEqual([
-        firstRow.id,
-      ]);
+      expect(await rowFor(second.id)).toEqual(settled);
     });
 
     it('a refused refund is retryable and leaves the duplicate owed; the retry settles it', async () => {
@@ -502,31 +567,6 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
       return { cId, sub };
     }
 
-    /** A service whose first transaction waits for `deletion` to commit. */
-    function serviceRacing(deletion: () => Promise<unknown>) {
-      let raced = false;
-      const racing = new Proxy(db, {
-        get(target, prop, receiver) {
-          if (prop === 'transaction') {
-            return async (fn: Parameters<Database['transaction']>[0]) => {
-              if (!raced) {
-                raced = true;
-                await deletion();
-              }
-              return target.transaction(fn);
-            };
-          }
-          const value = Reflect.get(target, prop, receiver);
-          return typeof value === 'function' ? value.bind(target) : value;
-        },
-      });
-      const service = new CourseSubscriptionService(
-        { db: racing, environment: 'test' },
-        stripeWithStableCharges()
-      );
-      return { service, raced: () => raced };
-    }
-
     it('checkout completion: no grant for the subscription the deletion ended', async () => {
       const { cId, sub } = await recordedWithoutGrant();
       const { service: deleting } = serviceWith();
@@ -676,20 +716,103 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
       return { invoice, chargeId: piId.replace(/^pi_/, 'ch_') };
     }
 
+    /**
+     * A Stripe that keeps state, so a retry sees what the first attempt did:
+     * a cancelled subscription stays cancelled, a refunded charge stays
+     * refunded, and a refund replayed under its key is the same refund.
+     */
+    function statefulStripe() {
+      const stripe = stripeWithStableCharges();
+      const subs = new Map<string, Stripe.Subscription>();
+      const invoices = new Map<string, Stripe.Invoice>();
+      const refundsByKey = new Map<string, { id: string; charge: string }>();
+      const refunded = new Set<string>();
+      vi.mocked(stripe.subscriptions.retrieve).mockImplementation((async (
+        id: string
+      ) => subs.get(id)) as never);
+      vi.mocked(stripe.subscriptions.cancel).mockImplementation((async (
+        id: string
+      ) => {
+        const ended = { ...subs.get(id), status: 'canceled' };
+        subs.set(id, ended as Stripe.Subscription);
+        return ended;
+      }) as never);
+      vi.mocked(stripe.invoices.retrieve).mockImplementation(
+        (async (id: string) =>
+          invoices.get(id) ?? { id, payments: { data: [] } }) as never
+      );
+      vi.mocked(stripe.refunds.create).mockImplementation((async (
+        params: { charge: string },
+        options?: { idempotencyKey?: string }
+      ) => {
+        const key = options?.idempotencyKey ?? '';
+        const replay = refundsByKey.get(key);
+        if (replay) return replay;
+        if (refunded.has(params.charge)) {
+          throw Object.assign(new Error('Charge has already been refunded.'), {
+            type: 'StripeInvalidRequestError',
+            code: 'charge_already_refunded',
+          });
+        }
+        const refund = { id: `re_${randomUUID().slice(0, 8)}`, ...params };
+        refunded.add(params.charge);
+        refundsByKey.set(key, refund);
+        return refund;
+      }) as never);
+      vi.mocked(stripe.charges.retrieve).mockImplementation((async (
+        id: string
+      ) => ({
+        id,
+        object: 'charge',
+        amount: 5000,
+        amount_refunded: refunded.has(id) ? 5000 : 0,
+        refunded: refunded.has(id),
+      })) as never);
+      return { stripe, subs, invoices, refunded };
+    }
+
+    /**
+     * A unpaid (its access ended), then B live; then A's open invoice is
+     * paid and Stripe makes A active again, with that invoice its latest.
+     */
     async function revivedNextToNewer() {
       const { cId, pId } = await makeCourseWithPlan();
-      const ctx = serviceWith();
+      const state = statefulStripe();
+      const { service } = serviceWith(state.stripe);
       const old = courseSub(cId, pId);
-      await ctx.service.handleCourseSubscriptionCreated(old);
-      await ctx.service.handleCourseSubscriptionUpdated(as(old, 'unpaid'));
+      await service.handleCourseSubscriptionCreated(old);
+      await service.handleCourseSubscriptionUpdated(as(old, 'unpaid'));
       const newer = courseSub(cId, pId);
-      await ctx.service.handleCourseSubscriptionCreated(newer);
+      await service.handleCourseSubscriptionCreated(newer);
       const oldRow = await rowFor(old.id);
       const newerRow = await rowFor(newer.id);
       if (!oldRow || !newerRow) throw new Error('subscriptions not recorded');
       expect(oldRow).toMatchObject({ status: 'cancelled', endedAt: null });
+
       const nextPeriodEnd = Math.floor(Date.now() / 1000) + 40 * DAY_SECONDS;
-      return { cId, old, oldRow, newerRow, nextPeriodEnd, ...ctx };
+      const { invoice, chargeId } = paidInvoiceFor(old);
+      state.invoices.set(invoice.id, invoice);
+      state.subs.set(old.id, {
+        ...as(old, 'active', nextPeriodEnd),
+        latest_invoice: invoice.id,
+      } as Stripe.Subscription);
+      /** The subscription as the webhook retrieves it now. */
+      const atStripe = async () =>
+        (await state.stripe.subscriptions.retrieve(
+          old.id
+        )) as Stripe.Subscription;
+      return {
+        cId,
+        old,
+        oldRow,
+        newerRow,
+        nextPeriodEnd,
+        invoice,
+        chargeId,
+        atStripe,
+        service,
+        ...state,
+      };
     }
 
     /** The newer subscription and its access, untouched; the old one ended. */
@@ -714,84 +837,75 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
         .where(eq(payouts.courseSubscriptionId, courseSubscriptionId));
     }
 
-    it("its paid invoice: cancelled once, that invoice refunded once, no payout, the newer one's access kept", async () => {
-      const { cId, old, oldRow, newerRow, nextPeriodEnd, stripe, service } =
-        await revivedNextToNewer();
-      const { invoice, chargeId } = paidInvoiceFor(old);
+    it("its paid invoice: refunded, then cancelled, once each; no payout; the newer one's access kept", async () => {
+      const ctx = await revivedNextToNewer();
+      const { stripe, old, invoice } = ctx;
 
-      const result = await service.handleCourseInvoicePaymentSucceeded(
+      const result = await ctx.service.handleCourseInvoicePaymentSucceeded(
         invoice,
-        as(old, 'active', nextPeriodEnd)
+        await ctx.atStripe()
       );
 
       expect(result).toBeUndefined();
+      expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
+      expect(stripe.refunds.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          charge: ctx.chargeId,
+          reason: 'requested_by_customer',
+        }),
+        { idempotencyKey: `refund_revived_${invoice.id}` }
+      );
       expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
       expect(stripe.subscriptions.cancel).toHaveBeenCalledWith(
         old.id,
         expect.objectContaining({ prorate: false }),
         { idempotencyKey: `revived_cancel_${old.id}` }
       );
-      expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
-      expect(stripe.refunds.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          charge: chargeId,
-          reason: 'requested_by_customer',
-        }),
-        { idempotencyKey: `refund_revived_${invoice.id}` }
-      );
-      await expectNewerKeptOldEnded(cId, old, newerRow);
-      expect(await payoutsFor(oldRow.id)).toHaveLength(0);
+      const [refundedAt] = vi.mocked(stripe.refunds.create).mock
+        .invocationCallOrder;
+      const [cancelledAt] = vi.mocked(stripe.subscriptions.cancel).mock
+        .invocationCallOrder;
+      expect(refundedAt).toBeLessThan(cancelledAt ?? 0);
+      await expectNewerKeptOldEnded(ctx.cId, old, ctx.newerRow);
+      expect(await payoutsFor(ctx.oldRow.id)).toHaveLength(0);
     });
 
-    it('an update first, then its invoice: the update cancels and refunds; the invoice changes nothing and pays no one', async () => {
-      const { cId, old, oldRow, newerRow, nextPeriodEnd, stripe, service } =
-        await revivedNextToNewer();
-      const { invoice, chargeId } = paidInvoiceFor(old);
-      // The live subscription is active again; its latest invoice is the paid one.
-      vi.mocked(stripe.subscriptions.retrieve).mockResolvedValueOnce({
-        ...as(old, 'active', nextPeriodEnd),
-        latest_invoice: invoice.id,
-      } as never);
-      vi.mocked(stripe.invoices.retrieve).mockResolvedValue(invoice as never);
+    it('an update first, then its invoice: the update refunds and cancels; the invoice changes nothing and pays no one', async () => {
+      const ctx = await revivedNextToNewer();
+      const { stripe, old, invoice } = ctx;
 
-      const updated = await service.handleCourseSubscriptionUpdated(
-        as(old, 'active', nextPeriodEnd)
+      const updated = await ctx.service.handleCourseSubscriptionUpdated(
+        as(old, 'active', ctx.nextPeriodEnd)
       );
 
       expect(updated).toBeUndefined();
-      expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
       expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
       expect(stripe.refunds.create).toHaveBeenCalledWith(
-        expect.objectContaining({ charge: chargeId }),
+        expect.objectContaining({ charge: ctx.chargeId }),
         { idempotencyKey: `refund_revived_${invoice.id}` }
       );
-      await expectNewerKeptOldEnded(cId, old, newerRow);
+      expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
+      await expectNewerKeptOldEnded(ctx.cId, old, ctx.newerRow);
 
-      // The invoice lands next; its charge is refunded in full by now.
-      vi.mocked(stripe.charges.retrieve).mockResolvedValue({
-        id: chargeId,
-        object: 'charge',
-        amount: 5000,
-        amount_refunded: 5000,
-        refunded: true,
-      } as never);
-      const paid = await service.handleCourseInvoicePaymentSucceeded(
+      // The invoice lands next: Stripe has it cancelled, its charge refunded.
+      const paid = await ctx.service.handleCourseInvoicePaymentSucceeded(
         invoice,
-        as(old, 'canceled')
+        await ctx.atStripe()
       );
 
       // Only the buyer's library cache is bumped; nothing else changes.
       expect(paid).toEqual({ userId: subscriberId, organizationId: orgId });
-      expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
       expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
-      expect(await payoutsFor(oldRow.id)).toHaveLength(0);
-      await expectNewerKeptOldEnded(cId, old, newerRow);
+      expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
+      expect(await payoutsFor(ctx.oldRow.id)).toHaveLength(0);
+      await expectNewerKeptOldEnded(ctx.cId, old, ctx.newerRow);
     });
 
-    it('a refused refund is retryable and leaves the old row unchanged; the retry completes', async () => {
-      const { cId, old, newerRow, nextPeriodEnd, stripe, service } =
-        await revivedNextToNewer();
-      const { invoice } = paidInvoiceFor(old);
+    // Cancelled first, a refused refund left it ended at Stripe; the
+    // redelivery then saw no revival and paid the invoice out instead.
+    it('a refused refund leaves Stripe and the row unchanged; the retry refunds once, cancels, and pays no one', async () => {
+      const ctx = await revivedNextToNewer();
+      const { stripe, old, invoice } = ctx;
       vi.mocked(stripe.refunds.create).mockRejectedValueOnce(
         Object.assign(new Error('Insufficient funds in your Stripe balance'), {
           type: 'StripeInvalidRequestError',
@@ -800,31 +914,71 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
       );
 
       await expect(
-        service.handleCourseInvoicePaymentSucceeded(
+        ctx.service.handleCourseInvoicePaymentSucceeded(
           invoice,
-          as(old, 'active', nextPeriodEnd)
+          await ctx.atStripe()
         )
       ).rejects.toBeInstanceOf(ServiceUnavailableError);
+      expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+      expect((await ctx.atStripe()).status).toBe('active');
       expect(await rowFor(old.id)).toMatchObject({
         status: 'cancelled',
         endedAt: null,
       });
 
-      // Stripe redelivers the invoice.
+      // Stripe redelivers; the webhook retrieves the subscription again.
       await expect(
-        service.handleCourseInvoicePaymentSucceeded(
+        ctx.service.handleCourseInvoicePaymentSucceeded(
           invoice,
-          as(old, 'active', nextPeriodEnd)
+          await ctx.atStripe()
         )
       ).resolves.toBeUndefined();
-      await expectNewerKeptOldEnded(cId, old, newerRow);
-      expect(stripe.refunds.create).toHaveBeenCalledTimes(2);
+
+      expect([...ctx.refunded]).toEqual([ctx.chargeId]);
       for (const nth of [1, 2]) {
         expect(stripe.refunds.create).toHaveBeenNthCalledWith(
           nth,
           expect.anything(),
           { idempotencyKey: `refund_revived_${invoice.id}` }
         );
+      }
+      expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
+      expect((await ctx.atStripe()).status).toBe('canceled');
+      await expectNewerKeptOldEnded(ctx.cId, old, ctx.newerRow);
+      expect(await payoutsFor(ctx.oldRow.id)).toHaveLength(0);
+    });
+
+    it('a refused cancel after a good refund: the retry refunds nothing more and completes', async () => {
+      const ctx = await revivedNextToNewer();
+      const { stripe, old, invoice } = ctx;
+      vi.mocked(stripe.subscriptions.cancel).mockRejectedValueOnce(
+        Object.assign(new Error('An error occurred with our connection'), {
+          type: 'StripeConnectionError',
+        })
+      );
+
+      await expect(
+        ctx.service.handleCourseInvoicePaymentSucceeded(
+          invoice,
+          await ctx.atStripe()
+        )
+      ).rejects.toBeInstanceOf(ServiceUnavailableError);
+      expect([...ctx.refunded]).toEqual([ctx.chargeId]);
+      expect(await rowFor(old.id)).toMatchObject({
+        status: 'cancelled',
+        endedAt: null,
+      });
+
+      await expect(
+        ctx.service.handleCourseInvoicePaymentSucceeded(
+          invoice,
+          await ctx.atStripe()
+        )
+      ).resolves.toBeUndefined();
+
+      expect([...ctx.refunded]).toEqual([ctx.chargeId]);
+      expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(2);
+      for (const nth of [1, 2]) {
         expect(stripe.subscriptions.cancel).toHaveBeenNthCalledWith(
           nth,
           old.id,
@@ -832,6 +986,144 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
           { idempotencyKey: `revived_cancel_${old.id}` }
         );
       }
+      await expectNewerKeptOldEnded(ctx.cId, old, ctx.newerRow);
+      expect(await payoutsFor(ctx.oldRow.id)).toHaveLength(0);
+    });
+
+    // As tiers: the earlier invoice retires the revival too, refunding the
+    // latest invoice; it bought real access itself, so it pays out.
+    it('a redelivered earlier invoice retires the revival (the latest invoice refunded) and is itself paid out', async () => {
+      const ctx = await revivedNextToNewer();
+      const { stripe, old } = ctx;
+      const earlier = paidInvoiceFor(old);
+
+      await ctx.service.handleCourseInvoicePaymentSucceeded(
+        earlier.invoice,
+        await ctx.atStripe()
+      );
+
+      expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
+      expect(stripe.refunds.create).toHaveBeenCalledWith(
+        expect.objectContaining({ charge: ctx.chargeId }),
+        { idempotencyKey: `refund_revived_${ctx.invoice.id}` }
+      );
+      expect([...ctx.refunded]).toEqual([ctx.chargeId]);
+      expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
+      await expectNewerKeptOldEnded(ctx.cId, old, ctx.newerRow);
+      const slices = await payoutsFor(ctx.oldRow.id);
+      expect(slices.map((r) => r.payoutType).sort()).toEqual([
+        'creator_payout',
+        'organization_fee',
+        'platform_fee',
+      ]);
+      expect(slices.every((r) => r.stripeChargeId === earlier.chargeId)).toBe(
+        true
+      );
+    });
+
+    // The update's revival refunds and tombstones while the invoice is being
+    // handled: the invoice read the row live, and the webhook retrieved the
+    // subscription after the cancel. The charge it holds is being refunded.
+    it('the invoice handled while the update retires it: no slices', async () => {
+      const ctx = await revivedNextToNewer();
+      const { old, invoice } = ctx;
+      const updating = serviceWith(ctx.stripe).service;
+      const racing = serviceRacing(
+        () =>
+          updating.handleCourseSubscriptionUpdated(
+            as(old, 'active', ctx.nextPeriodEnd)
+          ),
+        ctx.stripe
+      );
+
+      await racing.service.handleCourseInvoicePaymentSucceeded(invoice, {
+        ...as(old, 'canceled'),
+        latest_invoice: invoice.id,
+      } as Stripe.Subscription);
+
+      expect(racing.raced()).toBe(true);
+      expect([...ctx.refunded]).toEqual([ctx.chargeId]);
+      expect(await payoutsFor(ctx.oldRow.id)).toHaveLength(0);
+      await expectNewerKeptOldEnded(ctx.cId, old, ctx.newerRow);
+    });
+  });
+
+  // K5: the hourly sweep. Its query is global, so these rows are dated 1990
+  // and it is asked only for rows recorded before 2000: no other run's rows.
+  describe('settleOwedDuplicates', () => {
+    it('settles the owed duplicates Stripe accepts and returns the ones it still refuses', async () => {
+      const { stripe, service } = serviceWith();
+      const owedDuplicate = async () => {
+        const { cId, pId } = await makeCourseWithPlan();
+        const live = courseSub(cId, pId);
+        await service.handleCourseSubscriptionCreated(live);
+        const liveRow = await rowFor(live.id);
+        const item = live.items.data[0];
+        const stripeSubscriptionId = `sub_${randomUUID().slice(0, 8)}`;
+        await db.insert(courseSubscriptions).values({
+          userId: subscriberId,
+          courseId: cId,
+          planId: pId,
+          organizationId: orgId,
+          stripeSubscriptionId,
+          stripeCustomerId: `cus_${randomUUID().slice(0, 8)}`,
+          status: 'cancelled',
+          billingInterval: 'month',
+          currentPeriodStart: new Date(
+            (item?.current_period_start ?? 0) * 1000
+          ),
+          currentPeriodEnd: new Date((item?.current_period_end ?? 0) * 1000),
+          duplicateOfCourseSubscriptionId: liveRow?.id,
+          createdAt: new Date('1990-01-01T00:00:00Z'),
+        });
+        const owed = await rowFor(stripeSubscriptionId);
+        if (!owed) throw new Error('duplicate not recorded');
+        return owed;
+      };
+      const refused = await owedDuplicate();
+      const accepted = await owedDuplicate();
+      vi.mocked(stripe.subscriptions.retrieve).mockImplementation((async (
+        id: string
+      ) => {
+        if (id === refused.stripeSubscriptionId) {
+          throw Object.assign(new Error('Stripe is unavailable'), {
+            type: 'StripeAPIError',
+          });
+        }
+        return { id, status: 'active' };
+      }) as never);
+      const olderThanMs = Date.now() - Date.parse('2000-01-01T00:00:00Z');
+
+      const first = await service.settleOwedDuplicates({
+        olderThanMs,
+        limit: 50,
+      });
+
+      expect(first.settled).toBeGreaterThanOrEqual(1);
+      expect(first.stillOwed).toContainEqual({
+        id: refused.id,
+        stripeSubscriptionId: refused.stripeSubscriptionId,
+      });
+      expect(first.stillOwed.map((r) => r.id)).not.toContain(accepted.id);
+      expect(
+        (await rowFor(accepted.stripeSubscriptionId))?.duplicateSettledAt
+      ).not.toBeNull();
+      expect(
+        (await rowFor(refused.stripeSubscriptionId))?.duplicateSettledAt
+      ).toBeNull();
+
+      // Stripe recovers: the next sweep settles it.
+      vi.mocked(stripe.subscriptions.retrieve).mockImplementation((async (
+        id: string
+      ) => ({ id, status: 'canceled' })) as never);
+      const second = await service.settleOwedDuplicates({
+        olderThanMs,
+        limit: 50,
+      });
+      expect(second.stillOwed.map((r) => r.id)).not.toContain(refused.id);
+      expect(
+        (await rowFor(refused.stripeSubscriptionId))?.duplicateSettledAt
+      ).not.toBeNull();
     });
   });
 
