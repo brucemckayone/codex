@@ -26,7 +26,7 @@
     membership counts server-side.
 -->
 <script lang="ts">
-  import { getThumbnailSrcset } from '$lib/utils/image';
+  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
   import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
   import {
     Avatar,
@@ -373,7 +373,7 @@
                       <img
                         src={item.thumbnail}
                         srcset={getThumbnailSrcset(item.thumbnail) || undefined}
-                        sizes="9rem"
+                        sizes={coverCropSizes('9rem', 16 / 9, item.thumbnail)}
                         alt=""
                         loading="lazy"
                         decoding="async"

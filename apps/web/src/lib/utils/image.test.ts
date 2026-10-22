@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  containSizes,
   coverCropSizes,
   getShareImage,
   getThumbnailDimensions,
@@ -176,6 +177,38 @@ describe('coverCropSizes', () => {
     ).toBe(
       '(min-width: 40rem) and (max-width: 63.9375rem) calc(50vw * 2.37), not (min-width: 40rem) calc(100vw * 2.37), calc(20rem * 2.37)'
     );
+  });
+  it('leaves the slots alone when a ratio is not a number', () => {
+    // A NaN scale would put every entry inside a calc() the browser drops.
+    expect(coverCropSizes('10rem', Number.NaN, `${FOLDER}/md.webp`)).toBe(
+      '10rem'
+    );
+  });
+});
+
+describe('containSizes', () => {
+  it('is the box height times the picture ratio, up to the width', () => {
+    // A 4:1 signature in a 4.3rem-tall box; a square one is drawn 4.3rem wide.
+    expect(
+      containSizes(
+        'https://cdn.example.test/c/signature/1600x400-0a1b2c3d/md.webp',
+        4.3,
+        '20.5rem',
+        4
+      )
+    ).toBe('min(17.2rem, 20.5rem)');
+    expect(
+      containSizes(
+        'https://cdn.example.test/c/signature/1200x1200-0a1b2c3d/md.webp',
+        4.3,
+        '20.5rem',
+        4
+      )
+    ).toBe('min(4.3rem, 20.5rem)');
+  });
+
+  it('takes the assumed ratio for a picture that does not record its size', () => {
+    expect(containSizes(SIZED, 3.5, '100vw', 4)).toBe('min(14rem, 100vw)');
   });
 });
 

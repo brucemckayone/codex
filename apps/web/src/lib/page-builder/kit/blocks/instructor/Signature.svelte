@@ -9,7 +9,7 @@
   scheme in both themes. Decorative: the name is set in type beside it.
 -->
 <script lang="ts">
-  import { getThumbnailDimensions, getThumbnailSrcset } from '$lib/utils/image';
+  import { containSizes, getThumbnailSrcset } from '$lib/utils/image';
 
   interface Props {
     src: string;
@@ -23,11 +23,7 @@
    * Drawn 3.5rem tall at its own ratio. A folder that does not record the
    * picture's size is taken as a 4:1 mark, 14rem wide.
    */
-  const sizes = $derived.by(() => {
-    const size = getThumbnailDimensions(src);
-    const rem = size ? Math.round((350 * size.width) / size.height) / 100 : 14;
-    return `min(${rem}rem, 100vw)`;
-  });
+  const sizes = $derived(containSizes(src, 3.5, '100vw', 4));
 </script>
 
 <svg class="sig__defs" aria-hidden="true" focusable="false">

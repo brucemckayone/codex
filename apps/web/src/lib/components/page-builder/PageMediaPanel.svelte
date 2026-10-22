@@ -60,7 +60,7 @@
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
   import { shrinkPhotoAndSubmit } from '$lib/utils/shrink-photo';
   import { PAGE_MEDIA_SLOTS } from './page-media-slots';
-  import { getThumbnailSrcset } from '$lib/utils/image';
+  import { containSizes, getThumbnailSrcset } from '$lib/utils/image';
   import {
     uploadJourneyCoverForm,
     uploadJourneyHeroImageForm,
@@ -69,8 +69,19 @@
 
   const MAX_COVER_MB = Math.round(MAX_IMAGE_SIZE_BYTES / 1024 / 1024);
 
-  /** The previews fill BuilderShell's 23.75rem side panel (`SIDE_REM.panel`). */
+  /** The cover and hero previews fill BuilderShell's 23.75rem side panel (`SIDE_REM.panel`). */
   const PREVIEW_SIZES = 'min(23.75rem, 100vw)';
+
+  /**
+   * The signature is contained in a 4:1 frame across the panel, so it is drawn
+   * at the frame's height times its own ratio, up to the frame's width: inside
+   * its 0.5rem padding about 4.3rem tall and 20.5rem wide (Codex-kk9nv.3). As
+   * the panel's width it was up to 5.5x over. A folder that does not record
+   * the picture's size is taken as a 4:1 mark, as the page's Signature is.
+   */
+  const signatureSizes = $derived(
+    containSizes(sellMedia.signatureImageUrl, 4.3, '20.5rem', 4)
+  );
 
   /** The library slots, in page order (`page-media-slots.ts`). */
   const SLOTS = PAGE_MEDIA_SLOTS;
@@ -405,7 +416,7 @@
             class="cover__img cover__img--contain"
             src={sellMedia.signatureImageUrl}
             srcset={getThumbnailSrcset(sellMedia.signatureImageUrl) || undefined}
-            sizes={PREVIEW_SIZES}
+            sizes={signatureSizes}
             alt={m.studio_builder_media_signature_image_alt()}
           />
         {:else}

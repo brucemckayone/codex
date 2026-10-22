@@ -172,6 +172,23 @@ export function coverCropSizes(
     .join(', ');
 }
 
+/**
+ * A `sizes` for a picture drawn at a fixed height and its own width, up to
+ * `maxWidth`: a signature mark, or any picture `object-fit: contain`ed in a
+ * box `heightRem` tall. A picture that does not record its size is taken as
+ * `assumedRatio` (width / height).
+ */
+export function containSizes(
+  url: string | null | undefined,
+  heightRem: number,
+  maxWidth: string,
+  assumedRatio: number
+): string {
+  const size = getThumbnailDimensions(url);
+  const ratio = size ? size.width / size.height : assumedRatio;
+  return `min(${Math.round(heightRem * ratio * 100) / 100}rem, ${maxWidth})`;
+}
+
 /** A `sizes` list split on the commas that are not inside parentheses. */
 function splitTopLevel(list: string): string[] {
   const parts: string[] = [];
