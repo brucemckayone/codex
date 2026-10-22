@@ -721,10 +721,14 @@ export class IdentityService extends BaseService {
         await this.db.transaction(async (tx) => {
           const now = new Date();
           // The avatar the scrub drops, so its files can go after the commit.
-          const before = await tx.query.users.findFirst({
-            where: and(eq(users.id, userId), whereNotDeleted(users)),
-            columns: { avatarUrl: true },
-          });
+          // Locked: an avatar upload committing now waits for the scrub, and
+          // its write then matches no row (processUserAvatar skips a deleted
+          // user), so the URL read here is the one the scrub drops.
+          const [before] = await tx
+            .select({ avatarUrl: users.avatarUrl })
+            .from(users)
+            .where(and(eq(users.id, userId), whereNotDeleted(users)))
+            .for('update');
           const [deleted] = await tx
             .update(users)
             .set({
@@ -773,12 +777,6 @@ export class IdentityService extends BaseService {
       // read, until those are invalidated too (Codex-kk9nv.7).
       await this.invalidateUserSurfaces(userId, 'deleteAccount');
 
-      // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
-      // carries this user's id (Codex-kk9nv.14). Deleted after the commit, so
-      // a refused or failed deletion keeps them. A failed delete is recorded
-      // for the sweep, never thrown.
-      await this.imageService().deleteDroppedAvatar(userId, droppedAvatarUrl);
-
       // Every session this user holds, so the caller can clear the cached
       // copies. Read AFTER the tombstone lands: a session created between the
       // UPDATE and this SELECT would still be returned here, whereas reading
@@ -793,6 +791,24 @@ export class IdentityService extends BaseService {
         userId,
         sessionCount: rows.length,
       });
+
+      // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
+      // carries this user's id (Codex-kk9nv.14). Last of all: the deletion has
+      // committed and the tokens the route needs are read, so a failure here
+      // can only cost the files. A failed R2 delete is recorded for the sweep
+      // inside; anything else is logged, never allowed to undo the deletion.
+      try {
+        await this.imageService().deleteDroppedAvatar(
+          userId,
+          droppedAvatarUrl,
+          'account-deleted'
+        );
+      } catch (error) {
+        this.obs.error('Avatar files not deleted after account deletion', {
+          userId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
 
       return rows.map((r) => r.token);
     } catch (error) {

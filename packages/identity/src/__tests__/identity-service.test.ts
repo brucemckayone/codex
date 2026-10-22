@@ -7,7 +7,7 @@ import {
   users,
 } from '@codex/database/schema';
 import type { ImageProcessingResult } from '@codex/image-processing';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AccountHasContentError,
   AccountOwnsOrganizationError,
@@ -962,22 +962,30 @@ describe('IdentityService', () => {
     //   org check:      select().from().innerJoin().where()  → rows
     //   content check:  select().from().where().limit()      → rows
     //   session tokens: select().from(sessions).where()      → rows   (Codex-na929)
-    // The last two are both `.from().where()`, so a single `where` mock cannot
+    //   avatar lock:    select().from(users).where().for()   → rows   (Codex-kk9nv.14)
+    // The content check and the token query are both `.from().where()`, so a single `where` mock cannot
     // serve both: the content check needs it to return `{ limit }` while the
     // token query awaits it directly. Keying on the table is what Drizzle
     // actually does and keeps each shape honest.
     const mockOwnedOrgsWhere = vi.fn();
     const mockExistsLimit = vi.fn();
     const mockSessionsWhere = vi.fn();
+    const mockUserFor = vi.fn();
     const mockInnerJoin = vi.fn(() => ({ where: mockOwnedOrgsWhere }));
     const mockExistsWhere = vi.fn(() => ({ limit: mockExistsLimit }));
     // Dispatch by OBJECT IDENTITY against the imported table, not by sniffing a
     // Drizzle internal — the schema module is not mocked here, so the service
     // and this test hold the same reference.
-    const mockSelectFrom = vi.fn((table: unknown) =>
-      table === sessions
-        ? { where: mockSessionsWhere }
-        : { innerJoin: mockInnerJoin, where: mockExistsWhere }
+    const SELECT_BY_TABLE = new Map<unknown, unknown>([
+      [sessions, { where: mockSessionsWhere }],
+      [users, { where: () => ({ for: mockUserFor }) }],
+    ]);
+    const mockSelectFrom = vi.fn(
+      (table: unknown) =>
+        SELECT_BY_TABLE.get(table) ?? {
+          innerJoin: mockInnerJoin,
+          where: mockExistsWhere,
+        }
     );
 
     beforeEach(() => {
@@ -991,10 +999,13 @@ describe('IdentityService', () => {
       mockExistsWhere.mockClear();
       mockExistsLimit.mockClear();
       mockSessionsWhere.mockClear();
-      // Defaults: owns no organizations, has no content/uploads, one session.
+      mockUserFor.mockClear();
+      // Defaults: owns no organizations, has no content/uploads, one session,
+      // no avatar.
       mockOwnedOrgsWhere.mockResolvedValue([]);
       mockExistsLimit.mockResolvedValue([]);
       mockSessionsWhere.mockResolvedValue([{ token: 'tok-current' }]);
+      mockUserFor.mockResolvedValue([{ avatarUrl: null }]);
     });
 
     it('soft-deletes and scrubs PII when the user owns no organizations', async () => {
@@ -1066,34 +1077,99 @@ describe('IdentityService', () => {
       );
     });
 
-    it("deletes the avatar's files after the scrub commits (Codex-kk9nv.14)", async () => {
+    describe("the avatar's files (Codex-kk9nv.14)", () => {
       // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
-      // carries the user's id. The URL is read in the transaction, before the
-      // UPDATE, and handed over once the transaction has returned.
+      // carries the user's id. They go last: after the commit, and after the
+      // token read the route needs to sign every device out.
       const avatarUrl = `https://cdn-test.revelations.studio/avatars/${userId}/300x300-ffffffff/md.webp`;
-      (
-        mockDb.query.users.findFirst as ReturnType<typeof vi.fn>
-      ).mockResolvedValueOnce({ avatarUrl });
-      mockReturning.mockResolvedValue([{ id: userId }]);
+      const committed = vi.fn();
 
-      await service.deleteAccount(userId);
+      beforeEach(() => {
+        committed.mockClear();
+        mockUserFor.mockResolvedValue([{ avatarUrl }]);
+        // A commit point to order against: the mock transaction otherwise
+        // just runs its callback.
+        (mockDb.transaction as ReturnType<typeof vi.fn>).mockImplementation(
+          async (fn: (tx: unknown) => unknown) => {
+            const result = await fn(mockDb);
+            committed();
+            return result;
+          }
+        );
+      });
 
-      expect(mockDeleteDroppedAvatar).toHaveBeenCalledWith(userId, avatarUrl);
-      // After the scrub: the files go once no row shows them.
-      const scrubbedAt = (mockDb.update as ReturnType<typeof vi.fn>).mock
-        .invocationCallOrder[0];
-      expect(
-        mockDeleteDroppedAvatar.mock.invocationCallOrder[0]
-      ).toBeGreaterThan(scrubbedAt ?? Number.POSITIVE_INFINITY);
-    });
+      afterEach(() => {
+        (mockDb.transaction as ReturnType<typeof vi.fn>).mockImplementation(
+          async (fn: (tx: unknown) => unknown) => fn(mockDb)
+        );
+      });
 
-    it('keeps the avatar when the deletion is refused', async () => {
-      mockOwnedOrgsWhere.mockResolvedValue([{ name: 'Studio Alpha' }]);
+      it('reads the avatar under a row lock, so a concurrent upload waits for the scrub', async () => {
+        mockReturning.mockResolvedValue([{ id: userId }]);
 
-      await expect(service.deleteAccount(userId)).rejects.toThrow(
-        AccountOwnsOrganizationError
-      );
-      expect(mockDeleteDroppedAvatar).not.toHaveBeenCalled();
+        await service.deleteAccount(userId);
+
+        expect(mockUserFor).toHaveBeenCalledWith('update');
+      });
+
+      it('deletes the dropped folder after the commit and after the token read', async () => {
+        mockReturning.mockResolvedValue([{ id: userId }]);
+
+        await service.deleteAccount(userId);
+
+        expect(mockDeleteDroppedAvatar).toHaveBeenCalledWith(
+          userId,
+          avatarUrl,
+          'account-deleted'
+        );
+        const [committedAt] = committed.mock.invocationCallOrder;
+        const [tokensReadAt] = mockSessionsWhere.mock.invocationCallOrder;
+        const [deletedAt] = mockDeleteDroppedAvatar.mock.invocationCallOrder;
+        expect(tokensReadAt).toBeGreaterThan(committedAt ?? Infinity);
+        expect(deletedAt).toBeGreaterThan(tokensReadAt ?? Infinity);
+      });
+
+      it('keeps the files when the transaction fails after the scrub', async () => {
+        // The scrub's UPDATE succeeds, then withdrawing the proposals fails:
+        // the transaction rolls back and the account keeps its avatar.
+        mockReturning
+          .mockResolvedValueOnce([{ id: userId }])
+          .mockRejectedValueOnce(new Error('neon unavailable'));
+
+        await expect(service.deleteAccount(userId)).rejects.toThrow();
+        expect(committed).not.toHaveBeenCalled();
+        expect(mockDeleteDroppedAvatar).not.toHaveBeenCalled();
+      });
+
+      it('keeps the files when the deletion is refused', async () => {
+        mockOwnedOrgsWhere.mockResolvedValue([{ name: 'Studio Alpha' }]);
+
+        await expect(service.deleteAccount(userId)).rejects.toThrow(
+          AccountOwnsOrganizationError
+        );
+        expect(mockDeleteDroppedAvatar).not.toHaveBeenCalled();
+      });
+
+      it('still returns the session tokens when the file delete throws', async () => {
+        // The deletion has committed: a failure here may cost the files, never
+        // the sign-out of every device.
+        mockReturning.mockResolvedValue([{ id: userId }]);
+        mockDeleteDroppedAvatar.mockRejectedValueOnce(
+          new Error('ASSETS_BUCKET not configured')
+        );
+        const error = vi.spyOn(
+          (service as unknown as { obs: { error: (m: string) => void } }).obs,
+          'error'
+        );
+
+        await expect(service.deleteAccount(userId)).resolves.toEqual([
+          'tok-current',
+        ]);
+        expect(error).toHaveBeenCalledWith(
+          'Avatar files not deleted after account deletion',
+          expect.objectContaining({ userId })
+        );
+      });
     });
 
     it('returns an empty list when the user holds no sessions', async () => {
@@ -1150,6 +1226,7 @@ describe('IdentityService', () => {
       await expect(service.deleteAccount('ghost')).rejects.toThrow(
         UserNotFoundError
       );
+      expect(mockDeleteDroppedAvatar).not.toHaveBeenCalled();
     });
   });
 });

@@ -85,7 +85,8 @@ function harness({ withCache = true, existingUsername = 'alice2' } = {}) {
     const where = (clause: SQL) => {
       if (isLookup) lookup.where = clause;
       const rows = answer();
-      return Object.assign(rows, { limit: () => rows });
+      // `for` answers deleteAccount's locking read of the avatar.
+      return Object.assign(rows, { limit: () => rows, for: () => rows });
     };
     return { from: () => ({ innerJoin: () => ({ where }), where }) };
   });

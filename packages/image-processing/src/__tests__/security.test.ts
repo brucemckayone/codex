@@ -71,7 +71,13 @@ describe('ImageProcessingService - Security', () => {
 
   beforeEach(() => {
     // Track update chain calls to verify scoping
-    whereMock = vi.fn().mockResolvedValue([{ id: 'test-1' }]);
+    // Awaited, the matched rows; `.returning()` on it resolves them too, as
+    // drizzle's builder does (the avatar write checks a row matched).
+    whereMock = vi.fn(() =>
+      Object.assign(Promise.resolve([{ id: 'test-1' }]), {
+        returning: vi.fn().mockResolvedValue([{ id: 'test-1' }]),
+      })
+    );
     setMock = vi.fn().mockReturnValue({ where: whereMock });
     updateMock = vi.fn().mockReturnValue({ set: setMock });
 

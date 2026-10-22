@@ -82,12 +82,22 @@ function createTestImageFile(mimeType: string, filename: string): File {
   return new File([new Uint8Array(jpegBuffer)], filename, { type: mimeType });
 }
 
+/**
+ * What `update().set().where()` returns: awaited, the matched rows, and with
+ * `.returning()` on it the same rows, as drizzle's builder does.
+ */
+function whereResult(rows: unknown[]) {
+  return Object.assign(Promise.resolve(rows), {
+    returning: vi.fn().mockResolvedValue(rows),
+  });
+}
+
 // Base mock implementations (will be recreated in beforeEach)
 const createMockDb = () =>
   ({
     update: vi.fn().mockReturnValue({
       set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue([{ id: 'content-1' }]),
+        where: vi.fn(() => whereResult([{ id: 'content-1' }])),
       }),
     }),
   }) as unknown as Database;
@@ -653,6 +663,27 @@ describe('ImageProcessingService', () => {
           /^https:\/\/test\.r2\.dev\/avatars\/user-1\/640x480-[0-9a-f]{8}\/lg\.webp$/
         ),
       });
+    });
+
+    it('never writes onto a deleted account, and discards the new folder (Codex-kk9nv.14)', async () => {
+      // An upload still in flight when the account is deleted: the write's
+      // `deletedAt IS NULL` matches no row, so the photo cannot come back.
+      const file = createTestImageFile('image/jpeg', 'avatar.jpg');
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants({}, 640, 640)
+      );
+      vi.mocked(testMockDb.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValue({ where: vi.fn(() => whereResult([])) }),
+      } as never);
+
+      await expect(service.processUserAvatar('user-1', file)).rejects.toThrow(
+        'User not found'
+      );
+      const folder = newFolderOf(testMockR2Service, 'avatars/user-1', {
+        width: 640,
+        height: 640,
+      });
+      expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
     });
   });
 
