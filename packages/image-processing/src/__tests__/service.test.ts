@@ -104,6 +104,12 @@ function whereResult(rows: unknown[]) {
  */
 const lockedAvatarRead = vi.fn();
 
+/**
+ * A failed write's check of whether the row names the new folder after all
+ * (Codex-kk9nv.16). Default: no row does. Reset in `beforeEach`.
+ */
+const folderProbe = vi.fn();
+
 // Base mock implementations (will be recreated in beforeEach)
 const createMockDb = () =>
   ({
@@ -113,7 +119,9 @@ const createMockDb = () =>
       }),
     }),
     select: vi.fn(() => ({
-      from: () => ({ where: () => ({ for: lockedAvatarRead }) }),
+      from: () => ({
+        where: () => ({ for: lockedAvatarRead, limit: folderProbe }),
+      }),
     })),
     // The callback runs on the db it was called on, as its `tx`.
     transaction(fn: (tx: unknown) => unknown) {
@@ -204,6 +212,7 @@ describe('ImageProcessingService', () => {
 
     // Reset database mock to default implementation
     testMockDb = createMockDb();
+    folderProbe.mockReset().mockResolvedValue([]);
     lockedAvatarRead
       .mockReset()
       .mockResolvedValue([
@@ -728,6 +737,99 @@ describe('ImageProcessingService', () => {
         height: 640,
       });
       expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
+    });
+
+    // Codex-kk9nv.16: a write can commit and still report failure (a lost
+    // COMMIT ack). Discarding the new folder then broke the picture the row
+    // names.
+    describe('when the write reports failure', () => {
+      const OLD = 'avatars/user-1/300x300-aaaaaaaa';
+
+      beforeEach(() => {
+        mockDbQuery.users.findFirst.mockResolvedValueOnce({
+          avatarUrl: `https://test.r2.dev/${OLD}/lg.webp`,
+        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants({}, 640, 640)
+        );
+        vi.mocked(testMockDb.update).mockReturnValueOnce({
+          set: vi.fn().mockReturnValue({
+            where: vi.fn(() => ({
+              returning: vi
+                .fn()
+                .mockRejectedValue(new Error('Connection terminated')),
+            })),
+          }),
+        } as never);
+      });
+
+      it('keeps the new folder its row names, deletes the one it replaced, and still reports the failure', async () => {
+        folderProbe.mockResolvedValueOnce([{ id: 'user-1' }]);
+
+        await expect(
+          service.processUserAvatar(
+            'user-1',
+            createTestImageFile('image/jpeg', 'a.jpg')
+          )
+        ).rejects.toThrow('Connection terminated');
+
+        newFolderOf(testMockR2Service, 'avatars/user-1', {
+          width: 640,
+          height: 640,
+        });
+        expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(OLD));
+      });
+
+      it('discards the new folder when its row does not name it', async () => {
+        await expect(
+          service.processUserAvatar(
+            'user-1',
+            createTestImageFile('image/jpeg', 'a.jpg')
+          )
+        ).rejects.toThrow('Connection terminated');
+
+        const folder = newFolderOf(testMockR2Service, 'avatars/user-1', {
+          width: 640,
+          height: 640,
+        });
+        expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
+      });
+
+      it('leaves the new folder to the sweep when its row cannot be read, and rethrows the write error', async () => {
+        folderProbe.mockRejectedValueOnce(new Error('neon unavailable'));
+        const recordOrphanedFiles = vi.fn().mockResolvedValue([]);
+        const withSweep = new ImageProcessingService({
+          db: { ...testMockDb, query: mockDbQuery } as unknown as Database,
+          environment: 'test',
+          r2Service: testMockR2Service,
+          r2PublicUrlBase: 'https://test.r2.dev',
+          orphanedFileService: {
+            recordOrphanedFiles,
+          } as unknown as OrphanedFileService,
+        });
+
+        await expect(
+          withSweep.processUserAvatar(
+            'user-1',
+            createTestImageFile('image/jpeg', 'a.jpg')
+          )
+        ).rejects.toThrow('Connection terminated');
+
+        const folder = newFolderOf(testMockR2Service, 'avatars/user-1', {
+          width: 640,
+          height: 640,
+        });
+        expect(deleteKeys(testMockR2Service)).toEqual([]);
+        // The sweep checks the row again before it deletes anything.
+        expect(recordOrphanedFiles).toHaveBeenCalledWith(
+          folderFiles(folder).map((r2Key) => ({
+            r2Key,
+            imageType: 'avatar',
+            entityType: 'user',
+            entityId: 'user-1',
+          }))
+        );
+      });
     });
   });
 

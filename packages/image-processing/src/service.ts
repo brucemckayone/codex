@@ -6,7 +6,13 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
-import { and, eq, schema, whereNotDeleted } from '@codex/database';
+import {
+  and,
+  eq,
+  messageForLog,
+  schema,
+  whereNotDeleted,
+} from '@codex/database';
 import {
   BaseService,
   InternalServiceError,
@@ -24,7 +30,10 @@ import {
   SUPPORTED_IMAGE_MIME_TYPES,
   validateImageSignature,
 } from '@codex/validation';
-import type { OrphanedFileService } from './orphaned-file-service';
+import {
+  isStillFolderReferenced,
+  type OrphanedFileService,
+} from './orphaned-file-service';
 import {
   pageImageKey,
   pageImageObjectKeys,
@@ -227,8 +236,8 @@ export class ImageProcessingService extends BaseService {
   /**
    * Run the write that points the row at a new folder, then delete the folder
    * it used to address, in the same request (owner, 2026-10-21: "Inline, same
-   * request"). A failed write deletes the NEW folder instead, which nothing
-   * references, and rethrows.
+   * request"). A failed write deletes the NEW folder instead, unless its row
+   * names it after all ({@link discardUnlessAddressed}), and rethrows.
    *
    * `replaced` is the old address as {@link ownedStillFolder} read it, so it is
    * null unless the folder is this entity's own: a poster frame, another
@@ -247,17 +256,76 @@ export class ImageProcessingService extends BaseService {
     try {
       result = await write();
     } catch (error) {
-      await this.deleteStill(
-        folder,
-        target,
-        `${target.imageType}-write-failed`
-      );
+      // Committed after all: the folder it replaced is dropped, as on success.
+      if (await this.discardUnlessAddressed(folder, target)) {
+        await this.deleteReplaced(replaced, folder, target);
+      }
       throw error;
     }
+    await this.deleteReplaced(replaced, folder, target);
+    return result;
+  }
+
+  private async deleteReplaced(
+    replaced: string | null,
+    folder: string,
+    target: StillOrphanTarget
+  ): Promise<void> {
     if (replaced && replaced !== folder) {
       await this.deleteStill(replaced, target, `${target.imageType}-replaced`);
     }
-    return result;
+  }
+
+  /**
+   * After a write that reported failure, delete the new folder unless its row
+   * addresses it after all (Codex-kk9nv.16). A write can commit and still
+   * report failure (a COMMIT whose ack was lost, a timeout after the commit),
+   * and deleting then breaks the picture the row now names.
+   *
+   * When the row cannot be read either, the folder is recorded for the sweep
+   * instead, which makes the same check before it deletes anything.
+   *
+   * @returns Whether the row addresses the new folder: the write landed
+   */
+  private async discardUnlessAddressed(
+    folder: string,
+    target: StillOrphanTarget
+  ): Promise<boolean> {
+    const context = `${target.imageType}-write-failed`;
+    let addressed: boolean | null;
+    try {
+      addressed = await isStillFolderReferenced(
+        this.db,
+        { imageType: target.imageType, originalEntityId: target.entityId },
+        folder
+      );
+    } catch (probeError) {
+      const r2Keys = variantKeyList(stillVariantKeys(folder));
+      this.obs.warn('Still write failed and its row could not be read; kept', {
+        context,
+        resourceId: target.entityId,
+        r2Keys,
+        error: messageForLog(probeError),
+      });
+      if (this.orphanedFileService) {
+        await recordOrphansOrLog(
+          this.orphanedFileService,
+          r2Keys.map((r2Key) => ({ r2Key, ...target })),
+          this.obs,
+          context
+        );
+      }
+      return false;
+    }
+    if (addressed) {
+      this.obs.warn(
+        'Still write reported failure, but its row addresses the new folder; kept',
+        { context, resourceId: target.entityId }
+      );
+      return true;
+    }
+    await this.deleteStill(folder, target, context);
+    return false;
   }
 
   /**
