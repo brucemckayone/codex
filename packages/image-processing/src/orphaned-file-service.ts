@@ -74,7 +74,7 @@ const STILL_OWNER = {
 type SizedStillType = keyof typeof STILL_OWNER;
 
 function isSizedStillType(type: OrphanedImageType): type is SizedStillType {
-  return type in STILL_OWNER;
+  return Object.hasOwn(STILL_OWNER, type);
 }
 
 /**

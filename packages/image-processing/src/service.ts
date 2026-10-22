@@ -846,10 +846,12 @@ export class ImageProcessingService extends BaseService {
     if (!folder) {
       const at = droppedUrl?.indexOf(`/${base}/`) ?? -1;
       if (droppedUrl && at >= 0) {
-        // A deleted account's photo left public is worth an alert. Enough to
-        // purge it by hand: the host, and the path under the user's base as
-        // its own field. A whole folder holds the 32-character user id, which
-        // production redaction hashes, and the nonce with it.
+        // A deleted account's photo left public is worth an alert. The host
+        // and the path under the user's base go as their own fields: a whole
+        // folder holds the 32-character user id, which production redaction
+        // hashes, and the nonce with it. `userId` arrives hashed too, but the
+        // hash is deterministic: hashing the accounts deleted (or changed) at
+        // the log's time finds the one, and with it the folder to purge.
         const level = cause === 'account-deleted' ? 'error' : 'warn';
         this.obs[level](
           "Avatar files not deleted: the URL is not one of this user's own folders",

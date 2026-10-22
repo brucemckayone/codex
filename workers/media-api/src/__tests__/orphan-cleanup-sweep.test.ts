@@ -67,6 +67,8 @@ const keys = {
   referenced: `categories/${ent.liveCategory}/cover/800x600-11111111/lg.webp`,
   avatar: `avatars/${ent.user}/300x300-33333333/md.webp`,
   courseHero: `courses/${ent.course}/hero/1600x900-44444444/lg.webp`,
+  courseCover: `courses/${ent.course}/cover/1200x630-99999999/lg.webp`,
+  courseSignature: `courses/${ent.course}/signature/600x200-aaaaaaaa/md.webp`,
   content: `${ent.user}/content-thumbnails/${ent.content}/1600x900-88888888/md.webp`,
   // One a soft-deleted category names, and one no row can be found for.
   deletedRow: `categories/${ent.deletedCategory}/cover/800x600-22222222/lg.webp`,
@@ -245,7 +247,9 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
       creatorId: ent.user,
       slug: 'sweep-test',
       title: 'Sweep test',
+      coverImageKey: folderOf(keys.courseCover),
       heroImageKey: folderOf(keys.courseHero),
+      signatureImageKey: folderOf(keys.courseSignature),
     });
 
     // A genuine orphan: its bytes were written long before the key was
@@ -296,6 +300,20 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
         {
           r2Key: keys.courseHero,
           imageType: 'course_hero',
+          originalEntityId: ent.course,
+          originalEntityType: 'course',
+          orphanedAt: hourAgo,
+        },
+        {
+          r2Key: keys.courseCover,
+          imageType: 'course_cover',
+          originalEntityId: ent.course,
+          originalEntityType: 'course',
+          orphanedAt: hourAgo,
+        },
+        {
+          r2Key: keys.courseSignature,
+          imageType: 'course_signature',
           originalEntityId: ent.course,
           originalEntityType: 'course',
           orphanedAt: hourAgo,
@@ -361,6 +379,8 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
       'referenced',
       'avatar',
       'courseHero',
+      'courseCover',
+      'courseSignature',
       'content',
       'deletedRow',
       'unplaced',
@@ -460,6 +480,8 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
       'referenced',
       'avatar',
       'courseHero',
+      'courseCover',
+      'courseSignature',
       'content',
     ] as const) {
       expect(await outcomeOf(ids[name])).toEqual({
@@ -494,6 +516,17 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
     expect(named).toEqual(
       expect.arrayContaining(forReview.map((name) => ids[name]))
     );
+    // And only those: a key kept for a live reference or a re-upload is not
+    // one a person needs to look at.
+    for (const name of [
+      'reused',
+      'referenced',
+      'avatar',
+      'courseHero',
+      'content',
+    ] as const) {
+      expect(named).not.toContain(ids[name]);
+    }
     // Up to five sweeps of a shared database, each a query or more per row.
   }, 30_000);
 });

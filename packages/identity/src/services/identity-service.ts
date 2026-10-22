@@ -672,9 +672,10 @@ export class IdentityService extends BaseService {
    * the opposite direction from `Codex-kgrdp.4`, which exists to reduce the two
    * reads a cache HIT already costs.
    *
-   * The tokens are read BEFORE the soft-delete would matter and returned rather
-   * than deleted here: `AUTH_SESSION_KV` is BetterAuth's namespace and this
-   * service has no binding to it, so the route owns that write. Session ROWS
+   * The tokens are read after the commit (and after the avatar delete) and
+   * returned rather than deleted here: `AUTH_SESSION_KV` is BetterAuth's
+   * namespace and this service has no binding to it, so the route owns that
+   * write. Session ROWS
    * are deliberately left alone — BetterAuth owns their lifecycle, and with the
    * KV entries gone the `deletedAt` gate on the DB path is what stops them.
    *
@@ -780,11 +781,12 @@ export class IdentityService extends BaseService {
       await this.invalidateUserSurfaces(userId, 'deleteAccount');
 
       // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
-      // carries this user's id (Codex-kk9nv.14). Straight after the commit,
-      // before the token read below: if that read failed, a retry would find
-      // no live user, so this would be the only chance to name the folder.
-      // Nothing here can undo the deletion: a failed R2 delete is recorded for
-      // the sweep inside, and anything else is logged.
+      // carries this user's id (Codex-kk9nv.14). After the commit and the
+      // best-effort cache invalidation (which never throws), before the token
+      // read below: if that read failed, a retry would find no live user, so
+      // this would be the only chance to name the folder. Nothing here can
+      // undo the deletion: a failed R2 delete is recorded for the sweep
+      // inside, and anything else is logged.
       try {
         await this.imageService().deleteDroppedAvatar(
           userId,
@@ -792,8 +794,12 @@ export class IdentityService extends BaseService {
           'account-deleted'
         );
       } catch (error) {
+        // `avatarUrl` is already null, so this log is the folder's only
+        // record. Its last segment, unlike the whole URL, holds no user id
+        // for production redaction to hash.
         this.obs.error('Avatar files not deleted after account deletion', {
           userId,
+          avatarFolder: droppedAvatarUrl?.split('/').at(-2),
           error: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
         });

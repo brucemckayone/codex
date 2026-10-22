@@ -152,12 +152,27 @@ export async function reasonToKeep(
 /**
  * One orphan the run could not finish or decide. Logged as fields, not as one
  * `key: message` string: a key holds a 32-character user id, and the
- * production redactor would hash the whole string, message and all.
+ * production redactor would hash the whole string, message and all. A
+ * `detail` that still carries such an id arrives hashed on its own; the row's
+ * `error_message` keeps the full text, found by `orphanId`.
  */
 interface OrphanOutcome {
   orphanId: string;
   imageType: OrphanedFileRecord['imageType'];
   detail: string;
+}
+
+/**
+ * An error's message without a failed query's parameters. drizzle's error
+ * reads `Failed query: … params: …`, and a parameter can be a folder holding a
+ * user id; the driver's own error, its `cause`, says what went wrong.
+ */
+function messageForLog(error: unknown): string {
+  const reported =
+    error instanceof Error && error.cause instanceof Error
+      ? error.cause
+      : error;
+  return reported instanceof Error ? reported.message : String(reported);
 }
 
 interface CleanupRunResult {
@@ -295,14 +310,6 @@ export class OrphanedFileCleanupDO implements DurableObject {
           errors: result.errors.slice(0, 10),
         });
       }
-      // Retained is terminal, so each of these is reported by one run only.
-      if (result.leftForReview.length > 0) {
-        obs.warn('Orphans left for review', {
-          count: result.leftForReview.length,
-          orphans: result.leftForReview.slice(0, 10),
-        });
-      }
-
       // Store last run result
       await this.state.storage.put('lastRunResult', result);
       await this.state.storage.put('lastRunAt', new Date().toISOString());
@@ -323,6 +330,10 @@ export class OrphanedFileCleanupDO implements DurableObject {
     const startTime = Date.now();
     const errors: OrphanOutcome[] = [];
     const leftForReview: OrphanOutcome[] = [];
+    const obs = new ObservabilityClient(
+      'OrphanedFileCleanupDO',
+      this.env.ENVIRONMENT ?? 'development'
+    );
 
     if (!this.env.ASSETS_BUCKET) {
       // Checked before any orphan is read, so nothing is marked deleted.
@@ -361,11 +372,16 @@ export class OrphanedFileCleanupDO implements DurableObject {
           await orphanedFileService.markRetained(orphan.id, keep);
           retained++;
           if (REVIEW_REASONS.has(keep)) {
-            leftForReview.push({
+            const outcome = {
               orphanId: orphan.id,
               imageType: orphan.imageType,
               detail: keep,
-            });
+            };
+            leftForReview.push(outcome);
+            // Retained is terminal, so this is the one time the orphan is
+            // named: now, as it is kept, not when the run ends, which a run
+            // that stops early never reaches.
+            obs.warn('Orphan left for review', outcome);
           }
           continue;
         }
@@ -387,7 +403,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
         errors.push({
           orphanId: orphan.id,
           imageType: orphan.imageType,
-          detail: errorMessage,
+          detail: messageForLog(error),
         });
       }
     }
