@@ -105,8 +105,8 @@ export function isFreshStillObject(r2Key: string): boolean {
  * only misfire on it (Codex-kk9nv.13). It misfired on every upload whose row
  * write and discard both failed: orphaned seconds after its put, the object
  * read as a re-upload and was kept for good. What decides it instead is
- * whether its own row, live, still addresses the folder. An orphan the
- * service cannot place keeps the re-upload check.
+ * whether its own row, live, still addresses the folder. One the service
+ * cannot place is left for review: the re-upload check would only misfire.
  */
 export async function reasonToKeep(
   orphan: OrphanedFileRecord,
@@ -126,9 +126,10 @@ export async function reasonToKeep(
       orphan,
       folder
     );
-    if (referenced !== null) {
-      return referenced ? 'its row still addresses this folder' : null;
+    if (referenced === null) {
+      return 'sized folder with no owning row to check; left for review';
     }
+    return referenced ? 'its row still addresses this folder' : null;
   }
 
   const current = await r2Service.head(orphan.r2Key);
@@ -143,8 +144,10 @@ interface CleanupRunResult {
   processed: number;
   deleted: number;
   /**
-   * Keys kept because a later upload re-occupied them (Codex-r85jo.6), or
-   * because a page still references them (page images, Codex-61zsk.10).
+   * Keys kept because a later upload re-occupied them (Codex-r85jo.6),
+   * because a page still references them (page images, Codex-61zsk.10), or
+   * because their own live row still addresses the sized folder
+   * (Codex-kk9nv.13).
    */
   retained: number;
   failed: number;
@@ -262,6 +265,13 @@ export class OrphanedFileCleanupDO implements DurableObject {
         failed: result.failed,
         durationMs: result.durationMs,
       });
+      // A failure is otherwise only a count here and an entry in DO storage.
+      if (result.failed > 0) {
+        obs.error('Orphan cleanup had failures', {
+          failed: result.failed,
+          errors: result.errors.slice(0, 10),
+        });
+      }
 
       // Store last run result
       await this.state.storage.put('lastRunResult', result);

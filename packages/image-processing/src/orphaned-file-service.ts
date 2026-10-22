@@ -15,13 +15,14 @@ import {
   and,
   eq,
   inArray,
-  isNull,
   lt,
   type SQL,
   schema,
   sql,
+  whereNotDeleted,
 } from '@codex/database';
 import { BaseService } from '@codex/service-errors';
+import { uuidSchema } from '@codex/validation';
 import { pageIdOfPageImageKey } from './page-image-keys';
 
 /** The course column that addresses each course still. */
@@ -253,16 +254,25 @@ export class OrphanedFileService extends BaseService {
    * the upload then discards a folder its row does point at, and if that
    * delete also fails the sweep must not finish the job.
    *
+   * An orphan is placed only when its folder sits under its own entity's id
+   * (every still base does: `avatars/{id}`, `…/content-thumbnails/{id}`,
+   * `categories/{id}/cover`, `courses/{id}/…`), so a row whose key and entity
+   * disagree is never decided by another entity's row; and only when the id
+   * is a uuid wherever the owning column is one, so the lookup cannot throw.
+   *
    * @param folder - The folder the orphaned object sits in
-   * @returns `null` when the orphan cannot be placed (no entity id, or a type
-   *   with no still column), so the caller keeps its own check
+   * @returns `null` when the orphan cannot be placed (no entity id, an id that
+   *   is not under its folder or not the column's type, or a type with no
+   *   still column), so the caller decides it some other way
    */
   async isStillFolderReferenced(
     orphan: Pick<OrphanedFileRecord, 'imageType' | 'originalEntityId'>,
     folder: string
   ): Promise<boolean | null> {
     const entityId = orphan.originalEntityId;
-    if (!entityId) return null;
+    if (!entityId || !`${folder}/`.includes(`/${entityId}/`)) return null;
+    const textId = orphan.imageType === 'avatar';
+    if (!textId && !uuidSchema.safeParse(entityId).success) return null;
     const references = this.stillReferences(orphan.imageType, entityId, folder);
     if (!references) return null;
     return (await references).length > 0;
@@ -283,7 +293,7 @@ export class OrphanedFileService extends BaseService {
           .where(
             and(
               eq(users.id, entityId),
-              isNull(users.deletedAt),
+              whereNotDeleted(users),
               addressesFolder(users.avatarUrl, folder)
             )
           )
@@ -295,7 +305,7 @@ export class OrphanedFileService extends BaseService {
           .where(
             and(
               eq(content.id, entityId),
-              isNull(content.deletedAt),
+              whereNotDeleted(content),
               addressesFolder(content.thumbnailUrl, folder)
             )
           )
@@ -307,7 +317,7 @@ export class OrphanedFileService extends BaseService {
           .where(
             and(
               eq(categories.id, entityId),
-              isNull(categories.deletedAt),
+              whereNotDeleted(categories),
               addressesFolder(categories.coverImageKey, folder)
             )
           )
@@ -321,7 +331,7 @@ export class OrphanedFileService extends BaseService {
           .where(
             and(
               eq(courses.id, entityId),
-              isNull(courses.deletedAt),
+              whereNotDeleted(courses),
               addressesFolder(COURSE_STILL_COLUMN[imageType], folder)
             )
           )

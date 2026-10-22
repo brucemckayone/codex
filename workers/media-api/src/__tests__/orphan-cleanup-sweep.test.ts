@@ -9,10 +9,10 @@
  * thumbnail went with it.
  *
  * Codex-kk9nv.13: a still in a folder named for its size
- * (`{base}/{w}x{h}-{nonce}/`, kk9nv.5) is never re-written, so the check is
- * skipped for it. It misfired on the commonest such orphan, an upload whose
- * row write and discard both failed: written seconds before its row, it read
- * as a re-upload and was kept for good.
+ * (`{base}/{w}x{h}-{nonce}/`, kk9nv.5) is never re-written, so the re-upload
+ * check is skipped for it. It misfired on the commonest such orphan, an upload
+ * whose row write and discard both failed: written seconds before its row, it
+ * read as a re-upload and was kept for good. Its own row decides instead.
  *
  * Runs the DO's real sweep (runCleanup) inside the DO, against the test env's
  * R2 and database, so the check is exercised where the delete happens.
@@ -40,19 +40,40 @@ const testEnv = env as TestEnv;
 
 const MINUTE = 60 * 1000;
 const prefix = `test-r85jo6/${crypto.randomUUID()}`;
+
+/**
+ * The entities whose rows decide the sized-folder orphans below. Every still
+ * base sits under its entity's own id, so these keys do too.
+ */
+const ent = {
+  user: `test-kk9nv13-${crypto.randomUUID()}`,
+  liveCategory: crypto.randomUUID(),
+  deletedCategory: crypto.randomUUID(),
+  org: crypto.randomUUID(),
+  course: crypto.randomUUID(),
+  noContent: crypto.randomUUID(),
+};
+
 const keys = {
   reused: `${prefix}/reused.webp`,
   orphan: `${prefix}/orphan.webp`,
   absent: `${prefix}/absent.webp`,
-  fresh: `${prefix}/1600x900-0a1b2c3d/lg.webp`,
-  // Sized folders whose category row names them (Codex-kk9nv.13): live, and
-  // soft-deleted. The folder is the key without its file name.
-  referenced: `${prefix}/live/800x600-11111111/lg.webp`,
-  deletedRow: `${prefix}/gone/800x600-22222222/lg.webp`,
+  // A content id no row has: nothing addresses this folder.
+  fresh: `${prefix}/content-thumbnails/${ent.noContent}/1600x900-0a1b2c3d/lg.webp`,
+  // Sized folders a live row names, in each column shape: a key that is the
+  // folder (category, course) and the URL of a file in it (avatar).
+  referenced: `categories/${ent.liveCategory}/cover/800x600-11111111/lg.webp`,
+  avatar: `avatars/${ent.user}/300x300-33333333/md.webp`,
+  courseHero: `courses/${ent.course}/hero/1600x900-44444444/lg.webp`,
+  // One a soft-deleted category names, and one no row can be found for.
+  deletedRow: `categories/${ent.deletedCategory}/cover/800x600-22222222/lg.webp`,
+  unplaced: `${prefix}/content-thumbnails/unplaced/1600x900-55555555/lg.webp`,
 };
 
 /** The folder an object key sits in, as a still column stores it. */
 const folderOf = (key: string) => key.slice(0, key.lastIndexOf('/'));
+
+const REFERENCED = 'its row still addresses this folder';
 
 function orphanRecord(
   overrides: Partial<OrphanedFileRecord>
@@ -61,7 +82,7 @@ function orphanRecord(
     id: 'orphan-1',
     r2Key: keys.fresh,
     imageType: 'content_thumbnail',
-    originalEntityId: crypto.randomUUID(),
+    originalEntityId: ent.noContent,
     originalEntityType: 'content',
     orphanedAt: new Date(Date.now() - 60 * 1000),
     cleanupAttempts: 0,
@@ -144,12 +165,12 @@ describe('isFreshStillObject (Codex-kk9nv.13)', () => {
     const s = stubs(true);
 
     expect(await reasonToKeep(orphanRecord({}), s.r2, s.orphans)).toBe(
-      'its row still addresses this folder'
+      REFERENCED
     );
     expect(s.head).not.toHaveBeenCalled();
   });
 
-  it('keeps the re-upload check for one the service cannot place', async () => {
+  it('leaves one the service cannot place for review, rather than misreading it as a re-upload', async () => {
     const s = stubs(null);
 
     expect(
@@ -158,63 +179,68 @@ describe('isFreshStillObject (Codex-kk9nv.13)', () => {
         s.r2,
         s.orphans
       )
-    ).toBe('key re-written after it was orphaned; it holds a live upload');
+    ).toBe('sized folder with no owning row to check; left for review');
+    expect(s.head).not.toHaveBeenCalled();
   });
 });
 
 describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
   const db = createDbClient(env);
-  const ids: Record<keyof typeof keys, string> = {
-    reused: '',
-    orphan: '',
-    absent: '',
-    fresh: '',
-    referenced: '',
-    deletedRow: '',
-  };
-  const userId = `test-kk9nv13-${crypto.randomUUID()}`;
-  const categoryIds: string[] = [];
+  const ids = Object.fromEntries(
+    Object.keys(keys).map((name) => [name, ''])
+  ) as Record<keyof typeof keys, string>;
 
   beforeAll(async () => {
-    // Two categories naming a sized folder: one live, one soft-deleted.
+    // The rows that decide the sized folders. The user's avatar is a URL of a
+    // file in its folder; the category and course columns are the folder.
     await db.insert(schema.users).values({
-      id: userId,
+      id: ent.user,
       name: 'Sweep test',
-      email: `${userId}@test.invalid`,
+      email: `${ent.user}@test.invalid`,
+      avatarUrl: `https://cdn.test.invalid/${folderOf(keys.avatar)}/lg.webp`,
     });
-    const categories = await db
-      .insert(schema.categories)
-      .values([
-        {
-          creatorId: userId,
-          name: 'Live cover',
-          slug: `${userId}-live`,
-          coverImageKey: folderOf(keys.referenced),
-        },
-        {
-          creatorId: userId,
-          name: 'Deleted cover',
-          slug: `${userId}-gone`,
-          coverImageKey: folderOf(keys.deletedRow),
-          deletedAt: new Date(),
-        },
-      ])
-      .returning({ id: schema.categories.id });
-    categoryIds.push(...categories.map((row) => row.id));
-    const [liveCategory, deletedCategory] = categoryIds;
+    await db.insert(schema.categories).values([
+      {
+        id: ent.liveCategory,
+        creatorId: ent.user,
+        name: 'Live cover',
+        slug: `${ent.user}-live`,
+        coverImageKey: folderOf(keys.referenced),
+      },
+      {
+        id: ent.deletedCategory,
+        creatorId: ent.user,
+        name: 'Deleted cover',
+        slug: `${ent.user}-gone`,
+        coverImageKey: folderOf(keys.deletedRow),
+        deletedAt: new Date(),
+      },
+    ]);
+    await db
+      .insert(schema.organizations)
+      .values({ id: ent.org, name: 'Sweep test', slug: `sweep-${ent.org}` });
+    await db.insert(schema.courses).values({
+      id: ent.course,
+      organizationId: ent.org,
+      creatorId: ent.user,
+      slug: 'sweep-test',
+      title: 'Sweep test',
+      heroImageKey: folderOf(keys.courseHero),
+    });
 
     // A genuine orphan: its bytes were written long before the key was
     // orphaned. R2's `uploaded` cannot be backdated, so the ROW is dated
     // after it instead — the same ordering.
     await testEnv.ASSETS_BUCKET.put(keys.orphan, 'old bytes');
 
+    const hourAgo = new Date(Date.now() - 60 * MINUTE);
     const rows = await db
       .insert(schema.orphanedImageFiles)
       .values([
         {
           r2Key: keys.reused,
           imageType: 'content_thumbnail',
-          orphanedAt: new Date(Date.now() - 60 * MINUTE),
+          orphanedAt: hourAgo,
         },
         {
           r2Key: keys.orphan,
@@ -224,29 +250,47 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
         {
           r2Key: keys.absent,
           imageType: 'content_thumbnail',
-          orphanedAt: new Date(Date.now() - 60 * MINUTE),
+          orphanedAt: hourAgo,
         },
         {
-          // A content id no row has: nothing addresses this folder.
           r2Key: keys.fresh,
           imageType: 'content_thumbnail',
-          originalEntityId: crypto.randomUUID(),
+          originalEntityId: ent.noContent,
           originalEntityType: 'content',
-          orphanedAt: new Date(Date.now() - 60 * MINUTE),
+          orphanedAt: hourAgo,
         },
         {
           r2Key: keys.referenced,
           imageType: 'category_cover',
-          originalEntityId: liveCategory,
+          originalEntityId: ent.liveCategory,
           originalEntityType: 'category',
-          orphanedAt: new Date(Date.now() - 60 * MINUTE),
+          orphanedAt: hourAgo,
+        },
+        {
+          r2Key: keys.avatar,
+          imageType: 'avatar',
+          originalEntityId: ent.user,
+          originalEntityType: 'user',
+          orphanedAt: hourAgo,
+        },
+        {
+          r2Key: keys.courseHero,
+          imageType: 'course_hero',
+          originalEntityId: ent.course,
+          originalEntityType: 'course',
+          orphanedAt: hourAgo,
         },
         {
           r2Key: keys.deletedRow,
           imageType: 'category_cover',
-          originalEntityId: deletedCategory,
+          originalEntityId: ent.deletedCategory,
           originalEntityType: 'category',
-          orphanedAt: new Date(Date.now() - 60 * MINUTE),
+          orphanedAt: hourAgo,
+        },
+        {
+          r2Key: keys.unplaced,
+          imageType: 'content_thumbnail',
+          orphanedAt: hourAgo,
         },
       ])
       .returning({
@@ -260,24 +304,43 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
       if (name) ids[name] = row.id;
     }
 
-    // The re-upload lands at the orphaned key AFTER the row was written.
-    await testEnv.ASSETS_BUCKET.put(keys.reused, 'new live bytes');
-    // The same timing at sized folders (Codex-kk9nv.13), so only the key's
-    // shape and its row can tell them apart.
-    await testEnv.ASSETS_BUCKET.put(keys.fresh, 'orphaned bytes');
-    await testEnv.ASSETS_BUCKET.put(keys.referenced, 'live cover bytes');
-    await testEnv.ASSETS_BUCKET.put(keys.deletedRow, 'deleted cover bytes');
+    // Each object lands AFTER its row was written: the re-upload's real
+    // order, and the timing the re-upload check misreads at a sized folder,
+    // so only the key's shape and its row can tell them apart.
+    for (const name of [
+      'reused',
+      'fresh',
+      'referenced',
+      'avatar',
+      'courseHero',
+      'deletedRow',
+      'unplaced',
+    ] as const) {
+      await testEnv.ASSETS_BUCKET.put(keys[name], `${name} bytes`);
+    }
   });
 
   afterAll(async () => {
-    await db
-      .delete(schema.orphanedImageFiles)
-      .where(inArray(schema.orphanedImageFiles.id, Object.values(ids)));
+    // Only the orphan rows that were written: a setup that failed part-way
+    // leaves '' ids, and a '' in a uuid IN list would throw before the rows
+    // below were cleaned up.
+    const written = Object.values(ids).filter(Boolean);
+    if (written.length > 0) {
+      await db
+        .delete(schema.orphanedImageFiles)
+        .where(inArray(schema.orphanedImageFiles.id, written));
+    }
     await testEnv.ASSETS_BUCKET.delete(Object.values(keys));
+    // The course goes with its org; categories and courses restrict the user.
+    await db
+      .delete(schema.organizations)
+      .where(inArray(schema.organizations.id, [ent.org]));
     await db
       .delete(schema.categories)
-      .where(inArray(schema.categories.id, categoryIds));
-    await db.delete(schema.users).where(inArray(schema.users.id, [userId]));
+      .where(
+        inArray(schema.categories.id, [ent.liveCategory, ent.deletedCategory])
+      );
+    await db.delete(schema.users).where(inArray(schema.users.id, [ent.user]));
     await closeDbPool();
   });
 
@@ -293,12 +356,16 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
     );
   }
 
-  async function statusOf(id: string) {
+  /** A row's status and, for a retained one, the reason it was kept. */
+  async function outcomeOf(id: string) {
     const [row] = await db
-      .select({ status: schema.orphanedImageFiles.status })
+      .select({
+        status: schema.orphanedImageFiles.status,
+        reason: schema.orphanedImageFiles.errorMessage,
+      })
       .from(schema.orphanedImageFiles)
       .where(inArray(schema.orphanedImageFiles.id, [id]));
-    return row?.status;
+    return row;
   }
 
   /**
@@ -311,33 +378,42 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
     const stub = ns.get(ns.idFromName('singleton'));
     for (let run = 0; run < 5; run++) {
       await sweep(stub);
-      const pending = await Promise.all(Object.values(ids).map(statusOf));
-      if (!pending.includes('pending')) break;
+      const outcomes = await Promise.all(Object.values(ids).map(outcomeOf));
+      if (!outcomes.some((outcome) => outcome?.status === 'pending')) break;
     }
   }
 
-  it('keeps a re-uploaded key and a referenced sized folder, deletes a genuine orphan and unreferenced sized folders, and marks an absent one deleted', async () => {
+  // One test, not several: R2 is isolated storage, so a delete is rolled back
+  // when the test that made it ends, while the database keeps its rows.
+  it('keeps what a re-upload or a live row still holds, and deletes the rest', async () => {
     await sweepUntilReached();
 
-    expect(await statusOf(ids.reused)).toBe('retained');
+    expect(await outcomeOf(ids.reused)).toMatchObject({ status: 'retained' });
     expect(await testEnv.ASSETS_BUCKET.head(keys.reused)).not.toBeNull();
 
-    expect(await statusOf(ids.orphan)).toBe('deleted');
+    expect(await outcomeOf(ids.orphan)).toMatchObject({ status: 'deleted' });
     expect(await testEnv.ASSETS_BUCKET.head(keys.orphan)).toBeNull();
 
-    expect(await statusOf(ids.absent)).toBe('deleted');
+    expect(await outcomeOf(ids.absent)).toMatchObject({ status: 'deleted' });
 
-    expect(await statusOf(ids.fresh)).toBe('deleted');
-    expect(await testEnv.ASSETS_BUCKET.head(keys.fresh)).toBeNull();
+    // A sized folder is decided by its own row (Codex-kk9nv.13), in every
+    // column shape, and kept for that reason, not by the re-upload timing.
+    for (const name of ['referenced', 'avatar', 'courseHero'] as const) {
+      expect(await outcomeOf(ids[name])).toEqual({
+        status: 'retained',
+        reason: REFERENCED,
+      });
+      expect(await testEnv.ASSETS_BUCKET.head(keys[name])).not.toBeNull();
+    }
+    for (const name of ['fresh', 'deletedRow'] as const) {
+      expect(await outcomeOf(ids[name])).toMatchObject({ status: 'deleted' });
+      expect(await testEnv.ASSETS_BUCKET.head(keys[name])).toBeNull();
+    }
 
-    // A sized folder is decided by its row (Codex-kk9nv.13): kept while a
-    // live category names it, deleted once the category is deleted. In this
-    // test, not a second one: R2 is isolated storage, so a delete is rolled
-    // back when the test that made it ends, while the database keeps its rows.
-    expect(await statusOf(ids.referenced)).toBe('retained');
-    expect(await testEnv.ASSETS_BUCKET.head(keys.referenced)).not.toBeNull();
-
-    expect(await statusOf(ids.deletedRow)).toBe('deleted');
-    expect(await testEnv.ASSETS_BUCKET.head(keys.deletedRow)).toBeNull();
-  });
+    expect(await outcomeOf(ids.unplaced)).toEqual({
+      status: 'retained',
+      reason: 'sized folder with no owning row to check; left for review',
+    });
+    // Up to five sweeps of a shared database, each a query or more per row.
+  }, 30_000);
 });
