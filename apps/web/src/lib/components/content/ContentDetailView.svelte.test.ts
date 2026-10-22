@@ -282,6 +282,44 @@ describe('the picture (Codex-une9r)', () => {
     );
   });
 
+  describe('the head preloads the file the page draws (Codex-kk9nv.3)', () => {
+    const SIZED =
+      'https://cdn.example.test/c1/thumbnail/2400x1000-0a1b2c3d/md.webp';
+    const preload = () =>
+      document.head.querySelector('link[rel="preload"][as="image"]');
+
+    test("for the audio card: the card's own src, srcset and sizes, so it is fetched once", () => {
+      render({
+        content: makeContent({ contentType: 'audio', thumbnailUrl: SIZED }),
+        hasAccess: false,
+      });
+      const img = document.querySelector('.content-detail__audio-locked-image');
+      const link = preload();
+      expect(img?.getAttribute('srcset')).toBeTruthy();
+      expect(link?.getAttribute('href')).toBe(img?.getAttribute('src'));
+      expect(link?.getAttribute('imagesrcset')).toBe(
+        img?.getAttribute('srcset')
+      );
+      expect(link?.getAttribute('imagesizes')).toBe(img?.getAttribute('sizes'));
+    });
+
+    test('for a video: the one largest file its poster uses, with no srcset', () => {
+      render({ content: makeContent({ thumbnailUrl: SIZED }) });
+      expect(preload()?.getAttribute('href')).toBe(
+        SIZED.replace('/md.webp', '/xl.webp')
+      );
+      expect(preload()?.hasAttribute('imagesrcset')).toBe(false);
+    });
+
+    test('for an audio page whose access is still loading: nothing, since either file may follow', () => {
+      render({
+        content: makeContent({ contentType: 'audio', thumbnailUrl: SIZED }),
+        accessLoading: true,
+      });
+      expect(preload()).toBeNull();
+    });
+  });
+
   test('the structured data names the same file as og:image, not the one the page drew', () => {
     const SIZED =
       'https://cdn.example.test/c1/thumbnail/2400x1350-0a1b2c3d/md.webp';
