@@ -92,6 +92,18 @@ export function isFreshStillObject(r2Key: string): boolean {
 }
 
 /**
+ * The reasons a person has to act on: the sweep could not decide the key, so
+ * it keeps the object rather than guess. A run reports each one.
+ */
+const LEFT_FOR_REVIEW = {
+  notPageImage: 'not a page-image object key; left for review',
+  unplacedFolder: 'sized folder with no owning row to check; left for review',
+} as const;
+const REVIEW_REASONS: ReadonlySet<string> = new Set(
+  Object.values(LEFT_FOR_REVIEW)
+);
+
+/**
  * Why the object at an orphan's key must stay, or `null` to delete it.
  *
  * A page image (Codex-61zsk.10) is decided differently. Its key is minted
@@ -115,7 +127,7 @@ export async function reasonToKeep(
 ): Promise<string | null> {
   if (orphan.imageType === 'page_image') {
     const baseKey = pageImageKeyOfObject(orphan.r2Key);
-    if (!baseKey) return 'not a page-image object key; left for review';
+    if (!baseKey) return LEFT_FOR_REVIEW.notPageImage;
     return (await orphanedFileService.isPageImageReferenced(baseKey))
       ? 'still referenced by a landing page'
       : null;
@@ -126,9 +138,7 @@ export async function reasonToKeep(
       orphan,
       folder
     );
-    if (referenced === null) {
-      return 'sized folder with no owning row to check; left for review';
-    }
+    if (referenced === null) return LEFT_FOR_REVIEW.unplacedFolder;
     return referenced ? 'its row still addresses this folder' : null;
   }
 
@@ -139,19 +149,32 @@ export async function reasonToKeep(
     : null;
 }
 
+/**
+ * One orphan the run could not finish or decide. Logged as fields, not as one
+ * `key: message` string: a key holds a 32-character user id, and the
+ * production redactor would hash the whole string, message and all.
+ */
+interface OrphanOutcome {
+  orphanId: string;
+  imageType: OrphanedFileRecord['imageType'];
+  detail: string;
+}
+
 interface CleanupRunResult {
   success: boolean;
   processed: number;
   deleted: number;
   /**
    * Keys kept because a later upload re-occupied them (Codex-r85jo.6),
-   * because a page still references them (page images, Codex-61zsk.10), or
+   * because a page still references them (page images, Codex-61zsk.10),
    * because their own live row still addresses the sized folder
-   * (Codex-kk9nv.13).
+   * (Codex-kk9nv.13), or because the sweep cannot decide them
+   * (`LEFT_FOR_REVIEW`, listed in `leftForReview`).
    */
   retained: number;
+  leftForReview: OrphanOutcome[];
   failed: number;
-  errors: string[];
+  errors: OrphanOutcome[];
   durationMs: number;
 }
 
@@ -272,6 +295,13 @@ export class OrphanedFileCleanupDO implements DurableObject {
           errors: result.errors.slice(0, 10),
         });
       }
+      // Retained is terminal, so each of these is reported by one run only.
+      if (result.leftForReview.length > 0) {
+        obs.warn('Orphans left for review', {
+          count: result.leftForReview.length,
+          orphans: result.leftForReview.slice(0, 10),
+        });
+      }
 
       // Store last run result
       await this.state.storage.put('lastRunResult', result);
@@ -291,7 +321,8 @@ export class OrphanedFileCleanupDO implements DurableObject {
    */
   private async runCleanup(): Promise<CleanupRunResult> {
     const startTime = Date.now();
-    const errors: string[] = [];
+    const errors: OrphanOutcome[] = [];
+    const leftForReview: OrphanOutcome[] = [];
 
     if (!this.env.ASSETS_BUCKET) {
       // Checked before any orphan is read, so nothing is marked deleted.
@@ -329,6 +360,13 @@ export class OrphanedFileCleanupDO implements DurableObject {
         if (keep) {
           await orphanedFileService.markRetained(orphan.id, keep);
           retained++;
+          if (REVIEW_REASONS.has(keep)) {
+            leftForReview.push({
+              orphanId: orphan.id,
+              imageType: orphan.imageType,
+              detail: keep,
+            });
+          }
           continue;
         }
 
@@ -346,7 +384,11 @@ export class OrphanedFileCleanupDO implements DurableObject {
         // Record failed attempt
         await orphanedFileService.recordFailedAttempt(orphan.id, errorMessage);
         failed++;
-        errors.push(`${orphan.r2Key}: ${errorMessage}`);
+        errors.push({
+          orphanId: orphan.id,
+          imageType: orphan.imageType,
+          detail: errorMessage,
+        });
       }
     }
 
@@ -355,6 +397,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
       processed: orphans.length,
       deleted,
       retained,
+      leftForReview,
       failed,
       errors,
       durationMs: Date.now() - startTime,

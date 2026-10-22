@@ -51,6 +51,7 @@ const ent = {
   deletedCategory: crypto.randomUUID(),
   org: crypto.randomUUID(),
   course: crypto.randomUUID(),
+  content: crypto.randomUUID(),
   noContent: crypto.randomUUID(),
 };
 
@@ -58,16 +59,26 @@ const keys = {
   reused: `${prefix}/reused.webp`,
   orphan: `${prefix}/orphan.webp`,
   absent: `${prefix}/absent.webp`,
-  // A content id no row has: nothing addresses this folder.
-  fresh: `${prefix}/content-thumbnails/${ent.noContent}/1600x900-0a1b2c3d/lg.webp`,
+  // A content id no row has: nothing addresses this folder. Content stills
+  // sit under their creator: `{creatorId}/content-thumbnails/{contentId}`.
+  fresh: `${ent.user}/content-thumbnails/${ent.noContent}/1600x900-0a1b2c3d/lg.webp`,
   // Sized folders a live row names, in each column shape: a key that is the
-  // folder (category, course) and the URL of a file in it (avatar).
+  // folder (category, course) and the URL of a file in it (avatar, content).
   referenced: `categories/${ent.liveCategory}/cover/800x600-11111111/lg.webp`,
   avatar: `avatars/${ent.user}/300x300-33333333/md.webp`,
   courseHero: `courses/${ent.course}/hero/1600x900-44444444/lg.webp`,
+  content: `${ent.user}/content-thumbnails/${ent.content}/1600x900-88888888/md.webp`,
   // One a soft-deleted category names, and one no row can be found for.
   deletedRow: `categories/${ent.deletedCategory}/cover/800x600-22222222/lg.webp`,
   unplaced: `${prefix}/content-thumbnails/unplaced/1600x900-55555555/lg.webp`,
+  // Rows that cannot be placed, each by one guard: an entity whose base the
+  // folder is not under (here a deleted row, which would answer "delete"), a
+  // type whose base it is not under (a cover row in the course's live hero
+  // folder: the cover column is empty, which would answer "delete"), and an
+  // id that is not a uuid (which would throw on the uuid column, every try).
+  otherEntity: `categories/${ent.liveCategory}/cover/800x600-66666666/lg.webp`,
+  otherType: `courses/${ent.course}/hero/1600x900-44444444/md.webp`,
+  notUuid: `${ent.user}/content-thumbnails/not-a-uuid/1600x900-77777777/lg.webp`,
 };
 
 /** The folder an object key sits in, as a still column stores it. */
@@ -191,13 +202,22 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
   ) as Record<keyof typeof keys, string>;
 
   beforeAll(async () => {
-    // The rows that decide the sized folders. The user's avatar is a URL of a
-    // file in its folder; the category and course columns are the folder.
+    // The rows that decide the sized folders. The avatar and content columns
+    // are a URL of a file in the folder; the category and course columns are
+    // the folder.
     await db.insert(schema.users).values({
       id: ent.user,
       name: 'Sweep test',
       email: `${ent.user}@test.invalid`,
       avatarUrl: `https://cdn.test.invalid/${folderOf(keys.avatar)}/lg.webp`,
+    });
+    await db.insert(schema.content).values({
+      id: ent.content,
+      creatorId: ent.user,
+      title: 'Sweep test',
+      slug: `${ent.user}-content`,
+      contentType: 'written',
+      thumbnailUrl: `https://cdn.test.invalid/${folderOf(keys.content)}/lg.webp`,
     });
     await db.insert(schema.categories).values([
       {
@@ -288,8 +308,36 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
           orphanedAt: hourAgo,
         },
         {
+          r2Key: keys.content,
+          imageType: 'content_thumbnail',
+          originalEntityId: ent.content,
+          originalEntityType: 'content',
+          orphanedAt: hourAgo,
+        },
+        {
           r2Key: keys.unplaced,
           imageType: 'content_thumbnail',
+          orphanedAt: hourAgo,
+        },
+        {
+          r2Key: keys.otherEntity,
+          imageType: 'category_cover',
+          originalEntityId: ent.deletedCategory,
+          originalEntityType: 'category',
+          orphanedAt: hourAgo,
+        },
+        {
+          r2Key: keys.otherType,
+          imageType: 'course_cover',
+          originalEntityId: ent.course,
+          originalEntityType: 'course',
+          orphanedAt: hourAgo,
+        },
+        {
+          r2Key: keys.notUuid,
+          imageType: 'content_thumbnail',
+          originalEntityId: 'not-a-uuid',
+          originalEntityType: 'content',
           orphanedAt: hourAgo,
         },
       ])
@@ -313,8 +361,12 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
       'referenced',
       'avatar',
       'courseHero',
+      'content',
       'deletedRow',
       'unplaced',
+      'otherEntity',
+      'otherType',
+      'notUuid',
     ] as const) {
       await testEnv.ASSETS_BUCKET.put(keys[name], `${name} bytes`);
     }
@@ -331,10 +383,14 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
         .where(inArray(schema.orphanedImageFiles.id, written));
     }
     await testEnv.ASSETS_BUCKET.delete(Object.values(keys));
-    // The course goes with its org; categories and courses restrict the user.
+    // The course goes with its org; content, categories and courses restrict
+    // the user.
     await db
       .delete(schema.organizations)
       .where(inArray(schema.organizations.id, [ent.org]));
+    await db
+      .delete(schema.content)
+      .where(inArray(schema.content.id, [ent.content]));
     await db
       .delete(schema.categories)
       .where(
@@ -376,17 +432,19 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
   async function sweepUntilReached() {
     const ns = testEnv.ORPHAN_CLEANUP_DO;
     const stub = ns.get(ns.idFromName('singleton'));
+    const runs = [];
     for (let run = 0; run < 5; run++) {
-      await sweep(stub);
+      runs.push(await sweep(stub));
       const outcomes = await Promise.all(Object.values(ids).map(outcomeOf));
       if (!outcomes.some((outcome) => outcome?.status === 'pending')) break;
     }
+    return runs;
   }
 
   // One test, not several: R2 is isolated storage, so a delete is rolled back
   // when the test that made it ends, while the database keeps its rows.
   it('keeps what a re-upload or a live row still holds, and deletes the rest', async () => {
-    await sweepUntilReached();
+    const runs = await sweepUntilReached();
 
     expect(await outcomeOf(ids.reused)).toMatchObject({ status: 'retained' });
     expect(await testEnv.ASSETS_BUCKET.head(keys.reused)).not.toBeNull();
@@ -398,7 +456,12 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
 
     // A sized folder is decided by its own row (Codex-kk9nv.13), in every
     // column shape, and kept for that reason, not by the re-upload timing.
-    for (const name of ['referenced', 'avatar', 'courseHero'] as const) {
+    for (const name of [
+      'referenced',
+      'avatar',
+      'courseHero',
+      'content',
+    ] as const) {
       expect(await outcomeOf(ids[name])).toEqual({
         status: 'retained',
         reason: REFERENCED,
@@ -410,10 +473,27 @@ describe('OrphanedFileCleanupDO sweep (Codex-r85jo.6)', () => {
       expect(await testEnv.ASSETS_BUCKET.head(keys[name])).toBeNull();
     }
 
-    expect(await outcomeOf(ids.unplaced)).toEqual({
-      status: 'retained',
-      reason: 'sized folder with no owning row to check; left for review',
-    });
+    // Each row one guard refuses to place is kept on the first try, object
+    // and all, and the run that kept it names it.
+    const forReview = [
+      'unplaced',
+      'otherEntity',
+      'otherType',
+      'notUuid',
+    ] as const;
+    for (const name of forReview) {
+      expect(await outcomeOf(ids[name])).toEqual({
+        status: 'retained',
+        reason: 'sized folder with no owning row to check; left for review',
+      });
+      expect(await testEnv.ASSETS_BUCKET.head(keys[name])).not.toBeNull();
+    }
+    const named = runs.flatMap((run) =>
+      run.leftForReview.map((orphan) => orphan.orphanId)
+    );
+    expect(named).toEqual(
+      expect.arrayContaining(forReview.map((name) => ids[name]))
+    );
     // Up to five sweeps of a shared database, each a query or more per row.
   }, 30_000);
 });

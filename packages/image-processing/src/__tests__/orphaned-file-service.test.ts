@@ -311,6 +311,7 @@ describe('OrphanedFileService', () => {
         processed: 12, // deleted + failed
         deleted: 10,
         failed: 2,
+        retained: 1,
         remaining: 5,
       });
     });
@@ -324,6 +325,7 @@ describe('OrphanedFileService', () => {
         processed: 0,
         deleted: 0,
         failed: 0,
+        retained: 0,
         remaining: 0,
       });
     });

@@ -22,15 +22,60 @@ import {
   whereNotDeleted,
 } from '@codex/database';
 import { BaseService } from '@codex/service-errors';
+import {
+  getContentThumbnailBaseKey,
+  getUserAvatarBaseKey,
+} from '@codex/transcoding';
 import { uuidSchema } from '@codex/validation';
 import { pageIdOfPageImageKey } from './page-image-keys';
+import { CALLER_OWNED_STILL_BASE } from './still-bases';
 
-/** The course column that addresses each course still. */
-const COURSE_STILL_COLUMN = {
-  course_cover: schema.courses.coverImageKey,
-  course_hero: schema.courses.heroImageKey,
-  course_signature: schema.courses.signatureImageKey,
+/**
+ * Each sized still, by image type: the base its folders sit under for one
+ * entity, the table that entity is a row of, and the column that addresses
+ * the folder. A content thumbnail's base starts with its creator's id, which
+ * an orphan row does not record, so that segment is taken from the folder;
+ * the rest must still be this content's.
+ */
+const STILL_OWNER = {
+  avatar: {
+    base: (userId: string) => getUserAvatarBaseKey(userId),
+    table: schema.users,
+    column: schema.users.avatarUrl,
+  },
+  content_thumbnail: {
+    base: (contentId: string, folder: string) =>
+      getContentThumbnailBaseKey(folder.split('/', 1)[0] ?? '', contentId),
+    table: schema.content,
+    column: schema.content.thumbnailUrl,
+  },
+  category_cover: {
+    base: CALLER_OWNED_STILL_BASE.category_cover,
+    table: schema.categories,
+    column: schema.categories.coverImageKey,
+  },
+  course_cover: {
+    base: CALLER_OWNED_STILL_BASE.course_cover,
+    table: schema.courses,
+    column: schema.courses.coverImageKey,
+  },
+  course_hero: {
+    base: CALLER_OWNED_STILL_BASE.course_hero,
+    table: schema.courses,
+    column: schema.courses.heroImageKey,
+  },
+  course_signature: {
+    base: CALLER_OWNED_STILL_BASE.course_signature,
+    table: schema.courses,
+    column: schema.courses.signatureImageKey,
+  },
 } as const;
+
+type SizedStillType = keyof typeof STILL_OWNER;
+
+function isSizedStillType(type: OrphanedImageType): type is SizedStillType {
+  return type in STILL_OWNER;
+}
 
 /**
  * `column` addresses `folder`: a key that is the folder itself, or the URL of
@@ -70,6 +115,8 @@ export interface CleanupStats {
   processed: number;
   deleted: number;
   failed: number;
+  /** Kept, terminally: a live reference, or left for a person to review. */
+  retained: number;
   remaining: number;
 }
 
@@ -254,91 +301,42 @@ export class OrphanedFileService extends BaseService {
    * the upload then discards a folder its row does point at, and if that
    * delete also fails the sweep must not finish the job.
    *
-   * An orphan is placed only when its folder sits under its own entity's id
-   * (every still base does: `avatars/{id}`, `…/content-thumbnails/{id}`,
-   * `categories/{id}/cover`, `courses/{id}/…`), so a row whose key and entity
-   * disagree is never decided by another entity's row; and only when the id
-   * is a uuid wherever the owning column is one, so the lookup cannot throw.
+   * An orphan is placed only when its folder sits under its own type's base
+   * for its own entity (`STILL_OWNER`), so a row whose key and entity or type
+   * disagree is never decided by another row or another column: a cover row
+   * pointing into the course's hero folder must not read the cover column,
+   * find nothing, and delete a live hero. And only when the id is a uuid
+   * wherever the owning id is one, so the lookup cannot throw.
    *
    * @param folder - The folder the orphaned object sits in
-   * @returns `null` when the orphan cannot be placed (no entity id, an id that
-   *   is not under its folder or not the column's type, or a type with no
-   *   still column), so the caller decides it some other way
+   * @returns `null` when the orphan cannot be placed (no entity id, a type
+   *   with no sized still, a folder outside that type's base for the id, or an
+   *   id that is not the owning column's type), so the caller decides it some
+   *   other way
    */
   async isStillFolderReferenced(
     orphan: Pick<OrphanedFileRecord, 'imageType' | 'originalEntityId'>,
     folder: string
   ): Promise<boolean | null> {
-    const entityId = orphan.originalEntityId;
-    if (!entityId || !`${folder}/`.includes(`/${entityId}/`)) return null;
-    const textId = orphan.imageType === 'avatar';
+    const { imageType, originalEntityId: entityId } = orphan;
+    if (!entityId || !isSizedStillType(imageType)) return null;
+    const owner = STILL_OWNER[imageType];
+    if (!folder.startsWith(`${owner.base(entityId, folder)}/`)) return null;
+    const textId = imageType === 'avatar';
     if (!textId && !uuidSchema.safeParse(entityId).success) return null;
-    const references = this.stillReferences(orphan.imageType, entityId, folder);
-    if (!references) return null;
-    return (await references).length > 0;
-  }
 
-  /** The live row of this type and id that addresses `folder`, at most one. */
-  private stillReferences(
-    imageType: OrphanedImageType,
-    entityId: string,
-    folder: string
-  ) {
-    const { users, content, categories, courses } = schema;
-    switch (imageType) {
-      case 'avatar':
-        return this.db
-          .select({ id: users.id })
-          .from(users)
-          .where(
-            and(
-              eq(users.id, entityId),
-              whereNotDeleted(users),
-              addressesFolder(users.avatarUrl, folder)
-            )
-          )
-          .limit(1);
-      case 'content_thumbnail':
-        return this.db
-          .select({ id: content.id })
-          .from(content)
-          .where(
-            and(
-              eq(content.id, entityId),
-              whereNotDeleted(content),
-              addressesFolder(content.thumbnailUrl, folder)
-            )
-          )
-          .limit(1);
-      case 'category_cover':
-        return this.db
-          .select({ id: categories.id })
-          .from(categories)
-          .where(
-            and(
-              eq(categories.id, entityId),
-              whereNotDeleted(categories),
-              addressesFolder(categories.coverImageKey, folder)
-            )
-          )
-          .limit(1);
-      case 'course_cover':
-      case 'course_hero':
-      case 'course_signature':
-        return this.db
-          .select({ id: courses.id })
-          .from(courses)
-          .where(
-            and(
-              eq(courses.id, entityId),
-              whereNotDeleted(courses),
-              addressesFolder(COURSE_STILL_COLUMN[imageType], folder)
-            )
-          )
-          .limit(1);
-      default:
-        return null;
-    }
+    const references = await this.db
+      .select({ id: owner.table.id })
+      .from(owner.table)
+      .where(
+        and(
+          eq(owner.table.id, entityId),
+          whereNotDeleted(owner.table),
+          addressesFolder(owner.column, folder)
+        )
+      )
+      .limit(1);
+    return references.length > 0;
   }
 
   /**
@@ -490,6 +488,7 @@ export class OrphanedFileService extends BaseService {
       processed: Number(stats.deleted) + Number(stats.failed),
       deleted: Number(stats.deleted),
       failed: Number(stats.failed),
+      retained: Number(stats.retained),
       remaining: Number(stats.pending),
     };
   }
