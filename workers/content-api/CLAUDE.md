@@ -77,7 +77,7 @@ GET /api/access/content/:id/stream
 ### Cache Invalidation on Publish/Unpublish/Delete
 `bumpOrgContentVersion()` fires via `waitUntil` — invalidates:
 - `COLLECTION_ORG_CONTENT(organizationId)` — org content collection version
-- Org slug-keyed cache (resolves slug from DB, then invalidates)
+- The org's public caches (resolves the slug from the DB, then `invalidateOrgPublicCaches`: the slug-keyed config and stats, and the creators list's own id)
 
 ## Services Used
 

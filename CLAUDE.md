@@ -347,7 +347,7 @@ executionCtx.waitUntil(
 `PaginatedResult` loses its identity and `procedure()` emits `{ data: {...} }`
 instead of the list envelope. Cache `{ items, pagination }` and re-wrap after.
 
-**Currently cached:** User profile (10min), user preferences (10min), public creator profile (10min, keyed by user id) + its username->id hop (1h), org branding (30min), org content collection versions. See `docs/caching-strategy.md` for full details.
+**Currently cached:** User profile (10min), user preferences (10min), public creator profile (10min, keyed by user id) + its username->id hop (1h), org branding/info and stats (4h, keyed by org slug), the org's public creators list (4h, under its own id `org:{slug}:creators` — bump both through `invalidateOrgPublicCaches`), org tiers (24h), org content collection versions. See `docs/caching-strategy.md` for full details.
 
 ---
 

@@ -246,9 +246,17 @@ the cache call.
   that entry carries the user's `email` and this one feeds an unauthenticated
   endpoint.
 - Invalidated via `cache.invalidate(userId)` on profile/preferences update
+- organization-api's public org reads, all 4 h (`CACHE_TTL.ORG_PUBLIC_INFO_SECONDS`):
+  branding/info → `ORG_CONFIG` and stats → `ORG_STATS`, keyed by org **slug**;
+  the creators list → `ORG_CREATORS`, keyed by its own id
+  `COLLECTION_ORG_CREATORS(slug)` = `org:{slug}:creators` (Codex-kk9nv.9). A
+  listed member's profile write (identity-api) bumps only the creators id, so
+  it no longer evicts the org's config and stats. A change to the org or its
+  membership bumps both through `invalidateOrgPublicCaches(cache, slug)`;
+  a bare `invalidate(slug)` would leave the creators list stale.
+- Org tiers → `ORG_TIERS`, 24 h, keyed by org id
 
 **Natural next additions:**
-- `PlatformSettingsFacade` org branding → `ORG_CONFIG`, 30 min TTL
 - Published content metadata → `CONTENT_METADATA`, 5-10 min TTL
 - Content access checks → `CONTENT_ACCESS`, 1-5 min TTL
 
@@ -435,6 +443,7 @@ CacheType.ORG_CONFIG             // 'org:config'
 // Collection version identifiers (server KV only)
 CacheType.COLLECTION_CONTENT_PUBLISHED             // 'content:published'
 CacheType.COLLECTION_ORG_CONTENT(orgId)            // 'org:{orgId}:content'
+CacheType.COLLECTION_ORG_CREATORS(slug)            // 'org:{slug}:creators' (the creators list's read id)
 
 // Collection version identifiers (client manifest + server KV)
 CacheType.COLLECTION_USER_LIBRARY(userId)          // 'user:{userId}:library'

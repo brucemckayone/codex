@@ -57,6 +57,7 @@ Import from `@codex/database` (re-exported from `utils`):
 | `withOrgScope(table, orgId)` | `(T, string) → SQL` | Org isolation: `eq(table.organizationId, id)` |
 | `scopedNotDeleted(table, creatorId)` | `(T, string) → SQL` | `whereNotDeleted` + `withCreatorScope` combined |
 | `orgScopedNotDeleted(table, orgId)` | `(T, string) → SQL` | `whereNotDeleted` + `withOrgScope` combined |
+| `listedCreatorConditions()` | `() → SQL[]` | The conditions that put a membership's user on an org's public creators list: an `active` membership, a role in `CREATOR_LIST_ROLES` (owner/admin/creator), and a live account (`users.deleted_at is null`, Codex-kk9nv.8). Spread into `and(...)` beside the org or user scope. The list, its count, the public creator count, and identity's "which orgs list me" lookup all read it, so they can never disagree |
 | `withPagination({ page, limit })` | `({page,limit}) → {limit,offset}` | Page → offset conversion (1-indexed pages) |
 | `isUniqueViolation(error)` | `(unknown) → boolean` | Detects Postgres 23505 (also unwraps Drizzle cause) |
 | `isForeignKeyViolation(error)` | `(unknown) → boolean` | Detects Postgres 23503 |

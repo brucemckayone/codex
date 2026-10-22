@@ -9,6 +9,8 @@ Versioned KV cache for Cloudflare Workers. Cache-aside pattern with atomic versi
 - **`buildCacheKey(type, id)`** — Build unversioned key (used internally)
 - **`buildVersionKey(id)`** — Build version key (used internally)
 - **`buildVersionedCacheKey(prefix, type, id, version)`** — Build fully qualified key
+- **`invalidateOrgPublicCaches(cache, slug)`** — Bump everything an org's public pages read for `slug`: config and stats (versioned by the slug) and the creators list (versioned by `COLLECTION_ORG_CREATORS(slug)`). Call it on any change to the org or to who is in it (Codex-kk9nv.9)
+- **`invalidateUserLibrary({ kv, waitUntil, userId })`** — Fire-and-forget bump of `COLLECTION_USER_LIBRARY(userId)`
 
 ## VersionedCache
 
@@ -73,10 +75,13 @@ CacheType.USER_SESSION         // 'user:session'
 // Collection version IDs (used for invalidate(), not get())
 CacheType.COLLECTION_CONTENT_PUBLISHED        // 'content:published'
 CacheType.COLLECTION_ORG_CONTENT(orgId)       // 'org:{orgId}:content'
+CacheType.COLLECTION_ORG_CREATORS(slug)       // 'org:{slug}:creators' — server KV only
 CacheType.COLLECTION_USER_LIBRARY(userId)     // 'user:{userId}:library'
 ```
 
 The `COLLECTION_*` types are version IDs only — they're passed to `cache.invalidate()` to bump a version that the web app client manifest tracks, not to store data.
+
+`COLLECTION_ORG_CREATORS(slug)` is the exception: it is the server-side `id` the org's public creators list (`ORG_CREATORS`) is read under. The list changes on every listed member's profile write, and when it shared the org slug's version, each of those writes evicted the org's config and stats with it (Codex-kk9nv.9). A member's own write bumps only this id. A change to the org or its membership bumps both, through `invalidateOrgPublicCaches`.
 
 ## Key Structure
 

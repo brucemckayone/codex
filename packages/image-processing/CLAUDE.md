@@ -33,11 +33,12 @@ new ImageProcessingService({
 | `processUserAvatar(userId, file)` | Validate → resize → upload | Same, for `users.avatarUrl` |
 | `processCategoryCover(categoryId, file)` | Validate → resize → upload | Four files in a new folder; returns the folder's key, does NOT write the DB |
 | `processCourseCover(courseId, file)` / `processCourseHero` / `processCourseSignature` | Validate → resize → upload | Same as the category cover |
-| `persistStillWithOrphanCleanup({ key, storedKey, imageType, entityType, entityId }, dbWrite)` | Run the CALLER's key write for one of the four stills above | A failed write deletes the new folder and rethrows; a successful one deletes `storedKey`'s folder. **Every caller of the four `process*` stills MUST wrap its DB write in this** (Codex-29fs0), with `storedKey` read BEFORE the upload |
+| `persistStillWithOrphanCleanup({ key, storedKey, imageType, entityType, entityId }, dbWrite)` | Run the CALLER's key write for one of the four stills above | A failed write deletes the new folder (unless its row names it after all, see DB update below) and rethrows; a successful one deletes `storedKey`'s folder. **Every caller of the four `process*` stills MUST wrap its DB write in this** (Codex-29fs0), with `storedKey` read BEFORE the upload |
 | `deleteDroppedStill({ imageType, entityType, entityId, droppedKey })` | After the CALLER cleared or hand-changed one of those keys | Deletes the folder the old key named. **Every DELETE or PATCH that drops a still key MUST call it**, or the folder is kept forever |
 | `deleteDroppedContentThumbnail(contentId, userId, droppedUrl)` | After a content update moved `thumbnailUrl` off an upload | The content-api PATCH route calls it with `ContentService.updateReportingDroppedThumbnail`'s `droppedThumbnailUrl` |
 | `deleteContentThumbnail(contentId, userId)` | Clear the URL, then delete the folder it named | |
-| `deleteUserAvatar(userId)` | Clear the URL, then delete the folder it named | |
+| `deleteUserAvatar(userId)` | Clear the URL, then delete the folder it named | `true` if there was an upload to remove. Reads the URL with `SELECT … FOR UPDATE` and clears it in the same transaction (Codex-kk9nv.17), so a concurrent upload either commits first and is the one removed, or waits and lands on the cleared row. Needs a db that runs transactions |
+| `avatarCachePrefix(userId)` | The CDN prefix every avatar of the user is served under, current and replaced | `{host}{path}/avatars/{userId}`, no scheme, the form a prefix purge takes (Codex-kk9nv.15) |
 
 Returns `ImageProcessingResult: { url: string, size: number, mimeType: string }`. The picture's size is in the URL (see R2 Key Format).
 
@@ -60,7 +61,7 @@ Returns `ImageProcessingResult: { url: string, size: number, mimeType: string }`
      `src/__tests__/fresh-key-cache-control.test.ts`.
    - A failed put deletes whatever landed in the new folder; nothing references
      it yet, and the previous picture is in another folder.
-5. **DB update**: writes the new folder's URL or key, then deletes the folder the row held before, in the same request (owner: "Inline, same request"). A failed write deletes the new folder instead. Only a delete that fails writes an orphan row.
+5. **DB update**: writes the new folder's URL or key, then deletes the folder the row held before, in the same request (owner: "Inline, same request"). A failed write deletes the new folder instead, unless its row names it after all: a write can commit and still report failure (a lost COMMIT ack), and the discard would break the picture (Codex-kk9nv.16). So a failed write first asks `isStillFolderReferenced`, the sweep's own question. If the row names the new folder, it is kept and the replaced folder is deleted, as on success, and the error is still rethrown. If the row cannot be read either, the new folder is recorded as an orphan for the sweep, which asks again before deleting. Otherwise only a delete that fails writes an orphan row.
 
 ## R2 Key Format
 

@@ -116,9 +116,12 @@ Branding and org-info reads go through a single cache layer (`CACHE_KV` via `Ver
 
 | Layer | Key Pattern | Invalidated By |
 |---|---|---|
-| **`CACHE_KV` (VersionedCache)** | org slug or org ID | `cache.invalidate(slug)` / `cache.invalidate(orgId)` |
+| **`CACHE_KV` (VersionedCache)** | org slug or org ID | `invalidateOrgPublicCaches(cache, slug)` / `cache.invalidate(orgId)` |
+| **`CACHE_KV`, the public creators list** | `CacheType.COLLECTION_ORG_CREATORS(slug)` (`org:{slug}:creators`) | `invalidateOrgPublicCaches(cache, slug)`; a listed member's own profile write (identity-api) bumps only this id |
 
 `invalidateBrandAndCache()` in `settings.ts` runs the slug-keyed invalidation INLINE (awaited) — that is the read-critical path. The orgId-keyed version bump is fire-and-forget via `ctx.executionCtx.waitUntil(...)`. The PATCH /:id and DELETE /:id handlers in `organizations.ts` invalidate the slug cache via `waitUntil`.
+
+`GET /public/:slug/creators` reads under its own id, not the slug (Codex-kk9nv.9). The list changes on every listed member's profile write, and sharing the slug's version made each of those writes evict the org's config and stats too. So anything that changes the org or its membership must bump BOTH ids, through `invalidateOrgPublicCaches` (`invalidateOrgSlugCache` in worker-utils does). A bare `cache.invalidate(slug)` leaves the creators list stale for its 4h TTL. `organizations-creators-cache-id.test.ts` pins the read id.
 
 > **Removed (Codex-fopbo):** A second KV namespace `BRAND_KV` (`brand:{slug}` keys) was previously written on every branding mutation by `updateBrandCache()` and `BRAND_KV.delete()` calls. The `apps/web` reader (`brand-cache.ts`) was never wired to a real consumer — only its own tests imported it. The binding, the writer, and the dead reader module were removed because nothing read the cache.
 
