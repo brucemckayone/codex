@@ -977,11 +977,14 @@ export class PurchaseService extends BaseService {
         { purchaseId: purchase.id }
       );
     }
+    // A bound instant, not now(): the query text stays the same on every
+    // request, so Hyperdrive can cache it (data-access contract, rule 6).
+    const refundedAt = new Date();
     const [refunded] = await this.db
       .update(purchases)
       .set({
         status: PURCHASE_STATUS.REFUNDED,
-        refundedAt: sql`COALESCE(${purchases.refundedAt}, now())`,
+        refundedAt: sql`COALESCE(${purchases.refundedAt}, ${refundedAt})`,
         refundAmountCents: sql`COALESCE(${purchases.refundAmountCents}, ${purchases.amountPaidCents})`,
         stripeRefundId: sql`COALESCE(${purchases.stripeRefundId}, ${refundId})`,
       })
