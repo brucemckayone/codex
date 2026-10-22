@@ -264,6 +264,24 @@ describe('the picture (Codex-une9r)', () => {
     expect(imageSources()).toContain(POSTER);
   });
 
+  test("the audio card's picture is sized for the 12rem-tall card it covers, not only the column (Codex-kk9nv.3)", () => {
+    // A 2.4:1 picture covering a card at least 12rem tall is drawn 28.8rem
+    // wide on a phone, past the column; declared as the column it was 0.63x.
+    const WIDE =
+      'https://cdn.example.test/c1/thumbnail/2400x1000-0a1b2c3d/md.webp';
+    render({
+      content: makeContent({ contentType: 'audio', thumbnailUrl: WIDE }),
+      hasAccess: false,
+    });
+    expect(
+      document
+        .querySelector('.content-detail__audio-locked-image')
+        ?.getAttribute('sizes')
+    ).toBe(
+      '(min-width: 60rem) max(58rem, calc(12rem * 2.4)), max(calc(100vw - 2rem), calc(12rem * 2.4))'
+    );
+  });
+
   test('the structured data names the same file as og:image, not the one the page drew', () => {
     const SIZED =
       'https://cdn.example.test/c1/thumbnail/2400x1350-0a1b2c3d/md.webp';

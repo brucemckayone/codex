@@ -314,7 +314,7 @@
             class="cover__img"
             src={sellMedia.heroImageUrl}
             srcset={getThumbnailSrcset(sellMedia.heroImageUrl) || undefined}
-            sizes={PREVIEW_SIZES}
+            sizes={coverCropSizes(PREVIEW_SIZES, 21 / 9, sellMedia.heroImageUrl)}
             alt={m.studio_builder_media_hero_image_alt()}
           />
         {:else}

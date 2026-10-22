@@ -250,16 +250,26 @@
 
   const thumbnailUrl = $derived(getDisplayThumbnail(content) ?? undefined);
 
-  /**
-   * The thumbnail is this page's picture, drawn across the column: 960px less
-   * its 1rem gutters (Codex-kk9nv.3). The audio card offers every stored file
-   * so the browser fetches the one the column needs.
-   */
-  const PREVIEW_SIZES = '(min-width: 60rem) 58rem, calc(100vw - 2rem)';
   const thumbnailSrcset = $derived(
     thumbnailUrl ? getThumbnailSrcset(thumbnailUrl) : ''
   );
   const thumbnailSize = $derived(getThumbnailDimensions(thumbnailUrl));
+  /**
+   * The thumbnail is this page's picture, drawn across the column: 960px less
+   * its 1rem gutters (Codex-kk9nv.3). The audio card offers every stored file
+   * so the browser fetches the one the column needs. The card is also at least
+   * 12rem tall (`--player-height-audio`) and the picture covers it, so where
+   * the column is narrower than the picture's shape (a phone, a wide picture)
+   * it is drawn as wide as that height times its ratio. A picture whose size
+   * is unknown is taken as 16:9, as FeatureCarousel's slides are.
+   */
+  const previewSizes = $derived.by(() => {
+    const ratio = thumbnailSize
+      ? thumbnailSize.width / thumbnailSize.height
+      : 16 / 9;
+    const covered = `calc(12rem * ${Math.round(ratio * 100) / 100})`;
+    return `(min-width: 60rem) max(58rem, ${covered}), max(calc(100vw - 2rem), ${covered})`;
+  });
   /**
    * The largest file there is: xl when the address records the picture's
    * size, else lg. A `<video poster>` takes ONE URL and the preview player
@@ -291,7 +301,7 @@
     return {
       href: thumbnailUrl,
       srcset: thumbnailSrcset || undefined,
-      sizes: thumbnailSrcset ? PREVIEW_SIZES : undefined,
+      sizes: thumbnailSrcset ? previewSizes : undefined,
     };
   });
   const duration = $derived(content.mediaItem?.durationSeconds ?? 0);
@@ -750,7 +760,7 @@
 <!--
   The thumbnail where it is the page's picture. Over a video it is the one
   file the poster also uses (largestThumbnailUrl); in the audio card it offers
-  every stored file (PREVIEW_SIZES).
+  every stored file (previewSizes).
 -->
 {#snippet thumbnailImage(audio: boolean)}
   <img
@@ -758,7 +768,7 @@
     class:content-detail__audio-locked-image={audio}
     src={audio ? thumbnailUrl : largestThumbnailUrl}
     srcset={audio && thumbnailSrcset ? thumbnailSrcset : undefined}
-    sizes={audio && thumbnailSrcset ? PREVIEW_SIZES : undefined}
+    sizes={audio && thumbnailSrcset ? previewSizes : undefined}
     width={thumbnailSize?.width}
     height={thumbnailSize?.height}
     alt={m.content_thumbnail_alt({ title: content.title })}

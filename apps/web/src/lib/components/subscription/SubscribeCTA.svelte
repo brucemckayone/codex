@@ -371,7 +371,8 @@
                     {#if item.thumbnail}
                       <!-- 16:9, 144px from 48rem and 7.3rem (117px) below,
                            where the tile is 7.8rem less its padding
-                           (Codex-kk9nv.3). -->
+                           (Codex-kk9nv.3). At brand density 1: the tile is
+                           spacing tokens, which a sizes value cannot read. -->
                       <img
                         src={item.thumbnail}
                         srcset={getThumbnailSrcset(item.thumbnail) || undefined}
