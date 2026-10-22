@@ -38,7 +38,11 @@ import type {
 } from '@codex/database/schema';
 import type { AvatarUploadResponse } from '@codex/identity';
 import type { NotificationPreferencesResponse } from '@codex/notifications';
-import type { SaleListItem, SalesStats } from '@codex/purchase';
+import type {
+  CheckoutSessionVerifyResult,
+  SaleListItem,
+  SalesStats,
+} from '@codex/purchase';
 // `import type` from @codex/shared-types is sanctioned for apps/web — it pulls
 // no runtime value, so the vite server-only module guard is not tripped.
 import type {
@@ -58,11 +62,13 @@ import type {
   UserProfile,
 } from '@codex/shared-types';
 import type {
+  CourseSubscriptionCheckoutVerifyResult,
   CreatorEarningsSummary,
   CreatorPayoutBreakdown,
   PayoutSummary,
   PayoutWithCreator,
   SubscriberListItem,
+  SubscriptionCheckoutVerifyResult,
 } from '@codex/subscription';
 import {
   buildServiceUrl as getServiceUrl,
@@ -2238,28 +2244,28 @@ export function createServerApi(
        * Verify Stripe checkout session status
        *
        * Called on the checkout success page to confirm payment.
-       * Returns session status, purchase record, and content details.
+       * Returns session status, purchase record, and content details (or
+       * the course, for a course purchase), and `duplicatePayment` for a
+       * second payment that is being refunded.
        *
        * @param sessionId - Stripe checkout session ID (cs_xxx)
        */
       verify: (sessionId: string) =>
-        request<{
-          sessionStatus: 'complete' | 'expired' | 'open';
-          purchase?: {
-            id: string;
-            contentId: string;
-            amountPaidCents: number;
-            purchasedAt: string;
-          };
-          content?: {
-            id: string;
-            title: string;
-            thumbnailUrl?: string;
-            contentType: string;
-          };
-        }>(
+        request<CheckoutSessionVerifyResult>(
           'ecom',
           `/checkout/verify?session_id=${encodeURIComponent(sessionId)}`
+        ),
+
+      /**
+       * Verify a course-plan Checkout session
+       * (`GET /checkout/course-subscription/verify`). The journey success
+       * page reads `subscription` once our row exists, and its `duplicateOf`
+       * for a second subscription that is being refunded.
+       */
+      verifyCourseSubscription: (sessionId: string) =>
+        request<CourseSubscriptionCheckoutVerifyResult>(
+          'ecom',
+          `/checkout/course-subscription/verify?session_id=${encodeURIComponent(sessionId)}`
         ),
     },
 
@@ -2820,20 +2826,10 @@ export function createServerApi(
        * Verify a Stripe subscription-mode Checkout session.
        * Called by the /subscription/success page to poll until the webhook
        * has written the subscription row. Mirrors `checkout.verify` above.
+       * A duplicate's `subscription.duplicateOf` names the one the user keeps.
        */
       verify: (sessionId: string) =>
-        request<{
-          sessionStatus: 'complete' | 'expired' | 'open';
-          subscription?: {
-            id: string;
-            organizationId: string;
-            tierId: string;
-            tierName: string;
-            organizationName: string;
-            organizationSlug: string;
-            startedAt: string;
-          };
-        }>(
+        request<SubscriptionCheckoutVerifyResult>(
           'ecom',
           `/subscriptions/verify?session_id=${encodeURIComponent(sessionId)}`
         ),

@@ -564,6 +564,30 @@ export interface WebhookHandlerResult {
 }
 
 /**
+ * Result of `verifyCheckoutSession()` — what the /subscription/success page
+ * reads. `subscription` appears once our row for the session exists.
+ */
+export interface SubscriptionCheckoutVerifyResult {
+  sessionStatus: 'complete' | 'expired' | 'open';
+  subscription?: {
+    id: string;
+    organizationId: string;
+    tierId: string;
+    tierName: string;
+    organizationName: string;
+    organizationSlug: string;
+    startedAt: string;
+    /**
+     * Set when this subscription is a duplicate (Codex-2hxff.15): the
+     * subscription it repeats, which the user keeps. This one is cancelled
+     * and refunded, so the page says so instead of confirming it
+     * (Codex-o4jvw).
+     */
+    duplicateOf?: { id: string; tierId: string; tierName: string };
+  };
+}
+
+/**
  * Result of `previewTierChange()` — drives the proration confirmation dialog.
  *
  * `prorationDate` is the canonical timestamp the preview was computed at.
@@ -1082,22 +1106,13 @@ export class SubscriptionService extends BaseService {
    * - Ownership enforced via `metadata.codex_user_id`
    * - Returns a `subscription` object only when the row actually exists in
    *   our DB (caller treats its absence as "still processing" and retries)
+   * - A duplicate's `subscription` carries `duplicateOf`, the subscription
+   *   the user keeps (Codex-o4jvw)
    */
   async verifyCheckoutSession(
     sessionId: string,
     userId: string
-  ): Promise<{
-    sessionStatus: 'complete' | 'expired' | 'open';
-    subscription?: {
-      id: string;
-      organizationId: string;
-      tierId: string;
-      tierName: string;
-      organizationName: string;
-      organizationSlug: string;
-      startedAt: string;
-    };
-  }> {
+  ): Promise<SubscriptionCheckoutVerifyResult> {
     try {
       const session = await this.stripe.checkout.sessions.retrieve(sessionId);
 
@@ -1111,18 +1126,7 @@ export class SubscriptionService extends BaseService {
         );
       }
 
-      const result: {
-        sessionStatus: 'complete' | 'expired' | 'open';
-        subscription?: {
-          id: string;
-          organizationId: string;
-          tierId: string;
-          tierName: string;
-          organizationName: string;
-          organizationSlug: string;
-          startedAt: string;
-        };
-      } = {
+      const result: SubscriptionCheckoutVerifyResult = {
         sessionStatus:
           (session.status as 'complete' | 'expired' | 'open') ?? 'open',
       };
@@ -1157,6 +1161,14 @@ export class SubscriptionService extends BaseService {
           organizationSlug: row.organization.slug,
           startedAt: row.createdAt.toISOString(),
         };
+        // A duplicate (isDuplicateSubscription) names the subscription the
+        // user keeps; the page shows that one's tier.
+        if (row.duplicateOfSubscriptionId) {
+          result.subscription.duplicateOf = await this.keptSubscriptionOf(
+            row.duplicateOfSubscriptionId,
+            userId
+          );
+        }
       }
 
       return result;
@@ -1176,6 +1188,30 @@ export class SubscriptionService extends BaseService {
 
       this.handleError(error, 'verifyCheckoutSession');
     }
+  }
+
+  /**
+   * The subscription a duplicate repeats, which the user keeps. The column is
+   * a foreign key, so a missing row is a broken invariant, not "not found".
+   */
+  private async keptSubscriptionOf(
+    keptSubscriptionId: string,
+    userId: string
+  ): Promise<{ id: string; tierId: string; tierName: string }> {
+    const kept = await this.db.query.subscriptions.findFirst({
+      where: and(
+        eq(subscriptions.id, keptSubscriptionId),
+        eq(subscriptions.userId, userId)
+      ),
+      columns: { id: true, tierId: true },
+      with: { tier: { columns: { name: true } } },
+    });
+    if (!kept) {
+      throw new InternalServiceError('Kept subscription missing', {
+        subscriptionId: keptSubscriptionId,
+      });
+    }
+    return { id: kept.id, tierId: kept.tierId, tierName: kept.tier.name };
   }
 
   // ─── Webhook Handlers ──────────────────────────────────────────────────────

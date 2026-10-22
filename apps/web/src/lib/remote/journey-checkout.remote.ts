@@ -101,8 +101,11 @@ export const startJourneyCheckout = form(
       // Stripe expands `{CHECKOUT_SESSION_ID}` on redirect. The success page is
       // a waiting room: it polls the entitlement and forwards to the dashboard
       // the moment the webhook has written it, so the buyer never lands on a
-      // dashboard that does not yet know about their purchase.
-      const successUrl = `${url.origin}${checkoutPath}/success?session_id={CHECKOUT_SESSION_ID}`;
+      // dashboard that does not yet know about their purchase. `kind` names
+      // the path, so the page asks the endpoint that can say whether this
+      // payment was a duplicate (Codex-o4jvw); a tampered one only finds
+      // nothing to report.
+      const successUrl = `${url.origin}${checkoutPath}/success?kind=${target.kind}&session_id={CHECKOUT_SESSION_ID}`;
       const cancelUrl = `${url.origin}${returnTo}`;
 
       const sessionUrl = await createSession({

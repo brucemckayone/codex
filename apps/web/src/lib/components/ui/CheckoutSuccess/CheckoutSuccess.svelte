@@ -2,9 +2,11 @@
   @component CheckoutSuccess
 
   Shared checkout success component used by both org and creator checkout
-  success pages. Handles three states: success (animated checkmark +
-  content preview + CTA + onboarding tips), pending (spinner + auto-retry),
-  and fallback (retries exhausted, friendly messaging).
+  success pages. Handles four states: success (animated checkmark +
+  content preview + CTA + onboarding tips), duplicate (a second payment for
+  an item the buyer owns, being refunded: a calm notice, no confirmation),
+  pending (spinner + auto-retry), and fallback (retries exhausted, friendly
+  messaging).
 
   Auto-retry: When verification is null or not complete, polls via
   invalidate('checkout:verify') every 3 seconds, up to 10 times (~30s
@@ -15,12 +17,20 @@
   import { invalidate } from '$app/navigation';
   import * as m from '$paraglide/messages';
   import { formatPrice } from '$lib/utils/format';
-  import { ClockIcon, PlayIcon, FileTextIcon, GlobeIcon } from '$lib/components/ui/Icon';
+  import {
+    CheckCircleIcon,
+    ClockIcon,
+    PlayIcon,
+    FileTextIcon,
+    GlobeIcon
+  } from '$lib/components/ui/Icon';
 
   interface Verification {
     sessionStatus: 'complete' | 'expired' | 'open';
     purchase?: { id: string; amountPaidCents: number; purchasedAt: string };
     content?: { id: string; title: string; thumbnailUrl?: string; contentType: string };
+    /** A second payment for an item the buyer owns, being refunded (Codex-o4jvw). */
+    duplicatePayment?: true;
   }
 
   interface Props {
@@ -41,6 +51,12 @@
   const isComplete = $derived(verification?.sessionStatus === 'complete');
   const content = $derived(verification?.content);
   const purchase = $derived(verification?.purchase);
+  const isDuplicate = $derived(verification?.duplicatePayment === true);
+  const headTitle = $derived(
+    isComplete && content && isDuplicate
+      ? m.checkout_duplicate_title({ item: content.title })
+      : m.checkout_success_title()
+  );
 
   // --- Auto-retry polling ---
   // 10 retries * 3s = 30s window. Stripe webhooks occasionally take 5-30s
@@ -72,7 +88,7 @@
 </script>
 
 <svelte:head>
-  <title>{m.checkout_success_title()} | {titleSuffix}</title>
+  <title>{headTitle} | {titleSuffix}</title>
   <!-- Session-keyed thank-you page — never index. Each visit uses a
        unique session_id param so appearing in SERPs would be noise. -->
   <meta name="robots" content="noindex, nofollow" />
@@ -80,7 +96,26 @@
 
 <div class="checkout-success">
   <div class="checkout-success__card" aria-live="polite">
-    {#if isComplete && content}
+    {#if isComplete && content && isDuplicate}
+      <!-- Duplicate: the buyer already owned this, and this payment is being
+           refunded (Codex-o4jvw). No confirmation, amount or tips — just the
+           way to the item they already have. -->
+      <div class="checkout-success__icon checkout-success__icon--notice" aria-hidden="true">
+        <CheckCircleIcon size={48} />
+      </div>
+
+      <h1 class="checkout-success__title">
+        {m.checkout_duplicate_title({ item: content.title })}
+      </h1>
+      <p class="checkout-success__description">{m.checkout_duplicate_description()}</p>
+
+      <div class="checkout-success__actions">
+        <a href={contentUrl} class="checkout-success__btn checkout-success__btn--primary">
+          {m.checkout_duplicate_go_to({ name: content.title })}
+        </a>
+      </div>
+
+    {:else if isComplete && content}
       <!-- Success: Animated checkmark + content preview + CTA + tips -->
       <div class="checkout-success__icon">
         <svg
@@ -242,7 +277,8 @@
     margin-bottom: var(--space-2);
   }
 
-  .checkout-success__icon--pending {
+  .checkout-success__icon--pending,
+  .checkout-success__icon--notice {
     color: var(--color-text-secondary);
   }
 

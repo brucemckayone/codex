@@ -3097,9 +3097,12 @@ export class PurchaseService extends BaseService {
       // payment_intent is only present when session status is 'complete'
       if (result.sessionStatus === 'complete' && session.payment_intent) {
         const purchase = await this.db.query.purchases.findFirst({
-          where: eq(
-            purchases.stripePaymentIntentId,
-            session.payment_intent as string
+          where: and(
+            eq(
+              purchases.stripePaymentIntentId,
+              session.payment_intent as string
+            ),
+            eq(purchases.customerId, customerId)
           ),
           with: {
             content: {
@@ -3110,12 +3113,26 @@ export class PurchaseService extends BaseService {
                 contentType: true,
               },
             },
+            course: { columns: { id: true, title: true } },
           },
         });
 
+        // A second payment for an item the buyer owns: the page says it is
+        // being refunded rather than confirming a purchase (Codex-o4jvw).
+        if (purchase && isDuplicatePayment(purchase)) {
+          result.duplicatePayment = true;
+        }
+
+        // Course-purchase sessions populate the course block only: the
+        // journey success page needs to know our row exists, not a receipt.
+        if (purchase?.course) {
+          result.course = {
+            id: purchase.course.id,
+            title: purchase.course.title,
+          };
+        }
+
         // Content-purchase sessions populate the purchase + content blocks.
-        // Course-purchase sessions (content join null) return sessionStatus only
-        // — the course success surface reads its own offer, not this shape.
         if (purchase?.purchasedAt && purchase.content) {
           result.purchase = {
             id: purchase.id,

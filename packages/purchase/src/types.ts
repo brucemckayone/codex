@@ -216,4 +216,21 @@ export interface CheckoutSessionVerifyResult {
     /** Content type (video, audio, etc.) */
     contentType: string;
   };
+  /**
+   * Course details, for a course-purchase session (the journey success page).
+   * Present once our purchase row exists, as `purchase` is for content.
+   */
+  course?: {
+    /** Course ID */
+    id: string;
+    /** Course title */
+    title: string;
+  };
+  /**
+   * Set when this session's payment repeated a purchase the buyer already
+   * had (`duplicate_of_purchase_id`, Codex-2hxff.14). It is being refunded in
+   * full, so the success page says so instead of confirming a purchase
+   * (Codex-o4jvw).
+   */
+  duplicatePayment?: true;
 }

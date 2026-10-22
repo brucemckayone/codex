@@ -5498,6 +5498,171 @@ describe('PurchaseService Integration', () => {
       expect(result.purchase?.amountPaidCents).toBe(999);
       expect(result.content).toBeDefined();
       expect(result.content?.id).toBe(verifyContentId);
+      expect(result.duplicatePayment).toBeUndefined();
+    });
+
+    /**
+     * A second payment for an item the buyer owns (Codex-o4jvw). Rows are
+     * written directly, as completion records them. Each duplicate is written
+     * already REFUNDED, so the global `settleOwedDuplicates` sweep (pending
+     * duplicates only) never picks it up, and both rows are deleted after.
+     */
+    describe('a duplicate payment (Codex-o4jvw)', () => {
+      async function insertPurchase(
+        values: Partial<typeof schema.purchases.$inferInsert> & {
+          customerId: string;
+        }
+      ) {
+        return takeFirst(
+          await db
+            .insert(schema.purchases)
+            .values({
+              organizationId: verifyOrgId,
+              amountPaidCents: 999,
+              creatorPayoutCents: 999,
+              currency: 'gbp',
+              stripePaymentIntentId: `pi_verify_dup_${crypto.randomUUID()}`,
+              status: 'completed',
+              purchasedAt: new Date(),
+              ...values,
+            })
+            .returning(),
+          'purchase'
+        );
+      }
+
+      /** The buyer's first purchase, and a refunded duplicate of it. */
+      async function purchaseAndDuplicate(
+        target: { contentId: string } | { courseId: string }
+      ) {
+        const original = await insertPurchase({
+          customerId: verifyOtherUserId,
+          ...target,
+        });
+        const duplicate = await insertPurchase({
+          customerId: verifyOtherUserId,
+          ...target,
+          status: 'refunded',
+          refundedAt: new Date(),
+          duplicateOfPurchaseId: original.id,
+        });
+        return { original, duplicate };
+      }
+
+      async function removePurchases(ids: {
+        duplicate: string;
+        original: string;
+      }) {
+        // The duplicate first: `duplicate_of_purchase_id` is ON DELETE RESTRICT.
+        await db
+          .delete(schema.purchases)
+          .where(eq(schema.purchases.id, ids.duplicate));
+        await db
+          .delete(schema.purchases)
+          .where(eq(schema.purchases.id, ids.original));
+      }
+
+      function sessionFor(paymentIntentId: string, customerId: string) {
+        vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+          id: 'cs_test_verify_duplicate',
+          status: 'complete',
+          payment_intent: paymentIntentId,
+          metadata: { customerId },
+        } as unknown as Stripe.Response<Stripe.Checkout.Session>);
+      }
+
+      it('flags the duplicate, still naming the content; the first purchase is not flagged', async () => {
+        const { original, duplicate } = await purchaseAndDuplicate({
+          contentId: verifyContentId,
+        });
+
+        sessionFor(duplicate.stripePaymentIntentId, verifyOtherUserId);
+        const forDuplicate = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_duplicate',
+          verifyOtherUserId
+        );
+        expect(forDuplicate.duplicatePayment).toBe(true);
+        expect(forDuplicate.purchase?.id).toBe(duplicate.id);
+        expect(forDuplicate.content?.title).toBe('Verify Test Content');
+
+        sessionFor(original.stripePaymentIntentId, verifyOtherUserId);
+        const forOriginal = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_duplicate',
+          verifyOtherUserId
+        );
+        expect(forOriginal.duplicatePayment).toBeUndefined();
+        expect(forOriginal.purchase?.id).toBe(original.id);
+
+        await removePurchases({
+          duplicate: duplicate.id,
+          original: original.id,
+        });
+      });
+
+      it('names the course for a course purchase, and flags its duplicate', async () => {
+        const course = takeFirst(
+          await db
+            .insert(schema.courses)
+            .values({
+              organizationId: verifyOrgId,
+              creatorId: verifyUserId,
+              slug: createUniqueSlug('verify-dup-course'),
+              title: 'Verify Test Course',
+              status: 'published',
+              priceCents: 999,
+            })
+            .returning(),
+          'course'
+        );
+        const { original, duplicate } = await purchaseAndDuplicate({
+          courseId: course.id,
+        });
+
+        sessionFor(duplicate.stripePaymentIntentId, verifyOtherUserId);
+        const forDuplicate = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_duplicate',
+          verifyOtherUserId
+        );
+        expect(forDuplicate).toEqual({
+          sessionStatus: 'complete',
+          course: { id: course.id, title: 'Verify Test Course' },
+          duplicatePayment: true,
+        });
+
+        sessionFor(original.stripePaymentIntentId, verifyOtherUserId);
+        const forOriginal = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_duplicate',
+          verifyOtherUserId
+        );
+        expect(forOriginal).toEqual({
+          sessionStatus: 'complete',
+          course: { id: course.id, title: 'Verify Test Course' },
+        });
+
+        await removePurchases({
+          duplicate: duplicate.id,
+          original: original.id,
+        });
+      });
+
+      it("does not read another buyer's purchase for the session", async () => {
+        const { original, duplicate } = await purchaseAndDuplicate({
+          contentId: verifyContentId,
+        });
+
+        // The session's metadata says it is verifyUserId's; the row is not.
+        sessionFor(duplicate.stripePaymentIntentId, verifyUserId);
+        const result = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_duplicate',
+          verifyUserId
+        );
+        expect(result).toEqual({ sessionStatus: 'complete' });
+
+        await removePurchases({
+          duplicate: duplicate.id,
+          original: original.id,
+        });
+      });
     });
 
     it('should return open status for incomplete sessions', async () => {

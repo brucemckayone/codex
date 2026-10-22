@@ -100,8 +100,9 @@ Stripe sends `checkout.session.completed` (subscription mode) to
   entitlement that expires at the end of the paid period.
 
 The success page waits for our row before confirming
-([purchases.md](purchases.md#after-payment)). For a duplicate it still
-confirms the duplicate's tier — **gap**: `Codex-o4jvw`.
+([purchases.md](purchases.md#after-payment)). For a duplicate it confirms
+nothing: it names the subscription the user keeps and says the second one is
+cancelled and refunded, with Change plan when the tiers differ (Codex-o4jvw).
 
 ---
 
