@@ -1559,6 +1559,22 @@ export const team_only_cta_description = () => `This content is only available t
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const course_only_cta_title = () => `Part of a course`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const course_only_cta_description = () => `This lesson is available to people enrolled in its course.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const org_continue_watching_title = () => `Continue Watching`
 
 

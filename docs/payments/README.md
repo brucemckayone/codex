@@ -6,7 +6,7 @@ split, how creators get paid, and who can see what.
 **This folder is a specification.** It describes the behaviour Codex is meant
 to have, as decided by the owner. Where today's code does not behave this way
 yet, the rule ends with a **gap** marker naming the bead that fixes it, for
-example — **gap**: `Codex-2hxff.14` (checkout gating). [status.md](status.md)
+example — **gap**: `Codex-2hxff.13` (releasing pending money). [status.md](status.md)
 lists every gap in one table. Evidence for today's behaviour, with file and
 line references, is in [docs/audits/payments-2026-10-13/](../audits/payments-2026-10-13/README.md).
 

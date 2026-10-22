@@ -9,6 +9,7 @@
   @prop {string} contentId - Content ID for checkout form
   @prop {string} [contentTitle] - Content title for display
   @prop {AccessState} accessState - Current access state
+  @prop {boolean} canPurchase - Whether a purchase would open this content (`canBeSold`)
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
@@ -33,11 +34,26 @@
     contentId: string;
     contentTitle?: string;
     accessState: AccessState;
+    /**
+     * Whether a one-off purchase would open this content — `canBeSold` from
+     * `@codex/constants`. When false the overlay offers no Buy form, since
+     * checkout refuses the item (Codex-2hxff.14). Required so that no caller
+     * can bring the Buy button back by leaving it out.
+     */
+    canPurchase: boolean;
     /** When true, attempts muted autoplay after HLS init. Default: false */
     autoplay?: boolean;
   }
 
-  const { previewUrl, poster, contentId, contentTitle, accessState, autoplay = false }: Props = $props();
+  const {
+    previewUrl,
+    poster,
+    contentId,
+    contentTitle,
+    accessState,
+    canPurchase,
+    autoplay = false,
+  }: Props = $props();
 
   let videoEl: HTMLVideoElement | undefined = $state();
   let hlsInstance: Hls | null = null;
@@ -316,7 +332,7 @@
               <a href="/pricing" class="preview-player__cta-button">
                 {m.upgrade_cta_title()}
               </a>
-            {:else}
+            {:else if canPurchase}
               <form {...createCheckout}>
                 <input type="hidden" name="contentId" value={contentId} />
                 <button

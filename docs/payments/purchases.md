@@ -18,17 +18,30 @@ A **gap** marker means the code does not behave this way yet; see
   refuses 1p–99p on every price (`PRICE_LIMITS` in `@codex/constants`), and
   checkout refuses an older row priced below £1.00 before it reaches Stripe;
 - its access rule honours a purchase. Content that is course-only, team-only
-  or followers-only is not sold on its own — **gap**: `Codex-2hxff.14`
-  (checkout gating).
+  or followers-only is not sold on its own, nor is orgless content with a tier
+  (the access decision denies it to everyone). Checkout refuses these with
+  `not_sold_separately`, and the content page shows no Buy: a priced
+  course-only item shows a "Part of a course" note instead, like the "Team
+  Only" note (owner decisions 2026-10-21/22, `Codex-2hxff.14`).
+
+One rule decides this, `canBeSold` in `@codex/constants`, beside
+`isGrantableContent`. Checkout and the content page both read it, and an
+`@codex/access` test ties it to the access decision.
 
 **A course** can be bought when it is published and has a price of at least £1.00.
 
-Publishing priced content requires the seller's payouts to be set up (a payable
-Connect account), whether or not it is marked purchasable — **gap**:
-`Codex-2hxff.14`.
+Publishing a priced item requires its creator's payouts to be set up (a
+payable Connect account): any price or tier inclusion, whether or not the
+content is marked purchasable, and courses too (owner decision 2026-10-22,
+"Yes, same rule"). The rule is `requiresPayoutsToPublish`, and the refusal is
+the Studio's existing "set up payouts" message. It is checked when content is
+published, when a published item is given a price or a tier, by the admin
+publish route, and when a course is published.
 
-A buyer who already owns the item (a completed purchase of the content, or a
-live course entitlement) cannot start a second checkout for it.
+A buyer who already owns the item cannot start a second checkout for it.
+Owning is a completed purchase, or, for a course, a live purchase or support
+grant entitlement. A course plan subscriber rents the course, so they may
+still buy it outright.
 
 ## Checkout
 
@@ -54,10 +67,45 @@ live course entitlement) cannot start a second checkout for it.
      title, and `codex_env`; `payment_intent_data.metadata` carries `codex_env`
      too, and Stripe snapshots it onto the Charge, so refund and dispute events
      are tagged;
-   - an idempotency key per buyer and item, and an expiry, so two open tabs can
-     never both take payment — **gap**: `Codex-2hxff.14` (double purchase).
+   - an expiry 30 minutes after it is made (owner decision 2026-10-21, "30
+     minutes"). Stripe refuses an `expires_at` under 30 minutes after its own
+     creation time, so 31 is sent;
+   - an idempotency key per reservation (below) and Stripe Customer.
 3. Success and cancel URLs must be on an allow-listed host
    (`checkoutRedirectUrlSchema`).
+
+### One checkout at a time
+
+A buyer has at most one open checkout per item (owner decision 2026-10-21,
+"Block, then refund"). A second tab or a double click gets the first tab's
+Stripe page back, so only one of them can take payment.
+
+- Before calling Stripe, checkout reserves a `checkout_sessions` row for the
+  buyer and item, under an advisory lock. A partial unique index on `open`
+  rows backs the lock.
+- An open row is reused when it was made at today's price and has at least 5
+  minutes left. Otherwise it is marked `expired`, its Stripe session is
+  expired too, and a new row is reserved. Expiring the old session is best
+  effort: if it was paid meanwhile, that payment completes, and a payment on
+  the new session is refunded as a duplicate.
+- The row stores the expiry, and the key is `checkout_<row id>_<customer>`.
+  Two callers on one row therefore send identical parameters under one key,
+  and Stripe returns the same session to both. An idempotency key alone could
+  not do this: Stripe compares a reused key's parameters, errors when they
+  differ (a price change), and forgets keys after 24 hours.
+- A Stripe failure frees the row, so the next attempt starts afresh rather
+  than replaying the stored failure.
+- A 409, or an idempotency error, means another caller (the other tab of a
+  double click) is creating that very session. It returns the idempotency
+  error when its parameters differ: the content page and the preview player
+  send different cancel URLs. This caller waits up to about 3 seconds for the
+  other's session and returns it; failing that, the buyer is asked to try
+  again in a moment (409).
+- A row still without a session after a minute is replaced, not reused: its
+  creator failed, and its stored expiry is now under Stripe's floor.
+- The booking webhook marks the paid row `completed`. An abandoned row stays
+  `open` until the buyer next checks out for the item, and is expired then.
+  Nothing sweeps them.
 
 No `transfer_data`, `application_fee_amount` or `on_behalf_of` is passed — the
 charge stays on the platform account (see
@@ -74,7 +122,11 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
    - the session carries another environment's tag (checked for every webhook
      before any handler runs — see
      [operations](operations.md#environments-and-stripe-accounts));
-   - `payment_status` is not `paid` — **gap**: `Codex-2hxff.14`.
+   - `payment_status` is not `paid` (owner decision, `Codex-2hxff.14`).
+     Checkout is card-only, and a card session is always `paid` by the time
+     it completes. A delayed method (a bank debit) would complete `unpaid`
+     and be paid on `checkout.session.async_payment_succeeded`, which nothing
+     handles yet: adding such a method means handling that event first.
 3. The charge id is read from the PaymentIntent (`latest_charge`). If that
    lookup fails **temporarily** — an outage, or a Stripe key or permission
    misconfiguration — the webhook returns 500 so Stripe retries
@@ -116,9 +168,68 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
 **Errors.** A transient failure (database connection, Stripe outage) returns
 500 and Stripe retries. A failure writing the slices after the purchase has
 committed is logged as exactly that, with an errorId; a transient one returns
-500 and the redelivery re-records the missing slices. If a buyer is charged twice
-for an item they already own, the second payment is refunded automatically —
-**gap**: `Codex-2hxff.14`.
+500 and the redelivery re-records the missing slices.
+
+### A second payment for an owned item
+
+One open checkout per item makes this rare. It can still happen: a session
+opened before this rule, an old tab paid after its replacement, or two
+sessions paid at once. The buyer keeps one purchase and the other payment is
+refunded in full, automatically (owner decision 2026-10-21, "Block, then
+refund").
+
+- **At most one completed purchase per buyer and item**, enforced by partial
+  unique indexes on `purchases` (`status = 'completed'`, one for content, one
+  for courses). Refunded and failed rows don't count, so a buyer can buy
+  again after a refund. Migration 0006 once added a full unique index there,
+  and 0007 dropped it for exactly that case.
+- **Completion** takes an advisory lock per buyer and item, then looks for a
+  completed purchase. (It first looks again for its own PaymentIntent, in case
+  a concurrent delivery of the same event wrote it meanwhile.) If one exists,
+  the new row is a **duplicate**: `duplicate_of_purchase_id` names the purchase
+  it repeats. It writes no access row, no entitlement and no payout slice, and
+  is not a sale: Sales and its totals leave it out. Its split columns keep what
+  the sale would have paid.
+- **Its status tells the truth about the money.** A duplicate is written
+  `pending` and becomes `refunded` only once Stripe has refunded it, so no
+  reader shows money as returned that is not.
+- **After the commit**, `issueRefund` (`@codex/payments`, the platform's one
+  refund call) refunds the charge in full under
+  `refund_duplicate_<PaymentIntent>`. A redelivered event asks again under the
+  same key, unless the duplicate is already `refunded`, and
+  `charge_already_refunded` counts as done.
+- **If Stripe refuses the refund**, the row stays `pending` and the failure is
+  logged ("Duplicate payment could not be refunded", with Stripe's `code`). It
+  is thrown as retryable whatever the cause, so Stripe redelivers the event
+  through its retry window: a refusal such as a low platform balance can clear.
+  One that never clears, such as a charge the buyer has disputed, ends with
+  the dispute or is held for support (owner decision: a failed refund is held
+  for support). Support finds them with `duplicate_of_purchase_id IS NOT NULL
+  AND status = 'pending'`.
+- **No receipt** is sent for it. Its `charge.refunded` sends the usual refund
+  email, naming the item: "You still have {item}. This refunds a second
+  payment for it." Every refund email now names the purchase's own item; it
+  used to say "Content", because charges carry no title.
+- **A refund or dispute of one purchase spares another.** `content_access`
+  holds one row per buyer and item, shared by every purchase of it. A refund,
+  a dispute or a lost dispute revokes it only when no other completed purchase
+  of the item remains. In that case the webhook also writes no org-wide
+  streaming block: a buyer who disputes the duplicate charge keeps streaming
+  everything they own. Before this, a dispute on an old refunded purchase
+  locked a buyer out of the copy they had bought again. Each purchase's own
+  entitlement is revoked as before.
+- **Self-heal.** When `charge.refunded` arrives before
+  `checkout.session.completed` for an item the buyer already owns, the row is
+  rebuilt as a duplicate, under the same lock, not as a second completed
+  purchase.
+
+**Deploying and rolling back migration 0109.** Its partial unique indexes
+assume the new completion code: older code would hit them with a second
+payment and drop it, since a unique violation is answered as permanent.
+Production held 0 duplicate completed purchases when it was written. To roll
+the code back, also run `DROP INDEX uq_purchases_completed_customer_content,
+uq_purchases_completed_customer_course;`. The `checkout_sessions` table and
+the new column can stay.
 
 ## After payment
 

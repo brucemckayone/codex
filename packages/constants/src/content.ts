@@ -1,3 +1,4 @@
+import { PRICE_LIMITS } from './commerce';
 /**
  * Content domain constants
  */
@@ -158,6 +159,58 @@ export function isGrantableContent(
     !c.isFollowerGated &&
     (c.includedInTierId != null || (c.priceCents ?? 0) > 0)
   );
+}
+
+/**
+ * Is this content offered for a one-off purchase that would actually open it?
+ * Checkout refuses anything else, and the content page shows Buy only for
+ * these items (owner decision, Codex-2hxff.14: "checkout only for items a
+ * purchase opens").
+ *
+ * The seller must have marked it purchasable at a price of at least
+ * `PRICE_LIMITS.MIN_CENTS`, and its access rule must honour a purchase.
+ * `decideContentAccess` reads a purchase only in the tier arm
+ * (`subscribers_purchase`) and the paid arm (`paid_purchase`): course-only,
+ * team-only and followers-only content return before either, and orgless
+ * content with a tier is denied to everyone (`orgless_tier_gate`). A test in
+ * `@codex/access` ties the two, as it does for `isGrantableContent`.
+ *
+ * Lifecycle (published, not deleted) is not read here: checkout refuses those
+ * with their own reasons.
+ */
+export function canBeSold(
+  c: Pick<
+    ContentAccessFlags,
+    | 'isPurchasable'
+    | 'priceCents'
+    | 'courseOnly'
+    | 'isTeamOnly'
+    | 'isFollowerGated'
+    | 'includedInTierId'
+  > & { organizationId: string | null }
+): boolean {
+  return (
+    c.isPurchasable &&
+    (c.priceCents ?? 0) >= PRICE_LIMITS.MIN_CENTS &&
+    !c.courseOnly &&
+    !c.isTeamOnly &&
+    !c.isFollowerGated &&
+    !(c.organizationId == null && c.includedInTierId != null)
+  );
+}
+
+/**
+ * Does publishing this content need the creator's payouts set up? Any price,
+ * or inclusion in a tier, earns money, whether or not the item is marked
+ * purchasable (owner decision, Codex-2hxff.14: "any priced item needs payouts
+ * set up to publish"). The content publish and update paths and the admin
+ * publish route all refuse with `CreatorPayoutsRequiredError` when this holds
+ * and the creator can't be paid.
+ */
+export function requiresPayoutsToPublish(
+  c: Pick<ContentAccessFlags, 'priceCents' | 'includedInTierId'>
+): boolean {
+  return (c.priceCents ?? 0) > 0 || c.includedInTierId != null;
 }
 
 /**

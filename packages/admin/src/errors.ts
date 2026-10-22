@@ -38,3 +38,26 @@ export class ContentNotGrantableError extends BusinessLogicError {
     );
   }
 }
+
+/**
+ * An admin publish of content that earns money (`requiresPayoutsToPublish`,
+ * `@codex/constants`) whose creator can't be paid yet (422, Codex-2hxff.14).
+ *
+ * The twin of `@codex/content`'s `CreatorPayoutsRequiredError`, which this
+ * package cannot import (admin depends on Foundation packages only). The
+ * message and `code: 'CREATOR_CONNECT_REQUIRED'` are copied verbatim so the
+ * Studio shows the same "set up payouts" text whichever route refused — keep
+ * the two in step.
+ */
+export class CreatorPayoutsRequiredError extends BusinessLogicError {
+  constructor(creatorId: string, accessType: string) {
+    super(
+      'Set up payouts before publishing paid or subscriber content. Complete Stripe Connect onboarding to receive payments.',
+      {
+        creatorId,
+        accessType,
+        code: 'CREATOR_CONNECT_REQUIRED',
+      }
+    );
+  }
+}

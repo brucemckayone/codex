@@ -420,6 +420,8 @@ describe('Round-D read services (Codex-776gg)', () => {
         priceCents: null,
       });
 
+      // One buyer per purchase: a buyer holds at most one completed purchase per
+      // course (Codex-2hxff.14, `uq_purchases_completed_customer_course`).
       // current window [now-30d, now)
       await insertCoursePurchase(db, {
         customerId: u4,
@@ -430,7 +432,7 @@ describe('Round-D read services (Codex-776gg)', () => {
       });
       // previous window [now-60d, now-30d)
       await insertCoursePurchase(db, {
-        customerId: u4,
+        customerId: u5,
         courseId: course.id,
         organizationId: orgAId,
         amountPaidCents: 1000,
@@ -438,7 +440,7 @@ describe('Round-D read services (Codex-776gg)', () => {
       });
       // outside both windows — must never count
       await insertCoursePurchase(db, {
-        customerId: u4,
+        customerId: u6,
         courseId: course.id,
         organizationId: orgAId,
         amountPaidCents: 9999,

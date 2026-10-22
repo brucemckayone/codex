@@ -115,8 +115,12 @@ export class CategorySlugConflictError extends ConflictError {
 }
 
 /**
- * Thrown when a creator tries to publish monetised content (paid with a price,
- * or subscriber-gated) before their Stripe Connect account can receive money.
+ * Thrown when a creator tries to publish content that earns money (any price,
+ * or included in a tier — `requiresPayoutsToPublish`, `@codex/constants`)
+ * before their Stripe Connect account can receive money, or to set or change
+ * the price or tier of content that is already published. `@codex/access`
+ * throws it for courses too (same rule, Codex-2hxff.14); `@codex/admin`, which
+ * cannot depend on this package, has a twin with the same message and code.
  *
  * Without this gate, a buyer can pay for content whose creator has no payout
  * destination — funds are collected and the creator payout is parked pending

@@ -96,6 +96,7 @@ export {
 } from './services/fee-config-service';
 // Service
 export {
+  isDuplicatePayment,
   type PurchaseMailer,
   PurchaseService,
 } from './services/purchase-service';

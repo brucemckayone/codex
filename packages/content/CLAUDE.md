@@ -17,10 +17,10 @@ All validation schemas are re-exported from `@codex/validation` for convenience.
 |---|---|---|
 | `create` | `(input: CreateContentInput, creatorId: string)` | Transaction. Media validated but not required to be ready for draft. Checks slug uniqueness. |
 | `get` | `(id: string, creatorId: string)` | Returns `ContentWithRelations` (includes mediaItem). Scoped by creatorId. |
-| `update` | `(id: string, input: UpdateContentInput, creatorId: string)` | Transaction. Checks slug conflict if slug changes. |
+| `update` | `(id: string, input: UpdateContentInput, creatorId: string)` | Transaction. Checks slug conflict if slug changes. On PUBLISHED content, a price or tier set or changed (or the row turned purchasable) needs a payout-ready creator — else `CreatorPayoutsRequiredError`. Compared by value, so a form resending unchanged flags never trips it; removing a price/tier never does. |
 | `uploadThumbnail` | `(id: string, creatorId: string, file: File, r2: R2Bucket, r2PublicUrlBase: string)` | Processes image via `@codex/image-processing`, returns `ImageProcessingResult`. |
 | `isSlugAvailable` | `(slug: string, creatorId: string, organizationId?: string \| null, excludeContentId?: string \| null)` | Slug uniqueness — org scope when `organizationId` is given, else creator-personal scope. |
-| `publish` | `(id: string, creatorId: string)` | Transaction. Video/audio content requires its media at `status === 'ready'`. Monetised content (priced or `includedInTierId` set) additionally requires a payout-ready Connect account — else `CreatorPayoutsRequiredError`. |
+| `publish` | `(id: string, creatorId: string)` | Transaction. Video/audio content requires its media at `status === 'ready'`. Content that earns money (`requiresPayoutsToPublish`: any price, or `includedInTierId` set — purchasable or not) additionally requires a payout-ready Connect account — else `CreatorPayoutsRequiredError`. |
 | `unpublish` | `(id: string, creatorId: string)` | Reverts published → draft. |
 | `delete` | `(id: string, creatorId: string)` | Soft delete via `deletedAt`. |
 | `list` | `(creatorId: string, filters: ContentFilters, pagination?)` | Paginated. Supports status/search/type filters. |

@@ -26,7 +26,7 @@ import {
   createR2SigningClientFromEnv,
   type R2SigningClient,
 } from '@codex/cloudflare-clients';
-import { isGrantableContent } from '@codex/constants';
+import { canBeSold, isGrantableContent } from '@codex/constants';
 import { ContentService, MediaItemService } from '@codex/content';
 import {
   content,
@@ -409,6 +409,57 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
         !(await accessService.canView(ungranted, item.id));
       expect(grantOpensIt).toBe(opens);
       expect(isGrantableContent(row)).toBe(opens);
+    });
+  });
+
+  // Checkout sells only what `canBeSold` accepts (Codex-2hxff.14), so whatever
+  // it accepts, a purchase must open. The converse need not hold: the access
+  // decision ignores `isPurchasable`, a seller's choice, so a purchase would
+  // open priced content that is not for sale. The table pins both columns.
+  describe('canBeSold agrees with the access decision', () => {
+    const forSale = {
+      isFree: false,
+      isPurchasable: true,
+      priceCents: 1500,
+      includedInTierId: null,
+      courseOnly: false,
+      isFollowerGated: false,
+      isTeamOnly: false,
+    };
+
+    it.each([
+      ['paid, for sale', true, true, {}],
+      ['paid, not marked purchasable', false, true, { isPurchasable: false }],
+      ['course-only', false, false, { courseOnly: true }],
+      ['team-only', false, false, { isTeamOnly: true }],
+      ['followers-only', false, false, { isFollowerGated: true }],
+    ])('%s: sold = %s, a purchase opens it = %s', async (shape, sold, opens, flags) => {
+      const [buyer, other] = await seedTestUsers(db, 2);
+      const item = await createPaidContent(
+        `sellable-${shape.replace(/[^a-z]+/g, '-').replace(/-+$/, '')}`
+      );
+      const [row] = await db
+        .update(content)
+        .set({ ...forSale, ...flags })
+        .where(eq(content.id, item.id))
+        .returning();
+      if (!row) throw new Error('Failed to set the content shape');
+
+      // A purchase, as `completePurchase` records it for the decision.
+      await db.insert(entitlements).values({
+        userId: buyer,
+        organizationId,
+        contentId: item.id,
+        source: 'content_purchase',
+      });
+
+      const purchaseOpensIt =
+        (await accessService.canView(buyer, item.id)) &&
+        !(await accessService.canView(other, item.id));
+      expect(canBeSold(row)).toBe(sold);
+      expect(purchaseOpensIt).toBe(opens);
+      // The invariant checkout relies on: never sell what a purchase won't open.
+      if (canBeSold(row)) expect(purchaseOpensIt).toBe(true);
     });
   });
 });

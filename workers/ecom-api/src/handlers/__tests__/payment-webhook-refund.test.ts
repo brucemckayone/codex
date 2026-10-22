@@ -541,6 +541,27 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     );
   });
 
+  it('a duplicate payment’s refund email says the buyer still has the item, and why (Codex-2hxff.14)', async () => {
+    mockProcessRefund.mockResolvedValueOnce({
+      userId: 'u',
+      accessEnded: false,
+      duplicatePayment: true,
+      // The purchase's own title: a charge carries none of ours.
+      itemTitle: 'Breathwork Basics',
+    });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+
+    expect(emails()).toEqual([
+      expect.objectContaining({
+        contentTitle: 'Breathwork Basics',
+        accessNote:
+          'You still have Breathwork Basics. This refunds a second payment for it.',
+      }),
+    ]);
+  });
+
   it("a subscription charge's refund email says nothing about access", async () => {
     // No purchase: processRefund finds none for the PaymentIntent.
     mockProcessRefund.mockResolvedValueOnce(undefined);

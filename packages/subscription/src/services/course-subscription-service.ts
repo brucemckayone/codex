@@ -81,6 +81,7 @@ import {
   ConnectAccountNotReadyError,
   CourseSubscriptionPlanExistsError,
   CourseSubscriptionPlanNotFoundError,
+  CreatorConnectRequiredError,
   SubscriptionCheckoutError,
 } from '../errors';
 import { schedulePriceChange } from './pending-price-change';
@@ -156,12 +157,43 @@ export class CourseSubscriptionService extends BaseService {
         eq(courses.organizationId, organizationId),
         isNull(courses.deletedAt)
       ),
-      columns: { id: true, title: true, organizationId: true },
+      columns: {
+        id: true,
+        title: true,
+        organizationId: true,
+        creatorId: true,
+        status: true,
+      },
     });
     if (!course) {
       throw new NotFoundError('Course not found', { courseId, organizationId });
     }
     return course;
+  }
+
+  /**
+   * A live course takes a new way to pay only if its creator can be paid
+   * (Codex-2hxff.14, owner decision "Yes, same rule"), as publishing a priced
+   * course does. A plan on a draft course is checked when the course is
+   * published. Without this a creator who can't be paid could start earning a
+   * share that waits, pending, until they set up payouts.
+   */
+  private async assertLiveCourseCreatorCanBePaid(course: {
+    creatorId: string;
+    status: string;
+  }): Promise<void> {
+    if (course.status !== CONTENT_STATUS.PUBLISHED) return;
+    const [account] = await this.db
+      .select({
+        chargesEnabled: stripeConnectAccounts.chargesEnabled,
+        payoutsEnabled: stripeConnectAccounts.payoutsEnabled,
+      })
+      .from(stripeConnectAccounts)
+      .where(eq(stripeConnectAccounts.userId, course.creatorId))
+      .limit(1);
+    if (!account?.chargesEnabled || !account.payoutsEnabled) {
+      throw new CreatorConnectRequiredError(course.creatorId);
+    }
   }
 
   /**
@@ -189,6 +221,7 @@ export class CourseSubscriptionService extends BaseService {
       if (!connect?.chargesEnabled || !connect?.payoutsEnabled) {
         throw new ConnectAccountNotReadyError(course.organizationId);
       }
+      await this.assertLiveCourseCreatorCanBePaid(course);
 
       const existing = await this.db.query.courseSubscriptionPlans.findFirst({
         where: and(
@@ -376,7 +409,7 @@ export class CourseSubscriptionService extends BaseService {
     input: { priceMonthly: number; priceAnnual: number }
   ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
     try {
-      await this.getCourseInOrgOrThrow(organizationId, courseId);
+      const course = await this.getCourseInOrgOrThrow(organizationId, courseId);
 
       const existing = await this.findPlanRow(courseId);
       if (!existing) {
@@ -389,6 +422,9 @@ export class CourseSubscriptionService extends BaseService {
       if (!monthlyChanged && !annualChanged && !needsRelist) {
         return existing;
       }
+      // Putting a withdrawn plan back on sale is a new way to pay; a price
+      // change on a plan already on sale is not.
+      if (needsRelist) await this.assertLiveCourseCreatorCanBePaid(course);
 
       // The three Stripe id columns are nullable, so the row type permits a live
       // plan with nothing behind it in Stripe. `createPlan` always writes all

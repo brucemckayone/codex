@@ -105,6 +105,7 @@ function attachExecutionCtx(
 describe('handleCheckoutCompleted', () => {
   let mockStripe: Stripe;
   let mockCompletePurchase: ReturnType<typeof vi.fn>;
+  let mockMarkCheckoutSessionCompleted: ReturnType<typeof vi.fn>;
   let mockRelease: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -115,7 +116,10 @@ describe('handleCheckoutCompleted', () => {
       id: 'purchase_123',
       customerId: 'user_123',
       contentId: 'content_456',
+      status: 'completed',
+      duplicateOfPurchaseId: null,
     });
+    mockMarkCheckoutSessionCompleted = vi.fn().mockResolvedValue(undefined);
     mockRelease = vi.fn();
 
     // The registry's services, as the composition root hands them over.
@@ -124,6 +128,7 @@ describe('handleCheckoutCompleted', () => {
         purchase: {
           completePurchase: mockCompletePurchase,
           completeCoursePurchase: mockCompletePurchase,
+          markCheckoutSessionCompleted: mockMarkCheckoutSessionCompleted,
         },
       } as unknown as WebhookServices['services'],
       background: (promise) => promise,
@@ -243,34 +248,107 @@ describe('handleCheckoutCompleted', () => {
     });
   });
 
-  describe('payment status handling', () => {
-    /**
-     * NOTE: The handler does NOT validate payment_status because:
-     * 1. Stripe only sends checkout.session.completed AFTER payment succeeds
-     * 2. The payment_status field can be 'paid' or 'no_payment_required' (for free trials)
-     * 3. For paid checkouts, payment_status is always 'paid' when this event fires
-     *
-     * If we wanted to add validation, we would check payment_status === 'paid'
-     * and early return otherwise. But this is defensive programming not required
-     * per Stripe's documentation.
-     */
-    it('should process events regardless of payment_status field', async () => {
-      // This tests the ACTUAL behavior - handler processes all events
-      // Stripe guarantees checkout.session.completed only fires after payment
+  // Only a paid session completes a purchase (owner decision, Codex-2hxff.14).
+  // A session completes `unpaid` when a delayed method is used: it is paid
+  // later, if at all, so completing it now would grant what was not paid for.
+  describe('payment status', () => {
+    const metadata = {
+      customerId: 'user_123',
+      contentId: 'content_456',
+      organizationId: 'org_789',
+    };
+
+    it('completes a paid session and marks its checkout completed', async () => {
       const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_paid',
         paymentStatus: 'paid',
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
+        metadata,
       }) as unknown as Stripe.Event;
       const { context, mock } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
       expect(mockCompletePurchase).toHaveBeenCalled();
+      expect(mockMarkCheckoutSessionCompleted).toHaveBeenCalledWith('cs_paid');
       expect(mock._obs.error).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'unpaid',
+      'no_payment_required',
+    ])('skips a %s session: nothing is completed or marked', async (paymentStatus) => {
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_not_paid',
+        paymentStatus,
+        metadata,
+      }) as unknown as Stripe.Event;
+      const { context, mock } = createContext();
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(mockCompletePurchase).not.toHaveBeenCalled();
+      expect(mockMarkCheckoutSessionCompleted).not.toHaveBeenCalled();
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Skipping unpaid checkout session',
+        expect.objectContaining({ sessionId: 'cs_not_paid', paymentStatus })
+      );
+    });
+
+    it('a failure to record the session paid is logged, not thrown: the purchase stands and the receipt still goes', async () => {
+      mockMarkCheckoutSessionCompleted.mockRejectedValueOnce(
+        new Error('connection reset')
+      );
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_mark_fails',
+        paymentStatus: 'paid',
+        metadata,
+      }) as unknown as Stripe.Event;
+      const { context, mock } = createContext();
+
+      await expect(
+        handleCheckoutCompleted(event, mockStripe, context)
+      ).resolves.toBeUndefined();
+
+      expect(mockCompletePurchase).toHaveBeenCalled();
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Paid checkout session could not be marked completed',
+        expect.objectContaining({ sessionId: 'cs_mark_fails' })
+      );
+      // The handler carries on to the library bump and the receipt.
+      expect(mock._obs.info).toHaveBeenCalledWith(
+        'Purchase completed successfully',
+        expect.anything()
+      );
+    });
+
+    it('a duplicate payment sends no receipt and bumps no library: its refund email says why', async () => {
+      mockCompletePurchase.mockResolvedValueOnce({
+        id: 'purchase_dup',
+        customerId: 'user_123',
+        contentId: 'content_456',
+        status: 'refunded',
+        duplicateOfPurchaseId: 'purchase_first',
+      });
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_dup',
+        paymentStatus: 'paid',
+        metadata,
+      }) as unknown as Stripe.Event;
+      const { context, mock } = createContext();
+      const executionCtx = attachExecutionCtx(mock);
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(mockMarkCheckoutSessionCompleted).toHaveBeenCalledWith('cs_dup');
+      expect(executionCtx.waitUntil).not.toHaveBeenCalled();
+      expect(mock._obs.warn).toHaveBeenCalledWith(
+        'Duplicate payment refunded instead of completed',
+        expect.objectContaining({ purchaseId: 'purchase_dup' })
+      );
+      expect(mock._obs.info).not.toHaveBeenCalledWith(
+        'Purchase completed successfully',
+        expect.anything()
+      );
     });
   });
 
@@ -726,56 +804,6 @@ describe('handleCheckoutCompleted', () => {
         expect.anything(),
         expect.objectContaining({ currency: 'eur' })
       );
-    });
-  });
-
-  describe('payment_status edge cases', () => {
-    /**
-     * Stripe checkout.session.completed fires when:
-     * - payment_status = 'paid' for successful payments
-     * - payment_status = 'no_payment_required' for free trials or $0 checkouts
-     *
-     * Current behavior: Handler processes ALL events regardless of payment_status
-     * because Stripe guarantees the event only fires after successful payment.
-     *
-     * These tests document the current behavior.
-     */
-    it('should process no_payment_required status (free trials/zero-amount)', async () => {
-      const event = createMockStripeCheckoutEvent({
-        paymentStatus: 'no_payment_required',
-        amountTotal: 0,
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
-      }) as unknown as Stripe.Event;
-      const { context, mock } = createContext();
-
-      await handleCheckoutCompleted(event, mockStripe, context);
-
-      // Handler processes the event (current behavior)
-      expect(mockCompletePurchase).toHaveBeenCalled();
-      expect(mock._obs.error).not.toHaveBeenCalled();
-    });
-
-    it('should process unpaid status if Stripe sends it', async () => {
-      // This shouldn't happen per Stripe docs, but test defensive behavior
-      const event = createMockStripeCheckoutEvent({
-        paymentStatus: 'unpaid',
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
-      }) as unknown as Stripe.Event;
-      const { context } = createContext();
-
-      await handleCheckoutCompleted(event, mockStripe, context);
-
-      // Current behavior: processes anyway
-      // If we want to reject unpaid, add validation in handler
-      expect(mockCompletePurchase).toHaveBeenCalled();
     });
   });
 

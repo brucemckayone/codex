@@ -6,6 +6,7 @@
  */
 
 import { toast } from '$lib/components/ui/Toast/toast-store';
+import { remoteErrorMessage } from '$lib/page-builder/builder-save';
 import { publishContent, unpublishContent } from '$lib/remote/content.remote';
 import * as m from '$paraglide/messages';
 
@@ -29,11 +30,20 @@ export async function togglePublishStatus(
     toast.success(m.studio_content_form_publish_success());
     return 'published';
   } catch (err) {
-    const message =
-      err instanceof Error
-        ? err.message
-        : m.studio_content_form_publish_error();
-    toast.error(message);
+    // A refusal the remote forwards (a 4xx) arrives as `{ status, body:
+    // { message } }`, not as an Error; its words are the creator's to act on
+    // (Codex-2hxff.14: the payouts message). Anything else gets our own line.
+    const status = (err as { status?: unknown } | null)?.status;
+    const refusal =
+      typeof status === 'number' && status >= 400 && status < 500
+        ? remoteErrorMessage(err)
+        : undefined;
+    toast.error(
+      refusal ??
+        (currentStatus === 'published'
+          ? m.studio_content_form_unpublish_error()
+          : m.studio_content_form_publish_error())
+    );
     throw err;
   }
 }

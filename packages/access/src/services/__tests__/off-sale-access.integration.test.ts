@@ -49,7 +49,6 @@ import type Stripe from 'stripe';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AccessDeniedError } from '../../errors';
 import { ContentAccessService } from '../ContentAccessService';
-import { CourseAccessService } from '../course-access-service';
 
 type R2 = ConstructorParameters<typeof ContentAccessService>[0]['r2'];
 
@@ -271,9 +270,14 @@ describe('a removed creator’s catalogue (Codex-2hxff.64)', () => {
       status: 'published',
       offSaleAt: null,
     });
-    const courseAccess = new CourseAccessService({ db, environment: 'test' });
-    await courseAccess.setTierAccess(orgId, courseOffSaleId, [tierId]);
-    await courseAccess.setTierAccess(orgId, coursePublishedId, [tierId]);
+    // Seeded as rows, not through `setTierAccess`: that write path now refuses
+    // a tier added to a LIVE course whose creator can't be paid
+    // (Codex-2hxff.14), and this suite is about what a grant opens, not about
+    // who may make one (`course-payouts-gate.integration.test.ts`).
+    await db.insert(courseTierAccess).values([
+      { courseId: courseOffSaleId, tierId, organizationId: orgId },
+      { courseId: coursePublishedId, tierId, organizationId: orgId },
+    ]);
   });
 
   afterAll(async () => {

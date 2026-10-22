@@ -161,7 +161,10 @@ Creating an organisation opens its creator's period.
 | Subscribing to a tier | The owner is payable |
 | Creating a course plan | The owner is payable |
 | Subscribing to a course plan | The owner is payable |
-| Publishing priced content | The content's creator is payable — **gap**: `Codex-2hxff.14` (only checked when marked purchasable) |
+| Publishing priced content (any price or tier, purchasable or not; also the admin publish route) | The content's creator is payable (`requiresPayoutsToPublish`, `Codex-2hxff.14`) |
+| Giving published content a price or tier, or marking it purchasable | The content's creator is payable. A save that changes nothing a buyer could pay into, or removes a price or tier, is never refused |
+| Publishing a priced course (a price, an active course plan, or a tier) | The course's creator is payable (owner decision 2026-10-22, "Yes, same rule") |
+| Giving a live course a price or a tier | The course's creator is payable |
 
 If an account later stops being payable (for example Stripe restricts it for
 verification), sales still complete and the affected slices wait as pending

@@ -96,10 +96,13 @@ describe('PurchaseService Integration', () => {
     sessionId: string,
     paymentIntentId: string
   ): Stripe.Response<Stripe.Checkout.Session> {
+    // Unique per call, as Stripe's are: checkout_sessions keeps every session
+    // id it records (UNIQUE), across tests and runs (Codex-2hxff.14).
+    const id = `${sessionId}_${crypto.randomUUID()}`;
     return {
-      id: sessionId,
+      id,
       object: 'checkout.session',
-      url: `https://checkout.stripe.com/c/pay/${sessionId}`,
+      url: `https://checkout.stripe.com/c/pay/${id}`,
       payment_intent: paymentIntentId,
       amount_total: 2999,
       currency: 'gbp',
@@ -271,6 +274,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 2999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -326,7 +330,13 @@ describe('PurchaseService Integration', () => {
           payment_intent_data: {
             metadata: { codex_env: 'test' },
           },
-        })
+          // Expires with its reservation (Codex-2hxff.14).
+          expires_at: expect.any(Number),
+        }),
+        // One key per reservation and Stripe Customer (Codex-2hxff.14).
+        {
+          idempotencyKey: expect.stringMatching(/^checkout_[0-9a-f-]{36}_cus_/),
+        }
       );
     });
 
@@ -364,6 +374,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 1999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -408,7 +419,8 @@ describe('PurchaseService Integration', () => {
       expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
         expect.objectContaining({
           customer: createdCustomerId,
-        })
+        }),
+        expect.anything()
       );
 
       // Regression: customer_email must NOT appear on the session payload.
@@ -458,6 +470,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 1999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -491,7 +504,8 @@ describe('PurchaseService Integration', () => {
       );
 
       expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
-        expect.objectContaining({ customer: cachedCustomerId })
+        expect.objectContaining({ customer: cachedCustomerId }),
+        expect.anything()
       );
       expect(mockStripe.customers.list).not.toHaveBeenCalled();
       expect(mockStripe.customers.create).not.toHaveBeenCalled();
@@ -529,6 +543,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 1999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -592,6 +607,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 1999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -860,6 +876,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents: 4999,
+          isPurchasable: true,
           tags: [],
         },
         userId
@@ -4122,10 +4139,12 @@ describe('PurchaseService Integration', () => {
       });
       // A fourth sale on salesOrg that we mark refunded directly in the DB
       // (processRefund needs Stripe; we're testing the listing/aggregation).
+      // Another buyer: a second completed purchase of content A by the same
+      // buyer is a duplicate payment, refunded at completion (Codex-2hxff.14).
       saleRefunded = await purchaseService.completePurchase(
         `pi_sales_refunded_${Date.now()}`,
         {
-          customerId: otherUserId,
+          customerId: userId,
           contentId: contentAId,
           organizationId: salesOrgId,
           amountPaidCents: 1000,
@@ -4208,10 +4227,12 @@ describe('PurchaseService Integration', () => {
       // Seed a disputed sale: completePurchase produces a 'completed' row,
       // then we mark it disputed at the DB level (status stays 'completed'
       // by design — see purchase-service.ts:1217 comment).
+      // The refunded sale's buyer: theirs no longer counts as owned, so this
+      // is a sale, not a duplicate payment (Codex-2hxff.14).
       const saleDisputed = await purchaseService.completePurchase(
         `pi_sales_disputed_${Date.now()}`,
         {
-          customerId: otherUserId,
+          customerId: userId,
           contentId: contentAId,
           organizationId: salesOrgId,
           amountPaidCents: 1000,
@@ -4322,11 +4343,14 @@ describe('PurchaseService Integration', () => {
       statsContentId = c.id;
 
       // Three completed @ 1000p + one refunded @ 1000p (refund 500p partial).
+      // Four buyers: a second completed purchase of the item by one buyer is
+      // a duplicate payment, refunded at completion (Codex-2hxff.14).
+      const buyers = await seedTestUsers(db, 4);
       for (let i = 0; i < 3; i++) {
         await purchaseService.completePurchase(
           `pi_stats_${i}_${Date.now()}_${Math.random()}`,
           {
-            customerId: otherUserId,
+            customerId: takeFirst(buyers.slice(i, i + 1), `stats buyer ${i}`),
             contentId: statsContentId,
             organizationId: statsOrgId,
             amountPaidCents: 1000,
@@ -4337,7 +4361,7 @@ describe('PurchaseService Integration', () => {
       const refunded = await purchaseService.completePurchase(
         `pi_stats_refund_${Date.now()}`,
         {
-          customerId: otherUserId,
+          customerId: takeFirst(buyers.slice(3), 'stats refund buyer'),
           contentId: statsContentId,
           organizationId: statsOrgId,
           amountPaidCents: 1000,
@@ -5233,10 +5257,11 @@ describe('PurchaseService Integration', () => {
         disputeReason: 'fraudulent',
       });
 
-      // Return shape — handler needs both fields
+      // Return shape — the handler reads all three
       expect(result).toEqual({
         userId: otherUserId,
         orgId: organizationId,
+        accessEnded: true,
       });
 
       // Access revoked — library query will omit this content
@@ -5311,6 +5336,7 @@ describe('PurchaseService Integration', () => {
       expect(first).toEqual({
         userId: otherUserId,
         orgId: organizationId,
+        accessEnded: true,
       });
 
       // Second dispute — must NOT throw and must return same scope so the
@@ -5323,6 +5349,7 @@ describe('PurchaseService Integration', () => {
       expect(second).toEqual({
         userId: otherUserId,
         orgId: organizationId,
+        accessEnded: true,
       });
 
       // First-write-wins on metadata — stripeDisputeId stays 'dp_first'.
@@ -5692,6 +5719,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           priceCents,
+          isPurchasable: true,
           tags: [],
         },
         creatorUserId

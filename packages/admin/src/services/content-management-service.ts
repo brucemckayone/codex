@@ -11,7 +11,12 @@
  */
 
 import { CacheType, type VersionedCache } from '@codex/cache';
-import { CONTENT_STATUS, CONTENT_TYPES, PAGINATION } from '@codex/constants';
+import {
+  CONTENT_STATUS,
+  CONTENT_TYPES,
+  PAGINATION,
+  requiresPayoutsToPublish,
+} from '@codex/constants';
 import { schema, withPagination } from '@codex/database';
 import {
   BaseService,
@@ -19,6 +24,7 @@ import {
   NotFoundError,
 } from '@codex/service-errors';
 import { and, count, desc, eq, isNull } from 'drizzle-orm';
+import { CreatorPayoutsRequiredError } from '../errors';
 import type {
   AdminContentItem,
   AdminContentListOptions,
@@ -116,7 +122,11 @@ export class AdminContentManagementService extends BaseService {
    * Publish content (admin override)
    *
    * Admin can publish any draft content in their organization.
-   * Validates media is ready for video/audio content.
+   * Validates media is ready for video/audio content, and that the creator
+   * can be paid when the content has a price or a tier.
+   *
+   * @throws {CreatorPayoutsRequiredError} Priced or tier content whose
+   *   creator's Connect account is not charges + payouts enabled
    */
   async publishContent(
     organizationId: string,
@@ -176,6 +186,27 @@ export class AdminContentManagementService extends BaseService {
               mediaItemId: existing.mediaItem.id,
               mediaStatus: existing.mediaItem.status,
             });
+          }
+        }
+
+        // Content that earns money needs a creator who can be paid — the rule
+        // ContentService.publish applies (Codex-2hxff.14), which an admin
+        // publish must not route round. The same DB-only readiness check:
+        // `stripe_connect_accounts` (one row per user) mirrors Stripe's flags.
+        if (requiresPayoutsToPublish(existing)) {
+          const [account] = await tx
+            .select({
+              chargesEnabled: schema.stripeConnectAccounts.chargesEnabled,
+              payoutsEnabled: schema.stripeConnectAccounts.payoutsEnabled,
+            })
+            .from(schema.stripeConnectAccounts)
+            .where(eq(schema.stripeConnectAccounts.userId, existing.creatorId))
+            .limit(1);
+          if (!account?.chargesEnabled || !account.payoutsEnabled) {
+            throw new CreatorPayoutsRequiredError(
+              existing.creatorId,
+              (existing.priceCents ?? 0) > 0 ? 'paid' : 'included_in_tier'
+            );
           }
         }
 

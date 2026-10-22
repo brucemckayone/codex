@@ -224,8 +224,9 @@ describe('CourseInsightsService.getOrgJourneyRevenue (Codex-9p47t)', () => {
       amountPaidCents: 5000,
       createdAt: daysAgo(3),
     });
+    // Another buyer: one completed purchase per buyer per course (Codex-2hxff.14).
     await insertCoursePurchase(db, {
-      customerId: buyer,
+      customerId: subscriber,
       courseId: courseA1,
       amountPaidCents: 9900,
       createdAt: daysAgo(40), // outside the 30d window → excluded

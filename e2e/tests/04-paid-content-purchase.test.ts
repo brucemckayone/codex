@@ -136,6 +136,7 @@ describe('Paid Content Purchase Flow', () => {
           organizationId: organization.id, // Required for paid content
           accessType: 'paid',
           priceCents: 2999, // $29.99 - PAID CONTENT
+          isPurchasable: true,
           category: 'Education',
           tags: ['paid', 'premium', 'course'],
         },
@@ -389,6 +390,7 @@ describe('Paid Content Purchase Flow', () => {
           organizationId: organization.id, // Required for paid content
           accessType: 'paid',
           priceCents: 1999,
+          isPurchasable: true,
         },
       }
     );
@@ -591,6 +593,7 @@ describe('Paid Content Purchase Flow', () => {
           organizationId: organization.id, // Required for paid content
           accessType: 'paid',
           priceCents: 999,
+          isPurchasable: true,
         },
       }
     );

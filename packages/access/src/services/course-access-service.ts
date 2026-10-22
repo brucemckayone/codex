@@ -15,6 +15,7 @@
  * lives, so the offer read reuses `hasCourseEntitlement` directly.
  */
 
+import { CONTENT_STATUS } from '@codex/constants';
 import {
   courseSubscriptionPlans,
   courses,
@@ -33,6 +34,7 @@ import type {
 } from '@codex/shared-types';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { hasCourseEntitlement } from './content-access/entitlements-resolver';
+import { assertCourseCreatorCanBePaid } from './course-payouts';
 
 export class CourseAccessService extends BaseService {
   /** WebSocket-capable client for the delete+insert replace transaction. */
@@ -54,6 +56,12 @@ export class CourseAccessService extends BaseService {
    * N1 GUARD: every tier MUST belong to that same organization. This is the
    * write-path defence; the `course_tier_access` composite FKs are the durable
    * DB backstop (a cross-org row is rejected at INSERT regardless of caller).
+   *
+   * PAYOUTS (Codex-2hxff.14): adding a tier to a course that is already LIVE
+   * opens a way to pay, so it needs the course creator to be payable — as
+   * publishing a tier-included course does — else `CreatorPayoutsRequiredError`
+   * and nothing is written. Removing tiers is never refused, and a draft is
+   * left to the publish check (`CourseJourneyService.saveJourneyPage`).
    */
   async setTierAccess(
     organizationId: string,
@@ -67,7 +75,7 @@ export class CourseAccessService extends BaseService {
           eq(courses.organizationId, organizationId),
           isNull(courses.deletedAt)
         ),
-        columns: { id: true },
+        columns: { id: true, status: true, creatorId: true },
       });
       if (!course) {
         throw new NotFoundError('Course not found', {
@@ -95,6 +103,22 @@ export class CourseAccessService extends BaseService {
             'Tier access grants must reference tiers in the same organization as the course',
             { courseId, organizationId }
           );
+        }
+
+        if (course.status === CONTENT_STATUS.PUBLISHED) {
+          const granted = await this.db
+            .select({ tierId: courseTierAccess.tierId })
+            .from(courseTierAccess)
+            .where(
+              and(
+                eq(courseTierAccess.courseId, courseId),
+                eq(courseTierAccess.organizationId, organizationId)
+              )
+            );
+          const alreadyGranted = new Set(granted.map((row) => row.tierId));
+          if (uniqueTierIds.some((tierId) => !alreadyGranted.has(tierId))) {
+            await assertCourseCreatorCanBePaid(this.db, course.creatorId);
+          }
         }
       }
 

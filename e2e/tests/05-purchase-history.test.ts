@@ -180,6 +180,7 @@ describe('Purchase History API', () => {
           organizationId: organizationId,
           accessType: 'paid',
           priceCents: 2999,
+          isPurchasable: true,
         },
       }),
       httpClient.post(`${WORKER_URLS.content}/api/content`, {
@@ -197,6 +198,7 @@ describe('Purchase History API', () => {
           organizationId: organizationId,
           accessType: 'paid',
           priceCents: 4999,
+          isPurchasable: true,
         },
       }),
     ]);

@@ -22,6 +22,7 @@ import {
   MEDIA_STATUS,
   MEDIA_TYPES,
   PAGINATION,
+  requiresPayoutsToPublish,
 } from '@codex/constants';
 import {
   isUniqueViolation,
@@ -206,6 +207,29 @@ export class ContentService extends BaseService {
       .limit(1);
 
     return !!account && account.chargesEnabled && account.payoutsEnabled;
+  }
+
+  /**
+   * Refuse to put content that earns money on sale while its creator can't be
+   * paid. `requiresPayoutsToPublish` decides what earns money — any price or
+   * any tier, whether or not the row is marked purchasable (owner rule,
+   * Codex-2hxff.14) — so publish() and update() both ask here. Free, followers
+   * and team content passes without a lookup.
+   *
+   * @throws {CreatorPayoutsRequiredError} When the row needs payouts and the
+   *   creator's Connect account is not charges + payouts enabled
+   */
+  private async assertCreatorCanBePaid(
+    tx: DatabaseTransaction,
+    creatorId: string,
+    row: { priceCents: number | null; includedInTierId: string | null }
+  ): Promise<void> {
+    if (!requiresPayoutsToPublish(row)) return;
+    if (await this.isCreatorConnectReady(tx, creatorId)) return;
+    throw new CreatorPayoutsRequiredError(
+      creatorId,
+      (row.priceCents ?? 0) > 0 ? 'paid' : 'included_in_tier'
+    );
   }
 
   /**
@@ -509,6 +533,8 @@ export class ContentService extends BaseService {
    * @returns Updated content
    * @throws {ContentNotFoundError} If content doesn't exist
    * @throws {ForbiddenError} If content doesn't belong to creator
+   * @throws {CreatorPayoutsRequiredError} If the update sets or changes a
+   *   price or tier on published content whose creator can't be paid
    */
   async update(
     id: string,
@@ -631,6 +657,31 @@ export class ContentService extends BaseService {
           (restValidated.isTeamOnly ?? existing.isTeamOnly) ||
           (restValidated.courseOnly ?? existing.courseOnly) ||
           effIncludedInTierId != null;
+
+        // Codex-2hxff.14: publish() refuses priced or tier content whose
+        // creator can't be paid, so a LIVE row must not be priced or tiered
+        // past that gate here. Only a change that opens a way to pay is
+        // checked — a price or tier set or changed, or the row turned
+        // purchasable — and it is compared by VALUE, not by key presence,
+        // because the studio form resends the whole flag set on every save and
+        // a title edit must never fail on payouts. Removing a price or tier is
+        // never refused. Drafts are left to publish().
+        if (existing.status === CONTENT_STATUS.PUBLISHED) {
+          const nextPriceCents = effPriceCents ?? null;
+          const nextTierId = effIncludedInTierId ?? null;
+          const opensAWayToPay =
+            ((nextPriceCents ?? 0) > 0 &&
+              nextPriceCents !== existing.priceCents) ||
+            (nextTierId != null && nextTierId !== existing.includedInTierId) ||
+            (!existing.isPurchasable && restValidated.isPurchasable === true);
+          if (opensAWayToPay) {
+            await this.assertCreatorCanBePaid(
+              tx as DatabaseTransaction,
+              creatorId,
+              { priceCents: nextPriceCents, includedInTierId: nextTierId }
+            );
+          }
+        }
 
         // Update content
         const [updated] = await tx
@@ -879,26 +930,16 @@ export class ContentService extends BaseService {
           }
         }
 
-        // Monetised content requires a payout-ready Connect account before it
-        // can go live. Paid (with a price) and subscriber-gated content both
-        // collect money; publishing without a payout destination strands buyer
-        // funds in a pending payout indefinitely. Free / followers / team
-        // content is unaffected.
-        const isMonetised =
-          (existing.isPurchasable && (existing.priceCents ?? 0) > 0) ||
-          existing.includedInTierId != null;
-        if (isMonetised) {
-          const connectReady = await this.isCreatorConnectReady(
-            tx as DatabaseTransaction,
-            creatorId
-          );
-          if (!connectReady) {
-            throw new CreatorPayoutsRequiredError(
-              creatorId,
-              existing.isPurchasable ? 'purchasable' : 'included_in_tier'
-            );
-          }
-        }
+        // Content that earns money needs a payout-ready Connect account before
+        // it can go live: publishing without a payout destination strands
+        // buyer funds in a pending payout indefinitely. Any price or tier
+        // counts, purchasable or not (Codex-2hxff.14 — the old gate only saw
+        // a price on a row marked purchasable).
+        await this.assertCreatorCanBePaid(
+          tx as DatabaseTransaction,
+          creatorId,
+          existing
+        );
 
         // Publish content
         const [published] = await tx
