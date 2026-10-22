@@ -7,16 +7,23 @@
  * 1. `DELETE /api/user/avatar` called the image service directly, which holds
  *    no cache, so `USER_PROFILE` / `USER_PUBLIC_PROFILE` (keyed by user id)
  *    kept serving the deleted URL for up to 10 minutes.
- * 2. Each org's creators list (`ORG_CREATORS`, keyed by org SLUG, 4h) carries
- *    name, username, avatar, bio and social links, and no user write bumped
- *    it. An avatar upload showed the placeholder, a delete a broken image,
- *    and a deleted account its owner's real details, on the org's public
- *    creator surfaces for up to four hours.
+ * 2. Each org's creators list (`ORG_CREATORS`, 4h) carries name, username,
+ *    avatar, bio and social links, and no user write bumped it. An avatar
+ *    upload showed the placeholder, a delete a broken image, and a deleted
+ *    account its owner's real details, on the org's public creator surfaces
+ *    for up to four hours.
  *
- * The fan-out is best-effort: it runs after the write has committed, so a
- * failed org lookup must not report the write as failed. The org lookup's
- * filter is asserted on the SQL drizzle renders, so a dropped role, status
- * or deleted-org condition fails here.
+ * The list has its own cache id, `org:{slug}:creators` (Codex-kk9nv.9), so a
+ * profile write bumps that and leaves the org's config and stats, keyed by
+ * the bare slug, alone. Deleting an account also ends its memberships
+ * (Codex-kk9nv.8), a change to who is in the org, so it bumps both.
+ *
+ * For a profile write the fan-out is best-effort: it runs after the write has
+ * committed, so a failed org lookup must not report the write as failed.
+ * deleteAccount reads the orgs inside its transaction instead, before the
+ * scrub hides them, so there a failed lookup aborts the deletion. The org
+ * lookup's filter is asserted on the SQL drizzle renders, so a dropped role,
+ * status, deleted-org or deleted-user condition fails here.
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
@@ -51,6 +58,7 @@ vi.mock('@codex/agreements', async (importOriginal) => ({
 
 const USER_ID = 'user-1';
 const SLUGS = ['org-a', 'org-b'];
+const CREATORS_IDS = SLUGS.map((slug) => `org:${slug}:creators`);
 
 const UPDATED_ROW = {
   id: USER_ID,
@@ -157,13 +165,13 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     });
   });
 
-  it('deleteAvatar removes the files, then invalidates the user and each listing org', async () => {
+  it("deleteAvatar removes the files, then invalidates the user and each listing org's creators list", async () => {
     const { service, invalidated, cache } = harness();
 
     await service.deleteAvatar(USER_ID);
 
     expect(mockDeleteUserAvatar).toHaveBeenCalledWith(USER_ID);
-    expect([...invalidated].sort()).toEqual([USER_ID, ...SLUGS].sort());
+    expect([...invalidated].sort()).toEqual([USER_ID, ...CREATORS_IDS].sort());
     // Invalidate AFTER the delete, or a read in between re-caches the old URL.
     const deletedAt = mockDeleteUserAvatar.mock.invocationCallOrder[0] ?? 0;
     const firstInvalidate = cache.invalidate.mock.invocationCallOrder[0] ?? 0;
@@ -178,38 +186,67 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     expect(invalidated).toEqual([]);
   });
 
-  it('uploadAvatar invalidates the user and each listing org', async () => {
+  it("uploadAvatar invalidates the user and each listing org's creators list", async () => {
     const { service, invalidated } = harness();
 
     await service.uploadAvatar(USER_ID, avatarFile());
 
-    expect([...invalidated].sort()).toEqual([USER_ID, ...SLUGS].sort());
+    expect([...invalidated].sort()).toEqual([USER_ID, ...CREATORS_IDS].sort());
   });
 
-  it('updateProfile invalidates each listing org (the creators list carries the name)', async () => {
+  it("updateProfile invalidates each listing org's creators list (it carries the name)", async () => {
     const { service, invalidated } = harness();
 
     await service.updateProfile(USER_ID, { displayName: 'New Name' });
 
-    expect([...invalidated].sort()).toEqual([USER_ID, ...SLUGS].sort());
+    expect([...invalidated].sort()).toEqual([USER_ID, ...CREATORS_IDS].sort());
   });
 
-  it('upgradeToCreator invalidates each listing org (the username, bio and links are on it)', async () => {
+  it("upgradeToCreator invalidates each listing org's creators list (the username, bio and links are on it)", async () => {
     const { service, invalidated } = harness({ existingUsername: '' });
 
     await service.upgradeToCreator(USER_ID, { username: 'alice2' });
 
     expect([...invalidated].sort()).toEqual(
-      [USER_ID, ...SLUGS, 'alice2'].sort()
+      [USER_ID, ...CREATORS_IDS, 'alice2'].sort()
     );
   });
 
-  it('deleteAccount invalidates each listing org, so the scrubbed card leaves their public lists', async () => {
+  it('a profile write leaves the org config and stats alone (Codex-kk9nv.9)', async () => {
+    const { service, invalidated } = harness();
+
+    await service.updateProfile(USER_ID, { displayName: 'New Name' });
+
+    // The bare slug is the id ORG_CONFIG and ORG_STATS are read under.
+    for (const slug of SLUGS) expect(invalidated).not.toContain(slug);
+  });
+
+  it("deleteAccount invalidates each listing org's creators list and its slug, so the scrubbed card leaves and the member count drops", async () => {
     const { service, invalidated } = harness();
 
     await service.deleteAccount(USER_ID);
 
-    expect([...invalidated].sort()).toEqual([USER_ID, ...SLUGS].sort());
+    expect([...invalidated].sort()).toEqual(
+      [USER_ID, ...SLUGS, ...CREATORS_IDS].sort()
+    );
+  });
+
+  it('deleteAccount reads the listing orgs before the scrub, while they still list the user', async () => {
+    const { service, select } = harness();
+    const update = vi.spyOn(
+      (service as unknown as { db: { update: () => unknown } }).db,
+      'update'
+    );
+
+    await service.deleteAccount(USER_ID);
+
+    const lookupAt = select.mock.calls.findIndex(
+      ([columns]) => 'slug' in columns
+    );
+    expect(lookupAt).toBeGreaterThan(-1);
+    expect(select.mock.invocationCallOrder[lookupAt]).toBeLessThan(
+      update.mock.invocationCallOrder[0] ?? 0
+    );
   });
 
   it('looks up exactly the orgs whose creators list shows the user', async () => {
@@ -228,9 +265,11 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     expect(sql).toContain('"organization_memberships"."status" = $');
     expect(sql).toContain('"organization_memberships"."role" in (');
     expect(sql).toContain('"organizations"."deleted_at" is null');
+    // A deleted account is on no creators list (Codex-kk9nv.8).
+    expect(sql).toContain('"users"."deleted_at" is null');
   });
 
-  describe('when the org lookup fails after the write committed', () => {
+  describe('when the org lookup fails', () => {
     it.each([
       [
         'uploadAvatar',
@@ -241,7 +280,6 @@ describe('IdentityService — user card writes invalidate every surface', () => 
         'updateProfile',
         (s: IdentityService) => s.updateProfile(USER_ID, { displayName: 'N' }),
       ],
-      ['deleteAccount', (s: IdentityService) => s.deleteAccount(USER_ID)],
     ])('%s still succeeds, invalidates the user, and logs the miss', async (operation, run) => {
       const { service, invalidated, lookup, warn } = harness();
       lookup.fails = true;
@@ -258,6 +296,21 @@ describe('IdentityService — user card writes invalidate every surface', () => 
           error: 'neon unavailable',
         })
       );
+    });
+
+    it('deleteAccount fails before the scrub, so no cache is left showing the person', async () => {
+      const { service, invalidated, lookup } = harness();
+      const update = vi.spyOn(
+        (service as unknown as { db: { update: () => unknown } }).db,
+        'update'
+      );
+      lookup.fails = true;
+
+      await expect(service.deleteAccount(USER_ID)).rejects.toThrow();
+
+      // Nothing committed, so nothing is stale: the account is intact.
+      expect(update).not.toHaveBeenCalled();
+      expect(invalidated).toEqual([]);
     });
 
     it('updateProfile still bumps the old and new username slots', async () => {
@@ -281,5 +334,15 @@ describe('IdentityService — user card writes invalidate every surface', () => 
 
     expect(mockDeleteUserAvatar).toHaveBeenCalledWith(USER_ID);
     expect(select).not.toHaveBeenCalled();
+  });
+
+  it('with no cache injected, deleteAccount skips the listing lookup', async () => {
+    const { service, select } = harness({ withCache: false });
+
+    await service.deleteAccount(USER_ID);
+
+    expect(select.mock.calls.some(([columns]) => 'slug' in columns)).toBe(
+      false
+    );
   });
 });

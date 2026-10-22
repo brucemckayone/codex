@@ -145,6 +145,15 @@ export const CacheType = {
   COLLECTION_ORG_CONTENT: (orgId: string): string => `org:${orgId}:content`,
 
   /**
+   * Server KV only — the id an org's public creators list (`ORG_CREATORS`) is
+   * cached under. Its own, not the org's slug: the list changes on every
+   * listed member's profile write, and bumping the slug for those evicted the
+   * org's config and stats with it (Codex-kk9nv.9). Anything that changes the
+   * org or its membership bumps both, through `invalidateOrgPublicCaches`.
+   */
+  COLLECTION_ORG_CREATORS: (slug: string): string => `org:${slug}:creators`,
+
+  /**
    * Client manifest + server KV — user-scoped library.
    * Bumped when a purchase completes, so another device's library goes stale.
    * Tracked in client manifest for cross-device staleness detection.

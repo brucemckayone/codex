@@ -22,7 +22,7 @@ function createMockKV(): KVNamespace & { _puts: Array<[string, string]> } {
 }
 
 describe('invalidateOrgSlugCache', () => {
-  it('resolves slug from db and invalidates the slug-keyed cache', async () => {
+  it('resolves slug from db and invalidates the slug-keyed cache and the creators list', async () => {
     const kv = createMockKV();
     const cache = new VersionedCache({ kv });
     const findFirst = vi.fn(async () => ({ slug: 'acme' }));
@@ -33,7 +33,12 @@ describe('invalidateOrgSlugCache', () => {
     await invalidateOrgSlugCache({ db, cache, orgId: 'org-1' });
 
     expect(findFirst).toHaveBeenCalledTimes(1);
-    expect(kv._puts.some(([k]) => k === 'cache:version:acme')).toBe(true);
+    // The creators list has its own version (Codex-kk9nv.9), and a change to
+    // the org or its membership changes it too.
+    expect(kv._puts.map(([k]) => k).sort()).toEqual([
+      'cache:version:acme',
+      'cache:version:org:acme:creators',
+    ]);
   });
 
   it('is a no-op when orgId is empty', async () => {

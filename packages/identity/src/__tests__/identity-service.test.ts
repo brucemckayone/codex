@@ -3,10 +3,13 @@ import type { Database } from '@codex/database';
 import {
   agreementProposals,
   creatorOrganizationAgreements,
+  organizationMemberships,
   sessions,
   users,
 } from '@codex/database/schema';
 import type { ImageProcessingResult } from '@codex/image-processing';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AccountHasContentError,
@@ -1061,7 +1064,12 @@ describe('IdentityService', () => {
         (mockDb.update as ReturnType<typeof vi.fn>).mock.calls.map(
           (call) => call[0]
         )
-      ).toEqual([users, agreementProposals, creatorOrganizationAgreements]);
+      ).toEqual([
+        users,
+        agreementProposals,
+        creatorOrganizationAgreements,
+        organizationMemberships,
+      ]);
       const [, proposalSet, agreementSet] = mockUpdateSet.mock.calls.map(
         (call) => call[0] as Record<string, unknown>
       );
@@ -1075,6 +1083,35 @@ describe('IdentityService', () => {
       expect(agreementSet?.terminatedAt).toEqual(
         (mockUpdateSet.mock.calls[0]?.[0] as { deletedAt: Date }).deletedAt
       );
+    });
+
+    // Owner: "Both" (Codex-kk9nv.8). A deleted account belongs to no org, so
+    // every member list drops it, not only the creators list.
+    it("ends the user's live memberships in every org, at the deletion time", async () => {
+      mockReturning.mockResolvedValue([{ id: userId }]);
+
+      await service.deleteAccount(userId);
+
+      const tables = (mockDb.update as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[0]
+      );
+      const at = tables.indexOf(organizationMemberships);
+      expect(at).toBeGreaterThan(-1);
+      const deletedAt = (
+        mockUpdateSet.mock.calls[0]?.[0] as { deletedAt: Date }
+      ).deletedAt;
+      expect(mockUpdateSet.mock.calls[at]?.[0]).toEqual({
+        status: 'inactive',
+        updatedAt: deletedAt,
+      });
+      const { sql, params } = new PgDialect().sqlToQuery(
+        mockUpdateWhere.mock.calls[at]?.[0] as SQL
+      );
+      expect(sql).toBe(
+        '("organization_memberships"."user_id" = $1 and "organization_memberships"."status" in ($2, $3))'
+      );
+      // Only live rows: an ended membership keeps the status it ended with.
+      expect(params).toEqual([userId, 'active', 'invited']);
     });
 
     describe("the avatar's files (Codex-kk9nv.14)", () => {

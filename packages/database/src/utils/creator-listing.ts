@@ -1,6 +1,6 @@
 /**
  * Who an organization's public creators list shows: its active owners,
- * admins and creators.
+ * admins and creators whose accounts are not deleted.
  *
  * Two places must agree on this. `OrganizationService.getPublicCreators`
  * READS the list, and `IdentityService` INVALIDATES each listing org's
@@ -11,8 +11,9 @@
  */
 
 import type { SQL } from 'drizzle-orm';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { organizationMemberships } from '../schema/content';
+import { users } from '../schema/users';
 
 /** The membership roles an org's public creators list shows. */
 export const CREATOR_LIST_ROLES = ['owner', 'admin', 'creator'] as const;
@@ -25,5 +26,10 @@ export function listedCreatorConditions(): SQL[] {
   return [
     eq(organizationMemberships.status, 'active'),
     inArray(organizationMemberships.role, [...CREATOR_LIST_ROLES]),
+    // Deleting an account ends its memberships (Codex-kk9nv.8), but one
+    // deleted before that, or by any other path, still is not listed. A
+    // subquery rather than a join, so a caller that counts memberships alone
+    // needs no join to agree with the list.
+    sql`exists (select 1 from ${users} where ${users.id} = ${organizationMemberships.userId} and ${users.deletedAt} is null)`,
   ];
 }

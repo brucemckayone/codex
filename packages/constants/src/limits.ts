@@ -540,8 +540,10 @@ export const CACHE_TTL = {
    * - Version keys NEVER expire (Codex-kgrdp.5), so a data TTL can never
    *   outlive the version key that stales it. Raising this cannot resurrect a
    *   staled slot — that failure mode is closed by construction, not by tuning.
-   * - One version key per `id`, so a single `invalidate(slug)` stales info,
-   *   stats AND creators together.
+   * - One version key per `id`. Info and stats are versioned by the slug,
+   *   the creators list by `org:{slug}:creators` (Codex-kk9nv.9), and
+   *   `invalidateOrgPublicCaches(slug)` stales all three together. A listed
+   *   member's profile write stales only the creators list.
    * - Every mutation path that changes these reads bumps that key: content
    *   publish/unpublish/delete (`bumpOrgContentVersion` -> `invalidateOrgSlugCache`),
    *   org settings + branding (`settings.ts`), membership (`members.ts`), and

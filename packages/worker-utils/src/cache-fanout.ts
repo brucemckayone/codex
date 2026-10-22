@@ -10,7 +10,11 @@
  * KV-only sibling `invalidateUserLibrary` stays in `@codex/cache`.
  */
 
-import type { InvalidationLogger, VersionedCache } from '@codex/cache';
+import {
+  type InvalidationLogger,
+  invalidateOrgPublicCaches,
+  type VersionedCache,
+} from '@codex/cache';
 import type { Database } from '@codex/database';
 import { eq, schema } from '@codex/database';
 
@@ -29,8 +33,9 @@ export interface InvalidateOrgSlugCacheArgs {
 }
 
 /**
- * Resolve an organisation slug from `orgId` and invalidate the slug-keyed
- * `VersionedCache` entry (public org info, stats, creators, members).
+ * Resolve an organisation slug from `orgId` and invalidate the org's public
+ * caches: its config and stats, keyed by the slug, and its creators list,
+ * which has its own id (`invalidateOrgPublicCaches`, Codex-kk9nv.9).
  *
  * Returns once the invalidation has completed (or swallowed an error). The
  * caller is responsible for wrapping in `executionCtx.waitUntil(...)` if it
@@ -51,7 +56,7 @@ export async function invalidateOrgSlugCache(
       columns: { slug: true },
     });
     if (org?.slug) {
-      await cache.invalidate(org.slug);
+      await invalidateOrgPublicCaches(cache, org.slug);
     }
   } catch (error: unknown) {
     // Non-critical — slug cache expires via TTL.

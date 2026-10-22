@@ -4,9 +4,10 @@ import {
   withdrawProposalsOnDeparture,
 } from '@codex/agreements';
 import type { VersionedCache } from '@codex/cache';
-import { CacheType } from '@codex/cache';
+import { CacheType, invalidateOrgPublicCaches } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
 import {
+  type DatabaseClient,
   listedCreatorConditions,
   messageForLog,
   stackForLog,
@@ -35,7 +36,7 @@ import {
 } from '@codex/service-errors';
 import type { PublicCreatorProfile, UserProfile } from '@codex/shared-types';
 import type { UpdateCreatorOnboardingInput } from '@codex/validation';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 
 import {
   AccountHasContentError,
@@ -55,6 +56,8 @@ export interface IdentityServiceConfig extends ServiceConfig {
    */
   orphanedFileService?: OrphanedFileService;
 }
+
+type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
 
 export class IdentityService extends BaseService {
   private r2Service: R2Service;
@@ -127,12 +130,11 @@ export class IdentityService extends BaseService {
    * profile entries (keyed by user id), and each org that lists them on its
    * creators list (`ORG_CREATORS`, 4h TTL). That list carries name, username,
    * avatar, bio and social links, so it goes stale on any of those writes,
-   * not only on an avatar (Codex-kk9nv.7). An org's slug is one version for
-   * every slug-keyed entry, so this also refreshes its config and stats.
+   * not only on an avatar (Codex-kk9nv.7). The list has its own cache id, so
+   * this leaves the org's config and stats alone (Codex-kk9nv.9).
    *
-   * The orgs are the ones `listedCreatorConditions` puts the user on, the
-   * same conditions the list itself is read with. Both workers bind the same
-   * CACHE_KV, so the slug bumped here is the version organization-api reads.
+   * Both workers bind the same CACHE_KV, so the id bumped here is the version
+   * organization-api reads.
    *
    * Best-effort, like `VersionedCache.invalidate` itself: it runs after the
    * write has committed, so a failed org lookup is logged and the lists
@@ -148,21 +150,7 @@ export class IdentityService extends BaseService {
 
     const listingOrgs = async (): Promise<string[]> => {
       try {
-        const orgs = await this.db
-          .select({ slug: organizations.slug })
-          .from(organizationMemberships)
-          .innerJoin(
-            organizations,
-            eq(organizationMemberships.organizationId, organizations.id)
-          )
-          .where(
-            and(
-              eq(organizationMemberships.userId, userId),
-              ...listedCreatorConditions(),
-              whereNotDeleted(organizations)
-            )
-          );
-        return orgs.map(({ slug }) => slug);
+        return await this.listingOrgSlugs(this.db, userId);
       } catch (error) {
         this.obs.warn(
           'Org creators lists not invalidated: org lookup failed; they expire with their TTL',
@@ -176,7 +164,37 @@ export class IdentityService extends BaseService {
       cache.invalidate(userId),
       listingOrgs(),
     ]);
-    await Promise.all(slugs.map((slug) => cache.invalidate(slug)));
+    await Promise.all(
+      slugs.map((slug) =>
+        cache.invalidate(CacheType.COLLECTION_ORG_CREATORS(slug))
+      )
+    );
+  }
+
+  /**
+   * The slugs of the orgs whose public creators list shows this user: the
+   * ones `listedCreatorConditions` puts them on, the same conditions the list
+   * itself is read with.
+   */
+  private async listingOrgSlugs(
+    db: Tx | DatabaseClient,
+    userId: string
+  ): Promise<string[]> {
+    const orgs = await db
+      .select({ slug: organizations.slug })
+      .from(organizationMemberships)
+      .innerJoin(
+        organizations,
+        eq(organizationMemberships.organizationId, organizations.id)
+      )
+      .where(
+        and(
+          eq(organizationMemberships.userId, userId),
+          ...listedCreatorConditions(),
+          whereNotDeleted(organizations)
+        )
+      );
+    return orgs.map(({ slug }) => slug);
   }
 
   /**
@@ -718,54 +736,81 @@ export class IdentityService extends BaseService {
       // ended in every organisation (owner decision AGR-09, "End them like a
       // removal"), in one transaction. Money earned before is still paid; no
       // email, since the address is scrubbed here.
-      const { endedAgreements, withdrawnProposals, droppedAvatarUrl } =
-        await this.db.transaction(async (tx) => {
-          const now = new Date();
-          // The avatar the scrub drops, so its files can go after the commit.
-          // Locked: an avatar upload committing now waits for the scrub, and
-          // its write then matches no row (processUserAvatar skips a deleted
-          // user), so the URL read here is the one the scrub drops.
-          const [before] = await tx
-            .select({ avatarUrl: users.avatarUrl })
-            .from(users)
-            .where(and(eq(users.id, userId), whereNotDeleted(users)))
-            .for('update');
-          const [deleted] = await tx
-            .update(users)
-            .set({
-              deletedAt: now,
-              email: `deleted-${userId}@deleted.invalid`,
-              name: 'Deleted User',
-              username: null,
-              bio: null,
-              avatarUrl: null,
-              image: null,
-              socialLinks: null,
-            })
-            .where(and(eq(users.id, userId), whereNotDeleted(users)))
-            .returning();
+      const {
+        endedAgreements,
+        withdrawnProposals,
+        droppedAvatarUrl,
+        listingSlugs,
+      } = await this.db.transaction(async (tx) => {
+        const now = new Date();
+        // The avatar the scrub drops, so its files can go after the commit.
+        // Locked: an avatar upload committing now waits for the scrub, and
+        // its write then matches no row (processUserAvatar skips a deleted
+        // user), so the URL read here is the one the scrub drops.
+        const [before] = await tx
+          .select({ avatarUrl: users.avatarUrl })
+          .from(users)
+          .where(and(eq(users.id, userId), whereNotDeleted(users)))
+          .for('update');
+        // Read while they still list the user: once the account is deleted
+        // and its memberships ended, no query finds which cached creators
+        // lists still show the real name and avatar (Codex-kk9nv.8). Inside
+        // the transaction, so a failed read aborts the deletion: Postgres
+        // refuses every later statement in a transaction that hit an error,
+        // and committing without the list would leave those caches showing
+        // the person for their 4h TTL.
+        const listing = this.cache
+          ? await this.listingOrgSlugs(tx, userId)
+          : [];
+        const [deleted] = await tx
+          .update(users)
+          .set({
+            deletedAt: now,
+            email: `deleted-${userId}@deleted.invalid`,
+            name: 'Deleted User',
+            username: null,
+            bio: null,
+            avatarUrl: null,
+            image: null,
+            socialLinks: null,
+          })
+          .where(and(eq(users.id, userId), whereNotDeleted(users)))
+          .returning();
 
-          if (!deleted) {
-            throw new UserNotFoundError(userId);
-          }
+        if (!deleted) {
+          throw new UserNotFoundError(userId);
+        }
 
-          const withdrawn = await withdrawProposalsOnDeparture(tx, {
-            creatorId: userId,
-            at: now,
-            everyOrganisation: true,
-          });
-          const ended = await terminateAgreementsOnDeparture(tx, {
-            creatorId: userId,
-            at: now,
-            everyOrganisation: true,
-            reason: ACCOUNT_DELETED_TERMINATION_REASON,
-          });
-          return {
-            endedAgreements: ended,
-            withdrawnProposals: withdrawn,
-            droppedAvatarUrl: before?.avatarUrl ?? null,
-          };
+        const withdrawn = await withdrawProposalsOnDeparture(tx, {
+          creatorId: userId,
+          at: now,
+          everyOrganisation: true,
         });
+        const ended = await terminateAgreementsOnDeparture(tx, {
+          creatorId: userId,
+          at: now,
+          everyOrganisation: true,
+          reason: ACCOUNT_DELETED_TERMINATION_REASON,
+        });
+        // A deleted account belongs to no org, so every member list drops
+        // it, not only the creators list (owner: "Both", Codex-kk9nv.8).
+        // An owner cannot get here: AccountOwnsOrganizationError above.
+        await tx
+          .update(organizationMemberships)
+          .set({ status: 'inactive', updatedAt: now })
+          .where(
+            and(
+              eq(organizationMemberships.userId, userId),
+              inArray(organizationMemberships.status, ['active', 'invited'])
+            )
+          );
+        return {
+          endedAgreements: ended,
+          withdrawnProposals: withdrawn,
+          droppedAvatarUrl: before?.avatarUrl ?? null,
+          listingSlugs: listing,
+        };
+      });
 
       this.obs.info('User account soft-deleted', {
         userId,
@@ -775,8 +820,16 @@ export class IdentityService extends BaseService {
 
       // The scrubbed name, avatar, bio and links are still on the cached
       // creators list of every org that listed this user, which anyone can
-      // read, until those are invalidated too (Codex-kk9nv.7).
-      await this.invalidateUserSurfaces(userId, 'deleteAccount');
+      // read, until those are invalidated too (Codex-kk9nv.7). The user also
+      // left each of those orgs, a change to who is in it, so its config and
+      // stats go as well, as for any departure.
+      if (this.cache) {
+        const cache = this.cache;
+        await Promise.all([
+          cache.invalidate(userId),
+          ...listingSlugs.map((slug) => invalidateOrgPublicCaches(cache, slug)),
+        ]);
+      }
 
       // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
       // carries this user's id (Codex-kk9nv.14). After the commit and the

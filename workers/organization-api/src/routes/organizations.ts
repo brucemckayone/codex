@@ -17,7 +17,11 @@
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
+import {
+  CacheType,
+  invalidateOrgPublicCaches,
+  VersionedCache,
+} from '@codex/cache';
 import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
 import { createDbClient } from '@codex/database';
 import type {
@@ -459,9 +463,11 @@ app.get(
       const fetcher = () =>
         ctx.services.organization.getPublicCreators(slug, { page, limit });
 
+      // Its own id, not the slug: a member's profile write invalidates only
+      // this list, not the org's config and stats (Codex-kk9nv.9).
       const result = await cachedRead(
         ctx,
-        slug,
+        CacheType.COLLECTION_ORG_CREATORS(slug),
         `${CacheType.ORG_CREATORS}:${page}:${limit}`,
         fetcher,
         { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
@@ -581,10 +587,12 @@ app.patch(
           kv: ctx.env.CACHE_KV,
           waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
         });
-        const invalidations: Promise<void>[] = [cache.invalidate(updated.slug)];
+        const invalidations: Promise<void>[] = [
+          invalidateOrgPublicCaches(cache, updated.slug),
+        ];
         // If slug changed, also invalidate the old slug's cache
         if (oldSlug && updated.slug !== oldSlug) {
-          invalidations.push(cache.invalidate(oldSlug));
+          invalidations.push(invalidateOrgPublicCaches(cache, oldSlug));
         }
 
         // The `slug -> organization id` cache read by
@@ -672,7 +680,7 @@ app.delete(
             kv: ctx.env.CACHE_KV,
             waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
           });
-          invalidations.push(cache.invalidate(org.slug));
+          invalidations.push(invalidateOrgPublicCaches(cache, org.slug));
           // Drop the `slug -> id` entry too — its 24h TTL is a backstop, far too
           // long to rely on here — so the freed hostname
           // stops resolving from cache (Codex-kgrdp.23 defect 1).

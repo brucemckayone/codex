@@ -20,7 +20,10 @@ export type {
   InvalidateUserLibraryArgs,
   WaitUntilFn,
 } from './helpers/invalidate';
-export { invalidateUserLibrary } from './helpers/invalidate';
+export {
+  invalidateOrgPublicCaches,
+  invalidateUserLibrary,
+} from './helpers/invalidate';
 export { logCacheStats } from './helpers/log-stats';
 export {
   cacheStatsLabel,
