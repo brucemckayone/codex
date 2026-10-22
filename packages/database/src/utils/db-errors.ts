@@ -146,25 +146,51 @@ export function getErrorDetail(error: unknown): string | null {
   return null;
 }
 
+const FAILED_QUERY = 'Failed query:';
+const NO_DRIVER_REASON = 'Query failed; the driver gave no reason';
+
+/**
+ * Whether this is drizzle's wrapper for a failed query, whose message is only
+ * `Failed query: <sql>\nparams: <params>` and whose `cause` is what the
+ * driver rejected with.
+ */
+export function isFailedQuery(error: unknown): error is Error {
+  return error instanceof Error && error.message.startsWith(FAILED_QUERY);
+}
+
 /**
  * An error's message for a log line, without a failed query's SQL and
  * parameters. drizzle wraps every failed query as `Failed query: <sql>\nparams:
- * <params>`, with the driver's error as its `cause`, and a parameter can be a
- * key holding a 32-character user id, for which production redaction hashes
- * the whole line. This walks that chain to the driver's reason. Any other
- * error keeps its own message, the specific one, even when it has a cause.
+ * <params>`, with whatever the driver rejected with as its `cause`, and a
+ * parameter can be a key holding a 32-character user id, for which production
+ * redaction hashes the whole line. This walks that chain to the driver's
+ * reason. Any other error keeps its own message, the specific one, even when
+ * it has a cause.
+ *
+ * The driver's reason is not always an Error: neon's WebSocket shim rejects
+ * with the socket's error Event. A query's own text is never returned, even
+ * when nothing else says what went wrong.
  *
  * drizzle's real prefix is pinned by media-api's orphan sweep test, which runs
  * a failed query (Codex-kk9nv.13).
  */
 export function messageForLog(error: unknown): string {
   let reported = error;
-  while (
-    reported instanceof Error &&
-    reported.message.startsWith('Failed query:') &&
-    reported.cause instanceof Error
-  ) {
+  while (isFailedQuery(reported) && reported.cause !== undefined) {
     reported = reported.cause;
   }
-  return reported instanceof Error ? reported.message : String(reported);
+  const message = describeForLog(reported);
+  return message.startsWith(FAILED_QUERY) ? NO_DRIVER_REASON : message;
+}
+
+/** An Error's message, else its name; a non-Error's own message, else itself. */
+function describeForLog(reported: unknown): string {
+  if (reported instanceof Error) {
+    return reported.message || reported.name;
+  }
+  const { message } = (reported ?? {}) as { message?: unknown };
+  if (typeof message === 'string' && message !== '') {
+    return message;
+  }
+  return String(reported);
 }

@@ -290,11 +290,12 @@ describe('OrphanedFileService', () => {
       // Only one update call (no second call to mark as failed)
       expect(mockDb.update).toHaveBeenCalledTimes(1);
     });
-    describe("a failed query: the row keeps it whole, the log only the driver's reason (Codex-kk9nv.13)", () => {
-      const ROW_TEXT =
+    describe("a failed query: the row keeps it whole with the driver's reason, the log only the reason (Codex-kk9nv.13)", () => {
+      const QUERY_TEXT =
         'Failed query: select …\nparams: avatars/u/300x300-aaaaaaaa/';
+      const ROW_TEXT = `${QUERY_TEXT}\ncause: connection terminated`;
       const failed = () =>
-        Object.assign(new Error(ROW_TEXT), {
+        Object.assign(new Error(QUERY_TEXT), {
           cause: new Error('connection terminated'),
         });
       const warnOf = (target: OrphanedFileService) =>
@@ -317,6 +318,18 @@ describe('OrphanedFileService', () => {
         expect(warn).toHaveBeenCalledWith(
           'Orphaned file cleanup attempt failed',
           { orphanId: 'orphan-1', attempts: 1, error: 'connection terminated' }
+        );
+      });
+
+      it('and any other error is recorded as it is logged, with no cause line', async () => {
+        mockDb._mocks.updateReturning.mockResolvedValueOnce([
+          { id: 'orphan-1', cleanupAttempts: 1 },
+        ]);
+
+        await service.recordFailedAttempt('orphan-1', new TypeError(''));
+
+        expect(mockDb._mocks.set).toHaveBeenCalledWith(
+          expect.objectContaining({ errorMessage: 'TypeError' })
         );
       });
 
