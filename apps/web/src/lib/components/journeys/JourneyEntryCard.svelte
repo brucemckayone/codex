@@ -138,13 +138,32 @@
   const COVER_RATIO = 16 / 9;
 
   /**
+   * A row's cover, plain or featured: its column's width; the shape the row
+   * stretches that column to, as measured (a plain row's is about 3:4, a
+   * featured row's wider column beside a title of one or two lines about
+   * 6:5); and its width on a phone, where the row stacks into a 16:9 frame.
+   * There a plain row's cover is the card, which its rails cap at about 24rem,
+   * and a featured row's keeps its column width: its own width rule wins on
+   * specificity (`.jec--featured .jec__cover`, Codex-32van).
+   */
+  const ROW_COVER = {
+    plain: {
+      column: 'clamp(6rem, 22vw, 7.5rem)',
+      frame: 3 / 4,
+      phone: 'min(calc(100vw - 2rem), 24rem)',
+    },
+    featured: {
+      column: 'clamp(7.5rem, 30vw, 12.5rem)',
+      frame: 6 / 5,
+      phone: 'clamp(7.5rem, 30vw, 12.5rem)',
+    },
+  } as const;
+
+  /**
    * How wide the cover is drawn, for choosing from its stored sizes
-   * (Codex-kk9nv.3). A tile is a 3:4 portrait in a 15-17rem rail; a row's
-   * cover is a narrow column the row stretches tall, taken here as about 3:4.
-   * On a phone the row stacks and its cover is a 16:9 frame: full width,
-   * except a featured row's, whose own width wins on specificity (the
-   * `.jec--featured .jec__cover` rule). Every frame crops, so a picture wider
-   * than its box is drawn wider than it (`coverCropSizes`).
+   * (Codex-kk9nv.3): a tile is a 3:4 portrait in a 15-17rem rail, and a row's
+   * is `ROW_COVER`. Every frame crops, so a picture wider than its box is
+   * drawn wider than it (`coverCropSizes`).
    */
   const coverSrcset = $derived(
     coverImageUrl ? getThumbnailSrcset(coverImageUrl) : ''
@@ -159,11 +178,8 @@
         COVER_RATIO
       );
     }
-    const column = featured
-      ? 'clamp(7.5rem, 30vw, 12.5rem)'
-      : 'clamp(6rem, 22vw, 7.5rem)';
-    const phone = featured ? column : 'calc(100vw - 2rem)';
-    return `(max-width: 39.9375rem) ${coverCropSizes(phone, 16 / 9, coverImageUrl, COVER_RATIO)}, ${coverCropSizes(column, 3 / 4, coverImageUrl, COVER_RATIO)}`;
+    const row = ROW_COVER[featured ? 'featured' : 'plain'];
+    return `(max-width: 39.9375rem) ${coverCropSizes(row.phone, 16 / 9, coverImageUrl, COVER_RATIO)}, ${coverCropSizes(row.column, row.frame, coverImageUrl, COVER_RATIO)}`;
   });
 
   /**

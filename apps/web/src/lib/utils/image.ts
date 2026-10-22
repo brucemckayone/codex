@@ -162,7 +162,8 @@ export function coverCropSizes(
   const pictureRatio = size ? size.width / size.height : assumedRatio;
   if (pictureRatio === undefined) return slots;
   const scale = Math.round((pictureRatio / frameRatio) * 100) / 100;
-  if (scale <= 1) return slots;
+  // Also a ratio that is not a number: a NaN scale would void every entry.
+  if (!(scale > 1)) return slots;
   return splitTopLevel(slots)
     .map((entry) => {
       const { condition, length } = splitSizesEntry(entry);

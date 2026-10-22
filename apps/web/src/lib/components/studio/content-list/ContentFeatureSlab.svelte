@@ -39,9 +39,10 @@
 
   /**
    * The 16:9 thumb: the full width less the shell's and the slab's 1rem
-   * padding below 48rem, else the 1.2fr of the 1.2fr/1fr split, inside the
-   * 120rem studio column less its 3rem padding, the slab's 2.5rem and the
-   * 1.5rem gap.
+   * padding below 48rem, else 0.55 of the studio's main column (up to 124rem,
+   * less its 4rem rail and 1.5rem padding each side). That leaves out the
+   * slab's own padding and gap, so from 64rem it runs 5-9% over the 1.2fr of
+   * the 1.2fr/1fr split; exact at 48-64rem.
    */
   const THUMB_SIZES =
     '(max-width: 47.9375rem) calc(100vw - 4rem), calc((min(100vw, 124rem) - 7rem) * 0.55)';

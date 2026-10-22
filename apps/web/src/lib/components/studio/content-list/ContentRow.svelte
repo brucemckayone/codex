@@ -14,7 +14,7 @@
   @prop onPublishToggle  Handler for publish toggle
 -->
 <script lang="ts">
-  import { getThumbnailSrcset } from '$lib/utils/image';
+  import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
   import type { ContentWithRelations } from '$lib/types';
   import {
     FilmIcon,
@@ -77,11 +77,16 @@
 <article class="row" data-status={statusVariant}>
   <div class="row-thumb">
     {#if item.thumbnailUrl}
-      <!-- 9-12rem wide, 6rem below md (Codex-kk9nv.3). -->
+      <!-- 9-12rem wide, 6rem below md (Codex-kk9nv.3), in a 16:9 frame the
+           picture covers: one wider than 16:9 is drawn wider than that. -->
       <img
         src={item.thumbnailUrl}
         srcset={getThumbnailSrcset(item.thumbnailUrl) || undefined}
-        sizes="(max-width: 47.9375rem) 6rem, 12rem"
+        sizes={coverCropSizes(
+          '(max-width: 47.9375rem) 6rem, 12rem',
+          16 / 9,
+          item.thumbnailUrl
+        )}
         alt=""
         class="thumb-img"
         loading="lazy"

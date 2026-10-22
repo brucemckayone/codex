@@ -60,7 +60,9 @@
 
   /**
    * MediaTileGrid's tile: one full-width column below 40rem, else
-   * `auto-fill, minmax(18rem, 1fr)`, whose columns settle at 18-27rem.
+   * `auto-fill, minmax(var(--tile-min), 1fr)` (15rem below 48rem, then 18rem),
+   * so a thumb inside the tile's 0.5rem padding is 17-26rem. 24rem is at most
+   * 1.4x over, which picks the same file at 1x and 2x.
    */
   const TILE_SIZES = '(max-width: 39.9375rem) calc(100vw - 2rem), 24rem';
 

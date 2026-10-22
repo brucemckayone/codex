@@ -144,25 +144,27 @@ describe('JourneyEntryCard', () => {
     expect(document.querySelector('.jec__dropcap')).not.toBeNull();
   });
 
-  test("a featured row's phone cover is sized to its own width, not the card's (Codex-kk9nv.3)", () => {
-    // On a phone the featured width rule beats the full-width one on
-    // specificity, so the cover stays a small 16:9 box; declared as the card,
-    // it fetched about 3x the pixels it draws.
+  test("a row's cover is sized as drawn, featured or not (Codex-kk9nv.3)", () => {
+    // Measured in the compiled CSS: on a phone the featured width rule beats
+    // the full-width one on specificity, so that cover stays a small 16:9 box;
+    // a plain row's is the card, capped by its rails. Above 40rem a featured
+    // row's cover is about 6:5, not the plain row's 3:4, so a 16:9 picture is
+    // drawn 1.48x its column, not 2.37x. Each was 1.5-3x over-declared.
     const url =
       'http://localhost:4100/courses/abc/cover/1600x900-0a1b2c3d/md.webp';
     const sizes = () =>
       cover()?.querySelector('.jec__cover-img')?.getAttribute('sizes');
 
     render({ layout: 'row', featured: true, coverImageUrl: url });
-    expect(sizes()).toMatch(
-      /^\(max-width: 39\.9375rem\) clamp\(7\.5rem, 30vw, 12\.5rem\), /
+    expect(sizes()).toBe(
+      '(max-width: 39.9375rem) clamp(7.5rem, 30vw, 12.5rem), calc(clamp(7.5rem, 30vw, 12.5rem) * 1.48)'
     );
 
     reset();
 
     render({ layout: 'row', featured: false, coverImageUrl: url });
-    expect(sizes()).toMatch(
-      /^\(max-width: 39\.9375rem\) calc\(100vw - 2rem\), /
+    expect(sizes()).toBe(
+      '(max-width: 39.9375rem) min(calc(100vw - 2rem), 24rem), calc(clamp(6rem, 22vw, 7.5rem) * 2.37)'
     );
   });
 
