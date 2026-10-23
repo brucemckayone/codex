@@ -6,11 +6,20 @@ on:
     paths:
       - "infrastructure/runpod/**"
       - ".github/workflows/runpod-ci.yml"
+  # PRs land on dev, so dev is here too: without it the handler's unit tests
+  # and the container verification only ran on the dev -> main promotion.
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - "infrastructure/runpod/**"
       - ".github/workflows/runpod-ci.yml"
+
+# Whole-workflow, so pushes to main queue in push order: a job-level group is
+# entered when the deploy job becomes ready, and a run with a faster build
+# could deploy, then be overwritten by an older one.
+concurrency:
+  group: runpod-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   WORKING_DIR: infrastructure/runpod
@@ -92,19 +101,33 @@ jobs:
     name: Deploy to RunPod
     runs-on: ubuntu-latest
     needs: [container-verification]
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
-    environment: production
+    # Push to main only. A pull_request run used to deploy too, which put
+    # unmerged handler code on the production endpoint (2026-02-11).
+    if: github.event_name == 'push'
+    # Its own environment, with no required reviewer: main is already gated by
+    # the owner's dev -> main promotion. Under `production` every deploy since
+    # July sat waiting for an approval and expired after 30 days (Codex-l2c48.2).
+    environment: runpod-production
 
     permissions:
       contents: read
       packages: write
 
-    env:
-      # Expose secret as env var so we can check if it's set in step conditions
-      HAS_RUNPOD_ENDPOINT: ${{ secrets.RUNPOD_ENDPOINT_ID != '' }}
-
     steps:
       - uses: actions/checkout@v5
+
+      # Fail loudly, before anything is pushed. A missing secret used to skip
+      # the endpoint update and leave the job green, so no deploy happened and
+      # nothing said so.
+      - name: Require deploy secrets
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+        run: |
+          if [ -z "$RUNPOD_API_KEY" ] || [ -z "$RUNPOD_ENDPOINT_ID" ]; then
+            echo "::error::RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID must be set on the runpod-production environment"
+            exit 1
+          fi
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
@@ -140,8 +163,6 @@ jobs:
         run: pip install requests
 
       - name: Update RunPod Endpoint
-        # Skip on initial setup before endpoint is created
-        if: env.HAS_RUNPOD_ENDPOINT == 'true'
         env:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
@@ -150,12 +171,10 @@ jobs:
           IMAGE_TAG: sha-${{ github.sha }}
         run: python ${{ env.WORKING_DIR }}/scripts/update_runpod_endpoint.py
 
-      - name: Initial Setup Notice
-        if: env.HAS_RUNPOD_ENDPOINT != 'true'
-        run: |
-          echo "⚠️ RUNPOD_ENDPOINT_ID not set - skipping endpoint update"
-          echo "Image pushed to: ghcr.io/${{ github.repository_owner }}/codex-transcoder:sha-${{ github.sha }}"
-          echo ""
-          echo "To complete setup:"
-          echo "1. Run locally: python infrastructure/runpod/scripts/setup_endpoint.py"
-          echo "2. Add the endpoint ID to GitHub secrets: gh secret set RUNPOD_ENDPOINT_ID"
+      # Its own step: red when the endpoint cannot take jobs (paused), while the
+      # step above, which deployed the image, stays green.
+      - name: Endpoint health
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+        run: python ${{ env.WORKING_DIR }}/scripts/update_runpod_endpoint.py --health

@@ -149,7 +149,7 @@ Creating Endpoint: codex-transcoder-endpoint...
 🎉 Success!
 RunPod Endpoint ID: <endpoint-id>
 
-Add to GitHub: gh secret set RUNPOD_ENDPOINT_ID --body "<endpoint-id>"
+Add to GitHub: gh secret set RUNPOD_ENDPOINT_ID --env runpod-production --body "<endpoint-id>"
 ```
 
 ---

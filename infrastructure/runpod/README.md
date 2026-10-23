@@ -89,18 +89,21 @@ docker run --rm \
 
 The GitHub Actions workflow (`runpod-ci.yml`) automatically:
 
-1.  **Quality & Unit**: Lints (Black, Flake8) and runs unit tests.
+1.  **Quality & Unit**: Lints (Black, Flake8) and runs unit tests. Runs on PRs into `dev` and `main`.
 2.  **Container Verification**: Builds the Docker image and runs the integration script.
-3.  **Deployment** (Main branch only):
-    -   Pushes image to Docker Hub (`codex-transcoder`).
-    -   Updates the RunPod Serverless Endpoint via API.
+3.  **Deployment** (push to `main` only, never on a PR):
+    -   Pushes the image to GHCR (`ghcr.io/<owner>/codex-transcoder:sha-<commit>`).
+    -   Points the endpoint's template at it (`scripts/update_runpod_endpoint.py`); the job fails unless RunPod echoes the new image.
+    -   **Endpoint health** (`update_runpod_endpoint.py --health`): prints the live config, warns on a long `idleTimeout` or a short `executionTimeoutMs`, and goes red when the endpoint is paused (`workersMax=0`).
 
 ### Required GitHub Secrets
 
-- `DOCKERHUB_USERNAME`: Docker Hub username.
-- `DOCKERHUB_TOKEN`: Docker Hub access token.
-- `RUNPOD_API_KEY`: RunPod API Key.
+On the `runpod-production` environment (no required reviewer; the dev → main promotion is the gate):
+
+- `RUNPOD_API_KEY`: RunPod API key with write access (the deploy edits the template).
 - `RUNPOD_ENDPOINT_ID`: The ID of the serverless endpoint to update.
+
+The repo-level `RUNPOD_*` secrets are a different thing: the E2E workflows pass them to the local stack, which talks to a mock transcoder.
 
 ## FFmpeg Settings
 
