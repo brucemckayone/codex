@@ -238,4 +238,27 @@ checkout.get(
   })
 );
 
+/**
+ * GET /checkout/course-subscription/verify
+ *
+ * The course-plan counterpart of `/checkout/verify` (Codex-o4jvw): the
+ * journey success page reads `subscription` once our row exists, and its
+ * `duplicateOf` for a second subscription to a course the buyer already
+ * holds. Ownership is checked against `metadata.codex_user_id`; errors as
+ * `/subscriptions/verify`.
+ */
+checkout.get(
+  '/course-subscription/verify',
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: verifyCheckoutSessionSchema },
+    handler: async (ctx) => {
+      return await ctx.services.courseSubscription.verifyCheckoutSession(
+        ctx.input.query.session_id,
+        ctx.user.id
+      );
+    },
+  })
+);
+
 export default checkout;

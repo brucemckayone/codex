@@ -239,12 +239,35 @@ The buyer lands on a page that waits for **our** record, not just Stripe's:
 |---|---|---|
 | Content: `/checkout/success?session_id=…` (organisation and creator subdomains) | our purchase row, via `GET /checkout/verify` | stops at Stripe's `complete` — **gap**: `Codex-2hxff.22` |
 | Content bought from the player paywall | the same verifying page | goes to `/library?purchase=success`, which nothing reads — **gap**: `Codex-2hxff.22` |
-| Course or journey: `…/checkout/success` | the course entitlement, then redirects to the course | meets the spec |
+| Course or journey: `…/checkout/success?kind=…` | the course entitlement and our row for this session, then redirects to the course | meets the spec |
 | Subscription: `/subscription/success` | our subscription row | meets the spec |
 
 Polling is bounded. When it runs out, the page says the payment is still being
 processed and that we will email the buyer. After success the page refreshes
 the library and subscription collections itself — **gap**: `Codex-2hxff.22`.
+
+**A second payment is never confirmed** (Codex-o4jvw; owner decision
+2026-10-22, "Say it plainly"). When our row for the session is a duplicate,
+the page shows a calm notice instead and keeps the way to the item:
+
+- **Purchase** (content or course): "You already own {item}". "This second
+  payment is being refunded in full. You don't need to do anything." Button:
+  "Go to {item}".
+- **Organisation tier**: "You're already subscribed to {org} ({kept tier})".
+  "We've cancelled the second subscription and are refunding it." When the
+  duplicate was for another tier: "Want {tier} instead? Use Change plan.",
+  linking to `/pricing`. Buttons: "Go to {org}" (and Change plan).
+- **Course plan**: "You're already subscribed to {course}", the same body,
+  "Go to {course}".
+
+The verify reads say so from the data: `duplicatePayment` on
+`GET /checkout/verify` (`duplicate_of_purchase_id`), and `duplicateOf`, the
+subscription the user keeps, on `GET /subscriptions/verify` and
+`GET /checkout/course-subscription/verify`. A buyer who already held a course
+is entitled before this payment's row exists, so the journey page, told the
+path by `kind` on its success URL, waits for that row before forwarding.
+Without `kind` (a session opened before it), it forwards on the entitlement
+alone.
 
 ## Purchase history and sales
 
@@ -360,7 +383,13 @@ Stripe does not return its processing fee on a refund; the platform bears it.
 
 A refund that arrives before the purchase it belongs to is recorded (courses as
 well as content) and applied when the purchase completes — **gap**:
-`Codex-2hxff.8` (course refunds are dropped).
+`Codex-2hxff.8` (course refunds are dropped), and `Codex-2hxff.68` (after a
+partial refund, the completed purchase never records the creator's and the
+organisation's remaining share).
+
+A refund processed after the purchase exists but before its payouts are
+recorded is applied the moment they are, through the same reversal as a later
+refund, so the net is the same whichever comes first (`Codex-2hxff.67`).
 
 **The refund email.** Each refund is emailed to the buyer once, with that
 refund's amount (owner decision 2026-10-19, "One per refund"). The refund's row

@@ -34,6 +34,7 @@
 
 <CheckoutSuccess
   verification={data.verification}
+  verifyFailed={data.verifyFailed}
   {contentUrl}
   browseUrl="/explore"
   libraryUrl="/library"

@@ -10,7 +10,12 @@
     spinner + auto-retry via `invalidate('subscription:verify')` up to 10 times
     at 3s intervals (~30s total window). Handles the Stripe webhook race
     where the redirect beats `checkout.session.completed`.
+  - Duplicate (the row is a second subscription to this org, Codex-o4jvw):
+    a calm notice naming the tier the user keeps, that this one is cancelled
+    and refunded, and Change plan when it was for another tier.
   - Expired / fallback: honest "didn't land in time" message with a library CTA.
+  - Error (`verifyFailed`: a 4xx other than 408/429, which a retry will not
+    change): "couldn't verify" with a library CTA, at once, without polling.
 
   See the shared CheckoutSuccess component for the equivalent purchase flow
   — intentionally kept separate so each flow can evolve independently.
@@ -18,7 +23,11 @@
 <script lang="ts">
   import { invalidate } from '$app/navigation';
   import * as m from '$paraglide/messages';
-  import { ClockIcon } from '$lib/components/ui/Icon';
+  import {
+    AlertCircleIcon,
+    CheckCircleIcon,
+    ClockIcon
+  } from '$lib/components/ui/Icon';
   import type { PageData } from './$types';
 
   interface Props {
@@ -36,12 +45,13 @@
   // Auto-retry loop — mirrors the checkout/success pattern. We retry until
   // either the subscription row appears (webhook landed) OR Stripe says the
   // session expired. A null `verification` is treated as still-pending
-  // (transient ecom-api failure) so the user doesn't get stuck on an error.
+  // (transient ecom-api failure) so the user doesn't get stuck on an error,
+  // unless the load says the failure is one a retry will not change.
   let retryCount = $state(0);
   const MAX_RETRIES = 10;
   const RETRY_INTERVAL_MS = 3000;
   const shouldRetry = $derived(
-    !isComplete && !isExpired && retryCount < MAX_RETRIES
+    !isComplete && !isExpired && !data.verifyFailed && retryCount < MAX_RETRIES
   );
 
   $effect(() => {
@@ -56,16 +66,68 @@
   const subscription = $derived(verification?.subscription);
   const orgName = $derived(data.org?.name ?? 'Codex');
   const libraryUrl = '/library';
+
+  // A second subscription to this org: it names the one the user keeps.
+  const kept = $derived(subscription?.duplicateOf);
+  // Paid for another tier than the one kept: point at Change plan.
+  const otherTierName = $derived(
+    kept && subscription && kept.tierId !== subscription.tierId
+      ? subscription.tierName
+      : null
+  );
+  const duplicateTitle = $derived(
+    kept && subscription
+      ? m.subscription_duplicate_title({
+          org: subscription.organizationName,
+          tier: kept.tierName
+        })
+      : null
+  );
 </script>
 
 <svelte:head>
-  <title>{m.subscription_success_title()} | {orgName}</title>
+  <title>{duplicateTitle ?? m.subscription_success_title()} | {orgName}</title>
   <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
 <div class="subscription-success">
   <div class="subscription-success__card" aria-live="polite">
-    {#if isComplete}
+    {#if duplicateTitle && subscription}
+      <div
+        class="subscription-success__icon subscription-success__icon--notice"
+        aria-hidden="true"
+      >
+        <CheckCircleIcon size={48} />
+      </div>
+
+      <h1 class="subscription-success__title">{duplicateTitle}</h1>
+      <p class="subscription-success__description">
+        {m.subscription_duplicate_description()}
+      </p>
+      {#if otherTierName}
+        <p class="subscription-success__description">
+          {m.subscription_duplicate_change_plan_hint({ tier: otherTierName })}
+        </p>
+      {/if}
+
+      <div class="subscription-success__actions">
+        <a
+          href="/"
+          class="subscription-success__btn subscription-success__btn--primary"
+        >
+          {m.checkout_duplicate_go_to({ name: subscription.organizationName })}
+        </a>
+        {#if otherTierName}
+          <a
+            href="/pricing"
+            class="subscription-success__btn subscription-success__btn--secondary"
+          >
+            {m.subscription_duplicate_change_plan()}
+          </a>
+        {/if}
+      </div>
+
+    {:else if isComplete}
       <div class="subscription-success__icon">
         <svg
           class="checkmark"
@@ -128,6 +190,28 @@
         </a>
       </div>
 
+    {:else if data.verifyFailed}
+      <!-- The verify failed in a way a retry will not change (a 4xx): say we
+           could not verify it, rather than implying it is still processing. -->
+      <div
+        class="subscription-success__icon subscription-success__icon--pending"
+        aria-hidden="true"
+      >
+        <AlertCircleIcon size={48} />
+      </div>
+      <h1 class="subscription-success__title">{m.common_error()}</h1>
+      <p class="subscription-success__description">
+        {m.checkout_success_error()}
+      </p>
+      <div class="subscription-success__actions">
+        <a
+          href={libraryUrl}
+          class="subscription-success__btn subscription-success__btn--primary"
+        >
+          {m.checkout_success_go_to_library()}
+        </a>
+      </div>
+
     {:else}
       <!-- Retries exhausted, webhook hasn't landed. Let the user into their
            library — the webhook will catch up shortly and the next library
@@ -181,7 +265,8 @@
     margin-bottom: var(--space-2);
   }
 
-  .subscription-success__icon--pending {
+  .subscription-success__icon--pending,
+  .subscription-success__icon--notice {
     color: var(--color-text-secondary);
   }
 
@@ -298,6 +383,17 @@
 
   .subscription-success__btn--primary:hover {
     background: var(--color-interactive-hover);
+  }
+
+  .subscription-success__btn--secondary {
+    background: transparent;
+    color: var(--color-text-secondary);
+    border: var(--border-width) solid var(--color-border);
+  }
+
+  .subscription-success__btn--secondary:hover {
+    background: var(--color-surface-secondary);
+    color: var(--color-text);
   }
 
   @media (--breakpoint-sm) {

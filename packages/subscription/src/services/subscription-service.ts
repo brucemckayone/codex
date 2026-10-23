@@ -76,6 +76,7 @@ import {
   resolveOrganisationPayee,
   retryFailedClawbacks,
   reverseCharge,
+  reverseEarlierRefundsAfterCommit,
   settlePayoutPaid,
   settleTransfer,
 } from '@codex/payments';
@@ -560,6 +561,30 @@ export interface WebhookHandlerResult {
   orgId?: string;
   /** Composed email payload ready for sendEmailToWorker() */
   email?: WebhookEmailPayload;
+}
+
+/**
+ * Result of `verifyCheckoutSession()` — what the /subscription/success page
+ * reads. `subscription` appears once our row for the session exists.
+ */
+export interface SubscriptionCheckoutVerifyResult {
+  sessionStatus: 'complete' | 'expired' | 'open';
+  subscription?: {
+    id: string;
+    organizationId: string;
+    tierId: string;
+    tierName: string;
+    organizationName: string;
+    organizationSlug: string;
+    startedAt: string;
+    /**
+     * Set when this subscription is a duplicate (Codex-2hxff.15): the
+     * subscription it repeats, which the user keeps. This one is cancelled
+     * and refunded, so the page says so instead of confirming it
+     * (Codex-o4jvw).
+     */
+    duplicateOf?: { id: string; tierId: string; tierName: string };
+  };
 }
 
 /**
@@ -1081,22 +1106,13 @@ export class SubscriptionService extends BaseService {
    * - Ownership enforced via `metadata.codex_user_id`
    * - Returns a `subscription` object only when the row actually exists in
    *   our DB (caller treats its absence as "still processing" and retries)
+   * - A duplicate's `subscription` carries `duplicateOf`, the subscription
+   *   the user keeps (Codex-o4jvw)
    */
   async verifyCheckoutSession(
     sessionId: string,
     userId: string
-  ): Promise<{
-    sessionStatus: 'complete' | 'expired' | 'open';
-    subscription?: {
-      id: string;
-      organizationId: string;
-      tierId: string;
-      tierName: string;
-      organizationName: string;
-      organizationSlug: string;
-      startedAt: string;
-    };
-  }> {
+  ): Promise<SubscriptionCheckoutVerifyResult> {
     try {
       const session = await this.stripe.checkout.sessions.retrieve(sessionId);
 
@@ -1110,18 +1126,7 @@ export class SubscriptionService extends BaseService {
         );
       }
 
-      const result: {
-        sessionStatus: 'complete' | 'expired' | 'open';
-        subscription?: {
-          id: string;
-          organizationId: string;
-          tierId: string;
-          tierName: string;
-          organizationName: string;
-          organizationSlug: string;
-          startedAt: string;
-        };
-      } = {
+      const result: SubscriptionCheckoutVerifyResult = {
         sessionStatus:
           (session.status as 'complete' | 'expired' | 'open') ?? 'open',
       };
@@ -1139,7 +1144,10 @@ export class SubscriptionService extends BaseService {
       // response to the webhook. Callers poll this endpoint until the row
       // appears, so an absent row here is expected, not an error.
       const row = await this.db.query.subscriptions.findFirst({
-        where: eq(subscriptions.stripeSubscriptionId, stripeSubId),
+        where: and(
+          eq(subscriptions.stripeSubscriptionId, stripeSubId),
+          eq(subscriptions.userId, userId)
+        ),
         with: {
           tier: { columns: { name: true } },
           organization: { columns: { name: true, slug: true } },
@@ -1156,6 +1164,14 @@ export class SubscriptionService extends BaseService {
           organizationSlug: row.organization.slug,
           startedAt: row.createdAt.toISOString(),
         };
+        // A duplicate (isDuplicateSubscription) names the subscription the
+        // user keeps; the page shows that one's tier.
+        if (row.duplicateOfSubscriptionId) {
+          result.subscription.duplicateOf = await this.keptSubscriptionOf(
+            row.duplicateOfSubscriptionId,
+            userId
+          );
+        }
       }
 
       return result;
@@ -1175,6 +1191,30 @@ export class SubscriptionService extends BaseService {
 
       this.handleError(error, 'verifyCheckoutSession');
     }
+  }
+
+  /**
+   * The subscription a duplicate repeats, which the user keeps. The column is
+   * a foreign key, so a missing row is a broken invariant, not "not found".
+   */
+  private async keptSubscriptionOf(
+    keptSubscriptionId: string,
+    userId: string
+  ): Promise<{ id: string; tierId: string; tierName: string }> {
+    const kept = await this.db.query.subscriptions.findFirst({
+      where: and(
+        eq(subscriptions.id, keptSubscriptionId),
+        eq(subscriptions.userId, userId)
+      ),
+      columns: { id: true, tierId: true },
+      with: { tier: { columns: { name: true } } },
+    });
+    if (!kept) {
+      throw new InternalServiceError('Kept subscription missing', {
+        subscriptionId: keptSubscriptionId,
+      });
+    }
+    return { id: kept.id, tierId: kept.tierId, tierName: kept.tier.name };
   }
 
   // ─── Webhook Handlers ──────────────────────────────────────────────────────
@@ -2097,9 +2137,11 @@ export class SubscriptionService extends BaseService {
 
     // Before paying out, the row as it stands now, read under the lock: a
     // revival another event is retiring at once may have ended it. Ended, or
-    // not live at Stripe, the charge is checked too: a refund that lands
-    // before the payouts exist reverses nothing, so paying out after it
-    // would pay for money handed back.
+    // not live at Stripe, the charge is checked too, and one refunded in full
+    // pays no one rather than paying out only to be reversed. Stripe is asked
+    // because the refund may be that revival's, made a moment ago and not
+    // recorded yet. Every other refund before the payout is clawed back once
+    // the slices exist (reverseEarlierRefunds, below).
     const current = (await this.rereadUnderLock(sub)) ?? sub;
     const ended = current.endedAt != null;
     if (
@@ -2133,6 +2175,15 @@ export class SubscriptionService extends BaseService {
       split.creatorPayoutCents,
       invoiceCreatedAt
     );
+    // A refund or chargeback handled before this invoice found no slices to
+    // claw back (Codex-2hxff.67): it is clawed back now, as if it had come
+    // after. A redelivery runs it too, so a delivery that died in between
+    // catches up. Its failure is raised at the end, with the result
+    // (`AfterCommitError`), so the renewal's side effects still happen.
+    const finish = await reverseEarlierRefundsAfterCommit(
+      { ...this.ledger(), obs: this.obs },
+      { chargeId: sourceTransaction, source: { sourceType: 'subscription' } }
+    );
 
     this.obs.info('Invoice payment processed', {
       subscriptionId: sub.id,
@@ -2141,7 +2192,7 @@ export class SubscriptionService extends BaseService {
     });
 
     // No renewal email and no access cleared for an ended subscription.
-    if (ended) return {};
+    if (ended) return finish({});
 
     // Build renewal email only for recurring invoices (not first payment)
     let email: WebhookEmailPayload | undefined;
@@ -2182,7 +2233,7 @@ export class SubscriptionService extends BaseService {
       'payment_succeeded'
     );
 
-    return { userId: sub.userId, orgId: sub.organizationId, email };
+    return finish({ userId: sub.userId, orgId: sub.organizationId, email });
   }
 
   /**

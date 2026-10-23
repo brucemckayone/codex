@@ -72,6 +72,7 @@ export {
 export { ConnectAccountService } from './services/connect-account-service';
 export {
   COURSE_SUBSCRIPTION_METADATA_TYPE,
+  type CourseSubscriptionCheckoutVerifyResult,
   CourseSubscriptionService,
   type CourseSubscriptionWebhookResult,
 } from './services/course-subscription-service';
@@ -107,6 +108,7 @@ export type {
   PropagateTierPriceOptions,
   PropagateTierPriceResult,
   SubscriberListItem,
+  SubscriptionCheckoutVerifyResult,
   TierChangePreview,
   WebhookEmailPayload,
   WebhookHandlerResult,

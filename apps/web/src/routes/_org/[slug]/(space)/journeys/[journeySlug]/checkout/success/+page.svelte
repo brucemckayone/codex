@@ -9,9 +9,14 @@
   dependency. The poll is capped — a webhook that never arrives must resolve into
   an honest "we're still working on it, here's what to do" rather than an
   indefinite spinner that quietly implies the purchase failed.
+
+  A second payment for access the buyer already held (`data.duplicate`,
+  Codex-o4jvw) is final: a calm notice that it is being refunded, the way in,
+  and no more polling.
 -->
 <script lang="ts">
   import { invalidate } from '$app/navigation';
+  import * as m from '$paraglide/messages';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -23,10 +28,52 @@
   let polls = $state(0);
   const givenUp = $derived(polls >= MAX_POLLS);
 
+  /** The duplicate-payment notice, or null for every other state. */
+  const notice = $derived.by(() => {
+    const duplicate = data.duplicate;
+    if (!duplicate) return null;
+    const toCourse = {
+      href: data.dashboardPath,
+      label: m.checkout_duplicate_go_to({ name: data.courseTitle }),
+    };
+    switch (duplicate.kind) {
+      case 'purchase':
+        return {
+          title: m.checkout_duplicate_title({ item: data.courseTitle }),
+          body: m.checkout_duplicate_description(),
+          goTo: toCourse,
+          changePlanHint: null,
+        };
+      case 'subscription':
+        return {
+          title: m.subscription_duplicate_course_title({ course: data.courseTitle }),
+          body: m.subscription_duplicate_description(),
+          goTo: toCourse,
+          changePlanHint: null,
+        };
+      case 'tier':
+        return {
+          title: m.subscription_duplicate_title({
+            org: duplicate.organizationName,
+            tier: duplicate.keptTierName,
+          }),
+          body: m.subscription_duplicate_description(),
+          goTo: {
+            href: '/',
+            label: m.checkout_duplicate_go_to({ name: duplicate.organizationName }),
+          },
+          changePlanHint: duplicate.otherTierName
+            ? m.subscription_duplicate_change_plan_hint({ tier: duplicate.otherTierName })
+            : null,
+        };
+    }
+  });
+
   $effect(() => {
     // Only poll when a payment actually happened; a direct visit has nothing
-    // pending and polling it would be a pointless request loop.
-    if (!data.arrivedFromStripe || givenUp) return;
+    // pending and polling it would be a pointless request loop. A duplicate
+    // notice is final.
+    if (!data.arrivedFromStripe || givenUp || notice) return;
 
     const timer = setInterval(() => {
       polls += 1;
@@ -38,12 +85,30 @@
 </script>
 
 <svelte:head>
-  <title>Confirming your place in {data.courseTitle}</title>
+  {#if notice}
+    <title>{notice.title}</title>
+  {:else}
+    <title>Confirming your place in {data.courseTitle}</title>
+  {/if}
   <meta name="robots" content="noindex" />
 </svelte:head>
 
 <section class="ret">
-  {#if !data.arrivedFromStripe}
+  {#if notice}
+    <h1 class="ret__title">{notice.title}</h1>
+    <p class="ret__body">{notice.body}</p>
+    {#if notice.changePlanHint}
+      <p class="ret__body">{notice.changePlanHint}</p>
+    {/if}
+    <div class="ret__actions">
+      <a class="ret__cta" href={notice.goTo.href}>
+        {notice.goTo.label} <span aria-hidden="true">→</span>
+      </a>
+      {#if notice.changePlanHint}
+        <a class="ret__link" href="/pricing">{m.subscription_duplicate_change_plan()}</a>
+      {/if}
+    </div>
+  {:else if !data.arrivedFromStripe}
     <h1 class="ret__title">Nothing to confirm here</h1>
     <p class="ret__body">
       This page confirms a payment as it completes. If you meant to join

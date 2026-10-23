@@ -100,8 +100,9 @@ Stripe sends `checkout.session.completed` (subscription mode) to
   entitlement that expires at the end of the paid period.
 
 The success page waits for our row before confirming
-([purchases.md](purchases.md#after-payment)). For a duplicate it still
-confirms the duplicate's tier — **gap**: `Codex-o4jvw`.
+([purchases.md](purchases.md#after-payment)). For a duplicate it confirms
+nothing: it names the subscription the user keeps and says the second one is
+cancelled and refunded, with Change plan when the tiers differ (Codex-o4jvw).
 
 ---
 
@@ -272,6 +273,10 @@ Owner decision P-4, "Cancel + end access".
   exactly as for one-off purchases ([purchases.md](purchases.md#refunds)). A
   shortfall on the payee's balance goes to `refund_reviews`, which holds
   subscription debts as well as purchase ones (one row per reversal).
+- The order of Stripe's events does not change that. A refund handled before
+  its invoice's payout reverses nothing then, and is clawed back as soon as
+  the invoice's slices are recorded, so the payees net the same either way
+  (`Codex-2hxff.67`).
 
 The current period's payment is the newest **paid** invoice Stripe raised to
 buy a period (`billing_reason` `subscription_create` or `subscription_cycle`),

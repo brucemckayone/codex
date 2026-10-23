@@ -31,8 +31,10 @@ import {
   payoutReversals,
   payouts,
   refundReviews,
+  refunds,
 } from '@codex/database/schema';
 import {
+  AfterCommitError,
   InternalServiceError,
   ServiceUnavailableError,
 } from '@codex/service-errors';
@@ -43,6 +45,7 @@ import {
   inArray,
   isNull,
   lt,
+  ne,
   or,
   type SQL,
   sql,
@@ -384,6 +387,179 @@ export async function reverseCharge(
   }
 }
 
+/**
+ * Claw back the refunds and chargebacks a charge already had when the
+ * source's slices of it were recorded (Codex-2hxff.67). The flow that records
+ * them calls this right after, so a payment's payouts reflect every refund and
+ * chargeback of it, whatever order Stripe's events arrive in.
+ *
+ * Stripe does not order them: `charge.refunded` (or a dispute) can be handled
+ * before the event that records the slices (`invoice.payment_succeeded`, or a
+ * purchase's completion), and its clawback then finds no slices and does
+ * nothing. This runs that same clawback once they exist, so they end as they
+ * would had the refund come second: a full refund nets the payees nothing, a
+ * partial one the reduced amounts, an open chargeback holds an unpaid slice.
+ * Each step is recorded per slice and cause, so a cause both runs handle is
+ * clawed back once.
+ *
+ * One of the two always sees the other: the refund and dispute handlers record
+ * their cause (`refunds`, `disputes`) before they read the slices, and this
+ * reads both after the slices are committed. A charge with neither recorded
+ * asks Stripe nothing.
+ *
+ * A failure is logged here, then rethrown: nothing else would retry it, as
+ * the hourly retry revisits only steps already recorded and this can fail
+ * before any is. A step that could not run YET (another delivery holds it, a
+ * drain is paying the slice) is a warning: the retry finishes it. Anything
+ * else is an error with an errorId, for a person if the event is not retried.
+ */
+export async function reverseEarlierRefunds(
+  deps: ClawbackDeps,
+  input: { chargeId: string; source: ClawbackSource }
+): Promise<void> {
+  try {
+    if (!(await hasClawbackCause(deps.db, input.chargeId))) return;
+    // As the refund webhook calls it: the charge's own amount is the
+    // denominator (D1), and its refunds are read from Stripe.
+    const charge = await deps.stripe.charges.retrieve(input.chargeId);
+    await reverseCharge(deps, {
+      charge: { id: charge.id, amountCents: charge.amount },
+      source: input.source,
+      refunds: () => listClawableRefunds(deps.stripe, charge.id),
+    });
+  } catch (error) {
+    const fields = {
+      chargeId: input.chargeId,
+      sourceType: input.source.sourceType,
+      ...(input.source.sourceType === 'purchase'
+        ? { purchaseId: input.source.purchaseId }
+        : {}),
+      ...rootCauseOf(error),
+    };
+    if (isNotYet(error)) {
+      deps.obs.warn(
+        'A refund or chargeback preceded this payout and is not clawed back yet: another delivery or a drain holds a step, and the retry finishes it',
+        fields
+      );
+    } else {
+      deps.obs.error(
+        'A refund or chargeback preceded this payout and its transfers were not reversed: a retried event runs this again; if the event is not retried, a person must reverse them',
+        { errorId: crypto.randomUUID(), ...fields }
+      );
+    }
+    throw error;
+  }
+}
+
+/** How far down a cause chain to look (and the guard against a cycle). */
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * Whether every failure under `error` is a step that could not run YET
+ * (`ServiceUnavailableError`, as `reverseCharge` reports one), so a retry
+ * finishes it.
+ */
+function isNotYet(error: unknown, depth = 0): boolean {
+  if (depth > MAX_CAUSE_DEPTH) return false;
+  if (error instanceof ServiceUnavailableError) return true;
+  if (error instanceof AggregateError) {
+    return (
+      error.errors.length > 0 &&
+      error.errors.every((inner) => isNotYet(inner, depth + 1))
+    );
+  }
+  return error instanceof Error && error.cause !== undefined
+    ? isNotYet(error.cause, depth + 1)
+    : false;
+}
+
+/**
+ * The innermost error under `error`, for a log line: its name, its message
+ * and the deepest string `code` on the way. Never a failed query's own
+ * message, which holds the SQL and its bound values.
+ */
+function rootCauseOf(error: unknown): {
+  errorName: string;
+  errorMessage: string;
+  code: string | undefined;
+} {
+  let current: unknown = error;
+  let code: string | undefined;
+  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+    if (!(current instanceof Error)) break;
+    const own = (current as { code?: unknown }).code;
+    if (typeof own === 'string') code = own;
+    const inner =
+      current instanceof AggregateError ? current.errors[0] : current.cause;
+    if (!(inner instanceof Error)) break;
+    current = inner;
+  }
+  if (!(current instanceof Error)) {
+    return { errorName: typeof current, errorMessage: String(current), code };
+  }
+  return {
+    errorName: current.name,
+    errorMessage: current.message.startsWith('Failed query:')
+      ? '(query omitted)'
+      : current.message,
+    code,
+  };
+}
+
+/**
+ * `reverseEarlierRefunds` for a flow whose payout has committed: its failure
+ * must not cancel what follows from the commit. It is held, and the returned
+ * `finish` raises it at the flow's end, with the flow's result
+ * (`AfterCommitError`); without a failure, `finish` returns the result.
+ */
+export async function reverseEarlierRefundsAfterCommit(
+  deps: ClawbackDeps,
+  input: { chargeId: string; source: ClawbackSource }
+): Promise<<T>(result: T) => T> {
+  try {
+    await reverseEarlierRefunds(deps, input);
+    return (result) => result;
+  } catch (failure) {
+    return (result) => {
+      throw new AfterCommitError(
+        'The payout was recorded, but a refund or chargeback before it was not clawed back',
+        result,
+        failure
+      );
+    };
+  }
+}
+
+/**
+ * Whether the charge has a cause the clawback acts on, as the webhooks have
+ * recorded them: a refund that is not canceled (final, never clawed back), or
+ * a chargeback still open or lost.
+ */
+async function hasClawbackCause(
+  db: LedgerDeps['db'],
+  chargeId: string
+): Promise<boolean> {
+  const [refund] = await db
+    .select({ id: refunds.id })
+    .from(refunds)
+    .where(
+      and(eq(refunds.stripeChargeId, chargeId), ne(refunds.status, 'canceled'))
+    )
+    .limit(1);
+  if (refund) return true;
+  const [chargeback] = await db
+    .select({ id: disputes.id })
+    .from(disputes)
+    .where(
+      and(
+        eq(disputes.stripeChargeId, chargeId),
+        inArray(disputes.status, CHARGEBACK_CLAWED_STATUSES)
+      )
+    )
+    .limit(1);
+  return chargeback !== undefined;
+}
+
 async function clawBackShare(
   ctx: StepContext,
   payoutId: string,
@@ -521,7 +697,14 @@ async function reduceUnpaidSlice(
         and(
           eq(payouts.id, row.id),
           inArray(payouts.status, ['pending', 'failed']),
-          or(isNull(payouts.lastRetryAt), lt(payouts.lastRetryAt, leaseStart))
+          or(
+            isNull(payouts.lastRetryAt),
+            lt(payouts.lastRetryAt, leaseStart),
+            // The lease of the reserve's own transfer, which failed: nothing
+            // is in flight. A drain's claim counts its attempt, so a failed
+            // row a drain is retrying still waits (Codex-2hxff.67).
+            and(eq(payouts.status, 'failed'), eq(payouts.retryCount, 0))
+          )
         )
       )
       .returning();

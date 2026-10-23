@@ -14,6 +14,7 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { STRIPE_EVENTS } from '@codex/constants';
+import { AfterCommitError } from '@codex/service-errors';
 import {
   createMockHonoContext,
   createMockStripeSubscription,
@@ -112,6 +113,7 @@ describe('handleSubscriptionWebhook', () => {
   let mockRecordPriceDrift: ReturnType<typeof vi.fn>;
   let mockMarkCheckoutCompleted: ReturnType<typeof vi.fn>;
   let mockHandleCourseCreated: ReturnType<typeof vi.fn>;
+  let mockHandleCourseInvoiceSuccess: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -119,6 +121,7 @@ describe('handleSubscriptionWebhook', () => {
     mockHandleCreated = vi.fn().mockResolvedValue(undefined);
     mockMarkCheckoutCompleted = vi.fn().mockResolvedValue(undefined);
     mockHandleCourseCreated = vi.fn().mockResolvedValue(undefined);
+    mockHandleCourseInvoiceSuccess = vi.fn().mockResolvedValue(undefined);
     mockHandleUpdated = vi.fn().mockResolvedValue(undefined);
     mockHandleDeleted = vi.fn().mockResolvedValue(undefined);
     mockHandleInvoiceSuccess = vi.fn().mockResolvedValue(undefined);
@@ -169,9 +172,7 @@ describe('handleSubscriptionWebhook', () => {
           handleCourseSubscriptionCreated: mockHandleCourseCreated,
           handleCourseSubscriptionUpdated: vi.fn().mockResolvedValue(undefined),
           handleCourseSubscriptionDeleted: vi.fn().mockResolvedValue(undefined),
-          handleCourseInvoicePaymentSucceeded: vi
-            .fn()
-            .mockResolvedValue(undefined),
+          handleCourseInvoicePaymentSucceeded: mockHandleCourseInvoiceSuccess,
         },
       } as unknown as WebhookServices['services'],
       background: (promise) => promise,
@@ -472,6 +473,126 @@ describe('handleSubscriptionWebhook', () => {
         'Invoice payment succeeded',
         expect.objectContaining({ invoiceId: 'in_success_001' })
       );
+    });
+
+    // Codex-2hxff.67: the payout committed, then the clawback of a refund
+    // that preceded it failed (`AfterCommitError`, carrying the result).
+    describe('a clawback that fails after the payout committed', () => {
+      const email = {
+        to: 'subscriber@example.com',
+        templateName: 'subscription-renewed',
+        category: 'transactional',
+        data: {},
+      };
+      const permanent = () =>
+        Object.assign(new Error('No such charge'), {
+          type: 'StripeInvalidRequestError',
+          statusCode: 404,
+        });
+      const transient = () =>
+        Object.assign(new Error('Connection to Stripe failed'), {
+          type: 'StripeConnectionError',
+        });
+      const kv = () =>
+        ({
+          get: vi.fn().mockResolvedValue(null),
+          put: vi.fn().mockResolvedValue(undefined),
+          delete: vi.fn().mockResolvedValue(undefined),
+        }) as unknown as KVNamespace;
+
+      it('permanent (tier) → the renewal email still goes, then it rejects', async () => {
+        const failure = new AfterCommitError(
+          'clawback failed',
+          { userId: 'user_1', orgId: 'org_1', email },
+          permanent()
+        );
+        mockHandleInvoiceSuccess.mockRejectedValueOnce(failure);
+        const event = createEvent(STRIPE_EVENTS.INVOICE_PAYMENT_SUCCEEDED, {
+          id: 'in_after_commit',
+        });
+        const { context, mock } = createContext();
+
+        await expect(
+          handleSubscriptionWebhook(event, mockStripe, context)
+        ).rejects.toBe(failure);
+
+        expect(sendEmailToWorker).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          email
+        );
+        expect(mock._obs.info).toHaveBeenCalledWith(
+          'Invoice payment succeeded',
+          expect.objectContaining({ invoiceId: 'in_after_commit' })
+        );
+        expect(mockRelease).toHaveBeenCalledOnce();
+      });
+
+      it('transient (tier) → access is cleared at once, the email waits; the redelivery sends it once', async () => {
+        const renewal = { userId: 'user_1', orgId: 'org_1', email };
+        const failure = new AfterCommitError(
+          'clawback failed',
+          renewal,
+          transient()
+        );
+        mockHandleInvoiceSuccess
+          .mockRejectedValueOnce(failure)
+          .mockResolvedValueOnce(renewal);
+        const event = createEvent(STRIPE_EVENTS.INVOICE_PAYMENT_SUCCEEDED, {
+          id: 'in_after_commit_transient',
+        });
+        const store = kv();
+        const { context } = createContext({ CACHE_KV: store });
+
+        await expect(
+          handleSubscriptionWebhook(event, mockStripe, context)
+        ).rejects.toBe(failure);
+
+        // A past_due subscriber's streaming block is lifted now, not at its TTL.
+        expect(context.executionCtx.waitUntil).toHaveBeenCalled();
+        expect(store.delete).toHaveBeenCalled();
+        expect(sendEmailToWorker).not.toHaveBeenCalled();
+
+        // The redelivery: the clawback finishes, and the email goes once.
+        await handleSubscriptionWebhook(event, mockStripe, context);
+
+        expect(sendEmailToWorker).toHaveBeenCalledTimes(1);
+        expect(sendEmailToWorker).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          email
+        );
+      });
+
+      it("permanent (course plan) → the buyer's library is still bumped, then it rejects", async () => {
+        const failure = new AfterCommitError(
+          'clawback failed',
+          { userId: 'user_1', organizationId: 'org_1' },
+          permanent()
+        );
+        mockHandleCourseInvoiceSuccess.mockRejectedValueOnce(failure);
+        const event = createEvent(STRIPE_EVENTS.INVOICE_PAYMENT_SUCCEEDED, {
+          id: 'in_course_after_commit',
+          parent: {
+            subscription_details: {
+              subscription: 'sub_course_1',
+              metadata: { type: 'course_subscription' },
+            },
+          },
+        });
+        const { context, mock } = createContext({ CACHE_KV: kv() });
+
+        await expect(
+          handleSubscriptionWebhook(event, mockStripe, context)
+        ).rejects.toBe(failure);
+
+        expect(mockHandleCourseInvoiceSuccess).toHaveBeenCalled();
+        expect(context.executionCtx.waitUntil).toHaveBeenCalled();
+        expect(mock._obs.info).toHaveBeenCalledWith(
+          'Course subscription invoice payment succeeded',
+          expect.objectContaining({ invoiceId: 'in_course_after_commit' })
+        );
+      });
     });
   });
 
