@@ -90,8 +90,11 @@ can each pay only one connected account, so neither can split a sale three ways.
 
 1. **GBP only.** Every amount is in pence; every Stripe call passes `gbp`.
    Every payment path checks the currency before it records a split, with one
-   shared guard (`assertGbpOnly` in `@codex/payments`); anything else is
-   refused as `UNSUPPORTED_CURRENCY`.
+   shared rule (`assertGbpOnly` / `isGbpOrUnset` in `@codex/payments`).
+   Anything else is refused and logged at error with an errorId, for support
+   to settle by hand; a course renewal still keeps the subscriber's access.
+   Stripe's Adaptive Pricing does not trip it: the session keeps GBP and the
+   buyer's own currency is only in `presentment_details`.
 2. **Studio is the only place prices are set.** A price edited in the Stripe
    Dashboard is recorded as drift and never applied to anyone.
 3. **No £0 offers.** A price of £0 is refused when it is written.
