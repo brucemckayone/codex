@@ -54,6 +54,13 @@ export class CdnCachePurger {
     // Called bare: workerd rejects a `fetch` invoked as another object's method.
     const send = this.config.fetch ?? fetch;
     const timeoutMs = this.config.timeoutMs ?? DEFAULT_PURGE_TIMEOUT_MS;
+    // Kept, so a timeout is recognised by the signal itself, whatever error a
+    // runtime's fetch rejects with, and also when it fires during the body.
+    const signal = AbortSignal.timeout(timeoutMs);
+    const timedOut: CdnPurgeResult = {
+      ok: false,
+      reason: `timed out after ${timeoutMs}ms`,
+    };
     try {
       const res = await send(
         `https://api.cloudflare.com/client/v4/zones/${encodeURIComponent(this.config.zoneId)}/purge_cache`,
@@ -64,26 +71,35 @@ export class CdnCachePurger {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ prefixes }),
-          signal: AbortSignal.timeout(timeoutMs),
+          signal,
         }
       );
-      const body = (await res.json().catch(() => null)) as {
+      const text = await res.text();
+      const body = parseJson(text) as {
         success?: boolean;
         errors?: unknown;
       } | null;
       if (res.ok && body?.success === true) return { ok: true };
+      // Not JSON (an HTML 5xx page, say): its text says more than `null`.
+      const detail = body ? JSON.stringify(body.errors ?? body) : text;
       return {
         ok: false,
-        reason: `HTTP ${res.status}: ${JSON.stringify(body?.errors ?? body).slice(0, 300)}`,
+        reason: `HTTP ${res.status}: ${detail.slice(0, 300)}`,
       };
     } catch (error) {
-      if (error instanceof Error && error.name === 'TimeoutError') {
-        return { ok: false, reason: `timed out after ${timeoutMs}ms` };
-      }
+      if (signal.aborted) return timedOut;
       return {
         ok: false,
         reason: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
   }
 }

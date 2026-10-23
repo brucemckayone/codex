@@ -1424,6 +1424,8 @@ export async function createServiceRegistry(
           r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
           cache,
           orphanedFileService: getOrphanedFileService(),
+          // The CDN purge runs after the response (a fetch, no DB pool).
+          waitUntil: cacheWaitUntil,
           // A deleted account's avatars leave the CDN edge (Codex-kk9nv.15).
           cdnPurger:
             env.CF_ZONE_ID && env.CF_API_TOKEN

@@ -932,15 +932,93 @@ describe('ImageProcessingService', () => {
           height: 640,
         });
         expect(recordOrphanedFiles).toHaveBeenCalledWith(orphanRows([folder]));
+        // Named by folder under the base: a whole key holds the user id,
+        // which production redaction hashes, and the record with it.
         expect(error).toHaveBeenCalledWith(
-          'Still write failed and its row could not be read; kept',
+          'Still write failed and its outcome could not be read; folders kept for the sweep',
           expect.objectContaining({
-            r2Keys: folderFiles(folder),
-            untrackedR2Keys: folderFiles('avatars/user-1'),
+            folders: [folder.split('/').at(-1)],
+            unsizedBaseKept: true,
             error: 'neon unavailable',
           })
         );
       });
+    });
+  });
+
+  // Codex-kk9nv.17's transaction can commit and still report failure (a lost
+  // COMMIT ack). The photo the user removed would then stay public with
+  // nothing naming it, so its folder goes to the sweep, which keeps it if the
+  // row still names it (a real rollback).
+  describe('deleteUserAvatar when the transaction reports failure', () => {
+    function lostAck(avatarUrl: string) {
+      lockedAvatarRead.mockResolvedValueOnce([{ avatarUrl }]);
+      const recordOrphanedFiles = vi.fn().mockResolvedValue([]);
+      const db = {
+        ...testMockDb,
+        query: mockDbQuery,
+        async transaction(fn: (tx: unknown) => unknown) {
+          await fn(db);
+          throw new Error('Connection terminated');
+        },
+      } as unknown as Database;
+      const target = new ImageProcessingService({
+        db,
+        environment: 'test',
+        r2Service: testMockR2Service,
+        r2PublicUrlBase: 'https://test.r2.dev',
+        orphanedFileService: {
+          recordOrphanedFiles,
+        } as unknown as OrphanedFileService,
+      });
+      const logs = (
+        target as unknown as {
+          obs: Record<'warn' | 'error', (...args: unknown[]) => void>;
+        }
+      ).obs;
+      return { target, recordOrphanedFiles, logs };
+    }
+
+    it('leaves the folder it read to the sweep and rethrows, deleting nothing', async () => {
+      const folder = 'avatars/user-1/300x300-aaaaaaaa';
+      const { target, recordOrphanedFiles } = lostAck(
+        `https://test.r2.dev/${folder}/lg.webp`
+      );
+
+      await expect(target.deleteUserAvatar('user-1')).rejects.toThrow(
+        'Connection terminated'
+      );
+
+      expect(deleteKeys(testMockR2Service)).toEqual([]);
+      expect(recordOrphanedFiles).toHaveBeenCalledWith(
+        folderFiles(folder).map((r2Key) => ({
+          r2Key,
+          imageType: 'avatar',
+          entityType: 'user',
+          entityId: 'user-1',
+        }))
+      );
+    });
+
+    it('only names an unsized avatar, at error, since the sweep would delete it live', async () => {
+      const { target, recordOrphanedFiles, logs } = lostAck(
+        'https://test.r2.dev/avatars/user-1/lg.webp'
+      );
+      const error = vi.spyOn(logs, 'error');
+
+      await expect(target.deleteUserAvatar('user-1')).rejects.toThrow(
+        'Connection terminated'
+      );
+
+      expect(recordOrphanedFiles).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(
+        'Still write failed and its outcome could not be read; folders kept for the sweep',
+        expect.objectContaining({
+          context: 'avatar-remove-failed',
+          folders: [],
+          unsizedBaseKept: true,
+        })
+      );
     });
   });
 

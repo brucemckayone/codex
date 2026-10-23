@@ -838,7 +838,7 @@ function bumpKey(key: string): void {
     console.log(`  ✓ bumped ${key}`);
   } catch (error) {
     console.log(
-      `  ! bump of ${key} failed (${short(error)}) — that surface may lag by up to 30 min`
+      `  ! bump of ${key} failed (${short(error)}) — that surface may lag by up to its cache TTL (4h for an org's public caches)`
     );
   }
 }

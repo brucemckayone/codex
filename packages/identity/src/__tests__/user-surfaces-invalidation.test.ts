@@ -179,18 +179,32 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     expect(deletedAt).toBeLessThan(firstInvalidate);
   });
 
-  it("deleteAvatar with no upload to remove refreshes only the user's profile", async () => {
+  it('deleteAvatar with no upload to remove still invalidates every surface', async () => {
     // Remove is offered only for an upload (Codex-kk9nv.10), so a no-op
-    // delete usually means the profile that offered it was stale: an earlier
-    // invalidation failed. Refreshing it lets the retry heal that. The orgs'
-    // creators lists did not change, so they are not looked up.
-    const { service, invalidated, select } = harness();
+    // delete usually means a surface left stale: an earlier removal whose
+    // invalidation failed, or whose commit ack was lost. Invalidating again
+    // is what lets the retry heal the profile AND the creators lists.
+    const { service, invalidated } = harness();
     mockDeleteUserAvatar.mockResolvedValueOnce(false);
 
     await service.deleteAvatar(USER_ID);
 
-    expect(invalidated).toEqual([USER_ID]);
-    expect(select).not.toHaveBeenCalled();
+    expect([...invalidated].sort()).toEqual([USER_ID, ...CREATORS_IDS].sort());
+  });
+
+  it('uploadAvatar invalidates even when the write throws, and rethrows its error', async () => {
+    // A write can commit and still report failure; the folder it replaced is
+    // then deleted, so a cached copy of the old URL would be a broken image
+    // (Codex-kk9nv.16).
+    const { service, invalidated } = harness();
+    mockProcessUserAvatar.mockRejectedValueOnce(
+      new Error('Connection terminated')
+    );
+
+    await expect(service.uploadAvatar(USER_ID, avatarFile())).rejects.toThrow(
+      'Connection terminated'
+    );
+    expect([...invalidated].sort()).toEqual([USER_ID, ...CREATORS_IDS].sort());
   });
 
   it('deleteAvatar invalidates nothing when the delete fails', async () => {

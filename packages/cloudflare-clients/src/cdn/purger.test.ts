@@ -84,6 +84,17 @@ describe('CdnCachePurger.purgePrefixes', () => {
     expect(result).toEqual({ ok: false, reason: 'HTTP 200: []' });
   });
 
+  it('keeps the text of a body that is not JSON', async () => {
+    const { purger } = purgerAnswering(
+      new Response('<html>502 Bad Gateway</html>', { status: 502 })
+    );
+
+    await expect(purger.purgePrefixes(['cdn.test/a'])).resolves.toEqual({
+      ok: false,
+      reason: 'HTTP 502: <html>502 Bad Gateway</html>',
+    });
+  });
+
   it('returns a network failure, never throws', async () => {
     const { purger } = purgerAnswering(new TypeError('fetch failed'));
 

@@ -55,9 +55,11 @@ import { cleanupContentThumbnailOnDelete } from './content-cleanup';
 
 /**
  * Bump the org content version in KV after publish/unpublish/delete.
- * Also invalidates the slug-keyed cache (public org info, stats, creators)
- * since content changes affect creator contentCount and org stats.
- * Fire-and-forget via waitUntil — does not block the response.
+ * Also invalidates the org's public caches (info, stats, creators) since
+ * content changes affect creator contentCount and org stats.
+ * Fire-and-forget via waitUntil — does not block the response, and never
+ * throws: the thumbnail route calls it from a `.finally()`, where a throw
+ * would replace the upload's own error.
  */
 function bumpOrgContentVersion(
   env: HonoEnv['Bindings'],
@@ -70,29 +72,39 @@ function bumpOrgContentVersion(
     kv: env.CACHE_KV,
     waitUntil: (promise) => executionCtx.waitUntil(promise),
   });
-  const db = createDbClient(env);
   executionCtx.waitUntil(
-    Promise.all([
-      // Invalidate org content collection version
-      cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId)),
-      // Invalidate slug-keyed cache (stats, creators, public info) — shared
-      // helper resolves orgId → slug and swallows transient failures.
-      invalidateOrgSlugCache({ db, cache, orgId: organizationId, logger: obs }),
-      // Invalidate the public topic list: publish/unpublish/delete changes the
-      // set of categories with ≥1 published item, so a cached "Browse by topic"
-      // list could otherwise show empty or missing topics until TTL.
-      cache.invalidate(CacheType.CATEGORIES(organizationId)),
-      // Invalidate the public portal (journey) rails for the same reason
-      // (Codex-72k55): each card's `practiceCount`/`stageCount` counts only
-      // practices whose content is PUBLISHED, so publishing or unpublishing one
-      // practice changes cards that name no content at all. Without this bump a
-      // portal advertises "8 practices" while only 7 are reachable.
-      cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId)),
-    ]).catch((err: unknown) => {
-      obs?.warn('Cache invalidation failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    })
+    // Started inside the promise, so a client that cannot be built (missing
+    // config) lands in the `.catch` below instead of throwing to the caller.
+    Promise.resolve()
+      .then(() =>
+        Promise.all([
+          // Invalidate org content collection version
+          cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId)),
+          // Invalidate slug-keyed cache (stats, creators, public info) — shared
+          // helper resolves orgId → slug and swallows transient failures.
+          invalidateOrgSlugCache({
+            db: createDbClient(env),
+            cache,
+            orgId: organizationId,
+            logger: obs,
+          }),
+          // Invalidate the public topic list: publish/unpublish/delete changes the
+          // set of categories with ≥1 published item, so a cached "Browse by topic"
+          // list could otherwise show empty or missing topics until TTL.
+          cache.invalidate(CacheType.CATEGORIES(organizationId)),
+          // Invalidate the public portal (journey) rails for the same reason
+          // (Codex-72k55): each card's `practiceCount`/`stageCount` counts only
+          // practices whose content is PUBLISHED, so publishing or unpublishing one
+          // practice changes cards that name no content at all. Without this bump a
+          // portal advertises "8 practices" while only 7 are reachable.
+          cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId)),
+        ])
+      )
+      .catch((err: unknown) => {
+        obs?.warn('Cache invalidation failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
   );
 }
 

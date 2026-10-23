@@ -20,6 +20,7 @@ import {
   mediaItems,
   notificationPreferences,
   organizationMemberships,
+  organizationOwnershipOffers,
   organizations,
   sessions,
   users,
@@ -60,6 +61,12 @@ export interface IdentityServiceConfig extends ServiceConfig {
    * (Codex-kk9nv.15). Absent, deletion logs that it skipped the purge.
    */
   cdnPurger?: Pick<CdnCachePurger, 'purgePrefixes'>;
+  /**
+   * Keeps work the response does not wait for alive after it: the CDN purge.
+   * The registry passes the request's plain `executionCtx.waitUntil` (the
+   * purge touches no DB pool). Absent (unit tests), the work is awaited.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
@@ -103,6 +110,7 @@ export class IdentityService extends BaseService {
   private cache?: VersionedCache;
   private orphanedFileService?: OrphanedFileService;
   private cdnPurger?: Pick<CdnCachePurger, 'purgePrefixes'>;
+  private waitUntil?: (promise: Promise<unknown>) => void;
 
   constructor(config: IdentityServiceConfig) {
     super(config);
@@ -111,6 +119,7 @@ export class IdentityService extends BaseService {
     this.cache = config.cache;
     this.orphanedFileService = config.orphanedFileService;
     this.cdnPurger = config.cdnPurger;
+    this.waitUntil = config.waitUntil;
   }
 
   /**
@@ -146,21 +155,17 @@ export class IdentityService extends BaseService {
    * Remove the user's avatar (R2 files + `avatarUrl`), then invalidate every
    * cache that shows it (Codex-kk9nv.7). The route used to call the image
    * service directly, which holds no cache, so the profile kept serving the
-   * deleted URL for up to 10 minutes. With nothing to remove, only the user's
-   * own profile is refreshed: the orgs' creators lists did not change
-   * (Codex-kk9nv.10).
+   * deleted URL for up to 10 minutes.
    */
   async deleteAvatar(userId: string): Promise<void> {
     try {
-      const removed = await this.imageService().deleteUserAvatar(userId);
-      if (removed) {
-        await this.invalidateUserSurfaces(userId, 'deleteAvatar');
-      } else if (this.cache) {
-        // Nothing to remove. Remove is offered only for an upload, so the
-        // usual way here is a cached profile left stale by a failed
-        // invalidation; refreshing it is what lets this retry heal it.
-        await this.cache.invalidate(userId);
-      }
+      await this.imageService().deleteUserAvatar(userId);
+      // Also when there was nothing to remove. Remove is offered only for an
+      // upload, so the usual way here is a surface left stale: an earlier
+      // removal whose invalidation failed, or whose commit ack was lost.
+      // Invalidating again is what lets this retry heal the profile and the
+      // creators lists.
+      await this.invalidateUserSurfaces(userId, 'deleteAvatar');
     } catch (error) {
       throw this.handleError(error, 'IdentityService.deleteAvatar');
     }
@@ -248,6 +253,36 @@ export class IdentityService extends BaseService {
       if (!result.ok) this.obs.error(skipped, { userId, error: result.reason });
     } catch (error) {
       this.obs.error(skipped, { userId, error: messageForLog(error) });
+    }
+  }
+
+  /**
+   * Refuse to delete an account that owns a live organization. Membership
+   * lifecycle uses `status` (organization_memberships has no deletedAt
+   * column); the organization itself is soft-deleted, so deleted orgs do not
+   * count.
+   */
+  private async refuseIfOwner(
+    db: Tx | DatabaseClient,
+    userId: string
+  ): Promise<void> {
+    const ownedOrgs = await db
+      .select({ name: organizations.name })
+      .from(organizationMemberships)
+      .innerJoin(
+        organizations,
+        eq(organizationMemberships.organizationId, organizations.id)
+      )
+      .where(
+        and(
+          eq(organizationMemberships.userId, userId),
+          eq(organizationMemberships.role, 'owner'),
+          eq(organizationMemberships.status, 'active'),
+          whereNotDeleted(organizations)
+        )
+      );
+    if (ownedOrgs.length > 0) {
+      throw new AccountOwnsOrganizationError(ownedOrgs.map((o) => o.name));
     }
   }
 
@@ -744,28 +779,10 @@ export class IdentityService extends BaseService {
    */
   async deleteAccount(userId: string): Promise<readonly string[]> {
     try {
-      // Block if the user owns any active organization. Membership lifecycle
-      // uses `status` (organization_memberships has no deletedAt column); the
-      // organization itself is soft-deleted, so filter deleted orgs out.
-      const ownedOrgs = await this.db
-        .select({ name: organizations.name })
-        .from(organizationMemberships)
-        .innerJoin(
-          organizations,
-          eq(organizationMemberships.organizationId, organizations.id)
-        )
-        .where(
-          and(
-            eq(organizationMemberships.userId, userId),
-            eq(organizationMemberships.role, 'owner'),
-            eq(organizationMemberships.status, 'active'),
-            whereNotDeleted(organizations)
-          )
-        );
-
-      if (ownedOrgs.length > 0) {
-        throw new AccountOwnsOrganizationError(ownedOrgs.map((o) => o.name));
-      }
+      // Block if the user owns any active organization. Asked again inside
+      // the transaction below, under a lock: this first answer is the cheap
+      // refusal, not the guarantee.
+      await this.refuseIfOwner(this.db, userId);
 
       // Block accounts that have published content or uploads. Deleting a
       // creator's account has unresolved downstream implications (buyer
@@ -796,6 +813,19 @@ export class IdentityService extends BaseService {
           .from(users)
           .where(and(eq(users.id, userId), whereNotDeleted(users)))
           .for('update');
+        // The owner check above ran before this transaction, and an ownership
+        // transfer to this user can commit since. Every membership row they
+        // hold is locked first, with no role filter: a transfer holds the
+        // recipient's row while it promotes it, so this waits for it, and the
+        // check then reads the committed role and refuses. A transfer that
+        // comes second waits here instead, then finds no live membership and
+        // withdraws its offer as ineligible.
+        await tx
+          .select({ id: organizationMemberships.id })
+          .from(organizationMemberships)
+          .where(eq(organizationMemberships.userId, userId))
+          .for('update');
+        await this.refuseIfOwner(tx, userId);
         // Read while they still list the user: once the account is deleted
         // and its memberships ended, no query finds which cached creators
         // lists still show the real name and avatar (Codex-kk9nv.8). Inside
@@ -838,10 +868,8 @@ export class IdentityService extends BaseService {
         });
         // A deleted account belongs to no org, so every member list drops
         // it, not only the creators list (owner: "Both", Codex-kk9nv.8).
-        // Never an owner's: AccountOwnsOrganizationError above refuses an
-        // owner, but that check runs before this transaction, and an
-        // ownership transfer committing in between must not leave its org
-        // with no active owner.
+        // Never an owner's: refused above, and kept out here as well, so no
+        // path can leave an org with no active owner.
         await tx
           .update(organizationMemberships)
           .set({ status: 'inactive', updatedAt: now })
@@ -850,6 +878,23 @@ export class IdentityService extends BaseService {
               eq(organizationMemberships.userId, userId),
               inArray(organizationMemberships.status, ['active', 'invited']),
               ne(organizationMemberships.role, 'owner')
+            )
+          );
+        // An open ownership offer to the user can never be accepted now (it
+        // needs a live membership), and it would block any new offer in its
+        // org for its 7 days. Withdrawn as a member removal does it.
+        await tx
+          .update(organizationOwnershipOffers)
+          .set({
+            status: 'withdrawn',
+            withdrawnReason: 'recipient_ineligible',
+            respondedAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(organizationOwnershipOffers.recipientUserId, userId),
+              eq(organizationOwnershipOffers.status, 'open')
             )
           );
         return {
@@ -906,12 +951,14 @@ export class IdentityService extends BaseService {
         });
       }
 
-      // After the files are gone, or a request in between caches them again.
-      // Started, not awaited first: the session-token read below must never
-      // wait on an external API. A purge that hung past the web's 10s abort
-      // would leave every device signed in to the deleted account, since the
-      // route clears the cached sessions with these tokens (Codex-na929).
+      // After the files are gone, or a request in between caches them again,
+      // and off the response path: the route clears the cached sessions with
+      // the tokens this returns, so a purge it waited on would hold the
+      // sign-out of every device behind an external API, past the web's 10s
+      // abort if that API stalled (Codex-na929). Bounded by the purger's
+      // timeout, and it never rejects.
       const purged = this.purgeAvatarEdgeCache(userId);
+      if (this.waitUntil) this.waitUntil(purged);
       try {
         // Every session this user holds, so the caller can clear the cached
         // copies. Read AFTER the tombstone lands: a session created between
@@ -930,8 +977,9 @@ export class IdentityService extends BaseService {
 
         return rows.map((r) => r.token);
       } finally {
-        // Bounded by the purger's timeout, and it never rejects.
-        await purged;
+        // Without a request to outlive (unit tests, scripts): awaited, still
+        // after the token read.
+        if (!this.waitUntil) await purged;
       }
     } catch (error) {
       throw this.handleError(error, 'IdentityService.deleteAccount');

@@ -72,17 +72,21 @@ CacheType.CONTENT_METADATA     // 'content:metadata'
 CacheType.CONTENT_ACCESS       // 'content:access'
 CacheType.USER_SESSION         // 'user:session'
 
-// Collection version IDs (used for invalidate(), not get())
+// Collection version IDs
 CacheType.COLLECTION_CONTENT_PUBLISHED        // 'content:published'
-CacheType.COLLECTION_ORG_CONTENT(orgId)       // 'org:{orgId}:content'
-CacheType.COLLECTION_ORG_CREATORS(slug)       // 'org:{slug}:creators' — server KV only
-CacheType.USERNAME_LOOKUP(username)           // 'username:{name}' — the USERNAME_TO_ID slot's id
+CacheType.COLLECTION_ORG_CONTENT(orgId)       // 'org:{orgId}:content' — also a server read id
+CacheType.COLLECTION_ORG_JOURNEYS(orgId)      // 'org:{orgId}:journeys' — also a server read id
+CacheType.COLLECTION_ORG_CREATORS(slug)       // 'org:{slug}:creators' — server read id only
 CacheType.COLLECTION_USER_LIBRARY(userId)     // 'user:{userId}:library'
+CacheType.COLLECTION_USER_SUBSCRIPTION(userId, orgId)
+
+// Prefixed read ids
+CacheType.USERNAME_LOOKUP(username)           // 'username:{name}' — the USERNAME_TO_ID slot's id
 ```
 
-The `COLLECTION_*` types are version IDs only — they're passed to `cache.invalidate()` to bump a version that the web app client manifest tracks, not to store data.
+A `COLLECTION_*` id is a version id: `cache.invalidate()` bumps it. Some are tracked by the web app's client manifest. Several are ALSO the server-side `id` data is read under, so bumping one evicts real cached data, not just a client marker: content-api reads the org's public content under `COLLECTION_ORG_CONTENT(orgId)` and its journey rails under `COLLECTION_ORG_JOURNEYS(orgId)`, and organization-api reads the creators list under `COLLECTION_ORG_CREATORS(slug)`.
 
-`COLLECTION_ORG_CREATORS(slug)` is the exception: it is the server-side `id` the org's public creators list (`ORG_CREATORS`) is read under. The list changes on every listed member's profile write, and when it shared the org slug's version, each of those writes evicted the org's config and stats with it (Codex-kk9nv.9). A member's own write bumps only this id. A change to the org or its membership bumps both, through `invalidateOrgPublicCaches`.
+`COLLECTION_ORG_CREATORS(slug)` is the creators list's own id. The list changes on every listed member's profile write, and when it shared the org slug's version, each of those writes evicted the org's config and stats with it (Codex-kk9nv.9). A member's own write bumps only this id. A change to the org or its membership bumps both, through `invalidateOrgPublicCaches`.
 
 `USERNAME_LOOKUP(username)` exists for the same namespace reason. Version ids are bare strings in one namespace, and a username and an org slug use the same characters, so a bare username id let a user who took an org's slug bump that org's config and stats. Neither can contain `:`, so a prefixed id can never collide with a slug. Give any new caller-controlled id a prefix.
 

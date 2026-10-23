@@ -307,34 +307,19 @@ export class ImageProcessingService extends BaseService {
         folder
       );
     } catch (probeError) {
-      const keysOf = (f: string) => variantKeyList(stillVariantKeys(f));
-      const sweepable = [folder];
-      let untracked: string[] = [];
-      if (replaced && replaced !== folder) {
-        const sized = readStillFolderName(replaced.split('/').at(-1) ?? '');
-        if (sized) sweepable.push(replaced);
-        else untracked = keysOf(replaced);
-      }
-      const r2Keys = sweepable.flatMap(keysOf);
-      this.obs[untracked.length > 0 ? 'error' : 'warn'](
-        'Still write failed and its row could not be read; kept',
-        {
-          context,
-          resourceId: target.entityId,
-          r2Keys,
-          ...(untracked.length > 0 && { untrackedR2Keys: untracked }),
-          error: messageForLog(probeError),
-        }
-      );
-      if (this.orphanedFileService) {
-        await recordOrphansOrLog(
-          this.orphanedFileService,
-          r2Keys.map((r2Key) => ({ r2Key, ...target })),
-          this.obs,
-          context
-        );
-      }
+      // It may have landed or not, so either folder may be the dropped one.
+      const folders =
+        replaced && replaced !== folder ? [folder, replaced] : [folder];
+      await this.leaveToTheSweep(folders, target, context, probeError);
       return false;
+    }
+    if (addressed === null) {
+      // Unreachable while every type writeNewStill serves is in STILL_OWNER.
+      // A type that is not has this check switched off, so say so.
+      this.obs.error(
+        'Still write failed and its folder cannot be placed; discarded',
+        { context, resourceId: target.entityId }
+      );
     }
     if (addressed) {
       this.obs.warn(
@@ -345,6 +330,49 @@ export class ImageProcessingService extends BaseService {
     }
     await this.deleteStill(folder, target, context);
     return false;
+  }
+
+  /**
+   * Hand folders that may or may not still be in use to the sweep, which asks
+   * their row before it deletes anything (`isStillFolderReferenced`): the
+   * outcome of a failed write that could not be read back. An unsized folder
+   * (files directly under the base, from before Codex-kk9nv.5) is only
+   * logged, at error: the sweep decides those by its re-upload check alone,
+   * and would delete one that is still in use.
+   *
+   * Logged by each folder's name under its base (`{w}x{h}-{nonce}`): a whole
+   * key holds the user's or creator's id, which production redaction hashes,
+   * and the folder with it.
+   */
+  private async leaveToTheSweep(
+    folders: string[],
+    target: StillOrphanTarget,
+    context: string,
+    cause: unknown
+  ): Promise<void> {
+    const nameOf = (folder: string) => folder.split('/').at(-1) ?? '';
+    const sized = folders.filter((f) => readStillFolderName(nameOf(f)));
+    const unsizedKept = sized.length < folders.length;
+    this.obs[unsizedKept ? 'error' : 'warn'](
+      'Still write failed and its outcome could not be read; folders kept for the sweep',
+      {
+        context,
+        resourceId: target.entityId,
+        folders: sized.map(nameOf),
+        ...(unsizedKept && { unsizedBaseKept: true }),
+        error: messageForLog(cause),
+      }
+    );
+    if (sized.length > 0 && this.orphanedFileService) {
+      await recordOrphansOrLog(
+        this.orphanedFileService,
+        sized
+          .flatMap((f) => variantKeyList(stillVariantKeys(f)))
+          .map((r2Key) => ({ r2Key, ...target })),
+        this.obs,
+        context
+      );
+    }
   }
 
   /**
@@ -903,20 +931,44 @@ export class ImageProcessingService extends BaseService {
    *   picture is their sign-in provider's has none (Codex-kk9nv.10).
    */
   async deleteUserAvatar(userId: string): Promise<boolean> {
-    const droppedUrl = await this.db.transaction(async (tx) => {
-      const [user] = await tx
-        .select({ avatarUrl: schema.users.avatarUrl })
-        .from(schema.users)
-        .where(eq(schema.users.id, userId))
-        .for('update');
-      if (!user?.avatarUrl) return null;
+    // What the locked read found, kept for the failure path below.
+    let read: string | null = null;
+    let droppedUrl: string | null;
+    try {
+      droppedUrl = await this.db.transaction(async (tx) => {
+        const [user] = await tx
+          .select({ avatarUrl: schema.users.avatarUrl })
+          .from(schema.users)
+          .where(eq(schema.users.id, userId))
+          .for('update');
+        if (!user?.avatarUrl) return null;
+        read = user.avatarUrl;
 
-      await tx
-        .update(schema.users)
-        .set({ avatarUrl: null, updatedAt: new Date() })
-        .where(eq(schema.users.id, userId));
-      return user.avatarUrl;
-    });
+        await tx
+          .update(schema.users)
+          .set({ avatarUrl: null, updatedAt: new Date() })
+          .where(eq(schema.users.id, userId));
+        return user.avatarUrl;
+      });
+    } catch (error) {
+      // The clear may have committed with its ack lost: the photo the user
+      // removed would then stay public with nothing naming it. Its folder goes
+      // to the sweep, which keeps it if the row still names it (a rollback).
+      const folder = ownedStillFolder(
+        read,
+        getUserAvatarBaseKey(userId),
+        this.r2PublicUrlBase
+      );
+      if (folder) {
+        await this.leaveToTheSweep(
+          [folder],
+          { imageType: 'avatar', entityType: 'user', entityId: userId },
+          'avatar-remove-failed',
+          error
+        );
+      }
+      throw error;
+    }
     if (!droppedUrl) return false;
 
     await this.deleteDroppedAvatar(userId, droppedUrl, 'avatar-removed');

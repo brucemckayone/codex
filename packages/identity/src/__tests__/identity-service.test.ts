@@ -4,6 +4,7 @@ import {
   agreementProposals,
   creatorOrganizationAgreements,
   organizationMemberships,
+  organizationOwnershipOffers,
   sessions,
   users,
 } from '@codex/database/schema';
@@ -1014,6 +1015,9 @@ describe('IdentityService', () => {
     const mockExistsLimit = vi.fn();
     const mockSessionsWhere = vi.fn();
     const mockUserFor = vi.fn();
+    // The lock on every membership row the user holds, taken inside the
+    // transaction before the owner question is asked again (Codex-kk9nv.8).
+    const mockMembershipLock = vi.fn();
     const mockInnerJoin = vi.fn(() => ({ where: mockOwnedOrgsWhere }));
     const mockExistsWhere = vi.fn(() => ({ limit: mockExistsLimit }));
     // Dispatch by OBJECT IDENTITY against the imported table, not by sniffing a
@@ -1022,6 +1026,13 @@ describe('IdentityService', () => {
     const SELECT_BY_TABLE = new Map<unknown, unknown>([
       [sessions, { where: mockSessionsWhere }],
       [users, { where: () => ({ for: mockUserFor }) }],
+      [
+        organizationMemberships,
+        {
+          innerJoin: mockInnerJoin,
+          where: () => ({ for: mockMembershipLock }),
+        },
+      ],
     ]);
     const mockSelectFrom = vi.fn(
       (table: unknown) =>
@@ -1043,6 +1054,7 @@ describe('IdentityService', () => {
       mockExistsLimit.mockClear();
       mockSessionsWhere.mockClear();
       mockUserFor.mockClear();
+      mockMembershipLock.mockReset().mockResolvedValue([]);
       // Defaults: owns no organizations, has no content/uploads, one session,
       // no avatar.
       mockOwnedOrgsWhere.mockResolvedValue([]);
@@ -1109,6 +1121,7 @@ describe('IdentityService', () => {
         agreementProposals,
         creatorOrganizationAgreements,
         organizationMemberships,
+        organizationOwnershipOffers,
       ]);
       const [, proposalSet, agreementSet] = mockUpdateSet.mock.calls.map(
         (call) => call[0] as Record<string, unknown>
@@ -1154,6 +1167,58 @@ describe('IdentityService', () => {
       // Never an owner's, even if a transfer made the user one after the
       // owner check: the org must keep an active owner.
       expect(params).toEqual([userId, 'active', 'invited', 'owner']);
+    });
+
+    // The owner check runs before the transaction; a transfer to this user
+    // can commit in between. Asked again inside, after every membership row
+    // the user holds is locked, so the transfer is seen (Codex-kk9nv.8).
+    it('refuses inside the transaction when the user became an owner after the first check', async () => {
+      mockReturning.mockResolvedValue([{ id: userId }]);
+      mockOwnedOrgsWhere
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ name: 'Studio Alpha' }]);
+
+      await expect(service.deleteAccount(userId)).rejects.toThrow(
+        AccountOwnsOrganizationError
+      );
+
+      expect(mockMembershipLock).toHaveBeenCalledWith('update');
+      // Locked BEFORE the second question, or it could read a stale role.
+      const [lockedAt] = mockMembershipLock.mock.invocationCallOrder;
+      const secondAskAt = mockOwnedOrgsWhere.mock.invocationCallOrder[1];
+      expect(lockedAt).toBeLessThan(secondAskAt ?? 0);
+      // Refused before the scrub: nothing was written.
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+
+    // Departure parity with a member removal: an open offer to a deleted
+    // account can never be accepted, and it blocks any new offer for 7 days.
+    it('withdraws open ownership offers to the user as ineligible, at the deletion time', async () => {
+      mockReturning.mockResolvedValue([{ id: userId }]);
+
+      await service.deleteAccount(userId);
+
+      const tables = (mockDb.update as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[0]
+      );
+      const at = tables.indexOf(organizationOwnershipOffers);
+      expect(at).toBeGreaterThan(-1);
+      const deletedAt = (
+        mockUpdateSet.mock.calls[0]?.[0] as { deletedAt: Date }
+      ).deletedAt;
+      expect(mockUpdateSet.mock.calls[at]?.[0]).toEqual({
+        status: 'withdrawn',
+        withdrawnReason: 'recipient_ineligible',
+        respondedAt: deletedAt,
+        updatedAt: deletedAt,
+      });
+      const { sql, params } = new PgDialect().sqlToQuery(
+        mockUpdateWhere.mock.calls[at]?.[0] as SQL
+      );
+      expect(sql).toBe(
+        '("organization_ownership_offers"."recipient_user_id" = $1 and "organization_ownership_offers"."status" = $2)'
+      );
+      expect(params).toEqual([userId, 'open']);
     });
 
     describe("the avatar's files (Codex-kk9nv.14)", () => {
@@ -1389,6 +1454,27 @@ describe('IdentityService', () => {
         await expect(withPurger().deleteAccount(userId)).resolves.toEqual([
           'tok-current',
         ]);
+      });
+
+      it('hands the purge to waitUntil, so returning the tokens never waits on it', async () => {
+        // The route clears the cached sessions only once these are returned.
+        purgePrefixes.mockImplementationOnce(() => new Promise(() => {}));
+        const deferred: Promise<unknown>[] = [];
+        const target = new IdentityService({
+          db: mockDb,
+          environment: 'test',
+          r2Service: mockR2Service,
+          r2PublicUrlBase: 'https://cdn-test.revelations.studio',
+          cdnPurger: { purgePrefixes },
+          waitUntil: (promise) => deferred.push(promise),
+        });
+
+        // Resolves although the purge never settles.
+        await expect(target.deleteAccount(userId)).resolves.toEqual([
+          'tok-current',
+        ]);
+        expect(deferred).toHaveLength(1);
+        expect(purgePrefixes).toHaveBeenCalledTimes(1);
       });
 
       it('logs a missing purge config at error in production', async () => {
