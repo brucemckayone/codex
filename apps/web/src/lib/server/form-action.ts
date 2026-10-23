@@ -9,9 +9,11 @@
 
 /**
  * True for a browser's native form submit, whose Accept leads with text/html.
- * Kit sends any other POST (a `use:enhance` submit asks for application/json)
- * to the page's actions as a JSON request, and never takes it as a
- * remote-form submit.
+ * An approximation of Kit, which negotiates Accept between application/json
+ * and text/html: a `use:enhance` submit asks for application/json, so it is
+ * a JSON action request and never a remote-form submit, and a native submit
+ * leads with text/html. Any other Accept is a crafted client, which the hook
+ * refuses with a 404 either way.
  */
 export function isNativeFormSubmit(request: Request): boolean {
   const accept = request.headers.get('accept') ?? '';

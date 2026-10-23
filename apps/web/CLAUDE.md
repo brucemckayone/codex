@@ -603,7 +603,7 @@ padding: 12px;
 `hooks.server.ts` runs six hooks in sequence:
 1. `junkHostHook` — terminates reserved junk hosts (`cdn*`, `preview`, `api`, …) with a cached 404 before any SvelteKit work
 2. `cdnAssetHook` — serves public CDN assets (`cdn-assets*`/`cdn-platform*`) from bound R2
-3. `unservableActionHook` — answers a POST naming a form action no page can have (`?/default`, or an `Object.prototype` member such as `?/valueOf`) with a 404 before any session work. SvelteKit looks actions up on a plain object, so these were 500s any client could cause (Codex-osuqt)
+3. `unservableActionHook` — answers a POST naming a form action no page can have (`?/default`, or an `Object.prototype` member such as `?/valueOf`) with a 404 before any session work. SvelteKit looks actions up on a plain object, so most of these were 500s any client could cause; `?/toString` ran as an action (Codex-osuqt). Remote-function ids have the same plain-object lookup and are not covered yet (Codex-eaq2r)
 4. `sessionHook` — validates `codex-session` cookie against auth worker, sets `locals.user`, `locals.session`, `locals.userId`
 5. `securityHook` — applies security headers (`X-Frame-Options`, `X-Content-Type-Options`, etc.)
 6. `cdnRewriteHook` — dev-only: rewrites `localhost:4100` CDN URLs to `nip.io` for LAN mobile access

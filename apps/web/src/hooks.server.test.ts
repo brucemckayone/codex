@@ -1,7 +1,7 @@
 /**
  * Tests for the server hooks: the junk-host short-circuit (measured
  * 2026-08-31), the unservable-form-action refusal, the assembled `handle`
- * sequence, and the bodies and logs of `handleError` and
+ * sequence, the body of `handleError`, and the body and log of
  * `handleValidationError` (Codex-osuqt). The junk-host contract:
  *
  * Reserved-but-unmatched subdomains (cdn, cdn-dev, cdn-resources*, preview, …)
@@ -16,8 +16,8 @@
  *     them; it runs right after junkHostHook in the sequence), the frontend
  *     aliases codex and creators with any suffix, the platform frontends app
  *     and platform, and the staging/tunnel apexes;
- *   - the 404 is a constant edge-cacheable body, written into the Cache API
- *     on GET, and a cache failure never breaks the response;
+ *   - the 404 is a constant edge-cacheable body, never written to the Cache
+ *     API;
  *   - the assembled `handle` sequence terminates junk hosts before any
  *     session work and carries real traffic through to the router.
  *
