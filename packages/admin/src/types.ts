@@ -275,9 +275,11 @@ export interface RevenueQueryOptions {
  *    NOT included in Phase 1 — there is no per-creator immutable invoice
  *    row today, only dynamic fan-out at transfer time. A future revenue
  *    ledger will close that gap (Phase 2).
- *  - `splitPercent` is a display percentage (0..100), derived from the
- *    creator's CURRENT `organizationFeePercentage` basis points
- *    (`bps / 100`). It is the present DB value, not historical.
+ *  - `splitPercent` is a display percentage (0..100): the creator's share
+ *    from their active agreement's accepted proposal
+ *    (`proposed_creator_share_percent`, basis points / 100), never the legacy
+ *    `organizationFeePercentage` (Codex-2hxff.19). It is the present share,
+ *    not historical.
  *  - `lastPayoutAt` is the most-recent `payouts.resolvedAt` for `status='paid'`
  *    rows belonging to the (creator, org) pair; `null` when nothing has paid
  *    out yet.

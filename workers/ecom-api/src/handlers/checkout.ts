@@ -17,7 +17,6 @@
  */
 
 import { invalidateUserLibrary } from '@codex/cache';
-import { CURRENCY } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
 import { isDuplicatePayment } from '@codex/purchase';
 import {
@@ -251,7 +250,9 @@ export async function handleCheckoutCompleted(
         contentId: validatedMetadata.contentId,
         organizationId: validatedMetadata.organizationId,
         amountPaidCents: amountTotal,
-        currency: CURRENCY.GBP,
+        // What the buyer actually paid in. completePurchase refuses anything
+        // but GBP before it writes (Codex-2hxff.23 PAY-25).
+        currency: session.currency ?? undefined,
         stripeApplicationFeeCents,
         stripeChargeId,
         paidAt,
@@ -400,7 +401,8 @@ async function handleCourseCheckoutCompleted(
         customerId: metadata.customerId,
         courseId: metadata.courseId,
         amountPaidCents: amountTotal,
-        currency: CURRENCY.GBP,
+        // Refused unless GBP, as for content.
+        currency: session.currency ?? undefined,
         stripeApplicationFeeCents,
         stripeChargeId,
         paidAt,

@@ -6,8 +6,13 @@
  * `at` — the content purchase, the one-off COURSE purchase (which reuses
  * `content_purchase` share terms per HARDENING §H4(a)) and the course-
  * subscription payout (`subscription` terms) all read it here. Returns the
- * share in basis points, or `null` when no agreement applies (the caller falls
- * back to the FeeConfigService-resolved org fee).
+ * agreement and its share in basis points, or `null` when no agreement applies
+ * (the caller falls back to the FeeConfigService-resolved org fee).
+ *
+ * The agreement's id is what the sale records as the agreement it used:
+ * `purchases.creator_org_agreement_id` and, for a course-subscription invoice,
+ * the creator slice's `payouts.creator_org_agreement_id` (Codex-2hxff.19
+ * AGR-06).
  *
  * Which agreements are in force is `agreementsInForce` in @codex/agreements,
  * the one rule every payment path reads (docs/payments/architecture.md WP4).
@@ -16,6 +21,7 @@
  */
 
 import {
+  type AgreementInForce,
   type AgreementRevenueType,
   agreementsInForce,
   type ResolverLogger,
@@ -27,9 +33,15 @@ type QueryClient = DatabaseClient | Tx;
 
 export type { AgreementRevenueType };
 
+/** The agreement a sale is split by, and the creator's share under it. */
+export type CreatorAgreementShare = Pick<
+  AgreementInForce,
+  'agreementId' | 'sharePercent'
+>;
+
 /**
- * The creator's agreed share of the post-platform pool in basis points, or
- * `null` when no agreement is in force at `at`.
+ * The creator's agreement in force at `at`, with their share of the
+ * post-platform pool in basis points, or `null` when none is.
  */
 export async function findActiveCreatorAgreementShare(
   client: QueryClient,
@@ -40,7 +52,11 @@ export async function findActiveCreatorAgreementShare(
     at: Date;
     obs: ResolverLogger;
   }
-): Promise<number | null> {
+): Promise<CreatorAgreementShare | null> {
   const [agreement] = await agreementsInForce(client, params);
-  return agreement?.sharePercent ?? null;
+  if (!agreement) return null;
+  return {
+    agreementId: agreement.agreementId,
+    sharePercent: agreement.sharePercent,
+  };
 }

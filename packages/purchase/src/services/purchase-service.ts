@@ -52,6 +52,7 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  assertGbpOnly,
   type ClawbackCharge,
   issueRefund,
   type LedgerDeps,
@@ -553,7 +554,7 @@ export class PurchaseService extends BaseService {
       // as `SubscriptionService.createCheckoutSession`.
       return await this.checkoutReservations.create(reserved, () =>
         withStaleCustomerRecovery(
-          { db: this.db, stripe: this.stripe },
+          { db: this.db, stripe: this.stripe, obs: this.obs },
           {
             userId: customerId,
             email: user.email,
@@ -638,11 +639,16 @@ export class PurchaseService extends BaseService {
         throw error;
       }
 
-      // Wrap Stripe errors
+      // Wrap Stripe errors. Its message is logged, never sent (SEC-02).
       if (isStripeError(error)) {
+        const context = { contentId: validated.contentId };
         throw new PaymentProcessingError('Failed to create checkout session', {
-          stripeError: error.message,
-          contentId: validated.contentId,
+          ...context,
+          errorId: this.logStripeFailure(
+            'Stripe failed to create a checkout session',
+            error,
+            context
+          ),
         });
       }
 
@@ -918,6 +924,14 @@ export class PurchaseService extends BaseService {
     metadata: CompletePurchaseMetadata
   ): Promise<Purchase> {
     try {
+      // GBP in, GBP out (Codex-2hxff.23 PAY-25): every slice is transferred in
+      // pounds, so a sale in another currency is refused before its purchase
+      // or any slice is written. A 400: the webhook acknowledges it and Stripe
+      // does not redeliver.
+      assertGbpOnly(metadata.currency, {
+        stripePaymentIntentId,
+        contentId: metadata.contentId,
+      });
       const txResult = await this.db.transaction(async (tx) => {
         // Step 1: Check for existing purchase (idempotency)
         const existing = await tx.query.purchases.findFirst({
@@ -1027,10 +1041,11 @@ export class PurchaseService extends BaseService {
         // Codex-2pryk WP-6: agreement lookup hoisted to the shared
         // `findActiveCreatorAgreementShare` (reused by the course-purchase +
         // course-subscription payout paths so all three apply IDENTICAL
-        // Decision-Q3 agreement math). Returns the creator's share in basis
-        // points, or null when no agreement is in force when the checkout
-        // started (`offerAt`; `purchasedAt` when a caller has no session).
-        const agreementSharePercent = organizationId
+        // Decision-Q3 agreement math). Returns the agreement and the creator's
+        // share in basis points, or null when no agreement is in force when
+        // the checkout started (`offerAt`; `purchasedAt` when a caller has no
+        // session).
+        const agreement = organizationId
           ? await findActiveCreatorAgreementShare(tx, {
               organizationId,
               creatorId: contentRecord.creatorId,
@@ -1052,8 +1067,8 @@ export class PurchaseService extends BaseService {
         // "org keeps 100% of post-platform" unless an admin overrode it).
         const effectiveOrgFeePercent = !organizationId
           ? 0
-          : agreementSharePercent != null
-            ? 10_000 - agreementSharePercent
+          : agreement
+            ? 10_000 - agreement.sharePercent
             : fees.orgFeePercent;
 
         // Codex-69t7c WP5 hardening (d): record the orgless org-fee-zero
@@ -1101,7 +1116,7 @@ export class PurchaseService extends BaseService {
           platformFeeCents: revenueSplit.platformFeeCents,
           organizationFeeCents: revenueSplit.organizationFeeCents,
           creatorPayoutCents: revenueSplit.creatorPayoutCents,
-          agreementApplied: agreementSharePercent != null,
+          agreementApplied: agreement !== null,
           source: 'content_purchase',
           // Computed for the record; a duplicate is refunded, never paid out.
           duplicatePayment: isDuplicate,
@@ -1140,9 +1155,12 @@ export class PurchaseService extends BaseService {
             platformFeeCents: revenueSplit.platformFeeCents,
             organizationFeeCents: revenueSplit.organizationFeeCents,
             creatorPayoutCents: revenueSplit.creatorPayoutCents,
-            // Phase 1: No agreement IDs (using defaults)
+            // Fee configuration replaced platform agreements: the platform
+            // fee has no agreement row to point at, so this stays null.
             platformAgreementId: null,
-            creatorOrgAgreementId: null,
+            // The creator agreement this sale was split by, if any
+            // (Codex-2hxff.19 AGR-06).
+            creatorOrgAgreementId: agreement?.agreementId ?? null,
             ...purchaseOutcomeFields(duplicateOf),
           })
           .returning();
@@ -1377,7 +1395,7 @@ export class PurchaseService extends BaseService {
 
       return await this.checkoutReservations.create(reserved, () =>
         withStaleCustomerRecovery(
-          { db: this.db, stripe: this.stripe },
+          { db: this.db, stripe: this.stripe, obs: this.obs },
           {
             userId: customerId,
             email: user.email,
@@ -1448,9 +1466,17 @@ export class PurchaseService extends BaseService {
         throw error;
       }
       if (isStripeError(error)) {
+        const context = { courseId: validated.courseId };
         throw new PaymentProcessingError(
           'Failed to create course checkout session',
-          { stripeError: error.message, courseId: validated.courseId }
+          {
+            ...context,
+            errorId: this.logStripeFailure(
+              'Stripe failed to create a course checkout session',
+              error,
+              context
+            ),
+          }
         );
       }
       this.handleError(error, 'createCourseCheckoutSession');
@@ -1475,6 +1501,11 @@ export class PurchaseService extends BaseService {
     metadata: CompleteCoursePurchaseMetadata
   ): Promise<Purchase> {
     try {
+      // GBP only, before anything is written (PAY-25; see completePurchase).
+      assertGbpOnly(metadata.currency, {
+        stripePaymentIntentId,
+        courseId: metadata.courseId,
+      });
       const txResult = await this.db.transaction(async (tx) => {
         // Idempotency — a webhook replay returns the existing purchase and skips
         // payouts (the first-write path already ran; transfer idempotency keys
@@ -1527,21 +1558,17 @@ export class PurchaseService extends BaseService {
         // HARDENING §H4(a): course purchases reuse the creator's
         // `content_purchase` revenue-share agreement terms.
         const purchasedAt = metadata.paidAt ?? new Date();
-        const agreementSharePercent = await findActiveCreatorAgreementShare(
-          tx,
-          {
-            organizationId,
-            creatorId: course.creatorId,
-            revenueType: 'content_purchase',
-            // At the checkout's start (Codex-2hxff.64 Q1).
-            at: metadata.offerAt ?? purchasedAt,
-            obs: this.obs,
-          }
-        );
-        const effectiveOrgFeePercent =
-          agreementSharePercent != null
-            ? 10_000 - agreementSharePercent
-            : fees.orgFeePercent;
+        const agreement = await findActiveCreatorAgreementShare(tx, {
+          organizationId,
+          creatorId: course.creatorId,
+          revenueType: 'content_purchase',
+          // At the checkout's start (Codex-2hxff.64 Q1).
+          at: metadata.offerAt ?? purchasedAt,
+          obs: this.obs,
+        });
+        const effectiveOrgFeePercent = agreement
+          ? 10_000 - agreement.sharePercent
+          : fees.orgFeePercent;
 
         const rawSplit = calculateRevenueSplit(
           metadata.amountPaidCents,
@@ -1563,7 +1590,7 @@ export class PurchaseService extends BaseService {
           platformFeeCents: revenueSplit.platformFeeCents,
           organizationFeeCents: revenueSplit.organizationFeeCents,
           creatorPayoutCents: revenueSplit.creatorPayoutCents,
-          agreementApplied: agreementSharePercent != null,
+          agreementApplied: agreement !== null,
           source: 'course_purchase',
           // Computed for the record; a duplicate is refunded, never paid out.
           duplicatePayment: isDuplicate,
@@ -1599,8 +1626,9 @@ export class PurchaseService extends BaseService {
             platformFeeCents: revenueSplit.platformFeeCents,
             organizationFeeCents: revenueSplit.organizationFeeCents,
             creatorPayoutCents: revenueSplit.creatorPayoutCents,
+            // Fee configuration replaced platform agreements (as above).
             platformAgreementId: null,
-            creatorOrgAgreementId: null,
+            creatorOrgAgreementId: agreement?.agreementId ?? null,
             ...purchaseOutcomeFields(duplicateOf),
           })
           .returning();
@@ -1769,6 +1797,8 @@ export class PurchaseService extends BaseService {
         payee: { userId: creatorId, account: creatorConnect },
         idempotencyKey: `${stripeChargeId}_creator`,
         metadata: { purchase_id: purchase.id },
+        // The agreement the purchase was split by (Codex-2hxff.19 AGR-06).
+        creatorOrgAgreementId: purchase.creatorOrgAgreementId,
       });
       // Only a freshly reserved row: a replay ('exists') never re-sends it.
       if (outcome?.kind === 'pending') {
@@ -1865,6 +1895,27 @@ export class PurchaseService extends BaseService {
       obs: this.obs,
       environment: this.environment,
     };
+  }
+
+  /**
+   * Log a Stripe failure for support and return the errorId the client gets
+   * instead (Codex-2hxff.23 SEC-02). A ServiceError's context is sent to the
+   * client verbatim as `details`, so Stripe's own message never goes in it.
+   */
+  private logStripeFailure(
+    message: string,
+    error: Error & { type: string },
+    context: Record<string, unknown>
+  ): string {
+    const errorId = crypto.randomUUID();
+    this.obs.error(message, {
+      errorId,
+      ...context,
+      stripeType: error.type,
+      code: stripeErrorCode(error),
+      error: error.message,
+    });
+    return errorId;
   }
 
   /**
@@ -3177,33 +3228,21 @@ export class PurchaseService extends BaseService {
       // StripeInvalidRequestError: Invalid session ID (404)
       // StripeConnectionError: Network failure (500)
       // StripeAPIError: Other Stripe errors
-      if (
-        error instanceof Error &&
-        'type' in error &&
-        error.type === 'StripeInvalidRequestError'
-      ) {
-        throw new PaymentProcessingError('Checkout session not found', {
-          stripeError: error.message,
-          sessionId,
-        });
-      }
-
-      if (
-        error instanceof Error &&
-        'type' in error &&
-        error.type === 'StripeConnectionError'
-      ) {
-        throw new PaymentProcessingError('Failed to connect to Stripe API', {
-          stripeError: error.message,
-          sessionId,
-        });
-      }
-
-      // Wrap other Stripe errors
+      // Stripe's own message is logged, never sent (SEC-02).
       if (isStripeError(error)) {
-        throw new PaymentProcessingError('Failed to verify checkout session', {
-          stripeError: error.message,
+        const message =
+          error.type === 'StripeInvalidRequestError'
+            ? 'Checkout session not found'
+            : error.type === 'StripeConnectionError'
+              ? 'Failed to connect to Stripe API'
+              : 'Failed to verify checkout session';
+        throw new PaymentProcessingError(message, {
           sessionId,
+          errorId: this.logStripeFailure(
+            `Stripe checkout session verify failed: ${message}`,
+            error,
+            { sessionId, customerId }
+          ),
         });
       }
 
@@ -3258,7 +3297,7 @@ export class PurchaseService extends BaseService {
       // resolution step propagate untouched — the catch below only wraps
       // raw Stripe errors from billingPortal.sessions.create.
       const session = await withStaleCustomerRecovery(
-        { db: this.db, stripe: this.stripe },
+        { db: this.db, stripe: this.stripe, obs: this.obs },
         { userId, email, environment: this.environment },
         (stripeCustomerId) =>
           this.stripe.billingPortal.sessions.create({
@@ -3288,8 +3327,12 @@ export class PurchaseService extends BaseService {
         throw new PaymentProcessingError(
           'Failed to create billing portal session',
           {
-            stripeError: error.message,
             userId,
+            errorId: this.logStripeFailure(
+              'Stripe failed to create a billing portal session',
+              error,
+              { userId }
+            ),
           }
         );
       }

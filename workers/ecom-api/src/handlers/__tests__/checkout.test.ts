@@ -14,7 +14,10 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { CURRENCY } from '@codex/constants';
-import { AfterCommitError } from '@codex/service-errors';
+import {
+  AfterCommitError,
+  UnsupportedCurrencyError,
+} from '@codex/service-errors';
 import {
   createMockHonoContext,
   createMockStripeCheckoutEvent,
@@ -65,6 +68,7 @@ vi.mock('@codex/validation', () => ({
 
 import { checkoutSessionMetadataSchema } from '@codex/validation';
 import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
+import { isTransientError } from '../../utils/error-classification';
 // Import after mocks
 import { handleCheckoutCompleted } from '../checkout';
 
@@ -746,68 +750,73 @@ describe('handleCheckoutCompleted', () => {
     });
   });
 
+  // Codex-2hxff.23 PAY-25: the handler passes the currency the buyer actually
+  // paid in, and completePurchase refuses anything but GBP before it writes.
+  // It used to pass a GBP literal, so a non-GBP sale was recorded, and its
+  // slices transferred, as pounds.
   describe('currency handling', () => {
-    /**
-     * Platform default currency is GBP (see root CLAUDE.md "Currency" rule).
-     * The handler hardcodes `CURRENCY.GBP` when calling `completePurchase`,
-     * ignoring `session.currency`. This is intentional for the single-currency
-     * MVP — Stripe Checkout sessions are created with GBP upstream.
-     *
-     * If multi-currency support is added later, the handler must read
-     * `session.currency` and these tests must be updated together.
-     */
-    it('passes GBP through to completePurchase for a GBP session', async () => {
+    const sessions = [
+      ['content', { customerId: 'user_123', contentId: 'content_456' }],
+      ['course', { kind: 'course', customerId: 'user_123', courseId: 'c_1' }],
+    ] as const;
+
+    function eventIn(
+      currency: string,
+      metadata: (typeof sessions)[number][1]
+    ): Stripe.Event {
       const event = createMockStripeCheckoutEvent({
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
+        metadata: { ...metadata },
       }) as unknown as Stripe.Event;
-      (event.data.object as Stripe.Checkout.Session).currency = 'gbp';
+      (event.data.object as Stripe.Checkout.Session).currency = currency;
+      return event;
+    }
 
-      const { context } = createContext();
-
-      await handleCheckoutCompleted(event, mockStripe, context);
+    it.each(
+      sessions
+    )('passes a GBP %s session through as GBP', async (_kind, metadata) => {
+      await handleCheckoutCompleted(
+        eventIn('gbp', metadata),
+        mockStripe,
+        createContext().context
+      );
 
       expect(mockCompletePurchase).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({
-          currency: CURRENCY.GBP,
-        })
+        expect.objectContaining({ currency: CURRENCY.GBP })
       );
     });
 
-    it('still records GBP even when session.currency drifts (defends platform default)', async () => {
-      const event = createMockStripeCheckoutEvent({
-        metadata: {
-          customerId: 'user_123',
-          contentId: 'content_456',
-          organizationId: 'org_789',
-        },
-      }) as unknown as Stripe.Event;
-      // Defence-in-depth: even if a session leaks through with a non-GBP
-      // currency, the handler must persist GBP until multi-currency lands.
-      (event.data.object as Stripe.Checkout.Session).currency = 'eur';
+    it.each(
+      sessions
+    )('a usd %s session is refused, permanently, with no transfer and no receipt', async (_kind, metadata) => {
+      // As purchase-service does (its own tests run the real guard): refuse
+      // anything but GBP before writing.
+      mockCompletePurchase.mockImplementation(
+        async (_pi: string, sale: { currency?: string }) => {
+          if (sale.currency && sale.currency.toLowerCase() !== CURRENCY.GBP) {
+            throw new UnsupportedCurrencyError(sale.currency, [CURRENCY.GBP]);
+          }
+          return { id: 'purchase_123', duplicateOfPurchaseId: null };
+        }
+      );
+      const transfers = vi.fn();
+      const stripe = { transfers: { create: transfers } } as unknown as Stripe;
 
-      const { context } = createContext();
-
-      await handleCheckoutCompleted(event, mockStripe, context);
+      const error = await handleCheckoutCompleted(
+        eventIn('usd', metadata),
+        stripe,
+        createContext().context
+      ).catch((e: unknown) => e);
 
       expect(mockCompletePurchase).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({
-          currency: CURRENCY.GBP,
-        })
-      );
-      expect(mockCompletePurchase).not.toHaveBeenCalledWith(
-        expect.anything(),
         expect.objectContaining({ currency: 'usd' })
       );
-      expect(mockCompletePurchase).not.toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ currency: 'eur' })
-      );
+      expect(error).toBeInstanceOf(UnsupportedCurrencyError);
+      // Permanent: the webhook answers 200 and Stripe does not redeliver.
+      expect(isTransientError(error)).toBe(false);
+      expect(transfers).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
     });
   });
 

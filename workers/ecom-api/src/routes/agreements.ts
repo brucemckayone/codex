@@ -391,7 +391,13 @@ interface CreatorAgreementWithPeers {
   status: string;
   effectiveFrom: Date;
   effectiveUntil: Date | null;
+  /** Legacy (`10000 - share`); kept while web pages still read it. */
   organizationFeePercentage: number;
+  /**
+   * The caller's share in basis points, from the accepted proposal
+   * (Codex-2hxff.19 AGR-08). `null` when the proposal link is gone.
+   */
+  creatorSharePercent: number | null;
   currentProposalId: string | null;
   terminatedAt: Date | null;
   /**
@@ -409,10 +415,8 @@ interface CreatorAgreementWithPeers {
      * decision Q1, subscription and content_purchase are separate
      * pools — peers across pools are never aggregated together.
      *
-     * Computed from `10000 - organizationFeePercentage` per row (legacy
-     * column; dual-written by `acceptProposal`). When WP-4 swaps the
-     * read path to `current_proposal_id.proposed_creator_share_percent`,
-     * this computation should track.
+     * Summed from each peer's accepted proposal (`creatorSharePercent`),
+     * not the legacy `organization_fee_percentage` (Codex-2hxff.19 AGR-08).
      */
     aggregateSharePercent: number;
   };
@@ -471,11 +475,10 @@ agreements.get(
               (row) =>
                 row.revenueType === revType && row.creatorId !== ctx.user.id
             );
-            // The legacy `organization_fee_percentage` column is the
-            // dual-write source of truth for active rows today (per WP-1
-            // discoveries). `share = 10000 - fee`.
+            // Each peer's accepted-proposal share; one with no proposal
+            // pays nothing, so it adds nothing (Codex-2hxff.19 AGR-08).
             const aggregate = peersInType.reduce(
-              (sum, p) => sum + (10000 - p.organizationFeePercentage),
+              (sum, p) => sum + (p.creatorSharePercent ?? 0),
               0
             );
             peerByOrgAndType.set(`${orgId}:${revType}`, {
@@ -502,6 +505,7 @@ agreements.get(
           effectiveFrom: row.effectiveFrom,
           effectiveUntil: row.effectiveUntil,
           organizationFeePercentage: row.organizationFeePercentage,
+          creatorSharePercent: row.creatorSharePercent,
           currentProposalId: row.currentProposalId,
           terminatedAt: row.terminatedAt,
           peers,
@@ -765,8 +769,9 @@ agreements.get(
               (row) =>
                 row.revenueType === revType && row.creatorId !== ctx.user.id
             );
+            // As in GET /agreements/me: the proposal share (AGR-08).
             const aggregate = peersInType.reduce(
-              (sum, p) => sum + (10000 - p.organizationFeePercentage),
+              (sum, p) => sum + (p.creatorSharePercent ?? 0),
               0
             );
             peerByOrgAndType.set(`${orgId}:${revType}`, {
@@ -791,6 +796,7 @@ agreements.get(
           effectiveFrom: row.effectiveFrom,
           effectiveUntil: row.effectiveUntil,
           organizationFeePercentage: row.organizationFeePercentage,
+          creatorSharePercent: row.creatorSharePercent,
           currentProposalId: row.currentProposalId,
           terminatedAt: row.terminatedAt,
           peers,
@@ -873,11 +879,10 @@ agreements.get(
           organizationName: nameByOrg.get(row.organizationId) ?? null,
           revenueType: row.revenueType,
           status: 'terminated',
-          // The legacy fee column `organizationFeePercentage` carries the
-          // OWNER share at termination — derive creator share from it. The
-          // dual-write invariant (see `acceptProposal`) guarantees
-          // `organizationFeePercentage = 10000 - creatorShare`.
-          proposedSharePercent: 10000 - row.organizationFeePercentage,
+          // The share the agreement paid: its accepted proposal's, not the
+          // legacy org-fee column (Codex-2hxff.19 AGR-08). With no proposal
+          // it paid nothing.
+          proposedSharePercent: row.creatorSharePercent ?? 0,
           // Terminated rows aren't a proposal — record-keeping fields below
           // come from the agreement, not a proposal. `proposedByRole` is
           // unknowable from the agreement alone; we mark it `owner` as the

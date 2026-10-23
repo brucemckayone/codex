@@ -32,6 +32,7 @@ export {
   AgreementService,
   type AgreementServiceConfig,
   type AgreementTemplateName,
+  type AgreementWithShare,
   type CounterProposeInput,
   type DeclineProposalInput,
   type ProposeAgreementInput,

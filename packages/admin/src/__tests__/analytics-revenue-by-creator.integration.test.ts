@@ -21,6 +21,7 @@
 
 import { PURCHASE_STATUS } from '@codex/constants';
 import {
+  agreementProposals,
   content as contentTable,
   creatorOrganizationAgreements,
   mediaItems,
@@ -140,6 +141,35 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     return sub.id;
   }
 
+  /**
+   * An accepted proposal carrying `shareBps`, for an agreement to point at:
+   * the split is read from it, not from the legacy column (Codex-2hxff.19
+   * AGR-08).
+   */
+  async function acceptedProposal(
+    orgId: string,
+    creatorId: string,
+    shareBps: number
+  ): Promise<string> {
+    const proposal = takeFirst(
+      await db
+        .insert(agreementProposals)
+        .values({
+          organizationId: orgId,
+          creatorId,
+          revenueType: 'subscription',
+          roundNumber: 1,
+          proposedByUserId: creatorId,
+          proposedByRole: 'owner',
+          proposedCreatorSharePercent: shareBps,
+          proposedEffectiveFrom: new Date(),
+          status: 'accepted',
+        })
+        .returning()
+    );
+    return proposal.id;
+  }
+
   it('returns empty for an org with no active agreements', async () => {
     const { orgId } = await seedScenario(0);
 
@@ -153,17 +183,20 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     const { orgId, creators, contentByCreator } = await seedScenario(2);
     const [creatorA, creatorB] = creators as [string, string];
 
-    // 75/25 split (bps).
+    // 75/25 split (bps), from the accepted proposals. The legacy column is
+    // deliberately wrong: the split must not read it (AGR-08).
     await db.insert(creatorOrganizationAgreements).values([
       {
         creatorId: creatorA,
         organizationId: orgId,
-        organizationFeePercentage: 7500,
+        organizationFeePercentage: 1234,
+        currentProposalId: await acceptedProposal(orgId, creatorA, 7500),
       },
       {
         creatorId: creatorB,
         organizationId: orgId,
-        organizationFeePercentage: 2500,
+        organizationFeePercentage: 4321,
+        currentProposalId: await acceptedProposal(orgId, creatorB, 2500),
       },
     ]);
 

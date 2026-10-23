@@ -1049,18 +1049,27 @@ export class AdminAnalyticsService extends BaseService {
 
       // Active agreements + creator profile join. Drives the result-set
       // shape — rows that exist here are the ones the executeTransfers
-      // fan-out will distribute to in production. `sharePercent` is the
-      // creator's `organizationFeePercentage` (basis points) per the
-      // subscription-service contract.
+      // fan-out will distribute to in production. `shareBps` is the
+      // creator's share from the accepted proposal, through
+      // `current_proposal_id` as the payment resolver reads it — never the
+      // legacy `organization_fee_percentage`, which holds the ORG's part
+      // (Codex-2hxff.19 AGR-08). With no proposal the agreement pays
+      // nothing, so it shows 0.
       const agreementRows = await this.db
         .select({
           creatorId: schema.creatorOrganizationAgreements.creatorId,
-          shareBps:
-            schema.creatorOrganizationAgreements.organizationFeePercentage,
+          shareBps: schema.agreementProposals.proposedCreatorSharePercent,
           name: schema.users.name,
           avatarUrl: schema.users.avatarUrl,
         })
         .from(schema.creatorOrganizationAgreements)
+        .leftJoin(
+          schema.agreementProposals,
+          eq(
+            schema.agreementProposals.id,
+            schema.creatorOrganizationAgreements.currentProposalId
+          )
+        )
         .innerJoin(
           schema.users,
           eq(schema.creatorOrganizationAgreements.creatorId, schema.users.id)
@@ -1178,7 +1187,7 @@ export class AdminAnalyticsService extends BaseService {
             name: row.name ?? '',
             avatarUrl: row.avatarUrl ?? null,
             totalRevenueCents: revenueByCreator.get(row.creatorId) ?? 0,
-            splitPercent: row.shareBps / 100,
+            splitPercent: (row.shareBps ?? 0) / 100,
             lastPayoutAt,
             pendingPayoutCents: pendingByCreator.get(row.creatorId) ?? 0,
           };
