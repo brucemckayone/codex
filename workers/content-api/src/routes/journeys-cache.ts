@@ -25,7 +25,7 @@
  */
 
 import { CacheType, VersionedCache } from '@codex/cache';
-import type { Logger } from '@codex/observability';
+import type { ObservabilityClient } from '@codex/observability';
 import type { HonoEnv } from '@codex/shared-types';
 
 /**
@@ -151,12 +151,15 @@ export function bumpOrgJourneysVersion(
   env: HonoEnv['Bindings'],
   executionCtx: ExecutionContext,
   organizationId: string | null | undefined,
-  obs?: Logger
+  obs?: ObservabilityClient
 ): void {
   if (!organizationId || !env.CACHE_KV) return;
+  // Given `obs`: the cache logs a failed invalidation only through its own
+  // client, so the `.catch` below never sees one.
   const cache = new VersionedCache({
     kv: env.CACHE_KV,
     waitUntil: (promise) => executionCtx.waitUntil(promise),
+    obs,
   });
   executionCtx.waitUntil(
     cache

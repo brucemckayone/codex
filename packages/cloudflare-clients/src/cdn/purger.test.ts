@@ -76,12 +76,15 @@ describe('CdnCachePurger.purgePrefixes', () => {
     });
   });
 
-  it('treats a 200 that says success: false as a failure', async () => {
+  it('treats a 200 that says success: false as a failure, and shows the body when no error is named', async () => {
     const { purger } = purgerAnswering(json({ success: false, errors: [] }));
 
     const result = await purger.purgePrefixes(['cdn.test/a']);
 
-    expect(result).toEqual({ ok: false, reason: 'HTTP 200: []' });
+    expect(result).toEqual({
+      ok: false,
+      reason: 'HTTP 200: {"success":false,"errors":[]}',
+    });
   });
 
   it('keeps the text of a body that is not JSON', async () => {

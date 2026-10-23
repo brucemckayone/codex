@@ -152,9 +152,12 @@ function invalidateCategories(
   obs: ObservabilityClient | undefined
 ): void {
   if (!env.CACHE_KV) return;
+  // Given `obs`: the cache logs a failed invalidation only through its own
+  // client, so the `.catch` below never sees one.
   const cache = new VersionedCache({
     kv: env.CACHE_KV,
     waitUntil: (promise) => executionCtx.waitUntil(promise),
+    obs,
   });
   executionCtx.waitUntil(
     cache

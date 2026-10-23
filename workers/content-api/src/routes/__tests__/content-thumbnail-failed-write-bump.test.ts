@@ -20,6 +20,9 @@ import {
   env,
   waitOnExecutionContext,
 } from 'cloudflare:test';
+import { CacheType } from '@codex/cache';
+import { createDbClient } from '@codex/database';
+import { ConflictError } from '@codex/service-errors';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -76,7 +79,8 @@ import content from '../content';
 const testEnv = {
   ...env,
   ENVIRONMENT: 'development',
-  R2_PUBLIC_URL_BASE: env.R2_PUBLIC_URL_BASE ?? 'https://cdn.codex.test',
+  // The registry's image service getter requires it; the service is a spy.
+  R2_PUBLIC_URL_BASE: 'https://cdn.codex.test',
 } as unknown as typeof env;
 
 function cacheKv(): NonNullable<typeof env.CACHE_KV> {
@@ -115,6 +119,8 @@ async function uploadThumbnail(contentId: string): Promise<Response> {
 }
 
 const contentVersion = (orgId: string) => `cache:version:org:${orgId}:content`;
+const journeysVersion = (orgId: string) =>
+  `cache:version:${CacheType.COLLECTION_ORG_JOURNEYS(orgId)}`;
 
 describe('POST /:id/thumbnail bumps the org content version', () => {
   beforeEach(() => {
@@ -145,8 +151,9 @@ describe('POST /:id/thumbnail bumps the org content version', () => {
       id: contentId,
       organizationId: orgId,
     });
+    // A typed error, so a bump that replaced it would show as another status.
     imageSpies.processContentThumbnail.mockRejectedValue(
-      new Error('Connection terminated')
+      new ConflictError('Thumbnail write reported failure')
     );
 
     // Nothing has staled this org yet, so the key's presence below means the
@@ -155,7 +162,34 @@ describe('POST /:id/thumbnail bumps the org content version', () => {
 
     const res = await uploadThumbnail(contentId);
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: { code: 'CONFLICT' } });
     expect(await cacheKv().get(contentVersion(orgId))).not.toBeNull();
+  });
+
+  it('when the DB client for the slug bump cannot be built, and the other bumps still run', async () => {
+    const { contentId, orgId } = freshIds();
+    contentSpies.get.mockResolvedValue({
+      id: contentId,
+      organizationId: orgId,
+    });
+    imageSpies.processContentThumbnail.mockResolvedValue({
+      url: 'https://cdn.codex.test/x/lg.webp',
+      size: 4,
+      mimeType: 'image/webp',
+    });
+    // The only createDbClient call on this route is the slug bump's.
+    vi.mocked(createDbClient).mockImplementationOnce(() => {
+      throw new Error('DATABASE_URL is not set');
+    });
+
+    const res = await uploadThumbnail(contentId);
+
+    expect(res.status).toBe(200);
+    expect(createDbClient).toHaveBeenCalledTimes(1);
+    expect(await cacheKv().get(contentVersion(orgId))).not.toBeNull();
+    // Listed after the slug bump: built inside one array with it, a throw
+    // there stopped this one from ever starting.
+    expect(await cacheKv().get(journeysVersion(orgId))).not.toBeNull();
   });
 });

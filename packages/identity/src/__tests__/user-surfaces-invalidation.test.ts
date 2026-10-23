@@ -28,6 +28,7 @@
 
 import type { R2Service } from '@codex/cloudflare-clients';
 import type { Database } from '@codex/database';
+import { ConflictError } from '@codex/service-errors';
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -207,12 +208,16 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     expect([...invalidated].sort()).toEqual([USER_ID, ...CREATORS_IDS].sort());
   });
 
-  it('deleteAvatar invalidates nothing when the delete fails', async () => {
+  it('deleteAvatar invalidates even when the delete throws, and rethrows its error', async () => {
+    // The clear can commit and lose its ack; the files then go to the sweep,
+    // so a cached copy of the old URL would be a broken image. A typed error,
+    // so one replaced on the way out would not be the same object.
     const { service, invalidated } = harness();
-    mockDeleteUserAvatar.mockRejectedValueOnce(new Error('db down'));
+    const failure = new ConflictError('Avatar removal reported failure');
+    mockDeleteUserAvatar.mockRejectedValueOnce(failure);
 
-    await expect(service.deleteAvatar(USER_ID)).rejects.toThrow();
-    expect(invalidated).toEqual([]);
+    await expect(service.deleteAvatar(USER_ID)).rejects.toBe(failure);
+    expect([...invalidated].sort()).toEqual([USER_ID, ...CREATORS_IDS].sort());
   });
 
   it("uploadAvatar invalidates the user and each listing org's creators list", async () => {

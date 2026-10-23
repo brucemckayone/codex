@@ -935,7 +935,7 @@ describe('ImageProcessingService', () => {
         // Named by folder under the base: a whole key holds the user id,
         // which production redaction hashes, and the record with it.
         expect(error).toHaveBeenCalledWith(
-          'Still write failed and its outcome could not be read; folders kept for the sweep',
+          'Still change failed and its outcome is unknown; folders kept for the sweep',
           expect.objectContaining({
             folders: [folder.split('/').at(-1)],
             unsizedBaseKept: true,
@@ -1012,7 +1012,7 @@ describe('ImageProcessingService', () => {
 
       expect(recordOrphanedFiles).not.toHaveBeenCalled();
       expect(error).toHaveBeenCalledWith(
-        'Still write failed and its outcome could not be read; folders kept for the sweep',
+        'Still change failed and its outcome is unknown; folders kept for the sweep',
         expect.objectContaining({
           context: 'avatar-remove-failed',
           folders: [],

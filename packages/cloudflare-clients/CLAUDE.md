@@ -69,7 +69,7 @@ if (!result.ok) obs.error('...', { error: result.reason });
 ```
 
 - Prefixes are a hostname plus path, with **no scheme**. At most 100 per call (the API's limit).
-- **Never throws, never hangs.** A purge follows a change that has already happened, so a refused, failed or timed-out purge (default 5s, `timeoutMs`) comes back as `{ ok: false, reason }` for the caller to log, never raised over that change. A Workers subrequest has no time limit of its own, so the timeout is what keeps a slow Cloudflare API from stalling the request it runs in.
+- **Never throws, never hangs.** A purge follows a change that has already happened, so a refused, failed or timed-out purge (default 5s, `timeoutMs`) comes back as `{ ok: false, reason }` for the caller to log, never raised over that change. A Workers subrequest has no time limit of its own, so the timeout bounds the purge wherever it runs: in `waitUntil` after the response (account deletion), it fits that work's limited time after the response; awaited, it never holds its caller longer than `timeoutMs`.
 - The token needs the zone's **Cache Purge** permission and nothing else. `CF_ZONE_ID` and `CF_API_TOKEN` are secrets on the worker that purges; today that is identity-api, for account deletion, uploaded by the production deploy (`.github/scripts/upload-worker-secrets.sh`). The service registry builds the purger only when both are set.
 - The earlier orphaned `src/cache/` subdir was removed in Codex-vwv5c (commit 5d9263a1); this is a new client, not that one.
 

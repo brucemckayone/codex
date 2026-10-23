@@ -354,7 +354,7 @@ export class ImageProcessingService extends BaseService {
     const sized = folders.filter((f) => readStillFolderName(nameOf(f)));
     const unsizedKept = sized.length < folders.length;
     this.obs[unsizedKept ? 'error' : 'warn'](
-      'Still write failed and its outcome could not be read; folders kept for the sweep',
+      'Still change failed and its outcome is unknown; folders kept for the sweep',
       {
         context,
         resourceId: target.entityId,

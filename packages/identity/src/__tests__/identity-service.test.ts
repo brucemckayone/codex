@@ -1006,7 +1006,8 @@ describe('IdentityService', () => {
     //   org check:      select().from().innerJoin().where()  → rows
     //   content check:  select().from().where().limit()      → rows
     //   session tokens: select().from(sessions).where()      → rows   (Codex-na929)
-    //   avatar lock:    select().from(users).where().for()   → rows   (Codex-kk9nv.14)
+    //   row locks:      select().from(table).where().for()   → rows   (Codex-kk9nv.14, .8)
+    //                   on users, then proposals, offers and memberships
     // The content check and the token query are both `.from().where()`, so a
     // single `where` mock cannot serve both: the content check needs it to
     // return `{ limit }` while the token query awaits it directly. Keying on
@@ -1016,8 +1017,11 @@ describe('IdentityService', () => {
     const mockSessionsWhere = vi.fn();
     const mockUserFor = vi.fn();
     // The lock on every membership row the user holds, taken inside the
-    // transaction before the owner question is asked again (Codex-kk9nv.8).
+    // transaction before the owner question is asked again (Codex-kk9nv.8),
+    // and the locks on their open proposals and offers, taken before it.
     const mockMembershipLock = vi.fn();
+    const mockProposalLock = vi.fn();
+    const mockOfferLock = vi.fn();
     const mockInnerJoin = vi.fn(() => ({ where: mockOwnedOrgsWhere }));
     const mockExistsWhere = vi.fn(() => ({ limit: mockExistsLimit }));
     // Dispatch by OBJECT IDENTITY against the imported table, not by sniffing a
@@ -1026,6 +1030,8 @@ describe('IdentityService', () => {
     const SELECT_BY_TABLE = new Map<unknown, unknown>([
       [sessions, { where: mockSessionsWhere }],
       [users, { where: () => ({ for: mockUserFor }) }],
+      [agreementProposals, { where: () => ({ for: mockProposalLock }) }],
+      [organizationOwnershipOffers, { where: () => ({ for: mockOfferLock }) }],
       [
         organizationMemberships,
         {
@@ -1055,6 +1061,8 @@ describe('IdentityService', () => {
       mockSessionsWhere.mockClear();
       mockUserFor.mockClear();
       mockMembershipLock.mockReset().mockResolvedValue([]);
+      mockProposalLock.mockReset().mockResolvedValue([]);
+      mockOfferLock.mockReset().mockResolvedValue([]);
       // Defaults: owns no organizations, has no content/uploads, one session,
       // no avatar.
       mockOwnedOrgsWhere.mockResolvedValue([]);
@@ -1191,6 +1199,35 @@ describe('IdentityService', () => {
       expect(mockDb.update).not.toHaveBeenCalled();
     });
 
+    // Accepting or countering a proposal, and accepting an ownership offer,
+    // lock the proposal or the offer, then the membership, then (through a
+    // foreign key) a KEY SHARE on the user's row. Taken in another order, the
+    // two transactions wait on each other and Postgres aborts one.
+    it('takes its locks in the order the transfer and agreement paths take them, before any write', async () => {
+      mockReturning.mockResolvedValue([{ id: userId }]);
+
+      await service.deleteAccount(userId);
+
+      // NO KEY UPDATE on the user: a foreign-key check from a transfer or an
+      // agreement under way passes it, so that transaction commits instead of
+      // waiting on this one.
+      expect(mockUserFor).toHaveBeenCalledWith('no key update');
+      expect(mockProposalLock).toHaveBeenCalledWith('update');
+      expect(mockOfferLock).toHaveBeenCalledWith('update');
+      expect(mockMembershipLock).toHaveBeenCalledWith('update');
+      const order = [
+        mockUserFor,
+        mockProposalLock,
+        mockOfferLock,
+        mockMembershipLock,
+      ].map((lock) => lock.mock.invocationCallOrder[0] ?? 0);
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+      expect(order.at(-1)).toBeLessThan(
+        (mockDb.update as ReturnType<typeof vi.fn>).mock
+          .invocationCallOrder[0] ?? 0
+      );
+    });
+
     // Departure parity with a member removal: an open offer to a deleted
     // account can never be accepted, and it blocks any new offer for 7 days.
     it('withdraws open ownership offers to the user as ineligible, at the deletion time', async () => {
@@ -1258,7 +1295,9 @@ describe('IdentityService', () => {
 
         await service.deleteAccount(userId);
 
-        expect(mockUserFor).toHaveBeenCalledWith('update');
+        // NO KEY UPDATE still conflicts with the upload's and the removal's
+        // own row locks.
+        expect(mockUserFor).toHaveBeenCalledWith('no key update');
         // Inside the scrub's transaction: an autocommit read would drop the
         // lock at once.
         const [lockedAt] = mockUserFor.mock.invocationCallOrder;

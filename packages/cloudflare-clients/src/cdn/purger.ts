@@ -14,9 +14,10 @@
 const MAX_PREFIXES_PER_PURGE = 100;
 
 /**
- * How long a purge may take before it is given up. A Workers subrequest has
- * no time limit of its own, and a purge runs inside a request that has more
- * to do after it (account deletion still has to clear the user's sessions).
+ * How long a purge may take before it is given up, wherever it runs. A
+ * Workers subrequest has no time limit of its own. Run in `waitUntil` after
+ * the response (account deletion does), it must fit that work's limited time
+ * after the response; awaited, it never holds its caller longer than this.
  */
 const DEFAULT_PURGE_TIMEOUT_MS = 5_000;
 
@@ -80,8 +81,11 @@ export class CdnCachePurger {
         errors?: unknown;
       } | null;
       if (res.ok && body?.success === true) return { ok: true };
-      // Not JSON (an HTML 5xx page, say): its text says more than `null`.
-      const detail = body ? JSON.stringify(body.errors ?? body) : text;
+      // The API's `errors` when it names any, else the whole body. Not JSON
+      // (an HTML 5xx page, say): its text says more than `null`.
+      const errors = body?.errors;
+      const named = Array.isArray(errors) && errors.length > 0;
+      const detail = body ? JSON.stringify(named ? errors : body) : text;
       return {
         ok: false,
         reason: `HTTP ${res.status}: ${detail.slice(0, 300)}`,

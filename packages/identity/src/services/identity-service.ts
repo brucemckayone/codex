@@ -15,6 +15,7 @@ import {
   whereNotDeleted,
 } from '@codex/database';
 import {
+  agreementProposals,
   content,
   creatorOnboarding,
   mediaItems,
@@ -159,13 +160,16 @@ export class IdentityService extends BaseService {
    */
   async deleteAvatar(userId: string): Promise<void> {
     try {
-      await this.imageService().deleteUserAvatar(userId);
-      // Also when there was nothing to remove. Remove is offered only for an
-      // upload, so the usual way here is a surface left stale: an earlier
-      // removal whose invalidation failed, or whose commit ack was lost.
-      // Invalidating again is what lets this retry heal the profile and the
-      // creators lists.
-      await this.invalidateUserSurfaces(userId, 'deleteAvatar');
+      // Invalidated whatever the outcome, as uploadAvatar does. When the
+      // delete throws: the clear can commit and lose its ack, and the files
+      // then go to the sweep. When there was nothing to remove: Remove is
+      // offered only for an upload, so the usual way here is a surface left
+      // stale by such a removal, and invalidating again is what lets this
+      // retry heal the profile and the creators lists. It never rejects, so
+      // it cannot replace the delete's own error.
+      await this.imageService()
+        .deleteUserAvatar(userId)
+        .finally(() => this.invalidateUserSurfaces(userId, 'deleteAvatar'));
     } catch (error) {
       throw this.handleError(error, 'IdentityService.deleteAvatar');
     }
@@ -800,26 +804,58 @@ export class IdentityService extends BaseService {
       const {
         endedAgreements,
         withdrawnProposals,
+        withdrawnOffers,
         droppedAvatarUrl,
         listingSlugs,
       } = await this.db.transaction(async (tx) => {
         const now = new Date();
-        // The avatar the scrub drops, so its files can go after the commit.
-        // Locked: an avatar upload committing now waits for the scrub, and
-        // its write then matches no row (processUserAvatar skips a deleted
-        // user), so the URL read here is the one the scrub drops.
+        // LOCK ORDER. Every other path that locks this user's rows takes a
+        // proposal or an ownership offer first, then the membership, then,
+        // through the foreign key of a row it inserts naming the user, a KEY
+        // SHARE on the user's row: accepting or countering a proposal,
+        // accepting an offer. Taken in any other order, the two transactions
+        // wait on each other and Postgres aborts one (Codex-kk9nv.8). So the
+        // locks are taken in that order, before anything is written.
+        //
+        // The user's row first, as NO KEY UPDATE. It still makes an avatar
+        // upload or removal wait for the scrub, so the URL read here is the
+        // one the scrub drops (processUserAvatar then skips a deleted user).
+        // And it lets another transaction's foreign-key check through, so a
+        // transfer or an agreement already under way commits instead of
+        // waiting on this one. The scrub's email change upgrades the lock
+        // later, once every membership is held below, when no path that
+        // inserts a row naming the user can still be part-way through.
         const [before] = await tx
           .select({ avatarUrl: users.avatarUrl })
           .from(users)
           .where(and(eq(users.id, userId), whereNotDeleted(users)))
+          .for('no key update');
+        await tx
+          .select({ id: agreementProposals.id })
+          .from(agreementProposals)
+          .where(
+            and(
+              eq(agreementProposals.creatorId, userId),
+              eq(agreementProposals.status, 'open')
+            )
+          )
+          .for('update');
+        await tx
+          .select({ id: organizationOwnershipOffers.id })
+          .from(organizationOwnershipOffers)
+          .where(
+            and(
+              eq(organizationOwnershipOffers.recipientUserId, userId),
+              eq(organizationOwnershipOffers.status, 'open')
+            )
+          )
           .for('update');
         // The owner check above ran before this transaction, and an ownership
         // transfer to this user can commit since. Every membership row they
-        // hold is locked first, with no role filter: a transfer holds the
-        // recipient's row while it promotes it, so this waits for it, and the
-        // check then reads the committed role and refuses. A transfer that
-        // comes second waits here instead, then finds no live membership and
-        // withdraws its offer as ineligible.
+        // hold is locked, with no role filter, and the question asked again.
+        // A transfer that took its offer first has committed by now, so this
+        // reads the new role and refuses. One that comes second finds its
+        // offer withdrawn below, and refuses.
         await tx
           .select({ id: organizationMemberships.id })
           .from(organizationMemberships)
@@ -855,6 +891,9 @@ export class IdentityService extends BaseService {
           throw new UserNotFoundError(userId);
         }
 
+        // Each write below reads afresh, so it also covers a proposal or an
+        // offer whose creator held a membership row this transaction waited
+        // on, and committed before it got the lock.
         const withdrawn = await withdrawProposalsOnDeparture(tx, {
           creatorId: userId,
           at: now,
@@ -882,8 +921,9 @@ export class IdentityService extends BaseService {
           );
         // An open ownership offer to the user can never be accepted now (it
         // needs a live membership), and it would block any new offer in its
-        // org for its 7 days. Withdrawn as a member removal does it.
-        await tx
+        // org for its 7 days. The row is written as a member removal writes
+        // it; unlike a removal, nobody is emailed yet (Codex-kk9nv.18).
+        const offers = await tx
           .update(organizationOwnershipOffers)
           .set({
             status: 'withdrawn',
@@ -896,10 +936,14 @@ export class IdentityService extends BaseService {
               eq(organizationOwnershipOffers.recipientUserId, userId),
               eq(organizationOwnershipOffers.status, 'open')
             )
-          );
+          )
+          // Bare: the client union collapses the projected overload, as in
+          // ownership-transfer.ts. Only the count is used.
+          .returning();
         return {
           endedAgreements: ended,
           withdrawnProposals: withdrawn,
+          withdrawnOffers: offers,
           droppedAvatarUrl: before?.avatarUrl ?? null,
           listingSlugs: listing,
         };
@@ -909,6 +953,7 @@ export class IdentityService extends BaseService {
         userId,
         agreementsEnded: endedAgreements.length,
         proposalsWithdrawn: withdrawnProposals.length,
+        ownershipOffersWithdrawn: withdrawnOffers.length,
       });
 
       // The scrubbed name, avatar, bio and links are still on the cached

@@ -335,11 +335,14 @@ const cache = new VersionedCache({
 // fragments the version namespace so the write-side invalidate never lands.
 const data = await cache.get(orgSlug, CacheType.ORG_CONFIG, async () => {
   return await service.getPublicInfo(slug); // fetcher on miss
-}, { ttl: 30 * 60 }); // 30 min TTL
+}, { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }); // 4h, from @codex/constants
 
-// Invalidate on mutation (fire-and-forget via waitUntil)
+// Invalidate on mutation (fire-and-forget via waitUntil). A bare
+// `cache.invalidate(orgSlug)` reaches this read, but an org or membership
+// change also stales the creators list, cached under its own id, so it bumps
+// both:
 executionCtx.waitUntil(
-  cache.invalidate(orgSlug).catch(() => {})
+  invalidateOrgPublicCaches(cache, orgSlug).catch(() => {})
 );
 ```
 

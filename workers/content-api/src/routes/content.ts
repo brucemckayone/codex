@@ -41,7 +41,7 @@ import {
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
-import type { Logger } from '@codex/observability';
+import type { Logger, ObservabilityClient } from '@codex/observability';
 import type { CheckSlugResponse, HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
 import {
@@ -65,46 +65,49 @@ function bumpOrgContentVersion(
   env: HonoEnv['Bindings'],
   executionCtx: ExecutionContext,
   organizationId: string | null | undefined,
-  obs?: Logger
+  obs?: ObservabilityClient
 ): void {
   if (!organizationId || !env.CACHE_KV) return;
+  // Given `obs`, because the cache swallows a failed invalidation and logs it
+  // only through its own client: the `.catch` below never sees one.
   const cache = new VersionedCache({
     kv: env.CACHE_KV,
     waitUntil: (promise) => executionCtx.waitUntil(promise),
+    obs,
   });
+  // Invalidate slug-keyed cache (stats, creators, public info) — shared
+  // helper resolves orgId → slug and swallows transient failures. Started in
+  // a promise of its own, so a client that cannot be built (missing config)
+  // lands in the `.catch` below instead of throwing to the caller, and the
+  // other bumps still run.
+  const bySlug = Promise.resolve().then(() =>
+    invalidateOrgSlugCache({
+      db: createDbClient(env),
+      cache,
+      orgId: organizationId,
+      logger: obs,
+    })
+  );
   executionCtx.waitUntil(
-    // Started inside the promise, so a client that cannot be built (missing
-    // config) lands in the `.catch` below instead of throwing to the caller.
-    Promise.resolve()
-      .then(() =>
-        Promise.all([
-          // Invalidate org content collection version
-          cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId)),
-          // Invalidate slug-keyed cache (stats, creators, public info) — shared
-          // helper resolves orgId → slug and swallows transient failures.
-          invalidateOrgSlugCache({
-            db: createDbClient(env),
-            cache,
-            orgId: organizationId,
-            logger: obs,
-          }),
-          // Invalidate the public topic list: publish/unpublish/delete changes the
-          // set of categories with ≥1 published item, so a cached "Browse by topic"
-          // list could otherwise show empty or missing topics until TTL.
-          cache.invalidate(CacheType.CATEGORIES(organizationId)),
-          // Invalidate the public portal (journey) rails for the same reason
-          // (Codex-72k55): each card's `practiceCount`/`stageCount` counts only
-          // practices whose content is PUBLISHED, so publishing or unpublishing one
-          // practice changes cards that name no content at all. Without this bump a
-          // portal advertises "8 practices" while only 7 are reachable.
-          cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId)),
-        ])
-      )
-      .catch((err: unknown) => {
-        obs?.warn('Cache invalidation failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      })
+    Promise.all([
+      // Invalidate org content collection version
+      cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId)),
+      bySlug,
+      // Invalidate the public topic list: publish/unpublish/delete changes the
+      // set of categories with ≥1 published item, so a cached "Browse by topic"
+      // list could otherwise show empty or missing topics until TTL.
+      cache.invalidate(CacheType.CATEGORIES(organizationId)),
+      // Invalidate the public portal (journey) rails for the same reason
+      // (Codex-72k55): each card's `practiceCount`/`stageCount` counts only
+      // practices whose content is PUBLISHED, so publishing or unpublishing one
+      // practice changes cards that name no content at all. Without this bump a
+      // portal advertises "8 practices" while only 7 are reachable.
+      cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId)),
+    ]).catch((err: unknown) => {
+      obs?.warn('Cache invalidation failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    })
   );
 }
 
