@@ -250,9 +250,14 @@ app.get(
     policy: { auth: 'required' },
     input: { query: contentBrowseQuerySchema },
     handler: async (ctx) => {
+      // page and limit go in their own argument: list() pages only from that
+      // one, so left inside the filters they were ignored and every page
+      // returned the first 20 items (Codex-uuj1g).
+      const { page, limit, ...filters } = ctx.input.query;
       const result = await ctx.services.content.list(
         ctx.user.id,
-        ctx.input.query,
+        filters,
+        { page, limit },
         { scope: 'browse' }
       );
       return new PaginatedResult(result.items, result.pagination);
@@ -362,9 +367,12 @@ app.get(
     handler: async (ctx) => {
       // Studio-scope: returns the signed-in creator's content across all
       // their orgs (drafts list, dashboard). organizationId is optional.
+      // Paged from its own argument, as /browse is (Codex-uuj1g).
+      const { page, limit, ...filters } = ctx.input.query;
       const result = await ctx.services.content.list(
         ctx.user.id,
-        ctx.input.query,
+        filters,
+        { page, limit },
         { scope: 'studio' }
       );
       return new PaginatedResult(result.items, result.pagination);
