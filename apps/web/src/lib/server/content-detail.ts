@@ -230,7 +230,11 @@ export function isPublicContent(policy: ContentPublicnessPolicy): boolean {
  * gate (which the course service writes on purpose: `isFree` + `courseOnly`)
  * kept its full body, and returning the row as-is put that body in the load
  * payload, readable through view-source while the page showed it locked. The
- * public API itself still returns it; that is tracked separately.
+ * public API itself still returns it; that is tracked separately (Codex-039vo).
+ *
+ * This only covers what the load RETURNS. Read the row through the server API,
+ * never the `getPublicContent` remote query: SvelteKit serialises each remote
+ * query's SSR result into the page for hydration, body included.
  */
 export function withoutRawBody<
   T extends { contentBody?: string | null; contentBodyJson?: unknown },
@@ -240,6 +244,34 @@ export function withoutRawBody<
 
 /** The server-side API surface returned by `createServerApi`. */
 type ServerApi = ReturnType<typeof createServerApi>;
+
+type PublicContentItem = Awaited<
+  ReturnType<ServerApi['content']['getPublicContent']>
+>['items'][number];
+
+/**
+ * A detail page's "more from this org" strip: the org's newest pieces, each
+ * without its raw body, as a streamed promise that never rejects (the strip
+ * just stays empty).
+ *
+ * Through the server API, not the `getPublicContent` remote query, whose SSR
+ * result SvelteKit serialises into the page with every body (see
+ * {@link withoutRawBody}). The cards render metadata only.
+ */
+export function loadRelatedContent(
+  api: ServerApi,
+  orgId: string | null | undefined
+): Promise<PublicContentItem[]> {
+  if (!orgId) return Promise.resolve([]);
+  const params = new URLSearchParams();
+  params.set('orgId', orgId);
+  params.set('sort', 'newest');
+  params.set('limit', '5');
+  return api.content
+    .getPublicContent(params)
+    .then((result) => (result?.items ?? []).map(withoutRawBody))
+    .catch((): PublicContentItem[] => []);
+}
 
 /**
  * Resolved payload of the access worker's `/stream` endpoint

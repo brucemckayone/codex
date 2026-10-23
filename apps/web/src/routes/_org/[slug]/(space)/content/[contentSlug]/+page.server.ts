@@ -9,7 +9,6 @@
  */
 import { error } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
-import { getPublicContent } from '$lib/remote/content.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
@@ -18,6 +17,7 @@ import {
   handlePurchaseAction,
   isPublicContent,
   loadAccessAndProgress,
+  loadRelatedContent,
   loadSubscriptionContext,
   withoutRawBody,
 } from '$lib/server/content-detail';
@@ -61,11 +61,17 @@ export const load: PageServerLoad = async ({
   if (contentSlug.length > 500) {
     error(404, 'Content not found');
   }
-  const contentResult = await getPublicContent({
-    orgId: org.id,
-    slug: contentSlug,
-    limit: 1,
-  });
+  // Through the server API, NOT the `getPublicContent` remote query: SvelteKit
+  // serialises every remote query's SSR result into the page for hydration
+  // (`__sveltekit_*.data`), so the remote form shipped this row, body and all,
+  // whatever the load returned. Measured live: the row's contentBodyJson sat
+  // in that cache while the returned `content` had it nulled.
+  const api = createServerApi(platform, cookies);
+  const contentParams = new URLSearchParams();
+  contentParams.set('orgId', org.id);
+  contentParams.set('slug', contentSlug);
+  contentParams.set('limit', '1');
+  const contentResult = await api.content.getPublicContent(contentParams);
 
   const content = contentResult?.items?.[0];
   if (!content) {
@@ -86,13 +92,7 @@ export const load: PageServerLoad = async ({
   const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
 
   // Fetch related content — returned as a bare promise (streamed, below fold)
-  const relatedPromise = getPublicContent({
-    orgId: org.id,
-    sort: 'newest',
-    limit: 5,
-  })
-    .then((r) => r?.items ?? [])
-    .catch(() => [] as Awaited<ReturnType<typeof getPublicContent>>['items']);
+  const relatedPromise = loadRelatedContent(api, org.id);
 
   // Journey cross-link (Codex-2pryk.3.10, F19/F20): the PUBLISHED course(s) this
   // item belongs to. Streamed — it's below-the-fold context (breadcrumb signpost
@@ -100,8 +100,8 @@ export const load: PageServerLoad = async ({
   // (no auth), so it runs for visitors and owners alike. `.catch(() => null)`
   // keeps an unhandled rejection from crashing the load; the FE omits the
   // cross-link gracefully on null / empty.
-  const parentCoursesPromise = createServerApi(platform, cookies)
-    .access.contentCourses(content.id)
+  const parentCoursesPromise = api.access
+    .contentCourses(content.id)
     .catch(() => null);
 
   // Only run the subscription-context fetch when content is tier-gated

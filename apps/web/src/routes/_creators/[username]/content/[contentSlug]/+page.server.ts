@@ -11,7 +11,6 @@
  */
 import { error } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
-import { getPublicContent } from '$lib/remote/content.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
@@ -20,6 +19,7 @@ import {
   handlePurchaseAction,
   isPublicContent,
   loadAccessAndProgress,
+  loadRelatedContent,
   loadSubscriptionContext,
   withoutRawBody,
 } from '$lib/server/content-detail';
@@ -107,19 +107,7 @@ export const load: PageServerLoad = async ({
   const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
 
   // Fetch related content — returned as a bare promise (streamed, below fold)
-  const relatedPromise = content.organization?.id
-    ? getPublicContent({
-        orgId: content.organization.id,
-        sort: 'newest',
-        limit: 5,
-      })
-        .then((r) => r?.items ?? [])
-        .catch(
-          () => [] as Awaited<ReturnType<typeof getPublicContent>>['items']
-        )
-    : Promise.resolve(
-        [] as Awaited<ReturnType<typeof getPublicContent>>['items']
-      );
+  const relatedPromise = loadRelatedContent(api, content.organization?.id);
 
   // Subscription context (org-scoped content may have tier gating).
   // Skip the round-trip entirely for content that can't require a

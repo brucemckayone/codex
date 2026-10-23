@@ -40,12 +40,6 @@ vi.mock('$lib/server/api', () => ({
 
 vi.mock('$lib/observability', () => ({ logger: mockLogger }));
 
-// The detail page streams related content through the remote query, which
-// needs a request context; the cases here only read the awaited fields.
-vi.mock('$lib/remote/content.remote', () => ({
-  getPublicContent: vi.fn(() => Promise.resolve({ items: [] })),
-}));
-
 const event = (overrides: Record<string, unknown> = {}) =>
   ({
     params: { username: '@alex-creator' },
