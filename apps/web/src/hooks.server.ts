@@ -301,8 +301,9 @@ export const handleError: HandleServerError = async ({
   const clientError = clientErrorBody(status, message);
   if (clientError) return clientError;
 
-  // In dev mode, expose the real error message for debugging (production
-  // keeps the sanitised "unexpected error" message to avoid leaking internals).
+  // At 500 and above: in dev mode, expose the real error message for debugging
+  // (production keeps the sanitised "unexpected error" message to avoid leaking
+  // internals). Below 500, the body is SvelteKit's own message in both.
   if (dev) {
     const msg = error instanceof Error ? error.message : String(error);
     return { message: msg, code: 'INTERNAL_ERROR' };

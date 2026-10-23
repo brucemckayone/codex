@@ -34,7 +34,12 @@ import {
 import type { Handle } from '@sveltejs/kit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isPublicCdnHost } from '$lib/server/cdn-proxy';
-import { handle, junkHostHook, shouldShortCircuitHost } from './hooks.server';
+import {
+  handle,
+  handleError,
+  junkHostHook,
+  shouldShortCircuitHost,
+} from './hooks.server';
 
 // The real `sequence()` enters SvelteKit's per-request tracing store, which
 // only exists inside a live request — `handle` cannot be driven from vitest
@@ -369,5 +374,41 @@ describe('handle — the assembled sequence', () => {
     expect(resolve).toHaveBeenCalledTimes(1);
     // The full chain really ran — sessionHook stamped the request ID.
     expect(event.locals.requestId).toEqual(expect.any(String));
+  });
+});
+
+// A status below 500 is SvelteKit's own refusal, so its message is safe to show:
+// "An unexpected error occurred" told a visitor with a mistyped URL the
+// opposite of what happened (Codex-osuqt). 500 and above keep the sanitised body.
+describe('handleError — the body a visitor sees', () => {
+  const errorEvent = {
+    url: new URL('http://lvh.me:3000/nope'),
+    request: new Request('http://lvh.me:3000/nope'),
+    locals: { requestId: 'req-1' },
+  };
+
+  it("shows SvelteKit's own message for a 404", async () => {
+    expect(
+      await handleError({
+        error: new Error('Not found: /nope'),
+        event: errorEvent,
+        status: 404,
+        message: 'Not Found',
+      } as never)
+    ).toEqual({ message: 'Not Found', code: 'NOT_FOUND' });
+  });
+
+  it('keeps the sanitised body at 500', async () => {
+    expect(
+      await handleError({
+        error: new Error('database password in a stack'),
+        event: errorEvent,
+        status: 500,
+        message: 'Internal Error',
+      } as never)
+    ).toEqual({
+      message: 'An unexpected error occurred',
+      code: 'INTERNAL_ERROR',
+    });
   });
 });

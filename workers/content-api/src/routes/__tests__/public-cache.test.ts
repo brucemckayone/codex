@@ -226,6 +226,37 @@ describe('getCachedPublicContent', () => {
     mockKV._reset();
   });
 
+  // KV refuses a key over 512 bytes, so a slug long enough to push the key past
+  // it made every such read a KV error and an error-level log (Codex-osuqt).
+  it('skips KV for a slug too long to key, and still serves it', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ items: [] });
+
+    const result = await getCachedPublicContent(
+      cache,
+      'org-1',
+      { orgId: 'org-1', slug: 'a'.repeat(450) },
+      fetcher
+    );
+
+    expect(result).toEqual({ items: [] });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(mockKV.get).not.toHaveBeenCalled();
+    expect(mockKV.put).not.toHaveBeenCalled();
+  });
+
+  it('still caches an ordinary slug read', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ items: [] });
+
+    await getCachedPublicContent(
+      cache,
+      'org-1',
+      { orgId: 'org-1', slug: 'a'.repeat(100) },
+      fetcher
+    );
+
+    expect(mockKV.put).toHaveBeenCalled();
+  });
+
   it('uses COLLECTION_ORG_CONTENT(orgId) as the cache id (regression guard for id/type swap)', async () => {
     const orgId = 'org-1';
     const fetcher = vi.fn().mockResolvedValue({ items: [], pagination: {} });

@@ -272,6 +272,39 @@ describe('explore +page.server.ts — cache wiring', () => {
       expect(params.get('category')).toBe('ritual');
     });
 
+    // The signed-in sorts send these straight to browse, whose 400 this load
+    // let through as a 500 with an error-level "contract bug" log: any
+    // visitor could raise it by editing a URL (Codex-osuqt).
+    it('bounds the search and drops a category that is not a topic slug', async () => {
+      const { load } = await import('../+page.server');
+
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: `http://lvh.me:3000/explore?sort=popular&q=%00${'x'.repeat(300)}&category=Sound%20%26%20Vibration`,
+        })
+      );
+
+      const params = browseMock.mock.calls[0][0] as URLSearchParams;
+      expect(params.get('search')).toBe('x'.repeat(255));
+      expect(params.get('category')).toBeNull();
+    });
+
+    it('still sends a real topic up to the column width', async () => {
+      const { load } = await import('../+page.server');
+      const longTopic = 'a'.repeat(110);
+
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: `http://lvh.me:3000/explore?sort=popular&category=${longTopic}`,
+        })
+      );
+
+      const params = browseMock.mock.calls[0][0] as URLSearchParams;
+      expect(params.get('category')).toBe(longTopic);
+    });
+
     it('downgrades an auth-only sort to newest when `featured` is requested', async () => {
       // The browse endpoint has no `featured` filter, so honouring the sort
       // would silently return the whole catalogue behind a "Featured" chip.

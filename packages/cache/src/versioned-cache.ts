@@ -210,7 +210,7 @@ export class VersionedCache {
       .catch((err) => {
         this.obs?.warn('Cache write failed', {
           id,
-          type,
+          type: cacheStatsLabel(type),
           error: err instanceof Error ? err.message : String(err),
         });
       });
@@ -226,7 +226,7 @@ export class VersionedCache {
     } catch (err) {
       this.obs?.warn('Cache write could not be scheduled on waitUntil', {
         id,
-        type,
+        type: cacheStatsLabel(type),
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -327,7 +327,9 @@ export class VersionedCache {
       // — see getWithResult.
       this.obs?.error('Cache lookup failed, serving from the fetcher', {
         id,
-        type,
+        // The bounded label, never the raw type: a composed type can carry a
+        // visitor's slug or topic (Codex-osuqt), and so can each log below.
+        type: cacheStatsLabel(type),
         error: error instanceof Error ? error.message : String(error),
       });
       return { hit: false, cacheKey: null };
@@ -481,7 +483,7 @@ export class VersionedCache {
     } catch (error) {
       this.obs?.warn('Cache set failed', {
         id,
-        type,
+        type: cacheStatsLabel(type),
         error: error instanceof Error ? error.message : String(error),
       });
     }

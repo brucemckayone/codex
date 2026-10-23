@@ -1450,8 +1450,9 @@ export class ContentService extends BaseService {
             orderBy: [orderByClause],
             with: {
               mediaItem: true,
-              // No email: this list is anonymous, and three public creator
-              // pages and /discover serialise each item into their HTML.
+              // No email: this list is anonymous, and every public page that
+              // lists content (creator pages, /discover, the org landing,
+              // /explore, the related strips) serialises each item into its HTML.
               creator: {
                 columns: {
                   id: true,

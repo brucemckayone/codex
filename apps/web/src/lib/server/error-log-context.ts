@@ -32,22 +32,26 @@ export function errorLogContext(
 }
 
 /**
- * SvelteKit's own 404 for a URL no route matches (`Not found: /path`), the
- * one error it hands `handleError` that a crawler, not our code, causes.
+ * SvelteKit's own refusals that a crawler or a scanner, not our code, causes:
+ * the 404 for a URL no route matches (`Not found: /path`), and the 405 for a
+ * POST to a page with no form actions at all (`… No form actions exist for
+ * this page`). A renamed action's 404 (`No action with name …`) is a deploy
+ * of ours, so it is not noise.
  */
-function isUnmatchedRoute(error: unknown, responseStatus: number): boolean {
-  return (
-    responseStatus === 404 &&
-    error instanceof Error &&
-    error.message.startsWith('Not found:')
-  );
+function isCrawlerNoise(error: unknown, responseStatus: number): boolean {
+  if (!(error instanceof Error)) return false;
+  if (responseStatus === 404) return error.message.startsWith('Not found:');
+  if (responseStatus === 405) {
+    return error.message.includes('No form actions exist');
+  }
+  return false;
 }
 
 /**
  * Logs an error SvelteKit hands `handleError`. It is also called for every
- * unmatched route: a crawler's miss is a warning, not a crash. Every other
- * error is tracked, including Kit's own sub-500 refusals of a form action (a
- * 404 for a renamed action, a 405), which a deploy of ours can cause.
+ * unmatched route and every POST to a page without actions: a crawler's
+ * noise is a warning, not a crash. Every other error is tracked, including a
+ * renamed form action's 404.
  */
 export function logUnhandledError(
   error: unknown,
@@ -55,7 +59,7 @@ export function logUnhandledError(
   responseStatus: number
 ): void {
   const context = errorLogContext(error, event, responseStatus);
-  if (isUnmatchedRoute(error, responseStatus)) {
+  if (isCrawlerNoise(error, responseStatus)) {
     logger.warn(
       error instanceof Error ? error.message : String(error),
       context

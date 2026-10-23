@@ -50,10 +50,15 @@ export const SEARCH_MIN_QUERY_LENGTH = 3;
 /**
  * Drops NUL (U+0000) from a text value (Codex-osuqt). Postgres refuses NUL in
  * text (22021), so one in a search, slug or topic from a URL was a 500 and an
- * error-level log any visitor could raise. No real search, slug or topic
- * contains one, so dropping it changes no legitimate query.
+ * error-level log any visitor could raise. For FREE TEXT only: dropping it
+ * changes no legitimate search. An exact-match identifier (a slug, a topic)
+ * refuses one instead ({@link hasNoNul}), because a rewritten identifier can
+ * name a different row, or none at all.
  */
 export const stripNul = (value: string): string => value.replaceAll('\0', '');
+
+/** True when a value carries no NUL: the refine for an exact-match identifier. */
+export const hasNoNul = (value: string): boolean => !value.includes('\0');
 
 /**
  * Build the schema for an optional free-text `search` query parameter.
@@ -75,7 +80,10 @@ export const stripNul = (value: string): string => value.replaceAll('\0', '');
  * here and return 200 (with a scan); the client is what declines to issue
  * them. See {@link gateSearchQuery}.
  *
- * @param maxLength - Maximum accepted length after trimming (default 255)
+ * Drops a NUL first ({@link stripNul}), then trims and caps.
+ *
+ * @param maxLength - Maximum accepted length after NUL is dropped and the value
+ *   trimmed (default 255)
  *
  * @example
  * ```typescript

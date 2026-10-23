@@ -7,6 +7,7 @@
  */
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { CacheType, logCacheStats, VersionedCache } from '@codex/cache';
+import { stripNul, topicSlugSchema } from '@codex/validation';
 import type { CourseCardSummary } from '$lib/journeys/types';
 import { logger } from '$lib/observability';
 import { getPublicCategories } from '$lib/remote/categories.remote';
@@ -73,19 +74,29 @@ export const load: PageServerLoad = async ({
 }) => {
   const { org } = await parent();
 
-  // Extract and validate URL search params
-  const q = url.searchParams.get('q') ?? undefined;
+  // Extract and validate URL search params. `q` and `category` are bounded to
+  // what BOTH branches' schemas accept, once, before either uses them
+  // (Codex-osuqt): the signed-in sorts send them straight to the browse API,
+  // whose 400 this load let through as a 500 with an error-level "contract
+  // bug" log that any visitor could raise by editing a URL.
+  const searchText = stripNul(url.searchParams.get('q') ?? '')
+    .trim()
+    .slice(0, 255);
+  const q = searchText === '' ? undefined : searchText;
   const typeParam = url.searchParams.get('type');
   const sortParam = url.searchParams.get('sort');
   const pageParam = url.searchParams.get('page');
-  // `?category=` carries a category SLUG, never a display name. Both filter
-  // paths match `categories.slug` (content-service's membership subquery), and
-  // `publicContentQueryParamsSchema.category` only accepts the slug charset
-  // `^[\p{L}\p{N}-]+$` — a display name with a space or `&` ("Ancestral
-  // Medicine", "Sound & Vibration") makes the whole page 400. The category
-  // strip renders `categoryOptions` below, which carries name+slug pairs, so
-  // the label the user reads and the value the URL carries stay separate.
-  const category = url.searchParams.get('category') ?? undefined;
+  // `?category=` carries a category SLUG, never a display name. A value that is
+  // not a topic slug (topicSlugSchema: the slug charset, at most 120) names no
+  // topic, so it is dropped rather than sent: a display name with a space or
+  // `&` ("Sound & Vibration") used to 400 the page, and past browse's old cap
+  // a long one was a 500. The category strip renders `categoryOptions` below,
+  // which carries name+slug pairs, so the label the user reads and the value
+  // the URL carries stay separate.
+  const categoryParam = url.searchParams.get('category') ?? undefined;
+  const category = topicSlugSchema.safeParse(categoryParam).success
+    ? categoryParam
+    : undefined;
   const creatorUsername = url.searchParams.get('creator') ?? undefined;
   const featuredParam = url.searchParams.get('featured');
   const featured = featuredParam === 'true' ? true : undefined;

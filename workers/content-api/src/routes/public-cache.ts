@@ -64,6 +64,15 @@ const PUBLIC_CONTENT_CACHE_TTL = 7200;
 const PUBLIC_CONTENT_SHAPE_VERSION = 'v2';
 
 /**
+ * KV refuses a key over 512 bytes. A data-slot key is this type plus about 70
+ * bytes (its prefix, the org's version id and a version stamp), so a type past
+ * this budget, which only a long slug reaches, made every such read a KV error:
+ * an error-level log any visitor could raise with a URL (Codex-osuqt). A read
+ * that long skips KV; a real slug is far shorter.
+ */
+const MAX_CACHED_TYPE_BYTES = 400;
+
+/**
  * Public content list query shape accepted by the cache wiring.
  * Kept narrow so callers can pass the worker's validated input directly.
  *
@@ -171,10 +180,11 @@ export async function getCachedPublicContent<T>(
   fetcher: () => Promise<T>,
   opts: { ttl?: number } = {}
 ): Promise<T> {
-  return cache.get(
-    CacheType.COLLECTION_ORG_CONTENT(orgId),
-    buildPublicContentCacheType(query),
-    fetcher,
-    { ttl: opts.ttl ?? PUBLIC_CONTENT_CACHE_TTL }
-  );
+  const type = buildPublicContentCacheType(query);
+  if (new TextEncoder().encode(type).length > MAX_CACHED_TYPE_BYTES) {
+    return fetcher();
+  }
+  return cache.get(CacheType.COLLECTION_ORG_CONTENT(orgId), type, fetcher, {
+    ttl: opts.ttl ?? PUBLIC_CONTENT_CACHE_TTL,
+  });
 }

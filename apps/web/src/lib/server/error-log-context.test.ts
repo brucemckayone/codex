@@ -108,20 +108,29 @@ describe('logUnhandledError', () => {
     expect(mockLogger.warn).not.toHaveBeenCalled();
   });
 
-  // Kit's sub-500 refusals of a form action come from our own code (a
-  // renamed action after a deploy), so they stay tracked.
-  it.each([
-    [404, "No action with name 'purchase' found"],
-    [405, 'No form actions exist for this page'],
-  ])('tracks a %i from a form action as an error', (status, message) => {
+  // A renamed form action's 404 comes from a deploy of ours: tracked.
+  it("tracks a renamed form action's 404 as an error", () => {
     logUnhandledError(
-      new Error(message),
+      new Error("No action with name 'purchase' found"),
       event('http://lvh.me:3000/content/first?/purchase', 'POST'),
-      status
+      404
     );
 
     expect(mockLogger.trackError).toHaveBeenCalled();
     expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+
+  // Any POST to a page with no actions at all gets this 405: a scanner's
+  // noise, so a warning.
+  it('logs a POST to a page without actions as a warning', () => {
+    logUnhandledError(
+      new Error('POST method not allowed. No form actions exist for this page'),
+      event('http://lvh.me:3000/', 'POST'),
+      405
+    );
+
+    expect(mockLogger.warn).toHaveBeenCalled();
+    expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
 });
 

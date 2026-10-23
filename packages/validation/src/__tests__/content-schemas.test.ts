@@ -10,6 +10,7 @@ import {
   mediaStatusEnum,
   mediaTypeEnum,
   publicContentQuerySchema,
+  topicSlugSchema,
   updateContentSchema,
   updateMediaItemSchema,
   updateOrganizationSchema,
@@ -1325,8 +1326,11 @@ describe('Codex-osuqt: a public orgId is lowercased', () => {
 });
 
 // Postgres refuses NUL in text, so one in a search, slug or topic from a URL
-// was a 500 and an error-level log, whichever caller sent it.
-describe('Codex-osuqt: NUL is dropped at the schema edge', () => {
+// was a 500 and an error-level log, whichever caller sent it. Free text drops
+// it; an exact-match identifier refuses it, because a rewritten one named a
+// different row (`a\0b` as `ab`) or none (`\0` as '', which dropped the slug
+// filter and answered a by-slug lookup with the whole catalogue).
+describe('Codex-osuqt: NUL at the schema edge', () => {
   it('drops a NUL from a public search', () => {
     const result = publicContentQuerySchema.parse({
       orgId: '4d111111-1111-4111-8111-111111111111',
@@ -1336,13 +1340,18 @@ describe('Codex-osuqt: NUL is dropped at the schema edge', () => {
     expect(result.search).toBe('psalm');
   });
 
-  it('drops a NUL from a public slug', () => {
-    expect(publicContentQuerySchema.parse({ slug: 'a\0b' }).slug).toBe('ab');
+  it.each(['a\0b', '\0'])('refuses a NUL in a public slug (%j)', (slug) => {
+    expect(
+      publicContentQuerySchema.safeParse({
+        orgId: '4d111111-1111-4111-8111-111111111111',
+        slug,
+      }).success
+    ).toBe(false);
   });
 
-  it('drops a NUL from a browse category', () => {
-    expect(contentQuerySchema.parse({ category: 'ritu\0al' }).category).toBe(
-      'ritual'
+  it('refuses a NUL in a browse category', () => {
+    expect(contentQuerySchema.safeParse({ category: 'ritu\0al' }).success).toBe(
+      false
     );
   });
 
@@ -1350,5 +1359,23 @@ describe('Codex-osuqt: NUL is dropped at the schema edge', () => {
     expect(
       publicContentQuerySchema.parse({ slug: 'x', search: '\0 psalm ' }).search
     ).toBe('psalm');
+  });
+});
+
+// The public list and the signed-in browse list accept the same topics, so a
+// topic that works signed out works on explore's signed-in sorts too.
+describe('Codex-osuqt: one topic slug rule', () => {
+  it('accepts a unicode topic slug and refuses a cache-key delimiter', () => {
+    expect(topicSlugSchema.safeParse('café-del-mar').success).toBe(true);
+    expect(topicSlugSchema.safeParse('x:feat:true').success).toBe(false);
+  });
+
+  it('lets browse take a topic as long as the column (120)', () => {
+    expect(
+      contentQuerySchema.safeParse({ category: 'a'.repeat(120) }).success
+    ).toBe(true);
+    expect(
+      contentQuerySchema.safeParse({ category: 'a'.repeat(121) }).success
+    ).toBe(false);
   });
 });

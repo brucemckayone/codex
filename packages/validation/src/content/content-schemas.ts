@@ -18,7 +18,7 @@ import {
   uuidSchema,
 } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
-import { createSearchQuerySchema, stripNul } from '../shared/search-schema';
+import { createSearchQuerySchema, hasNoNul } from '../shared/search-schema';
 
 /**
  * Content Management Validation Schemas
@@ -669,7 +669,14 @@ export const contentQuerySchema = paginationSchema.extend({
   status: contentStatusEnum.optional(),
   contentType: contentTypeEnum.optional(),
   accessType: contentAccessTypeEnum.optional(),
-  category: z.string().max(100).transform(stripNul).optional(),
+  // Up to the topic slug width, so a topic the public list accepts is accepted
+  // here too (100 refused a real 101-120 character slug on /explore's
+  // signed-in sorts). A NUL is refused: Postgres refuses NUL in text.
+  category: z
+    .string()
+    .max(120)
+    .refine(hasNoNul, 'Category must not contain NUL')
+    .optional(),
   organizationId: uuidSchema.optional(),
   // A user id (BetterAuth text), not a uuid: uuidSchema refused every real
   // one, so /explore's creator filter 400'd (Codex-osuqt).
@@ -746,6 +753,20 @@ export const PUBLIC_CONTENT_SLUG_MAX = 500;
 export const orgIdQuerySchema = uuidSchema.transform((id) => id.toLowerCase());
 
 /**
+ * A topic (category) slug as `?category=` carries it: unicode letters, numbers
+ * and hyphens (matching `slugify`), at most the `categories.slug` column width.
+ * A SECURITY control, not just validation: it forbids the public-cache-key
+ * delimiter ':' so a value like `x:feat:true` can't forge a different filter
+ * combo's cache slot (within-org cache poisoning), and it can't carry a NUL.
+ * ASCII-only would wrongly reject legit unicode slugs like `café-del-mar`.
+ * /explore normalises its `?category=` with this too (Codex-osuqt).
+ */
+export const topicSlugSchema = z
+  .string()
+  .max(120)
+  .regex(/^[\p{L}\p{N}-]+$/u, 'Invalid category slug');
+
+/**
  * Public content query schema (org- or creator-scoped)
  * Used for unauthenticated listing of published content: within an
  * organization (orgId), or by one creator across every org they publish in
@@ -756,25 +777,19 @@ export const orgIdQuerySchema = uuidSchema.transform((id) => id.toLowerCase());
 export const publicContentQuerySchema = paginationSchema
   .extend({
     orgId: orgIdQuerySchema.optional(),
+    // An exact-match identifier, so a NUL is refused, never stripped: `a\0b`
+    // rewritten to `ab` resolved a different piece, and `\0` rewritten to ''
+    // dropped the slug filter and answered a by-slug lookup with the catalogue.
     slug: z
       .string()
       .max(PUBLIC_CONTENT_SLUG_MAX)
-      .transform(stripNul)
+      .refine(hasNoNul, 'Slug must not contain NUL')
       .optional(),
     contentType: contentTypeEnum.optional(),
     // Topic-category filter — matches a category slug in the same space (org).
     // Powers the landing "Browse by topic" and the /explore ?category= deep
-    // link. Constrained to the slug charset (unicode letters/numbers + hyphen,
-    // matching `slugify`) — this is a SECURITY control, not just validation: it
-    // forbids the public-cache-key delimiter ':' so a value like `x:feat:true`
-    // can't forge a different filter combo's cache slot (within-org cache
-    // poisoning). ASCII-only would wrongly reject legit unicode slugs like
-    // `café-del-mar`. Max 120 mirrors the `categories.slug` column width.
-    category: z
-      .string()
-      .max(120)
-      .regex(/^[\p{L}\p{N}-]+$/u, 'Invalid category slug')
-      .optional(),
+    // link. See topicSlugSchema for why its charset is a security control.
+    category: topicSlugSchema.optional(),
     search: createSearchQuerySchema(255),
     sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
     // A user id (BetterAuth text), not a uuid (Codex-osuqt).
