@@ -22,9 +22,23 @@ function pathKeys(issue: ValidationIssue): PropertyKey[] {
   );
 }
 
+/** A segment shaped like a schema's own field name. */
+const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,40}$/;
+
+/**
+ * A path segment as a log may name it: an array index, or a field name. Any
+ * other key is `*`, because a record's keys are the caller's, so the key of a
+ * refused record entry (an email, any text) is input, not schema.
+ */
+function loggableSegment(key: PropertyKey): string {
+  if (typeof key === 'number') return String(key);
+  if (typeof key === 'string' && FIELD_NAME.test(key)) return key;
+  return '*';
+}
+
 /** Each issue's path as `a.b.0`: what a log may say about refused input, never its values. */
 export function issuePaths(issues: readonly ValidationIssue[]): string[] {
-  return issues.map((issue) => pathKeys(issue).map(String).join('.'));
+  return issues.map((issue) => pathKeys(issue).map(loggableSegment).join('.'));
 }
 
 export function validationErrorFor(

@@ -429,6 +429,7 @@ describe('handleValidationError — a refused remote input', () => {
           'http://lvh.me:3000/_app/remote/abc/getPublicContent'
         ),
         locals: { requestId: 'req-1' },
+        isRemoteRequest: true,
       },
     } as never);
 

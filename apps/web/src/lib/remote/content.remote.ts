@@ -13,6 +13,7 @@
 import {
   checkContentSlugSchema,
   contentQuerySchema,
+  PAGINATION_MAX_LIMIT,
   PAGINATION_MAX_PAGE,
   publicContentArgsSchema,
 } from '@codex/validation';
@@ -64,7 +65,12 @@ export const listContent = query(
 const browseContentSchema = z.object({
   organizationId: z.string().uuid(),
   page: z.coerce.number().int().min(1).max(PAGINATION_MAX_PAGE).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(100),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(PAGINATION_MAX_LIMIT)
+    .default(PAGINATION_MAX_LIMIT),
 });
 
 /**

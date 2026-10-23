@@ -3,6 +3,9 @@ import { z } from 'zod';
 /** The last page any list accepts. */
 export const PAGINATION_MAX_PAGE = 1000;
 
+/** The most items one page of a list holds. */
+export const PAGINATION_MAX_LIMIT = 100;
+
 /**
  * Unified pagination schema for all list queries
  *
@@ -29,7 +32,9 @@ export const paginationSchema = z.object({
     .number()
     .int({ message: 'Must be a whole number' })
     .positive({ message: 'Must be greater than 0' })
-    .max(100, { message: 'Must be 100 or less' })
+    .max(PAGINATION_MAX_LIMIT, {
+      message: `Must be ${PAGINATION_MAX_LIMIT} or less`,
+    })
     .default(20),
 });
 

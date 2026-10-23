@@ -109,16 +109,51 @@ describe('logUnhandledError', () => {
     expect(mockLogger.warn).not.toHaveBeenCalled();
   });
 
-  // A renamed form action's 404 comes from a deploy of ours: tracked.
-  it("tracks a renamed form action's 404 as an error", () => {
+  // The action name is the client's `?/<name>`, so any script could raise
+  // this; a deploy that drops an action shows as the flag's rate.
+  it("flags a missing form action's 404 on a warning, never tracks it", () => {
     logUnhandledError(
       new Error("No action with name 'purchase' found"),
       event('http://lvh.me:3000/content/first?/purchase', 'POST'),
       404
     );
 
-    expect(mockLogger.trackError).toHaveBeenCalled();
-    expect(mockLogger.warn).not.toHaveBeenCalled();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ staleAction: true })
+    );
+    expect(mockLogger.trackError).not.toHaveBeenCalled();
+  });
+
+  // Below 500 handleError only ever sees Kit refusing the request (an
+  // HttpError never reaches it), and the client chose what decided it.
+  it.each([
+    [415, 'Unsupported Media Type'],
+    [405, '`form` functions must be invoked via POST'],
+    [400, 'Bad Request'],
+  ])('logs a %i refusal as a warning, never tracks it', (status, message) => {
+    logUnhandledError(
+      new Error(message),
+      event('http://lvh.me:3000/login', 'POST'),
+      status
+    );
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      message,
+      expect.not.objectContaining({ staleAction: true })
+    );
+    expect(mockLogger.trackError).not.toHaveBeenCalled();
+  });
+
+  it("logs the 500 for Kit's reserved `default` action as a warning", () => {
+    logUnhandledError(
+      new Error('Cannot use reserved action name "default"'),
+      event('http://lvh.me:3000/login?/default', 'POST'),
+      500
+    );
+
+    expect(mockLogger.warn).toHaveBeenCalled();
+    expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
 
   // Any POST to a page with no actions at all gets this 405: a scanner's
@@ -176,23 +211,38 @@ describe('logUnhandledError', () => {
 describe('logRefusedRemoteInput', () => {
   beforeEach(() => vi.clearAllMocks());
 
+  type RefusalEvent = Parameters<typeof logRefusedRemoteInput>[1];
+
+  // For a browser call Kit sets `event.url` to the calling page; the request
+  // keeps the function's own URL and its payload.
+  const browserCall = (): RefusalEvent =>
+    ({
+      request: new Request(
+        'http://studio-alpha.lvh.me:3000/_app/remote/1wvwy0x/getPublicContent?payload=c2VjcmV0'
+      ),
+      url: new URL('http://studio-alpha.lvh.me:3000/explore'),
+      locals: { requestId: 'req-1' },
+      isRemoteRequest: true,
+    }) as RefusalEvent;
+
+  // A server load's call runs with the page's own event.
+  const serverLoadCall = (): RefusalEvent =>
+    ({
+      request: new Request('http://studio-alpha.lvh.me:3000/explore'),
+      url: new URL('http://studio-alpha.lvh.me:3000/explore'),
+      locals: { requestId: 'req-2' },
+      isRemoteRequest: false,
+    }) as RefusalEvent;
+
   // Kit refuses a remote function's input with an HttpError that never
-  // reaches handleError: without this a page of ours sending what a schema
-  // refuses left no trace. For a remote call Kit sets `event.url` to the
-  // calling page; the request keeps the function's own URL and payload.
-  it('names the page, the function and the refused fields, never their values', () => {
+  // reaches handleError: without this a refusal left no trace.
+  it('warns on a browser call, naming the page, the function and the fields, never their values', () => {
     logRefusedRemoteInput(
       [
         { message: 'Slug must not contain NUL', path: ['slug'] },
         { message: 'Too big', path: [{ key: 'page' }] },
       ],
-      {
-        request: new Request(
-          'http://studio-alpha.lvh.me:3000/_app/remote/1wvwy0x/getPublicContent?payload=c2VjcmV0'
-        ),
-        url: new URL('http://studio-alpha.lvh.me:3000/explore'),
-        locals: { requestId: 'req-1' },
-      } as Parameters<typeof logRefusedRemoteInput>[1]
+      browserCall()
     );
 
     expect(mockLogger.warn).toHaveBeenCalledWith(
@@ -201,12 +251,55 @@ describe('logRefusedRemoteInput', () => {
         url: '/explore',
         remote: '/_app/remote/1wvwy0x/getPublicContent',
         issues: ['slug', 'page'],
+        issueCount: 2,
       })
     );
     expect(JSON.stringify(mockLogger.warn.mock.calls)).not.toContain(
       'c2VjcmV0'
     );
+    expect(mockLogger.error).not.toHaveBeenCalled();
     expect(mockLogger.trackError).not.toHaveBeenCalled();
+  });
+
+  // Our own load built the arguments: contract drift, so an error. Its
+  // request is the page's, so it names no function.
+  it("logs a server load's refused call as an error, naming the page", () => {
+    logRefusedRemoteInput(
+      [{ message: 'Too big', path: ['page'] }],
+      serverLoadCall()
+    );
+
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Remote function input refused by our own server load',
+      expect.objectContaining({ url: '/explore', issues: ['page'] })
+    );
+    expect(mockLogger.error.mock.calls[0][1]).not.toHaveProperty('remote');
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+
+  // A query.batch validates every payload of one request.
+  it('logs one line per request, however many payloads it refused', () => {
+    const call = browserCall();
+
+    logRefusedRemoteInput([{ message: 'x', path: [0] }], call);
+    logRefusedRemoteInput([{ message: 'x', path: [1] }], call);
+    logRefusedRemoteInput([{ message: 'x', path: [2] }], call);
+
+    expect(mockLogger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  // Zod checks every element of an array before its length.
+  it('names at most 10 fields and counts the rest', () => {
+    const issues = Array.from({ length: 50_000 }, (_, i) => ({
+      message: 'Invalid UUID',
+      path: ['orderedIds', i],
+    }));
+
+    logRefusedRemoteInput(issues, browserCall());
+
+    const [, context] = mockLogger.warn.mock.calls[0];
+    expect(context.issues).toHaveLength(10);
+    expect(context.issueCount).toBe(50_000);
   });
 });
 
