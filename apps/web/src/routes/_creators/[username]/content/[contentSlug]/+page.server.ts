@@ -9,6 +9,7 @@
  *   Phase 1: Personal content purchase is blocked by the backend — returns
  *   a friendly error message instead of a generic 500.
  */
+import { PUBLIC_CONTENT_SLUG_MAX } from '@codex/validation';
 import { error, redirect } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
 import { logger } from '$lib/observability';
@@ -68,9 +69,13 @@ export const load: PageServerLoad = async ({
   // A failed request is not, so it propagates as a 500, as the profile
   // lookup above does.
   //
-  // A slug longer than publicContentQuerySchema allows (500) names nothing,
-  // so it is a 404 here rather than the API's 400 surfacing as a 500.
-  if (contentSlug.length > 500) {
+  // A slug longer than publicContentQuerySchema allows names nothing, so it is
+  // a 404 here rather than the API's 400 surfacing as a 500. So is one with a
+  // NUL, which Postgres refuses in text: sent on, it was a content-api 500.
+  if (
+    contentSlug.length > PUBLIC_CONTENT_SLUG_MAX ||
+    contentSlug.includes('\0')
+  ) {
     error(404, 'Content not found');
   }
   // One creator can hold this slug once in their personal space AND once per
@@ -109,7 +114,10 @@ export const load: PageServerLoad = async ({
       logger.error('Creator content slug matched no personal or org piece', {
         creatorId: creatorProfile.id,
         contentSlug,
-        matchCount: matches.length,
+        matches: matches.map(({ id, organizationId }) => ({
+          id,
+          organizationId,
+        })),
       });
     }
     error(404, 'Content not found');

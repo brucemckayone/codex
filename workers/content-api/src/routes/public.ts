@@ -15,7 +15,7 @@ import {
   publicContentQuerySchema,
 } from '@codex/content';
 import type { HonoEnv } from '@codex/shared-types';
-import { uuidSchema, z } from '@codex/validation';
+import { orgIdQuerySchema, z } from '@codex/validation';
 import { cachedRead, PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { resolveCategoryCoverUrl } from './category-cover-url';
@@ -37,7 +37,9 @@ import {
  */
 const PUBLIC_CATEGORIES_CACHE_TTL = 7200;
 
-const publicCategoriesQuerySchema = z.object({ orgId: uuidSchema });
+// Lowercased: the id keys the topics cache, which org delete invalidates under
+// the lowercase DB id (see orgIdQuerySchema).
+const publicCategoriesQuerySchema = z.object({ orgId: orgIdQuerySchema });
 
 const app = new Hono<HonoEnv>();
 

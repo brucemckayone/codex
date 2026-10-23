@@ -57,7 +57,9 @@ const PUBLIC_CONTENT_CACHE_TTL = 7200;
  * the query, not the payload, so without a bump every slot written by the old
  * code stays a valid hit after deploy and keeps serving what was removed, for
  * up to the TTL. v2 (Codex-osuqt): no creator email, and no body on a
- * catalogue read. Old slots are never read again and age out.
+ * catalogue read. Old slots are never read again and age out. A bump also
+ * renames the cache-stats series (`cacheStatsLabel` keeps four segments, so
+ * `content:public:newest` became `content:public:v2:newest`).
  */
 const PUBLIC_CONTENT_SHAPE_VERSION = 'v2';
 
@@ -103,8 +105,8 @@ export function buildPublicContentCacheType(
   // org version key. `featured` in particular was the latent bug: it is already
   // a live query param, but the prior key omitted it — so `?featured=true`
   // (Editor's picks) and the unfiltered list shared one slot and served each
-  // other's content. Both are appended ONLY when present so existing
-  // (category/featured-free) keys keep their exact shape and stay hit-compatible.
+  // other's content. Both are appended ONLY when present, so an absent
+  // dimension adds nothing to the key.
   if (query.category) {
     type += `:cat:${query.category}`;
   }
@@ -127,8 +129,10 @@ export function buildPublicContentCacheType(
  *
  * Search and creatorId are bypassed:
  * - search: unbounded variant space, would pollute KV
- * - creatorId: lower-volume per-creator filter; skipping avoids key
- *   explosion
+ * - creatorId: a correctness rule, not tuning. The data-slot key carries no
+ *   creator, so a creator-filtered org read cached here would collide with
+ *   the org-wide slot and serve the whole org's list (or seed that slot with
+ *   one creator's pieces).
  *
  * Slug lookups (content-detail pages) ARE cached now that
  * `buildPublicContentCacheType` folds the slug into the data-slot key

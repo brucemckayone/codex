@@ -186,7 +186,7 @@ describe('explore +page.server.ts — cache wiring', () => {
       );
 
       const [, typeArg] = cacheGetMock.mock.calls[0];
-      expect(typeArg).toBe('content:auth:v2:top-selling:video:ritual:3');
+      expect(typeArg).toBe('content:auth:v2:top-selling:video:3:cat:ritual');
     });
 
     it('varies the cache type by category so two filter combos cannot collide', async () => {
@@ -207,8 +207,33 @@ describe('explore +page.server.ts — cache wiring', () => {
 
       const [, firstType] = cacheGetMock.mock.calls[0];
       const [, secondType] = cacheGetMock.mock.calls[1];
-      expect(firstType).toBe('content:auth:v2:popular:all:ritual:1');
-      expect(secondType).toBe('content:auth:v2:popular:all:breath:1');
+      expect(firstType).toBe('content:auth:v2:popular:all:1:cat:ritual');
+      expect(secondType).toBe('content:auth:v2:popular:all:1:cat:breath');
+    });
+
+    // A real category value must never produce the unfiltered key: an 'all'
+    // placeholder let ?category=all (which matches nothing) fill the
+    // unfiltered slot and blank that sort's grid for every viewer.
+    it('never lets a category value share the unfiltered slot', async () => {
+      const { load } = await import('../+page.server');
+
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: 'http://lvh.me:3000/explore?sort=popular&category=all',
+        })
+      );
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: 'http://lvh.me:3000/explore?sort=popular',
+        })
+      );
+
+      const [, filtered] = cacheGetMock.mock.calls[0];
+      const [, unfiltered] = cacheGetMock.mock.calls[1];
+      expect(unfiltered).toBe('content:auth:v2:popular:all:1');
+      expect(filtered).not.toBe(unfiltered);
     });
 
     it('forwards category to the browse endpoint (it is part of contentQuerySchema)', async () => {

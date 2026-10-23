@@ -12,6 +12,7 @@
 import { isReservedSubdomain as isReservedSubdomainInConstants } from '@codex/constants';
 import {
   buildContentUrl as buildContentUrlInner,
+  buildCreatorContentUrl as buildCreatorContentUrlInner,
   buildCreatorsUrl as buildCreatorsUrlInner,
   buildJourneyUrl as buildJourneyUrlInner,
   buildOrgUrl as buildOrgUrlInner,
@@ -57,38 +58,8 @@ export const buildContentUrl = buildContentUrlInner;
 /** Journeys build (Codex-2pryk · WP-0) — sibling of buildContentUrl for course pages. */
 export const buildJourneyUrl = buildJourneyUrlInner;
 
-/**
- * A content card's link on a creator's public pages (Codex-osuqt).
- *
- * Org content opens on its org's subdomain. Personal content (no org) opens
- * on the creator's own detail page, `/@{username}/content/{slug}`:
- * `buildContentUrl`'s bare `/content/{slug}` matches no route on the
- * creators host, so passing it a public-list item 404'd every card. The item
- * carries its org as a nested `organization`, not the flat `organizationSlug`
- * that `buildContentUrl` reads.
- */
-export function buildCreatorContentUrl(
-  currentUrl: URL,
-  username: string,
-  content: {
-    slug?: string | null;
-    id: string;
-    organization?: { slug?: string | null } | null;
-  }
-): string {
-  const organizationSlug = content.organization?.slug;
-  if (organizationSlug) {
-    return buildContentUrlInner(currentUrl, {
-      slug: content.slug,
-      id: content.id,
-      organizationSlug,
-    });
-  }
-  const path = `/@${username}/content/${content.slug ?? content.id}`;
-  return parseHost(currentUrl.hostname).subdomain === 'creators'
-    ? path
-    : buildCreatorsUrlInner(currentUrl, path);
-}
+/** A creator-page card's link (Codex-osuqt): personal pieces on the creators host. */
+export const buildCreatorContentUrl = buildCreatorContentUrlInner;
 
 /**
  * Determine the context type from a hostname.

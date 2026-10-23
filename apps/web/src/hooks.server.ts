@@ -21,7 +21,7 @@ import { dev } from '$app/environment';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { isPublicCdnHost, tryServeCdnAsset } from '$lib/server/cdn-proxy';
-import { errorLogContext } from '$lib/server/error-log-context';
+import { logUnhandledError } from '$lib/server/error-log-context';
 import { validationErrorFor } from '$lib/server/validation-error';
 import { getSubdomainContext } from '$lib/utils/subdomain';
 
@@ -287,12 +287,12 @@ export const handle = sequence(
  * Global error handler
  * Logs errors with request context and tracks in analytics
  */
-export const handleError: HandleServerError = async ({ error, event }) => {
-  // Use centralized logger
-  logger.trackError(
-    error instanceof Error ? error : new Error(String(error)),
-    errorLogContext(error, event)
-  );
+export const handleError: HandleServerError = async ({
+  error,
+  event,
+  status,
+}) => {
+  logUnhandledError(error, event, status);
 
   // In dev mode, expose the real error message for debugging (production
   // keeps the sanitised "unexpected error" message to avoid leaking internals).

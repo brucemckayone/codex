@@ -29,11 +29,15 @@ export const load: PageServerLoad = async ({
   const api = createServerApi(platform, cookies);
 
   // Parse URL search params for filtering and pagination. Bounded to what the
-  // public list accepts (page 1-1000, search trimmed to 255), so a hand-edited
+  // public list accepts (page 1-1000, search trimmed to 255 with no NUL, which
+  // Postgres refuses in text and so was a content-api 500), so a hand-edited
   // URL never reaches content-api as a 400: logReadFailure logs a
   // 4xx at error level as OUR contract bug, and a visitor must not be able to
   // raise that alarm with a URL.
-  const search = (url.searchParams.get('search') ?? '').trim().slice(0, 255);
+  const search = (url.searchParams.get('search') ?? '')
+    .replaceAll('\0', '')
+    .trim()
+    .slice(0, 255);
   const typeFilter = url.searchParams.get('type') ?? 'all';
   const page = Math.min(
     1000,

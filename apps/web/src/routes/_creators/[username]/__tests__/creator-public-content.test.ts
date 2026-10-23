@@ -414,7 +414,10 @@ describe('creator public pages read the public list by creator (Codex-osuqt)', (
     await expect(load(detailEvent())).rejects.toMatchObject({ status: 404 });
     expect(mockLogger.error).toHaveBeenCalledWith(
       'Creator content slug matched no personal or org piece',
-      expect.objectContaining({ creatorId: CREATOR_ID, matchCount: 1 })
+      expect.objectContaining({
+        creatorId: CREATOR_ID,
+        matches: [{ id: 'orphan', organizationId: 'o1' }],
+      })
     );
   });
 
@@ -459,5 +462,30 @@ describe('creator public pages read the public list by creator (Codex-osuqt)', (
       sort: 'newest',
       limit: '5',
     });
+  });
+
+  // Postgres refuses NUL in text: sent on, either was a content-api 500, an
+  // alarm any visitor could raise with a URL.
+  it('the catalogue drops a NUL from the search', async () => {
+    const { load } = await import('../content/+page.server');
+
+    await load(
+      event({
+        url: new URL(
+          'http://lvh.me:3000/@alex-creator/content?search=ps%00alm'
+        ),
+      })
+    );
+
+    expect(sentParams().search).toBe('psalm');
+  });
+
+  it('a slug with a NUL is a 404, never sent', async () => {
+    const { load } = await import('../content/[contentSlug]/+page.server');
+
+    await expect(load(detailEvent('a\0b'))).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(mockGetPublicContent).not.toHaveBeenCalled();
   });
 });

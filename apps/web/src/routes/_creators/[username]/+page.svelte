@@ -28,8 +28,8 @@
   const socialLinks = $derived(profile?.socialLinks ?? null);
   const contentItems = $derived(data.contentItems ?? []);
   // Everything published, not just the newest page of it.
-  const contentTotal = $derived(data.contentTotal ?? contentItems.length);
-  const contentError = $derived(data.contentError ?? false);
+  const contentTotal = $derived(data.contentTotal);
+  const contentError = $derived(data.contentError);
   const organizations = $derived(data.organizations ?? []);
   const initial = $derived(displayName.charAt(0).toUpperCase());
   const hasSocialLinks = $derived(

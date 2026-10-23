@@ -293,6 +293,30 @@ describe('GET /api/content/public/categories — cache write survives', () => {
     expect(await second.json()).toEqual(expected);
     expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(1);
   });
+
+  // Org delete invalidates under the lowercase DB id, so an uppercase read must
+  // key the same slot, or it caches where no invalidation reaches.
+  it('keys an uppercase org id as the lowercase one', async () => {
+    categorySpies.listPublicForOrg.mockResolvedValue([]);
+
+    await dispatch(
+      `/api/content/public/categories?orgId=${OTHER_ORG_ID.toUpperCase()}`
+    );
+    await dispatch(`/api/content/public/categories?orgId=${OTHER_ORG_ID}`);
+
+    expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(1);
+    expect(categorySpies.listPublicForOrg).toHaveBeenCalledWith(OTHER_ORG_ID);
+  });
+
+  it('keys an uppercase org id as the lowercase one for the content list too', async () => {
+    await dispatch(`/api/content/public?orgId=${OTHER_ORG_ID.toUpperCase()}`);
+    await dispatch(`/api/content/public?orgId=${OTHER_ORG_ID}`);
+
+    expect(contentSpies.listPublic).toHaveBeenCalledTimes(1);
+    expect(contentSpies.listPublic.mock.calls[0]?.[0]).toMatchObject({
+      orgId: OTHER_ORG_ID,
+    });
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

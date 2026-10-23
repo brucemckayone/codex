@@ -730,6 +730,22 @@ export const mediaQuerySchema = paginationSchema.extend({
 export type MediaQueryInput = z.infer<typeof mediaQuerySchema>;
 
 /**
+ * The longest content slug a public read accepts. The web detail pages 404 a
+ * longer one before sending it, so the API's 400 never surfaces as a 500.
+ */
+export const PUBLIC_CONTENT_SLUG_MAX = 500;
+
+/**
+ * An org id that keys a KV cache (Codex-osuqt). Postgres compares uuids
+ * case-insensitively, so `?orgId=<UPPERCASE>` read the real rows, but the
+ * cache keyed on the raw string: the rows were cached under a key that no
+ * publish or org-delete invalidation (which use the lowercase DB id) ever
+ * bumped, and were served stale for the full TTL. Lowercasing gives reads and
+ * invalidations one id.
+ */
+export const orgIdQuerySchema = uuidSchema.transform((id) => id.toLowerCase());
+
+/**
  * Public content query schema (org- or creator-scoped)
  * Used for unauthenticated listing of published content: within an
  * organization (orgId), or by one creator across every org they publish in
@@ -739,8 +755,8 @@ export type MediaQueryInput = z.infer<typeof mediaQuerySchema>;
  */
 export const publicContentQuerySchema = paginationSchema
   .extend({
-    orgId: uuidSchema.optional(),
-    slug: z.string().max(500).optional(),
+    orgId: orgIdQuerySchema.optional(),
+    slug: z.string().max(PUBLIC_CONTENT_SLUG_MAX).optional(),
     contentType: contentTypeEnum.optional(),
     // Topic-category filter — matches a category slug in the same space (org).
     // Powers the landing "Browse by topic" and the /explore ?category= deep

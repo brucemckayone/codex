@@ -16,7 +16,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { content, organizations } from '@codex/database/schema';
+import {
+  categories,
+  content,
+  contentCategories,
+  organizations,
+} from '@codex/database/schema';
 import { ValidationError } from '@codex/service-errors';
 import {
   createUniqueSlug,
@@ -37,6 +42,8 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
   const orgIds: string[] = [];
   const ids = { liveOrg: '', deletedOrg: '', personal: '', followerOnly: '' };
   let liveOrgId = '';
+  let topicSlug = '';
+  let personalTopicId = '';
   let deletedOrgId = '';
   let deletedOrgSlug = '';
   let liveOrgSlug = '';
@@ -93,14 +100,49 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
     ids.followerOnly = (
       await seedPublished(liveOrgId, { isFree: false, isFollowerGated: true })
     ).id;
+    // A topic on the live-org piece, for the enrichment case. Deleting the
+    // org in afterAll cascades to it and to its membership row.
+    topicSlug = `topic-${token}`;
+    const [topic] = await db
+      .insert(categories)
+      .values({
+        creatorId,
+        organizationId: liveOrgId,
+        name: `Topic ${token}`,
+        slug: topicSlug,
+      })
+      .returning({ id: categories.id });
+    if (!topic) throw new Error('failed to create topic');
+    await db
+      .insert(contentCategories)
+      .values({ contentId: ids.liveOrg, categoryId: topic.id });
     deletedOrgId = await seedOrg(new Date());
     const inDeletedOrg = await seedPublished(deletedOrgId);
     ids.deletedOrg = inDeletedOrg.id;
     deletedOrgSlug = inDeletedOrg.slug;
     ids.personal = (await seedPublished(null)).id;
+    // A personal topic on the personal piece: a creator read used to list it,
+    // though nothing reads a creator read's topics. Not cascaded from any org.
+    const [personalTopic] = await db
+      .insert(categories)
+      .values({
+        creatorId,
+        organizationId: null,
+        name: `Personal ${token}`,
+        slug: `personal-${token}`,
+      })
+      .returning({ id: categories.id });
+    if (!personalTopic) throw new Error('failed to create personal topic');
+    personalTopicId = personalTopic.id;
+    await db
+      .insert(contentCategories)
+      .values({ contentId: ids.personal, categoryId: personalTopicId });
   });
 
   afterAll(async () => {
+    await db
+      .delete(categories)
+      .where(inArray(categories.id, [personalTopicId]));
     await db.delete(content).where(inArray(content.id, Object.values(ids)));
     await db.delete(organizations).where(inArray(organizations.id, orgIds));
     await teardownTestDatabase();
@@ -154,6 +196,34 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
       expect.arrayContaining([ids.liveOrg, ids.followerOnly])
     );
     expect(await listed({ orgId: deletedOrgId })).toEqual([]);
+  });
+
+  // Only the org landing reads topic slugs, and a topic is an org's: a creator
+  // read (their profile, never KV-cached) skips the query.
+  it("an org read carries its pieces' topics; a creator read skips them", async () => {
+    const byOrg = (await read({ orgId: liveOrgId })).items.find(
+      (item) => item.id === ids.liveOrg
+    );
+    const byCreator = (await read({ creatorId })).items;
+
+    expect(byOrg?.categorySlugs).toEqual([topicSlug]);
+    // The personal piece is tagged too, so an empty list here means the
+    // query was skipped, not that nothing matched.
+    expect(byCreator.map((item) => item.id)).toContain(ids.personal);
+    for (const item of byCreator) {
+      expect(item.categorySlugs).toEqual([]);
+    }
+  });
+
+  it('the browse catalogue of a deleted org lists nothing', async () => {
+    const { items } = await service.list(
+      creatorId,
+      { organizationId: deletedOrgId, status: 'published', search: token },
+      { page: 1, limit: 50 },
+      { scope: 'browse' }
+    );
+
+    expect(items).toEqual([]);
   });
 
   // The route refuses this too; the service fails closed for any other caller.

@@ -25,7 +25,7 @@ Frontend SvelteKit application for the Codex platform.
 
 ### Routing
 - **MUST** use root-relative paths on org subdomains — slug is in hostname, not URL path
-- **MUST** use `buildContentUrl(page.url, content)` for content links — handles cross-org subdomain routing
+- **MUST** use `buildContentUrl(page.url, content)` for content links — handles cross-org subdomain routing. It reads a FLAT `organizationSlug`, so map a public-list row's `organization?.slug`. On a creator's pages, or for any card that may be personal (no org), use `buildCreatorContentUrl(page.url, username, item)`: `buildContentUrl`'s bare `/content/{slug}` matches no route on the creators host (Codex-osuqt)
 - **MUST** use `buildOrgUrl()` for cross-org navigation — different org = different origin
 - **NEVER** include route group names (`(platform)`, `(space)`, `(auth)`) in hrefs or `goto()`
 
@@ -143,7 +143,7 @@ Rerouting: `bruce-studio.lvh.me:3000/explore` → `_org/bruce-studio/(space)/exp
 
 **Exception:** StudioSwitcher and other cross-org navigation uses `buildOrgUrl()` since it targets a different origin.
 
-**Content links:** Always `buildContentUrl(page.url, content)` from `$lib/utils/subdomain.ts`.
+**Content links:** `buildContentUrl(page.url, content)` from `$lib/utils/subdomain.ts`; on a creator's pages, or for a card that may be personal, `buildCreatorContentUrl(page.url, username, item)`.
 
 ---
 
@@ -664,7 +664,7 @@ import * as m from '$paraglide/messages';
 | `src/lib/client/version-manifest.ts` | `getStaleKeys`, `updateStoredVersions` |
 | `src/lib/client/user-scoped-state.ts` | `reconcileStateOwner`, `clearUserScopedState`, `registerUserScopedReset` — the user-scoped-vs-device-scoped key inventory and the clear-on-identity-change primitive |
 | `src/lib/brand-editor/` | Brand editor store, CSS injection, palette generator, presets |
-| `src/lib/utils/subdomain.ts` | `buildContentUrl`, `buildOrgUrl` |
+| `src/lib/utils/subdomain.ts` | `buildContentUrl`, `buildCreatorContentUrl`, `buildOrgUrl` |
 | `src/lib/remote/*.remote.ts` | Remote function wrappers |
 
 ---

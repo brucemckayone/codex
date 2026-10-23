@@ -1304,3 +1304,22 @@ describe('Codex-osuqt: a creatorId filter takes a user id, not a uuid', () => {
     expect(contentQuerySchema.safeParse({ creatorId }).success).toBe(false);
   });
 });
+
+// The org id keys a KV cache that publish and org delete invalidate under the
+// lowercase DB id. Postgres matches an uppercase uuid, so an uppercase read
+// found the real rows and cached them where no invalidation reached.
+describe('Codex-osuqt: a public orgId is lowercased', () => {
+  const upper = '4D111111-1111-4111-8111-111111111111';
+
+  it('lowercases an uppercase org id', () => {
+    const result = publicContentQuerySchema.parse({ orgId: upper });
+
+    expect(result.orgId).toBe(upper.toLowerCase());
+  });
+
+  it('still refuses an org id that is not a uuid', () => {
+    expect(
+      publicContentQuerySchema.safeParse({ orgId: 'not-a-uuid' }).success
+    ).toBe(false);
+  });
+});

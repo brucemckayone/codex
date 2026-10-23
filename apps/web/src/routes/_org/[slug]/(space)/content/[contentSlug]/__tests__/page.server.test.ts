@@ -193,4 +193,12 @@ describe('org content detail: a 404 means the piece does not exist', () => {
     });
     expect(mockServerGetPublicContent).not.toHaveBeenCalled();
   });
+
+  // Postgres refuses NUL in text: sent on, it was a content-api 500.
+  it('a slug with a NUL is a 404, never sent', async () => {
+    const { load } = await import('../+page.server');
+
+    await expect(load(event('a\0b'))).rejects.toMatchObject({ status: 404 });
+    expect(mockServerGetPublicContent).not.toHaveBeenCalled();
+  });
 });

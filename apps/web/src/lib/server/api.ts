@@ -367,6 +367,9 @@ export function createServerApi(
     options?: RequestInit
   ): Promise<T> {
     const url = `${serverApiUrl(platform, worker)}${path}`;
+    // Logs name the route, never its query: a visitor's search text (and any
+    // other query value) must not reach a perf line or an error message.
+    const logPath = path.split('?')[0];
     const headers: HeadersInit = {
       [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
       ...options?.headers,
@@ -384,7 +387,7 @@ export function createServerApi(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    const timer = logger.startTimer(`api:${worker}${path}`);
+    const timer = logger.startTimer(`api:${worker}${logPath}`);
     let response: Response;
     try {
       response = await fetch(url, {
@@ -398,7 +401,7 @@ export function createServerApi(
         timer.end({ method: options?.method ?? 'GET', status: 408 });
         throw new ApiError(
           408,
-          `Request to ${worker}${path} timed out`,
+          `Request to ${worker}${logPath} timed out`,
           'REQUEST_TIMEOUT'
         );
       }
@@ -490,6 +493,9 @@ export function createServerApi(
       options?: RequestInit
     ): Promise<T> {
       const url = `${serverApiUrl(platform, worker)}${path}`;
+      // Logs name the route, never its query: a visitor's search text (and any
+      // other query value) must not reach a perf line or an error message.
+      const logPath = path.split('?')[0];
       const headers: HeadersInit = {
         [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
         ...options?.headers,
@@ -505,7 +511,7 @@ export function createServerApi(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const timer = logger.startTimer(`api.fetch:${worker}${path}`);
+      const timer = logger.startTimer(`api.fetch:${worker}${logPath}`);
       let response: Response;
       try {
         response = await fetch(url, {
@@ -519,7 +525,7 @@ export function createServerApi(
           timer.end({ method: options?.method ?? 'GET', status: 408 });
           throw new ApiError(
             408,
-            `Request to ${worker}${path} timed out`,
+            `Request to ${worker}${logPath} timed out`,
             'REQUEST_TIMEOUT'
           );
         }

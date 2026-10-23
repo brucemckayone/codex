@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildCreatorContentUrl,
   buildCreatorsUrl,
   buildOrgUrl,
   extractSubdomain,
@@ -247,49 +246,6 @@ describe('Subdomain Utilities', () => {
       expect(buildCreatorsUrl(currentUrl, '/profile/alex')).toBe(
         'https://creators.dev.revelations.studio/profile/alex'
       );
-    });
-  });
-
-  // A card on a creator's public pages (Codex-osuqt). The item is a public-list
-  // row: its org is nested (`organization.slug`), never a flat
-  // `organizationSlug`, which is why `buildContentUrl(url, item)` gave the
-  // creators host a bare `/content/{slug}` that matched no route.
-  describe('buildCreatorContentUrl', () => {
-    const onCreators = new URL('http://creators.lvh.me:3000/@alex');
-
-    it("opens org content on its org's subdomain", () => {
-      expect(
-        buildCreatorContentUrl(onCreators, 'alex', {
-          id: 'c1',
-          slug: 'first-light',
-          organization: { slug: 'studio-alpha' },
-        })
-      ).toBe('http://studio-alpha.lvh.me:3000/content/first-light');
-    });
-
-    it("opens personal content on the creator's own detail page", () => {
-      expect(
-        buildCreatorContentUrl(onCreators, 'alex', {
-          id: 'c2',
-          slug: 'notes',
-          organization: null,
-        })
-      ).toBe('/@alex/content/notes');
-    });
-
-    it('builds a creators-host URL when the card is shown elsewhere', () => {
-      expect(
-        buildCreatorContentUrl(new URL('http://lvh.me:3000/discover'), 'alex', {
-          id: 'c2',
-          slug: 'notes',
-        })
-      ).toBe('http://creators.lvh.me:3000/@alex/content/notes');
-    });
-
-    it('falls back to the id when there is no slug', () => {
-      expect(
-        buildCreatorContentUrl(onCreators, 'alex', { id: 'c3', slug: null })
-      ).toBe('/@alex/content/c3');
     });
   });
 });

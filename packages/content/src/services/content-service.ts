@@ -65,6 +65,7 @@ import {
   ne,
   notExists,
   or,
+  type SQL,
   sql,
 } from 'drizzle-orm';
 import {
@@ -1084,6 +1085,28 @@ export class ContentService extends BaseService {
   }
 
   /**
+   * Content whose org is live (Codex-osuqt), for every public read. Deleting an
+   * org soft-deletes only the org row, so its content stays published: without
+   * this a deleted org's pieces went on being listed, with cards into an org
+   * that 404s. Personal content has no org, so it has no deleted org to match
+   * and is kept. One correlated anti-join on the org's primary key; no or(), so
+   * no undefined branch for and() to drop silently.
+   */
+  private orgIsLive(): SQL {
+    return notExists(
+      this.db
+        .select({ one: sql`1` })
+        .from(organizations)
+        .where(
+          and(
+            eq(organizations.id, content.organizationId),
+            isNotNull(organizations.deletedAt)
+          )
+        )
+    );
+  }
+
+  /**
    * List content with filtering and pagination.
    *
    * **Scope is required** to make the multi-tenant boundary explicit:
@@ -1156,6 +1179,9 @@ export class ContentService extends BaseService {
               // scope deliberately still shows them — a creator must be able to
               // see and manage their own gated practices.
               eq(content.courseOnly, false),
+              // A deleted org's catalogue is not browsable either; its content
+              // stays published when the org is deleted.
+              this.orgIsLive(),
             ]
           : [scopedNotDeleted(content, creatorId)];
 
@@ -1320,27 +1346,11 @@ export class ContentService extends BaseService {
         whereConditions.push(eq(content.organizationId, params.orgId));
       }
 
-      // Only content whose org is live, on every path. Deleting an org
-      // soft-deletes only the org row, so its content stays published: a
-      // creator's profile or /discover would show a card into an org that now
-      // 404s, and an org-scoped read of a deleted org would still list it to a
-      // direct API client (a KV-cached org list is also invalidated on
-      // delete, by organization-api). Personal content has no org, so it has
-      // no deleted org to match and is kept. One correlated anti-join on the
-      // org's primary key; no or(), so no undefined branch to drop silently.
-      whereConditions.push(
-        notExists(
-          this.db
-            .select({ one: sql`1` })
-            .from(organizations)
-            .where(
-              and(
-                eq(organizations.id, content.organizationId),
-                isNotNull(organizations.deletedAt)
-              )
-            )
-        )
-      );
+      // Only content whose org is live, on every path: a creator's profile,
+      // /discover, and an org-scoped read of a deleted org by a direct API
+      // client (a KV-cached org list is also invalidated on delete, by
+      // organization-api).
+      whereConditions.push(this.orgIsLive());
 
       // Optional slug filter (exact match for content detail page)
       if (params.slug) {
@@ -1470,24 +1480,15 @@ export class ContentService extends BaseService {
 
       // Enrich each item with its category (topic) slugs so the landing
       // "Browse by topic" filter can match items to the active topic without a
-      // second round-trip. One extra query keyed on the returned content ids;
-      // space-scoped (org listing → org categories; creatorId only → the
-      // creator's own personal ones) and excluding soft-deleted categories —
-      // mirrors the category FILTER scope above. Items with no membership get
-      // an empty array; so do the org items of a creatorId-only (cross-org)
-      // read, whose profile does not use topics.
+      // second round-trip. One extra query keyed on the returned content ids,
+      // for an org-scoped read only: a topic is an org's, the same scope as
+      // the category filter above, and only the org landing reads the slugs. A
+      // creatorId-only read (a creator's profile, never KV-cached) skips the
+      // query, so its items get an empty array. Soft-deleted categories are
+      // excluded.
       const itemIds = result.items.map((item) => item.id);
-      const categorySpaceScope = params.orgId
-        ? eq(categories.organizationId, params.orgId)
-        : params.creatorId
-          ? and(
-              isNull(categories.organizationId),
-              eq(categories.creatorId, params.creatorId)
-            )
-          : undefined;
-
       const slugsByContentId = new Map<string, string[]>();
-      if (itemIds.length > 0 && categorySpaceScope) {
+      if (itemIds.length > 0 && params.orgId) {
         const slugRows = await this.db
           .select({
             contentId: contentCategories.contentId,
@@ -1502,7 +1503,7 @@ export class ContentService extends BaseService {
             and(
               inArray(contentCategories.contentId, itemIds),
               isNull(categories.deletedAt),
-              categorySpaceScope
+              eq(categories.organizationId, params.orgId)
             )
           );
         for (const row of slugRows) {

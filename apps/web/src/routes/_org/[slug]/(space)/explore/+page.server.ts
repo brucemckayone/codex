@@ -233,7 +233,12 @@ export const load: PageServerLoad = async ({
       // bump it whenever the browse list NARROWS, or slots the old code wrote
       // keep serving the removed fields until their TTL (v2, Codex-osuqt: no
       // body, no creator email).
-      const dataType = `content:auth:v2:${sort}:${contentType ?? 'all'}:${category ?? 'all'}:${page}`;
+      // The category is a `:cat:` suffix only when set, as in public-cache.ts.
+      // An `all` placeholder let `?category=all` (a filter that matches
+      // nothing) share the unfiltered slot, so one signed-in visitor blanked
+      // that sort's grid for every viewer until the TTL.
+      const categoryKey = category ? `:cat:${category}` : '';
+      const dataType = `content:auth:v2:${sort}:${contentType ?? 'all'}:${page}${categoryKey}`;
       contentResult = await cache.get(
         CacheType.COLLECTION_ORG_CONTENT(org.id),
         dataType,

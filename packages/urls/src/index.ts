@@ -3,6 +3,7 @@
 export {
   type BuildJourneyUrlOptions,
   buildContentUrl,
+  buildCreatorContentUrl,
   buildCreatorsUrl,
   buildJourneyUrl,
   buildOrgUrl,

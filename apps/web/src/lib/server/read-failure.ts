@@ -8,19 +8,20 @@ import { ApiError } from '$lib/api/errors';
 import { logger } from '$lib/observability';
 
 /**
+ * The log fields of a failed worker call, shared by every log of one.
+ *
  * A 4xx other than 408 or 429 means OUR request was malformed: a contract bug
- * (a schema change, a renamed parameter, deploy skew), so it logs as an error,
- * with the worker's `details` (each issue's path and static message, never an
- * input value) naming the field it refused. That is how a uuid-only creatorId
- * refused every real creator while the profile said they had published
- * nothing. Anything else (5xx, a timeout, a network failure) is an outage and
- * logs as a warning.
+ * (a schema change, a renamed parameter, deploy skew). Its log carries the
+ * worker's `details` (each issue's path and static message, never an input
+ * value) naming the field it refused, because the message alone is always
+ * "Invalid request data". That is how a uuid-only creatorId refused every real
+ * creator while the profile said they had published nothing. Anything else (a
+ * 5xx, a timeout, a rate limit, a network failure) is an outage.
  */
-export function logReadFailure(
-  message: string,
-  context: Record<string, unknown>,
-  error: unknown
-): void {
+export function apiErrorFields(error: unknown): {
+  ourRequestWasWrong: boolean;
+  fields: { status?: number; code?: string; details?: unknown };
+} {
   const apiError = error instanceof ApiError ? error : undefined;
   const status = apiError?.status;
   const ourRequestWasWrong =
@@ -29,12 +30,27 @@ export function logReadFailure(
     status < 500 &&
     status !== 408 &&
     status !== 429;
+  return {
+    ourRequestWasWrong,
+    fields: {
+      status,
+      code: apiError?.code,
+      details: ourRequestWasWrong ? apiError?.details : undefined,
+    },
+  };
+}
+
+/** Logs a survived read failure: our contract bug as an error, an outage as a warning. */
+export function logReadFailure(
+  message: string,
+  context: Record<string, unknown>,
+  error: unknown
+): void {
+  const { ourRequestWasWrong, fields } = apiErrorFields(error);
   const level = ourRequestWasWrong ? 'error' : 'warn';
   logger[level](message, {
     ...context,
-    status,
-    code: apiError?.code,
-    details: ourRequestWasWrong ? apiError?.details : undefined,
+    ...fields,
     error: error instanceof Error ? error.message : String(error),
   });
 }

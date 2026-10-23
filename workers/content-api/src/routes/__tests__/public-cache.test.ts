@@ -168,8 +168,7 @@ describe('buildPublicContentCacheType', () => {
         featured: true,
       })
     ).toBe('content:public:v2:newest:20:1:all:cat:fiction:feat:true');
-    // ...and a query with neither new dimension keeps its exact prior shape,
-    // so existing cache entries stay hit-compatible.
+    // ...and a query with neither dimension adds nothing for them to the key.
     expect(
       buildPublicContentCacheType({
         sort: 'newest',
