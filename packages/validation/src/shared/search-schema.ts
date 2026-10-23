@@ -43,7 +43,10 @@ import { z } from 'zod';
  */
 export const SEARCH_MIN_QUERY_LENGTH = 3;
 
-/** The longest search a list accepts, after NUL is dropped and it is trimmed. */
+/**
+ * The default search cap, after NUL is dropped and the value trimmed: the
+ * content lists take 255. Some facets pass a smaller one.
+ */
 export const SEARCH_MAX_QUERY_LENGTH = 255;
 
 // ============================================================================

@@ -47,7 +47,14 @@ export const load: PageServerLoad = async ({
   // OUR contract bug, and a visitor must not be able to raise that alarm with
   // a URL.
   const search = boundSearchParam(url.searchParams.get('search'));
-  const typeFilter = url.searchParams.get('type') ?? 'all';
+  // The filter the page states is the one it applied: an unknown `?type=`
+  // applies none, so it reads as "all" (no tab lit, no bogus `type=` carried
+  // into the pagination links).
+  const typeParam = url.searchParams.get('type');
+  const typeFilter =
+    typeParam !== null && CONTENT_TYPE_BY_FILTER.has(typeParam)
+      ? typeParam
+      : 'all';
   const page = clampPageParam(url.searchParams.get('page'));
 
   // The creator's public profile from identity-api. Note this used to read

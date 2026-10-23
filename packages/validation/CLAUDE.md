@@ -38,8 +38,8 @@ app.get('/content/:id',
 - `contentQuerySchema` — paginated list (status, type, creatorId, visibility filters)
 - `publicContentQuerySchema` — public-facing list (published only)
 - `publicContentArgsSchema` — the web `getPublicContent` remote query's args, built from the same field rules as `publicContentQuerySchema`
-- `publicContentSlugSchema` (`PUBLIC_CONTENT_SLUG_MAX`), `topicSlugSchema` (`TOPIC_SLUG_MAX`), `orgIdQuerySchema` (lowercased, for KV keys) — field rules shared by the API, the remote query and the web pages that 404 before calling
-- `discoverContentQuerySchema` — discover/browse with category filter
+- `publicContentSlugSchema` (`PUBLIC_CONTENT_SLUG_MAX`), `topicSlugSchema` (`TOPIC_SLUG_MAX`), `orgIdQuerySchema` (lowercased, for KV keys), `PUBLIC_LIST_MAX_LIMIT` (50: the API caps to it, the remote refuses past it) — field rules shared by the API, the remote query and the web pages that 404 before calling
+- `discoverContentQuerySchema` — platform-wide published list (type, search, sort)
 - `uploadRequestSchema` — presigned upload request (filename, mimeType, fileSize)
 - `createMediaItemSchema` — register media upload
 - `updateMediaItemSchema` — update media metadata

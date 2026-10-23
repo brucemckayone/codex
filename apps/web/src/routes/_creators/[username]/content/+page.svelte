@@ -114,7 +114,7 @@
       <input
         type="search"
         id="creator-content-search"
-        name="q"
+        name="search"
         autocomplete="off"
         class="search-input"
         placeholder={m.creator_content_search_placeholder()}

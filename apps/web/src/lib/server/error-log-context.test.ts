@@ -19,6 +19,7 @@ vi.mock('$lib/observability', () => ({ logger: mockLogger }));
 import {
   clientErrorBody,
   errorLogContext,
+  logRefusedRemoteInput,
   logUnhandledError,
 } from './error-log-context';
 
@@ -129,13 +130,18 @@ describe('logUnhandledError', () => {
       405
     );
 
-    expect(mockLogger.warn).toHaveBeenCalled();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.not.objectContaining({ staleRemoteForm: true })
+    );
     expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
 
   // Kit refuses a native POST to a renamed or moved remote form() with the
-  // same 405 text, but that is a deploy of ours: tracked.
-  it("tracks a stale remote form's 405 as an error", () => {
+  // same 405 text. Its `?/remote=` param is the client's to choose, so
+  // tracking it would let any script raise error-level alarms: a warning,
+  // flagged so a deploy's stale forms can be counted.
+  it("flags a stale remote form's 405 on a warning, never tracks it", () => {
     logUnhandledError(
       new Error('POST method not allowed. No form actions exist for this page'),
       event(
@@ -145,8 +151,62 @@ describe('logUnhandledError', () => {
       405
     );
 
-    expect(mockLogger.trackError).toHaveBeenCalled();
-    expect(mockLogger.warn).not.toHaveBeenCalled();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ staleRemoteForm: true })
+    );
+    expect(mockLogger.trackError).not.toHaveBeenCalled();
+  });
+
+  // Kit takes a POST as a remote-form submit only when the param has a value.
+  it('does not flag an empty ?/remote= as a remote form', () => {
+    logUnhandledError(
+      new Error('POST method not allowed. No form actions exist for this page'),
+      event('http://lvh.me:3000/?/remote=', 'POST'),
+      405
+    );
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.not.objectContaining({ staleRemoteForm: true })
+    );
+  });
+});
+
+describe('logRefusedRemoteInput', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // Kit refuses a remote function's input with an HttpError that never
+  // reaches handleError: without this a page of ours sending what a schema
+  // refuses left no trace. For a remote call Kit sets `event.url` to the
+  // calling page; the request keeps the function's own URL and payload.
+  it('names the page, the function and the refused fields, never their values', () => {
+    logRefusedRemoteInput(
+      [
+        { message: 'Slug must not contain NUL', path: ['slug'] },
+        { message: 'Too big', path: [{ key: 'page' }] },
+      ],
+      {
+        request: new Request(
+          'http://studio-alpha.lvh.me:3000/_app/remote/1wvwy0x/getPublicContent?payload=c2VjcmV0'
+        ),
+        url: new URL('http://studio-alpha.lvh.me:3000/explore'),
+        locals: { requestId: 'req-1' },
+      } as Parameters<typeof logRefusedRemoteInput>[1]
+    );
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Remote function input refused',
+      expect.objectContaining({
+        url: '/explore',
+        remote: '/_app/remote/1wvwy0x/getPublicContent',
+        issues: ['slug', 'page'],
+      })
+    );
+    expect(JSON.stringify(mockLogger.warn.mock.calls)).not.toContain(
+      'c2VjcmV0'
+    );
+    expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
 });
 

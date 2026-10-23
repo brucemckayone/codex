@@ -63,7 +63,8 @@ describe('the migrated remote declarations use the shared builder', () => {
   // The `search:` declarations that live in apps/web/src/lib/remote. A fourth,
   // content.remote.ts's `getPublicContent` args, moved to @codex/validation as
   // `publicContentArgsSchema` (Codex-osuqt), where search-schema.test.ts's
-  // sweep of that package covers it.
+  // sweep of that package covers it; content.remote.test.ts pins the remote
+  // to that schema.
   const REMOTE_DECLARATIONS = [
     'lib/remote/admin.remote.ts',
     'lib/remote/journeys.remote.ts',

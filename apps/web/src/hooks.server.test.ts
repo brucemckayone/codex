@@ -33,10 +33,12 @@ import {
 } from '@codex/constants';
 import type { Handle } from '@sveltejs/kit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { logger } from '$lib/observability';
 import { isPublicCdnHost } from '$lib/server/cdn-proxy';
 import {
   handle,
   handleError,
+  handleValidationError,
   junkHostHook,
   shouldShortCircuitHost,
 } from './hooks.server';
@@ -410,5 +412,34 @@ describe('handleError — the body a visitor sees', () => {
       message: 'An unexpected error occurred',
       code: 'INTERNAL_ERROR',
     });
+  });
+});
+
+// Kit refuses a remote function's input with an HttpError, which never reaches
+// handleError: this hook is the only place the refusal can be logged.
+describe('handleValidationError — a refused remote input', () => {
+  it('logs the refused fields and still tells the caller which part failed', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+
+    const body = await handleValidationError({
+      issues: [{ message: 'Slug must not contain NUL', path: ['slug'] }],
+      event: {
+        url: new URL('http://lvh.me:3000/_app/remote/abc/getPublicContent'),
+        request: new Request(
+          'http://lvh.me:3000/_app/remote/abc/getPublicContent'
+        ),
+        locals: { requestId: 'req-1' },
+      },
+    } as never);
+
+    expect(body).toEqual({
+      message: 'Slug must not contain NUL',
+      code: 'VALIDATION_ERROR',
+    });
+    expect(warn).toHaveBeenCalledWith(
+      'Remote function input refused',
+      expect.objectContaining({ issues: ['slug'] })
+    );
+    warn.mockRestore();
   });
 });

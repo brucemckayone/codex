@@ -789,6 +789,12 @@ export const topicSlugSchema = z
 const publicContentSortSchema = z.enum(['newest', 'oldest', 'title']);
 
 /**
+ * The most items one page of a public list holds. The API caps a larger
+ * `limit` to it; the remote query refuses one, since only our pages call it.
+ */
+export const PUBLIC_LIST_MAX_LIMIT = 50;
+
+/**
  * Public content query schema (org- or creator-scoped)
  * Used for unauthenticated listing of published content: within an
  * organization (orgId), or by one creator across every org they publish in
@@ -832,7 +838,7 @@ export const publicContentQuerySchema = paginationSchema
   })
   .transform((data) => ({
     ...data,
-    limit: Math.min(data.limit, 50),
+    limit: Math.min(data.limit, PUBLIC_LIST_MAX_LIMIT),
   }));
 
 export type PublicContentQueryInput = z.infer<typeof publicContentQuerySchema>;
@@ -851,7 +857,13 @@ export const publicContentArgsSchema = z.object({
   orgId: orgIdQuerySchema,
   slug: publicContentSlugSchema.optional(),
   page: z.number().int().min(1).max(PAGINATION_MAX_PAGE).default(1).optional(),
-  limit: z.number().int().min(1).max(50).default(20).optional(),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(PUBLIC_LIST_MAX_LIMIT)
+    .default(20)
+    .optional(),
   contentType: contentTypeEnum.optional(),
   category: topicSlugSchema.optional(),
   search: createSearchQuerySchema(SEARCH_MAX_QUERY_LENGTH),
@@ -868,12 +880,12 @@ export const publicContentArgsSchema = z.object({
 export const discoverContentQuerySchema = paginationSchema
   .extend({
     contentType: contentTypeEnum.optional(),
-    search: createSearchQuerySchema(255),
-    sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
+    search: createSearchQuerySchema(SEARCH_MAX_QUERY_LENGTH),
+    sort: publicContentSortSchema.default('newest'),
   })
   .transform((data) => ({
     ...data,
-    limit: Math.min(data.limit, 50),
+    limit: Math.min(data.limit, PUBLIC_LIST_MAX_LIMIT),
   }));
 
 export type DiscoverContentQueryInput = z.infer<

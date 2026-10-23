@@ -13,6 +13,7 @@
 import type { RequestEvent } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import { apiErrorFields } from './read-failure';
+import { issuePaths, type ValidationIssue } from './validation-error';
 
 type LoggedEvent = Pick<RequestEvent, 'request' | 'url' | 'locals'>;
 
@@ -35,33 +36,35 @@ export function errorLogContext(
  * SvelteKit's own refusals that a crawler or a scanner, not our code, causes:
  * the 404 for a URL no route matches (`Not found: /path`), and the 405 for a
  * POST to a page with no form actions at all (`… No form actions exist for
- * this page`). A deploy of ours is not noise: a renamed action's 404 (`No
- * action with name …`), and a native POST to a remote `form()` that was
- * renamed or moved, which Kit refuses with that same 405 text. Kit marks a
- * remote-form POST with a `?/remote=` param, which is how the two are told
- * apart.
+ * this page`). A renamed action's 404 (`No action with name …`) is a deploy
+ * of ours, so it is not noise.
  */
-function isCrawlerNoise(
-  error: unknown,
-  event: LoggedEvent,
-  responseStatus: number
-): boolean {
+function isCrawlerNoise(error: unknown, responseStatus: number): boolean {
   if (!(error instanceof Error)) return false;
   if (responseStatus === 404) return error.message.startsWith('Not found:');
   if (responseStatus === 405) {
-    return (
-      !event.url.searchParams.has('/remote') &&
-      error.message.includes('No form actions exist')
-    );
+    return error.message.includes('No form actions exist');
   }
   return false;
+}
+
+/**
+ * True for a POST Kit handled as a remote `form()` submit: it does so only
+ * when `?/remote=` has a value. Kit refuses a native submit to a remote form a
+ * deploy renamed or moved with the same "no form actions" 405 a scanner gets.
+ * The client chooses that param, so the 405 cannot be tracked (any script
+ * could raise error-level alarms); it is a warning flagged `staleRemoteForm`,
+ * whose rate after a deploy is the signal.
+ */
+function isRemoteFormPost(event: LoggedEvent): boolean {
+  return Boolean(event.url.searchParams.get('/remote'));
 }
 
 /**
  * Logs an error SvelteKit hands `handleError`. It is also called for every
  * unmatched route and every POST to a page without actions: a crawler's
  * noise is a warning, not a crash. Every other error is tracked, including a
- * renamed form action's 404 and a stale remote form's 405.
+ * renamed form action's 404.
  */
 export function logUnhandledError(
   error: unknown,
@@ -69,17 +72,43 @@ export function logUnhandledError(
   responseStatus: number
 ): void {
   const context = errorLogContext(error, event, responseStatus);
-  if (isCrawlerNoise(error, event, responseStatus)) {
-    logger.warn(
-      error instanceof Error ? error.message : String(error),
-      context
-    );
+  if (isCrawlerNoise(error, responseStatus)) {
+    const staleRemoteForm = responseStatus === 405 && isRemoteFormPost(event);
+    logger.warn(error instanceof Error ? error.message : String(error), {
+      ...context,
+      ...(staleRemoteForm && { staleRemoteForm }),
+    });
     return;
   }
   logger.trackError(
     error instanceof Error ? error : new Error(String(error)),
     context
   );
+}
+
+/**
+ * Logs a remote function's refused input (Codex-osuqt). Kit refuses it with
+ * an HttpError, which never reaches `handleError`, so a page of ours sending
+ * what a schema refuses (contract drift) left no trace. A warning, not
+ * tracked: a remote function is a public endpoint any visitor can call. The
+ * issue paths only, never the values.
+ *
+ * For a remote call Kit sets `event.url` to the page that made it, so the
+ * function is named from the request's own path (`/_app/remote/<id>`), without
+ * its `?payload=`, which carries the refused values.
+ */
+export function logRefusedRemoteInput(
+  issues: readonly ValidationIssue[],
+  event: LoggedEvent
+): void {
+  logger.warn('Remote function input refused', {
+    requestId: event.locals.requestId,
+    host: event.url.host,
+    url: event.url.pathname,
+    remote: new URL(event.request.url).pathname,
+    method: event.request.method,
+    issues: issuePaths(issues),
+  });
 }
 
 /**

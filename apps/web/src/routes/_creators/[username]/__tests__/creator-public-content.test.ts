@@ -491,20 +491,22 @@ describe('creator public pages read the public list by creator (Codex-osuqt)', (
 
   // An object literal answers `constructor` and `toString` from its
   // prototype, so these were sent as a content type the API refused with a 400.
+  // The page then states the filter it applied: none, so "all".
   it.each([
     'constructor',
     'toString',
     '__proto__',
     'nonsense',
-  ])('the catalogue sends no content type for ?type=%s', async (type) => {
+  ])('the catalogue applies and states no type for ?type=%s', async (type) => {
     const { load } = await import('../content/+page.server');
 
-    await load(
+    const data = (await load(
       event({
         url: new URL(`http://lvh.me:3000/@alex-creator/content?type=${type}`),
       })
-    );
+    )) as { typeFilter: string };
 
     expect(sentParams()).not.toHaveProperty('contentType');
+    expect(data.typeFilter).toBe('all');
   });
 });

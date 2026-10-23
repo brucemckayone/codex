@@ -23,6 +23,7 @@ import { createServerApi } from '$lib/server/api';
 import { isPublicCdnHost, tryServeCdnAsset } from '$lib/server/cdn-proxy';
 import {
   clientErrorBody,
+  logRefusedRemoteInput,
   logUnhandledError,
 } from '$lib/server/error-log-context';
 import { validationErrorFor } from '$lib/server/validation-error';
@@ -317,7 +318,13 @@ export const handleError: HandleServerError = async ({
 
 /**
  * A remote function's input failed its schema: say which part and why, not
- * SvelteKit's bare "Bad Request" (see `validationErrorFor`).
+ * SvelteKit's bare "Bad Request" (see `validationErrorFor`), and log it, since
+ * this refusal never reaches `handleError`.
  */
-export const handleValidationError: HandleValidationError = ({ issues }) =>
-  validationErrorFor(issues);
+export const handleValidationError: HandleValidationError = ({
+  issues,
+  event,
+}) => {
+  logRefusedRemoteInput(issues, event);
+  return validationErrorFor(issues);
+};

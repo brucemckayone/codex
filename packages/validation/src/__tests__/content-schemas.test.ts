@@ -1416,6 +1416,15 @@ describe('Codex-osuqt: the remote query refuses what the API refuses', () => {
     expect(publicContentQuerySchema.safeParse(args).success).toBe(false);
   });
 
+  // The API caps an oversized page silently; only our pages call the remote,
+  // so one there is our bug and is refused.
+  it('refuses a limit the API would cap', () => {
+    expect(
+      publicContentArgsSchema.safeParse({ orgId, limit: 51 }).success
+    ).toBe(false);
+    expect(publicContentQuerySchema.parse({ orgId, limit: 51 }).limit).toBe(50);
+  });
+
   it('lowercases the org id, as the API keys its cache', () => {
     expect(
       publicContentArgsSchema.parse({ orgId: orgId.toUpperCase() }).orgId
