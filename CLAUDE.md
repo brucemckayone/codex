@@ -296,6 +296,7 @@ export const load: PageServerLoad = async ({ parent }) => {
 - **MUST** use design tokens in skeleton CSS (shimmer animation, `--color-surface-secondary`)
 - With JS disabled, SvelteKit waits for all promises before sending HTML (graceful degradation)
 - Streaming only works in `+page.server.ts`, NOT `+page.ts` (universal loads)
+- A remote query (`getPublicContent`, `getCreators` above) serialises its SSR result into the page whatever the load returns, so trimming its items in the load hides nothing from view-source. A load that must withhold a field (a body, an email) reads through `createServerApi(...)` instead (Codex-osuqt)
 - One streamed promise anywhere in the branch puts the WHOLE response, error pages included, on SvelteKit's streaming arm. In 2.x that arm dropped the status, so every error page under the org layout (which streams `subscriptionContext`) went out as HTTP 200 (Codex-nqop3). `patches/@sveltejs__kit@2.55.0.patch` restores it and `apps/web/e2e/org-error-status.spec.ts` holds it. A Kit bump must re-key or drop that patch; Kit 3 passes the status itself
 
 **Pages using streaming:** Org landing, content detail (org + creator), pricing, journey detail, creator studio earnings.

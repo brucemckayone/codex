@@ -13,6 +13,7 @@
 import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { withoutRawBody } from '$lib/server/content-detail';
 import type { PageServerLoad } from './$types';
 import { logCreatorContentFailure } from './content-failure';
 
@@ -62,7 +63,7 @@ export const load: PageServerLoad = async ({
     title: string;
     slug: string;
     description: string | null;
-    contentType: string;
+    contentType: 'video' | 'audio' | 'written';
     thumbnailUrl?: string | null;
     priceCents?: number | null;
     mediaItem?: {
@@ -101,7 +102,8 @@ export const load: PageServerLoad = async ({
     params.set('sort', 'newest');
 
     const contentResult = await api.content.getPublicContent(params);
-    contentItems = contentResult?.items ?? [];
+    // Cards draw metadata only; no body reaches this page's HTML.
+    contentItems = (contentResult?.items ?? []).map(withoutRawBody);
     contentTotal = contentResult?.pagination?.total ?? contentItems.length;
   } catch (err) {
     logCreatorContentFailure(

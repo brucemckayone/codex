@@ -29,7 +29,7 @@ gate rejects it.
 
 | Method | Path | Policy | Notes |
 |---|---|---|---|
-| GET | `/api/content/public` | `auth: 'none'` | List published content for org (orgId or slug required) |
+| GET | `/api/content/public` | `auth: 'none'` | List published content for an org or a creator (orgId, creatorId or slug required; `category` needs orgId). Only a by-slug read of a free piece carries its body |
 | GET | `/api/content/public/discover` | `auth: 'none'` | Platform-wide content browse |
 
 ### Media (`/api/media`)

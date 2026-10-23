@@ -684,6 +684,14 @@ app.delete(
             obs: ctx.obs,
           });
           invalidations.push(invalidateOrgPublicCaches(cache, org.slug));
+          // content-api caches the org's public content list and its topics
+          // under the org's ID for up to 2h, so a deleted org's catalogue went
+          // on being served to direct API clients until then. Bump both so
+          // the next read misses and listPublic's live-org filter applies.
+          invalidations.push(
+            cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(org.id)),
+            cache.invalidate(CacheType.CATEGORIES(org.id))
+          );
           // Drop the `slug -> id` entry too — its 24h TTL is a backstop, far too
           // long to rely on here — so the freed hostname
           // stops resolving from cache (Codex-kgrdp.23 defect 1).

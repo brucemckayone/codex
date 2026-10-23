@@ -34,7 +34,8 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
   let service: ContentService;
   let creatorId: string;
   const orgIds: string[] = [];
-  const ids = { liveOrg: '', deletedOrg: '', personal: '' };
+  const ids = { liveOrg: '', deletedOrg: '', personal: '', followerOnly: '' };
+  let liveOrgId = '';
   let deletedOrgId = '';
   let deletedOrgSlug = '';
   let liveOrgSlug = '';
@@ -54,7 +55,8 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
   }
 
   async function seedPublished(
-    organizationId: string | null
+    organizationId: string | null,
+    gate: { isFree?: boolean; isFollowerGated?: boolean } = {}
   ): Promise<{ id: string; slug: string }> {
     const slug = createUniqueSlug('piece');
     const [row] = await db
@@ -65,8 +67,10 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
         title: `Piece ${token}`,
         slug,
         contentType: 'written',
+        contentBody: `article body ${token}`,
         status: 'published',
         publishedAt: new Date(),
+        ...gate,
       })
       .returning({ id: content.id });
     if (!row) throw new Error('failed to create content');
@@ -81,9 +85,13 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
     if (!creator) throw new Error('failed to seed creator');
     creatorId = creator;
 
-    const inLiveOrg = await seedPublished(await seedOrg(null));
+    liveOrgId = await seedOrg(null);
+    const inLiveOrg = await seedPublished(liveOrgId);
     ids.liveOrg = inLiveOrg.id;
     liveOrgSlug = inLiveOrg.slug;
+    ids.followerOnly = (
+      await seedPublished(liveOrgId, { isFree: false, isFollowerGated: true })
+    ).id;
     deletedOrgId = await seedOrg(new Date());
     const inDeletedOrg = await seedPublished(deletedOrgId);
     ids.deletedOrg = inDeletedOrg.id;
@@ -146,5 +154,54 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
       expect(item.creator).toBeDefined();
       expect(item.creator).not.toHaveProperty('email');
     }
+  });
+
+  // A catalogue read serialises into anonymous HTML, and it lists gated rows
+  // alongside free ones. The follower-only row is the one that matters.
+  it('a catalogue read carries no body, gated or free', async () => {
+    const { items } = await read({ creatorId });
+
+    expect(items.map((item) => item.id)).toContain(ids.followerOnly);
+    for (const item of items) {
+      expect(item.contentBody).toBeNull();
+      expect(item.contentBodyJson).toBeNull();
+    }
+  });
+
+  // The positive control: the detail page renders a free piece's article from
+  // this read, so a strip that also emptied it would pass the case above.
+  it('a by-slug read of a free piece keeps its body', async () => {
+    const { items } = await read({ creatorId, slug: liveOrgSlug });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.contentBody).toBe(`article body ${token}`);
+  });
+
+  const browse = (scope: 'studio' | 'browse') =>
+    service.list(
+      creatorId,
+      { organizationId: liveOrgId, status: 'published', search: token },
+      { page: 1, limit: 50 },
+      { scope }
+    );
+
+  // Browse answers any signed-in viewer, entitled or not.
+  it('the browse catalogue carries no body and no creator email', async () => {
+    const { items } = await browse('browse');
+
+    expect(items.map((item) => item.id)).toContain(ids.followerOnly);
+    for (const item of items) {
+      expect(item.contentBody).toBeNull();
+      expect(item.contentBodyJson).toBeNull();
+      expect(item.creator).not.toHaveProperty('email');
+    }
+  });
+
+  it("the studio list keeps the creator's own bodies and email", async () => {
+    const { items } = await browse('studio');
+    const followerOnly = items.find((item) => item.id === ids.followerOnly);
+
+    expect(followerOnly?.contentBody).toBe(`article body ${token}`);
+    expect(followerOnly?.creator).toHaveProperty('email');
   });
 });

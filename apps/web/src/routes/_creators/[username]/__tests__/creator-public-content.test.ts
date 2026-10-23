@@ -197,10 +197,11 @@ describe('creator public pages read the public list by creator (Codex-osuqt)', (
 
     await expect(load(detailEvent())).rejects.toMatchObject({ status: 404 });
 
+    // Every match, not the newest one: the page picks the personal piece.
     expect(sentParams()).toEqual({
       creatorId: CREATOR_ID,
       slug: 'first',
-      limit: '1',
+      limit: '50',
     });
     expect(mockStudioList).not.toHaveBeenCalled();
   });
@@ -253,5 +254,100 @@ describe('creator public pages read the public list by creator (Codex-osuqt)', (
     expect(data.content.contentBodyJson).toBeNull();
     expect(data.contentBodyHtml).toBeNull();
     expect(JSON.stringify(data)).not.toContain('the paid curriculum');
+  });
+
+  // The list pages draw cards from metadata; the items serialise verbatim into
+  // the anonymous HTML, so a body must never ride along.
+  it.each([
+    ['the profile', '../+page.server'],
+    ['the catalogue', '../content/+page.server'],
+  ])('%s ships no body in its items', async (_page, path) => {
+    mockGetPublicContent.mockResolvedValueOnce({
+      items: [
+        {
+          id: 'c5',
+          title: 'Follower piece',
+          slug: 'follower-piece',
+          isFree: true,
+          isFollowerGated: true,
+          contentBody: 'a locked article',
+          contentBodyJson: { type: 'doc' },
+          organization: null,
+        },
+      ],
+      pagination: { page: 1, limit: 12, total: 1, totalPages: 1 },
+    });
+    const { load } = await import(path);
+
+    const data = await load(event());
+
+    expect(JSON.stringify(data)).not.toContain('a locked article');
+    expect(JSON.stringify(data)).not.toContain('"type":"doc"');
+  });
+
+  it('the catalogue bounds page and search to what the API accepts', async () => {
+    const { load } = await import('../content/+page.server');
+
+    await load(
+      event({
+        url: new URL(
+          `http://lvh.me:3000/@alex-creator/content?page=1001&search=${' '.repeat(3)}${'x'.repeat(300)}`
+        ),
+      })
+    );
+
+    expect(sentParams().page).toBe('1000');
+    expect(sentParams().search).toBe('x'.repeat(255));
+    expect(mockLogger.error).not.toHaveBeenCalled();
+  });
+
+  // A creator can hold one slug in their personal space AND in each org; this
+  // URL is the personal piece's.
+  it('the detail page prefers the personal piece over a newer org piece', async () => {
+    mockGetPublicContent.mockResolvedValueOnce({
+      items: [
+        {
+          id: 'org-piece',
+          slug: 'first',
+          organizationId: 'o1',
+          organization: { id: 'o1', slug: 'studio-alpha' },
+          isFree: true,
+        },
+        {
+          id: 'personal-piece',
+          slug: 'first',
+          organizationId: null,
+          organization: null,
+          isFree: true,
+        },
+      ],
+      pagination: { page: 1, limit: 50, total: 2, totalPages: 1 },
+    });
+    const { load } = await import('../content/[contentSlug]/+page.server');
+
+    const data = (await load(detailEvent())) as { content: { id: string } };
+
+    expect(data.content.id).toBe('personal-piece');
+    expect(sentParams().limit).toBe('50');
+  });
+
+  it("the detail page sends an org piece to its org's own page", async () => {
+    mockGetPublicContent.mockResolvedValueOnce({
+      items: [
+        {
+          id: 'org-piece',
+          slug: 'first',
+          organizationId: 'o1',
+          organization: { id: 'o1', slug: 'studio-alpha' },
+        },
+      ],
+      pagination: { page: 1, limit: 50, total: 1, totalPages: 1 },
+    });
+    const { load } = await import('../content/[contentSlug]/+page.server');
+
+    await expect(load(detailEvent())).rejects.toMatchObject({
+      status: 302,
+      location: 'http://studio-alpha.lvh.me:3000/content/first',
+    });
   });
 });

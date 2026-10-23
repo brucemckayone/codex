@@ -773,6 +773,13 @@ export const publicContentQuerySchema = paginationSchema
     message: 'One of orgId, creatorId or slug must be provided',
     path: ['orgId'],
   })
+  // A category lives in one space. Without an org the read is cross-org (a
+  // creator's profile spans their orgs and personal space), and matching
+  // only their personal categories would silently drop all their org content.
+  .refine((data) => !data.category || data.orgId, {
+    message: 'category requires orgId',
+    path: ['category'],
+  })
   .transform((data) => ({
     ...data,
     limit: Math.min(data.limit, 50),

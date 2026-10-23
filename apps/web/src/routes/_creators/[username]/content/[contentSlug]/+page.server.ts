@@ -9,7 +9,7 @@
  *   Phase 1: Personal content purchase is blocked by the backend — returns
  *   a friendly error message instead of a generic 500.
  */
-import { error } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
@@ -24,10 +24,12 @@ import {
   withoutRawBody,
 } from '$lib/server/content-detail';
 import type { ContentWithRelations } from '$lib/types';
+import { buildContentUrl } from '$lib/utils/subdomain';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
   params,
+  url,
   locals,
   setHeaders,
   platform,
@@ -69,16 +71,34 @@ export const load: PageServerLoad = async ({
   if (contentSlug.length > 500) {
     error(404, 'Content not found');
   }
+  // One creator can hold this slug once in their personal space AND once per
+  // org (slugs are unique per org and per creator's personal space, not per
+  // creator), so a single newest match could be the wrong piece. This URL is
+  // the PERSONAL piece's (buildCreatorContentUrl): prefer it, and send an org
+  // piece to its canonical page on the org's subdomain, where its brand,
+  // access and checkout live. A 302, not a 301: a personal piece published
+  // later under this slug takes the URL back.
   const contentParams = new URLSearchParams();
   contentParams.set('creatorId', creatorProfile.id);
   contentParams.set('slug', contentSlug);
-  contentParams.set('limit', '1');
+  contentParams.set('limit', '50');
 
   const contentResult = await api.content.getPublicContent(contentParams);
-  const content =
-    (contentResult?.items?.[0] as ContentWithRelations | undefined) ?? null;
+  const matches = (contentResult?.items ?? []) as ContentWithRelations[];
+  const content = matches.find((item) => item.organizationId == null) ?? null;
 
   if (!content) {
+    const orgPiece = matches.find((item) => item.organization?.slug);
+    if (orgPiece?.organization?.slug) {
+      redirect(
+        302,
+        buildContentUrl(url, {
+          slug: orgPiece.slug,
+          id: orgPiece.id,
+          organizationSlug: orgPiece.organization.slug,
+        })
+      );
+    }
     error(404, 'Content not found');
   }
 

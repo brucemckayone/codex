@@ -36,8 +36,9 @@
 import { subscriptionStatusGrantsAccess } from '@codex/constants';
 import type { Cookies } from '@sveltejs/kit';
 import { fail } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
-import { createServerApi } from './api';
+import { createServerApi, type PublicContentListItem } from './api';
 import { ApiError } from './errors';
 
 /**
@@ -245,14 +246,10 @@ export function withoutRawBody<
 /** The server-side API surface returned by `createServerApi`. */
 type ServerApi = ReturnType<typeof createServerApi>;
 
-type PublicContentItem = Awaited<
-  ReturnType<ServerApi['content']['getPublicContent']>
->['items'][number];
-
 /**
  * A detail page's "more from this org" strip: the org's newest pieces, each
  * without its raw body, as a streamed promise that never rejects (the strip
- * just stays empty).
+ * stays empty, and the failure is logged).
  *
  * Through the server API, not the `getPublicContent` remote query, whose SSR
  * result SvelteKit serialises into the page with every body (see
@@ -261,7 +258,7 @@ type PublicContentItem = Awaited<
 export function loadRelatedContent(
   api: ServerApi,
   orgId: string | null | undefined
-): Promise<PublicContentItem[]> {
+): Promise<PublicContentListItem[]> {
   if (!orgId) return Promise.resolve([]);
   const params = new URLSearchParams();
   params.set('orgId', orgId);
@@ -270,7 +267,15 @@ export function loadRelatedContent(
   return api.content
     .getPublicContent(params)
     .then((result) => (result?.items ?? []).map(withoutRawBody))
-    .catch((): PublicContentItem[] => []);
+    .catch((error: unknown): PublicContentListItem[] => {
+      logger.warn('Related content not loaded', {
+        orgId,
+        status: error instanceof ApiError ? error.status : undefined,
+        code: error instanceof ApiError ? error.code : undefined,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    });
 }
 
 /**

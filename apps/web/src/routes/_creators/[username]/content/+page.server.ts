@@ -10,6 +10,7 @@
 import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { withoutRawBody } from '$lib/server/content-detail';
 import { logCreatorContentFailure } from '../content-failure';
 import type { PageServerLoad } from './$types';
 
@@ -26,12 +27,16 @@ export const load: PageServerLoad = async ({
   const username = params.username.replace(/^@/, '');
   const api = createServerApi(platform, cookies);
 
-  // Parse URL search params for filtering and pagination
-  const search = url.searchParams.get('search') ?? '';
+  // Parse URL search params for filtering and pagination. Bounded to what the
+  // public list accepts (page 1-1000, search trimmed to 255), so a hand-edited
+  // URL never reaches content-api as a 400: logCreatorContentFailure logs a
+  // 4xx at error level as OUR contract bug, and a visitor must not be able to
+  // raise that alarm with a URL.
+  const search = (url.searchParams.get('search') ?? '').trim().slice(0, 255);
   const typeFilter = url.searchParams.get('type') ?? 'all';
-  const page = Math.max(
-    1,
-    parseInt(url.searchParams.get('page') || '1', 10) || 1
+  const page = Math.min(
+    1000,
+    Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1)
   );
 
   // The creator's public profile from identity-api. Note this used to read
@@ -53,7 +58,7 @@ export const load: PageServerLoad = async ({
     title: string;
     slug: string;
     description: string | null;
-    contentType: string;
+    contentType: 'video' | 'audio' | 'written';
     thumbnailUrl?: string | null;
     priceCents?: number | null;
     mediaItem?: {
@@ -94,7 +99,8 @@ export const load: PageServerLoad = async ({
     }
 
     const contentResult = await api.content.getPublicContent(contentParams);
-    contentItems = contentResult?.items ?? [];
+    // Cards draw metadata only; no body reaches this page's HTML.
+    contentItems = (contentResult?.items ?? []).map(withoutRawBody);
     totalPages = contentResult?.pagination?.totalPages ?? 1;
     total = contentResult?.pagination?.total ?? 0;
   } catch (err) {

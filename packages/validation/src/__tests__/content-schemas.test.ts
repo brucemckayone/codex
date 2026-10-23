@@ -1258,6 +1258,26 @@ describe('Codex-osuqt: publicContentQuerySchema scopes', () => {
     expect(result.success).toBe(false);
     expect(result.error?.issues[0]?.path).toEqual(['orgId']);
   });
+
+  // A creator-only read spans their orgs; a personal-only category match
+  // would silently drop all their org content.
+  it('refuses a category without an org', () => {
+    const result = publicContentQuerySchema.safeParse({
+      creatorId: userId,
+      category: 'breathwork',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['category']);
+  });
+
+  it('accepts a category within an org', () => {
+    expect(
+      publicContentQuerySchema.safeParse({
+        orgId: uuid,
+        category: 'breathwork',
+      }).success
+    ).toBe(true);
+  });
 });
 
 // users.id is BetterAuth text (32 alphanumerics), never a uuid. Both creatorId

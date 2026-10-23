@@ -63,6 +63,7 @@ import {
   isNotNull,
   isNull,
   ne,
+  notExists,
   or,
   sql,
 } from 'drizzle-orm';
@@ -1234,16 +1235,29 @@ export class ContentService extends BaseService {
             with: {
               mediaItem: true,
               organization: true,
+              // The studio scope is the signed-in creator's own rows, email
+              // included. Browse spans every creator in an org for ANY
+              // signed-in viewer, so it carries no email.
               creator: {
-                columns: {
-                  id: true,
-                  email: true,
-                  name: true,
-                },
+                columns:
+                  scope === 'browse'
+                    ? { id: true, name: true }
+                    : { id: true, email: true, name: true },
               },
             },
           }),
         countQuery: { db: this.db, table: content, where },
+        // Browse is a catalogue for any signed-in viewer (its route checks
+        // sign-in, not entitlement), so it never carries a body. It used to
+        // return the full text of every published paid, tier, follower and
+        // team-only article in the org, and /explore's signed-in sorts put
+        // it in the page: a free account could read them all. Its consumers
+        // (/explore's cards, the studio grant picker) read metadata only.
+        // The studio scope is the creator's own rows and keeps them.
+        mapItem: (item) =>
+          scope === 'browse'
+            ? { ...item, contentBody: null, contentBodyJson: null }
+            : item,
       });
     } catch (error) {
       this.handleError(error, 'list');
@@ -1300,26 +1314,23 @@ export class ContentService extends BaseService {
       // soft-deletes only the org row, so its content stays published: a
       // creator's profile or /discover would show a card into an org that now
       // 404s, and an org-scoped read of a deleted org would still list it to a
-      // direct API client. Personal content has no org and is kept.
-      const liveOrgOrPersonal = or(
-        isNull(content.organizationId),
-        inArray(
-          content.organizationId,
+      // direct API client (a KV-cached org list is also invalidated on
+      // delete, by organization-api). Personal content has no org, so it has
+      // no deleted org to match and is kept. One correlated anti-join on the
+      // org's primary key; no or(), so no undefined branch to drop silently.
+      whereConditions.push(
+        notExists(
           this.db
-            .select({ id: organizations.id })
+            .select({ one: sql`1` })
             .from(organizations)
-            .where(isNull(organizations.deletedAt))
+            .where(
+              and(
+                eq(organizations.id, content.organizationId),
+                isNotNull(organizations.deletedAt)
+              )
+            )
         )
       );
-      // or() is SQL | undefined, and and() drops an undefined silently, which
-      // would quietly lift this filter. Two defined arguments never give
-      // undefined; refuse rather than run unfiltered if that ever changes.
-      if (!liveOrgOrPersonal) {
-        throw new InternalServiceError(
-          'listPublic live-org filter did not build'
-        );
-      }
-      whereConditions.push(liveOrgOrPersonal);
 
       // Optional slug filter (exact match for content detail page)
       if (params.slug) {
@@ -1364,11 +1375,15 @@ export class ContentService extends BaseService {
       // ids and we match via `IN`, so the relational `findMany` below (with its
       // media/creator/org relations) stays intact — no join reshaping needed.
       //
-      // Space scoping: org listing → org categories; personal listing → the
-      // creator's OWN personal categories (scope by creatorId, NOT merely
+      // Space scoping: org listing → org categories; with only a creatorId →
+      // the creator's OWN personal categories (scope by creatorId, NOT merely
       // `organizationId IS NULL`, which would match personal categories across
-      // ALL creators). A bare category slug with neither orgId nor creatorId
-      // can't be space-scoped, so we SKIP the filter rather than perform a
+      // ALL creators). A creatorId-only read is now cross-org (their public
+      // profile, Codex-osuqt), where a personal-only match would silently drop
+      // their org content, so the public route refuses `category` without
+      // orgId (publicContentQuerySchema); that branch is for in-process
+      // callers. A bare category slug with neither orgId nor creatorId can't
+      // be space-scoped, so we SKIP the filter rather than perform a
       // cross-creator personal match. Soft-deleted categories are excluded.
       if (params.category) {
         const categorySpaceScope = params.orgId
@@ -1445,15 +1460,19 @@ export class ContentService extends BaseService {
             },
           }),
         countQuery: { db: this.db, table: content, where },
-        // Strip body columns for any non-free content. The public endpoint is
+        // The body ships only on a by-slug read (a detail page, which renders
+        // it once access allows) of a FREE row. The public endpoint is
         // unauthenticated and KV-cached, so it must never return the text of
-        // gated articles (followers / subscribers / team / paid). Metadata —
-        // title, description, thumbnail, access-policy flags, priceCents,
-        // creator, org, mediaItem — stays so cards and the detail page shell
-        // still render. Authorized callers fetch full rows through the
-        // authenticated `/api/content` endpoint (creator-scoped).
+        // gated articles (followers / subscribers / team / paid). A catalogue
+        // read (no slug: an org's list, /discover, a creator's profile) never
+        // needs a body, so it never carries one whatever the flags: a row
+        // flagged free that also has a gate kept its text there, and every
+        // free article's whole body rode every card grid. A by-slug free row
+        // with a gate still keeps it; that is Codex-039vo. Metadata — title,
+        // description, thumbnail, access-policy flags, priceCents, creator,
+        // org, mediaItem — stays so cards and the detail page shell render.
         mapItem: (item) =>
-          item.isFree
+          params.slug && item.isFree
             ? item
             : { ...item, contentBody: null, contentBodyJson: null },
       });
@@ -1461,9 +1480,11 @@ export class ContentService extends BaseService {
       // Enrich each item with its category (topic) slugs so the landing
       // "Browse by topic" filter can match items to the active topic without a
       // second round-trip. One extra query keyed on the returned content ids;
-      // space-scoped (org listing → org categories; personal → the creator's
-      // own) and excluding soft-deleted categories — mirrors the category
-      // FILTER scope above. Items with no membership get an empty array.
+      // space-scoped (org listing → org categories; creatorId only → the
+      // creator's own personal ones) and excluding soft-deleted categories —
+      // mirrors the category FILTER scope above. Items with no membership get
+      // an empty array; so do the org items of a creatorId-only (cross-org)
+      // read, whose profile does not use topics.
       const itemIds = result.items.map((item) => item.id);
       const categorySpaceScope = params.orgId
         ? eq(categories.organizationId, params.orgId)

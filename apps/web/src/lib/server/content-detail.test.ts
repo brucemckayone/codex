@@ -20,6 +20,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./api', () => ({ createServerApi: vi.fn() }));
 
+const mockLogger = vi.hoisted(() => ({
+  warn: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  trackError: vi.fn(),
+}));
+vi.mock('$lib/observability', () => ({ logger: mockLogger }));
+
 import { createServerApi } from './api';
 import {
   ACCESS_CHECK_FAILED_RESULT,
@@ -27,10 +35,61 @@ import {
   EMPTY_SUB_CONTEXT,
   isPublicContent,
   loadAccessAndProgress,
+  loadRelatedContent,
   loadSubscriptionContext,
   resolveAccessGranted,
 } from './content-detail';
 import { ApiError } from './errors';
+
+// The detail pages' "more from this org" strip (Codex-osuqt review): read
+// through the server API so no remote-query cache carries it, every item
+// without its raw body, and a failure logged rather than swallowed.
+describe('loadRelatedContent', () => {
+  const apiWith = (getPublicContent: ReturnType<typeof vi.fn>) =>
+    ({ content: { getPublicContent } }) as unknown as Parameters<
+      typeof loadRelatedContent
+    >[0];
+
+  it("lists the org's newest five, each without its raw body", async () => {
+    const getPublicContent = vi.fn().mockResolvedValue({
+      items: [{ id: 'r1', contentBody: 'text', contentBodyJson: { a: 1 } }],
+    });
+
+    const items = await loadRelatedContent(apiWith(getPublicContent), 'o1');
+
+    expect(
+      Object.fromEntries(
+        (getPublicContent.mock.calls[0]?.[0] as URLSearchParams).entries()
+      )
+    ).toEqual({ orgId: 'o1', sort: 'newest', limit: '5' });
+    expect(items).toEqual([
+      { id: 'r1', contentBody: null, contentBodyJson: null },
+    ]);
+  });
+
+  it('is empty, with no request, when the piece has no org', async () => {
+    const getPublicContent = vi.fn();
+
+    expect(await loadRelatedContent(apiWith(getPublicContent), null)).toEqual(
+      []
+    );
+    expect(getPublicContent).not.toHaveBeenCalled();
+  });
+
+  it('logs a failure and stays empty instead of rejecting', async () => {
+    const getPublicContent = vi
+      .fn()
+      .mockRejectedValue(new ApiError(503, 'unavailable'));
+
+    expect(await loadRelatedContent(apiWith(getPublicContent), 'o1')).toEqual(
+      []
+    );
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Related content not loaded',
+      expect.objectContaining({ orgId: 'o1', status: 503 })
+    );
+  });
+});
 
 /** A non-null `/stream` payload — only its presence matters to the seam. */
 type StreamResult = NonNullable<Parameters<typeof resolveAccessGranted>[0]>;
