@@ -1,11 +1,13 @@
 -- Codex-2hxff.23 / .48 / .19. The runner applies this file as ONE implicit
 -- transaction, and each DROP CONSTRAINT holds an ACCESS EXCLUSIVE lock on
 -- the table the FK points at (users, organizations, courses, subscriptions)
--- until the file commits. If a long transaction is open on one of them, the
--- migration fails after 5s and rolls back whole, rather than queueing every
--- sign-in and org read behind it; re-run it once the database is quiet.
--- Every FK re-added below was already enforced on the same columns, so the
--- validating scans cannot fail.
+-- until the file commits. lock_timeout bounds only the WAIT for each lock:
+-- if a long transaction is open on one of those tables, the migration fails
+-- after 5s and rolls back whole, instead of holding a queue of sign-ins and
+-- org reads behind its own wait; re-run it once the database is quiet. Once
+-- the locks are held, reads still wait for the validating scans, which take
+-- well under a second at production's size. Every FK re-added below was
+-- already enforced on the same columns, so those scans cannot fail.
 SET lock_timeout = '5s';--> statement-breakpoint
 ALTER TABLE "course_subscriptions" DROP CONSTRAINT "course_subscriptions_user_id_users_id_fk";
 --> statement-breakpoint

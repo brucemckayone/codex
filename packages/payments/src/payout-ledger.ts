@@ -865,9 +865,11 @@ export interface LandedAfterCancel {
 
 /**
  * Stripe may have made the transfer: it never answered (an outage), or the
- * call failed outside Stripe's own error types. A refusal means it did not.
+ * call failed outside Stripe's own error types. A refusal means it did not,
+ * and so does our own GBP guard, which refuses before Stripe is called.
  */
 function mayHaveLanded(failure: TransferFailure): boolean {
+  if (failure.code === 'UNSUPPORTED_CURRENCY') return false;
   return failure.kind === 'outage' || !failure.type.startsWith('Stripe');
 }
 

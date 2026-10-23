@@ -6070,10 +6070,10 @@ export class SubscriptionService extends BaseService {
     const now = new Date();
     const threshold = new Date(now.getTime() - olderThanMinutes * 60 * 1000);
 
-    // We deliberately do NOT join to stripeConnectAccounts here — we want the
-    // sweep to surface orphan pending rows whose Connect account row may have
-    // been re-keyed, and the per-payee lookup below handles the
-    // missing-account case (logs warn, skips).
+    // claimSweepPayees takes only payees with a Connect account row (plus
+    // organisations with no owner): a payee who never onboarded cannot be
+    // paid, and must not take a batch slot from one who can. Rows with no
+    // payee and no organisation are counted and logged there.
     const groups = await this.claimSweepPayees(threshold, limit, now);
 
     const groupsScanned = groups.length;

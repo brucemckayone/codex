@@ -604,5 +604,28 @@ describe('payouts Stripe keeps refusing wait for support', () => {
         expect.objectContaining({ payoutId: id })
       );
     });
+
+    it('our own GBP guard on a cancelled row sent nothing either: no lookup, no hand-reversal alarm', async () => {
+      const id = await failedRow();
+      await db
+        .update(payouts)
+        .set({ status: 'cancelled_by_refund', resolvedAt: new Date() })
+        .where(eq(payouts.id, id));
+
+      expect(
+        await recordTransferFailure(
+          deps,
+          attemptOn(id),
+          new UnsupportedCurrencyError('usd', ['gbp']),
+          context
+        )
+      ).toBeNull();
+
+      expect(stripe.transfers.list).not.toHaveBeenCalled();
+      expect(obs.error).not.toHaveBeenCalledWith(
+        expect.stringContaining('may have landed'),
+        expect.anything()
+      );
+    });
   });
 });
