@@ -90,3 +90,37 @@ describe('org content detail: the load payload carries no raw body', () => {
     expect(data.content.contentBody).toBeNull();
   });
 });
+
+// The read used to end in `.catch(() => null)`, so every content-api outage
+// rendered "Content not found" (a 404 that hides an outage).
+describe('org content detail: a 404 means the piece does not exist', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('no result is a 404', async () => {
+    mockGetPublicContent.mockResolvedValue({ items: [] });
+    const { load } = await import('../+page.server');
+
+    await expect(load(event())).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('a failed read propagates as an error, not a 404', async () => {
+    const outage = new Error('content-api unavailable');
+    mockGetPublicContent.mockRejectedValue(outage);
+    const { load } = await import('../+page.server');
+
+    await expect(load(event())).rejects.toBe(outage);
+  });
+
+  it('a slug longer than the query accepts is a 404, never sent', async () => {
+    const { load } = await import('../+page.server');
+    const longSlug = {
+      ...(event() as unknown as Record<string, unknown>),
+      params: { slug: 'studio-alpha', contentSlug: 'x'.repeat(501) },
+    } as never;
+
+    await expect(load(longSlug)).rejects.toMatchObject({ status: 404 });
+    expect(mockGetPublicContent).not.toHaveBeenCalled();
+  });
+});

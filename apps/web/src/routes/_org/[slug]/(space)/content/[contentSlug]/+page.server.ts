@@ -53,11 +53,19 @@ export const load: PageServerLoad = async ({
   //   1. api.org.getBySlug(orgSlug) — redundant (org already resolved by layout)
   //   2. api.content.list({ organizationId, slug })
   // Now: single public call, no auth needed, CDN-cacheable.
+  //
+  // No result is a 404. A failed request is not: it propagates as a 500, as
+  // the creator detail page's does. A `.catch(() => null)` here used to turn
+  // every content-api outage into "Content not found". A slug longer than the
+  // query accepts (500) names nothing, so it is a 404 before any call.
+  if (contentSlug.length > 500) {
+    error(404, 'Content not found');
+  }
   const contentResult = await getPublicContent({
     orgId: org.id,
     slug: contentSlug,
     limit: 1,
-  }).catch(() => null);
+  });
 
   const content = contentResult?.items?.[0];
   if (!content) {
