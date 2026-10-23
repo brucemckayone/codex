@@ -4,9 +4,11 @@
  * Runs on every request to:
  * 1. Terminate junk reserved hosts (cdn*, preview, …) with a cached 404
  * 2. Serve public CDN assets that the wildcard route shadows off R2
- * 3. Generate request ID for tracing and validate session with Auth Worker
- * 4. Apply security headers
- * 5. Handle global errors
+ * 3. Refuse a POST naming a form action no page can have (?/default,
+ *    ?/valueOf, …) with a 404, before any session work
+ * 4. Generate request ID for tracing and validate session with Auth Worker
+ * 5. Apply security headers
+ * 6. Handle global errors
  */
 
 import { APP_SUBDOMAINS, CACHE_PRESETS, COOKIES } from '@codex/constants';
@@ -26,7 +28,11 @@ import {
   logRefusedRemoteInput,
   logUnhandledError,
 } from '$lib/server/error-log-context';
-import { namesUnservableAction } from '$lib/server/form-action';
+import {
+  isNativeFormSubmit,
+  namedFormAction,
+  namesUnservableAction,
+} from '$lib/server/form-action';
 import { validationErrorFor } from '$lib/server/validation-error';
 import { getSubdomainContext } from '$lib/utils/subdomain';
 
@@ -157,18 +163,36 @@ const cdnAssetHook: Handle = async ({ event, resolve }) => {
 /**
  * Refuses a POST naming a form action no page can have (Codex-osuqt): Kit's
  * reserved `default`, or an `Object.prototype` member such as `?/valueOf`
- * (`namesUnservableAction`). SvelteKit's own handling of those throws, so each
- * was a tracked 500 any client could cause. Answered here, before Kit
- * dispatches it, with the 404 Kit gives any other unknown action, so no
- * error-log rule has to guess which 500s were these. Runs before the session
- * hook: a refused probe costs no session lookup.
+ * (`namesUnservableAction`). Most of those threw inside SvelteKit, a tracked
+ * 500 any client could cause. Refused here with a 404 before Kit dispatches
+ * it, so no error-log rule has to guess which 500s were these.
+ *
+ * A `use:enhance` submit gets an ActionResult-shaped JSON body, which Kit's
+ * `deserialize` can read; a native submit gets plain text. Logged as a
+ * warning naming the action, which is one of a closed set, never the client's
+ * own text. Like junkHostHook, the response carries no app security headers
+ * or request id on purpose: the body is a constant and there is no page. Runs
+ * before the session hook, so a refused probe costs no session lookup.
  */
 export const unservableActionHook: Handle = async ({ event, resolve }) => {
   if (!namesUnservableAction(event.request)) return resolve(event);
-  return new Response('Not Found', {
-    status: 404,
-    headers: { 'content-type': 'text/plain; charset=utf-8' },
+
+  logger.warn('Form action refused before dispatch', {
+    host: event.url.host,
+    url: event.url.pathname,
+    method: event.request.method,
+    refusedAction: namedFormAction(event.request),
   });
+  if (isNativeFormSubmit(event.request)) {
+    return new Response('Not Found', {
+      status: 404,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+  }
+  return Response.json(
+    { type: 'error', error: { message: 'Not Found', code: 'NOT_FOUND' } },
+    { status: 404 }
+  );
 };
 
 /**

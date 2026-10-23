@@ -600,12 +600,13 @@ padding: 12px;
 
 ## Auth on the Frontend
 
-`hooks.server.ts` runs five hooks in sequence:
+`hooks.server.ts` runs six hooks in sequence:
 1. `junkHostHook` — terminates reserved junk hosts (`cdn*`, `preview`, `api`, …) with a cached 404 before any SvelteKit work
 2. `cdnAssetHook` — serves public CDN assets (`cdn-assets*`/`cdn-platform*`) from bound R2
-3. `sessionHook` — validates `codex-session` cookie against auth worker, sets `locals.user`, `locals.session`, `locals.userId`
-4. `securityHook` — applies security headers (`X-Frame-Options`, `X-Content-Type-Options`, etc.)
-5. `cdnRewriteHook` — dev-only: rewrites `localhost:4100` CDN URLs to `nip.io` for LAN mobile access
+3. `unservableActionHook` — answers a POST naming a form action no page can have (`?/default`, or an `Object.prototype` member such as `?/valueOf`) with a 404 before any session work. SvelteKit looks actions up on a plain object, so these were 500s any client could cause (Codex-osuqt)
+4. `sessionHook` — validates `codex-session` cookie against auth worker, sets `locals.user`, `locals.session`, `locals.userId`
+5. `securityHook` — applies security headers (`X-Frame-Options`, `X-Content-Type-Options`, etc.)
+6. `cdnRewriteHook` — dev-only: rewrites `localhost:4100` CDN URLs to `nip.io` for LAN mobile access
 
 Session validation fails gracefully — auth worker unavailable = treat as unauthenticated.
 

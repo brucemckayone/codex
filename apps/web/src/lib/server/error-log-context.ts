@@ -14,7 +14,7 @@
  */
 import type { RequestEvent } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
-import { namedFormAction } from './form-action';
+import { isNativeFormSubmit, namedFormAction } from './form-action';
 import { apiErrorFields } from './read-failure';
 import { issuePaths, type ValidationIssue } from './validation-error';
 
@@ -43,10 +43,9 @@ export function errorLogContext(
  * its Accept header with text/html.
  */
 function isRemoteFormPost(event: LoggedEvent): boolean {
-  const accept = event.request.headers.get('accept') ?? '';
   return (
     Boolean(new URL(event.request.url).searchParams.get('/remote')) &&
-    accept.trimStart().startsWith('text/html')
+    isNativeFormSubmit(event.request)
   );
 }
 
@@ -195,15 +194,14 @@ export function logRefusedRemoteInput(
  * The body a status below 500 shows: SvelteKit's own refusal (an unmatched
  * route, a missing form action, a wrong method), whose `message` ("Not Found")
  * is safe to show. "An unexpected error occurred" told a visitor with a
- * mistyped URL the opposite of what happened. Null at 500 and above, which
- * keep the sanitised body. That includes the 500s {@link isRequestRefusal}
- * counts as refusals, on purpose: Kit's message there is internal text
- * ("action is not a function"), not a reason a visitor can act on.
+ * mistyped URL the opposite of what happened. Null for any other status
+ * (every 500), which keeps the sanitised body. The boundary is
+ * {@link isRequestRefusal}'s, so the body and the log level agree.
  */
 export function clientErrorBody(
   status: number,
   message: string
 ): App.Error | null {
-  if (status >= 500) return null;
+  if (!isRequestRefusal(status)) return null;
   return { message, code: status === 404 ? 'NOT_FOUND' : 'BAD_REQUEST' };
 }

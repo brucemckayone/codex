@@ -1,5 +1,8 @@
 /**
- * Tests for the junk-host short-circuit hook (measured 2026-08-31).
+ * Tests for the server hooks: the junk-host short-circuit (measured
+ * 2026-08-31), the unservable-form-action refusal, the assembled `handle`
+ * sequence, and the bodies and logs of `handleError` and
+ * `handleValidationError` (Codex-osuqt). The junk-host contract:
  *
  * Reserved-but-unmatched subdomains (cdn, cdn-dev, cdn-resources*, preview, …)
  * used to fall through the whole SSR pipeline and render a full 404 page —
@@ -88,11 +91,15 @@ function makeHookEvent(opts: { host: string; method?: string }) {
 /** Minimal input for driving the real `handle` sequence end to end: the
  * resolve stand-in for the router plus the event pieces sessionHook and
  * securityHook touch (cookies.get returning undefined skips the auth call). */
-function makeSequenceInput(opts: { host: string }) {
-  const url = new URL(`https://${opts.host}/some/probe/path`);
+function makeSequenceInput(opts: {
+  host: string;
+  path?: string;
+  method?: string;
+}) {
+  const url = new URL(`https://${opts.host}${opts.path ?? '/some/probe/path'}`);
   const event = {
     url,
-    request: new Request(url),
+    request: new Request(url, { method: opts.method ?? 'GET' }),
     cookies: { get: vi.fn(() => undefined) },
     // Loosely typed: the assertions below read locals.requestId, which only
     // exists once the real sessionHook has run.
@@ -447,13 +454,17 @@ describe('handleValidationError — a refused remote input', () => {
 });
 
 // Kit looks a form action up on a plain object and refuses an explicit
-// `?/default` by throwing, so these POSTs were tracked 500s any client could
-// cause. The hook answers them with a 404 before Kit dispatches them.
+// `?/default` by throwing, so most of these POSTs were tracked 500s any client
+// could cause. The hook answers them with a 404 before Kit dispatches them.
 describe('unservableActionHook', () => {
-  const hookInput = (href: string, method: string) => {
+  const hookInput = (href: string, method: string, accept?: string) => {
     const resolve = vi.fn(async () => new Response('rendered page'));
+    const request = new Request(href, {
+      method,
+      headers: accept ? { accept } : undefined,
+    });
     const input = {
-      event: { url: new URL(href), request: new Request(href, { method }) },
+      event: { url: new URL(href), request },
       resolve,
     } as unknown as Parameters<typeof unservableActionHook>[0];
     return { input, resolve };
@@ -466,15 +477,42 @@ describe('unservableActionHook', () => {
     'constructor',
     'toString',
   ])('answers a POST naming ?/%s with a 404, before Kit sees it', async (name) => {
+    const warn = vi.spyOn(logger, 'warn');
     const { input, resolve } = hookInput(
       `http://lvh.me:3000/content/first?/${name}`,
-      'POST'
+      'POST',
+      'text/html,application/xhtml+xml'
     );
 
     const response = await unservableActionHook(input);
 
     expect(response.status).toBe(404);
+    expect(await response.text()).toBe('Not Found');
     expect(resolve).not.toHaveBeenCalled();
+    // The action is one of a closed set, so naming it is safe to log.
+    expect(warn).toHaveBeenCalledWith(
+      'Form action refused before dispatch',
+      expect.objectContaining({ refusedAction: name, url: '/content/first' })
+    );
+    warn.mockRestore();
+  });
+
+  // `use:enhance` asks for JSON and runs Kit's `deserialize` on the body,
+  // which would throw on plain text.
+  it('answers a use:enhance submit with an ActionResult it can read', async () => {
+    const { input } = hookInput(
+      'http://lvh.me:3000/content/first?/valueOf',
+      'POST',
+      'application/json'
+    );
+
+    const response = await unservableActionHook(input);
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      type: 'error',
+      error: { message: 'Not Found', code: 'NOT_FOUND' },
+    });
   });
 
   it.each([
@@ -494,15 +532,19 @@ describe('unservableActionHook', () => {
     expect(resolve).toHaveBeenCalled();
   });
 
-  it('runs before the session hook in the real sequence', async () => {
-    const { readFile } = await import('node:fs/promises');
-    const { join } = await import('node:path');
-    const source = await readFile(
-      join(import.meta.dirname, 'hooks.server.ts'),
-      'utf8'
-    );
-    const order = source.match(/export const handle = sequence\(([\s\S]*?)\);/);
+  // Driven through the real sequence: the refusal comes before any session
+  // work, observable as locals.requestId, sessionHook's first write.
+  it('refuses before the session hook runs in the real sequence', async () => {
+    const { input, resolve, event } = makeSequenceInput({
+      host: 'studio-alpha.lvh.me',
+      path: '/content/first?/valueOf',
+      method: 'POST',
+    });
 
-    expect(order?.[1]).toMatch(/unservableActionHook,\s*sessionHook/);
+    const response = await handle(input);
+
+    expect(response.status).toBe(404);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(event.locals.requestId).toBeUndefined();
   });
 });
