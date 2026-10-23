@@ -27,6 +27,7 @@
 
 <CheckoutSuccess
   verification={data.verification}
+  verifyFailed={data.verifyFailed}
   {contentUrl}
   {browseUrl}
   libraryUrl={browseUrl}

@@ -387,7 +387,20 @@ describe('remote/journey-checkout', () => {
 
       const { successUrl } = courseCheckoutMock.mock.calls[0][0];
       expect(successUrl).toBe(
-        `${ORIGIN}/journeys/pricing-smoke-test/checkout/success?session_id={CHECKOUT_SESSION_ID}`
+        `${ORIGIN}/journeys/pricing-smoke-test/checkout/success?kind=purchase&session_id={CHECKOUT_SESSION_ID}`
+      );
+    });
+
+    it('names the path on the success URL, so the page can tell a second payment (Codex-o4jvw)', async () => {
+      await submit({ offerId: 'subscription-monthly' });
+      await submit({ offerId: `tier:${TIER_ID}` });
+
+      const success = '/journeys/pricing-smoke-test/checkout/success';
+      expect(courseSubscriptionCheckoutMock.mock.calls[0][0].successUrl).toBe(
+        `${ORIGIN}${success}?kind=subscription&session_id={CHECKOUT_SESSION_ID}`
+      );
+      expect(tierCheckoutMock.mock.calls[0][0].successUrl).toBe(
+        `${ORIGIN}${success}?kind=tier&session_id={CHECKOUT_SESSION_ID}`
       );
     });
 

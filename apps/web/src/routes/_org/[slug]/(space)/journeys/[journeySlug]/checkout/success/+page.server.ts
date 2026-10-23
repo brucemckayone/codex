@@ -7,29 +7,123 @@
  * course they apparently cannot enter — so this page holds them for as long as
  * the grant takes and forwards the instant it exists.
  *
- * WHAT IT VERIFIES, AND WHY NOT THE STRIPE SESSION
- * `api.checkout.verify` is CONTENT-shaped (it returns `purchase.contentId` + a
- * `content` object) so it cannot describe a course purchase, and the three course
- * paths would need two more session-verify shapes between them (course purchase,
- * course subscription; the tier path already has `api.subscription.verify`).
+ * WHAT IT POLLS
+ * The thing the buyer actually cares about: `offer.entitled` — the same
+ * `hasCourseEntitlement` read that gates the dashboard. That makes the page
+ * fail-CLOSED and self-consistent: a forged or bookmarked visit to this URL can
+ * only ever sit in "confirming", never assert access, because the only thing
+ * that flips it is a real entitlement row. The trade-off is that this page
+ * cannot show a receipt (amount paid) or distinguish a failed payment from a
+ * slow webhook — it says "still confirming" for both.
  *
- * Rather than add those, this polls the thing the buyer actually cares about:
- * `offer.entitled` — the same `hasCourseEntitlement` read that gates the
- * dashboard. That makes the page fail-CLOSED and self-consistent: a forged or
- * bookmarked visit to this URL can only ever sit in "confirming", never assert
- * access, because the only thing that flips it is a real entitlement row. The
- * trade-off is that this page cannot show a receipt (amount paid) or distinguish
- * a failed payment from a slow webhook — it says "still confirming" for both.
+ * A SECOND PAYMENT (Codex-o4jvw)
+ * A buyer who already held access is entitled BEFORE this payment's own row is
+ * written, so the entitlement alone would forward them as if the payment were a
+ * fresh purchase, while it is being refunded. So when the checkout said which
+ * path it took (`kind`, set by `startJourneyCheckout`), the load also reads our
+ * record of THIS session from that path's verify endpoint, which checks the
+ * session is the buyer's own. It waits for that record before forwarding, and
+ * when the record is a duplicate the page says so instead. A missing or
+ * tampered `kind` falls back to the entitlement alone. A read that FAILS is
+ * logged and counts as not settled: forwarding on it would send a duplicate
+ * buyer to the dashboard as if this were a new purchase, so the next poll
+ * retries, and the poll cap ends in the page's "Still confirming" copy.
  *
- * `session_id` is not verified, only PRESENCE-checked: it separates "came back
- * from Stripe" (poll, reassure) from "typed this URL" (nothing to confirm), so a
- * stray visit is not left waiting on a payment that never happened.
+ * `session_id` separates "came back from Stripe" (poll, reassure) from "typed
+ * this URL" (nothing to confirm), so a stray visit is not left waiting on a
+ * payment that never happened.
  */
 import { error, redirect } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
+import type { OfferPathKind } from '$lib/page-builder/offer-paths';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { ApiError } from '$lib/server/errors';
 import { resolveCourseBySlug } from '$lib/server/journeys/round-d-seam';
 import type { PageServerLoad } from './$types';
+
+/** A payment for access the buyer already held, being refunded (Codex-o4jvw). */
+type JourneyDuplicate =
+  | { kind: 'purchase' }
+  | { kind: 'subscription' }
+  | {
+      kind: 'tier';
+      organizationName: string;
+      /** The tier of the subscription the buyer keeps. */
+      keptTierName: string;
+      /** The tier this payment was for, when it is not the one kept. */
+      otherTierName: string | null;
+    };
+
+/**
+ * Our record of the session: `settled` once there is nothing left to wait for
+ * (our row exists, or the session never completed), and the duplicate when the
+ * row is one.
+ */
+interface SessionRecord {
+  settled: boolean;
+  duplicate: JourneyDuplicate | null;
+}
+
+const OFFER_PATH_KINDS: readonly OfferPathKind[] = [
+  'purchase',
+  'subscription',
+  'tier',
+];
+
+function parseKind(value: string | null): OfferPathKind | null {
+  return OFFER_PATH_KINDS.find((kind) => kind === value) ?? null;
+}
+
+/**
+ * Read the session from the endpoint that owns its path. A course purchase or
+ * plan recorded for ANOTHER course reports nothing: the notice names this one.
+ */
+async function readSession(
+  api: ReturnType<typeof createServerApi>,
+  kind: OfferPathKind,
+  sessionId: string,
+  courseId: string
+): Promise<SessionRecord> {
+  switch (kind) {
+    case 'purchase': {
+      const v = await api.checkout.verify(sessionId);
+      const ours = v.course?.id === courseId;
+      return {
+        settled: v.sessionStatus !== 'complete' || !!v.course,
+        duplicate: ours && v.duplicatePayment ? { kind: 'purchase' } : null,
+      };
+    }
+    case 'subscription': {
+      const v = await api.checkout.verifyCourseSubscription(sessionId);
+      const sub = v.subscription;
+      return {
+        settled: v.sessionStatus !== 'complete' || !!sub,
+        duplicate:
+          sub?.courseId === courseId && sub.duplicateOf
+            ? { kind: 'subscription' }
+            : null,
+      };
+    }
+    case 'tier': {
+      const v = await api.subscription.verify(sessionId);
+      const sub = v.subscription;
+      const kept = sub?.duplicateOf;
+      return {
+        settled: v.sessionStatus !== 'complete' || !!sub,
+        duplicate:
+          sub && kept
+            ? {
+                kind: 'tier',
+                organizationName: sub.organizationName,
+                keptTierName: kept.tierName,
+                otherTierName: kept.tierId !== sub.tierId ? sub.tierName : null,
+              }
+            : null,
+      };
+    }
+  }
+}
 
 export const load: PageServerLoad = async (event) => {
   const { params, url, locals, platform, cookies, setHeaders, depends } = event;
@@ -54,24 +148,49 @@ export const load: PageServerLoad = async (event) => {
     throw error(404, 'This portal could not be found.');
   }
 
-  // `.catch(() => null)` so a transient read failure keeps the buyer in the
-  // waiting room (where the next poll can succeed) instead of erroring them out
-  // of a flow they have already paid for.
-  const offer = await createServerApi(platform, cookies)
-    .courses.offer(course.id)
-    .catch(() => null);
+  const api = createServerApi(platform, cookies);
+  const sessionId = url.searchParams.get('session_id');
+  const kind = parseKind(url.searchParams.get('kind'));
 
-  // The grant has landed — hand them straight to the journey.
-  if (offer?.entitled) {
-    redirect(303, `${journeyPath}/dashboard`);
-  }
+  // Both reads keep the buyer in the waiting room on failure (where the next
+  // poll can succeed) instead of erroring them out of a flow they have already
+  // paid for. A failed session read is NOT settled, so it never forwards.
+  const [offer, record] = await Promise.all([
+    api.courses.offer(course.id).catch(() => null),
+    sessionId && kind
+      ? readSession(api, kind, sessionId, course.id).catch(
+          (err: unknown): SessionRecord => {
+            logger.warn('journey-checkout-success: session verify failed', {
+              kind,
+              sessionId,
+              status: err instanceof ApiError ? err.status : undefined,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return { settled: false, duplicate: null };
+          }
+        )
+      : null,
+  ]);
 
-  return {
+  const base = {
     courseTitle: course.title,
     dashboardPath: `${journeyPath}/dashboard`,
     checkoutPath: `${journeyPath}/checkout`,
     libraryPath: '/library',
     /** Came back from Stripe (vs. a direct visit) — decides the copy + polling. */
-    arrivedFromStripe: url.searchParams.has('session_id'),
+    arrivedFromStripe: sessionId !== null,
   };
+
+  if (record?.duplicate) {
+    return { ...base, duplicate: record.duplicate };
+  }
+
+  // The grant has landed — hand them straight to the journey. With a record to
+  // read, wait for it too: entitled with no row yet is a second payment whose
+  // webhook is still in flight.
+  if (offer?.entitled && (record === null || record.settled)) {
+    redirect(303, base.dashboardPath);
+  }
+
+  return { ...base, duplicate: null };
 };

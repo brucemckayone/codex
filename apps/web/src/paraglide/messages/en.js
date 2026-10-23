@@ -4763,6 +4763,46 @@ export const subscription_success_description = () => `Welcome! Your subscriptio
 
 
 /**
+ * @param {{ org: NonNullable<unknown>, tier: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_duplicate_title = (params) => `You're already subscribed to ${params.org} (${params.tier})`
+
+
+/**
+ * @param {{ course: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_duplicate_course_title = (params) => `You're already subscribed to ${params.course}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_duplicate_description = () => `We've cancelled the second subscription and are refunding it.`
+
+
+/**
+ * @param {{ tier: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_duplicate_change_plan_hint = (params) => `Want ${params.tier} instead? Use Change plan.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_duplicate_change_plan = () => `Change plan`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -8896,6 +8936,30 @@ export const checkout_success_start_over = () => `Start Over`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const checkout_success_icon_alt = () => `Purchase confirmed`
+
+
+/**
+ * @param {{ item: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_duplicate_title = (params) => `You already own ${params.item}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_duplicate_description = () => `This second payment is being refunded in full. You don't need to do anything.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_duplicate_go_to = (params) => `Go to ${params.name}`
 
 
 /**

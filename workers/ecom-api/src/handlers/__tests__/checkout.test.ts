@@ -12,7 +12,9 @@
  * - Idempotency (duplicate events handled safely)
  */
 
+import type { KVNamespace } from '@cloudflare/workers-types';
 import { CURRENCY } from '@codex/constants';
+import { AfterCommitError } from '@codex/service-errors';
 import {
   createMockHonoContext,
   createMockStripeCheckoutEvent,
@@ -33,6 +35,8 @@ vi.mock('@codex/worker-utils', async (importOriginal) => {
   return {
     ...actual,
     createWebhookServices: vi.fn(),
+    // The receipt: observed, never sent.
+    sendEmailToWorker: vi.fn(),
   };
 });
 
@@ -60,7 +64,7 @@ vi.mock('@codex/validation', () => ({
 }));
 
 import { checkoutSessionMetadataSchema } from '@codex/validation';
-import { createWebhookServices } from '@codex/worker-utils';
+import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 // Import after mocks
 import { handleCheckoutCompleted } from '../checkout';
 
@@ -874,6 +878,98 @@ describe('handleCheckoutCompleted', () => {
       expect(mockCompletePurchase).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ stripeChargeId: null })
+      );
+    });
+  });
+
+  // Codex-2hxff.67: the purchase committed, then the clawback of a refund that
+  // preceded its payout failed (`AfterCommitError`, carrying the purchase).
+  // That must not cancel what follows from the purchase alone.
+  describe('a clawback that fails after the purchase committed', () => {
+    const purchase = {
+      id: 'purchase_123',
+      customerId: 'user_123',
+      contentId: 'content_456',
+      status: 'refunded',
+      duplicateOfPurchaseId: null,
+    };
+    const afterCommit = (cause: Error) =>
+      new AfterCommitError('clawback failed', purchase, cause);
+    const permanent = () =>
+      Object.assign(new Error('No such charge'), {
+        type: 'StripeInvalidRequestError',
+        statusCode: 404,
+      });
+    const transient = () =>
+      Object.assign(new Error('Connection to Stripe failed'), {
+        type: 'StripeConnectionError',
+      });
+    const kv = () =>
+      ({
+        get: vi.fn().mockResolvedValue(null),
+        put: vi.fn().mockResolvedValue(undefined),
+      }) as unknown as KVNamespace;
+
+    it.each([
+      ['content', { customerId: 'user_123', contentId: 'content_456' }],
+      ['course', { kind: 'course', customerId: 'user_123', courseId: 'c_1' }],
+    ])('permanent (%s) → the session is marked and the library bumped, then it rejects', async (_kind, metadata) => {
+      const failure = afterCommit(permanent());
+      mockCompletePurchase.mockRejectedValueOnce(failure);
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_after_commit',
+        metadata,
+      }) as unknown as Stripe.Event;
+      const { context, mock } = createContext({ CACHE_KV: kv() });
+      const executionCtx = attachExecutionCtx(mock);
+
+      await expect(
+        handleCheckoutCompleted(event, mockStripe, context)
+      ).rejects.toBe(failure);
+
+      expect(mockMarkCheckoutSessionCompleted).toHaveBeenCalledWith(
+        'cs_after_commit'
+      );
+      expect(mock._obs.info).toHaveBeenCalledWith(
+        expect.stringContaining('completed successfully'),
+        expect.objectContaining({ purchaseId: 'purchase_123' })
+      );
+      expect(executionCtx.waitUntil).toHaveBeenCalled();
+      expect(mockRelease).toHaveBeenCalledOnce();
+    });
+
+    it('transient → the session record and the library bump run, the receipt waits; the redelivery sends it once', async () => {
+      const failure = afterCommit(transient());
+      mockCompletePurchase.mockRejectedValueOnce(failure);
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_after_commit_transient',
+        metadata: { customerId: 'user_123', contentId: 'content_456' },
+      }) as unknown as Stripe.Event;
+      (event.data.object as Stripe.Checkout.Session).customer_details = {
+        email: 'buyer@example.com',
+        name: 'Buyer',
+      } as Stripe.Checkout.Session.CustomerDetails;
+      const { context, mock } = createContext({ CACHE_KV: kv() });
+      const executionCtx = attachExecutionCtx(mock);
+
+      await expect(
+        handleCheckoutCompleted(event, mockStripe, context)
+      ).rejects.toBe(failure);
+
+      expect(mockMarkCheckoutSessionCompleted).toHaveBeenCalledWith(
+        'cs_after_commit_transient'
+      );
+      expect(executionCtx.waitUntil).toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+
+      // The redelivery: the clawback finishes, and the receipt goes once.
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(sendEmailToWorker).toHaveBeenCalledTimes(1);
+      expect(sendEmailToWorker).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ templateName: 'purchase-receipt' })
       );
     });
   });

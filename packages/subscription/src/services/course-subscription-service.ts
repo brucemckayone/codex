@@ -65,6 +65,7 @@ import {
   recordSlice,
   resolveInvoiceCharge,
   resolveOrganisationPayee,
+  reverseEarlierRefundsAfterCommit,
 } from '@codex/payments';
 import {
   applyMinPlatformFeeFloor,
@@ -108,6 +109,7 @@ import {
   CourseSubscriptionPlanExistsError,
   CourseSubscriptionPlanNotFoundError,
   CreatorConnectRequiredError,
+  ForbiddenError,
   SubscriptionCheckoutError,
 } from '../errors';
 import { schedulePriceChange } from './pending-price-change';
@@ -149,6 +151,26 @@ interface PlanPriceMove {
 export interface CourseSubscriptionWebhookResult {
   userId: string;
   organizationId: string;
+}
+
+/**
+ * Result of `verifyCheckoutSession()` — what the journey success page reads.
+ * `subscription` appears once our row for the session exists.
+ */
+export interface CourseSubscriptionCheckoutVerifyResult {
+  sessionStatus: 'complete' | 'expired' | 'open';
+  subscription?: {
+    id: string;
+    courseId: string;
+    courseTitle: string;
+    startedAt: string;
+    /**
+     * Set when this subscription is a duplicate (Codex-2hxff.15): the course
+     * subscription it repeats, which the user keeps. This one is cancelled
+     * and refunded (Codex-o4jvw).
+     */
+    duplicateOf?: { id: string };
+  };
 }
 
 export class CourseSubscriptionService extends BaseService {
@@ -1127,6 +1149,74 @@ export class CourseSubscriptionService extends BaseService {
     }
   }
 
+  /**
+   * Verify a course-plan Checkout session for the journey success page, as
+   * `SubscriptionService.verifyCheckoutSession` does for tiers: ownership by
+   * `metadata.codex_user_id`, and a `subscription` only once our row exists
+   * (the caller keeps polling until then). A duplicate's carries `duplicateOf`
+   * (Codex-o4jvw).
+   */
+  async verifyCheckoutSession(
+    sessionId: string,
+    userId: string
+  ): Promise<CourseSubscriptionCheckoutVerifyResult> {
+    try {
+      const session = await this.stripe.checkout.sessions.retrieve(sessionId);
+      if (session.metadata?.codex_user_id !== userId) {
+        throw new ForbiddenError(
+          'Checkout session does not belong to authenticated user',
+          { sessionId }
+        );
+      }
+
+      const result: CourseSubscriptionCheckoutVerifyResult = {
+        sessionStatus:
+          (session.status as 'complete' | 'expired' | 'open') ?? 'open',
+      };
+      if (result.sessionStatus !== 'complete') return result;
+
+      const stripeSubId =
+        typeof session.subscription === 'string'
+          ? session.subscription
+          : session.subscription?.id;
+      if (!stripeSubId) return result;
+
+      const row = await this.db.query.courseSubscriptions.findFirst({
+        where: and(
+          eq(courseSubscriptions.stripeSubscriptionId, stripeSubId),
+          eq(courseSubscriptions.userId, userId)
+        ),
+        with: { course: { columns: { title: true } } },
+      });
+      if (row) {
+        result.subscription = {
+          id: row.id,
+          courseId: row.courseId,
+          courseTitle: row.course.title,
+          startedAt: row.createdAt.toISOString(),
+          // isDuplicateSubscription: the row names the one the user keeps.
+          ...(row.duplicateOfCourseSubscriptionId
+            ? { duplicateOf: { id: row.duplicateOfCourseSubscriptionId } }
+            : {}),
+        };
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof ForbiddenError) throw error;
+      if (
+        error instanceof Error &&
+        'type' in error &&
+        (error as { type?: string }).type === 'StripeInvalidRequestError'
+      ) {
+        throw new SubscriptionCheckoutError('Checkout session not found', {
+          stripeError: error.message,
+          sessionId,
+        });
+      }
+      this.handleError(error, 'verifyCheckoutSession');
+    }
+  }
+
   // ─── Webhook handlers ──────────────────────────────────────────────────────
 
   /**
@@ -1648,10 +1738,12 @@ export class CourseSubscriptionService extends BaseService {
   }
 
   /**
-   * Whether a charge has been refunded in full. A slice written after the
-   * refund's clawback ran is never reversed (the clawback reverses only the
-   * slices a charge has when its refund arrives), so a late invoice on an
-   * ended subscription must not pay out a refunded charge.
+   * Whether a charge has been refunded in full, so a late invoice on an ended
+   * subscription pays no one rather than paying out only to be reversed.
+   * Slices recorded after a refund are clawed back anyway
+   * (`reverseEarlierRefunds`), but that reads the refunds we have recorded,
+   * and a refund just made (a revival's) may not be recorded yet: Stripe is
+   * asked here.
    */
   private async chargeRefundedInFull(chargeId: string): Promise<boolean> {
     const charge = await this.stripe.charges.retrieve(chargeId);
@@ -1842,8 +1934,21 @@ export class CourseSubscriptionService extends BaseService {
       chargeId,
       invoiceCreatedAt
     );
+    // A refund or chargeback handled before this invoice found no slices to
+    // claw back (Codex-2hxff.67): it is clawed back now, as if it had come
+    // after. Its failure comes with the result (`AfterCommitError`), so the
+    // webhook still refreshes the buyer's library.
+    const finish = await reverseEarlierRefundsAfterCommit(
+      {
+        db: this.db,
+        stripe: this.stripe,
+        obs: this.obs,
+        environment: this.environment,
+      },
+      { chargeId, source: { sourceType: 'subscription' } }
+    );
 
-    return result;
+    return finish(result);
   }
 
   /**

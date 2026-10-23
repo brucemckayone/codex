@@ -62,8 +62,10 @@ import {
   repayDispute,
   resolveOrganisationPayee,
   reverseCharge,
+  reverseEarlierRefunds,
 } from '@codex/payments';
 import {
+  AfterCommitError,
   BaseService,
   type ServiceConfig,
   ServiceUnavailableError,
@@ -1250,13 +1252,16 @@ export class PurchaseService extends BaseService {
 
       return txResult.purchase;
     } catch (error) {
-      this.obs.error('Failed to complete purchase', {
-        error: error instanceof Error ? error.message : String(error),
-        stripePaymentIntentId,
-        customerId: metadata.customerId,
-        contentId: metadata.contentId,
-        amountPaidCents: metadata.amountPaidCents,
-      });
+      // An AfterCommitError's purchase did complete; its own step logged it.
+      if (!(error instanceof AfterCommitError)) {
+        this.obs.error('Failed to complete purchase', {
+          error: error instanceof Error ? error.message : String(error),
+          stripePaymentIntentId,
+          customerId: metadata.customerId,
+          contentId: metadata.contentId,
+          amountPaidCents: metadata.amountPaidCents,
+        });
+      }
       this.handleError(error, 'completePurchase');
     }
   }
@@ -1675,13 +1680,15 @@ export class PurchaseService extends BaseService {
 
       return txResult.purchase;
     } catch (error) {
-      this.obs.error('Failed to complete course purchase', {
-        error: error instanceof Error ? error.message : String(error),
-        stripePaymentIntentId,
-        customerId: metadata.customerId,
-        courseId: metadata.courseId,
-        amountPaidCents: metadata.amountPaidCents,
-      });
+      if (!(error instanceof AfterCommitError)) {
+        this.obs.error('Failed to complete course purchase', {
+          error: error instanceof Error ? error.message : String(error),
+          stripePaymentIntentId,
+          customerId: metadata.customerId,
+          courseId: metadata.courseId,
+          amountPaidCents: metadata.amountPaidCents,
+        });
+      }
       this.handleError(error, 'completeCoursePurchase');
     }
   }
@@ -1807,6 +1814,13 @@ export class PurchaseService extends BaseService {
    * webhook answers by its cause, and a redelivery's replay re-records the
    * missing slices. Acknowledged (a permanent cause), the slices stay
    * missing until someone replays the event, so the errorId is the handle.
+   *
+   * Then any refund or chargeback of the charge is clawed back from them
+   * (Codex-2hxff.67): one handled between the purchase's commit and this
+   * write found no slices to claw back. Its failure is logged once, by the
+   * clawback (with its purchase, charge and an errorId), and rethrown as an
+   * `AfterCommitError` carrying the purchase, so the webhook still does what
+   * follows from the purchase alone.
    */
   private async recordPayoutsAfterCommit(
     purchase: Purchase,
@@ -1826,6 +1840,21 @@ export class PurchaseService extends BaseService {
         }
       );
       throw error;
+    }
+    try {
+      await reverseEarlierRefunds(
+        { ...this.ledger(), obs: this.obs },
+        {
+          chargeId: stripeChargeId,
+          source: { sourceType: 'purchase', purchaseId: purchase.id },
+        }
+      );
+    } catch (error) {
+      throw new AfterCommitError(
+        'The purchase completed, but a refund or chargeback before its payout was not clawed back',
+        purchase,
+        error
+      );
     }
   }
 
@@ -3085,9 +3114,12 @@ export class PurchaseService extends BaseService {
       // payment_intent is only present when session status is 'complete'
       if (result.sessionStatus === 'complete' && session.payment_intent) {
         const purchase = await this.db.query.purchases.findFirst({
-          where: eq(
-            purchases.stripePaymentIntentId,
-            session.payment_intent as string
+          where: and(
+            eq(
+              purchases.stripePaymentIntentId,
+              session.payment_intent as string
+            ),
+            eq(purchases.customerId, customerId)
           ),
           with: {
             content: {
@@ -3098,12 +3130,26 @@ export class PurchaseService extends BaseService {
                 contentType: true,
               },
             },
+            course: { columns: { id: true, title: true } },
           },
         });
 
+        // A second payment for an item the buyer owns: the page says it is
+        // being refunded rather than confirming a purchase (Codex-o4jvw).
+        if (purchase && isDuplicatePayment(purchase)) {
+          result.duplicatePayment = true;
+        }
+
+        // Course-purchase sessions populate the course block only: the
+        // journey success page needs to know our row exists, not a receipt.
+        if (purchase?.course) {
+          result.course = {
+            id: purchase.course.id,
+            title: purchase.course.title,
+          };
+        }
+
         // Content-purchase sessions populate the purchase + content blocks.
-        // Course-purchase sessions (content join null) return sessionStatus only
-        // — the course success surface reads its own offer, not this shape.
         if (purchase?.purchasedAt && purchase.content) {
           result.purchase = {
             id: purchase.id,
