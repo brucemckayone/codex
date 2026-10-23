@@ -29,6 +29,7 @@ import {
   validateDatabaseConnection,
 } from '@codex/test-utils';
 import type { CreateOrganizationInput } from '@codex/validation';
+import { eq } from 'drizzle-orm';
 import {
   afterAll,
   beforeAll,
@@ -1702,6 +1703,64 @@ describe('OrganizationService', () => {
       );
       const sortedDates = [...joinedAtDates].sort((a, b) => a - b);
       expect(joinedAtDates).toEqual(sortedDates);
+    });
+  });
+
+  // Codex-kk9nv.8: deleteAccount soft-deletes and scrubs the user. A
+  // membership it did not end (every one before the fix) kept them on the
+  // public creators list as a "Deleted User" card with no avatar.
+  describe('a deleted account on the creators list', () => {
+    let slug: string;
+    let liveCreatorId: string;
+
+    beforeAll(async () => {
+      const [ownerId, liveId, deletedId] = await seedTestUsers(db, 3);
+      liveCreatorId = liveId!;
+      const org = await service.create(
+        {
+          name: 'Deleted Creator Org',
+          slug: createUniqueSlug('deleted-creator'),
+        },
+        ownerId!
+      );
+      slug = org.slug;
+      await db.insert(schema.organizationMemberships).values([
+        {
+          organizationId: org.id,
+          userId: liveId!,
+          role: 'creator',
+          status: 'active',
+        },
+        {
+          organizationId: org.id,
+          userId: deletedId!,
+          role: 'creator',
+          status: 'active',
+        },
+      ]);
+      // The membership stays active: the row shape a deletion left behind.
+      await db
+        .update(schema.users)
+        .set({ deletedAt: new Date(), name: 'Deleted User' })
+        .where(eq(schema.users.id, deletedId!));
+    });
+
+    it('is not listed, and the total counts only live accounts', async () => {
+      const result = await service.getPublicCreators(slug);
+
+      expect(result.items.map((item) => item.name)).not.toContain(
+        'Deleted User'
+      );
+      // The owner and the live creator.
+      expect(result.items).toHaveLength(2);
+      expect(result.items.some((item) => item.id === liveCreatorId)).toBe(true);
+      expect(result.pagination.total).toBe(2);
+    });
+
+    it("is not counted in the org's public creator count", async () => {
+      const stats = await service.getPublicStats(slug);
+
+      expect(stats.creators).toBe(2);
     });
   });
 

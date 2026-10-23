@@ -7,6 +7,7 @@ export {
   DEPARTURE_TERMINATION_REASON,
   type DepartureScope,
   type DepartureTerminatedAgreement,
+  lockProposalsOnDeparture,
   terminateAgreementsOnDeparture,
   withdrawProposalsOnDeparture,
 } from './agreement-departure';

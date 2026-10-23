@@ -335,11 +335,14 @@ const cache = new VersionedCache({
 // fragments the version namespace so the write-side invalidate never lands.
 const data = await cache.get(orgSlug, CacheType.ORG_CONFIG, async () => {
   return await service.getPublicInfo(slug); // fetcher on miss
-}, { ttl: 30 * 60 }); // 30 min TTL
+}, { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }); // 4h, from @codex/constants
 
-// Invalidate on mutation (fire-and-forget via waitUntil)
+// Invalidate on mutation (fire-and-forget via waitUntil). A bare
+// `cache.invalidate(orgSlug)` reaches this read, but an org or membership
+// change also stales the creators list, cached under its own id, so it bumps
+// both:
 executionCtx.waitUntil(
-  cache.invalidate(orgSlug).catch(() => {})
+  invalidateOrgPublicCaches(cache, orgSlug).catch(() => {})
 );
 ```
 
@@ -347,7 +350,7 @@ executionCtx.waitUntil(
 `PaginatedResult` loses its identity and `procedure()` emits `{ data: {...} }`
 instead of the list envelope. Cache `{ items, pagination }` and re-wrap after.
 
-**Currently cached:** User profile (10min), user preferences (10min), public creator profile (10min, keyed by user id) + its username->id hop (1h), org branding (30min), org content collection versions. See `docs/caching-strategy.md` for full details.
+**Currently cached:** User profile (10min), user preferences (10min), public creator profile (10min, keyed by user id) + its username->id hop (1h), org branding/info and stats (4h, keyed by org slug), the org's public creators list (4h, under its own id `org:{slug}:creators` — bump both through `invalidateOrgPublicCaches`), org tiers (24h), org content collection versions. See `docs/caching-strategy.md` for full details.
 
 ---
 

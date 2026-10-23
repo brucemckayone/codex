@@ -98,6 +98,38 @@ function whereResult(rows: unknown[]) {
   });
 }
 
+/**
+ * deleteUserAvatar's read of the avatar row, under a row lock in the
+ * transaction that clears it (Codex-kk9nv.17). Reset in `beforeEach`.
+ */
+const lockedAvatarRead = vi.fn();
+
+/**
+ * A failed write's check of whether the row names the new folder after all
+ * (Codex-kk9nv.16). Default: no row does. Reset in `beforeEach`.
+ */
+const folderProbe = vi.fn();
+
+/** Every condition a `select(...).where()` on the mock db was given. */
+const selectWhere = vi.fn();
+
+/**
+ * The strings a drizzle condition binds: raw template values and `Param`
+ * values, walked through nested `SQL`. This package has no dialect to render
+ * the query with, and a column (which points back at its table) is skipped.
+ */
+function boundStrings(node: unknown): string[] {
+  if (typeof node === 'string') return [node];
+  if (!node || typeof node !== 'object') return [];
+  if ('queryChunks' in node && Array.isArray(node.queryChunks)) {
+    return node.queryChunks.flatMap(boundStrings);
+  }
+  if ('encoder' in node && 'value' in node) {
+    return typeof node.value === 'string' ? [node.value] : [];
+  }
+  return [];
+}
+
 // Base mock implementations (will be recreated in beforeEach)
 const createMockDb = () =>
   ({
@@ -106,6 +138,18 @@ const createMockDb = () =>
         where: vi.fn(() => whereResult([{ id: 'content-1' }])),
       }),
     }),
+    select: vi.fn(() => ({
+      from: () => ({
+        where: (clause: unknown) => {
+          selectWhere(clause);
+          return { for: lockedAvatarRead, limit: folderProbe };
+        },
+      }),
+    })),
+    // The callback runs on the db it was called on, as its `tx`.
+    transaction(fn: (tx: unknown) => unknown) {
+      return fn(this);
+    },
   }) as unknown as Database;
 
 // Mock processor. Every still goes through the page-image pipeline
@@ -191,6 +235,13 @@ describe('ImageProcessingService', () => {
 
     // Reset database mock to default implementation
     testMockDb = createMockDb();
+    folderProbe.mockReset().mockResolvedValue([]);
+    selectWhere.mockReset();
+    lockedAvatarRead
+      .mockReset()
+      .mockResolvedValue([
+        { avatarUrl: 'https://test.r2.dev/avatars/user-1/lg.webp' },
+      ]);
 
     // Mock for delete methods that query database
     mockDbQuery = {
@@ -297,6 +348,42 @@ describe('ImageProcessingService', () => {
       const firstDelete = vi.mocked(testMockR2Service.delete).mock
         .invocationCallOrder[0];
       expect(firstDelete).toBeGreaterThan(writeOrder ?? Infinity);
+    });
+
+    it('asks its row before discarding the new folder after a failed write (a uuid-owned row)', async () => {
+      // The fixtures elsewhere use 'content-1', which is not a uuid, so the
+      // probe returns "cannot place" without a query. A real content id runs
+      // it (Codex-kk9nv.16).
+      const contentId = '0b6a3c2e-4f5d-4e7a-9b1c-2d3e4f5a6b7c';
+      vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+        pageVariants()
+      );
+      vi.mocked(testMockDb.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn(() =>
+            Promise.reject(new Error('Connection terminated'))
+          ),
+        }),
+      } as never);
+
+      await expect(
+        service.processContentThumbnail(
+          contentId,
+          'user-1',
+          createTestImageFile('image/png', 'new.png')
+        )
+      ).rejects.toThrow('Connection terminated');
+
+      expect(folderProbe).toHaveBeenCalledTimes(1);
+      const keys = putKeys(testMockR2Service);
+      const folder = keys[0]?.replace(/\/sm\.webp$/, '') ?? '';
+      expect(folder).toMatch(
+        new RegExp(
+          `^user-1/content-thumbnails/${contentId}/2400x1600-[0-9a-f]{8}$`
+        )
+      );
+      // No row names it, so it is discarded inline, as before.
+      expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
     });
 
     it("never deletes a poster frame the row points at — it is the transcoding pipeline's", async () => {
@@ -711,6 +798,228 @@ describe('ImageProcessingService', () => {
       });
       expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
     });
+
+    // Codex-kk9nv.16: a write can commit and still report failure (a lost
+    // COMMIT ack). Discarding the new folder then broke the picture the row
+    // names.
+    describe('when the write reports failure', () => {
+      const OLD = 'avatars/user-1/300x300-aaaaaaaa';
+
+      beforeEach(() => {
+        mockDbQuery.users.findFirst.mockResolvedValueOnce({
+          avatarUrl: `https://test.r2.dev/${OLD}/lg.webp`,
+        });
+        vi.mocked(processor.processStillVariants).mockReturnValueOnce(
+          pageVariants({}, 640, 640)
+        );
+        vi.mocked(testMockDb.update).mockReturnValueOnce({
+          set: vi.fn().mockReturnValue({
+            where: vi.fn(() => ({
+              returning: vi
+                .fn()
+                .mockRejectedValue(new Error('Connection terminated')),
+            })),
+          }),
+        } as never);
+      });
+
+      it('keeps the new folder its row names, deletes the one it replaced, and still reports the failure', async () => {
+        folderProbe.mockResolvedValueOnce([{ id: 'user-1' }]);
+
+        await expect(
+          service.processUserAvatar(
+            'user-1',
+            createTestImageFile('image/jpeg', 'a.jpg')
+          )
+        ).rejects.toThrow('Connection terminated');
+
+        const folder = newFolderOf(testMockR2Service, 'avatars/user-1', {
+          width: 640,
+          height: 640,
+        });
+        expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(OLD));
+        // It asked about the NEW folder: probing the replaced one would read
+        // "referenced" off a write that did not land, and delete a live photo.
+        const probed = boundStrings(selectWhere.mock.calls.at(-1)?.[0]);
+        expect(probed).toContain(`${folder}/`);
+        expect(probed).toContain('user-1');
+        expect(probed).not.toContain(`${OLD}/`);
+      });
+
+      it('discards the new folder when its row does not name it', async () => {
+        await expect(
+          service.processUserAvatar(
+            'user-1',
+            createTestImageFile('image/jpeg', 'a.jpg')
+          )
+        ).rejects.toThrow('Connection terminated');
+
+        const folder = newFolderOf(testMockR2Service, 'avatars/user-1', {
+          width: 640,
+          height: 640,
+        });
+        expect(deleteKeys(testMockR2Service)).toEqual(folderFiles(folder));
+      });
+
+      const orphanRows = (folders: string[]) =>
+        folders.flatMap(folderFiles).map((r2Key) => ({
+          r2Key,
+          imageType: 'avatar',
+          entityType: 'user',
+          entityId: 'user-1',
+        }));
+
+      function withSweep() {
+        const recordOrphanedFiles = vi.fn().mockResolvedValue([]);
+        const target = new ImageProcessingService({
+          db: { ...testMockDb, query: mockDbQuery } as unknown as Database,
+          environment: 'test',
+          r2Service: testMockR2Service,
+          r2PublicUrlBase: 'https://test.r2.dev',
+          orphanedFileService: {
+            recordOrphanedFiles,
+          } as unknown as OrphanedFileService,
+        });
+        const logs = (
+          target as unknown as {
+            obs: Record<'warn' | 'error', (...args: unknown[]) => void>;
+          }
+        ).obs;
+        return { target, recordOrphanedFiles, logs };
+      }
+
+      it('leaves both folders to the sweep when its row cannot be read, and rethrows the write error', async () => {
+        // It may have landed or not, so either folder may be the dropped one.
+        folderProbe.mockRejectedValueOnce(new Error('neon unavailable'));
+        const { target, recordOrphanedFiles } = withSweep();
+
+        await expect(
+          target.processUserAvatar(
+            'user-1',
+            createTestImageFile('image/jpeg', 'a.jpg')
+          )
+        ).rejects.toThrow('Connection terminated');
+
+        const folder = newFolderOf(testMockR2Service, 'avatars/user-1', {
+          width: 640,
+          height: 640,
+        });
+        expect(deleteKeys(testMockR2Service)).toEqual([]);
+        // The sweep asks the row again before it deletes anything.
+        expect(recordOrphanedFiles).toHaveBeenCalledWith(
+          orphanRows([folder, OLD])
+        );
+      });
+
+      it('only names an unsized replaced folder, at error, since the sweep cannot decide it', async () => {
+        // An avatar from before Codex-kk9nv.5: its files sit in the base.
+        mockDbQuery.users.findFirst.mockReset().mockResolvedValue({
+          avatarUrl: 'https://test.r2.dev/avatars/user-1/lg.webp',
+        });
+        folderProbe.mockRejectedValueOnce(new Error('neon unavailable'));
+        const { target, recordOrphanedFiles, logs } = withSweep();
+        const error = vi.spyOn(logs, 'error');
+
+        await expect(
+          target.processUserAvatar(
+            'user-1',
+            createTestImageFile('image/jpeg', 'a.jpg')
+          )
+        ).rejects.toThrow('Connection terminated');
+
+        const folder = newFolderOf(testMockR2Service, 'avatars/user-1', {
+          width: 640,
+          height: 640,
+        });
+        expect(recordOrphanedFiles).toHaveBeenCalledWith(orphanRows([folder]));
+        // Named by folder under the base: a whole key holds the user id,
+        // which production redaction hashes, and the record with it.
+        expect(error).toHaveBeenCalledWith(
+          'Still change failed and its outcome is unknown; folders kept for the sweep',
+          expect.objectContaining({
+            folders: [folder.split('/').at(-1)],
+            unsizedBaseKept: true,
+            error: 'neon unavailable',
+          })
+        );
+      });
+    });
+  });
+
+  // Codex-kk9nv.17's transaction can commit and still report failure (a lost
+  // COMMIT ack). The photo the user removed would then stay public with
+  // nothing naming it, so its folder goes to the sweep, which keeps it if the
+  // row still names it (a real rollback).
+  describe('deleteUserAvatar when the transaction reports failure', () => {
+    function lostAck(avatarUrl: string) {
+      lockedAvatarRead.mockResolvedValueOnce([{ avatarUrl }]);
+      const recordOrphanedFiles = vi.fn().mockResolvedValue([]);
+      const db = {
+        ...testMockDb,
+        query: mockDbQuery,
+        async transaction(fn: (tx: unknown) => unknown) {
+          await fn(db);
+          throw new Error('Connection terminated');
+        },
+      } as unknown as Database;
+      const target = new ImageProcessingService({
+        db,
+        environment: 'test',
+        r2Service: testMockR2Service,
+        r2PublicUrlBase: 'https://test.r2.dev',
+        orphanedFileService: {
+          recordOrphanedFiles,
+        } as unknown as OrphanedFileService,
+      });
+      const logs = (
+        target as unknown as {
+          obs: Record<'warn' | 'error', (...args: unknown[]) => void>;
+        }
+      ).obs;
+      return { target, recordOrphanedFiles, logs };
+    }
+
+    it('leaves the folder it read to the sweep and rethrows, deleting nothing', async () => {
+      const folder = 'avatars/user-1/300x300-aaaaaaaa';
+      const { target, recordOrphanedFiles } = lostAck(
+        `https://test.r2.dev/${folder}/lg.webp`
+      );
+
+      await expect(target.deleteUserAvatar('user-1')).rejects.toThrow(
+        'Connection terminated'
+      );
+
+      expect(deleteKeys(testMockR2Service)).toEqual([]);
+      expect(recordOrphanedFiles).toHaveBeenCalledWith(
+        folderFiles(folder).map((r2Key) => ({
+          r2Key,
+          imageType: 'avatar',
+          entityType: 'user',
+          entityId: 'user-1',
+        }))
+      );
+    });
+
+    it('only names an unsized avatar, at error, since the sweep would delete it live', async () => {
+      const { target, recordOrphanedFiles, logs } = lostAck(
+        'https://test.r2.dev/avatars/user-1/lg.webp'
+      );
+      const error = vi.spyOn(logs, 'error');
+
+      await expect(target.deleteUserAvatar('user-1')).rejects.toThrow(
+        'Connection terminated'
+      );
+
+      expect(recordOrphanedFiles).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(
+        'Still change failed and its outcome is unknown; folders kept for the sweep',
+        expect.objectContaining({
+          context: 'avatar-remove-failed',
+          folders: [],
+          unsizedBaseKept: true,
+        })
+      );
+    });
   });
 
   describe('deleteContentThumbnail', () => {
@@ -804,11 +1113,101 @@ describe('ImageProcessingService', () => {
     });
 
     it('should handle missing avatar gracefully', async () => {
-      mockDbQuery.users.findFirst.mockResolvedValueOnce({ avatarUrl: null });
+      lockedAvatarRead.mockResolvedValueOnce([{ avatarUrl: null }]);
 
-      await service.deleteUserAvatar('user-1');
+      // Nothing to remove: a provider picture is not an upload (Codex-kk9nv.10).
+      await expect(service.deleteUserAvatar('user-1')).resolves.toBe(false);
 
+      expect(testMockDb.update).not.toHaveBeenCalled();
       expect(testMockR2Service.delete).not.toHaveBeenCalled();
+    });
+
+    it('reports that it removed an avatar', async () => {
+      await expect(service.deleteUserAvatar('user-1')).resolves.toBe(true);
+    });
+
+    // Codex-kk9nv.17: read and cleared apart, an upload committing in between
+    // had its new URL nulled while the folder it replaced was deleted, so the
+    // new photo stayed public with nothing pointing at it.
+    it('reads the avatar under a row lock and clears it in the same transaction, then deletes the files', async () => {
+      const events: string[] = [];
+      const base = testMockDb as unknown as {
+        select: (...args: unknown[]) => unknown;
+        update: (...args: unknown[]) => unknown;
+      };
+      // Its own `tx`, so a statement sent through the db instead of the
+      // transaction shows up: on a real pool it would wait on this
+      // transaction's own row lock.
+      const tx = {
+        select: base.select,
+        update: (...args: unknown[]) => {
+          events.push('clear');
+          return base.update(...args);
+        },
+      };
+      const db = {
+        query: mockDbQuery,
+        async transaction(fn: (t: unknown) => unknown) {
+          events.push('begin');
+          const result = await fn(tx);
+          events.push('commit');
+          return result;
+        },
+        select: (...args: unknown[]) => {
+          events.push('read outside the transaction');
+          return base.select(...args);
+        },
+        update: (...args: unknown[]) => {
+          events.push('clear outside the transaction');
+          return base.update(...args);
+        },
+      } as unknown as Database;
+      lockedAvatarRead.mockImplementationOnce(async (mode: string) => {
+        events.push(`read for ${mode}`);
+        return [{ avatarUrl: 'https://test.r2.dev/avatars/user-1/lg.webp' }];
+      });
+      vi.mocked(testMockR2Service.delete).mockImplementation(async () => {
+        events.push('delete files');
+      });
+      const locked = new ImageProcessingService({
+        db,
+        environment: 'test',
+        r2Service: testMockR2Service,
+        r2PublicUrlBase: 'https://test.r2.dev',
+      });
+
+      await locked.deleteUserAvatar('user-1');
+
+      expect(events.slice(0, 4)).toEqual([
+        'begin',
+        'read for update',
+        'clear',
+        'commit',
+      ]);
+      expect(events.slice(4).every((e) => e === 'delete files')).toBe(true);
+      expect(events.length).toBeGreaterThan(4);
+    });
+  });
+
+  // Codex-kk9nv.15: the prefix a purge of a deleted account's avatars takes.
+  describe('avatarCachePrefix', () => {
+    it('is the CDN host and the avatar base, with no scheme', () => {
+      expect(service.avatarCachePrefix('user-1')).toBe(
+        'test.r2.dev/avatars/user-1'
+      );
+    });
+
+    it('keeps a path the CDN base carries', () => {
+      const underPath = new ImageProcessingService({
+        db: testMockDb,
+        environment: 'test',
+        r2Service: testMockR2Service,
+        r2PublicUrlBase: 'https://cdn.test/assets/',
+      });
+
+      expect(underPath.avatarCachePrefix('user-1')).toBe(
+        'cdn.test/assets/avatars/user-1'
+      );
     });
   });
 
@@ -1057,9 +1456,7 @@ describe('ImageProcessingService', () => {
       });
 
       it('should propagate database query errors in delete operations', async () => {
-        mockDbQuery.users.findFirst.mockRejectedValue(
-          new Error('Database query failed')
-        );
+        lockedAvatarRead.mockRejectedValue(new Error('Database query failed'));
 
         await expect(service.deleteUserAvatar('user-1')).rejects.toThrow(
           /Database query failed/i

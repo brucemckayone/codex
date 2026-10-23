@@ -17,7 +17,11 @@
  * - GET    /api/organizations/check-slug/:slug - Check slug availability
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
+import {
+  CacheType,
+  invalidateOrgPublicCaches,
+  VersionedCache,
+} from '@codex/cache';
 import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
 import { createDbClient } from '@codex/database';
 import type {
@@ -171,7 +175,7 @@ app.get(
  * path. `auth: 'none'` means no session is even resolved, so the body cannot
  * differ between viewers. This route is NOT KV cache-aside (it calls
  * `fetchPublicOrgInfo` directly), so the 60s CDN window is its only cache; the
- * `/info` route below serves the same data through KV on a 30-minute TTL, which
+ * `/info` route below serves the same data through KV on a 4-hour TTL, which
  * is the window this 60s one has to stay inside.
  * @returns {PublicBrandingResponse}
  */
@@ -345,11 +349,11 @@ async function fetchPublicOrgInfo(
  *
  * Returns org identity + branding for the org layout (works without cookies) —
  * "works without cookies" is the same fact `cache: 'public'` states to a CDN.
- * Cached in KV for 30 minutes; invalidated on branding/settings updates.
+ * Cached in KV for 4 hours (`CACHE_TTL.ORG_PUBLIC_INFO_SECONDS`); invalidated on branding/settings updates.
  *
  * Cache: `public`. This is the read every org page's layout makes, so it is the
  * single highest-volume beneficiary of a shared cache on the platform, and the
- * 60s CDN window sits well inside the 30-minute KV TTL it fronts — a branding
+ * 60s CDN window sits well inside the 4-hour KV TTL it fronts — a branding
  * write bumps the KV version immediately and the edge catches up within 60s.
  */
 app.get(
@@ -459,9 +463,11 @@ app.get(
       const fetcher = () =>
         ctx.services.organization.getPublicCreators(slug, { page, limit });
 
+      // Its own id, not the slug: a member's profile write invalidates only
+      // this list, not the org's config and stats (Codex-kk9nv.9).
       const result = await cachedRead(
         ctx,
-        slug,
+        CacheType.COLLECTION_ORG_CREATORS(slug),
         `${CacheType.ORG_CREATORS}:${page}:${limit}`,
         fetcher,
         { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
@@ -580,11 +586,15 @@ app.patch(
         const cache = new VersionedCache({
           kv: ctx.env.CACHE_KV,
           waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+          // The cache logs a failed invalidation only through its own obs.
+          obs: ctx.obs,
         });
-        const invalidations: Promise<void>[] = [cache.invalidate(updated.slug)];
+        const invalidations: Promise<void>[] = [
+          invalidateOrgPublicCaches(cache, updated.slug),
+        ];
         // If slug changed, also invalidate the old slug's cache
         if (oldSlug && updated.slug !== oldSlug) {
-          invalidations.push(cache.invalidate(oldSlug));
+          invalidations.push(invalidateOrgPublicCaches(cache, oldSlug));
         }
 
         // The `slug -> organization id` cache read by
@@ -671,8 +681,9 @@ app.delete(
           const cache = new VersionedCache({
             kv: ctx.env.CACHE_KV,
             waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+            obs: ctx.obs,
           });
-          invalidations.push(cache.invalidate(org.slug));
+          invalidations.push(invalidateOrgPublicCaches(cache, org.slug));
           // Drop the `slug -> id` entry too — its 24h TTL is a backstop, far too
           // long to rely on here — so the freed hostname
           // stops resolving from cache (Codex-kgrdp.23 defect 1).

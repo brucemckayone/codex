@@ -8,11 +8,13 @@ User identity, profiles, avatar management, role upgrades, notification preferen
 
 | Method | Path | Auth | Input | Success | Notes |
 |---|---|---|---|---|---|
-| GET | `/api/user/profile` | `required` | — | 200 | Get authenticated user's profile |
+| GET | `/api/user/public/:username` | `none`, `rateLimit: 'api'`, `cache: 'public'` | params: `publicProfileParamsSchema` | 200 | The worker's only anonymous route: `{ id, name, image, bio, socialLinks }`; an unknown username is a 404 |
+| GET | `/api/user/profile` | `required` | — | 200 | Get authenticated user's profile, incl. `hasCustomAvatar` (Codex-kk9nv.10) |
 | PATCH | `/api/user/profile` | `required` | body: `updateProfileSchema` | 200 | Update profile |
 | POST | `/api/user/avatar` | `required` | multipart: `avatar` file | 200 | Upload/replace avatar; returns `{ avatarUrl, size, mimeType }` |
-| DELETE | `/api/user/avatar` | `required` | — | 204 | Remove avatar, revert to default |
+| DELETE | `/api/user/avatar` | `required` | — | 204 | Remove the uploaded avatar; the profile falls back to the sign-in provider's picture. A no-op without an upload |
 | POST | `/api/user/upgrade-to-creator` | `required`, `rateLimit: 'strict'` | body: `upgradeToCreatorSchema` | 200 | Upgrade customer → creator role; invalidates session KV immediately |
+| DELETE | `/api/user/account` | `required`, `rateLimit: 'strict'` | body: `deleteAccountSchema` (`{ confirmation: 'DELETE' }`) | 204 | Self-service soft delete (`IdentityService.deleteAccount`); 422 while the user owns an org. Then deletes EVERY cached session the user holds, awaited |
 | GET | `/api/user/notification-preferences` | `required` | — | 200 | Get preferences; upserts defaults on first access |
 | PUT | `/api/user/notification-preferences` | `required` | body: `updateNotificationPreferencesSchema` | 200 | Update preferences |
 | GET | `/api/user/creator-onboarding` | `required` | — | 200 | Get creator first-run onboarding state; upserts defaults on first access |
@@ -38,6 +40,7 @@ User identity, profiles, avatar management, role upgrades, notification preferen
 | `WEB_APP_URL` | No | Web app base URL |
 | `API_URL` | No | API base URL |
 | `MEDIA_BUCKET` | No | R2 bucket for avatar storage |
+| `CF_ZONE_ID` / `CF_API_TOKEN` | No (secrets) | CDN cache purge: account deletion purges the user's avatars from the edge (Codex-kk9nv.15). Uploaded by the production deploy from the GitHub secrets `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_CACHE_PURGE_TOKEN` (a token with ONLY the zone's Cache Purge permission); never `wrangler secret put`, the next deploy blanks it. Unset, deletion logs the skipped purge, at error in production |
 
 ## Key Packages
 

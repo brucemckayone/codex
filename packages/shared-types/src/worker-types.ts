@@ -337,14 +337,15 @@ export type Bindings = {
   // ==========================================================================
 
   /**
-   * Cloudflare Zone ID for cache purge operations
-   * Only needed by workers that purge CDN cache
+   * Cloudflare Zone ID of the zone serving `R2_PUBLIC_URL_BASE`, for cache
+   * purges. identity-api purges a deleted account's avatars with it
+   * (Codex-kk9nv.15); unset there, the purge is skipped and logged.
    */
   CF_ZONE_ID?: string;
 
   /**
-   * Cloudflare API token with cache purge permissions
-   * Only needed by workers that purge CDN cache
+   * Cloudflare API token with that zone's Cache Purge permission and nothing
+   * else. A secret, set beside `CF_ZONE_ID`.
    */
   CF_API_TOKEN?: string;
 };
@@ -466,6 +467,11 @@ export type UserProfile = {
   emailVerified: boolean;
   /** Profile image URL (also aliased as avatarUrl in some contexts) */
   image: string | null;
+  /**
+   * Whether `image` is the user's own upload, not their sign-in provider's
+   * picture. Only an upload can be removed (Codex-kk9nv.10).
+   */
+  hasCustomAvatar: boolean;
   /** Username handle */
   username: string | null;
   /** User bio/description */

@@ -1,13 +1,16 @@
 import {
   ACCOUNT_DELETED_TERMINATION_REASON,
+  lockProposalsOnDeparture,
   terminateAgreementsOnDeparture,
   withdrawProposalsOnDeparture,
 } from '@codex/agreements';
 import type { VersionedCache } from '@codex/cache';
-import { CacheType } from '@codex/cache';
-import type { R2Service } from '@codex/cloudflare-clients';
+import { CacheType, invalidateOrgPublicCaches } from '@codex/cache';
+import type { CdnCachePurger, R2Service } from '@codex/cloudflare-clients';
 import {
+  type DatabaseClient,
   listedCreatorConditions,
+  listedMembershipConditions,
   messageForLog,
   stackForLog,
   toIso,
@@ -16,9 +19,11 @@ import {
 import {
   content,
   creatorOnboarding,
+  creatorOrganizationAgreements,
   mediaItems,
   notificationPreferences,
   organizationMemberships,
+  organizationOwnershipOffers,
   organizations,
   sessions,
   users,
@@ -35,7 +40,7 @@ import {
 } from '@codex/service-errors';
 import type { PublicCreatorProfile, UserProfile } from '@codex/shared-types';
 import type { UpdateCreatorOnboardingInput } from '@codex/validation';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, inArray, ne, type SQL } from 'drizzle-orm';
 
 import {
   AccountHasContentError,
@@ -54,6 +59,52 @@ export interface IdentityServiceConfig extends ServiceConfig {
    * OrphanedFileCleanupDO sweep instead of only logged (Codex-r85jo.3).
    */
   orphanedFileService?: OrphanedFileService;
+  /**
+   * Purges a deleted account's avatars from Cloudflare's edge cache
+   * (Codex-kk9nv.15). Absent, deletion logs that it skipped the purge.
+   */
+  cdnPurger?: Pick<CdnCachePurger, 'purgePrefixes'>;
+  /**
+   * Keeps work the response does not wait for alive after it: the CDN purge.
+   * The registry passes the request's plain `executionCtx.waitUntil` (the
+   * purge touches no DB pool). Absent (unit tests), the work is awaited.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
+}
+
+type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
+
+/**
+ * A user row as the profile API returns it, from `getProfile`,
+ * `updateProfile` and `upgradeToCreator` alike, so the three cannot drift.
+ */
+function toUserProfile(
+  user: Pick<
+    typeof users.$inferSelect,
+    | 'id'
+    | 'name'
+    | 'email'
+    | 'emailVerified'
+    | 'avatarUrl'
+    | 'image'
+    | 'username'
+    | 'bio'
+    | 'socialLinks'
+  >
+): UserProfile {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    emailVerified: user.emailVerified,
+    // A custom upload wins over the sign-in provider's picture, and only an
+    // upload can be removed (Codex-kk9nv.10).
+    image: user.avatarUrl ?? user.image,
+    hasCustomAvatar: user.avatarUrl != null,
+    username: user.username ?? null,
+    bio: user.bio ?? null,
+    socialLinks: user.socialLinks ?? null,
+  };
 }
 
 export class IdentityService extends BaseService {
@@ -61,6 +112,8 @@ export class IdentityService extends BaseService {
   private r2PublicUrlBase: string;
   private cache?: VersionedCache;
   private orphanedFileService?: OrphanedFileService;
+  private cdnPurger?: Pick<CdnCachePurger, 'purgePrefixes'>;
+  private waitUntil?: (promise: Promise<unknown>) => void;
 
   constructor(config: IdentityServiceConfig) {
     super(config);
@@ -68,6 +121,8 @@ export class IdentityService extends BaseService {
     this.r2PublicUrlBase = config.r2PublicUrlBase;
     this.cache = config.cache;
     this.orphanedFileService = config.orphanedFileService;
+    this.cdnPurger = config.cdnPurger;
+    this.waitUntil = config.waitUntil;
   }
 
   /**
@@ -89,12 +144,14 @@ export class IdentityService extends BaseService {
       throw new UserNotFoundError(userId);
     }
 
-    // Process, upload, and update DB (cleanup handled inside ImageProcessingService)
-    const result = await this.imageService().processUserAvatar(userId, file);
-
-    await this.invalidateUserSurfaces(userId, 'uploadAvatar');
-
-    return result;
+    // Process, upload, and update DB (cleanup handled inside ImageProcessingService).
+    // Invalidated even when it throws: a write can commit and still report
+    // failure, and the folder it replaced is then deleted (Codex-kk9nv.16),
+    // so a cached copy of the old URL would show a broken image. It never
+    // rejects, so it cannot replace the upload's own error.
+    return await this.imageService()
+      .processUserAvatar(userId, file)
+      .finally(() => this.invalidateUserSurfaces(userId, 'uploadAvatar'));
   }
 
   /**
@@ -105,8 +162,16 @@ export class IdentityService extends BaseService {
    */
   async deleteAvatar(userId: string): Promise<void> {
     try {
-      await this.imageService().deleteUserAvatar(userId);
-      await this.invalidateUserSurfaces(userId, 'deleteAvatar');
+      // Invalidated whatever the outcome, as uploadAvatar does. When the
+      // delete throws: the clear can commit and lose its ack, and the files
+      // then go to the sweep. When there was nothing to remove: Remove is
+      // offered only for an upload, so the usual way here is a surface left
+      // stale by such a removal, and invalidating again is what lets this
+      // retry heal the profile and the creators lists. It never rejects, so
+      // it cannot replace the delete's own error.
+      await this.imageService()
+        .deleteUserAvatar(userId)
+        .finally(() => this.invalidateUserSurfaces(userId, 'deleteAvatar'));
     } catch (error) {
       throw this.handleError(error, 'IdentityService.deleteAvatar');
     }
@@ -127,12 +192,11 @@ export class IdentityService extends BaseService {
    * profile entries (keyed by user id), and each org that lists them on its
    * creators list (`ORG_CREATORS`, 4h TTL). That list carries name, username,
    * avatar, bio and social links, so it goes stale on any of those writes,
-   * not only on an avatar (Codex-kk9nv.7). An org's slug is one version for
-   * every slug-keyed entry, so this also refreshes its config and stats.
+   * not only on an avatar (Codex-kk9nv.7). The list has its own cache id, so
+   * this leaves the org's config and stats alone (Codex-kk9nv.9).
    *
-   * The orgs are the ones `listedCreatorConditions` puts the user on, the
-   * same conditions the list itself is read with. Both workers bind the same
-   * CACHE_KV, so the slug bumped here is the version organization-api reads.
+   * Both workers bind the same CACHE_KV, so the id bumped here is the version
+   * organization-api reads.
    *
    * Best-effort, like `VersionedCache.invalidate` itself: it runs after the
    * write has committed, so a failed org lookup is logged and the lists
@@ -148,21 +212,7 @@ export class IdentityService extends BaseService {
 
     const listingOrgs = async (): Promise<string[]> => {
       try {
-        const orgs = await this.db
-          .select({ slug: organizations.slug })
-          .from(organizationMemberships)
-          .innerJoin(
-            organizations,
-            eq(organizationMemberships.organizationId, organizations.id)
-          )
-          .where(
-            and(
-              eq(organizationMemberships.userId, userId),
-              ...listedCreatorConditions(),
-              whereNotDeleted(organizations)
-            )
-          );
-        return orgs.map(({ slug }) => slug);
+        return await this.listingOrgSlugs(this.db, userId);
       } catch (error) {
         this.obs.warn(
           'Org creators lists not invalidated: org lookup failed; they expire with their TTL',
@@ -176,7 +226,98 @@ export class IdentityService extends BaseService {
       cache.invalidate(userId),
       listingOrgs(),
     ]);
-    await Promise.all(slugs.map((slug) => cache.invalidate(slug)));
+    await Promise.all(
+      slugs.map((slug) =>
+        cache.invalidate(CacheType.COLLECTION_ORG_CREATORS(slug))
+      )
+    );
+  }
+
+  /**
+   * Purge Cloudflare's edge copies of every avatar this user ever had
+   * (Codex-kk9nv.15; owner: "Purge on account deletion"). Stills are stored
+   * immutable for a year and deleting the R2 objects does not evict them, so
+   * a deleted account's photo kept loading for anyone holding the URL. One
+   * prefix covers the current folder and every one it replaced. Browser
+   * caches cannot be purged.
+   *
+   * Best-effort and never throws: the deletion has committed.
+   */
+  private async purgeAvatarEdgeCache(userId: string): Promise<void> {
+    const skipped = 'Avatar edge cache not purged after account deletion';
+    if (!this.cdnPurger) {
+      // In production this is the photo left public, worth an alert, as
+      // deleteDroppedAvatar treats it. Locally nothing is configured.
+      const level = this.environment === 'production' ? 'error' : 'warn';
+      this.obs[level](`${skipped}: no CDN purge configured`, { userId });
+      return;
+    }
+    try {
+      const result = await this.cdnPurger.purgePrefixes([
+        this.imageService().avatarCachePrefix(userId),
+      ]);
+      if (!result.ok) this.obs.error(skipped, { userId, error: result.reason });
+    } catch (error) {
+      this.obs.error(skipped, { userId, error: messageForLog(error) });
+    }
+  }
+
+  /**
+   * Refuse to delete an account that owns a live organization. Membership
+   * lifecycle uses `status` (organization_memberships has no deletedAt
+   * column); the organization itself is soft-deleted, so deleted orgs do not
+   * count.
+   */
+  private async refuseIfOwner(
+    db: Tx | DatabaseClient,
+    userId: string
+  ): Promise<void> {
+    const ownedOrgs = await db
+      .select({ name: organizations.name })
+      .from(organizationMemberships)
+      .innerJoin(
+        organizations,
+        eq(organizationMemberships.organizationId, organizations.id)
+      )
+      .where(
+        and(
+          eq(organizationMemberships.userId, userId),
+          eq(organizationMemberships.role, 'owner'),
+          eq(organizationMemberships.status, 'active'),
+          whereNotDeleted(organizations)
+        )
+      );
+    if (ownedOrgs.length > 0) {
+      throw new AccountOwnsOrganizationError(ownedOrgs.map((o) => o.name));
+    }
+  }
+
+  /**
+   * The slugs of the orgs whose public creators list shows this user: the
+   * ones `listedCreatorConditions` puts them on, the same conditions the list
+   * itself is read with. Account deletion passes the membership half alone,
+   * once its scrub has marked the account deleted.
+   */
+  private async listingOrgSlugs(
+    db: Tx | DatabaseClient,
+    userId: string,
+    conditions: SQL[] = listedCreatorConditions()
+  ): Promise<string[]> {
+    const orgs = await db
+      .select({ slug: organizations.slug })
+      .from(organizationMemberships)
+      .innerJoin(
+        organizations,
+        eq(organizationMemberships.organizationId, organizations.id)
+      )
+      .where(
+        and(
+          eq(organizationMemberships.userId, userId),
+          ...conditions,
+          whereNotDeleted(organizations)
+        )
+      );
+    return orgs.map(({ slug }) => slug);
   }
 
   /**
@@ -221,16 +362,7 @@ export class IdentityService extends BaseService {
         throw new UserNotFoundError(userId);
       }
 
-      return {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        emailVerified: user.emailVerified,
-        image: user.avatarUrl ?? user.image,
-        username: user.username ?? null,
-        bio: user.bio ?? null,
-        socialLinks: user.socialLinks ?? null,
-      };
+      return toUserProfile(user);
     } catch (error) {
       throw this.handleError(error, 'IdentityService.fetchProfileFromDB');
     }
@@ -275,7 +407,7 @@ export class IdentityService extends BaseService {
     }
 
     const userId = await this.cache.get(
-      username.toLowerCase(),
+      CacheType.USERNAME_LOOKUP(username.toLowerCase()),
       CacheType.USERNAME_TO_ID,
       () => this.resolveUsernameFromDB(username),
       // Long TTL: a username changes far less often than a profile.
@@ -418,21 +550,7 @@ export class IdentityService extends BaseService {
         instagram?: string;
       } | null;
     }
-  ): Promise<{
-    id: string;
-    name: string;
-    email: string;
-    emailVerified: boolean;
-    image: string | null;
-    username: string | null;
-    bio: string | null;
-    socialLinks: {
-      website?: string;
-      twitter?: string;
-      youtube?: string;
-      instagram?: string;
-    } | null;
-  }> {
+  ): Promise<UserProfile> {
     try {
       // First, fetch the current user to check if email or username is changing
       const existing = await this.db.query.users.findFirst({
@@ -522,21 +640,16 @@ export class IdentityService extends BaseService {
         const nextUsername = updated.username;
         if (previousUsername !== nextUsername) {
           for (const name of [previousUsername, nextUsername]) {
-            if (name) await this.cache.invalidate(name.toLowerCase());
+            if (name) {
+              await this.cache.invalidate(
+                CacheType.USERNAME_LOOKUP(name.toLowerCase())
+              );
+            }
           }
         }
       }
 
-      return {
-        id: updated.id,
-        name: updated.name,
-        email: updated.email,
-        emailVerified: updated.emailVerified,
-        image: updated.avatarUrl ?? updated.image,
-        username: updated.username ?? null,
-        bio: updated.bio ?? null,
-        socialLinks: updated.socialLinks ?? null,
-      };
+      return toUserProfile(updated);
     } catch (error) {
       throw this.handleError(error, 'IdentityService.updateProfile');
     }
@@ -615,20 +728,12 @@ export class IdentityService extends BaseService {
         // of this name could not have cached a miss — but stating it here
         // keeps the public-profile invariant local to the writes that affect
         // it, instead of resting on a guard in another package.
-        await this.cache.invalidate(input.username.toLowerCase());
+        await this.cache.invalidate(
+          CacheType.USERNAME_LOOKUP(input.username.toLowerCase())
+        );
       }
 
-      return {
-        id: updated.id,
-        name: updated.name,
-        email: updated.email,
-        emailVerified: updated.emailVerified,
-        image: updated.avatarUrl ?? updated.image,
-        username: updated.username ?? null,
-        bio: updated.bio ?? null,
-        socialLinks: updated.socialLinks ?? null,
-        role: updated.role,
-      };
+      return { ...toUserProfile(updated), role: updated.role };
     } catch (error) {
       throw this.handleError(error, 'IdentityService.upgradeToCreator');
     }
@@ -682,28 +787,10 @@ export class IdentityService extends BaseService {
    */
   async deleteAccount(userId: string): Promise<readonly string[]> {
     try {
-      // Block if the user owns any active organization. Membership lifecycle
-      // uses `status` (organization_memberships has no deletedAt column); the
-      // organization itself is soft-deleted, so filter deleted orgs out.
-      const ownedOrgs = await this.db
-        .select({ name: organizations.name })
-        .from(organizationMemberships)
-        .innerJoin(
-          organizations,
-          eq(organizationMemberships.organizationId, organizations.id)
-        )
-        .where(
-          and(
-            eq(organizationMemberships.userId, userId),
-            eq(organizationMemberships.role, 'owner'),
-            eq(organizationMemberships.status, 'active'),
-            whereNotDeleted(organizations)
-          )
-        );
-
-      if (ownedOrgs.length > 0) {
-        throw new AccountOwnsOrganizationError(ownedOrgs.map((o) => o.name));
-      }
+      // Block if the user owns any active organization. Asked again inside
+      // the transaction below, under a lock: this first answer is the cheap
+      // refusal, not the guarantee.
+      await this.refuseIfOwner(this.db, userId);
 
       // Block accounts that have published content or uploads. Deleting a
       // creator's account has unresolved downstream implications (buyer
@@ -718,65 +805,193 @@ export class IdentityService extends BaseService {
       // ended in every organisation (owner decision AGR-09, "End them like a
       // removal"), in one transaction. Money earned before is still paid; no
       // email, since the address is scrubbed here.
-      const { endedAgreements, withdrawnProposals, droppedAvatarUrl } =
-        await this.db.transaction(async (tx) => {
-          const now = new Date();
-          // The avatar the scrub drops, so its files can go after the commit.
-          // Locked: an avatar upload committing now waits for the scrub, and
-          // its write then matches no row (processUserAvatar skips a deleted
-          // user), so the URL read here is the one the scrub drops.
-          const [before] = await tx
-            .select({ avatarUrl: users.avatarUrl })
-            .from(users)
-            .where(and(eq(users.id, userId), whereNotDeleted(users)))
-            .for('update');
-          const [deleted] = await tx
-            .update(users)
-            .set({
-              deletedAt: now,
-              email: `deleted-${userId}@deleted.invalid`,
-              name: 'Deleted User',
-              username: null,
-              bio: null,
-              avatarUrl: null,
-              image: null,
-              socialLinks: null,
-            })
-            .where(and(eq(users.id, userId), whereNotDeleted(users)))
-            .returning();
+      const {
+        endedAgreements,
+        withdrawnProposals,
+        withdrawnOffers,
+        droppedAvatarUrl,
+        listingSlugs,
+      } = await this.db.transaction(async (tx) => {
+        const now = new Date();
+        // LOCK ORDER (Codex-kk9nv.8). A member's rows are locked as: a
+        // proposal, then an ownership offer, then the membership, then the
+        // creator's agreements. Accepting or countering a proposal; accepting,
+        // withdrawing or reassigning an offer; removing a member or changing
+        // their role all keep that order. A row inserted naming the user
+        // takes a KEY SHARE on the user's row, through its foreign key. Two
+        // transactions taking the same rows in different orders wait on each
+        // other until Postgres aborts one, so every lock here is taken in that
+        // order before anything is written. Several rows of one table are
+        // locked in id order, so two paths locking some of the same rows agree.
+        //
+        // The user's row first, as NO KEY UPDATE. It still makes an avatar
+        // upload or removal wait for the scrub, so the URL read here is the
+        // one the scrub drops (processUserAvatar then skips a deleted user).
+        // And it lets another transaction's foreign-key check through, so a
+        // transfer or an agreement already under way commits instead of
+        // waiting on this one. The scrub's email change upgrades the lock to
+        // FOR UPDATE; a transaction then still holding a KEY SHARE only delays
+        // it. The one exception is the subscription webhook, which inserts a
+        // subscription naming the user before it upserts their membership
+        // (Codex-kk9nv.20).
+        const [before] = await tx
+          .select({ avatarUrl: users.avatarUrl })
+          .from(users)
+          .where(and(eq(users.id, userId), whereNotDeleted(users)))
+          .for('no key update');
+        const departing = {
+          creatorId: userId,
+          at: now,
+          everyOrganisation: true,
+        } as const;
+        await lockProposalsOnDeparture(tx, departing);
+        await tx
+          .select({ id: organizationOwnershipOffers.id })
+          .from(organizationOwnershipOffers)
+          .where(
+            and(
+              eq(organizationOwnershipOffers.recipientUserId, userId),
+              eq(organizationOwnershipOffers.status, 'open')
+            )
+          )
+          .orderBy(organizationOwnershipOffers.id)
+          .for('update');
+        // Every membership row, with no role filter: a transfer that took its
+        // offer first has committed by now, and one that comes second finds
+        // its offer withdrawn below, and refuses.
+        await tx
+          .select({ id: organizationMemberships.id })
+          .from(organizationMemberships)
+          .where(eq(organizationMemberships.userId, userId))
+          .orderBy(organizationMemberships.id)
+          .for('update');
+        // A creator ending their own agreement locks it, then takes a KEY
+        // SHARE on their row (the agreement names them as who ended it), which
+        // the scrub's lock would block. Locked here, under NO KEY UPDATE,
+        // that ending commits first.
+        await tx
+          .select({ id: creatorOrganizationAgreements.id })
+          .from(creatorOrganizationAgreements)
+          .where(
+            and(
+              eq(creatorOrganizationAgreements.creatorId, userId),
+              eq(creatorOrganizationAgreements.status, 'active')
+            )
+          )
+          .orderBy(creatorOrganizationAgreements.id)
+          .for('update');
+        const [deleted] = await tx
+          .update(users)
+          .set({
+            deletedAt: now,
+            email: `deleted-${userId}@deleted.invalid`,
+            name: 'Deleted User',
+            username: null,
+            bio: null,
+            avatarUrl: null,
+            image: null,
+            socialLinks: null,
+          })
+          .where(and(eq(users.id, userId), whereNotDeleted(users)))
+          .returning();
 
-          if (!deleted) {
-            throw new UserNotFoundError(userId);
-          }
+        if (!deleted) {
+          throw new UserNotFoundError(userId);
+        }
 
-          const withdrawn = await withdrawProposalsOnDeparture(tx, {
-            creatorId: userId,
-            at: now,
-            everyOrganisation: true,
-          });
-          const ended = await terminateAgreementsOnDeparture(tx, {
-            creatorId: userId,
-            at: now,
-            everyOrganisation: true,
-            reason: ACCOUNT_DELETED_TERMINATION_REASON,
-          });
-          return {
-            endedAgreements: ended,
-            withdrawnProposals: withdrawn,
-            droppedAvatarUrl: before?.avatarUrl ?? null,
-          };
+        // The owner check above ran before this transaction. Asked again now
+        // that the scrub holds the user's row exclusively. Whatever made them
+        // an owner since inserted a row naming them: a transfer's ownership
+        // period, or a new org's membership. Its KEY SHARE made the scrub
+        // wait, so it has committed, and no new one can start until this
+        // commits. A refusal rolls the scrub back.
+        await this.refuseIfOwner(tx, userId);
+
+        // The orgs whose cached creators list shows the user, read now, by
+        // the same reasoning: a membership an invite added meanwhile has
+        // committed, and none can be added until this commits. Before the
+        // memberships end, because after it no query finds which lists still
+        // show the real name and avatar (Codex-kk9nv.8). The membership half
+        // of the listing conditions only: the scrub has just marked the
+        // account deleted. Inside the transaction, so a failed read aborts
+        // the deletion: Postgres refuses every later statement in a
+        // transaction that hit an error, and committing without the list
+        // would leave those caches showing the person for their 4h TTL.
+        const listing = this.cache
+          ? await this.listingOrgSlugs(tx, userId, listedMembershipConditions())
+          : [];
+
+        // Each write below reads afresh, so it also covers a proposal or an
+        // offer whose creator held a membership row this transaction waited
+        // on, and committed before it got the lock.
+        const withdrawn = await withdrawProposalsOnDeparture(tx, departing);
+        const ended = await terminateAgreementsOnDeparture(tx, {
+          ...departing,
+          reason: ACCOUNT_DELETED_TERMINATION_REASON,
         });
+        // A deleted account belongs to no org, so every member list drops
+        // it, not only the creators list (owner: "Both", Codex-kk9nv.8).
+        // Never an owner's: refused above, and kept out here as well, so no
+        // path can leave an org with no active owner.
+        await tx
+          .update(organizationMemberships)
+          .set({ status: 'inactive', updatedAt: now })
+          .where(
+            and(
+              eq(organizationMemberships.userId, userId),
+              inArray(organizationMemberships.status, ['active', 'invited']),
+              ne(organizationMemberships.role, 'owner')
+            )
+          );
+        // An open ownership offer to the user can never be accepted now (it
+        // needs a live membership), and it would block any new offer in its
+        // org for its 7 days. The row is written as a member removal writes
+        // it; unlike a removal, nobody is emailed yet (Codex-kk9nv.18).
+        const offers = await tx
+          .update(organizationOwnershipOffers)
+          .set({
+            status: 'withdrawn',
+            withdrawnReason: 'recipient_ineligible',
+            respondedAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(organizationOwnershipOffers.recipientUserId, userId),
+              eq(organizationOwnershipOffers.status, 'open')
+            )
+          )
+          // Bare: the client union collapses the projected overload, as in
+          // ownership-transfer.ts. Only the count is used.
+          .returning();
+        return {
+          endedAgreements: ended,
+          withdrawnProposals: withdrawn,
+          withdrawnOffers: offers,
+          droppedAvatarUrl: before?.avatarUrl ?? null,
+          listingSlugs: listing,
+        };
+      });
 
       this.obs.info('User account soft-deleted', {
         userId,
         agreementsEnded: endedAgreements.length,
         proposalsWithdrawn: withdrawnProposals.length,
+        ownershipOffersWithdrawn: withdrawnOffers.length,
       });
 
       // The scrubbed name, avatar, bio and links are still on the cached
       // creators list of every org that listed this user, which anyone can
-      // read, until those are invalidated too (Codex-kk9nv.7).
-      await this.invalidateUserSurfaces(userId, 'deleteAccount');
+      // read, until those are invalidated too (Codex-kk9nv.7). The user also
+      // left each of those orgs, a change to who is in it, so its config and
+      // stats go as well, as for any departure.
+      if (this.cache) {
+        const cache = this.cache;
+        await Promise.all([
+          cache.invalidate(userId),
+          ...listingSlugs.map((slug) => invalidateOrgPublicCaches(cache, slug)),
+        ]);
+      }
 
       // The scrub nulls `avatarUrl`, but the files stayed public at a URL that
       // carries this user's id (Codex-kk9nv.14). After the commit and the
@@ -805,24 +1020,61 @@ export class IdentityService extends BaseService {
         });
       }
 
-      // Every session this user holds, so the caller can clear the cached
-      // copies. Read AFTER the tombstone lands: a session created between the
-      // UPDATE and this SELECT would still be returned here, whereas reading
-      // first could miss one. No `whereNotDeleted` — `sessions` has no
-      // `deletedAt`, BetterAuth hard-deletes on sign-out.
-      const rows = await this.db
-        .select({ token: sessions.token })
-        .from(sessions)
-        .where(eq(sessions.userId, userId));
+      // After the files are gone, or a request in between caches them again,
+      // and off the response path: the route clears the cached sessions with
+      // the tokens this returns, so a purge it waited on would hold the
+      // sign-out of every device behind an external API, past the web's 10s
+      // abort if that API stalled (Codex-na929). Bounded by the purger's
+      // timeout, and it never rejects.
+      const purged = this.purgeAvatarEdgeCache(userId);
+      const handedOff = this.handOffPurge(purged, userId);
+      try {
+        // Every session this user holds, so the caller can clear the cached
+        // copies. Read AFTER the tombstone lands: a session created between
+        // the UPDATE and this SELECT would still be returned here, whereas
+        // reading first could miss one. No `whereNotDeleted` — `sessions` has
+        // no `deletedAt`, BetterAuth hard-deletes on sign-out.
+        const rows = await this.db
+          .select({ token: sessions.token })
+          .from(sessions)
+          .where(eq(sessions.userId, userId));
 
-      this.obs.info('Session tokens collected for invalidation', {
-        userId,
-        sessionCount: rows.length,
-      });
+        this.obs.info('Session tokens collected for invalidation', {
+          userId,
+          sessionCount: rows.length,
+        });
 
-      return rows.map((r) => r.token);
+        return rows.map((r) => r.token);
+      } finally {
+        // Without a request to outlive (unit tests, scripts), or when the
+        // hook refused it: awaited, still after the token read.
+        if (!handedOff) await purged;
+      }
     } catch (error) {
       throw this.handleError(error, 'IdentityService.deleteAccount');
+    }
+  }
+
+  /**
+   * Hand the purge to `waitUntil`. False when there is no hook, or the hook
+   * throws (a spent ExecutionContext, say): the deletion has committed, so a
+   * hook's failure must not report it failed, and the caller awaits the
+   * purge itself.
+   */
+  private handOffPurge(purge: Promise<void>, userId: string): boolean {
+    if (!this.waitUntil) return false;
+    try {
+      this.waitUntil(purge);
+      return true;
+    } catch (error) {
+      this.obs.warn(
+        'Avatar edge cache purge not handed to waitUntil; awaited',
+        {
+          userId,
+          error: messageForLog(error),
+        }
+      );
+      return false;
     }
   }
 

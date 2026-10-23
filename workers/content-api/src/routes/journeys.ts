@@ -1132,31 +1132,36 @@ app.post(
 
       // The org-aware service owns the DB write (same split as categories).
       // Wrapped so a failed write cannot strand the variants (Codex-29fs0).
-      await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
-        {
-          key: processed.coverImageKey,
-          imageType: 'course_cover',
-          entityType: 'course',
-          entityId: courseId,
-          storedKey: course.coverImageKey,
-        },
-        () =>
-          ctx.services.courseJourney.setCourseCoverImageKey(
-            ctx.organizationId,
-            ctx.input.params.pageId,
-            processed.coverImageKey
-          )
-      );
-
-      // `coverImageUrl` is on every portal card — without this bump a creator
+      //
+      // `coverImageUrl` is on every portal card — without the bump a creator
       // uploads a cover, sees it in the builder, and the rails keep rendering the
-      // typographic fallback until the TTL lapses.
-      bumpOrgJourneysVersion(
-        ctx.env,
-        ctx.executionCtx,
-        ctx.organizationId,
-        ctx.obs
-      );
+      // typographic fallback until the TTL lapses. Bumped even when the write
+      // throws: it can commit and still report failure, and the cover it
+      // replaced is then deleted (Codex-kk9nv.16).
+      await ctx.services.imageProcessing
+        .persistStillWithOrphanCleanup(
+          {
+            key: processed.coverImageKey,
+            imageType: 'course_cover',
+            entityType: 'course',
+            entityId: courseId,
+            storedKey: course.coverImageKey,
+          },
+          () =>
+            ctx.services.courseJourney.setCourseCoverImageKey(
+              ctx.organizationId,
+              ctx.input.params.pageId,
+              processed.coverImageKey
+            )
+        )
+        .finally(() =>
+          bumpOrgJourneysVersion(
+            ctx.env,
+            ctx.executionCtx,
+            ctx.organizationId,
+            ctx.obs
+          )
+        );
 
       return { coverImageUrl: processed.url };
     },
@@ -1272,25 +1277,10 @@ app.post(
       );
 
       // The org-aware service owns the DB write (same split as the cover).
-      await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
-        {
-          key: processed.heroImageKey,
-          imageType: 'course_hero',
-          entityType: 'course',
-          entityId: courseId,
-          storedKey: course.heroImageKey,
-        },
-        () =>
-          ctx.services.courseJourney.setCourseHeroImageKey(
-            ctx.organizationId,
-            ctx.input.params.pageId,
-            processed.heroImageKey
-          )
-      );
-
-      // BELT AND BRACES, and stated honestly rather than copied from the cover.
-      // I checked what the org journeys version actually keys: only the two
-      // CACHED list reads (`getCachedPublishedCourses` :134,
+      //
+      // The bump is BELT AND BRACES, and stated honestly rather than copied
+      // from the cover. I checked what the org journeys version actually keys:
+      // only the two CACHED list reads (`getCachedPublishedCourses` :134,
       // `getCachedPublishedJourneys` :477). The hero image reaches a visitor
       // through `/courses/:courseId/sell-preview`, which is an UNCACHED read, and
       // no card carries a hero today — so unlike the cover, this bump changes
@@ -1300,13 +1290,32 @@ app.post(
       // in their cache story for a reader to have to work out which one bumps,
       // and the moment a card does render a hero the omission would be a stale
       // rail with no obvious cause. The cost is one KV write on an
-      // org-manager-only, rate-limited route.
-      bumpOrgJourneysVersion(
-        ctx.env,
-        ctx.executionCtx,
-        ctx.organizationId,
-        ctx.obs
-      );
+      // org-manager-only, rate-limited route. Like the cover's, it runs even
+      // when the write throws (Codex-kk9nv.16).
+      await ctx.services.imageProcessing
+        .persistStillWithOrphanCleanup(
+          {
+            key: processed.heroImageKey,
+            imageType: 'course_hero',
+            entityType: 'course',
+            entityId: courseId,
+            storedKey: course.heroImageKey,
+          },
+          () =>
+            ctx.services.courseJourney.setCourseHeroImageKey(
+              ctx.organizationId,
+              ctx.input.params.pageId,
+              processed.heroImageKey
+            )
+        )
+        .finally(() =>
+          bumpOrgJourneysVersion(
+            ctx.env,
+            ctx.executionCtx,
+            ctx.organizationId,
+            ctx.obs
+          )
+        );
 
       return { heroImageUrl: processed.url };
     },

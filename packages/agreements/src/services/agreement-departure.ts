@@ -50,10 +50,44 @@ function inScope(organizationColumn: PgColumn, scope: DepartureScope): SQL[] {
 }
 
 /**
+ * Lock the creator's open proposals in scope, without changing them. Accept
+ * and counter lock the proposal and then the membership, so a departure
+ * takes these before the membership too (Codex-kk9nv.8). It then writes
+ * after the membership change, with {@link withdrawProposalsOnDeparture},
+ * which reads afresh and so also withdraws a proposal that a transaction it
+ * waited on has committed since.
+ *
+ * In id order: a removal (one organisation) and an account deletion (every
+ * organisation) can both lock the same creator's proposals, through
+ * different indexes, and rows locked in different orders deadlock. A
+ * transaction only, since a lock outside one ends with its statement.
+ */
+export async function lockProposalsOnDeparture(
+  tx: Tx,
+  scope: DepartureScope
+): Promise<void> {
+  await tx
+    .select({ id: agreementProposals.id })
+    .from(agreementProposals)
+    .where(
+      and(
+        ...inScope(agreementProposals.organizationId, scope),
+        eq(agreementProposals.creatorId, scope.creatorId),
+        eq(agreementProposals.status, 'open')
+      )
+    )
+    .orderBy(agreementProposals.id)
+    .for('update');
+}
+
+/**
  * The creator's open proposals in scope, withdrawn at `at`, so a creator who
- * left cannot accept one and start a new agreement. Call it BEFORE the
- * membership change: accept and counter lock the proposal and then the
- * membership, so taking them in the same order cannot deadlock.
+ * left cannot accept one and start a new agreement. Lock them with
+ * {@link lockProposalsOnDeparture} before the membership change, then call
+ * this after it: proposeAgreement holds the membership while it inserts, so
+ * a proposal committed while the change waited is withdrawn too. Accept and
+ * counter lock the proposal and then the membership, so that order does not
+ * deadlock with them.
  */
 export async function withdrawProposalsOnDeparture(
   tx: Tx | DatabaseClient,

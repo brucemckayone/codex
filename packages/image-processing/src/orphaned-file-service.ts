@@ -6,6 +6,7 @@
  */
 
 import type {
+  DatabaseClient,
   OrphanedEntityType,
   OrphanedImageType,
   OrphanStatus,
@@ -155,6 +156,57 @@ const DEFAULT_BATCH_SIZE = 50;
  */
 export const PAGE_IMAGE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Whether a live row still addresses a sized still folder (Codex-kk9nv.13).
+ * The owning row is found by the orphan's own type and entity id, and only a
+ * live one counts: a deleted entity's stills go with it (Codex-kk9nv.14).
+ *
+ * A sized folder is never re-written, so this, not the re-upload check, is
+ * what decides it. It matters when a write committed but reported failure:
+ * the upload then discards a folder its row does point at, and if that
+ * delete also fails the sweep must not finish the job.
+ *
+ * An orphan is placed only when its folder sits under its own type's base
+ * for its own entity (`STILL_OWNER`), so a row whose key and entity or type
+ * disagree is never decided by another row or another column: a cover row
+ * pointing into the course's hero folder must not read the cover column,
+ * find nothing, and delete a live hero. And only when the id is a uuid
+ * wherever the owning id is one, so the lookup cannot throw.
+ *
+ * @param db - The database to read the owning row from
+ * @param folder - The folder the orphaned object sits in
+ * @returns `null` when the orphan cannot be placed (no entity id, a type
+ *   with no sized still, a folder outside that type's base for the id, or an
+ *   id that is not the owning column's type), so the caller decides it some
+ *   other way
+ */
+export async function isStillFolderReferenced(
+  db: DatabaseClient,
+  orphan: Pick<OrphanedFileRecord, 'imageType' | 'originalEntityId'>,
+  folder: string
+): Promise<boolean | null> {
+  const { imageType, originalEntityId: entityId } = orphan;
+  if (!entityId || !isSizedStillType(imageType)) return null;
+  const owner = STILL_OWNER[imageType];
+  if (!folder.startsWith(`${owner.base(entityId, folder)}/`)) return null;
+  const textId = imageType === 'avatar';
+  if (!textId && !uuidSchema.safeParse(entityId).success) return null;
+
+  const { table, column } = owner.row();
+  const references = await db
+    .select({ id: table.id })
+    .from(table)
+    .where(
+      and(
+        eq(table.id, entityId),
+        whereNotDeleted(table),
+        addressesFolder(column, folder)
+      )
+    )
+    .limit(1);
+  return references.length > 0;
+}
+
 export class OrphanedFileService extends BaseService {
   /**
    * Record an orphaned file for deferred cleanup
@@ -301,53 +353,12 @@ export class OrphanedFileService extends BaseService {
     return references.length > 0;
   }
 
-  /**
-   * Whether a live row still addresses a sized still folder (Codex-kk9nv.13).
-   * The owning row is found by the orphan's own type and entity id, and only a
-   * live one counts: a deleted entity's stills go with it (Codex-kk9nv.14).
-   *
-   * A sized folder is never re-written, so this, not the re-upload check, is
-   * what decides it. It matters when a write committed but reported failure:
-   * the upload then discards a folder its row does point at, and if that
-   * delete also fails the sweep must not finish the job.
-   *
-   * An orphan is placed only when its folder sits under its own type's base
-   * for its own entity (`STILL_OWNER`), so a row whose key and entity or type
-   * disagree is never decided by another row or another column: a cover row
-   * pointing into the course's hero folder must not read the cover column,
-   * find nothing, and delete a live hero. And only when the id is a uuid
-   * wherever the owning id is one, so the lookup cannot throw.
-   *
-   * @param folder - The folder the orphaned object sits in
-   * @returns `null` when the orphan cannot be placed (no entity id, a type
-   *   with no sized still, a folder outside that type's base for the id, or an
-   *   id that is not the owning column's type), so the caller decides it some
-   *   other way
-   */
-  async isStillFolderReferenced(
+  /** {@link isStillFolderReferenced}, on this service's database. */
+  isStillFolderReferenced(
     orphan: Pick<OrphanedFileRecord, 'imageType' | 'originalEntityId'>,
     folder: string
   ): Promise<boolean | null> {
-    const { imageType, originalEntityId: entityId } = orphan;
-    if (!entityId || !isSizedStillType(imageType)) return null;
-    const owner = STILL_OWNER[imageType];
-    if (!folder.startsWith(`${owner.base(entityId, folder)}/`)) return null;
-    const textId = imageType === 'avatar';
-    if (!textId && !uuidSchema.safeParse(entityId).success) return null;
-
-    const { table, column } = owner.row();
-    const references = await this.db
-      .select({ id: table.id })
-      .from(table)
-      .where(
-        and(
-          eq(table.id, entityId),
-          whereNotDeleted(table),
-          addressesFolder(column, folder)
-        )
-      )
-      .limit(1);
-    return references.length > 0;
+    return isStillFolderReferenced(this.db, orphan, folder);
   }
 
   /**

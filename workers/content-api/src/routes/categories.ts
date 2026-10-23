@@ -152,9 +152,12 @@ function invalidateCategories(
   obs: ObservabilityClient | undefined
 ): void {
   if (!env.CACHE_KV) return;
+  // Given `obs`: the cache logs a failed invalidation only through its own
+  // client, so the `.catch` below never sees one.
   const cache = new VersionedCache({
     kv: env.CACHE_KV,
     waitUntil: (promise) => executionCtx.waitUntil(promise),
+    obs,
   });
   executionCtx.waitUntil(
     cache
@@ -421,9 +424,11 @@ app.post(
       // Persist the folder's key on the row — the space-aware service owns the
       // write. Wrapped so a failed write deletes the files just uploaded
       // (Codex-29fs0), and a successful one deletes the cover `existing` (read
-      // BEFORE the upload) still names (Codex-kk9nv.5).
-      const updated =
-        await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
+      // BEFORE the upload) still names (Codex-kk9nv.5). The categories are
+      // invalidated even when it throws: a write can commit and still report
+      // failure, and the cover it replaced is then deleted (Codex-kk9nv.16).
+      const updated = await ctx.services.imageProcessing
+        .persistStillWithOrphanCleanup(
           {
             key: processed.coverImageKey,
             imageType: 'category_cover',
@@ -437,9 +442,10 @@ app.post(
               { coverImageKey: processed.coverImageKey },
               space
             )
+        )
+        .finally(() =>
+          invalidateCategories(ctx.env, ctx.executionCtx, space, ctx.obs)
         );
-
-      invalidateCategories(ctx.env, ctx.executionCtx, space, ctx.obs);
 
       return {
         coverImageKey: updated.coverImageKey,

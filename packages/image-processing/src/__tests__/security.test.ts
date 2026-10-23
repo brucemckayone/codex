@@ -68,6 +68,7 @@ describe('ImageProcessingService - Security', () => {
   let updateMock: Mock;
   let setMock: Mock;
   let whereMock: Mock;
+  let lockedAvatarRead: Mock;
 
   beforeEach(() => {
     // Track update chain calls to verify scoping
@@ -81,8 +82,17 @@ describe('ImageProcessingService - Security', () => {
     setMock = vi.fn().mockReturnValue({ where: whereMock });
     updateMock = vi.fn().mockReturnValue({ set: setMock });
 
+    // deleteUserAvatar's read of the avatar, under a row lock in the
+    // transaction that clears it (Codex-kk9nv.17).
+    lockedAvatarRead = vi.fn();
     mockDb = {
       update: updateMock,
+      select: vi.fn(() => ({
+        from: () => ({ where: () => ({ for: lockedAvatarRead }) }),
+      })),
+      transaction(fn: (tx: unknown) => unknown) {
+        return fn(this);
+      },
       query: {
         content: { findFirst: vi.fn() },
         users: { findFirst: vi.fn() },
@@ -227,23 +237,21 @@ describe('ImageProcessingService - Security', () => {
 
     it('should check user exists before deleting avatar', async () => {
       // Mock user exists with avatar
-      (mockDb.query.users.findFirst as Mock).mockResolvedValueOnce({
-        avatarUrl: 'https://cdn.test.com/avatars/user-1/lg.webp',
-      });
+      lockedAvatarRead.mockResolvedValueOnce([
+        { avatarUrl: 'https://cdn.test.com/avatars/user-1/lg.webp' },
+      ]);
 
       await service.deleteUserAvatar('user-1');
 
       // Verify user lookup was performed
-      expect(mockDb.query.users.findFirst).toHaveBeenCalled();
+      expect(lockedAvatarRead).toHaveBeenCalledWith('update');
       // Verify R2 delete was called
       expect(mockR2Service.delete).toHaveBeenCalled();
     });
 
     it('should skip R2 delete when user has no avatar', async () => {
       // Mock user exists but no avatar
-      (mockDb.query.users.findFirst as Mock).mockResolvedValueOnce({
-        avatarUrl: null,
-      });
+      lockedAvatarRead.mockResolvedValueOnce([{ avatarUrl: null }]);
 
       await service.deleteUserAvatar('user-1');
 

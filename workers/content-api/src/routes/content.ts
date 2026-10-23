@@ -41,7 +41,7 @@ import {
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
-import type { Logger } from '@codex/observability';
+import type { Logger, ObservabilityClient } from '@codex/observability';
 import type { CheckSlugResponse, HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
 import {
@@ -55,29 +55,44 @@ import { cleanupContentThumbnailOnDelete } from './content-cleanup';
 
 /**
  * Bump the org content version in KV after publish/unpublish/delete.
- * Also invalidates the slug-keyed cache (public org info, stats, creators)
- * since content changes affect creator contentCount and org stats.
- * Fire-and-forget via waitUntil — does not block the response.
+ * Also invalidates the org's public caches (info, stats, creators) since
+ * content changes affect creator contentCount and org stats.
+ * Fire-and-forget via waitUntil — does not block the response, and never
+ * throws: the thumbnail route calls it from a `.finally()`, where a throw
+ * would replace the upload's own error.
  */
 function bumpOrgContentVersion(
   env: HonoEnv['Bindings'],
   executionCtx: ExecutionContext,
   organizationId: string | null | undefined,
-  obs?: Logger
+  obs?: ObservabilityClient
 ): void {
   if (!organizationId || !env.CACHE_KV) return;
+  // Given `obs`, because the cache swallows a failed invalidation and logs it
+  // only through its own client: the `.catch` below never sees one.
   const cache = new VersionedCache({
     kv: env.CACHE_KV,
     waitUntil: (promise) => executionCtx.waitUntil(promise),
+    obs,
   });
-  const db = createDbClient(env);
+  // Invalidate slug-keyed cache (stats, creators, public info) — shared
+  // helper resolves orgId → slug and swallows transient failures. Started in
+  // a promise of its own, so a client that cannot be built (missing config)
+  // lands in the `.catch` below instead of throwing to the caller, and the
+  // other bumps still run.
+  const bySlug = Promise.resolve().then(() =>
+    invalidateOrgSlugCache({
+      db: createDbClient(env),
+      cache,
+      orgId: organizationId,
+      logger: obs,
+    })
+  );
   executionCtx.waitUntil(
     Promise.all([
       // Invalidate org content collection version
       cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId)),
-      // Invalidate slug-keyed cache (stats, creators, public info) — shared
-      // helper resolves orgId → slug and swallows transient failures.
-      invalidateOrgSlugCache({ db, cache, orgId: organizationId, logger: obs }),
+      bySlug,
       // Invalidate the public topic list: publish/unpublish/delete changes the
       // set of categories with ≥1 published item, so a cached "Browse by topic"
       // list could otherwise show empty or missing topics until TTL.
@@ -536,23 +551,26 @@ app.post(
         throw new ContentNotFoundError(ctx.input.params.id);
       }
 
-      // Process image via service registry
-      const result = await ctx.services.imageProcessing.processContentThumbnail(
-        ctx.input.params.id,
-        ctx.user.id,
-        new File([ctx.files.thumbnail.buffer], ctx.files.thumbnail.name, {
-          type: ctx.files.thumbnail.type,
-        })
-      );
-
       // Thumbnail is part of the public content payload, so cached list/detail
-      // pages must pick up the new image. Bump the org content version.
-      bumpOrgContentVersion(
-        ctx.env,
-        ctx.executionCtx,
-        content.organizationId,
-        ctx.obs
-      );
+      // pages must pick up the new image: bump the org content version. Also
+      // when it throws: a write can commit and still report failure, and the
+      // thumbnail it replaced is then deleted (Codex-kk9nv.16).
+      const result = await ctx.services.imageProcessing
+        .processContentThumbnail(
+          ctx.input.params.id,
+          ctx.user.id,
+          new File([ctx.files.thumbnail.buffer], ctx.files.thumbnail.name, {
+            type: ctx.files.thumbnail.type,
+          })
+        )
+        .finally(() =>
+          bumpOrgContentVersion(
+            ctx.env,
+            ctx.executionCtx,
+            content.organizationId,
+            ctx.obs
+          )
+        );
 
       return {
         thumbnailUrl: result.url,

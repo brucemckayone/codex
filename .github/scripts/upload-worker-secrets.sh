@@ -29,6 +29,11 @@ set -e
 #     worker-to-worker HMAC call: auth, content-api, ecom-api, organization-api,
 #     identity-api, notifications-api, media-api — NOT admin-api)
 #   - RESEND_API_KEY (secret, notifications-api only)
+#   - CF_ZONE_ID, CF_API_TOKEN (secrets, identity-api only — the CDN cache purge
+#     that takes a deleted account's avatars off the edge, Codex-kk9nv.15. The
+#     token needs only the zone's Cache Purge permission. Empty = purge skipped,
+#     logged at error in production. Set them here, never by `wrangler secret
+#     put`: every deploy re-uploads this JSON and would blank a manual value.)
 
 ENVIRONMENT=$1
 WORKER=$2
@@ -118,10 +123,13 @@ EOF
   identity-api)
     # WORKER_SHARED_SECRET required: identity-api exposes a worker-HMAC
     # membership lookup endpoint that auth uses to resolve org context.
+    # CF_ZONE_ID + CF_API_TOKEN: the account-deletion CDN purge (see header).
     SECRETS_JSON=$(cat <<EOF
 {
   "DATABASE_URL":"${DATABASE_URL}",
-  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}",
+  "CF_ZONE_ID":"${CF_ZONE_ID:-}",
+  "CF_API_TOKEN":"${CF_API_TOKEN:-}"
 }
 EOF
 )

@@ -258,7 +258,7 @@ describe('getPublicProfileByUsername — cache keying (the invalidation contract
     expect(cache.gets).toEqual([
       // lowercased, so `/@Alex-Creator` and `/@alex-creator` share one slot
       // instead of fragmenting the version namespace across casings.
-      { id: 'alex-creator', type: CacheType.USERNAME_TO_ID },
+      { id: 'username:alex-creator', type: CacheType.USERNAME_TO_ID },
       // THE contract: keyed by id, so `invalidate(userId)` reaches it.
       { id: 'user-abc', type: CacheType.USER_PUBLIC_PROFILE },
     ]);

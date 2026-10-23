@@ -60,7 +60,18 @@ const exists = await client.objectExists('key');
 
 ## Cache Purge
 
-No cache-purge client exists in this package — the orphaned `src/cache/` subdir was removed in Codex-vwv5c (commit 5d9263a1). `CF_ZONE_ID`/`CF_API_TOKEN` in `@codex/shared-types` are vestigial.
+`CdnCachePurger` (`src/cdn/purger.ts`, Codex-kk9nv.15) purges Cloudflare's edge cache for one zone by URL prefix. An R2 delete does NOT evict the copies the edge holds for the bucket's custom domain, and stills are stored `immutable` for a year, so a purge is the only way a delete reaches the edge. Browser caches cannot be purged.
+
+```ts
+const purger = new CdnCachePurger({ zoneId: env.CF_ZONE_ID, apiToken: env.CF_API_TOKEN });
+const result = await purger.purgePrefixes(['cdn-assets.example.com/avatars/u1']);
+if (!result.ok) obs.error('...', { error: result.reason });
+```
+
+- Prefixes are a hostname plus path, with **no scheme**. At most 100 per call (the API's limit).
+- **Never throws, never hangs.** A purge follows a change that has already happened, so a refused, failed or timed-out purge (default 5s, `timeoutMs`) comes back as `{ ok: false, reason }` for the caller to log, never raised over that change. A Workers subrequest has no time limit of its own, so the timeout bounds the purge wherever it runs: in `waitUntil` after the response (account deletion), it fits that work's limited time after the response; awaited, it never holds its caller longer than `timeoutMs`.
+- The token needs the zone's **Cache Purge** permission and nothing else. `CF_ZONE_ID` and `CF_API_TOKEN` are secrets on the worker that purges; today that is identity-api, for account deletion, uploaded by the production deploy (`.github/scripts/upload-worker-secrets.sh`). The service registry builds the purger only when both are set.
+- The earlier orphaned `src/cache/` subdir was removed in Codex-vwv5c (commit 5d9263a1); this is a new client, not that one.
 
 ## KV
 

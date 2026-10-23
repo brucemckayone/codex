@@ -6,7 +6,13 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
-import { and, eq, schema, whereNotDeleted } from '@codex/database';
+import {
+  and,
+  eq,
+  messageForLog,
+  schema,
+  whereNotDeleted,
+} from '@codex/database';
 import {
   BaseService,
   InternalServiceError,
@@ -21,10 +27,14 @@ import {
 import {
   extractMimeType,
   MAX_IMAGE_SIZE_BYTES,
+  readStillFolderName,
   SUPPORTED_IMAGE_MIME_TYPES,
   validateImageSignature,
 } from '@codex/validation';
-import type { OrphanedFileService } from './orphaned-file-service';
+import {
+  isStillFolderReferenced,
+  type OrphanedFileService,
+} from './orphaned-file-service';
 import {
   pageImageKey,
   pageImageObjectKeys,
@@ -227,8 +237,8 @@ export class ImageProcessingService extends BaseService {
   /**
    * Run the write that points the row at a new folder, then delete the folder
    * it used to address, in the same request (owner, 2026-10-21: "Inline, same
-   * request"). A failed write deletes the NEW folder instead, which nothing
-   * references, and rethrows.
+   * request"). A failed write deletes the NEW folder instead, unless its row
+   * names it after all ({@link discardUnlessAddressed}), and rethrows.
    *
    * `replaced` is the old address as {@link ownedStillFolder} read it, so it is
    * null unless the folder is this entity's own: a poster frame, another
@@ -247,17 +257,135 @@ export class ImageProcessingService extends BaseService {
     try {
       result = await write();
     } catch (error) {
-      await this.deleteStill(
-        folder,
-        target,
-        `${target.imageType}-write-failed`
-      );
+      // Committed after all: the folder it replaced is dropped, as on success.
+      if (await this.discardUnlessAddressed(folder, replaced, target)) {
+        await this.deleteReplaced(replaced, folder, target);
+      }
       throw error;
     }
+    await this.deleteReplaced(replaced, folder, target);
+    return result;
+  }
+
+  private async deleteReplaced(
+    replaced: string | null,
+    folder: string,
+    target: StillOrphanTarget
+  ): Promise<void> {
     if (replaced && replaced !== folder) {
       await this.deleteStill(replaced, target, `${target.imageType}-replaced`);
     }
-    return result;
+  }
+
+  /**
+   * After a write that reported failure, delete the new folder unless its row
+   * addresses it after all (Codex-kk9nv.16). A write can commit and still
+   * report failure (a COMMIT whose ack was lost, a timeout after the commit),
+   * and deleting then breaks the picture the row now names.
+   *
+   * When the row cannot be read either, the write may or may not have landed,
+   * so either folder may be the dropped one: the new folder if it did not,
+   * the one it replaced if it did. Both are recorded for the sweep, which
+   * asks the row again before it deletes anything. A replaced folder from
+   * before Codex-kk9nv.5 (files directly under the base) is only named in the
+   * log: the sweep decides an unsized folder by its re-upload check alone,
+   * and would delete it while the row still uses it.
+   *
+   * @returns Whether the row addresses the new folder: the write landed
+   */
+  private async discardUnlessAddressed(
+    folder: string,
+    replaced: string | null,
+    target: StillOrphanTarget
+  ): Promise<boolean> {
+    const context = `${target.imageType}-write-failed`;
+    let addressed: boolean | null;
+    try {
+      addressed = await isStillFolderReferenced(
+        this.db,
+        { imageType: target.imageType, originalEntityId: target.entityId },
+        folder
+      );
+    } catch (probeError) {
+      // It may have landed or not, so either folder may be the dropped one.
+      const folders =
+        replaced && replaced !== folder ? [folder, replaced] : [folder];
+      await this.leaveToTheSweep(folders, target, context, probeError);
+      return false;
+    }
+    if (addressed === null) {
+      // Unreachable while every type writeNewStill serves is in STILL_OWNER.
+      // A type that is not has this check switched off, so say so.
+      this.obs.error(
+        'Still write failed and its folder cannot be placed; discarded',
+        { context, resourceId: target.entityId }
+      );
+    }
+    if (addressed) {
+      this.obs.warn(
+        'Still write reported failure, but its row addresses the new folder; kept',
+        { context, resourceId: target.entityId }
+      );
+      return true;
+    }
+    await this.deleteStill(folder, target, context);
+    return false;
+  }
+
+  /**
+   * Hand folders that may or may not still be in use to the sweep, which asks
+   * their row before it deletes anything (`isStillFolderReferenced`): the
+   * outcome of a failed write that could not be read back. An unsized folder
+   * (files directly under the base, from before Codex-kk9nv.5) is only
+   * logged, at error: the sweep decides those by its re-upload check alone,
+   * and would delete one that is still in use.
+   *
+   * Logged by each folder's name under its base (`{w}x{h}-{nonce}`): a whole
+   * key holds the user's or creator's id, which production redaction hashes,
+   * and the folder with it.
+   */
+  private async leaveToTheSweep(
+    folders: string[],
+    target: StillOrphanTarget,
+    context: string,
+    cause: unknown
+  ): Promise<void> {
+    const nameOf = (folder: string) => folder.split('/').at(-1) ?? '';
+    const sized = folders.filter((f) => readStillFolderName(nameOf(f)));
+    const unsizedKept = sized.length < folders.length;
+    if (!this.orphanedFileService) {
+      // Nothing records them, so this line is their only trace.
+      this.obs.error(
+        'Still change failed and its outcome is unknown; no orphan service, folders untracked',
+        {
+          context,
+          resourceId: target.entityId,
+          folders: folders.map(nameOf),
+          error: messageForLog(cause),
+        }
+      );
+      return;
+    }
+    this.obs[unsizedKept ? 'error' : 'warn'](
+      'Still change failed and its outcome is unknown; folders kept for the sweep',
+      {
+        context,
+        resourceId: target.entityId,
+        folders: sized.map(nameOf),
+        ...(unsizedKept && { unsizedBaseKept: true }),
+        error: messageForLog(cause),
+      }
+    );
+    if (sized.length > 0) {
+      await recordOrphansOrLog(
+        this.orphanedFileService,
+        sized
+          .flatMap((f) => variantKeyList(stillVariantKeys(f)))
+          .map((r2Key) => ({ r2Key, ...target })),
+        this.obs,
+        context
+      );
+    }
   }
 
   /**
@@ -803,25 +931,71 @@ export class ImageProcessingService extends BaseService {
    * The row is cleared first and the files deleted after, as
    * {@link deleteContentThumbnail} does.
    *
+   * The URL is read under a row lock and cleared in the same transaction
+   * (Codex-kk9nv.17). Read and cleared apart, an upload committing in between
+   * had its new URL nulled here while this deleted the folder it replaced, so
+   * the new photo stayed public with nothing pointing at it. Locked, an
+   * upload either commits first, and its photo is the one removed, or waits
+   * and lands on the cleared row.
+   *
    * On R2 failure: Records orphans for deferred cleanup instead of throwing
+   *
+   * @returns Whether there was an uploaded avatar to remove. A user whose only
+   *   picture is their sign-in provider's has none (Codex-kk9nv.10).
    */
-  async deleteUserAvatar(userId: string): Promise<void> {
-    // Get current avatar URL
-    const user = await this.db.query.users.findFirst({
-      where: eq(schema.users.id, userId),
-      columns: { avatarUrl: true },
-    });
+  async deleteUserAvatar(userId: string): Promise<boolean> {
+    // What the locked read found, kept for the failure path below.
+    let read: string | null = null;
+    let droppedUrl: string | null;
+    try {
+      droppedUrl = await this.db.transaction(async (tx) => {
+        const [user] = await tx
+          .select({ avatarUrl: schema.users.avatarUrl })
+          .from(schema.users)
+          .where(eq(schema.users.id, userId))
+          .for('update');
+        if (!user?.avatarUrl) return null;
+        read = user.avatarUrl;
 
-    if (!user?.avatarUrl) {
-      return; // Nothing to delete
+        await tx
+          .update(schema.users)
+          .set({ avatarUrl: null, updatedAt: new Date() })
+          .where(eq(schema.users.id, userId));
+        return user.avatarUrl;
+      });
+    } catch (error) {
+      // The clear may have committed with its ack lost: the photo the user
+      // removed would then stay public with nothing naming it. Its folder goes
+      // to the sweep, which keeps it if the row still names it (a rollback).
+      const folder = ownedStillFolder(
+        read,
+        getUserAvatarBaseKey(userId),
+        this.r2PublicUrlBase
+      );
+      if (folder) {
+        await this.leaveToTheSweep(
+          [folder],
+          { imageType: 'avatar', entityType: 'user', entityId: userId },
+          'avatar-remove-failed',
+          error
+        );
+      }
+      throw error;
     }
+    if (!droppedUrl) return false;
 
-    await this.db
-      .update(schema.users)
-      .set({ avatarUrl: null, updatedAt: new Date() })
-      .where(eq(schema.users.id, userId));
+    await this.deleteDroppedAvatar(userId, droppedUrl, 'avatar-removed');
+    return true;
+  }
 
-    await this.deleteDroppedAvatar(userId, user.avatarUrl, 'avatar-removed');
+  /**
+   * The CDN cache prefix every avatar of this user is served under, current
+   * and replaced: `{host}{path}/avatars/{userId}` with no scheme, the form a
+   * prefix purge takes (Codex-kk9nv.15).
+   */
+  avatarCachePrefix(userId: string): string {
+    const { host, pathname } = new URL(this.r2PublicUrlBase);
+    return `${host}${pathname.replace(/\/+$/, '')}/${getUserAvatarBaseKey(userId)}`;
   }
 
   /**
