@@ -29,6 +29,11 @@
  *   paths marked failed has no attempt on record (`last_retry_at` NULL) and
  *   its transfer may have landed under metadata no lookup can match, so it
  *   is left for a person to reconcile (release checklist R6).
+ * - **A transfer Stripe keeps refusing waits for support** (Codex-2hxff.48).
+ *   The row records Stripe's code and type. A refusal that cannot succeed on
+ *   a retry, or the `MAX_PAYOUT_FAILURES`th refusal, flags it
+ *   (`needs_review_at`) and the drains stop; an outage never uses an attempt.
+ *   It stays `failed`, so it is still owed (`markPayoutFailed`).
  * - **Nothing is dropped.** A slice whose payee cannot be paid yet is a
  *   pending row in their name; the organisation's slices while it has no
  *   owner are pending `no_owner` rows with no payee, handed to the next owner
@@ -52,7 +57,10 @@ import {
   payouts,
   stripeConnectAccounts,
 } from '@codex/database/schema';
-import { InternalServiceError } from '@codex/service-errors';
+import {
+  InternalServiceError,
+  UnsupportedCurrencyError,
+} from '@codex/service-errors';
 import {
   and,
   eq,
@@ -70,6 +78,7 @@ import type Stripe from 'stripe';
 /** The subset of `ObservabilityClient` the ledger logs through. */
 interface LedgerLogger {
   error(message: string, metadata?: Record<string, unknown>): void;
+  warn(message: string, metadata?: Record<string, unknown>): void;
 }
 
 export interface LedgerDeps {
@@ -184,9 +193,13 @@ const DRAINABLE: Array<'pending' | 'failed'> = ['pending', 'failed'];
  * keeps holding it until the loss is applied (`outcome_applied_at`), which
  * cancels it (`cancelled_by_dispute`) or reduces it: released any earlier, a
  * drain could pay a slice the buyer's bank has already taken back.
+ *
+ * A row flagged for support (`needs_review_at`, Codex-2hxff.48) is skipped
+ * until support releases it. It is still `failed`, so a refund still cancels
+ * it and earnings still count it as owed: they key on the status, not this.
  */
 export function isDrainablePayout(): SQL {
-  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE (${notInArray(disputes.status, [...DISPUTE_CLOSED_STATUSES])} OR (${disputes.status} = 'lost' AND ${disputes.outcomeAppliedAt} IS NULL)) AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})))`;
+  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND ${payouts.needsReviewAt} IS NULL AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE (${notInArray(disputes.status, [...DISPUTE_CLOSED_STATUSES])} OR (${disputes.status} = 'lost' AND ${disputes.outcomeAppliedAt} IS NULL)) AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})))`;
 }
 
 /**
@@ -404,27 +417,15 @@ async function sendReservedSlice(
       { idempotencyKey: input.idempotencyKey }
     );
   } catch (error) {
-    deps.obs.error(`${input.payoutType} transfer failed; the drains retry it`, {
-      payoutId: reserved.id,
+    // If the row cannot be marked failed it is left pending with no reason:
+    // the sweep picks it up and, finding no transfer in Stripe, sends it.
+    await recordTransferFailure(deps, reserved.id, error, {
+      payoutType: input.payoutType,
       organizationId: input.organizationId,
       amountCents: input.amountCents,
       idempotencyKey: input.idempotencyKey,
       destination: account.stripeAccountId,
-      error: error instanceof Error ? error.message : String(error),
     });
-    try {
-      await markPayoutFailed(deps.db, reserved.id);
-    } catch (updateError) {
-      // Left pending with no reason: the sweep picks it up and, finding no
-      // transfer in Stripe, sends it.
-      deps.obs.error('Could not mark the payout failed; it stays pending', {
-        payoutId: reserved.id,
-        error:
-          updateError instanceof Error
-            ? updateError.message
-            : String(updateError),
-      });
-    }
     return { kind: 'failed', payoutId: reserved.id };
   }
 
@@ -646,17 +647,255 @@ export async function settlePayoutPaid(
 }
 
 /**
- * Mark a row's transfer failed. Never overwrites a row already paid — a
- * concurrent drain that settled it wins.
+ * Stripe refusals after which a payout waits for support instead of being
+ * retried: the refund-clawback cap (`MAX_CLAWBACK_ATTEMPTS`), owner decision
+ * D-P2 (Codex-2hxff.48). Only refusals count; see `classifyTransferFailure`.
+ */
+export const MAX_PAYOUT_FAILURES = 5;
+
+/**
+ * Stripe refusals of a transfer that no retry can fix, so the row is flagged
+ * at the first one. Kept deliberately short: a code missing here still flags
+ * the row, after `MAX_PAYOUT_FAILURES` refusals. Each is from Stripe's error
+ * codes reference (docs.stripe.com/error-codes, checked 2026-10-23):
+ *
+ * - `transfers_not_allowed`: "The requested transfer can't be created.
+ *   Contact us if you're receiving this error." Only Stripe can lift it.
+ * - `resource_missing` on the `destination` parameter: "The ID provided isn't
+ *   valid. Either the resource doesn't exist, or an ID for a different
+ *   resource has been provided." The payee's Connect account is gone or
+ *   belongs to the other mode. On any other parameter it is an ordinary
+ *   refusal.
+ *
+ * A destination without the `transfers` capability is NOT listed: Stripe's
+ * reference documents no code for it, and the account can still gain it.
+ */
+const PERMANENT_REFUSALS: ReadonlyArray<{ code: string; param?: string }> = [
+  { code: 'transfers_not_allowed' },
+  { code: 'resource_missing', param: 'destination' },
+];
+
+/**
+ * Refusals that are about the platform's own Stripe account, not the row: its
+ * balance (a person may need to top it up), its keys, or its Connect setup.
+ * They are retried without using an attempt, and logged at error every time.
+ */
+const PLATFORM_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'balance_insufficient',
+  'api_key_expired',
+  'platform_account_required',
+  'platform_api_key_expired',
+  'secret_key_required',
+]);
+
+/** How a failed transfer is treated (Codex-2hxff.48). */
+export type TransferFailureKind =
+  /** Stripe refused it and no retry can fix that: flagged at once. */
+  | 'permanent'
+  /** Stripe refused it: counts toward `MAX_PAYOUT_FAILURES`. */
+  | 'refusal'
+  /** Stripe could not answer (connection, 5xx, rate limit, lock): retried, no attempt used. */
+  | 'outage'
+  /**
+   * The platform's side: its balance, keys or Connect setup, or a fault
+   * that is not Stripe's at all. Retried, no attempt used, and a person is
+   * told every time.
+   */
+  | 'platform';
+
+export interface TransferFailure {
+  kind: TransferFailureKind;
+  /** Stripe's `code` (`balance_insufficient`, …), or `unknown`. */
+  code: string;
+  /** Stripe's error class (`StripeInvalidRequestError`, …), or the error's name. */
+  type: string;
+}
+
+function stringField(error: unknown, field: string): string | undefined {
+  const value = (error as Record<string, unknown> | null)?.[field];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Sort a failed `transfers.create` the way the refund clawbacks do: only
+ * Stripe answering "no" uses an attempt, so an outage can never flag a
+ * payout (owner decision, Codex-2hxff.48).
+ */
+export function classifyTransferFailure(error: unknown): TransferFailure {
+  const type = (
+    stringField(error, 'type') ??
+    (error instanceof Error ? error.name : 'unknown')
+  ).slice(0, 64);
+  const code = (stringField(error, 'code') ?? 'unknown').slice(0, 64);
+
+  // Our own GBP guard (assertGbpOnly): the row's currency never changes.
+  if (error instanceof UnsupportedCurrencyError) {
+    return { kind: 'permanent', code, type };
+  }
+  if (!type.startsWith('Stripe')) return { kind: 'platform', code, type };
+
+  const rawStatus = (error as { statusCode?: unknown }).statusCode;
+  const status = typeof rawStatus === 'number' ? rawStatus : undefined;
+  if (
+    type === 'StripeConnectionError' ||
+    type === 'StripeAPIError' ||
+    type === 'StripeRateLimitError' ||
+    code === 'rate_limit' ||
+    code === 'lock_timeout' ||
+    status === undefined ||
+    status === 409 ||
+    status === 429 ||
+    status >= 500
+  ) {
+    return { kind: 'outage', code, type };
+  }
+  if (
+    type === 'StripeAuthenticationError' ||
+    type === 'StripePermissionError' ||
+    PLATFORM_REFUSAL_CODES.has(code)
+  ) {
+    return { kind: 'platform', code, type };
+  }
+  const param = stringField(error, 'param');
+  const permanent = PERMANENT_REFUSALS.some(
+    (refusal) =>
+      refusal.code === code &&
+      (refusal.param === undefined || refusal.param === param)
+  );
+  return { kind: permanent ? 'permanent' : 'refusal', code, type };
+}
+
+/** What `markPayoutFailed` recorded. */
+export interface PayoutFailureRecord {
+  failure: TransferFailure;
+  /** Refusals on record now, this one included if it counted. */
+  failureCount: number;
+  /** THIS call flagged the row for support. */
+  flagged: boolean;
+}
+
+/**
+ * Mark a row's transfer failed and record why (Codex-2hxff.48). Never
+ * overwrites a row already paid — a concurrent drain that settled it wins.
+ *
+ * Records Stripe's code and type. A refusal adds one to `failure_count`; an
+ * outage or a platform fault does not. A permanent refusal, or the refusal
+ * that brings the count to `MAX_PAYOUT_FAILURES`, sets `needs_review_at`, and
+ * the drains skip the row from then on. The status stays `failed`.
+ *
+ * One UPDATE, and it never touches a row already flagged, so the row it
+ * returns flagged was flagged by THIS call: exactly one caller reports it.
+ * Returns `null` when no row was updated (paid, cancelled or flagged since).
  */
 export async function markPayoutFailed(
   db: DatabaseClient,
-  payoutId: string
-): Promise<void> {
-  await db
+  payoutId: string,
+  error: unknown,
+  now: Date = new Date()
+): Promise<PayoutFailureRecord | null> {
+  const failure = classifyTransferFailure(error);
+  const counts = failure.kind === 'refusal';
+  const [row] = await db
     .update(payouts)
-    .set({ status: 'failed', reason: 'transfer_failed' })
-    .where(and(eq(payouts.id, payoutId), inArray(payouts.status, DRAINABLE)));
+    .set({
+      status: 'failed',
+      reason: 'transfer_failed',
+      lastErrorCode: failure.code,
+      lastErrorType: failure.type,
+      ...(counts ? { failureCount: sql`${payouts.failureCount} + 1` } : {}),
+      ...(failure.kind === 'permanent'
+        ? { needsReviewAt: now }
+        : counts
+          ? {
+              // SET reads the row as it was: this is the count before +1.
+              needsReviewAt: sql`CASE WHEN ${payouts.failureCount} + 1 >= ${MAX_PAYOUT_FAILURES} THEN ${now.toISOString()}::timestamptz END`,
+            }
+          : {}),
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(payouts.id, payoutId),
+        inArray(payouts.status, DRAINABLE),
+        isNull(payouts.needsReviewAt)
+      )
+    )
+    // Bare `.returning()`: the client union collapses the projected overload.
+    .returning();
+  if (!row) return null;
+  return {
+    failure,
+    failureCount: row.failureCount,
+    flagged: row.needsReviewAt !== null,
+  };
+}
+
+/**
+ * Record a failed transfer on its row and log it at the level it deserves:
+ * - flagged for support by this failure: ONE error, with an errorId;
+ * - the platform's side (`balance_insufficient`, keys, setup, or a fault of
+ *   ours): an error with an errorId every time, as a person must act;
+ * - anything else (an outage, a refusal below the cap): a warning, as the
+ *   drains retry it.
+ *
+ * Never throws. A row that cannot be updated keeps its state for the drains,
+ * and that is logged at error.
+ */
+export async function recordTransferFailure(
+  deps: Pick<LedgerDeps, 'db' | 'obs'>,
+  payoutId: string,
+  error: unknown,
+  context: Record<string, unknown>
+): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  let recorded: PayoutFailureRecord | null;
+  try {
+    recorded = await markPayoutFailed(deps.db, payoutId, error);
+  } catch (updateError) {
+    deps.obs.error(
+      'A payout transfer failed and its row could not be marked failed; the drains retry it',
+      {
+        errorId: crypto.randomUUID(),
+        payoutId,
+        ...context,
+        error: message,
+        updateError:
+          updateError instanceof Error
+            ? updateError.message
+            : String(updateError),
+      }
+    );
+    return;
+  }
+
+  const failure = recorded?.failure ?? classifyTransferFailure(error);
+  const fields = {
+    payoutId,
+    ...context,
+    kind: failure.kind,
+    code: failure.code,
+    type: failure.type,
+    failureCount: recorded?.failureCount,
+    maxFailures: MAX_PAYOUT_FAILURES,
+    error: message,
+  };
+  if (recorded?.flagged) {
+    deps.obs.error(
+      failure.kind === 'permanent'
+        ? 'Stripe refused a payout transfer for good; it waits for support'
+        : `Stripe refused a payout transfer ${MAX_PAYOUT_FAILURES} times; it waits for support`,
+      { errorId: crypto.randomUUID(), ...fields }
+    );
+    return;
+  }
+  if (failure.kind === 'platform') {
+    deps.obs.error(
+      'A payout transfer failed on the platform side; it is retried, but a person must act',
+      { errorId: crypto.randomUUID(), ...fields }
+    );
+    return;
+  }
+  deps.obs.warn('A payout transfer failed; the drains retry it', fields);
 }
 
 /** How long an attempt holds a row against every other drain. */

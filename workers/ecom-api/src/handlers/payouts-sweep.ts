@@ -4,7 +4,9 @@
  * Drains pending payouts rows whose Connect account has since become
  * charges_enabled && payouts_enabled but whose account.updated webhook
  * never fired (webhook drop, capability-ricochet event without the
- * relevant previous_attributes, etc).
+ * relevant previous_attributes, etc). Each run claims at most
+ * `PAYOUTS_SWEEP_PAYEE_LIMIT` payees, so overlapping runs take different
+ * ones (Codex-2hxff.13).
  *
  * Hybrid event+sweep resolution per Stripe docs (verified 2026-05-13):
  *   - account.updated webhook is primary (./connect-webhook.ts)
@@ -35,6 +37,10 @@ import { runCourseOffSaleSweep } from './course-off-sale-sweep';
  *  account.updated webhook would already have fired by now if it was
  *  going to. The webhook owns fresh rows; the sweep owns dropped events. */
 const DEFAULT_OLDER_THAN_MINUTES = 15;
+
+/** Payees claimed per hourly run (Codex-2hxff.13); the rest wait an hour,
+ *  least recently checked first. */
+export const PAYOUTS_SWEEP_PAYEE_LIMIT = 50;
 
 /** A duplicate's refund is retried here once it is this old; a younger one is
  *  still the webhook's, which Stripe redelivers (Codex-2hxff.15). */
@@ -69,6 +75,8 @@ export interface RunSweepDeps {
   obs: ObservabilityClient;
   /** Optional override for the age threshold (mainly for tests) */
   olderThanMinutes?: number;
+  /** Optional override for the payees claimed per run (mainly for tests) */
+  payeeLimit?: number;
 }
 
 /**
@@ -86,13 +94,18 @@ export async function runPayoutsSweep(deps: RunSweepDeps): Promise<{
     subscription,
     obs,
     olderThanMinutes = DEFAULT_OLDER_THAN_MINUTES,
+    payeeLimit = PAYOUTS_SWEEP_PAYEE_LIMIT,
   } = deps;
 
   try {
-    const result = await subscription.sweepUnresolvedPayouts(olderThanMinutes);
+    const result = await subscription.sweepUnresolvedPayouts(
+      olderThanMinutes,
+      payeeLimit
+    );
 
     obs.info('payouts-sweep cron completed', {
       olderThanMinutes,
+      payeeLimit,
       ...result,
     });
 
@@ -193,6 +206,7 @@ export async function runScheduledPayoutsSweep(
     obs?: ObservabilityClient;
     stripe?: Stripe;
     olderThanMinutes?: number;
+    payeeLimit?: number;
   }
 ): Promise<void> {
   const obs =
@@ -226,6 +240,7 @@ export async function runScheduledPayoutsSweep(
       subscription: webhookServices.services.subscription,
       obs,
       olderThanMinutes: deps?.olderThanMinutes,
+      payeeLimit: deps?.payeeLimit,
     });
   } finally {
     // Same hourly wake (Codex-2hxff.64, Codex-2hxff.15): neither throws, so

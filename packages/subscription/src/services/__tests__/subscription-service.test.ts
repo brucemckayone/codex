@@ -2465,11 +2465,15 @@ describe('SubscriptionService', () => {
       expect(err.code).toBe('PAYMENT_REQUIRED');
       expect(err.statusCode).toBe(402);
       // Context carries newTierId + billingInterval so the dialog can
-      // re-open the correct row, and stripeMessage so the toast can show
-      // the upstream message verbatim.
+      // re-open the correct row.
       expect(err.context?.newTierId).toBe(tier2.id);
       expect(err.context?.billingInterval).toBe('month');
-      expect(err.context?.stripeMessage).toBe('Your card was declined.');
+      // The context is sent to the client as `details`: Stripe's own
+      // message is logged, never returned (Codex-2hxff.23, SEC-02).
+      expect(JSON.stringify(err.context)).not.toContain(
+        'Your card was declined.'
+      );
+      expect(err.context).not.toHaveProperty('stripeMessage');
       // Codex-w87s4: prorationDate echoes the pinned preview timestamp
       // — this is what lets the dialog branch "stale preview" from
       // "transient payment failure" without needing a second round-trip.
@@ -9767,13 +9771,14 @@ describe('SubscriptionService', () => {
 
       const result = await service.sweepUnresolvedPayouts(15);
 
+      // No payee and no organisation: nobody to claim it for, so the sweep
+      // never takes it (Codex-2hxff.13 claims payees, not rows).
       expect(result).toEqual({
-        groupsScanned: 1,
+        groupsScanned: 0,
         groupsResolved: 0,
-        groupsSkipped: 1,
+        groupsSkipped: 0,
         errors: 0,
       });
-      // userId-null group is skipped BEFORE any Stripe call.
       expect(retrieveSpy).not.toHaveBeenCalled();
       expect(transferSpy).not.toHaveBeenCalled();
     });
@@ -10111,7 +10116,7 @@ describe('SubscriptionService', () => {
       expect(transferSpy).not.toHaveBeenCalled();
     });
 
-    it('groups by (orgId, userId) — N rows for one Connect account → one accounts.retrieve, one resolvePendingPayouts', async () => {
+    it('claims by payee — N rows for one Connect account → one accounts.retrieve, one payee-wide drain', async () => {
       await clearPayoutsLedger(db);
 
       const { org, sub, stripeAccountId } =
@@ -10158,7 +10163,7 @@ describe('SubscriptionService', () => {
       const retrieveSpy = stubAccountsRetrieve(true);
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
-      const resolveSpy = vi.spyOn(service, 'resolvePendingPayouts');
+      const resolveSpy = vi.spyOn(service, 'resolvePendingPayoutsForAccount');
 
       const result = await service.sweepUnresolvedPayouts(15);
 
@@ -10167,10 +10172,10 @@ describe('SubscriptionService', () => {
       // One Stripe accounts.retrieve per Connect account, not per row
       expect(retrieveSpy).toHaveBeenCalledTimes(1);
       expect(retrieveSpy).toHaveBeenCalledWith(stripeAccountId);
-      // One resolvePendingPayouts per group, not per row
+      // One drain per payee, not per row, and for every organisation
       expect(resolveSpy).toHaveBeenCalledTimes(1);
-      expect(resolveSpy).toHaveBeenCalledWith(org.id, stripeAccountId);
-      // Three transfers because resolvePendingPayouts processes 3 rows
+      expect(resolveSpy).toHaveBeenCalledWith(stripeAccountId);
+      // Three transfers because the drain processes 3 rows
       expect(transferSpy).toHaveBeenCalledTimes(3);
 
       resolveSpy.mockRestore();
@@ -12563,7 +12568,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'month',
-      stripeMessage: 'Your card was declined.',
       prorationDate: 1_700_000_000,
       tierIdAtCommit: 'tier_789',
     });
@@ -12577,7 +12581,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'month',
-      stripeMessage: 'Your card was declined.',
       prorationDate: 1_700_000_000,
       tierIdAtCommit: 'tier_789',
     });
@@ -12589,7 +12592,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'year',
-      stripeMessage: 'Insufficient funds.',
     });
 
     expect(err.context).toMatchObject({
@@ -12597,7 +12599,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'year',
-      stripeMessage: 'Insufficient funds.',
     });
     expect(err.context?.prorationDate).toBeUndefined();
     expect(err.context?.tierIdAtCommit).toBeUndefined();

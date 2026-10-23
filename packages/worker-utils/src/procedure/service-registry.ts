@@ -1027,8 +1027,10 @@ export async function createServiceRegistry(
         // without needing to re-send.
         const webAppUrl = env.WEB_APP_URL;
 
-        // WP-10 (Codex-69t7c.10): wire payout-released mailer so
-        // resolvePendingPayouts fires a notification after pending→paid.
+        // WP-10 (Codex-69t7c.10): wire payout-released mailer so the
+        // drains (resolvePendingPayouts, and the payee-wide
+        // resolvePendingPayoutsForAccount, Codex-2hxff.13) send one
+        // notification after pending→paid.
         // Same pattern as `mailer` above — service stays unaware of
         // Bindings / ExecutionContext.
         const payoutMailer = executionCtx

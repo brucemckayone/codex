@@ -12,8 +12,9 @@
  *     rate-limit → `enforceRole([])` → `needsOrg === false` → handler. The
  *     unauthenticated path injects no user, so the real session middleware runs
  *     and returns 401.
- *  2. `@codex/subscription`'s `ConnectAccountService` is replaced with spies so no
- *     real Stripe/DB call fires (the established ecom-api mocking pattern).
+ *  2. `@codex/subscription`'s `ConnectAccountService` and `SubscriptionService`
+ *     are replaced with spies so no real Stripe/DB call fires (the established
+ *     ecom-api mocking pattern).
  *
  * This deliberately AVOIDS mocking `procedure()` (memory:
  * procedure_mock_hides_resolver_bugs) — doing so would skip the very resolver
@@ -39,11 +40,18 @@ const connectSpies = {
   setCache: vi.fn(),
 };
 
+// The payee-wide drain /me/sync starts when the account is payable
+// (Codex-2hxff.13).
+const subscriptionSpies = {
+  resolvePendingPayoutsForAccount: vi.fn(),
+};
+
 vi.mock('@codex/subscription', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@codex/subscription')>();
   return {
     ...actual,
     ConnectAccountService: vi.fn(() => connectSpies),
+    SubscriptionService: vi.fn(() => subscriptionSpies),
   };
 });
 
@@ -137,6 +145,10 @@ beforeEach(() => {
   });
   connectSpies.createDashboardLinkForUser.mockResolvedValue({
     url: 'https://connect.stripe.com/express/acct_test_123',
+  });
+  subscriptionSpies.resolvePendingPayoutsForAccount.mockResolvedValue({
+    resolved: 0,
+    failed: 0,
   });
 });
 
@@ -291,6 +303,72 @@ describe('POST /connect/me/sync — real resolver', () => {
     expect(res.status).toBe(401);
     expect(connectSpies.syncAccountStatusForUser).not.toHaveBeenCalled();
     expect(connectSpies.getStatusForUser).not.toHaveBeenCalled();
+    expect(
+      subscriptionSpies.resolvePendingPayoutsForAccount
+    ).not.toHaveBeenCalled();
+  });
+
+  // Codex-2hxff.13 (SUB-21): a sync that finds the account payable releases
+  // the creator's pending money, as account.updated does.
+  it('a payable account: drains the payee after the response, without holding it', async () => {
+    let finishDrain: (value: { resolved: number; failed: number }) => void =
+      () => {};
+    subscriptionSpies.resolvePendingPayoutsForAccount.mockReturnValue(
+      new Promise((resolve) => {
+        finishDrain = resolve;
+      })
+    );
+    const ec = createExecutionContext();
+
+    // Resolves while the drain is still running: a held response never would.
+    const res = await buildApp(CREATOR_USER).fetch(
+      postReq('/connect/me/sync'),
+      env,
+      ec
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: STATUS_PAYLOAD });
+    expect(
+      subscriptionSpies.resolvePendingPayoutsForAccount
+    ).toHaveBeenCalledWith('acct_test_123');
+    finishDrain({ resolved: 1, failed: 0 });
+    await waitOnExecutionContext(ec);
+  });
+
+  it('an account not payable yet: syncs and drains nothing', async () => {
+    connectSpies.syncAccountStatusForUser.mockResolvedValue({
+      stripeAccountId: 'acct_test_123',
+      chargesEnabled: true,
+      payoutsEnabled: false,
+      status: 'restricted',
+    });
+
+    const res = await dispatch(
+      buildApp(CREATOR_USER),
+      postReq('/connect/me/sync')
+    );
+
+    expect(res.status).toBe(200);
+    expect(
+      subscriptionSpies.resolvePendingPayoutsForAccount
+    ).not.toHaveBeenCalled();
+  });
+
+  it('a failed drain never fails the sync response', async () => {
+    subscriptionSpies.resolvePendingPayoutsForAccount.mockRejectedValue(
+      new Error('stripe unreachable')
+    );
+
+    const res = await dispatch(
+      buildApp(CREATOR_USER),
+      postReq('/connect/me/sync')
+    );
+
+    expect(res.status).toBe(200);
+    expect(
+      subscriptionSpies.resolvePendingPayoutsForAccount
+    ).toHaveBeenCalledOnce();
   });
 });
 

@@ -63,7 +63,7 @@ describe('payouts ledger', () => {
   let ownerId: string;
   let orgId: string;
   let subscriptionId: string;
-  const obs = { error: vi.fn() };
+  const obs = { error: vi.fn(), warn: vi.fn() };
   const createdPayoutIds: string[] = [];
 
   beforeAll(async () => {
@@ -102,6 +102,7 @@ describe('payouts ledger', () => {
   beforeEach(() => {
     stripe = createMockStripe();
     obs.error.mockClear();
+    obs.warn.mockClear();
     deps = { db, stripe, obs, environment: 'test' };
   });
 

@@ -43,7 +43,7 @@ every account event.
 |---|---|
 | `POST /connect/me/onboard` | Start or resume onboarding; returns a Stripe onboarding link (`account_onboarding`, collecting `eventually_due` requirements) |
 | `GET /connect/me/status` | The caller's own status and outstanding requirements |
-| `POST /connect/me/sync` | Re-read the account from Stripe after onboarding returns |
+| `POST /connect/me/sync` | Re-read the account from Stripe after onboarding returns; if it is payable, release the caller's pending money after the response ([Releasing pending money](#releasing-pending-money)) |
 | `POST /connect/me/dashboard` | A single-use login link to the caller's **own** Express Dashboard |
 
 All are `auth: 'required'` and act only on the caller's own account.
@@ -180,10 +180,11 @@ The `payouts` table holds one row for every slice of every sale and invoice.
 | Column | Values |
 |---|---|
 | `payoutType` | `platform_fee`, `organization_fee`, `creator_payout`, `creator_payout_to_owner` |
-| `status` | `paid`, `pending`, `failed`, `reversed`, `cancelled_by_refund` |
+| `status` | `paid`, `pending`, `failed`, `reversed`, `cancelled_by_refund`, `cancelled_by_dispute` |
 | `reason` (when not paid) | `connect_not_ready` (no account), `connect_restricted` (an account that cannot take charges), `transfer_failed`, `min_transfer_floor`, `no_owner` (the organisation had no owner at the sale's time — the row has no payee yet); empty on a pending row while its transfer is in flight |
 | `sourceType` | `purchase` or `subscription` (course subscriptions use `subscription`) |
-| References | the charge (`stripeChargeId`), the transfer once made, the payee, the organisation (empty for orgless sales), the purchase or subscription |
+| References | the charge (`stripeChargeId`), the transfer once made, the payee, the organisation (empty for orgless sales), the purchase or subscription; on an organisation subscription invoice's creator slice, the agreement it was split by (`creator_org_agreement_id`, `Codex-2hxff.19`) |
+| Failures | `last_error_code` and `last_error_type` (Stripe's, from the last failed transfer), `failure_count` (Stripe refusals only), `needs_review_at` (set when the row waits for support) — see [When Stripe keeps refusing a payout](#when-stripe-keeps-refusing-a-payout) |
 
 Rules:
 
@@ -216,11 +217,12 @@ Rules:
   rounding creators' shares go to the organisation's slice
   ([fees-and-splits](fees-and-splits.md#organisation-subscription-invoice)).
 - **A failed transfer stays payable.** A `failed` row keeps its charge id and is
-  retried by the drains. Not a row the write paths before `Codex-2hxff.11`
-  marked failed: they recorded no attempt (`last_retry_at` empty), and the
-  transfer they called failed may have landed under metadata no lookup can
-  match. Those are reconciled by a person before the release (release
-  checklist R6).
+  retried by the drains, until Stripe has refused it for good or five times:
+  then it waits for support ([below](#when-stripe-keeps-refusing-a-payout)).
+  Not a row the write paths before `Codex-2hxff.11` marked failed: they
+  recorded no attempt (`last_retry_at` empty), and the transfer they called
+  failed may have landed under metadata no lookup can match. Those are
+  reconciled by a person before the release (release checklist R6).
 - **A refund freezes the row, then asks Stripe.** A row is `pending` while
   its transfer is in flight, and stays so if the transfer landed but the row
   could not be marked paid; a `failed` row's transfer may have landed despite
@@ -231,7 +233,9 @@ Rules:
   ever account for the money. Stripe does not reverse transfers when a charge
   is refunded.
 - **Rows are permanent.** Deleting a user or organisation never deletes ledger
-  rows — **gap**: `Codex-2hxff.23` (they cascade today).
+  rows: the database refuses a hard delete of anyone a payout row names
+  (`ON DELETE RESTRICT`, migration 0111, `Codex-2hxff.23`), and deleting an
+  account anonymises the person instead ([README](README.md)).
 - A `paid` or `reversed` row always carries a transfer or charge id and the time
   it was resolved (database check).
 
@@ -278,36 +282,95 @@ decision 2026-10-13, "Hold and remind (Recommended)") — **gap**:
 `Codex-2hxff.34`.
 
 When a payee becomes payable, **all** their pending rows are paid at once —
-from every organisation and from orgless sales.
+from every organisation and from orgless sales
+(`SubscriptionService.resolvePendingPayoutsForAccount`, `Codex-2hxff.13`). The
+payee is found from the Connect account alone, so nothing depends on the
+account's metadata.
 
-**What triggers it** — **gap**: `Codex-2hxff.13`:
+**What triggers it:**
 
 1. `account.updated`, when the account changes from not payable to payable.
    "Was it payable before?" is read from **our** stored row, not from Stripe's
    `previous_attributes`, which can omit the fields that changed. That makes a
-   duplicate event a no-op and handles restricted-then-active correctly. Today
-   this trigger only runs for accounts carrying an organisation id in their
-   metadata, which accounts created since June 2026 do not have — so nothing
-   drains until the hourly sweep.
-2. `POST /connect/me/sync`, when it finds the account payable. Today it updates
-   the status but releases nothing.
+   duplicate event a no-op and handles restricted-then-active correctly: each
+   return to payable drains again. The drain runs after the webhook answers.
+2. `POST /connect/me/sync`, whenever it finds the account payable, after the
+   response. A repeat is harmless: a row already paid is not drainable, and
+   one another drain has claimed is skipped.
 3. **The hourly sweep**, a safety net.
 
 **How a drain works.** A payee's pending and failed rows are grouped by
-organisation and source. A group below the minimum transfer waits. Each row is
-claimed for one attempt; a transfer Stripe already made for it is found by its
-`payout_id` and settles it; the rest are transferred with key
-`payout_${payoutId}_${attempt}` and marked `paid`, or `failed` to be retried
-next time. One group's failure never stops the next. Rows held for an open
-dispute or inquiry are skipped (`isDrainablePayout`;
-[disputes](purchases.md#disputes)). The payee is emailed (`payout-released`) — **gap**:
-`Codex-2hxff.13`.
+organisation and source, so each group is paid at its own organisation's fees.
+A group below the minimum transfer waits. Each row is claimed for one attempt;
+a transfer Stripe already made for it is found by its `payout_id` and settles
+it; the rest are transferred with key `payout_${payoutId}_${attempt}` and
+marked `paid`, or `failed` to be retried next time. One group's failure never
+stops the next. Rows held for an open dispute or inquiry are skipped, and so
+are rows waiting for support (`isDrainablePayout`;
+[disputes](purchases.md#disputes)). The payee then gets **one**
+`payout-released` email, with what was actually paid to their creator slices
+in this drain, whatever the number of organisations.
 
-**The sweep.** An ecom-api cron at `0 * * * *`, in production only. It picks
-payees with rows pending for more than 15 minutes, checks each payee's account
-live with Stripe, and drains those now payable. It works in bounded batches,
-takes a lock so two runs cannot overlap, and records each attempt — **gap**:
-`Codex-2hxff.13` (unbounded, unlocked, attempts never recorded).
+**The sweep.** An ecom-api cron at `0 * * * *`, in production only. Each run
+claims at most 50 payees whose rows have waited more than 15 minutes since
+they were last checked, least recently checked first. The claim is one
+`UPDATE … SET attempted_at` over `SELECT … FOR UPDATE SKIP LOCKED`: it bounds
+the run, keeps two overlapping runs on different payees, and records the
+check, so a payee who cannot be paid yet goes to the back of the queue
+instead of being asked about first every hour. No session lock is used: the
+database pooler may give each statement a different connection. The sweep
+then checks each claimed payee's account live with Stripe and drains those
+now payable. An ownerless organisation's held rows are claimed the same way
+and re-homed if it has an owner again.
+
+### When Stripe keeps refusing a payout
+
+Owner decision 2026-10-23 (D-P2, "Stop, flag for support"; `Codex-2hxff.48`).
+A failed transfer records Stripe's `code` and error type on its row
+(`last_error_code`, `last_error_type`). What happens next depends on why it
+failed (`classifyTransferFailure` in `packages/payments/src/payout-ledger.ts`):
+
+| Failure | Uses an attempt | What happens |
+|---|---|---|
+| Stripe could not answer: a connection error, a 5xx, a rate limit, a lock or key conflict | No | Retried by the next drain; a warning |
+| The platform's side: `balance_insufficient`, the platform's keys or Connect setup, or a fault of ours | No | Retried by the next drain; an **error every time**, because a person may need to act (top up the balance, fix a key) |
+| A refusal no retry can fix: `transfers_not_allowed`, or `resource_missing` on the `destination` (the payee's account no longer exists) | No | **Flagged at once** |
+| Any other refusal | Yes (`failure_count`) | Retried; the **fifth** (`MAX_PAYOUT_FAILURES`, the same cap as refund clawbacks) flags it |
+
+A **flagged** row has `needs_review_at` set. Every drain and the sweep skip it,
+and exactly one error is logged for it, with an `errorId`, by the call that
+flagged it. Its status stays `failed`, so the money is still owed: earnings
+still count it, and a refund or a lost dispute still cancels it.
+
+The list of refusals that flag at once is kept short on purpose: an unlisted
+code still flags the row after five refusals. A destination without the
+`transfers` capability is not on it, because Stripe documents no code for it and
+the account can still gain it.
+
+**Releasing a flagged payout.** There is no screen yet (an admin button comes
+with the admin app). Support finds the queue — served by the partial index
+`idx_payouts_needs_review` — with:
+
+```sql
+SELECT id, user_id, organization_id, amount_cents, last_error_code,
+       last_error_type, failure_count, needs_review_at
+FROM payouts
+WHERE needs_review_at IS NOT NULL AND status = 'failed'
+ORDER BY needs_review_at;
+```
+
+Once the cause is fixed (for example the payee has reconnected their account,
+or Stripe has lifted a restriction), release the row:
+
+```sql
+UPDATE payouts
+SET needs_review_at = NULL, failure_count = 0, updated_at = now()
+WHERE id = '<payout id>' AND status = 'failed';
+```
+
+It must report `UPDATE 1`; `UPDATE 0` means the row was paid or cancelled
+meanwhile, and nothing is released. The next drain pays it: the payee's next
+`account.updated` or `/connect/me/sync`, or the hourly sweep.
 
 Why hourly, and why minute `0`: Neon bills the time the database is awake, and
 the sweep wakes it. At 15 minutes the sweep alone kept the database awake about

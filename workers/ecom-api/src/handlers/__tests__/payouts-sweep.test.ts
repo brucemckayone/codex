@@ -34,6 +34,7 @@ import { COURSE_OFF_SALE_SWEEP_LIMIT } from '../course-off-sale-sweep';
 import {
   OWED_DUPLICATES_OLDER_THAN_MS,
   OWED_DUPLICATES_SWEEP_LIMIT,
+  PAYOUTS_SWEEP_PAYEE_LIMIT,
   runOwedDuplicatesSweep,
   runPayoutsSweep,
   runScheduledPayoutsSweep,
@@ -142,11 +143,13 @@ describe('ecom-api payouts-sweep handler', () => {
       groupsSkipped: 1,
       errors: 0,
     });
-    expect(spy).toHaveBeenCalledWith(30);
+    // The run is bounded: the default payee limit is passed through.
+    expect(spy).toHaveBeenCalledWith(30, PAYOUTS_SWEEP_PAYEE_LIMIT);
     expect(obs.info).toHaveBeenCalledWith(
       'payouts-sweep cron completed',
       expect.objectContaining({
         olderThanMinutes: 30,
+        payeeLimit: PAYOUTS_SWEEP_PAYEE_LIMIT,
         groupsScanned: 3,
         groupsResolved: 2,
         groupsSkipped: 1,
@@ -155,6 +158,29 @@ describe('ecom-api payouts-sweep handler', () => {
     );
     expect(obs.error).not.toHaveBeenCalled();
 
+    spy.mockRestore();
+  });
+
+  it('runPayoutsSweep passes a payee limit override to the service (Codex-2hxff.13)', async () => {
+    const { SubscriptionService } = await import('@codex/subscription');
+    const spy = vi
+      .spyOn(SubscriptionService.prototype, 'sweepUnresolvedPayouts')
+      .mockResolvedValue({
+        groupsScanned: 2,
+        groupsResolved: 0,
+        groupsSkipped: 2,
+        errors: 0,
+      });
+    const { obs } = makeObs();
+
+    await runPayoutsSweep({
+      subscription: sweepService(),
+      obs: obs as never,
+      olderThanMinutes: 15,
+      payeeLimit: 2,
+    });
+
+    expect(spy).toHaveBeenCalledWith(15, 2);
     spy.mockRestore();
   });
 

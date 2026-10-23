@@ -296,7 +296,10 @@ export class ConnectAccountService extends BaseService {
       // which logs the full Stripe diagnostic surface and wraps as
       // InternalServiceError.
       if (this.isConnectPlatformNotEnabled(error)) {
+        // Stripe's message is logged, never put in the error's context, which
+        // is sent to the client (Codex-2hxff.23, SEC-02).
         this.obs.error('Stripe Connect not enabled for the platform account', {
+          errorId: crypto.randomUUID(),
           context: 'createAccountForUser',
           userId,
           stripeMessage: error instanceof Error ? error.message : String(error),
