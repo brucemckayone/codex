@@ -11,7 +11,8 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const CREATOR_ID = '5f0c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b';
+// A BetterAuth user id: users.id is text, never a uuid.
+const CREATOR_ID = 'a62da3ad5c94736a88f90ff5c666143c';
 
 const mockGetPublicContent = vi.fn();
 const mockStudioList = vi.fn(() => {

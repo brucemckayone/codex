@@ -197,7 +197,9 @@ describe('GET /api/content/public — list envelope survives a cache HIT', () =>
  * back to the studio list, which lists the SIGNED-IN user's own content.
  */
 describe('GET /api/content/public?creatorId — a creator without an org (Codex-osuqt)', () => {
-  const CREATOR_ID = '4d333333-3333-4333-8333-333333333333';
+  // A BetterAuth user id: 32 alphanumerics, NOT a uuid. The schema first
+  // shipped as uuidSchema, which refused every real creator.
+  const CREATOR_ID = 'a62da3ad5c94736a88f90ff5c666143c';
 
   it("returns the list envelope and asks the service for that creator's content only", async () => {
     const res = await dispatch(`/api/content/public?creatorId=${CREATOR_ID}`);
@@ -216,12 +218,19 @@ describe('GET /api/content/public?creatorId — a creator without an org (Codex-
     const first = await dispatch(`/api/content/public?creatorId=${CREATOR_ID}`);
     await dispatch(`/api/content/public?creatorId=${CREATOR_ID}`);
 
-    // `shouldCachePublicContentQuery` keys on orgId, so both reads reach the
-    // service and a publish shows on the profile within the CDN window.
+    // `shouldCachePublicContentQuery` skips any query naming a creator, so
+    // both reads reach the service and a publish shows within the CDN window.
     expect(contentSpies.listPublic).toHaveBeenCalledTimes(2);
     expect(first.headers.get('Cache-Control')).toBe(
       'public, max-age=60, s-maxage=60'
     );
+  });
+
+  it('refuses a creatorId that is not a user id', async () => {
+    const res = await dispatch('/api/content/public?creatorId=x%3Afeat%3Atrue');
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.listPublic).not.toHaveBeenCalled();
   });
 
   it('still refuses a query with no scope at all', async () => {

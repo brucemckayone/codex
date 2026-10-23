@@ -850,7 +850,7 @@ describe('Query Schemas', () => {
         accessType: 'free' as const,
         category: 'Programming',
         organizationId: '123e4567-e89b-12d3-a456-426614174000',
-        creatorId: '123e4567-e89b-12d3-a456-426614174001',
+        creatorId: 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b',
         search: 'typescript tutorial',
         sortBy: 'publishedAt' as const,
         sortOrder: 'asc' as const,
@@ -860,19 +860,20 @@ describe('Query Schemas', () => {
       expect(result).toEqual(query);
     });
 
+    // creatorId is a user id (BetterAuth text), not a uuid (Codex-osuqt).
     it('should validate with creatorId filter', () => {
       const query = {
-        creatorId: '123e4567-e89b-12d3-a456-426614174001',
+        creatorId: 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b',
       };
 
       const result = contentQuerySchema.parse(query);
-      expect(result.creatorId).toBe('123e4567-e89b-12d3-a456-426614174001');
+      expect(result.creatorId).toBe('GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b');
     });
 
     it('should reject invalid creatorId format', () => {
       expect(() =>
-        contentQuerySchema.parse({ creatorId: 'not-a-uuid' })
-      ).toThrow('Invalid ID format');
+        contentQuerySchema.parse({ creatorId: 'x:feat:true' })
+      ).toThrow('Invalid user ID format');
     });
 
     it('should reject page less than 1', () => {
@@ -1242,10 +1243,11 @@ describe('Codex-moyu5: updateContentSchema tag preservation', () => {
 // which only /discover does, on purpose.
 describe('Codex-osuqt: publicContentQuerySchema scopes', () => {
   const uuid = '5f0c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b';
+  const userId = 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b';
 
   it.each([
     ['orgId', { orgId: uuid }],
-    ['creatorId', { creatorId: uuid }],
+    ['creatorId', { creatorId: userId }],
     ['slug', { slug: 'first' }],
   ])('accepts a query scoped by %s alone', (_scope, query) => {
     expect(publicContentQuerySchema.safeParse(query).success).toBe(true);
@@ -1256,10 +1258,29 @@ describe('Codex-osuqt: publicContentQuerySchema scopes', () => {
     expect(result.success).toBe(false);
     expect(result.error?.issues[0]?.path).toEqual(['orgId']);
   });
+});
 
-  it('still refuses a creatorId that is not a uuid', () => {
-    expect(
-      publicContentQuerySchema.safeParse({ creatorId: 'not-a-uuid' }).success
-    ).toBe(false);
+// users.id is BetterAuth text (32 alphanumerics), never a uuid. Both creatorId
+// filters first validated it as a uuid, so they refused every real creator:
+// the profile's public list and /explore's creator filter (browse) 400'd.
+describe('Codex-osuqt: a creatorId filter takes a user id, not a uuid', () => {
+  const userId = 'a62da3ad5c94736a88f90ff5c666143c';
+
+  it.each([
+    ['publicContentQuerySchema', publicContentQuerySchema],
+    ['contentQuerySchema (studio list, /explore browse)', contentQuerySchema],
+  ])('%s accepts a BetterAuth user id', (_name, schema) => {
+    expect(schema.safeParse({ creatorId: userId }).success).toBe(true);
+  });
+
+  it.each([
+    ['a cache-key delimiter', 'x:feat:true'],
+    ['a path', '../etc'],
+    ['an empty string', ''],
+  ])('refuses %s as a creatorId', (_what, creatorId) => {
+    expect(publicContentQuerySchema.safeParse({ creatorId }).success).toBe(
+      false
+    );
+    expect(contentQuerySchema.safeParse({ creatorId }).success).toBe(false);
   });
 });

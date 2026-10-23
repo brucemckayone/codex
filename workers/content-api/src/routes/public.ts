@@ -151,9 +151,10 @@ function resolveR2Urls(items: ContentWithRelations[], bases: R2PublicBases) {
  * Cache: `public` — the body is a PUBLISHED catalogue page, identical
  * for every viewer (no session is read; `auth: 'none'` means none is even
  * resolved), so any shared cache may serve one visitor's copy to the next. 60s
- * browser + CDN, bounded by the KV invalidation window above. Only an org
- * query is KV-cached; a creator query's 60s CDN window is its only cache, as
- * for /discover, so a publish shows on the profile within 60s. The docstring
+ * browser + CDN, bounded by the KV invalidation window above. A query naming a
+ * creator is never KV-cached (`shouldCachePublicContentQuery` skips it), so
+ * its 60s CDN window is its only cache, as for /discover, and a publish shows
+ * on the profile within 60s. The docstring
  * used to say "5 minute public cache"; the header it sat over has emitted 60s
  * since the KV layer's event-driven invalidation landed, and now says so.
  * @returns {PublicContentListResponse}

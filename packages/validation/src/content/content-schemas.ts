@@ -14,6 +14,7 @@ import {
   createSlugSchema,
   priceCentsSchema,
   urlSchema,
+  userIdSchema,
   uuidSchema,
 } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
@@ -670,7 +671,9 @@ export const contentQuerySchema = paginationSchema.extend({
   accessType: contentAccessTypeEnum.optional(),
   category: z.string().max(100).optional(),
   organizationId: uuidSchema.optional(),
-  creatorId: uuidSchema.optional(),
+  // A user id (BetterAuth text), not a uuid: uuidSchema refused every real
+  // one, so /explore's creator filter 400'd (Codex-osuqt).
+  creatorId: userIdSchema.optional(),
 
   // Search
   search: createSearchQuerySchema(255),
@@ -754,7 +757,8 @@ export const publicContentQuerySchema = paginationSchema
       .optional(),
     search: createSearchQuerySchema(255),
     sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
-    creatorId: uuidSchema.optional(),
+    // A user id (BetterAuth text), not a uuid (Codex-osuqt).
+    creatorId: userIdSchema.optional(),
     // Creator-flagged featured filter — true returns only featured items,
     // false excludes them. Undefined (default) returns all published items.
     // Accepts boolean or stringified boolean (URL query strings).
