@@ -13,8 +13,15 @@
 import { stripeEnvMetadata } from '@codex/constants';
 import type Stripe from 'stripe';
 
-export interface IssueRefundInput {
-  paymentIntentId: string;
+/**
+ * What to refund: a one-off checkout's PaymentIntent, or a subscription
+ * invoice's charge (Codex-2hxff.15), which is what an invoice resolves to.
+ */
+type RefundTarget =
+  | { paymentIntentId: string; chargeId?: never }
+  | { chargeId: string; paymentIntentId?: never };
+
+export type IssueRefundInput = RefundTarget & {
   /** Stripe's own reason enum; `duplicate` for a second payment. */
   reason: Stripe.RefundCreateParams.Reason;
   /**
@@ -25,7 +32,7 @@ export interface IssueRefundInput {
   idempotencyKey: string;
   /** Tags the refund with `codex_env`, so its own events pass the filter. */
   environment: string;
-}
+};
 
 export interface IssueRefundResult {
   /** The refund Stripe made, or null when the charge was already refunded. */
@@ -34,7 +41,7 @@ export interface IssueRefundResult {
 }
 
 /**
- * Refund a PaymentIntent's charge in full. A charge already refunded in full
+ * Refund a payment in full. A charge already refunded in full
  * is success, not an error: whichever refund got there first did the job.
  * Any other failure is thrown for the caller to retry.
  */
@@ -45,7 +52,9 @@ export async function issueRefund(
   try {
     const refund = await stripe.refunds.create(
       {
-        payment_intent: input.paymentIntentId,
+        ...(input.chargeId
+          ? { charge: input.chargeId }
+          : { payment_intent: input.paymentIntentId }),
         reason: input.reason,
         metadata: stripeEnvMetadata(input.environment),
       },

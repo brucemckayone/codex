@@ -570,6 +570,7 @@
   "subscription_health_banner_dismiss": "Dismiss notice",
   "subscription_reactivate": "Reactivate",
   "subscription_change_tier": "Change Plan",
+  "subscription_tier_change_preview_expired": "Prices changed — please review again",
   "subscription_current_period_ends": "Current period ends {date}",
   "subscription_status_active": "Active",
   "subscription_status_cancelling": "Cancelling",

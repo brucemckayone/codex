@@ -1,5 +1,6 @@
 import { relations, sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   boolean,
   check,
   index,
@@ -141,6 +142,26 @@ export const subscriptions = pgTable(
     // subscription event, which would overwrite it (Codex-2hxff.9,
     // docs/payments/subscription-disputes.md).
     disputedAt: timestamp('disputed_at', { withTimezone: true }),
+
+    // Stripe ended this subscription (`customer.subscription.deleted`;
+    // Stripe's `canceled` is terminal). A tombstone: no later or replayed
+    // event brings the row back (Codex-2hxff.15). NULL while it can still
+    // change, including `cancelling` and `unpaid`-then-paid.
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+
+    // A second subscription to an org the user already subscribed to
+    // (Codex-2hxff.15, "Keep the first"): the subscription it duplicated.
+    // Written `cancelled`, outside the one-live-per-user index; it grants,
+    // pays and emails nothing. Cancelled at Stripe and its payment refunded
+    // in full; `duplicate_settled_at` records both done. A NULL there with
+    // the marker set is owed, held for support.
+    duplicateOfSubscriptionId: uuid('duplicate_of_subscription_id').references(
+      (): AnyPgColumn => subscriptions.id,
+      { onDelete: 'restrict' }
+    ),
+    duplicateSettledAt: timestamp('duplicate_settled_at', {
+      withTimezone: true,
+    }),
 
     // Revenue split snapshot (immutable — calculated at creation, updated on renewal)
     // Platform keeps 10% of gross. Org gets 15% of post-platform. Creators get remainder.

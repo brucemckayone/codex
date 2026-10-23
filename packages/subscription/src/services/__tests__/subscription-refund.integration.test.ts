@@ -73,27 +73,48 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
   let stripe: Stripe;
   let service: SubscriptionService;
   let orgId: string;
+  let orgName: string;
   let tierId: string;
+  let tierName: string;
+  let otherTierId: string;
+  let otherTierName: string;
   let planId: string;
   let courseId: string;
 
   beforeAll(async () => {
     db = setupTestDatabase();
     const [creatorId] = await seedTestUsers(db, 1);
-    orgId = takeFirst(
+    const org = takeFirst(
       await db
         .insert(organizations)
         .values(
           createTestOrganizationInput({ slug: createUniqueSlug('sub-refund') })
         )
         .returning()
-    ).id;
-    tierId = takeFirst(
+    );
+    orgId = org.id;
+    orgName = org.name;
+    const tier = takeFirst(
       await db
         .insert(subscriptionTiers)
-        .values(createTestTierInput(orgId))
+        .values(createTestTierInput(orgId, { name: `Gold ${uid()}` }))
         .returning()
-    ).id;
+    );
+    tierId = tier.id;
+    tierName = tier.name;
+    const otherTier = takeFirst(
+      await db
+        .insert(subscriptionTiers)
+        .values(
+          createTestTierInput(orgId, {
+            name: `Platinum ${uid()}`,
+            sortOrder: 2,
+          })
+        )
+        .returning()
+    );
+    otherTierId = otherTier.id;
+    otherTierName = otherTier.name;
     courseId = takeFirst(
       await db
         .insert(courses)
@@ -227,7 +248,7 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
     const ended = await service.cancelForFullRefund(charge);
 
     expect(ended?.subscription).toMatchObject({ kind: 'tier', id: sub.id });
-    expect(ended?.cancelled.status).toBe('canceled');
+    expect(ended?.cancelled?.status).toBe('canceled');
     expect(stripe.invoices.list).toHaveBeenCalledWith({
       subscription: stripeId,
       status: 'paid',
@@ -320,7 +341,7 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
 
     const ended = await service.cancelForFullRefund(fullRefund());
 
-    expect(ended?.subscription.id).toBe(sub.id);
+    expect(ended?.subscription?.id).toBe(sub.id);
     expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
   });
 
@@ -358,5 +379,311 @@ describe('SubscriptionService.cancelForFullRefund (Codex-2hxff.10)', () => {
 
     expect(await service.cancelForFullRefund(fullRefund())).toBeUndefined();
     expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+  });
+
+  // ── a duplicate subscription (Codex-2hxff.15) ─────────────────────────
+  // A second subscription the user already had is recorded `cancelled` and
+  // marked a duplicate, then cancelled at Stripe and every payment it took
+  // refunded. Each refund's charge.refunded lands here: nothing more to
+  // cancel, no "by hand" alert, and what the buyer's one email says.
+
+  function spyOnObs() {
+    const obs = (
+      service as unknown as { obs: { error: (...a: unknown[]) => void } }
+    ).obs;
+    return { error: vi.spyOn(obs, 'error') };
+  }
+
+  async function tierDuplicate(duplicateTierId: string) {
+    const kept = await tierSubscription();
+    const duplicate = takeFirst(
+      await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(kept.userId, orgId, duplicateTierId, {
+            status: 'cancelled',
+            duplicateOfSubscriptionId: kept.id,
+          })
+        )
+        .returning()
+    );
+    return { kept, duplicate };
+  }
+
+  function stripeKnowsEnded(stripeSubscriptionId: string, invoiceId: string) {
+    stripeKnows({
+      stripeSubscriptionId,
+      invoiceId,
+      billingReason: 'subscription_create',
+      paidInvoices: [{ id: invoiceId, billing_reason: 'subscription_create' }],
+      status: 'canceled',
+    });
+  }
+
+  it("a duplicate's refund cancels nothing, raises no alert, and says the user was already subscribed", async () => {
+    const { duplicate } = await tierDuplicate(tierId);
+    stripeKnowsEnded(duplicate.stripeSubscriptionId, 'in_dup_first');
+    const obs = spyOnObs();
+
+    const ended = await service.cancelForFullRefund(fullRefund());
+
+    expect(ended).toEqual({
+      duplicate: {
+        kind: 'tier',
+        organizationName: orgName,
+        tierName,
+        survivingTierName: tierName,
+        otherTier: false,
+      },
+    });
+    expect(ended?.subscription).toBeUndefined();
+    expect(stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(stripe.invoices.list).not.toHaveBeenCalled();
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(obs.error).not.toHaveBeenCalled();
+  });
+
+  it('a duplicate for another tier names both tiers, so the email can offer Change plan', async () => {
+    const { duplicate } = await tierDuplicate(otherTierId);
+    stripeKnowsEnded(duplicate.stripeSubscriptionId, 'in_dup_other');
+
+    const ended = await service.cancelForFullRefund(fullRefund());
+
+    expect(ended?.duplicate).toEqual({
+      kind: 'tier',
+      organizationName: orgName,
+      tierName: otherTierName,
+      survivingTierName: tierName,
+      otherTier: true,
+    });
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+  });
+
+  it("a duplicate's renewal, refunded as an earlier period's payment would be, is still a duplicate's", async () => {
+    // One that slipped through before this fix may have renewed; every paid
+    // invoice it raised is refunded.
+    const { duplicate } = await tierDuplicate(tierId);
+    stripeKnows({
+      stripeSubscriptionId: duplicate.stripeSubscriptionId,
+      invoiceId: 'in_dup_first',
+      paidInvoices: [
+        { id: 'in_dup_renewal', billing_reason: 'subscription_cycle' },
+        { id: 'in_dup_first', billing_reason: 'subscription_create' },
+      ],
+      status: 'canceled',
+    });
+
+    const ended = await service.cancelForFullRefund(fullRefund());
+
+    expect(ended?.duplicate?.kind).toBe('tier');
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+  });
+
+  it("a course plan duplicate's refund cancels nothing and names the course", async () => {
+    const kept = await courseSubscription();
+    const now = new Date();
+    const duplicate = takeFirst(
+      await db
+        .insert(courseSubscriptions)
+        .values({
+          userId: kept.userId,
+          courseId,
+          planId,
+          organizationId: orgId,
+          stripeSubscriptionId: `sub_course_dup_${uid()}`,
+          stripeCustomerId: kept.stripeCustomerId,
+          status: 'cancelled',
+          billingInterval: 'month',
+          currentPeriodStart: now,
+          currentPeriodEnd: new Date(now.getTime() + 30 * 24 * 3600 * 1000),
+          duplicateOfCourseSubscriptionId: kept.id,
+        })
+        .returning()
+    );
+    stripeKnowsEnded(duplicate.stripeSubscriptionId, 'in_course_dup');
+    const obs = spyOnObs();
+
+    const ended = await service.cancelForFullRefund(fullRefund());
+
+    expect(ended).toEqual({
+      duplicate: { kind: 'course', courseTitle: 'Refunded Course' },
+    });
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(obs.error).not.toHaveBeenCalled();
+  });
+
+  it('the subscription a duplicate duplicated is cancelled as any other', async () => {
+    const { kept } = await tierDuplicate(tierId);
+    stripeKnows({
+      stripeSubscriptionId: kept.stripeSubscriptionId,
+      invoiceId: 'in_kept_cycle',
+      paidInvoices: [
+        { id: 'in_kept_cycle', billing_reason: 'subscription_cycle' },
+      ],
+    });
+
+    const ended = await service.cancelForFullRefund(fullRefund());
+
+    expect(ended?.subscription?.id).toBe(kept.id);
+    expect(ended?.duplicate).toBeUndefined();
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  // ── an old subscription revived beside a newer one (owner decision 7) ──
+  // Old A went unpaid, the buyer took B, then paid A's open invoice. A was
+  // cancelled and ended, and only that payment refunded. Its charge.refunded
+  // lands here: A is ended while B is live, so nothing to cancel, no alert.
+
+  async function endedBesideLive() {
+    const [subscriberId] = await seedTestUsers(db, 1);
+    const userId = subscriberId ?? '';
+    const old = takeFirst(
+      await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(userId, orgId, otherTierId, {
+            status: 'cancelled',
+            endedAt: new Date(),
+          })
+        )
+        .returning()
+    );
+    const live = takeFirst(
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(userId, orgId, tierId))
+        .returning()
+    );
+    return { old, live };
+  }
+
+  it('the refund of an ended subscription beside a live one cancels nothing, raises no alert, and says the buyer still subscribes', async () => {
+    const { old } = await endedBesideLive();
+    stripeKnows({
+      stripeSubscriptionId: old.stripeSubscriptionId,
+      invoiceId: 'in_revived',
+      paidInvoices: [
+        { id: 'in_revived', billing_reason: 'subscription_cycle' },
+      ],
+      status: 'canceled',
+    });
+    const obs = spyOnObs();
+
+    const ended = await service.cancelForFullRefund(fullRefund());
+
+    expect(ended).toEqual({
+      superseded: {
+        kind: 'tier',
+        organizationName: orgName,
+        tierName: otherTierName,
+      },
+    });
+    expect(stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(obs.error).not.toHaveBeenCalled();
+  });
+
+  // Review R3 (with T1): the revival refunds FIRST, then cancels, so the
+  // refund's own charge.refunded can find A still active at Stripe and its
+  // row cancelled, not yet ended. Our row says A is not live: nothing to
+  // cancel, and B is never touched.
+  it('a cancelled-not-ended subscription beside a live one, still active at Stripe, is superseded and cancels nothing', async () => {
+    const [subscriberId] = await seedTestUsers(db, 1);
+    const userId = subscriberId ?? '';
+    const old = takeFirst(
+      await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(userId, orgId, otherTierId, {
+            status: 'cancelled',
+          })
+        )
+        .returning()
+    );
+    await db
+      .insert(subscriptions)
+      .values(createTestSubscriptionInput(userId, orgId, tierId));
+    stripeKnows({
+      stripeSubscriptionId: old.stripeSubscriptionId,
+      invoiceId: 'in_revived_first',
+      paidInvoices: [
+        { id: 'in_revived_first', billing_reason: 'subscription_cycle' },
+      ],
+      status: 'active',
+    });
+    const obs = spyOnObs();
+
+    const ended = await service.cancelForFullRefund(fullRefund());
+
+    expect(ended).toEqual({
+      superseded: {
+        kind: 'tier',
+        organizationName: orgName,
+        tierName: otherTierName,
+      },
+    });
+    expect(stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(obs.error).not.toHaveBeenCalled();
+  });
+
+  it('an ended subscription with no live one beside it is not superseded', async () => {
+    const [subscriberId] = await seedTestUsers(db, 1);
+    const old = takeFirst(
+      await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(subscriberId ?? '', orgId, tierId, {
+            status: 'cancelled',
+            endedAt: new Date(),
+          })
+        )
+        .returning()
+    );
+    stripeKnows({
+      stripeSubscriptionId: old.stripeSubscriptionId,
+      invoiceId: 'in_old_cycle',
+      paidInvoices: [
+        { id: 'in_old_cycle', billing_reason: 'subscription_cycle' },
+      ],
+      status: 'canceled',
+    });
+
+    // Ended at Stripe: its customer.subscription.deleted ended it here.
+    expect(await service.cancelForFullRefund(fullRefund())).toBeUndefined();
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+  });
+
+  it('a course plan ended beside a live one names the course', async () => {
+    const live = await courseSubscription();
+    const now = new Date();
+    const old = takeFirst(
+      await db
+        .insert(courseSubscriptions)
+        .values({
+          userId: live.userId,
+          courseId,
+          planId,
+          organizationId: orgId,
+          stripeSubscriptionId: `sub_course_old_${uid()}`,
+          stripeCustomerId: live.stripeCustomerId,
+          status: 'cancelled',
+          billingInterval: 'month',
+          currentPeriodStart: now,
+          currentPeriodEnd: new Date(now.getTime() + 30 * 24 * 3600 * 1000),
+          endedAt: now,
+        })
+        .returning()
+    );
+    stripeKnowsEnded(old.stripeSubscriptionId, 'in_course_revived');
+    const obs = spyOnObs();
+
+    const ended = await service.cancelForFullRefund(fullRefund());
+
+    expect(ended).toEqual({
+      superseded: { kind: 'course', courseTitle: 'Refunded Course' },
+    });
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(obs.error).not.toHaveBeenCalled();
   });
 });

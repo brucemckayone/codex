@@ -67,6 +67,21 @@ const TRANSIENT_NETWORK_CODES = new Set([
 /** How far down a cause chain to look (and the guard against a cycle). */
 const MAX_CAUSE_DEPTH = 5;
 
+/**
+ * drizzle's wrapper for a failed query: a plain Error whose message is
+ * `Failed query: <sql>\nparams: <params>`, with the driver's error on
+ * `cause`. drizzle-orm 0.44's DrizzleQueryError sets no `name`, so a real one
+ * is named 'Error' and only its shape tells (Codex-56l13). This is the rule
+ * `isFailedQuery` in @codex/database applies; it is not imported, so a test
+ * that mocks @codex/database cannot break the classifier every webhook uses.
+ */
+function isFailedQuery(error: Error): boolean {
+  return (
+    typeof error.message === 'string' &&
+    error.message.startsWith('Failed query:')
+  );
+}
+
 /** Network/DB error message patterns indicating transient failures */
 const TRANSIENT_MESSAGE_PATTERNS = [
   'ECONNRESET',
@@ -148,7 +163,7 @@ function isTransientAt(error: unknown, depth: number): boolean {
     // driver error it wraps.
     const inner =
       error.cause ?? (error as { sourceError?: unknown }).sourceError;
-    if (error.name === 'DrizzleQueryError') {
+    if (isFailedQuery(error)) {
       return inner !== undefined && isTransientAt(inner, depth + 1);
     }
 
@@ -194,8 +209,8 @@ export function describeRootCause(
       current.cause ?? (current as { sourceError?: unknown }).sourceError;
     if (!(inner instanceof Error)) {
       if (current === error) return undefined;
-      if (current.name === 'DrizzleQueryError') {
-        return { name: current.name, message: '(query omitted)', code };
+      if (isFailedQuery(current)) {
+        return { name: 'DrizzleQueryError', message: '(query omitted)', code };
       }
       return { name: current.name, message: current.message, code };
     }

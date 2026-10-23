@@ -189,6 +189,9 @@
   let tierChangePreview = $state<TierChangePreview | null>(null);
   let tierChangePreviewLoading = $state(false);
   let tierChangePreviewError = $state('');
+  // Shown above a preview fetched again because the confirmed one had
+  // expired (Codex-2hxff.15).
+  let tierChangeNotice = $state('');
 
   // Re-sync when a genuinely NEW server payload arrives — an `invalidateAll()`
   // after TIER_NOT_FOUND, or a client-side navigation back to this route.
@@ -556,15 +559,16 @@
    * preview from Stripe. The dialog stays open while loading so the user
    * sees a skeleton instead of a flash; the preview's `prorationDate` is
    * pinned and threaded back into the commit so Stripe charges exactly
-   * the amount we display.
+   * the amount we display. `notice` says why the dialog is asking again.
    */
-  async function openTierChangeDialog(tier: SubscriptionTier) {
+  async function openTierChangeDialog(tier: SubscriptionTier, notice = '') {
     tierChangeDialogTier = tier;
     tierChangeDialogOpen = true;
     tierChangePreview = null;
     tierChangePreviewError = '';
     tierChangePreviewLoading = true;
     switchTierError = '';
+    tierChangeNotice = notice;
 
     try {
       const result = await previewSubscriptionTierChange({
@@ -606,6 +610,7 @@
     tierChangePreview = null;
     tierChangePreviewError = '';
     tierChangePreviewLoading = false;
+    tierChangeNotice = '';
   }
 
   async function handleSwitchTier(tier: SubscriptionTier) {
@@ -643,6 +648,18 @@
         currentCancelAtPeriodEnd = previousCancelAtPeriodEnd;
         currentBillingInterval = previousBillingInterval;
         currentStatus = previousStatus;
+        // `in` narrows to the failure: apps/web is not `strict`, so the
+        // `!result.success` above does not.
+        if ('code' in result && result.code === 'TIER_CHANGE_PREVIEW_EXPIRED') {
+          // The preview is only good for 10 minutes and nothing changed
+          // (Codex-2hxff.15): show a fresh one and ask again, so the
+          // subscriber pays what they confirmed.
+          await openTierChangeDialog(
+            tier,
+            m.subscription_tier_change_preview_expired()
+          );
+          return;
+        }
         switchTierError = mapSubscriptionErrorMessage(
           result.code,
           result.message
@@ -1521,6 +1538,11 @@
     </Dialog.Header>
 
     <Dialog.Body>
+      {#if tierChangeNotice}
+        <Alert variant="warning" data-testid="tier-change-notice">
+          {tierChangeNotice}
+        </Alert>
+      {/if}
       {#if tierChangePreviewLoading}
         <div class="tier-change-skeleton" aria-busy="true">
           <div class="tier-change-skeleton__row"></div>

@@ -275,7 +275,8 @@ describe('createWebhookHandler', () => {
         new Error(
           'Failed query: insert into "payouts" values ($1)\nparams: buyer@example.com'
         ),
-        { name: 'DrizzleQueryError', cause: pgError }
+        // No name: drizzle 0.44's DrizzleQueryError sets none (Codex-56l13).
+        { cause: pgError }
       );
       const { context, mock } = createContext();
 

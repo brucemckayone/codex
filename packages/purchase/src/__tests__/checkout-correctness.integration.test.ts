@@ -612,6 +612,72 @@ describe('PurchaseService — checkout correctness (Codex-2hxff.14)', () => {
       expect(stripe.refunds.create).toHaveBeenCalledTimes(2);
     });
 
+    it('the hourly sweep leaves a fresh owed refund to the webhook, reports one Stripe still refuses, and settles it once Stripe accepts', async () => {
+      const { service, stripe } = fresh();
+      const refusal = Object.assign(new Error('The charge is disputed.'), {
+        type: 'StripeInvalidRequestError',
+        code: 'charge_disputed',
+        statusCode: 400,
+      });
+      const item = await insertContent();
+      const customerId = await buyer();
+      const owedPi = `pi_dup_owed_${crypto.randomUUID()}`;
+      await complete(
+        service,
+        `pi_first_${crypto.randomUUID()}`,
+        customerId,
+        item.id
+      );
+      vi.mocked(stripe.refunds.create).mockRejectedValueOnce(refusal);
+      await expect(
+        complete(service, owedPi, customerId, item.id)
+      ).rejects.toBeInstanceOf(ServiceUnavailableError);
+      const owedRow = async () =>
+        (
+          await db
+            .select()
+            .from(schema.purchases)
+            .where(eq(schema.purchases.stripePaymentIntentId, owedPi))
+        )[0];
+
+      // Within the hour Stripe is still redelivering: not the sweep's.
+      const early = await service.settleOwedDuplicates({
+        olderThanMs: 60 * 60 * 1000,
+        limit: 1000,
+      });
+      expect(early.stillOwed.map((o) => o.stripePaymentIntentId)).not.toContain(
+        owedPi
+      );
+      expect((await owedRow())?.status).toBe('pending');
+
+      // Past it, Stripe still refusing: reported, still owed.
+      vi.mocked(stripe.refunds.create).mockRejectedValue(refusal);
+      const refused = await service.settleOwedDuplicates({
+        olderThanMs: 0,
+        limit: 1000,
+      });
+      expect(refused.stillOwed.map((o) => o.stripePaymentIntentId)).toContain(
+        owedPi
+      );
+      expect((await owedRow())?.status).toBe('pending');
+
+      // Stripe accepts: refunded, and no longer owed.
+      vi.mocked(stripe.refunds.create).mockResolvedValue({
+        id: `re_sweep_${crypto.randomUUID()}`,
+      } as never);
+      const swept = await service.settleOwedDuplicates({
+        olderThanMs: 0,
+        limit: 1000,
+      });
+      expect(swept.stillOwed.map((o) => o.stripePaymentIntentId)).not.toContain(
+        owedPi
+      );
+      expect(await owedRow()).toMatchObject({
+        status: 'refunded',
+        refundAmountCents: 1500,
+      });
+    });
+
     it('two concurrent deliveries of the same payment complete it once, with no false duplicate', async () => {
       const { service, stripe } = fresh();
       const item = await insertContent();

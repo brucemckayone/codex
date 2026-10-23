@@ -131,6 +131,7 @@ import {
   CourseSubscriptionService,
   SubscriptionService,
 } from '@codex/subscription';
+import { sendEmailToWorker } from '@codex/worker-utils';
 import { handlePaymentWebhook } from '../payment-webhook';
 import { handleSubscriptionWebhook } from '../subscription-webhook';
 
@@ -215,6 +216,7 @@ describe('handleSubscriptionWebhook — access revocation', () => {
   let mockHandleInvoiceSuccess: ReturnType<typeof vi.fn>;
   let mockHandlePaused: ReturnType<typeof vi.fn>;
   let mockHandleResumed: ReturnType<typeof vi.fn>;
+  let mockHandleTrialWillEnd: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -235,6 +237,7 @@ describe('handleSubscriptionWebhook — access revocation', () => {
     mockHandleResumed = vi.fn().mockResolvedValue(undefined);
     mockHandleInvoiceSuccess = vi.fn().mockResolvedValue(undefined);
     mockHandleInvoiceFailed = vi.fn().mockResolvedValue(undefined);
+    mockHandleTrialWillEnd = vi.fn().mockResolvedValue(undefined);
     mockCleanup = vi.fn();
 
     mockStripe = {
@@ -264,8 +267,11 @@ describe('handleSubscriptionWebhook — access revocation', () => {
       handleSubscriptionResumed: mockHandleResumed,
       handleInvoicePaymentSucceeded: mockHandleInvoiceSuccess,
       handleInvoicePaymentFailed: mockHandleInvoiceFailed,
+      handleTrialWillEnd: mockHandleTrialWillEnd,
       // charge.refunded clawback (Codex-13v21) — handlePaymentWebhook calls this.
       reverseSubscriptionPayoutsForCharge: vi.fn(),
+      // The paid checkout's reservation (Codex-2hxff.15).
+      markCheckoutSessionCompleted: vi.fn().mockResolvedValue(undefined),
     }));
   });
 
@@ -1173,6 +1179,71 @@ describe('handleSubscriptionWebhook — access revocation', () => {
       expect(mockRevoke).toHaveBeenCalledTimes(1);
     });
   });
+
+  // ─── a duplicate subscription, or a tombstoned row (Codex-2hxff.15) ────────
+  //
+  // The service returns a result that names no user, org or email for a
+  // second subscription the user already had, and for a row Stripe has ended.
+  // The webhook decides every side effect from those fields, so such a result
+  // writes no streaming block, clears none, and sends no email: the
+  // subscription the user keeps is never touched. Pinned per event.
+
+  describe('a result naming no user, org or email', () => {
+    const inert = {};
+
+    it.each([
+      ['checkout.session.completed', STRIPE_EVENTS.CHECKOUT_COMPLETED],
+      ['customer.subscription.deleted', STRIPE_EVENTS.SUBSCRIPTION_DELETED],
+      ['customer.subscription.paused', STRIPE_EVENTS.SUBSCRIPTION_PAUSED],
+      ['customer.subscription.resumed', STRIPE_EVENTS.SUBSCRIPTION_RESUMED],
+      ['invoice.payment_succeeded', STRIPE_EVENTS.INVOICE_PAYMENT_SUCCEEDED],
+      ['invoice.payment_failed', STRIPE_EVENTS.INVOICE_PAYMENT_FAILED],
+      [
+        'customer.subscription.trial_will_end',
+        STRIPE_EVENTS.SUBSCRIPTION_TRIAL_WILL_END,
+      ],
+    ])('%s: no block written or cleared, no email', async (_name, type) => {
+      for (const handler of [
+        mockHandleCreated,
+        mockHandleDeleted,
+        mockHandlePaused,
+        mockHandleResumed,
+        mockHandleInvoiceSuccess,
+        mockHandleInvoiceFailed,
+        mockHandleTrialWillEnd,
+      ]) {
+        handler.mockResolvedValue(inert);
+      }
+      const bundle = buildContext();
+      const event = createEvent(type, {
+        mode: 'subscription',
+        subscription: 'sub_duplicate',
+      });
+
+      await handleSubscriptionWebhook(event, mockStripe, bundle.context);
+      await drainWaitUntil(bundle);
+
+      expect(mockRevoke).not.toHaveBeenCalled();
+      expect(mockClear).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['unpaid', 'unpaid'],
+      ['active', 'active'],
+    ])('customer.subscription.updated (%s): no block written or cleared', async (_name, status) => {
+      mockHandleUpdated.mockResolvedValue(inert);
+      const bundle = buildContext();
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, { status });
+
+      await handleSubscriptionWebhook(event, mockStripe, bundle.context);
+      await drainWaitUntil(bundle);
+
+      expect(mockHandleUpdated).toHaveBeenCalledOnce();
+      expect(mockRevoke).not.toHaveBeenCalled();
+      expect(mockClear).not.toHaveBeenCalled();
+    });
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1215,7 +1286,11 @@ describe('handlePaymentWebhook — access revocation on charge.refunded', () => 
 
     mockProcessRefund = vi.fn().mockResolvedValue({ userId: 'user_refund' });
     mockCancelForFullRefund = vi.fn().mockResolvedValue(undefined);
-    mockTierDeleted = vi.fn().mockResolvedValue(undefined);
+    // The deletion's own result names whom to block (Codex-2hxff.15): by
+    // default, the user's current subscription for the org ended.
+    mockTierDeleted = vi
+      .fn()
+      .mockResolvedValue({ userId: 'user_refund', orgId: 'org_refund' });
     mockCleanup = vi.fn();
     mockStripe = {} as Stripe;
 
@@ -1296,13 +1371,80 @@ describe('handlePaymentWebhook — access revocation on charge.refunded', () => 
     await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
     await drainWaitUntil(bundle);
 
-    expect(mockTierDeleted).toHaveBeenCalledWith(cancelledSub);
+    expect(mockTierDeleted).toHaveBeenCalledWith(
+      cancelledSub,
+      expect.any(String)
+    );
     expect(mockRevoke).toHaveBeenCalledTimes(1);
     expect(mockRevoke).toHaveBeenCalledWith(
       'user_refund',
       'org_refund',
       'refund'
     );
+  });
+
+  // Codex-2hxff.15: the refund path's own ending is the subscription's FIRST
+  // end, so it sends the cancellation email. Stripe's later
+  // customer.subscription.deleted finds it ended (a result of {}) and sends
+  // nothing, so the email goes once.
+  it('a full refund sends the cancellation email once; the later customer.subscription.deleted sends nothing', async () => {
+    const cancelledEmail = {
+      to: 'subscriber@example.com',
+      templateName: 'subscription-cancelled',
+      category: 'transactional',
+      data: { planName: 'Gold' },
+    };
+    mockCancelForFullRefund.mockResolvedValueOnce(tierEnded);
+    mockTierDeleted
+      .mockResolvedValueOnce({
+        userId: 'user_refund',
+        orgId: 'org_refund',
+        email: cancelledEmail,
+      })
+      .mockResolvedValueOnce({});
+    const bundle = buildContext({ WEB_APP_URL: 'https://revelations.studio' });
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+    await handleSubscriptionWebhook(
+      {
+        id: 'evt_deleted_after_refund',
+        type: STRIPE_EVENTS.SUBSCRIPTION_DELETED,
+        data: { object: cancelledSub },
+      } as unknown as Stripe.Event,
+      mockStripe,
+      bundle.context
+    );
+    await drainWaitUntil(bundle);
+
+    expect(mockTierDeleted).toHaveBeenCalledTimes(2);
+    expect(mockTierDeleted).toHaveBeenNthCalledWith(
+      1,
+      cancelledSub,
+      'https://revelations.studio'
+    );
+    expect(sendEmailToWorker).toHaveBeenCalledExactlyOnceWith(
+      expect.anything(),
+      expect.anything(),
+      cancelledEmail
+    );
+    // One block, the refund's: the later event writes none.
+    expect(mockRevoke).toHaveBeenCalledTimes(1);
+  });
+
+  // Codex-2hxff.15 (review R1): the block follows the deletion's result, not
+  // the refunded subscription. A full refund of old A while B is live ends A,
+  // and the deletion names no one: B keeps streaming.
+  it('a full refund of an old subscription while another is live writes no block', async () => {
+    mockCancelForFullRefund.mockResolvedValueOnce(tierEnded);
+    mockTierDeleted.mockResolvedValueOnce({});
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
+    await drainWaitUntil(bundle);
+
+    expect(mockTierDeleted).toHaveBeenCalledOnce();
+    expect(AccessRevocation).not.toHaveBeenCalled();
+    expect(mockRevoke).not.toHaveBeenCalled();
   });
 
   // Owner decision 2026-10-20: a course plan's grant is revoked (as on
@@ -1341,11 +1483,15 @@ describe('handlePaymentWebhook — access revocation on charge.refunded', () => 
       ...tierEnded,
       subscription: { ...tierEnded.subscription, organizationId: null },
     });
+    mockTierDeleted.mockResolvedValueOnce({ userId: 'user_refund' });
     const bundle = buildContext();
 
     await handlePaymentWebhook(createRefundEvent(), mockStripe, bundle.context);
 
-    expect(mockTierDeleted).toHaveBeenCalledWith(cancelledSub);
+    expect(mockTierDeleted).toHaveBeenCalledWith(
+      cancelledSub,
+      expect.any(String)
+    );
     expect(mockRevoke).not.toHaveBeenCalled();
   });
 

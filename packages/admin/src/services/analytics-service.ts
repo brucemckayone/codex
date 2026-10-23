@@ -243,6 +243,15 @@ export class AdminAnalyticsService extends BaseService {
     const effectiveStart = startDate ?? defaultStart;
     const effectiveEnd = endDate ?? new Date();
 
+    // A duplicate subscription (a second one to an org the user already
+    // subscribed to) was refunded and never subscribed anyone, so it is
+    // neither new nor churned (Codex-2hxff.15). A tombstone — a real
+    // subscription that ended — still churns.
+    const orgSubscriptions = and(
+      eq(schema.subscriptions.organizationId, organizationId),
+      isNull(schema.subscriptions.duplicateOfSubscriptionId)
+    );
+
     // Four independent aggregates — none consumes another's value. Launch via
     // Promise.all so the round-trip latency overlaps (R12 hard rule). At Neon
     // p95 this collapses ~320-480ms of sequential latency to ~100ms.
@@ -255,7 +264,7 @@ export class AdminAnalyticsService extends BaseService {
           .from(schema.subscriptions)
           .where(
             and(
-              eq(schema.subscriptions.organizationId, organizationId),
+              orgSubscriptions,
               inArray(schema.subscriptions.status, [
                 'active',
                 'past_due',
@@ -278,7 +287,7 @@ export class AdminAnalyticsService extends BaseService {
           .from(schema.subscriptions)
           .where(
             and(
-              eq(schema.subscriptions.organizationId, organizationId),
+              orgSubscriptions,
               ...dateWindow(
                 schema.subscriptions.createdAt,
                 effectiveStart,
@@ -292,7 +301,7 @@ export class AdminAnalyticsService extends BaseService {
           .from(schema.subscriptions)
           .where(
             and(
-              eq(schema.subscriptions.organizationId, organizationId),
+              orgSubscriptions,
               ...dateWindow(
                 schema.subscriptions.cancelledAt,
                 effectiveStart,
@@ -309,7 +318,7 @@ export class AdminAnalyticsService extends BaseService {
           .from(schema.subscriptions)
           .where(
             and(
-              eq(schema.subscriptions.organizationId, organizationId),
+              orgSubscriptions,
               ...dateWindow(
                 schema.subscriptions.createdAt,
                 effectiveStart,
