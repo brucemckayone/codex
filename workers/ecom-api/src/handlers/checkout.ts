@@ -28,7 +28,10 @@ import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
-import { isTransientError } from '../utils/error-classification';
+import {
+  isTransientError,
+  settleAfterCommit,
+} from '../utils/error-classification';
 
 /**
  * Retrieve the charge id + Stripe-collected application fee for a PaymentIntent.
@@ -235,18 +238,24 @@ export async function handleCheckoutCompleted(
     const purchaseService = services.purchase;
 
     // Complete purchase (atomic transaction: purchase + content access)
-    // organizationId already transformed to null by schema if empty/undefined
-    const purchase = await purchaseService.completePurchase(paymentIntentId, {
-      customerId: validatedMetadata.customerId,
-      contentId: validatedMetadata.contentId,
-      organizationId: validatedMetadata.organizationId,
-      amountPaidCents: amountTotal,
-      currency: CURRENCY.GBP,
-      stripeApplicationFeeCents,
-      stripeChargeId,
-      paidAt,
-      offerAt,
-    });
+    // organizationId already transformed to null by schema if empty/undefined.
+    // A clawback that failed after the commit (Codex-2hxff.67) is rethrown
+    // last, so the receipt and the library bump still go out; a transient one
+    // is rethrown now and the redelivery sends them once. A duplicate pays no
+    // one, so it never fails after its commit.
+    const { value: purchase, failure } = await settleAfterCommit(() =>
+      purchaseService.completePurchase(paymentIntentId, {
+        customerId: validatedMetadata.customerId,
+        contentId: validatedMetadata.contentId,
+        organizationId: validatedMetadata.organizationId,
+        amountPaidCents: amountTotal,
+        currency: CURRENCY.GBP,
+        stripeApplicationFeeCents,
+        stripeChargeId,
+        paidAt,
+        offerAt,
+      })
+    );
     await recordSessionPaid(purchaseService, session.id, obs);
 
     // A second payment for content the buyer owns was refunded, not sold.
@@ -302,6 +311,7 @@ export async function handleCheckoutCompleted(
         },
       });
     }
+    if (failure) throw failure;
   } finally {
     release();
   }
@@ -380,9 +390,10 @@ async function handleCourseCheckoutCompleted(
   try {
     const purchaseService = services.purchase;
 
-    const purchase = await purchaseService.completeCoursePurchase(
-      paymentIntentId,
-      {
+    // As for content: a clawback that failed after the commit is rethrown
+    // last, or now when transient.
+    const { value: purchase, failure } = await settleAfterCommit(() =>
+      purchaseService.completeCoursePurchase(paymentIntentId, {
         customerId: metadata.customerId,
         courseId: metadata.courseId,
         amountPaidCents: amountTotal,
@@ -393,7 +404,7 @@ async function handleCourseCheckoutCompleted(
         offerAt: Number.isFinite(session.created)
           ? new Date(session.created * 1000)
           : undefined,
-      }
+      })
     );
     await recordSessionPaid(purchaseService, session.id, obs);
 
@@ -443,6 +454,7 @@ async function handleCourseCheckoutCompleted(
         },
       });
     }
+    if (failure) throw failure;
   } finally {
     release();
   }

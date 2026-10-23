@@ -7,6 +7,7 @@
 
 // Base error classes
 export {
+  AfterCommitError,
   BusinessLogicError,
   ConflictError,
   type ErrorStatusCode,

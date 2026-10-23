@@ -76,7 +76,7 @@ import {
   resolveOrganisationPayee,
   retryFailedClawbacks,
   reverseCharge,
-  reverseEarlierRefunds,
+  reverseEarlierRefundsAfterCommit,
   settlePayoutPaid,
   settleTransfer,
 } from '@codex/payments';
@@ -2172,10 +2172,12 @@ export class SubscriptionService extends BaseService {
       split.creatorPayoutCents,
       invoiceCreatedAt
     );
-    // A refund handled before this invoice found no slices to claw back
-    // (Codex-2hxff.67): it is clawed back now, as if it had come after. A
-    // redelivery runs it too, so a delivery that died in between catches up.
-    await reverseEarlierRefunds(
+    // A refund or chargeback handled before this invoice found no slices to
+    // claw back (Codex-2hxff.67): it is clawed back now, as if it had come
+    // after. A redelivery runs it too, so a delivery that died in between
+    // catches up. Its failure is raised at the end, with the result
+    // (`AfterCommitError`), so the renewal's side effects still happen.
+    const finish = await reverseEarlierRefundsAfterCommit(
       { ...this.ledger(), obs: this.obs },
       { chargeId: sourceTransaction, source: { sourceType: 'subscription' } }
     );
@@ -2187,7 +2189,7 @@ export class SubscriptionService extends BaseService {
     });
 
     // No renewal email and no access cleared for an ended subscription.
-    if (ended) return {};
+    if (ended) return finish({});
 
     // Build renewal email only for recurring invoices (not first payment)
     let email: WebhookEmailPayload | undefined;
@@ -2228,7 +2230,7 @@ export class SubscriptionService extends BaseService {
       'payment_succeeded'
     );
 
-    return { userId: sub.userId, orgId: sub.organizationId, email };
+    return finish({ userId: sub.userId, orgId: sub.organizationId, email });
   }
 
   /**

@@ -34,6 +34,7 @@ import {
   refunds,
 } from '@codex/database/schema';
 import {
+  AfterCommitError,
   InternalServiceError,
   ServiceUnavailableError,
 } from '@codex/service-errors';
@@ -387,48 +388,113 @@ export async function reverseCharge(
 }
 
 /**
- * Claw back the refunds a charge already had when the source's slices of it
- * were recorded (Codex-2hxff.67). The flow that records them calls this right
- * after, so a payment's payouts reflect every refund of it, whatever order
- * Stripe's events arrive in.
+ * Claw back the refunds and chargebacks a charge already had when the
+ * source's slices of it were recorded (Codex-2hxff.67). The flow that records
+ * them calls this right after, so a payment's payouts reflect every refund and
+ * chargeback of it, whatever order Stripe's events arrive in.
  *
- * Stripe does not order them: `charge.refunded` can be handled before the
- * event that records the slices (`invoice.payment_succeeded`, or a purchase's
- * completion), and its clawback then finds no slices and does nothing. This
- * runs that same clawback once they exist, so they end as they would had the
- * refund come second: a full refund nets the payees nothing, a partial one the
- * reduced amounts. Each step is recorded per slice and cause, so a refund both
- * runs handle is clawed back once.
+ * Stripe does not order them: `charge.refunded` (or a dispute) can be handled
+ * before the event that records the slices (`invoice.payment_succeeded`, or a
+ * purchase's completion), and its clawback then finds no slices and does
+ * nothing. This runs that same clawback once they exist, so they end as they
+ * would had the refund come second: a full refund nets the payees nothing, a
+ * partial one the reduced amounts, an open chargeback holds an unpaid slice.
+ * Each step is recorded per slice and cause, so a cause both runs handle is
+ * clawed back once.
  *
- * One of the two always sees the other: the refund handlers record the refund
- * (`refunds`) before they read the slices, and this reads `refunds` after the
- * slices are committed. A charge with no refund recorded asks Stripe nothing.
+ * One of the two always sees the other: the refund and dispute handlers record
+ * their cause (`refunds`, `disputes`) before they read the slices, and this
+ * reads both after the slices are committed. A charge with neither recorded
+ * asks Stripe nothing.
+ *
+ * A failure is alerted here, then rethrown. Nothing else would retry it: the
+ * hourly retry revisits only steps already recorded, and this can fail before
+ * any is.
  */
 export async function reverseEarlierRefunds(
   deps: ClawbackDeps,
   input: { chargeId: string; source: ClawbackSource }
 ): Promise<void> {
-  const [recorded] = await deps.db
+  try {
+    if (!(await hasClawbackCause(deps.db, input.chargeId))) return;
+    // As the refund webhook calls it: the charge's own amount is the
+    // denominator (D1), and its refunds are read from Stripe.
+    const charge = await deps.stripe.charges.retrieve(input.chargeId);
+    await reverseCharge(deps, {
+      charge: { id: charge.id, amountCents: charge.amount },
+      source: input.source,
+      refunds: () => listClawableRefunds(deps.stripe, charge.id),
+    });
+  } catch (error) {
+    deps.obs.error(
+      'A refund or chargeback preceded this payout and its transfers were not reversed: a redelivery retries it, or a person must',
+      {
+        errorId: crypto.randomUUID(),
+        chargeId: input.chargeId,
+        sourceType: input.source.sourceType,
+        ...(input.source.sourceType === 'purchase'
+          ? { purchaseId: input.source.purchaseId }
+          : {}),
+        code: errorCodeOf(error),
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+    throw error;
+  }
+}
+
+/**
+ * `reverseEarlierRefunds` for a flow whose payout has committed: its failure
+ * must not cancel what follows from the commit. It is held, and the returned
+ * `finish` raises it at the flow's end, with the flow's result
+ * (`AfterCommitError`); without a failure, `finish` returns the result.
+ */
+export async function reverseEarlierRefundsAfterCommit(
+  deps: ClawbackDeps,
+  input: { chargeId: string; source: ClawbackSource }
+): Promise<<T>(result: T) => T> {
+  try {
+    await reverseEarlierRefunds(deps, input);
+    return (result) => result;
+  } catch (failure) {
+    return (result) => {
+      throw new AfterCommitError(
+        'The payout was recorded, but a refund or chargeback before it was not clawed back',
+        result,
+        failure
+      );
+    };
+  }
+}
+
+/**
+ * Whether the charge has a cause the clawback acts on, as the webhooks have
+ * recorded them: a refund that is not canceled (final, never clawed back), or
+ * a chargeback still open or lost.
+ */
+async function hasClawbackCause(
+  db: LedgerDeps['db'],
+  chargeId: string
+): Promise<boolean> {
+  const [refund] = await db
     .select({ id: refunds.id })
     .from(refunds)
     .where(
+      and(eq(refunds.stripeChargeId, chargeId), ne(refunds.status, 'canceled'))
+    )
+    .limit(1);
+  if (refund) return true;
+  const [chargeback] = await db
+    .select({ id: disputes.id })
+    .from(disputes)
+    .where(
       and(
-        eq(refunds.stripeChargeId, input.chargeId),
-        // Final, and never clawed back.
-        ne(refunds.status, 'canceled')
+        eq(disputes.stripeChargeId, chargeId),
+        inArray(disputes.status, CHARGEBACK_CLAWED_STATUSES)
       )
     )
     .limit(1);
-  if (!recorded) return;
-
-  // As the refund webhook calls it: the charge's own amount is the
-  // denominator (D1), and its refunds are read from Stripe.
-  const charge = await deps.stripe.charges.retrieve(input.chargeId);
-  await reverseCharge(deps, {
-    charge: { id: charge.id, amountCents: charge.amount },
-    source: input.source,
-    refunds: () => listClawableRefunds(deps.stripe, charge.id),
-  });
+  return chargeback !== undefined;
 }
 
 async function clawBackShare(

@@ -24,16 +24,21 @@
  * record of THIS session from that path's verify endpoint, which checks the
  * session is the buyer's own. It waits for that record before forwarding, and
  * when the record is a duplicate the page says so instead. A missing or
- * tampered `kind`, or a read that fails, falls back to the entitlement alone.
+ * tampered `kind` falls back to the entitlement alone. A read that FAILS is
+ * logged and counts as not settled: forwarding on it would send a duplicate
+ * buyer to the dashboard as if this were a new purchase, so the next poll
+ * retries, and the poll cap ends in the page's "Still confirming" copy.
  *
  * `session_id` separates "came back from Stripe" (poll, reassure) from "typed
  * this URL" (nothing to confirm), so a stray visit is not left waiting on a
  * payment that never happened.
  */
 import { error, redirect } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import type { OfferPathKind } from '$lib/page-builder/offer-paths';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { ApiError } from '$lib/server/errors';
 import { resolveCourseBySlug } from '$lib/server/journeys/round-d-seam';
 import type { PageServerLoad } from './$types';
 
@@ -147,13 +152,23 @@ export const load: PageServerLoad = async (event) => {
   const sessionId = url.searchParams.get('session_id');
   const kind = parseKind(url.searchParams.get('kind'));
 
-  // `.catch(() => null)` so a transient read failure keeps the buyer in the
-  // waiting room (where the next poll can succeed) instead of erroring them out
-  // of a flow they have already paid for.
+  // Both reads keep the buyer in the waiting room on failure (where the next
+  // poll can succeed) instead of erroring them out of a flow they have already
+  // paid for. A failed session read is NOT settled, so it never forwards.
   const [offer, record] = await Promise.all([
     api.courses.offer(course.id).catch(() => null),
     sessionId && kind
-      ? readSession(api, kind, sessionId, course.id).catch(() => null)
+      ? readSession(api, kind, sessionId, course.id).catch(
+          (err: unknown): SessionRecord => {
+            logger.warn('journey-checkout-success: session verify failed', {
+              kind,
+              sessionId,
+              status: err instanceof ApiError ? err.status : undefined,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return { settled: false, duplicate: null };
+          }
+        )
       : null,
   ]);
 

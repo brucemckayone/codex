@@ -33,6 +33,7 @@ import {
   refunds,
   stripeConnectAccounts,
 } from '@codex/database/schema';
+import { AfterCommitError } from '@codex/service-errors';
 import {
   createMockStripe,
   createTestConnectAccountInput,
@@ -436,5 +437,62 @@ describe('A refund handled before a purchase is paid out (Codex-2hxff.67)', () =
       );
     expect(records).toHaveLength(3);
     expect(records.every((record) => record.status === 'done')).toBe(true);
+  });
+
+  it('a clawback that fails after the purchase committed is logged as exactly that and comes back as an AfterCommitError with the purchase', async () => {
+    const charges = stripeCharges();
+    const sold = await sale();
+    charges.refund(sold.chargeId, PRICE);
+    const refusal = Object.assign(new Error('No such charge'), {
+      type: 'StripeInvalidRequestError',
+      statusCode: 404,
+    });
+    const service = new PurchaseService(
+      {
+        db: refundLandsAfterCommit(async () => {
+          await chargeRefunded(sold);
+          // The refund is in; the clawback after the payout is refused.
+          vi.mocked(stripe.charges.retrieve).mockRejectedValueOnce(refusal);
+        }),
+        environment: 'test',
+      },
+      stripe
+    );
+    const logged = vi.spyOn(
+      (service as unknown as { obs: { error: (...args: unknown[]) => void } })
+        .obs,
+      'error'
+    );
+
+    const failure = await service
+      .completePurchase(sold.paymentIntentId, sold.metadata)
+      .then(
+        () => undefined,
+        (error: unknown) => error
+      );
+
+    expect(failure).toBeInstanceOf(AfterCommitError);
+    expect(failure).toMatchObject({
+      cause: refusal,
+      completed: { stripePaymentIntentId: sold.paymentIntentId },
+    });
+    expect(logged).toHaveBeenCalledWith(
+      expect.stringContaining('was not clawed back; a redelivery retries it'),
+      expect.objectContaining({
+        errorId: expect.any(String),
+        stripeChargeId: sold.chargeId,
+      })
+    );
+    // The purchase did complete: it is not logged as one that failed.
+    expect(logged).not.toHaveBeenCalledWith(
+      'Failed to complete purchase',
+      expect.anything()
+    );
+    // The payout went out; the next delivery claws it back.
+    await complete(sold);
+    expect(await netByType(sold.chargeId)).toEqual({
+      organization_fee: 0,
+      creator_payout: 0,
+    });
   });
 });

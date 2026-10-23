@@ -11,6 +11,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { ApiError } from '$lib/server/errors';
 
 const COURSE_ID = '408f94d0-5442-43d3-a56a-3491110962eb';
 
@@ -20,13 +21,17 @@ const {
   purchaseVerifyMock,
   courseSubscriptionVerifyMock,
   tierVerifyMock,
+  warnMock,
 } = vi.hoisted(() => ({
   offerMock: vi.fn(),
   resolveCourseBySlugMock: vi.fn(),
   purchaseVerifyMock: vi.fn(),
   courseSubscriptionVerifyMock: vi.fn(),
   tierVerifyMock: vi.fn(),
+  warnMock: vi.fn(),
 }));
+
+vi.mock('$lib/observability', () => ({ logger: { warn: warnMock } }));
 
 vi.mock('$lib/server/api', () => ({
   createServerApi: () => ({
@@ -326,7 +331,7 @@ describe('journey checkout success load', () => {
       });
     });
 
-    it('falls back to the entitlement alone without a kind, an unknown one, or a readable session', async () => {
+    it('falls back to the entitlement alone without a kind, or an unknown one', async () => {
       const { load } = await import('../+page.server');
 
       for (const kind of [null, 'refund-me']) {
@@ -339,16 +344,43 @@ describe('journey checkout success load', () => {
       expect(purchaseVerifyMock).not.toHaveBeenCalled();
       expect(courseSubscriptionVerifyMock).not.toHaveBeenCalled();
       expect(tierVerifyMock).not.toHaveBeenCalled();
+    });
 
-      // A verify that fails must not strand an entitled buyer.
+    it('a failed read is logged and not settled: the buyer waits, the next poll shows the notice', async () => {
+      const { load } = await import('../+page.server');
+
+      // Poll 1: entitled already, the verify fails. Forwarding here would send
+      // a duplicate buyer to the dashboard as if this were a new purchase.
       offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
-      purchaseVerifyMock.mockRejectedValueOnce(new Error('ecom down'));
-      await expect(
-        load(makeEvent({ kind: 'purchase' }).event)
-      ).rejects.toMatchObject({
-        status: 303,
-        location: DASHBOARD,
+      purchaseVerifyMock.mockRejectedValueOnce(
+        new ApiError(503, 'Service unavailable')
+      );
+      const first = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+      expect(first.duplicate).toBeNull();
+      expect(first.arrivedFromStripe).toBe(true);
+      expect(warnMock).toHaveBeenCalledWith(
+        'journey-checkout-success: session verify failed',
+        {
+          kind: 'purchase',
+          sessionId: 'cs_test_abc',
+          status: 503,
+          error: 'Service unavailable',
+        }
+      );
+
+      // Poll 2: the read succeeds and the record is a duplicate.
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        course: COURSE,
+        duplicatePayment: true,
       });
+      const second = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+      expect(second.duplicate).toEqual({ kind: 'purchase' });
     });
   });
 });

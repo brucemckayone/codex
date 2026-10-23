@@ -65,7 +65,7 @@ import {
   recordSlice,
   resolveInvoiceCharge,
   resolveOrganisationPayee,
-  reverseEarlierRefunds,
+  reverseEarlierRefundsAfterCommit,
 } from '@codex/payments';
 import {
   applyMinPlatformFeeFloor,
@@ -1934,9 +1934,11 @@ export class CourseSubscriptionService extends BaseService {
       chargeId,
       invoiceCreatedAt
     );
-    // A refund handled before this invoice found no slices to claw back
-    // (Codex-2hxff.67): it is clawed back now, as if it had come after.
-    await reverseEarlierRefunds(
+    // A refund or chargeback handled before this invoice found no slices to
+    // claw back (Codex-2hxff.67): it is clawed back now, as if it had come
+    // after. Its failure comes with the result (`AfterCommitError`), so the
+    // webhook still refreshes the buyer's library.
+    const finish = await reverseEarlierRefundsAfterCommit(
       {
         db: this.db,
         stripe: this.stripe,
@@ -1946,7 +1948,7 @@ export class CourseSubscriptionService extends BaseService {
       { chargeId, source: { sourceType: 'subscription' } }
     );
 
-    return result;
+    return finish(result);
   }
 
   /**

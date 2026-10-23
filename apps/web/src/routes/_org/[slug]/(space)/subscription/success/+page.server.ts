@@ -8,11 +8,28 @@
  * in the UI until `subscription` is populated — i.e. the webhook has landed
  * and written our DB row. Without this gate, users land on /library before
  * the subscription row exists and see an empty library.
+ *
+ * A failed verify is logged. A 5xx, a network failure (including the client's
+ * own timeout) or a rate limit is treated as pending and retried; any other
+ * 4xx — not this user's session, or no such session — will not change on
+ * retry, so the page stops polling and shows its error state (`verifyFailed`).
  */
 import { error, redirect } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { ApiError } from '$lib/server/errors';
 import type { PageServerLoad } from './$types';
+
+/** A 5xx, the client's own timeout (408), a rate limit (429), or no response. */
+function isTransientFailure(err: unknown): boolean {
+  return (
+    !(err instanceof ApiError) ||
+    err.status >= 500 ||
+    err.status === 408 ||
+    err.status === 429
+  );
+}
 
 export const load: PageServerLoad = async ({
   url,
@@ -40,10 +57,17 @@ export const load: PageServerLoad = async ({
 
   try {
     const result = await api.subscription.verify(sessionId);
-    return { verification: result, org };
-  } catch {
-    // Webhook may still be processing. Returning null lets the component
-    // show the pending state and retry via invalidate('subscription:verify').
-    return { verification: null, org };
+    return { verification: result, verifyFailed: false, org };
+  } catch (err) {
+    const transient = isTransientFailure(err);
+    logger.warn('subscription-success: verify failed', {
+      sessionId,
+      status: err instanceof ApiError ? err.status : undefined,
+      transient,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // Transient: returning null lets the component show the pending state
+    // and retry via invalidate('subscription:verify').
+    return { verification: null, verifyFailed: !transient, org };
   }
 };

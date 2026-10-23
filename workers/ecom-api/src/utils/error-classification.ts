@@ -16,7 +16,11 @@
  * Permanent errors return 200 → Stripe considers the webhook delivered.
  */
 
-import { ServiceError, ServiceUnavailableError } from '@codex/service-errors';
+import {
+  AfterCommitError,
+  ServiceError,
+  ServiceUnavailableError,
+} from '@codex/service-errors';
 
 /**
  * Stripe error type strings (from stripe-node SDK). Authentication and
@@ -217,4 +221,32 @@ export function describeRootCause(
     current = inner;
   }
   return undefined;
+}
+
+/**
+ * Run a handler whose commit stands even when a step after it failed
+ * (`AfterCommitError`; the clawback of a refund that preceded the payout,
+ * Codex-2hxff.67), so that failure does not cancel the side effects that
+ * follow from the commit.
+ *
+ * - **Transient:** rethrown at once. Nothing after the handler has run, so
+ *   the redelivery runs it all once: no second receipt or renewal email.
+ * - **Otherwise:** the handler's result comes back, with the failure for the
+ *   caller to rethrow once those side effects have run. The step alerted it
+ *   already.
+ *
+ * Any other error is rethrown as it is.
+ */
+export async function settleAfterCommit<T>(
+  handler: () => Promise<T>
+): Promise<{ value: T; failure?: AfterCommitError }> {
+  try {
+    return { value: await handler() };
+  } catch (error) {
+    if (!(error instanceof AfterCommitError) || isTransientError(error)) {
+      throw error;
+    }
+    // The handler raised it with its own result.
+    return { value: error.completed as T, failure: error };
+  }
 }

@@ -22,6 +22,7 @@ import { stripeEnvMetadata } from '@codex/constants';
 import {
   courseSubscriptionPlans,
   courses,
+  disputes,
   organizations,
   type Payout,
   payoutReversals,
@@ -30,8 +31,9 @@ import {
   stripeConnectAccounts,
   subscriptionTiers,
 } from '@codex/database/schema';
-import { pendingReductionsFor } from '@codex/payments';
+import { isDrainablePayout, pendingReductionsFor } from '@codex/payments';
 import { PurchaseService } from '@codex/purchase';
+import { AfterCommitError } from '@codex/service-errors';
 import {
   createMockStripe,
   createMockStripeInvoice,
@@ -47,7 +49,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -79,6 +81,7 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
   let courseOwnerId: string;
   const orgIds: string[] = [];
   const refundIds: string[] = [];
+  const disputeIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -120,6 +123,11 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
       await db
         .delete(refunds)
         .where(inArray(refunds.stripeRefundId, refundIds));
+    }
+    if (disputeIds.length > 0) {
+      await db
+        .delete(disputes)
+        .where(inArray(disputes.stripeDisputeId, disputeIds));
     }
     await db
       .delete(stripeConnectAccounts)
@@ -205,6 +213,44 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
       id: chargeId,
       amountCents: charges.amountOf(chargeId),
     });
+  }
+
+  /**
+   * The money half of a chargeback's `charge.dispute.created`, in the
+   * webhook's order: the dispute recorded first, then the clawback.
+   */
+  async function chargeDisputed(
+    service: SubscriptionService,
+    charges: ReturnType<typeof stripeCharges>,
+    chargeId: string
+  ): Promise<void> {
+    const id = `dp_early_${uid()}`;
+    disputeIds.push(id);
+    await new PurchaseService(
+      { db, environment: 'test' },
+      stripe
+    ).recordDispute({
+      stripeDisputeId: id,
+      stripeChargeId: chargeId,
+      paymentIntentId: null,
+      amountCents: charges.amountOf(chargeId),
+      currency: 'gbp',
+      status: 'needs_response',
+      reason: 'fraudulent',
+      stripeCreatedAt: new Date(),
+    });
+    await service.reverseSubscriptionPayoutsForCharge({
+      id: chargeId,
+      amountCents: charges.amountOf(chargeId),
+    });
+  }
+
+  async function drainable(payoutId: string): Promise<boolean> {
+    const rows = await db
+      .select({ id: payouts.id })
+      .from(payouts)
+      .where(and(eq(payouts.id, payoutId), isDrainablePayout()));
+    return rows.length === 1;
   }
 
   // ── what the payees end with ──────────────────────────────────────────
@@ -482,6 +528,44 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
       expect(records).toHaveLength(3);
       expect(records.every((record) => record.status === 'done')).toBe(true);
     });
+
+    it('a clawback that fails after the payout committed comes back as an AfterCommitError with the renewal result; the redelivery finishes it', async () => {
+      const service = subscribed();
+      const charges = stripeCharges();
+      const chargeId = charges.charge(PRICE);
+      charges.refund(chargeId, PRICE);
+      await chargeRefunded(service, charges, chargeId);
+      const outage = Object.assign(new Error('Stripe is unreachable'), {
+        type: 'StripeConnectionError',
+      });
+      vi.mocked(stripe.charges.retrieve).mockRejectedValueOnce(outage);
+
+      const failure = await service
+        .handleInvoicePaymentSucceeded(invoiceFor(chargeId))
+        .then(
+          () => undefined,
+          (error: unknown) => error
+        );
+
+      // The payout committed and went out; the webhook still has what it
+      // needs to clear access and send the renewal email.
+      expect(failure).toBeInstanceOf(AfterCommitError);
+      expect(failure).toMatchObject({
+        cause: outage,
+        completed: { userId: subscriberId },
+      });
+      expect(statusByType(await slicesOf(chargeId))).toMatchObject({
+        organization_fee: 'paid',
+        creator_payout_to_owner: 'paid',
+      });
+
+      await service.handleInvoicePaymentSucceeded(invoiceFor(chargeId));
+
+      expect(await netByType(chargeId)).toEqual({
+        organization_fee: 0,
+        creator_payout_to_owner: 0,
+      });
+    });
   });
 
   // ── course plans ──────────────────────────────────────────────────────
@@ -664,6 +748,44 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
 
       expect(moneyCalls()).toEqual(calls);
       expect(await netByType(chargeId)).toEqual(settled);
+    });
+
+    it('a chargeback handled first, with no refund: the paid slice is reversed by its share and the unpaid one held, as for the late chargeback', async () => {
+      const { course, tiers } = subscribed();
+      const charges = stripeCharges();
+      const early = charges.charge(PRICE);
+      const late = charges.charge(PRICE);
+
+      await chargeDisputed(tiers, charges, early);
+      expect(await slicesOf(early)).toHaveLength(0);
+      await course.handleCourseInvoicePaymentSucceeded(
+        invoiceFor(early),
+        courseSub
+      );
+
+      await course.handleCourseInvoicePaymentSucceeded(
+        invoiceFor(late),
+        courseSub
+      );
+      await chargeDisputed(tiers, charges, late);
+
+      // A chargeback of the whole charge takes the paid slice back whole.
+      expect(await netByType(early)).toMatchObject({ creator_payout: 0 });
+      expect(await netByType(early)).toEqual(await netByType(late));
+      for (const chargeId of [early, late]) {
+        const rows = await slicesOf(chargeId);
+        expect(statusByType(rows)).toEqual({
+          platform_fee: 'reversed',
+          creator_payout: 'reversed',
+          organization_fee: 'pending',
+        });
+        // An open chargeback holds the unpaid slice: no drain pays it.
+        const unpaid = rows.find(
+          (row) => row.payoutType === 'organization_fee'
+        );
+        if (!unpaid) throw new Error('no organization slice');
+        expect(await drainable(unpaid.id)).toBe(false);
+      }
     });
   });
 });

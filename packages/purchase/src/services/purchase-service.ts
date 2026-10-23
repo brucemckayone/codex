@@ -65,6 +65,7 @@ import {
   reverseEarlierRefunds,
 } from '@codex/payments';
 import {
+  AfterCommitError,
   BaseService,
   type ServiceConfig,
   ServiceUnavailableError,
@@ -1251,13 +1252,16 @@ export class PurchaseService extends BaseService {
 
       return txResult.purchase;
     } catch (error) {
-      this.obs.error('Failed to complete purchase', {
-        error: error instanceof Error ? error.message : String(error),
-        stripePaymentIntentId,
-        customerId: metadata.customerId,
-        contentId: metadata.contentId,
-        amountPaidCents: metadata.amountPaidCents,
-      });
+      // An AfterCommitError's purchase did complete; its own step logged it.
+      if (!(error instanceof AfterCommitError)) {
+        this.obs.error('Failed to complete purchase', {
+          error: error instanceof Error ? error.message : String(error),
+          stripePaymentIntentId,
+          customerId: metadata.customerId,
+          contentId: metadata.contentId,
+          amountPaidCents: metadata.amountPaidCents,
+        });
+      }
       this.handleError(error, 'completePurchase');
     }
   }
@@ -1676,13 +1680,15 @@ export class PurchaseService extends BaseService {
 
       return txResult.purchase;
     } catch (error) {
-      this.obs.error('Failed to complete course purchase', {
-        error: error instanceof Error ? error.message : String(error),
-        stripePaymentIntentId,
-        customerId: metadata.customerId,
-        courseId: metadata.courseId,
-        amountPaidCents: metadata.amountPaidCents,
-      });
+      if (!(error instanceof AfterCommitError)) {
+        this.obs.error('Failed to complete course purchase', {
+          error: error instanceof Error ? error.message : String(error),
+          stripePaymentIntentId,
+          customerId: metadata.customerId,
+          courseId: metadata.courseId,
+          amountPaidCents: metadata.amountPaidCents,
+        });
+      }
       this.handleError(error, 'completeCoursePurchase');
     }
   }
@@ -1809,9 +1815,12 @@ export class PurchaseService extends BaseService {
    * missing slices. Acknowledged (a permanent cause), the slices stay
    * missing until someone replays the event, so the errorId is the handle.
    *
-   * Then any refund of the charge is clawed back from them (Codex-2hxff.67):
-   * one handled between the purchase's commit and this write found no slices
-   * to claw back.
+   * Then any refund or chargeback of the charge is clawed back from them
+   * (Codex-2hxff.67): one handled between the purchase's commit and this
+   * write found no slices to claw back. Its failure is logged the same way,
+   * and rethrown as an `AfterCommitError` carrying the purchase, so the
+   * webhook still sends what follows from the purchase alone (the receipt,
+   * the library bump) when a retry cannot fix it.
    */
   private async recordPayoutsAfterCommit(
     purchase: Purchase,
@@ -1832,13 +1841,30 @@ export class PurchaseService extends BaseService {
       );
       throw error;
     }
-    await reverseEarlierRefunds(
-      { ...this.ledger(), obs: this.obs },
-      {
-        chargeId: stripeChargeId,
-        source: { sourceType: 'purchase', purchaseId: purchase.id },
-      }
-    );
+    try {
+      await reverseEarlierRefunds(
+        { ...this.ledger(), obs: this.obs },
+        {
+          chargeId: stripeChargeId,
+          source: { sourceType: 'purchase', purchaseId: purchase.id },
+        }
+      );
+    } catch (error) {
+      this.obs.error(
+        'Purchase committed and its payout slices recorded, but a refund or chargeback before them was not clawed back; a redelivery retries it',
+        {
+          errorId: crypto.randomUUID(),
+          purchaseId: purchase.id,
+          stripeChargeId,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      throw new AfterCommitError(
+        'The purchase completed, but a refund or chargeback before its payout was not clawed back',
+        purchase,
+        error
+      );
+    }
   }
 
   private ledger(): LedgerDeps {

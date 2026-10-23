@@ -23,6 +23,7 @@ export {
   retryFailedClawbacks,
   reverseCharge,
   reverseEarlierRefunds,
+  reverseEarlierRefundsAfterCommit,
 } from './clawback';
 // The charge an invoice payment settled on: the key every invoice payout
 // uses (Codex-2hxff.50)

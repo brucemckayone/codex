@@ -44,7 +44,10 @@ import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
-import { isTransientError } from '../utils/error-classification';
+import {
+  isTransientError,
+  settleAfterCommit,
+} from '../utils/error-classification';
 
 /**
  * Swap a due pending price in (Codex-2hxff.3) without letting a permanent
@@ -534,15 +537,21 @@ export async function handleSubscriptionWebhook(
               : (subDetails?.subscription?.id ?? null);
           if (stripeSubId) {
             const courseSub = await stripe.subscriptions.retrieve(stripeSubId);
-            const courseResult =
-              await courseSubService.handleCourseInvoicePaymentSucceeded(
-                invoice,
-                courseSub
-              );
+            // A clawback that failed after the payout committed
+            // (Codex-2hxff.67) is rethrown after the library bump, or at once
+            // when transient: see settleAfterCommit.
+            const { value: courseResult, failure } = await settleAfterCommit(
+              () =>
+                courseSubService.handleCourseInvoicePaymentSucceeded(
+                  invoice,
+                  courseSub
+                )
+            );
             invalidateCourseBuyer(courseResult);
             obs?.info('Course subscription invoice payment succeeded', {
               invoiceId: invoice.id,
             });
+            if (failure) throw failure;
           }
           break;
         }
@@ -550,10 +559,11 @@ export async function handleSubscriptionWebhook(
         // `handleInvoicePaymentSucceeded` owns its own cache invalidation
         // via the orchestrator hook inside SubscriptionService. Renewal
         // continues access — both per-user version keys are bumped from
-        // inside the service.
-        const result = await service.handleInvoicePaymentSucceeded(
-          invoice,
-          webAppUrl
+        // inside the service. A clawback that failed after the payout
+        // committed (Codex-2hxff.67) is rethrown after the access clear and
+        // the renewal email, or at once when transient: see settleAfterCommit.
+        const { value: result, failure } = await settleAfterCommit(() =>
+          service.handleInvoicePaymentSucceeded(invoice, webAppUrl)
         );
 
         // Access-RESTORING: a successful payment confirms the invoice is
@@ -569,6 +579,7 @@ export async function handleSubscriptionWebhook(
         obs?.info('Invoice payment succeeded', {
           invoiceId: invoice.id,
         });
+        if (failure) throw failure;
         break;
       }
 
