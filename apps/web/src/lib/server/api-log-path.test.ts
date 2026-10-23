@@ -6,7 +6,9 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const mockStartTimer = vi.hoisted(() => vi.fn(() => ({ end: vi.fn() })));
+const mockStartTimer = vi.hoisted(() =>
+  vi.fn((_label: string) => ({ end: vi.fn() }))
+);
 vi.mock('$lib/observability', () => ({
   logger: {
     startTimer: mockStartTimer,
