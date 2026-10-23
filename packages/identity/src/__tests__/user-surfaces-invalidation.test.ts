@@ -100,8 +100,13 @@ function harness({ withCache = true, existingUsername = 'alice2' } = {}) {
     const where = (clause: SQL) => {
       if (isLookup) lookup.where = clause;
       const rows = answer();
-      // `for` answers deleteAccount's locking read of the avatar.
-      return Object.assign(rows, { limit: () => rows, for: () => rows });
+      // `for` answers deleteAccount's row locks: the avatar's directly, the
+      // rest after `orderBy`, in id order (Codex-kk9nv.8).
+      return Object.assign(rows, {
+        limit: () => rows,
+        for: () => rows,
+        orderBy: () => ({ for: () => rows }),
+      });
     };
     return { from: () => ({ innerJoin: () => ({ where }), where }) };
   });

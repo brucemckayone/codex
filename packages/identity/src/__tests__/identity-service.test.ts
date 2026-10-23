@@ -1028,20 +1028,24 @@ describe('IdentityService', () => {
     // Dispatch by OBJECT IDENTITY against the imported table, not by sniffing a
     // Drizzle internal — the schema module is not mocked here, so the service
     // and this test hold the same reference.
+    // Several rows of one table are locked in id order (Codex-kk9nv.8).
+    const lockedInIdOrder = (lock: ReturnType<typeof vi.fn>) => () => ({
+      orderBy: () => ({ for: lock }),
+    });
     const SELECT_BY_TABLE = new Map<unknown, unknown>([
       [sessions, { where: mockSessionsWhere }],
       [users, { where: () => ({ for: mockUserFor }) }],
-      [agreementProposals, { where: () => ({ for: mockProposalLock }) }],
-      [organizationOwnershipOffers, { where: () => ({ for: mockOfferLock }) }],
+      [agreementProposals, { where: lockedInIdOrder(mockProposalLock) }],
+      [organizationOwnershipOffers, { where: lockedInIdOrder(mockOfferLock) }],
       [
         creatorOrganizationAgreements,
-        { where: () => ({ for: mockAgreementLock }) },
+        { where: lockedInIdOrder(mockAgreementLock) },
       ],
       [
         organizationMemberships,
         {
           innerJoin: mockInnerJoin,
-          where: () => ({ for: mockMembershipLock }),
+          where: lockedInIdOrder(mockMembershipLock),
         },
       ],
     ]);

@@ -89,16 +89,38 @@ describe('lock order and live-user guards (Codex-kk9nv.8)', () => {
     ]);
   });
 
+  /** What the path under test did, once it has settled. */
+  type Settled = { value: unknown } | undefined;
+
   /**
-   * Resolve once a statement on `table` is waiting on a lock that `pid`
-   * holds. The table, not only the pid: on a shared local database, a peer's
-   * cleanup can block on the same rows, and an early return would let a
-   * regressed order through.
+   * Resolve once the path under test is waiting, in a statement on `table`,
+   * on a lock that `pid` holds. On a shared local database a peer's cleanup
+   * can block on the same rows, and an early return would let a regressed
+   * order through. So the table must match, and a delete or truncate (what
+   * cleanup runs, never what these paths run) does not count. A path that
+   * settles before it ever waits fails here, with what it did as the cause.
    */
-  async function untilBlockedBy(pid: number, table: string): Promise<void> {
+  async function untilBlockedBy(
+    pid: number,
+    table: string,
+    settled: () => Settled
+  ): Promise<void> {
     for (let attempt = 0; attempt < 250; attempt++) {
+      const early = settled();
+      if (early) {
+        throw new Error(
+          `the path under test settled before it waited on ${table}`,
+          {
+            cause: early.value,
+          }
+        );
+      }
       const { rows } = await db.execute(
-        sql`select 1 from pg_stat_activity where ${pid}::int = any(pg_blocking_pids(pid)) and query ilike ${`%"${table}"%`}`
+        sql`select 1 from pg_stat_activity
+            where ${pid}::int = any(pg_blocking_pids(pid))
+              and query ilike ${`%"${table}"%`}
+              and query not ilike 'delete%'
+              and query not ilike 'truncate%'`
       );
       if (rows.length > 0) return;
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -119,6 +141,7 @@ describe('lock order and live-user guards (Codex-kk9nv.8)', () => {
     then: (tx: Tx) => Promise<unknown>
   ): Promise<unknown> {
     let outcome: Promise<unknown> = Promise.resolve(DONE);
+    let settled: Settled;
     await db.transaction(async (tx) => {
       await hold(tx);
       const { rows } = await tx.execute(sql`select pg_backend_pid() as pid`);
@@ -127,7 +150,10 @@ describe('lock order and live-user guards (Codex-kk9nv.8)', () => {
         () => DONE,
         (error: unknown) => error
       );
-      await untilBlockedBy(pid, waitsOn);
+      void outcome.then((value) => {
+        settled = { value };
+      });
+      await untilBlockedBy(pid, waitsOn, () => settled);
       await then(tx);
     });
     return outcome;
@@ -186,26 +212,49 @@ describe('lock order and live-user guards (Codex-kk9nv.8)', () => {
     return row?.status;
   }
 
-  /** The membership writes of an accept: demote the owner, promote `userId`. */
-  const acceptAs = (offerId: string, userId: string) => async (tx: Tx) => {
-    const member = (id: string) =>
-      and(
-        eq(schema.organizationMemberships.organizationId, orgId),
-        eq(schema.organizationMemberships.userId, id)
-      );
-    await tx
-      .update(schema.organizationMemberships)
-      .set({ role: 'admin' })
-      .where(member(ownerId));
-    await tx
-      .update(schema.organizationMemberships)
-      .set({ role: 'owner' })
-      .where(member(userId));
-    await tx
-      .update(schema.organizationOwnershipOffers)
-      .set({ status: 'accepted', respondedAt: new Date() })
-      .where(eq(schema.organizationOwnershipOffers.id, offerId));
-  };
+  /**
+   * The membership writes of a transfer: demote the owner, promote `userId`.
+   * Given an offer, an accept's: it is marked accepted too. Without one, a
+   * support reassign's.
+   */
+  const promote =
+    (userId: string, acceptedOfferId?: string) => async (tx: Tx) => {
+      const member = (id: string) =>
+        and(
+          eq(schema.organizationMemberships.organizationId, orgId),
+          eq(schema.organizationMemberships.userId, id)
+        );
+      await tx
+        .update(schema.organizationMemberships)
+        .set({ role: 'admin' })
+        .where(member(ownerId));
+      await tx
+        .update(schema.organizationMemberships)
+        .set({ role: 'owner' })
+        .where(member(userId));
+      if (acceptedOfferId) {
+        await tx
+          .update(schema.organizationOwnershipOffers)
+          .set({ status: 'accepted', respondedAt: new Date() })
+          .where(eq(schema.organizationOwnershipOffers.id, acceptedOfferId));
+      }
+    };
+
+  /** An open offer to `creatorId`, as createOwnershipOffer inserts it. */
+  async function insertOfferToCreator(tx: Tx): Promise<string> {
+    const [row] = await tx
+      .insert(schema.organizationOwnershipOffers)
+      .values({
+        organizationId: orgId,
+        offeredByUserId: ownerId,
+        recipientUserId: creatorId,
+        status: 'open',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      })
+      .returning();
+    if (!row) throw new Error('offer not inserted');
+    return row.id;
+  }
 
   async function activeOwners() {
     const rows = await db
@@ -221,32 +270,59 @@ describe('lock order and live-user guards (Codex-kk9nv.8)', () => {
     return rows.map((row) => row.userId);
   }
 
-  describe('a member made owner while the write waited', () => {
-    // An UPDATE that waited re-checks only its own WHERE: without the owner
-    // condition on it, the removal or demotion would land on the new owner,
-    // and the org would be left with none.
-    it('removeMember refuses, and the org keeps its new owner', async () => {
+  // Without the owner condition on the write, a removal or demotion would
+  // land on the new owner, and the org would be left with none.
+  describe('a member made owner after the read', () => {
+    // The path waits on the offer an accept holds; its write then runs, fresh,
+    // after the accept committed.
+    it('removeMember refuses an accept, and the org keeps its new owner', async () => {
       const created = await offerTo(creatorId);
 
       const outcome = await whileHolding(
         lockOffer(created.id),
         OFFERS,
         () => service.removeMember(orgId, creatorId),
-        acceptAs(created.id, creatorId)
+        promote(creatorId, created.id)
       );
 
       expect(outcome).toBeInstanceOf(OwnershipTransferRequiredError);
       expect(await activeOwners()).toEqual([creatorId]);
     });
 
-    it('updateMemberRole refuses, and the org keeps its new owner', async () => {
+    it('updateMemberRole refuses an accept, and the org keeps its new owner', async () => {
       const created = await offerTo(creatorId);
 
       const outcome = await whileHolding(
         lockOffer(created.id),
         OFFERS,
         () => service.updateMemberRole(orgId, creatorId, 'member'),
-        acceptAs(created.id, creatorId)
+        promote(creatorId, created.id)
+      );
+
+      expect(outcome).toBeInstanceOf(OwnershipTransferRequiredError);
+      expect(await activeOwners()).toEqual([creatorId]);
+    });
+
+    // No offer: the write itself waits on the membership a support reassign
+    // holds, and re-checks only its own WHERE once that commits.
+    it('removeMember refuses a reassign it waited on, and the org keeps its new owner', async () => {
+      const outcome = await whileHolding(
+        lockMembership(creatorId),
+        MEMBERSHIPS,
+        () => service.removeMember(orgId, creatorId),
+        promote(creatorId)
+      );
+
+      expect(outcome).toBeInstanceOf(OwnershipTransferRequiredError);
+      expect(await activeOwners()).toEqual([creatorId]);
+    });
+
+    it('updateMemberRole refuses a reassign it waited on, and the org keeps its new owner', async () => {
+      const outcome = await whileHolding(
+        lockMembership(creatorId),
+        MEMBERSHIPS,
+        () => service.updateMemberRole(orgId, creatorId, 'member'),
+        promote(creatorId)
       );
 
       expect(outcome).toBeInstanceOf(OwnershipTransferRequiredError);
@@ -256,8 +332,9 @@ describe('lock order and live-user guards (Codex-kk9nv.8)', () => {
 
   describe('an offer created while the membership change waited', () => {
     // createOwnershipOffer holds the recipient's membership while it inserts.
-    // The removal withdraws after its membership change, by a fresh read, so
-    // that offer is withdrawn rather than left open to an inactive member.
+    // A removal or demotion withdraws after its membership change, by a
+    // fresh read, so that offer is withdrawn rather than left open to an
+    // inactive member or a plain member.
     it('removeMember withdraws it', async () => {
       let createdId = '';
 
@@ -266,17 +343,23 @@ describe('lock order and live-user guards (Codex-kk9nv.8)', () => {
         MEMBERSHIPS,
         () => service.removeMember(orgId, creatorId),
         async (tx) => {
-          const [row] = await tx
-            .insert(schema.organizationOwnershipOffers)
-            .values({
-              organizationId: orgId,
-              offeredByUserId: ownerId,
-              recipientUserId: creatorId,
-              status: 'open',
-              expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-            })
-            .returning();
-          createdId = row?.id ?? '';
+          createdId = await insertOfferToCreator(tx);
+        }
+      );
+
+      expect(outcome).toBe(DONE);
+      expect(await offerStatus(createdId)).toBe('withdrawn');
+    });
+
+    it('updateMemberRole withdraws it', async () => {
+      let createdId = '';
+
+      const outcome = await whileHolding(
+        lockMembership(creatorId),
+        MEMBERSHIPS,
+        () => service.updateMemberRole(orgId, creatorId, 'member'),
+        async (tx) => {
+          createdId = await insertOfferToCreator(tx);
         }
       );
 

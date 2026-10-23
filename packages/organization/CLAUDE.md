@@ -55,8 +55,14 @@ the gate fails closed: no logo can be set at all.
 `create` also reads its creator under `FOR KEY SHARE`, so an org created while that account is being deleted never gets a deleted owner.
 
 **Lock order (Codex-kk9nv.8).** A member's rows are locked as: a proposal, then an ownership offer, then the membership, then the creator's agreements. A row inserted naming a user takes a KEY SHARE on that user's row through its foreign key. Two transactions that take the same rows in different orders wait on each other until Postgres aborts one (40P01, a 500). Keep any new path in this order. These follow it: accept, counter and terminate of agreements; accept, decline, withdraw and reassign of offers; `removeMember`; `updateMemberRole`; and identity's `deleteAccount`.
-- **Lock, then write.** A path that ends a membership (`removeMember`, `updateMemberRole`, `deleteAccount`) locks the proposals and offer first (`lockProposalsOnDeparture`, `lockOfferToRecipient`), changes the membership, then withdraws by fresh reads. The reason is `createOwnershipOffer`: it holds the recipient's membership while it inserts its new offer, so an offer committed while the membership change waited is withdrawn too. Locking rather than updating the offer early also keeps that insert from waiting on the unique index.
-- **Guard the write, not only the read.** An UPDATE that waited on a row re-checks only its own WHERE. So a write that must never touch the owner carries the owner condition itself (`notTheActiveOwner`), and a missing row means the member was made owner meanwhile.
+- **Lock, then write.** A path that changes a membership locks what it will withdraw first, changes the membership, then withdraws by fresh reads:
+  - `removeMember` locks the member's proposals (`lockProposalsOnDeparture`) and their offer (`lockOfferToRecipient`);
+  - `updateMemberRole` locks only the offer, and only when the new role leaves admin/creator;
+  - identity's `deleteAccount` locks every row it writes first, memberships included, with its own lock on offers across every org.
+
+  The reason is that `createOwnershipOffer` holds the recipient's membership while it inserts its new offer, and `proposeAgreement` holds it while it inserts a proposal. Something committed while the membership change waited is withdrawn too. Locking rather than updating the offer early also keeps that insert from waiting on the unique index.
+- **Several rows of one table in id order** (`.orderBy(table.id)` before `.for('update')`). Two paths that lock some of the same rows through different indexes would otherwise take them in different orders.
+- **Guard the write, not only the read.** An UPDATE that waited on a row re-checks only its own WHERE. So a write that must never touch the owner carries the owner condition itself (`notTheActiveOwner`). A missing row means the member was made owner meanwhile, by an accept or a support reassign.
 - **Known exceptions:**
   - the subscription webhook, which inserts before it upserts the membership (Codex-kk9nv.20);
   - a fresh write after a wait can lock a row that the transaction it waited on has just committed, while an accept of that new row holds it. That window is milliseconds, and Postgres resolves it with a 40P01.

@@ -821,7 +821,8 @@ export class IdentityService extends BaseService {
         // takes a KEY SHARE on the user's row, through its foreign key. Two
         // transactions taking the same rows in different orders wait on each
         // other until Postgres aborts one, so every lock here is taken in that
-        // order before anything is written.
+        // order before anything is written. Several rows of one table are
+        // locked in id order, so two paths locking some of the same rows agree.
         //
         // The user's row first, as NO KEY UPDATE. It still makes an avatar
         // upload or removal wait for the scrub, so the URL read here is the
@@ -853,6 +854,7 @@ export class IdentityService extends BaseService {
               eq(organizationOwnershipOffers.status, 'open')
             )
           )
+          .orderBy(organizationOwnershipOffers.id)
           .for('update');
         // Every membership row, with no role filter: a transfer that took its
         // offer first has committed by now, and one that comes second finds
@@ -861,6 +863,7 @@ export class IdentityService extends BaseService {
           .select({ id: organizationMemberships.id })
           .from(organizationMemberships)
           .where(eq(organizationMemberships.userId, userId))
+          .orderBy(organizationMemberships.id)
           .for('update');
         // A creator ending their own agreement locks it, then takes a KEY
         // SHARE on their row (the agreement names them as who ended it), which
@@ -875,6 +878,7 @@ export class IdentityService extends BaseService {
               eq(creatorOrganizationAgreements.status, 'active')
             )
           )
+          .orderBy(creatorOrganizationAgreements.id)
           .for('update');
         const [deleted] = await tx
           .update(users)

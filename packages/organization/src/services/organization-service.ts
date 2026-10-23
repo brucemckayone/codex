@@ -193,9 +193,10 @@ const emailDate = new Intl.DateTimeFormat('en-GB', {
 /**
  * A membership that is not its org's active owner, for the WHERE of a write
  * that must never touch the owner (Codex-kk9nv.8). An earlier read is not
- * enough: an accept can make the member the owner while the write waits on
- * the row, and the waiting UPDATE re-checks only its own WHERE against the
- * committed row. The DB caps active owners at one but cannot require one.
+ * enough: an accept or a support reassign can make the member the owner
+ * after that read, and an UPDATE that waited on the row re-checks only its
+ * own WHERE against the committed row. The DB caps active owners at one but
+ * cannot require one.
  */
 const notTheActiveOwner = () =>
   sql`not (${organizationMemberships.role} = 'owner' and ${organizationMemberships.status} = 'active')`;
@@ -1285,7 +1286,8 @@ export class OrganizationService extends BaseService {
           // overload. Only whether a row came back matters.
           .returning();
         // The row exists (read above), so none back means it was made the
-        // owner while this waited on it, by an accept that held its offer.
+        // owner since, by an accept or a support reassign that committed while
+        // this waited.
         // The throw rolls back the locks and nothing is ended.
         if (!ended) {
           throw new OwnershipTransferRequiredError({ organizationId });
