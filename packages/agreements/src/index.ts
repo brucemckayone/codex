@@ -44,6 +44,7 @@ export {
   type DepartureTerminatedAgreement,
   formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,
+  lockProposalsOnDeparture,
   type ProposeAgreementInput,
   type ResolverLogger,
   sumActiveCreatorShares,

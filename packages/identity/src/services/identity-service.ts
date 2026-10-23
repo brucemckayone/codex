@@ -1,5 +1,6 @@
 import {
   ACCOUNT_DELETED_TERMINATION_REASON,
+  lockProposalsOnDeparture,
   terminateAgreementsOnDeparture,
   withdrawProposalsOnDeparture,
 } from '@codex/agreements';
@@ -9,13 +10,13 @@ import type { CdnCachePurger, R2Service } from '@codex/cloudflare-clients';
 import {
   type DatabaseClient,
   listedCreatorConditions,
+  listedMembershipConditions,
   messageForLog,
   stackForLog,
   toIso,
   whereNotDeleted,
 } from '@codex/database';
 import {
-  agreementProposals,
   content,
   creatorOnboarding,
   creatorOrganizationAgreements,
@@ -39,7 +40,7 @@ import {
 } from '@codex/service-errors';
 import type { PublicCreatorProfile, UserProfile } from '@codex/shared-types';
 import type { UpdateCreatorOnboardingInput } from '@codex/validation';
-import { and, eq, inArray, ne } from 'drizzle-orm';
+import { and, eq, inArray, ne, type SQL } from 'drizzle-orm';
 
 import {
   AccountHasContentError,
@@ -294,11 +295,13 @@ export class IdentityService extends BaseService {
   /**
    * The slugs of the orgs whose public creators list shows this user: the
    * ones `listedCreatorConditions` puts them on, the same conditions the list
-   * itself is read with.
+   * itself is read with. Account deletion passes the membership half alone,
+   * once its scrub has marked the account deleted.
    */
   private async listingOrgSlugs(
     db: Tx | DatabaseClient,
-    userId: string
+    userId: string,
+    conditions: SQL[] = listedCreatorConditions()
   ): Promise<string[]> {
     const orgs = await db
       .select({ slug: organizations.slug })
@@ -310,7 +313,7 @@ export class IdentityService extends BaseService {
       .where(
         and(
           eq(organizationMemberships.userId, userId),
-          ...listedCreatorConditions(),
+          ...conditions,
           whereNotDeleted(organizations)
         )
       );
@@ -835,16 +838,12 @@ export class IdentityService extends BaseService {
           .from(users)
           .where(and(eq(users.id, userId), whereNotDeleted(users)))
           .for('no key update');
-        await tx
-          .select({ id: agreementProposals.id })
-          .from(agreementProposals)
-          .where(
-            and(
-              eq(agreementProposals.creatorId, userId),
-              eq(agreementProposals.status, 'open')
-            )
-          )
-          .for('update');
+        const departing = {
+          creatorId: userId,
+          at: now,
+          everyOrganisation: true,
+        } as const;
+        await lockProposalsOnDeparture(tx, departing);
         await tx
           .select({ id: organizationOwnershipOffers.id })
           .from(organizationOwnershipOffers)
@@ -877,16 +876,6 @@ export class IdentityService extends BaseService {
             )
           )
           .for('update');
-        // Read while they still list the user: once the account is deleted
-        // and its memberships ended, no query finds which cached creators
-        // lists still show the real name and avatar (Codex-kk9nv.8). Inside
-        // the transaction, so a failed read aborts the deletion: Postgres
-        // refuses every later statement in a transaction that hit an error,
-        // and committing without the list would leave those caches showing
-        // the person for their 4h TTL.
-        const listing = this.cache
-          ? await this.listingOrgSlugs(tx, userId)
-          : [];
         const [deleted] = await tx
           .update(users)
           .set({
@@ -914,18 +903,26 @@ export class IdentityService extends BaseService {
         // commits. A refusal rolls the scrub back.
         await this.refuseIfOwner(tx, userId);
 
+        // The orgs whose cached creators list shows the user, read now, by
+        // the same reasoning: a membership an invite added meanwhile has
+        // committed, and none can be added until this commits. Before the
+        // memberships end, because after it no query finds which lists still
+        // show the real name and avatar (Codex-kk9nv.8). The membership half
+        // of the listing conditions only: the scrub has just marked the
+        // account deleted. Inside the transaction, so a failed read aborts
+        // the deletion: Postgres refuses every later statement in a
+        // transaction that hit an error, and committing without the list
+        // would leave those caches showing the person for their 4h TTL.
+        const listing = this.cache
+          ? await this.listingOrgSlugs(tx, userId, listedMembershipConditions())
+          : [];
+
         // Each write below reads afresh, so it also covers a proposal or an
         // offer whose creator held a membership row this transaction waited
         // on, and committed before it got the lock.
-        const withdrawn = await withdrawProposalsOnDeparture(tx, {
-          creatorId: userId,
-          at: now,
-          everyOrganisation: true,
-        });
+        const withdrawn = await withdrawProposalsOnDeparture(tx, departing);
         const ended = await terminateAgreementsOnDeparture(tx, {
-          creatorId: userId,
-          at: now,
-          everyOrganisation: true,
+          ...departing,
           reason: ACCOUNT_DELETED_TERMINATION_REASON,
         });
         // A deleted account belongs to no org, so every member list drops

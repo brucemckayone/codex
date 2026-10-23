@@ -19,13 +19,25 @@ import { users } from '../schema/users';
 export const CREATOR_LIST_ROLES = ['owner', 'admin', 'creator'] as const;
 
 /**
+ * The membership half of {@link listedCreatorConditions}: an active owner,
+ * admin or creator, whatever their account. Only for account deletion, which
+ * reads the orgs that list the user after its scrub has marked the account
+ * deleted, so the account condition no longer holds (Codex-kk9nv.8).
+ */
+export function listedMembershipConditions(): SQL[] {
+  return [
+    eq(organizationMemberships.status, 'active'),
+    inArray(organizationMemberships.role, [...CREATOR_LIST_ROLES]),
+  ];
+}
+
+/**
  * The conditions a membership meets to put its user on the org's public
  * creators list. Spread them into `and(...)` beside the org or user scope.
  */
 export function listedCreatorConditions(): SQL[] {
   return [
-    eq(organizationMemberships.status, 'active'),
-    inArray(organizationMemberships.role, [...CREATOR_LIST_ROLES]),
+    ...listedMembershipConditions(),
     // Deleting an account ends its memberships (Codex-kk9nv.8), but one
     // deleted before that, or by any other path, still is not listed. A
     // subquery rather than a join, so a caller that counts memberships alone

@@ -175,7 +175,7 @@ app.get(
  * path. `auth: 'none'` means no session is even resolved, so the body cannot
  * differ between viewers. This route is NOT KV cache-aside (it calls
  * `fetchPublicOrgInfo` directly), so the 60s CDN window is its only cache; the
- * `/info` route below serves the same data through KV on a 30-minute TTL, which
+ * `/info` route below serves the same data through KV on a 4-hour TTL, which
  * is the window this 60s one has to stay inside.
  * @returns {PublicBrandingResponse}
  */
@@ -349,11 +349,11 @@ async function fetchPublicOrgInfo(
  *
  * Returns org identity + branding for the org layout (works without cookies) —
  * "works without cookies" is the same fact `cache: 'public'` states to a CDN.
- * Cached in KV for 30 minutes; invalidated on branding/settings updates.
+ * Cached in KV for 4 hours (`CACHE_TTL.ORG_PUBLIC_INFO_SECONDS`); invalidated on branding/settings updates.
  *
  * Cache: `public`. This is the read every org page's layout makes, so it is the
  * single highest-volume beneficiary of a shared cache on the platform, and the
- * 60s CDN window sits well inside the 30-minute KV TTL it fronts — a branding
+ * 60s CDN window sits well inside the 4-hour KV TTL it fronts — a branding
  * write bumps the KV version immediately and the edge catches up within 60s.
  */
 app.get(

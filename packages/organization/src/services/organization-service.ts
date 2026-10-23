@@ -13,6 +13,7 @@
 
 import {
   type DepartureTerminatedAgreement,
+  lockProposalsOnDeparture,
   terminateAgreementsOnDeparture,
   withdrawProposalsOnDeparture,
 } from '@codex/agreements';
@@ -95,6 +96,7 @@ import {
   declineOwnershipOffer,
   getOwnershipView,
   getPendingOwnershipOffer,
+  lockOfferToRecipient,
   type OwnershipChange,
   type OwnershipOfferDto,
   type OwnershipViewCore,
@@ -187,6 +189,16 @@ const emailDate = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric',
   timeZone: 'UTC',
 });
+
+/**
+ * A membership that is not its org's active owner, for the WHERE of a write
+ * that must never touch the owner (Codex-kk9nv.8). An earlier read is not
+ * enough: an accept can make the member the owner while the write waits on
+ * the row, and the waiting UPDATE re-checks only its own WHERE against the
+ * committed row. The DB caps active owners at one but cannot require one.
+ */
+const notTheActiveOwner = () =>
+  sql`not (${organizationMemberships.role} = 'owner' and ${organizationMemberships.status} = 'active')`;
 
 export class OrganizationService extends BaseService {
   /**
@@ -1163,17 +1175,13 @@ export class OrganizationService extends BaseService {
           throw new OwnershipTransferRequiredError({ organizationId });
         }
 
-        // Before the membership change: every path that locks both takes the
-        // ownership offer first (see removeMember), so none can deadlock.
-        const withdrawn =
-          role === 'admin' || role === 'creator'
-            ? null
-            : await withdrawOfferForIneligibleRecipient(
-                tx,
-                organizationId,
-                userId,
-                new Date()
-              );
+        // Leaving admin and creator ends eligibility for an ownership offer.
+        // Lock, then write (see removeMember): the offer is locked before the
+        // membership, and withdrawn after it by a fresh read.
+        const leavesRecipientRoles = role !== 'admin' && role !== 'creator';
+        if (leavesRecipientRoles) {
+          await lockOfferToRecipient(tx, organizationId, userId);
+        }
 
         const [updated] = await tx
           .update(organizationMemberships)
@@ -1181,14 +1189,26 @@ export class OrganizationService extends BaseService {
           .where(
             and(
               eq(organizationMemberships.organizationId, organizationId),
-              eq(organizationMemberships.userId, userId)
+              eq(organizationMemberships.userId, userId),
+              notTheActiveOwner()
             )
           )
           .returning();
 
+        // The row exists (read above), so none back means it was made the
+        // owner while this waited on it.
         if (!updated) {
-          throw new MemberNotFoundError(userId);
+          throw new OwnershipTransferRequiredError({ organizationId });
         }
+
+        const withdrawn = leavesRecipientRoles
+          ? await withdrawOfferForIneligibleRecipient(
+              tx,
+              organizationId,
+              userId,
+              new Date()
+            )
+          : null;
 
         return {
           membership: {
@@ -1242,31 +1262,42 @@ export class OrganizationService extends BaseService {
         }
 
         const now = new Date();
-        // Both before the membership change, in this order: every path that
-        // locks these rows takes a proposal, then an ownership offer, then a
-        // membership (see withdrawProposalsOnDeparture), so none can deadlock
-        // with an accept or an account deletion (Codex-kk9nv.8).
-        await withdrawProposalsOnDeparture(tx, {
-          organizationId,
-          creatorId: userId,
-          at: now,
-        });
+        const departing = { organizationId, creatorId: userId, at: now };
+        // LOCK, then write (Codex-kk9nv.8). The member's open proposals and
+        // ownership offer are locked before their membership, the order an
+        // accept or a counter takes them in. They are withdrawn after it, by
+        // fresh reads: an offer created while the membership change waited
+        // (createOwnershipOffer holds the membership while it inserts) is
+        // withdrawn too.
+        await lockProposalsOnDeparture(tx, departing);
+        await lockOfferToRecipient(tx, organizationId, userId);
+        const [ended] = await tx
+          .update(organizationMemberships)
+          .set({ status: 'inactive', updatedAt: now })
+          .where(
+            and(
+              eq(organizationMemberships.organizationId, organizationId),
+              eq(organizationMemberships.userId, userId),
+              notTheActiveOwner()
+            )
+          )
+          // Bare `.returning()`: the client union collapses the projected
+          // overload. Only whether a row came back matters.
+          .returning();
+        // The row exists (read above), so none back means it was made the
+        // owner while this waited on it, by an accept that held its offer.
+        // The throw rolls back the locks and nothing is ended.
+        if (!ended) {
+          throw new OwnershipTransferRequiredError({ organizationId });
+        }
+
+        await withdrawProposalsOnDeparture(tx, departing);
         const withdrawn = await withdrawOfferForIneligibleRecipient(
           tx,
           organizationId,
           userId,
           now
         );
-        await tx
-          .update(organizationMemberships)
-          .set({ status: 'inactive', updatedAt: now })
-          .where(
-            and(
-              eq(organizationMemberships.organizationId, organizationId),
-              eq(organizationMemberships.userId, userId)
-            )
-          );
-
         const endedAgreements = await terminateAgreementsOnDeparture(tx, {
           organizationId,
           creatorId: userId,

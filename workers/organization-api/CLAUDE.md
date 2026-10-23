@@ -16,7 +16,7 @@ Organization CRUD, membership management, subscription tiers, follower relations
 | GET | `/api/organizations/public/:slug/info` | `none` | params: `slug` | 200 | Full public org identity + branding; KV-cached 4h |
 | GET | `/api/organizations/public/:slug/stats` | `none` | params: `slug` | 200 | Content counts, duration, creator count, views; KV-cached |
 | GET | `/api/organizations/public/:slug/creators` | `none` | params + query: page/limit | 200 | Paginated public creator profiles; KV-cached |
-| GET | `/api/organizations/public/:slug/members` | `none` | params + query: page/limit/role | 200 | Paginated public member profiles; KV-cached |
+| GET | `/api/organizations/public/:slug/members` | `none` | params + query: page/limit/role | 200 | Paginated public member profiles; not KV-cached |
 | GET | `/api/organizations/:id` | `required` | params: `id` | 200 | Get org by ID |
 | PATCH | `/api/organizations/:id` | `required`, `requireOrgManagement` | body: `updateOrganizationSchema` | 200 | Invalidates brand KV + VersionedCache on slug change |
 | GET | `/api/organizations` | `required` | query: pagination + filters | 200 | List orgs scoped to user |

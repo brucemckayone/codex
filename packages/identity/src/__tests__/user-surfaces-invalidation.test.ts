@@ -28,6 +28,7 @@
 
 import type { R2Service } from '@codex/cloudflare-clients';
 import type { Database } from '@codex/database';
+import { organizationMemberships, users } from '@codex/database/schema';
 import { ConflictError } from '@codex/service-errors';
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
@@ -265,10 +266,13 @@ describe('IdentityService — user card writes invalidate every surface', () => 
     );
   });
 
-  it('deleteAccount reads the listing orgs before the scrub, while they still list the user', async () => {
-    const { service, select } = harness();
+  it('deleteAccount reads the listing orgs after the scrub, before the memberships end, by membership alone', async () => {
+    // After the scrub, so a membership an invite committed while the scrub
+    // waited is included. Before the memberships end, while they still name
+    // the orgs. Without the account condition, which the scrub made false.
+    const { service, select, whereQuery } = harness();
     const update = vi.spyOn(
-      (service as unknown as { db: { update: () => unknown } }).db,
+      (service as unknown as { db: { update: (t: unknown) => unknown } }).db,
       'update'
     );
 
@@ -278,9 +282,14 @@ describe('IdentityService — user card writes invalidate every surface', () => 
       ([columns]) => 'slug' in columns
     );
     expect(lookupAt).toBeGreaterThan(-1);
-    expect(select.mock.invocationCallOrder[lookupAt]).toBeLessThan(
-      update.mock.invocationCallOrder[0] ?? 0
-    );
+    const lookedUpAt = select.mock.invocationCallOrder[lookupAt] ?? 0;
+    const tables = update.mock.calls.map(([table]) => table);
+    const scrubbedAt = update.mock.invocationCallOrder[tables.indexOf(users)];
+    const endedAt =
+      update.mock.invocationCallOrder[tables.indexOf(organizationMemberships)];
+    expect(lookedUpAt).toBeGreaterThan(scrubbedAt ?? Infinity);
+    expect(lookedUpAt).toBeLessThan(endedAt ?? 0);
+    expect(whereQuery().sql).not.toContain('"users"."deleted_at"');
   });
 
   it('looks up exactly the orgs whose creators list shows the user', async () => {
@@ -332,7 +341,7 @@ describe('IdentityService — user card writes invalidate every surface', () => 
       );
     });
 
-    it('deleteAccount fails before the scrub, so no cache is left showing the person', async () => {
+    it('deleteAccount fails inside its transaction, so the scrub rolls back and no cache is left showing the person', async () => {
       const { service, invalidated, lookup } = harness();
       const update = vi.spyOn(
         (service as unknown as { db: { update: () => unknown } }).db,
@@ -342,8 +351,10 @@ describe('IdentityService — user card writes invalidate every surface', () => 
 
       await expect(service.deleteAccount(USER_ID)).rejects.toThrow();
 
-      // Nothing committed, so nothing is stale: the account is intact.
-      expect(update).not.toHaveBeenCalled();
+      // The lookup runs after the scrub, inside the transaction: its failure
+      // rolls the scrub back, nothing past it is written, and nothing
+      // committed, so nothing is stale.
+      expect(update).toHaveBeenCalledTimes(1);
       expect(invalidated).toEqual([]);
     });
 

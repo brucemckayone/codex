@@ -50,10 +50,36 @@ function inScope(organizationColumn: PgColumn, scope: DepartureScope): SQL[] {
 }
 
 /**
+ * Lock the creator's open proposals in scope, without changing them. Accept
+ * and counter lock the proposal and then the membership, so a departure
+ * takes these before the membership too (Codex-kk9nv.8). It then writes
+ * after the membership change, with {@link withdrawProposalsOnDeparture},
+ * which reads afresh and so also withdraws a proposal that a transaction it
+ * waited on has committed since.
+ */
+export async function lockProposalsOnDeparture(
+  tx: Tx | DatabaseClient,
+  scope: DepartureScope
+): Promise<void> {
+  await tx
+    .select({ id: agreementProposals.id })
+    .from(agreementProposals)
+    .where(
+      and(
+        ...inScope(agreementProposals.organizationId, scope),
+        eq(agreementProposals.creatorId, scope.creatorId),
+        eq(agreementProposals.status, 'open')
+      )
+    )
+    .for('update');
+}
+
+/**
  * The creator's open proposals in scope, withdrawn at `at`, so a creator who
- * left cannot accept one and start a new agreement. Call it BEFORE the
- * membership change: accept and counter lock the proposal and then the
- * membership, so taking them in the same order cannot deadlock.
+ * left cannot accept one and start a new agreement. Take
+ * {@link lockProposalsOnDeparture} BEFORE the membership change, or call this
+ * before it: accept and counter lock the proposal and then the membership,
+ * so taking them in the same order cannot deadlock.
  */
 export async function withdrawProposalsOnDeparture(
   tx: Tx | DatabaseClient,

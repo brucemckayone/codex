@@ -606,7 +606,7 @@ export async function withdrawOwnershipOffer(
 
   return await db.transaction(async (tx) => {
     // The offer, then the membership: the order every path takes them in,
-    // so this cannot deadlock with an accept (Codex-kk9nv.8).
+    // so this does not deadlock with an accept (Codex-kk9nv.8).
     const offer = await lockOffer(tx, organizationId, offerId);
     await lockOwnerMembership(tx, organizationId, ownerUserId);
     assertOpen(offer, now);
@@ -739,7 +739,7 @@ export async function reassignOrganisationOwner(
 
   return await db.transaction(async (tx) => {
     // The open offer locked before any membership: the order every path
-    // takes them in, so this cannot deadlock with an accept or an account
+    // takes them in, so this does not deadlock with an accept or an account
     // deletion (Codex-kk9nv.8). It is closed further down.
     await tx
       .select({ id: organizationOwnershipOffers.id })
@@ -805,6 +805,33 @@ export async function reassignOrganisationOwner(
     });
     return { change, withdrawnOffer };
   });
+}
+
+/**
+ * Lock the open offer made to `userId`, without changing it, before the
+ * caller changes their membership: an offer before any membership, the order
+ * an accept takes them in (Codex-kk9nv.8). Lock only, not an UPDATE, so an
+ * offer created meanwhile fails its unique index at once instead of waiting
+ * on this transaction. The caller then withdraws after the membership change
+ * with {@link withdrawOfferForIneligibleRecipient}, which reads afresh and so
+ * also withdraws an offer committed while the membership change waited.
+ */
+export async function lockOfferToRecipient(
+  tx: Tx,
+  organizationId: string,
+  userId: string
+): Promise<void> {
+  await tx
+    .select({ id: organizationOwnershipOffers.id })
+    .from(organizationOwnershipOffers)
+    .where(
+      and(
+        eq(organizationOwnershipOffers.organizationId, organizationId),
+        eq(organizationOwnershipOffers.recipientUserId, userId),
+        eq(organizationOwnershipOffers.status, 'open')
+      )
+    )
+    .for('update');
 }
 
 /**

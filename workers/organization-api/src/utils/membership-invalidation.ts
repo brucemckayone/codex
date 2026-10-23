@@ -9,7 +9,7 @@ import {
   VersionedCache,
 } from '@codex/cache';
 import { createDbClient } from '@codex/database';
-import type { Logger } from '@codex/observability';
+import type { ObservabilityClient } from '@codex/observability';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   invalidateOrgSlugCache as invalidateOrgSlugCacheShared,
@@ -76,12 +76,14 @@ export function invalidateMembershipCache(
 export function dispatchOrgSlugInvalidation(
   ctx: CacheCtx,
   orgId: string,
-  obs?: Logger
+  obs?: ObservabilityClient
 ): void {
   if (!ctx.env.CACHE_KV) return;
   const cache = new VersionedCache({
     kv: ctx.env.CACHE_KV,
     waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+    // The cache logs a failed invalidation only through its own obs.
+    obs,
   });
   const db = createDbClient(ctx.env);
   ctx.executionCtx.waitUntil(
@@ -98,7 +100,7 @@ export function invalidateMemberCaches(
   ctx: CacheCtx,
   orgId: string,
   userId: string,
-  obs?: Logger
+  obs?: ObservabilityClient
 ): void {
   invalidateMembershipCache(ctx, orgId, userId);
   dispatchOrgSlugInvalidation(ctx, orgId, obs);
