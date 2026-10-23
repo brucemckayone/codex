@@ -310,6 +310,38 @@ export const stripeConnectAccounts = pgTable(
 );
 
 /**
+ * Every Connect account a user has had and no longer has (Codex-2hxff.47).
+ *
+ * A transfer is looked up by its destination, so a payout sent to an account
+ * that was later replaced would not be found, and could be sent again. A
+ * trigger in migration 0113 writes the old account here whenever a
+ * `stripe_connect_accounts` row is deleted or re-keyed, so a manual support
+ * edit is caught too; nothing in the app writes this table.
+ *
+ * `user_id` has no foreign key on purpose: deleting a user cascades to their
+ * Connect row, and the trigger's insert would then name a user already
+ * deleted in the same statement. A user who can be deleted has no payouts
+ * (payouts RESTRICT their user), so their history is never read again.
+ */
+export const stripeConnectAccountHistory = pgTable(
+  'stripe_connect_account_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    stripeAccountId: varchar('stripe_account_id', { length: 255 }).notNull(),
+    replacedAt: timestamp('replaced_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('uq_connect_history_user_account').on(
+      table.userId,
+      table.stripeAccountId
+    ),
+  ]
+);
+
+/**
  * Pending Payouts — accumulated creator payouts when Connect is unavailable
  *
  * When a creator's Connect account is restricted/disabled but their content

@@ -239,6 +239,8 @@ export async function cleanupDatabase(db: Database): Promise<void> {
   // re-seeding the same user collides on the unique constraint
   // (test-cleanup-fk-ordering memory). Delete before organizations.
   await db.delete(schema.stripeConnectAccounts);
+  // Filled by a trigger from the delete above (Codex-2hxff.47); no FK.
+  await db.delete(schema.stripeConnectAccountHistory);
   await db.delete(schema.organizations);
   // NOTE: Users are NOT deleted - preserve them across tests
 }
@@ -288,6 +290,8 @@ export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   // One Connect account per user (uq_stripe_connect_user, Codex-69t7c); clear
   // before organizations/users to keep FK ordering explicit.
   await db.delete(schema.stripeConnectAccounts);
+  // Filled by a trigger from the delete above (Codex-2hxff.47); no FK.
+  await db.delete(schema.stripeConnectAccountHistory);
   await db.delete(schema.organizations);
   await db.delete(schema.users);
 }
