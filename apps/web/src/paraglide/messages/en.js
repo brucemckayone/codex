@@ -4579,6 +4579,14 @@ export const subscription_change_tier = () => `Change Plan`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_tier_change_preview_expired = () => `Prices changed — please review again`
+
+
+/**
  * @param {{ date: NonNullable<unknown> }} params
  * @returns {string}
  */

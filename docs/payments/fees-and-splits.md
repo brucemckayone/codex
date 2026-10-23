@@ -195,4 +195,4 @@ Every screen that shows revenue uses the same rules as the split:
   `Codex-2hxff.20` (revenue by creator shows it inverted);
 - charts plot shares of the post-platform pool, using the fee actually
   configured rather than a hard-coded 10% — **gap**: `Codex-2hxff.20`;
-- payout totals exclude the platform's own fee rows — **gap**: `Codex-2hxff.15`.
+- payout totals exclude the platform's own fee rows.

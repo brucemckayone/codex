@@ -701,6 +701,79 @@ describe('AdminAnalyticsService', () => {
       };
     }
 
+    it('leaves a duplicate subscription out of new, daily-new and churn; a tombstone still churns (Codex-2hxff.15)', async () => {
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const tier = await insertTier(testOrg.id, 'dup');
+      const [u1, u2] = await seedTestUsers(db, 2);
+      const now = new Date();
+      const fiveDaysAgo = new Date(now);
+      fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+      const twoDaysAgo = new Date(now);
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+      const kept = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            subRow({
+              orgId: testOrg.id,
+              userId: u1,
+              tierId: tier.id,
+              label: 'kept',
+              status: 'active',
+              createdAt: fiveDaysAgo,
+            })
+          )
+          .returning()
+      );
+      await db.insert(subscriptions).values([
+        // The same user's second subscription, refunded as a duplicate.
+        {
+          ...subRow({
+            orgId: testOrg.id,
+            userId: u1,
+            tierId: tier.id,
+            label: 'duplicate',
+            status: 'cancelled',
+            createdAt: twoDaysAgo,
+            cancelledAt: twoDaysAgo,
+          }),
+          duplicateOfSubscriptionId: kept.id,
+          endedAt: twoDaysAgo,
+        },
+        // A real subscription that ended: a tombstone, and a churn.
+        {
+          ...subRow({
+            orgId: testOrg.id,
+            userId: u2,
+            tierId: tier.id,
+            label: 'ended',
+            status: 'cancelled',
+            createdAt: twoDaysAgo,
+            cancelledAt: twoDaysAgo,
+          }),
+          endedAt: twoDaysAgo,
+        },
+      ]);
+
+      const stats = await service.getSubscriberStats(testOrg.id, {
+        startDate: fiveDaysAgo,
+        endDate: now,
+      });
+
+      expect(stats.newSubscribers).toBe(2); // kept + ended
+      expect(stats.churnedSubscribers).toBe(1); // ended
+      expect(stats.activeSubscribers).toBe(1); // kept
+      expect(
+        stats.subscribersByDay.reduce((sum, day) => sum + day.newSubscribers, 0)
+      ).toBe(2);
+    });
+
     it('should return zero stats for organization with no subscriptions', async () => {
       const emptyOrg = takeFirst(
         await db

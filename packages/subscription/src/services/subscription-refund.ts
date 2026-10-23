@@ -12,8 +12,36 @@
  * reversed from the charge, as for any refund. Tier and course subscriptions
  * are handled alike. Safe to run again: Stripe is asked first whether the
  * subscription is still live, and the cancel carries an idempotency key.
+ *
+ * A refund of a second subscription the user already had (Codex-2hxff.15)
+ * cancels nothing: it was cancelled when it was recorded, and refunded by us.
+ * Nor does the refund of a payment on an old subscription that is no longer
+ * live next to the newer one that stands, such as the payment that revived it
+ * (owner decision 7, "Cancel old, refund it"): the revival refunds it first
+ * and cancels it after. Either result says what the buyer's email needs
+ * instead.
  */
 
+import { ACCESS_GRANTING_SUBSCRIPTION_STATUSES } from '@codex/constants';
+import {
+  courseSubscriptions,
+  courses,
+  organizations,
+  subscriptions,
+  subscriptionTiers,
+} from '@codex/database/schema';
+import { InternalServiceError } from '@codex/service-errors';
+import {
+  and,
+  eq,
+  inArray,
+  isNotNull,
+  ne,
+  notInArray,
+  or,
+  type SQL,
+} from 'drizzle-orm';
+import { type AnyPgColumn, alias } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import {
   type ChargedSubscription,
@@ -37,11 +65,63 @@ export interface RefundedCharge {
   amountRefundedCents: number;
 }
 
-export interface RefundCancellation {
-  subscription: ChargedSubscription;
-  /** The subscription as Stripe returned it from the cancel. */
-  cancelled: Stripe.Subscription;
-}
+/**
+ * What the refund email of a duplicate subscription says (owner decision
+ * 2026-10-22): "You were already subscribed to …", and for another tier
+ * than the one that stands, that Change plan switches to it.
+ */
+export type DuplicateSubscriptionRefund =
+  | {
+      kind: 'tier';
+      organizationName: string;
+      /** The tier the second subscription was for. */
+      tierName: string;
+      /** The tier of the subscription that stands. */
+      survivingTierName: string;
+      /** The second subscription was for another tier than the one that stands. */
+      otherTier: boolean;
+    }
+  | { kind: 'course'; courseTitle: string };
+
+/**
+ * What the refund email of an old subscription, ended next to the newer one
+ * that stands, says (owner decision 7): "You still subscribe to …".
+ */
+export type SupersededSubscriptionRefund =
+  | {
+      kind: 'tier';
+      organizationName: string;
+      /** The old subscription's tier. */
+      tierName: string;
+    }
+  | { kind: 'course'; courseTitle: string };
+
+/**
+ * A subscription the refund cancelled now; or a duplicate's refund, or an
+ * ended old subscription's beside the one that stands, which end nothing of
+ * the user's: they carry no user or org, so no access is ended and no
+ * streaming block written for them.
+ */
+export type RefundCancellation =
+  | {
+      subscription: ChargedSubscription;
+      /** The subscription as Stripe returned it from the cancel. */
+      cancelled: Stripe.Subscription;
+      duplicate?: never;
+      superseded?: never;
+    }
+  | {
+      duplicate: DuplicateSubscriptionRefund;
+      subscription?: never;
+      cancelled?: never;
+      superseded?: never;
+    }
+  | {
+      superseded: SupersededSubscriptionRefund;
+      subscription?: never;
+      cancelled?: never;
+      duplicate?: never;
+    };
 
 /** Invoices that buy a billing period: the first one, and each renewal. */
 const PERIOD_BILLING_REASONS: readonly string[] = [
@@ -65,7 +145,10 @@ export function isFullRefund(
  * renewal still being retried never count as "latest". Undefined when nothing
  * is cancelled: a partial refund, a one-off purchase, another payment, or a
  * subscription that has already ended (its `customer.subscription.deleted`
- * ends it here).
+ * ends it here). A duplicate's refund, any of its payments, cancels nothing
+ * and asks Stripe no more: it returns what the buyer's email says. So does
+ * the refund of a subscription that is not live (ended, or in a status that
+ * grants nothing) while the user holds a live one for the same org or course.
  */
 export async function cancelForFullRefund(
   deps: SubscriptionRefundDeps,
@@ -89,6 +172,25 @@ export async function cancelForFullRefund(
       { ...context, errorId: crypto.randomUUID() }
     );
     return undefined;
+  }
+  const duplicate = await duplicateRefund(deps, subscription);
+  if (duplicate) {
+    deps.obs.info(
+      'Full refund of a duplicate subscription; nothing to cancel',
+      {
+        ...context,
+        kind: subscription.kind,
+      }
+    );
+    return { duplicate };
+  }
+  const superseded = await supersededRefund(deps, subscription);
+  if (superseded) {
+    deps.obs.info(
+      'Full refund of an ended subscription beside a live one; nothing to cancel',
+      { ...context, kind: subscription.kind }
+    );
+    return { superseded };
   }
   if (!PERIOD_BILLING_REASONS.includes(paid.billingReason ?? '')) {
     deps.obs.info(
@@ -138,6 +240,163 @@ export async function cancelForFullRefund(
     { ...context, kind: subscription.kind }
   );
   return { subscription, cancelled };
+}
+
+/**
+ * What a duplicate's refund email says; undefined for a subscription that
+ * duplicates none. A tier duplicate is read with the subscription it
+ * duplicated, which stands, so the email can tell their tiers apart.
+ */
+async function duplicateRefund(
+  deps: SubscriptionRefundDeps,
+  subscription: ChargedSubscription
+): Promise<DuplicateSubscriptionRefund | undefined> {
+  if (subscription.kind === 'course') {
+    const [row] = await deps.db
+      .select({ courseTitle: courses.title })
+      .from(courseSubscriptions)
+      .innerJoin(courses, eq(courses.id, courseSubscriptions.courseId))
+      .where(
+        and(
+          eq(courseSubscriptions.id, subscription.id),
+          isNotNull(courseSubscriptions.duplicateOfCourseSubscriptionId)
+        )
+      )
+      .limit(1);
+    return row ? { kind: 'course', courseTitle: row.courseTitle } : undefined;
+  }
+
+  const surviving = alias(subscriptions, 'surviving');
+  const survivingTier = alias(subscriptionTiers, 'surviving_tier');
+  const [row] = await deps.db
+    .select({
+      organizationName: organizations.name,
+      tierId: subscriptions.tierId,
+      tierName: subscriptionTiers.name,
+      survivingTierId: surviving.tierId,
+      survivingTierName: survivingTier.name,
+    })
+    .from(subscriptions)
+    // Only a duplicate names the subscription it duplicated.
+    .innerJoin(
+      surviving,
+      eq(surviving.id, subscriptions.duplicateOfSubscriptionId)
+    )
+    .innerJoin(survivingTier, eq(survivingTier.id, surviving.tierId))
+    .innerJoin(
+      subscriptionTiers,
+      eq(subscriptionTiers.id, subscriptions.tierId)
+    )
+    .innerJoin(
+      organizations,
+      eq(organizations.id, subscriptions.organizationId)
+    )
+    .where(eq(subscriptions.id, subscription.id))
+    .limit(1);
+  if (!row) return undefined;
+  return {
+    kind: 'tier',
+    organizationName: row.organizationName,
+    tierName: row.tierName,
+    survivingTierName: row.survivingTierName,
+    otherTier: row.tierId !== row.survivingTierId,
+  };
+}
+
+/**
+ * What the refund email of a subscription that is not live says while the
+ * user holds a live one for the same org (course plan: the same course);
+ * undefined otherwise (owner decision 7). The revival refunds BEFORE it
+ * cancels, so the refund's own event can find the old subscription still
+ * active at Stripe: our row, not Stripe, says it is not live. (Our row live
+ * and canceled at Stripe cannot sit beside another live row: the one-live
+ * index forbids two.)
+ */
+async function supersededRefund(
+  deps: SubscriptionRefundDeps,
+  subscription: ChargedSubscription
+): Promise<SupersededSubscriptionRefund | undefined> {
+  const liveStatuses = [...ACCESS_GRANTING_SUBSCRIPTION_STATUSES];
+  if (subscription.kind === 'course') {
+    const live = alias(courseSubscriptions, 'live');
+    const [row] = await deps.db
+      .select({ courseTitle: courses.title })
+      .from(courseSubscriptions)
+      // The live plan subscription the user holds for the course now.
+      .innerJoin(
+        live,
+        and(
+          eq(live.userId, courseSubscriptions.userId),
+          eq(live.courseId, courseSubscriptions.courseId),
+          ne(live.id, courseSubscriptions.id),
+          inArray(live.status, liveStatuses)
+        )
+      )
+      .innerJoin(courses, eq(courses.id, courseSubscriptions.courseId))
+      .where(
+        and(
+          eq(courseSubscriptions.id, subscription.id),
+          notLive(courseSubscriptions.endedAt, courseSubscriptions.status)
+        )
+      )
+      .limit(1);
+    return row ? { kind: 'course', courseTitle: row.courseTitle } : undefined;
+  }
+
+  const live = alias(subscriptions, 'live');
+  const [row] = await deps.db
+    .select({
+      organizationName: organizations.name,
+      tierName: subscriptionTiers.name,
+    })
+    .from(subscriptions)
+    // The live subscription the user holds for the org now.
+    .innerJoin(
+      live,
+      and(
+        eq(live.userId, subscriptions.userId),
+        eq(live.organizationId, subscriptions.organizationId),
+        ne(live.id, subscriptions.id),
+        inArray(live.status, liveStatuses)
+      )
+    )
+    .innerJoin(
+      subscriptionTiers,
+      eq(subscriptionTiers.id, subscriptions.tierId)
+    )
+    .innerJoin(
+      organizations,
+      eq(organizations.id, subscriptions.organizationId)
+    )
+    .where(
+      and(
+        eq(subscriptions.id, subscription.id),
+        notLive(subscriptions.endedAt, subscriptions.status)
+      )
+    )
+    .limit(1);
+  return row
+    ? {
+        kind: 'tier',
+        organizationName: row.organizationName,
+        tierName: row.tierName,
+      }
+    : undefined;
+}
+
+/**
+ * Not live in our records: ended, or in a status that grants nothing. Never
+ * left undefined: `and()` would drop a missing filter without a word.
+ */
+function notLive(endedAt: AnyPgColumn, status: AnyPgColumn): SQL {
+  const condition = or(
+    isNotNull(endedAt),
+    notInArray(status, [...ACCESS_GRANTING_SUBSCRIPTION_STATUSES])
+  );
+  if (!condition) {
+    throw new InternalServiceError('The not-live filter could not be built');
+  }
+  return condition;
 }
 
 /** The newest paid invoice that bought a billing period, newest first. */

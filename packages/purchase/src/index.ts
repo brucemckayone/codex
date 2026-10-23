@@ -73,6 +73,14 @@ export {
   type AgreementRevenueType,
   findActiveCreatorAgreementShare,
 } from './services/agreement-share';
+// One open checkout per buyer and item (Codex-2hxff.14, .15)
+export {
+  CheckoutReservations,
+  type CheckoutReservationTarget,
+  checkoutIdempotencyKey,
+  stripeErrorCode,
+  toStripeTime,
+} from './services/checkout-reservations';
 // Entitlement + auto-enrollment write seam (Codex-2pryk WP-6)
 export {
   autoEnroll,

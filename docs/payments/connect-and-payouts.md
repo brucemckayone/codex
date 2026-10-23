@@ -342,7 +342,7 @@ If it is never recovered (owner decisions 2026-10-13: "Write off after 12 months
 | Route | Who | Shows |
 |---|---|---|
 | `GET /subscriptions/me/payouts`, `/me/earnings-summary` | Any signed-in person | Their own rows only (no ids accepted from the client): earned (paid), in transit (pending), needs attention |
-| `GET /subscriptions/payouts`, `/payouts/summary`, `/payouts/by-creator` | Organisation owner and admins | The organisation's rows. Totals exclude the platform's own fee rows — **gap**: `Codex-2hxff.15` |
+| `GET /subscriptions/payouts`, `/payouts/summary`, `/payouts/by-creator` | Organisation owner and admins | The organisation's rows. Totals exclude the platform's own fee rows, and "needs attention" counts stuck charges, not rows |
 
 A pending row is the normal state before a drain, not a fault, and is not shown
 as a warning.

@@ -127,6 +127,19 @@ export const CHECKOUT_SESSION_TIMING = {
   MIN_REMAINING_TO_REUSE_MS: 5 * 60 * 1000,
 } as const;
 
+/** What a reserved checkout session sells (Codex-2hxff.15). */
+export const CHECKOUT_SESSION_KIND = {
+  PURCHASE: 'purchase',
+  SUBSCRIPTION: 'subscription',
+} as const;
+
+/**
+ * How long a tier-change preview's price stands (owner decision 2026-10-22,
+ * "10 min, then review again"). An older one is refused and the subscriber
+ * is shown a fresh preview, so they pay what they were shown.
+ */
+export const TIER_CHANGE_PREVIEW_TTL_MS = 10 * 60 * 1000;
+
 export const SUBSCRIPTION_STATUS = {
   ACTIVE: 'active',
   PAST_DUE: 'past_due',

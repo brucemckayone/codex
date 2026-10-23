@@ -1,5 +1,6 @@
 import { relations, sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   boolean,
   check,
   foreignKey,
@@ -119,6 +120,19 @@ export const courseSubscriptions = pgTable(
     // stops granting (the resolver reads this), and billing is paused
     // (Codex-2hxff.9, docs/payments/subscription-disputes.md).
     disputedAt: timestamp('disputed_at', { withTimezone: true }),
+    // As on `subscriptions` (Codex-2hxff.15): Stripe ended it, and nothing
+    // brings the row or its grant back.
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    // As on `subscriptions`: a second plan subscription to a course the user
+    // already subscribes to. Grants nothing; cancelled and refunded in full.
+    duplicateOfCourseSubscriptionId: uuid(
+      'duplicate_of_course_subscription_id'
+    ).references((): AnyPgColumn => courseSubscriptions.id, {
+      onDelete: 'restrict',
+    }),
+    duplicateSettledAt: timestamp('duplicate_settled_at', {
+      withTimezone: true,
+    }),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

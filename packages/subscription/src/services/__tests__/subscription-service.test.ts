@@ -255,8 +255,75 @@ describe('SubscriptionService', () => {
           subscription_data: expect.objectContaining({
             metadata: expect.objectContaining({ codex_env: 'test' }),
           }),
+          // One open checkout per buyer and org (Codex-2hxff.15): the
+          // reservation's 30-minute expiry and its key.
+          expires_at: expect.any(Number),
+        }),
+        expect.objectContaining({
+          idempotencyKey: expect.stringMatching(/^checkout_/),
         })
       );
+    });
+
+    it('gives a second tab the same Stripe page, and another interval a new one', async () => {
+      const { org, tier1 } = await createFullOrg('checkout-reserve');
+      const open = (interval: 'month' | 'year') =>
+        service.createCheckoutSession(
+          otherCreatorId,
+          org.id,
+          tier1.id,
+          interval,
+          'https://example.com/success',
+          'https://example.com/cancel'
+        );
+
+      const first = await open('month');
+      const secondTab = await open('month');
+      expect(secondTab).toEqual(first);
+      expect(stripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
+
+      const annual = await open('year');
+      expect(annual.sessionId).not.toBe(first.sessionId);
+      // The monthly page is closed at Stripe so it cannot take payment too.
+      expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith(
+        first.sessionId
+      );
+    });
+
+    it('marks a paid checkout completed, and never throws when it cannot', async () => {
+      const { org, tier1 } = await createFullOrg('checkout-complete');
+      const { sessionId } = await service.createCheckoutSession(
+        otherCreatorId,
+        org.id,
+        tier1.id,
+        'month',
+        'https://example.com/success',
+        'https://example.com/cancel'
+      );
+
+      await service.markCheckoutSessionCompleted(sessionId);
+      const { checkoutSessions } = await import('@codex/database/schema');
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db
+        .select({ status: checkoutSessions.status })
+        .from(checkoutSessions)
+        .where(eq(checkoutSessions.stripeSessionId, sessionId));
+      expect(row?.status).toBe('completed');
+
+      const broken = new SubscriptionService(
+        {
+          db: {
+            update: () => {
+              throw new Error('database unreachable');
+            },
+          } as unknown as typeof db,
+          environment: 'test',
+        },
+        stripe
+      );
+      await expect(
+        broken.markCheckoutSessionCompleted(sessionId)
+      ).resolves.toBeUndefined();
     });
 
     // Codex-ssfes: Checkout Session MUST be created with `customer: cus_...`,
@@ -333,7 +400,10 @@ describe('SubscriptionService', () => {
       );
 
       expect(stripe.checkout.sessions.create).toHaveBeenCalledWith(
-        expect.objectContaining({ customer: cachedId })
+        expect.objectContaining({ customer: cachedId }),
+        expect.objectContaining({
+          idempotencyKey: expect.stringContaining(cachedId),
+        })
       );
       // Cache-hit path: no Stripe customer lookup or creation.
       expect(customersMock.list).not.toHaveBeenCalled();
@@ -1639,11 +1709,12 @@ describe('SubscriptionService', () => {
       expect(result.orgId).toBe(org.id);
     });
 
-    it('should return { userId: undefined, orgId: undefined } when metadata is absent (negative path)', async () => {
-      // Negative path — subscription was created before metadata was stamped
-      // (legacy data). Handler must still update the DB row and return an
-      // object so the route code paths remain uniform; ids are undefined so
-      // invalidateForUser skips the cache bump per its documented contract.
+    it('takes { userId, orgId } from our row when metadata is absent', async () => {
+      // Subscription created before metadata was stamped (legacy data). The
+      // side effects follow the subscription, not the payload
+      // (Codex-2hxff.15, SUB-09): its access still ends, so the ids come from
+      // the row. Until then this asserted undefined ids, which left a legacy
+      // subscriber streaming for 20 minutes after their subscription ended.
       const { org, tier1 } = await createFullOrg('wh-deleted-no-metadata');
       const sub = takeFirst(
         await db
@@ -1661,8 +1732,8 @@ describe('SubscriptionService', () => {
         metadata: {},
       } as unknown as Stripe.Subscription);
 
-      expect(result.userId).toBeUndefined();
-      expect(result.orgId).toBeUndefined();
+      expect(result.userId).toBe(otherCreatorId);
+      expect(result.orgId).toBe(org.id);
     });
   });
 
@@ -2115,16 +2186,21 @@ describe('SubscriptionService', () => {
       ).toBe(updated.amountCents);
     });
 
-    it('downgrade (Phase 1 fallback): keeps create_prorations, NO payment_behavior, NO idempotency key', async () => {
+    it('downgrade (Phase 1 fallback): keeps create_prorations, NO payment_behavior, its own idempotency key', async () => {
       const { org, tier1, tier2 } = await createFullOrg('change-tier-down');
       // Subscribe on tier2 (priceMonthly=999) — split must sum to 999.
-      await db.insert(subscriptions).values(
-        createTestSubscriptionInput(otherCreatorId, org.id, tier2.id, {
-          amountCents: tier2.priceMonthly,
-          platformFeeCents: 100,
-          organizationFeeCents: 134,
-          creatorPayoutCents: 765,
-        })
+      const sub = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier2.id, {
+              amountCents: tier2.priceMonthly,
+              platformFeeCents: 100,
+              organizationFeeCents: 134,
+              creatorPayoutCents: 765,
+            })
+          )
+          .returning()
       );
 
       // tier2 (999) → tier1 (499) is a DOWNGRADE.
@@ -2141,9 +2217,11 @@ describe('SubscriptionService', () => {
       // Phase 1 downgrade still updates the local row immediately —
       // Phase 2 replaces this with a scheduled change.
       expect(params.proration_date).toEqual(expect.any(Number));
-      // No options arg (idempotency key) for downgrade — proration is
-      // deferred to the next invoice, no risk of double-charging on retry.
-      expect(updateCall[2]).toBeUndefined();
+      // A downgrade has a key too (Codex-2hxff.15, SUB-12): a retried one
+      // must not credit the customer twice.
+      expect(updateCall[2]).toEqual({
+        idempotencyKey: `downgrade_${sub.id}_${tier1.stripePriceMonthlyId}_${params.proration_date}`,
+      });
     });
 
     it('upgrade payment failure: maps Stripe 402 to SubscriptionPaymentRequiredError, leaves DB untouched', async () => {
@@ -2207,7 +2285,9 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const previewProrationDate = 1700000000;
+      // A preview's date stands for 10 minutes (Codex-2hxff.15, SUB-12); the
+      // fixed 2023 date this used is now refused as expired.
+      const previewProrationDate = Math.floor(Date.now() / 1000);
       await service.changeTier(
         otherCreatorId,
         org.id,
@@ -2220,7 +2300,7 @@ describe('SubscriptionService', () => {
         expect.any(String),
         expect.objectContaining({ proration_date: previewProrationDate }),
         expect.objectContaining({
-          idempotencyKey: `upgrade_${insertedSub.id}_${previewProrationDate}`,
+          idempotencyKey: `upgrade_${insertedSub.id}_${tier2.stripePriceMonthlyId}_${previewProrationDate}`,
         })
       );
     });
@@ -2256,7 +2336,7 @@ describe('SubscriptionService', () => {
       // Preview was generated against tier2 at its current £9.99/month
       // price (priceMonthly=999 from createFullOrg). Capture the prorationDate
       // the dialog would have held.
-      const previewProrationDate = 1700000000;
+      const previewProrationDate = Math.floor(Date.now() / 1000);
       const previewSnapshotMonthly = tier2.priceMonthly; // 999
 
       // Dashboard sync-back arrives: tier2's monthly price is bumped to
@@ -2349,7 +2429,7 @@ describe('SubscriptionService', () => {
         .insert(subscriptions)
         .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
 
-      const previewProrationDate = 1700000001;
+      const previewProrationDate = Math.floor(Date.now() / 1000);
 
       // Stripe rejects the proration invoice with HTTP 402.
       const stripeError = Object.assign(new Error('Your card was declined.'), {
@@ -3855,7 +3935,9 @@ describe('SubscriptionService', () => {
               id: 'si_test_noop',
               price: {
                 id: 'price_test_monthly',
-                unit_amount: 499,
+                // The row keeps the live price (Codex-2hxff.15, SUB-11): the
+                // same price as the first call's retrieve.
+                unit_amount: afterFirst.amountCents,
                 currency: 'gbp',
                 recurring: { interval: 'month' },
               },

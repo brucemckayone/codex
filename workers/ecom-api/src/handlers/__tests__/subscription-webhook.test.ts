@@ -110,11 +110,15 @@ describe('handleSubscriptionWebhook', () => {
   let mockHandleResumed: ReturnType<typeof vi.fn>;
   let mockApplyProductUpdate: ReturnType<typeof vi.fn>;
   let mockRecordPriceDrift: ReturnType<typeof vi.fn>;
+  let mockMarkCheckoutCompleted: ReturnType<typeof vi.fn>;
+  let mockHandleCourseCreated: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
 
     mockHandleCreated = vi.fn().mockResolvedValue(undefined);
+    mockMarkCheckoutCompleted = vi.fn().mockResolvedValue(undefined);
+    mockHandleCourseCreated = vi.fn().mockResolvedValue(undefined);
     mockHandleUpdated = vi.fn().mockResolvedValue(undefined);
     mockHandleDeleted = vi.fn().mockResolvedValue(undefined);
     mockHandleInvoiceSuccess = vi.fn().mockResolvedValue(undefined);
@@ -150,6 +154,8 @@ describe('handleSubscriptionWebhook', () => {
           handleInvoicePaymentSucceeded: mockHandleInvoiceSuccess,
           handleInvoicePaymentFailed: mockHandleInvoiceFailed,
           handleTrialWillEnd: mockHandleTrialWillEnd,
+          // The paid checkout's reservation (Codex-2hxff.15).
+          markCheckoutSessionCompleted: mockMarkCheckoutCompleted,
         },
         // Dashboard sync-back path (Codex-s7h0y) goes through TierService,
         // stubbed with controllable apply* method behaviour.
@@ -157,10 +163,10 @@ describe('handleSubscriptionWebhook', () => {
           applyStripeProductUpdate: mockApplyProductUpdate,
           recordStripePriceDrift: mockRecordPriceDrift,
         },
-        // Stubbed rather than left bare so a future course-sub test gets a
-        // mock method instead of a TypeError; no test here routes through it.
+        // Stubbed rather than left bare so a course-sub test gets a mock
+        // method instead of a TypeError.
         courseSubscription: {
-          handleCourseSubscriptionCreated: vi.fn().mockResolvedValue(undefined),
+          handleCourseSubscriptionCreated: mockHandleCourseCreated,
           handleCourseSubscriptionUpdated: vi.fn().mockResolvedValue(undefined),
           handleCourseSubscriptionDeleted: vi.fn().mockResolvedValue(undefined),
           handleCourseInvoicePaymentSucceeded: vi
@@ -257,6 +263,80 @@ describe('handleSubscriptionWebhook', () => {
         expect.objectContaining({ sessionId: 'cs_no_sub' })
       );
       expect(mockHandleCreated).not.toHaveBeenCalled();
+      expect(mockMarkCheckoutCompleted).not.toHaveBeenCalled();
+    });
+
+    // One open checkout per buyer per org or course plan (Codex-2hxff.15,
+    // owner decision 2026-10-22): once paid, its reservation is completed so
+    // a new checkout is never handed the same session.
+    it('marks the paid checkout session completed, after the subscription is recorded', async () => {
+      const event = createEvent(STRIPE_EVENTS.CHECKOUT_COMPLETED, {
+        id: 'cs_paid_tier',
+        mode: 'subscription',
+        subscription: 'sub_new_123',
+      });
+      const { context } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mockMarkCheckoutCompleted).toHaveBeenCalledExactlyOnceWith(
+        'cs_paid_tier'
+      );
+      expect(mockHandleCreated.mock.invocationCallOrder[0]).toBeLessThan(
+        mockMarkCheckoutCompleted.mock.invocationCallOrder[0] ?? 0
+      );
+    });
+
+    it("marks a course plan's paid checkout session completed too", async () => {
+      vi.mocked(mockStripe.subscriptions.retrieve).mockResolvedValueOnce(
+        createMockStripeSubscription({
+          metadata: { type: 'course_subscription' },
+        }) as never
+      );
+      const event = createEvent(STRIPE_EVENTS.CHECKOUT_COMPLETED, {
+        id: 'cs_paid_course',
+        mode: 'subscription',
+        subscription: 'sub_course_123',
+      });
+      const { context } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mockHandleCourseCreated).toHaveBeenCalledOnce();
+      expect(mockHandleCreated).not.toHaveBeenCalled();
+      expect(mockMarkCheckoutCompleted).toHaveBeenCalledExactlyOnceWith(
+        'cs_paid_course'
+      );
+      expect(mockHandleCourseCreated.mock.invocationCallOrder[0]).toBeLessThan(
+        mockMarkCheckoutCompleted.mock.invocationCallOrder[0] ?? 0
+      );
+    });
+
+    it('a checkout whose subscription could not be recorded is left open, so Stripe redelivers it', async () => {
+      mockHandleCreated.mockRejectedValueOnce(new Error('refund refused'));
+      const event = createEvent(STRIPE_EVENTS.CHECKOUT_COMPLETED, {
+        id: 'cs_unrecorded',
+        mode: 'subscription',
+        subscription: 'sub_new_123',
+      });
+      const { context } = createContext();
+
+      await expect(
+        handleSubscriptionWebhook(event, mockStripe, context)
+      ).rejects.toThrow('refund refused');
+      expect(mockMarkCheckoutCompleted).not.toHaveBeenCalled();
+    });
+
+    it('a payment-mode checkout marks no subscription session', async () => {
+      const event = createEvent(STRIPE_EVENTS.CHECKOUT_COMPLETED, {
+        mode: 'payment',
+        subscription: null,
+      });
+      const { context } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mockMarkCheckoutCompleted).not.toHaveBeenCalled();
     });
   });
 
