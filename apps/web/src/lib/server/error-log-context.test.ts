@@ -1,9 +1,11 @@
 /**
- * What `handleError` logs about a request whose load threw (Codex-osuqt
- * review). It used to log the href and hand the query string to `method`, and
- * never a worker's status, code or refused field, so an outage read the same
- * as a contract 400 or a timeout. Every unmatched route also reaches it, with a
- * 404: a crawler's miss must not log like a crash.
+ * What the web server logs about a request it failed or refused (Codex-osuqt
+ * review). `handleError` used to log the href and hand the query string to
+ * `method`, and never a worker's status, code or refused field, so an outage
+ * read the same as a contract 400 or a timeout. It also tracked every one of
+ * SvelteKit's refusals, so any script could raise error-level alarms with a
+ * URL: they are warnings now, flagged where a deploy of ours could be the
+ * cause. A remote function's refused input never reached it at all.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/errors';
@@ -83,6 +85,9 @@ describe('errorLogContext', () => {
 describe('logUnhandledError', () => {
   beforeEach(() => vi.clearAllMocks());
 
+  const refusal = (fields: Record<string, unknown>) =>
+    expect.objectContaining(fields);
+
   it("logs an unmatched route's 404 as a warning, not a tracked error", () => {
     logUnhandledError(
       new Error('Not found: /wp-admin'),
@@ -91,8 +96,12 @@ describe('logUnhandledError', () => {
     );
 
     expect(mockLogger.warn).toHaveBeenCalledWith(
-      'Not found: /wp-admin',
-      expect.objectContaining({ responseStatus: 404, url: '/wp-admin' })
+      'Request refused by SvelteKit',
+      refusal({
+        responseStatus: 404,
+        url: '/wp-admin',
+        kitMessage: 'Not found: /wp-admin',
+      })
     );
     expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
@@ -109,22 +118,6 @@ describe('logUnhandledError', () => {
     expect(mockLogger.warn).not.toHaveBeenCalled();
   });
 
-  // The action name is the client's `?/<name>`, so any script could raise
-  // this; a deploy that drops an action shows as the flag's rate.
-  it("flags a missing form action's 404 on a warning, never tracks it", () => {
-    logUnhandledError(
-      new Error("No action with name 'purchase' found"),
-      event('http://lvh.me:3000/content/first?/purchase', 'POST'),
-      404
-    );
-
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ staleAction: true })
-    );
-    expect(mockLogger.trackError).not.toHaveBeenCalled();
-  });
-
   // Below 500 handleError only ever sees Kit refusing the request (an
   // HttpError never reaches it), and the client chose what decided it.
   it.each([
@@ -139,16 +132,38 @@ describe('logUnhandledError', () => {
     );
 
     expect(mockLogger.warn).toHaveBeenCalledWith(
-      message,
-      expect.not.objectContaining({ staleAction: true })
+      'Request refused by SvelteKit',
+      refusal({ responseStatus: status, kitMessage: message })
     );
     expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
 
-  it("logs the 500 for Kit's reserved `default` action as a warning", () => {
+  // Kit's message embeds what the client sent; the logger redacts metadata,
+  // not the message, so the text goes there, bounded.
+  it("keeps Kit's text out of the message and bounds it", () => {
     logUnhandledError(
-      new Error('Cannot use reserved action name "default"'),
-      event('http://lvh.me:3000/login?/default', 'POST'),
+      new Error(`No action with name '${'x'.repeat(5000)}' found`),
+      event('http://lvh.me:3000/login?/x', 'POST'),
+      404
+    );
+
+    const [message, context] = mockLogger.warn.mock.calls[0];
+    expect(message).toBe('Request refused by SvelteKit');
+    expect(context.kitMessage).toHaveLength(200);
+  });
+
+  // Kit looks an action up on a plain object and refuses `default` by name,
+  // so these resolve to something that throws: a 500 the client chose.
+  it.each([
+    'default',
+    'valueOf',
+    '__proto__',
+    'constructor',
+    'hasOwnProperty',
+  ])('logs the 500 for a POST naming ?/%s as a warning', (name) => {
+    logUnhandledError(
+      new Error('action is not a function'),
+      event(`http://lvh.me:3000/content/first?/${name}`, 'POST'),
       500
     );
 
@@ -156,25 +171,69 @@ describe('logUnhandledError', () => {
     expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
 
-  // Any POST to a page with no actions at all gets this 405: a scanner's
-  // noise, so a warning.
-  it('logs a POST to a page without actions as a warning', () => {
+  // A real action that throws is a bug of ours.
+  it("still tracks a real action's 500", () => {
+    logUnhandledError(
+      new Error('boom'),
+      event('http://lvh.me:3000/content/first?/purchase', 'POST'),
+      500
+    );
+
+    expect(mockLogger.trackError).toHaveBeenCalled();
+  });
+
+  // The action name is the client's `?/<name>`, so any script could raise
+  // this; a deploy that drops an action shows as the flag's rate.
+  it("flags a missing form action's 404 on a warning, never tracks it", () => {
+    logUnhandledError(
+      new Error("No action with name 'purchase' found"),
+      event('http://lvh.me:3000/content/first?/purchase', 'POST'),
+      404
+    );
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Request refused by SvelteKit',
+      refusal({ staleAction: true })
+    );
+    expect(mockLogger.trackError).not.toHaveBeenCalled();
+  });
+
+  // Once a page has no actions left, a stale tab's `?/purchase` gets the 405
+  // a scanner's bare POST gets: it named an action, so it is flagged.
+  it('flags a named action refused with the no-actions 405', () => {
     logUnhandledError(
       new Error('POST method not allowed. No form actions exist for this page'),
-      event('http://lvh.me:3000/', 'POST'),
+      event('http://lvh.me:3000/content/first?/purchase', 'POST'),
       405
     );
 
     expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.not.objectContaining({ staleRemoteForm: true })
+      'Request refused by SvelteKit',
+      refusal({ staleAction: true })
+    );
+  });
+
+  // A POST naming no action makes Kit look for `default`: a scanner's, so
+  // it must not count toward the stale-action rate.
+  it.each([
+    [404, "No action with name 'default' found"],
+    [405, 'POST method not allowed. No form actions exist for this page'],
+  ])('does not flag a POST that named no action (%i)', (status, message) => {
+    logUnhandledError(
+      new Error(message),
+      event('http://lvh.me:3000/content/first', 'POST'),
+      status
+    );
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Request refused by SvelteKit',
+      expect.not.objectContaining({ staleAction: true })
     );
     expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
 
   // Kit refuses a native POST to a renamed or moved remote form() with the
-  // same 405 text. Its `?/remote=` param is the client's to choose, so
-  // tracking it would let any script raise error-level alarms: a warning,
+  // same 405 text; its `?/remote=` param is the client's, so a warning,
   // flagged so a deploy's stale forms can be counted.
   it("flags a stale remote form's 405 on a warning, never tracks it", () => {
     logUnhandledError(
@@ -187,24 +246,23 @@ describe('logUnhandledError', () => {
     );
 
     expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ staleRemoteForm: true })
+      'Request refused by SvelteKit',
+      refusal({ staleRemoteForm: true })
     );
     expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
 
   // Kit takes a POST as a remote-form submit only when the param has a value.
-  it('does not flag an empty ?/remote= as a remote form', () => {
+  it('does not flag an empty ?/remote= as either', () => {
     logUnhandledError(
       new Error('POST method not allowed. No form actions exist for this page'),
       event('http://lvh.me:3000/?/remote=', 'POST'),
       405
     );
 
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.not.objectContaining({ staleRemoteForm: true })
-    );
+    const [, context] = mockLogger.warn.mock.calls[0];
+    expect(context).not.toHaveProperty('staleRemoteForm');
+    expect(context).not.toHaveProperty('staleAction');
   });
 });
 
@@ -215,10 +273,12 @@ describe('logRefusedRemoteInput', () => {
 
   // For a browser call Kit sets `event.url` to the calling page; the request
   // keeps the function's own URL and its payload.
-  const browserCall = (): RefusalEvent =>
+  const browserCall = (
+    path = '/_app/remote/1wvwy0x/getPublicContent'
+  ): RefusalEvent =>
     ({
       request: new Request(
-        'http://studio-alpha.lvh.me:3000/_app/remote/1wvwy0x/getPublicContent?payload=c2VjcmV0'
+        `http://studio-alpha.lvh.me:3000${path}?payload=c2VjcmV0`
       ),
       url: new URL('http://studio-alpha.lvh.me:3000/explore'),
       locals: { requestId: 'req-1' },
@@ -257,28 +317,44 @@ describe('logRefusedRemoteInput', () => {
     expect(JSON.stringify(mockLogger.warn.mock.calls)).not.toContain(
       'c2VjcmV0'
     );
-    expect(mockLogger.error).not.toHaveBeenCalled();
     expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
 
-  // Our own load built the arguments: contract drift, so an error. Its
-  // request is the page's, so it names no function.
-  it("logs a server load's refused call as an error, naming the page", () => {
+  it('names the function without any segment a client appended', () => {
+    logRefusedRemoteInput(
+      [{ message: 'x', path: ['slug'] }],
+      browserCall('/_app/remote/1wvwy0x/getPublicContent/jane@example.com')
+    );
+
+    const [, context] = mockLogger.warn.mock.calls[0];
+    expect(context.remote).toBe('/_app/remote/1wvwy0x/getPublicContent');
+  });
+
+  // Our own load built the arguments, but usually from the page's URL, so a
+  // visitor can cause one: flagged, never an error.
+  it("flags a server load's refused call on a warning, naming the page", () => {
     logRefusedRemoteInput(
       [{ message: 'Too big', path: ['page'] }],
       serverLoadCall()
     );
 
-    expect(mockLogger.error).toHaveBeenCalledWith(
-      'Remote function input refused by our own server load',
-      expect.objectContaining({ url: '/explore', issues: ['page'] })
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Remote function input refused',
+      expect.objectContaining({
+        url: '/explore',
+        ownServerLoad: true,
+        issues: ['page'],
+      })
     );
-    expect(mockLogger.error.mock.calls[0][1]).not.toHaveProperty('remote');
-    expect(mockLogger.warn).not.toHaveBeenCalled();
+    const [, context] = mockLogger.warn.mock.calls[0];
+    expect(context).not.toHaveProperty('remote');
+    expect(context.responseStatus).toBeUndefined();
+    expect(mockLogger.error).not.toHaveBeenCalled();
+    expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
 
   // A query.batch validates every payload of one request.
-  it('logs one line per request, however many payloads it refused', () => {
+  it('logs one line per browser request, however many payloads it refused', () => {
     const call = browserCall();
 
     logRefusedRemoteInput([{ message: 'x', path: [0] }], call);
@@ -286,6 +362,18 @@ describe('logRefusedRemoteInput', () => {
     logRefusedRemoteInput([{ message: 'x', path: [2] }], call);
 
     expect(mockLogger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  // One page load makes several remote calls with the page's Request: a
+  // second call's drift must not hide behind the first's.
+  it("logs each distinct drift of one page load's calls once", () => {
+    const call = serverLoadCall();
+
+    logRefusedRemoteInput([{ message: 'x', path: ['page'] }], call);
+    logRefusedRemoteInput([{ message: 'x', path: ['page'] }], call);
+    logRefusedRemoteInput([{ message: 'x', path: ['category'] }], call);
+
+    expect(mockLogger.warn).toHaveBeenCalledTimes(2);
   });
 
   // Zod checks every element of an array before its length.

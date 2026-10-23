@@ -105,7 +105,7 @@ app.get('/content/:id',
 - Admin-only operation schemas
 
 ### Pagination (`shared/pagination-schema.ts`)
-- `paginationSchema` — `{ page, limit }`: page 1 to `PAGINATION_MAX_PAGE` (1000), limit 1–100
+- `paginationSchema` — `{ page, limit }`: page 1 to `PAGINATION_MAX_PAGE` (1000), limit 1 to `PAGINATION_MAX_LIMIT` (100)
 - `PaginationInput` — inferred type
 - `clampPageParam(raw)` — a `?page=` URL param clamped to a page every list accepts, for a server load that forwards it
 

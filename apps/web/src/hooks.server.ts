@@ -288,8 +288,8 @@ export const handle = sequence(
 );
 
 /**
- * Global error handler
- * Logs errors with request context and tracks in analytics
+ * Global error handler. Logs with request context (`logUnhandledError`):
+ * SvelteKit refusing the request is a warning, anything else is tracked.
  */
 export const handleError: HandleServerError = async ({
   error,

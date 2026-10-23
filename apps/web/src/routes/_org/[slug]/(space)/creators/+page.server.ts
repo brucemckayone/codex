@@ -6,6 +6,7 @@
  * Sets PRIVATE cache headers — the page is auth-varying (org layout injects
  * `user`), so it must not be shared-cached.
  */
+import { clampPageParam } from '@codex/validation';
 import { getPublicCreators } from '$lib/remote/org.remote';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
@@ -15,9 +16,9 @@ const PAGE_LIMIT = 12;
 export const load: PageServerLoad = async ({ url, setHeaders, parent }) => {
   const { org } = await parent();
 
-  // Extract pagination from URL
-  const pageParam = url.searchParams.get('page');
-  const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
+  // Bounded to a page the list accepts (Codex-osuqt): an unbounded `?page=`
+  // (400 digits parse to Infinity) was refused by the remote query's schema.
+  const page = clampPageParam(url.searchParams.get('page'));
 
   const creatorsResult = await getPublicCreators({
     slug: org.slug,
