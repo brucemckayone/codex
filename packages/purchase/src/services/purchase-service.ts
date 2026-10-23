@@ -1901,14 +1901,17 @@ export class PurchaseService extends BaseService {
    * Log a Stripe failure for support and return the errorId the client gets
    * instead (Codex-2hxff.23 SEC-02). A ServiceError's context is sent to the
    * client verbatim as `details`, so Stripe's own message never goes in it.
+   * `warn` is for a failure the caller caused, such as a session id that
+   * does not exist; anything else is an error.
    */
   private logStripeFailure(
     message: string,
     error: Error & { type: string },
-    context: Record<string, unknown>
+    context: Record<string, unknown>,
+    level: 'error' | 'warn' = 'error'
   ): string {
     const errorId = crypto.randomUUID();
-    this.obs.error(message, {
+    this.obs[level](message, {
       errorId,
       ...context,
       stripeType: error.type,
@@ -3228,20 +3231,24 @@ export class PurchaseService extends BaseService {
       // StripeInvalidRequestError: Invalid session ID (404)
       // StripeConnectionError: Network failure (500)
       // StripeAPIError: Other Stripe errors
-      // Stripe's own message is logged, never sent (SEC-02).
+      // Stripe's own message is logged, never sent (SEC-02). A session id
+      // Stripe does not know came from the client (a stale or invented
+      // success URL), so it is a warning; an outage or API failure is an
+      // error.
       if (isStripeError(error)) {
-        const message =
-          error.type === 'StripeInvalidRequestError'
-            ? 'Checkout session not found'
-            : error.type === 'StripeConnectionError'
-              ? 'Failed to connect to Stripe API'
-              : 'Failed to verify checkout session';
+        const notFound = error.type === 'StripeInvalidRequestError';
+        const message = notFound
+          ? 'Checkout session not found'
+          : error.type === 'StripeConnectionError'
+            ? 'Failed to connect to Stripe API'
+            : 'Failed to verify checkout session';
         throw new PaymentProcessingError(message, {
           sessionId,
           errorId: this.logStripeFailure(
             `Stripe checkout session verify failed: ${message}`,
             error,
-            { sessionId, customerId }
+            { sessionId, customerId },
+            notFound ? 'warn' : 'error'
           ),
         });
       }

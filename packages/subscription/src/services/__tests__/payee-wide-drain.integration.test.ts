@@ -74,6 +74,9 @@ describe('payee-wide payout drain', () => {
   let stripe: Stripe;
   let payeeId: string;
   let subscriberId: string;
+  /** Has owed rows but never started onboarding: no Connect account row. */
+  let neverOnboardedId: string;
+  const otherPayoutIds: string[] = [];
   const sweepPayees: string[] = [];
   const orgIds: string[] = [];
   const tierIds: string[] = [];
@@ -85,13 +88,14 @@ describe('payee-wide payout drain', () => {
 
   beforeAll(async () => {
     db = setupTestDatabase();
-    const seeded = await seedTestUsers(db, 5);
-    const [payee, subscriber, ...rest] = seeded;
-    if (!payee || !subscriber || rest.length !== 3) {
+    const seeded = await seedTestUsers(db, 6);
+    const [payee, subscriber, neverOnboarded, ...rest] = seeded;
+    if (!payee || !subscriber || !neverOnboarded || rest.length !== 3) {
       throw new Error('seed failed');
     }
     payeeId = payee;
     subscriberId = subscriber;
+    neverOnboardedId = neverOnboarded;
     sweepPayees.push(...rest);
     userIds.push(...seeded);
     await db.insert(stripeConnectAccounts).values({
@@ -119,6 +123,9 @@ describe('payee-wide payout drain', () => {
   // Every row this file wrote goes; the sweep must never see them again.
   afterAll(async () => {
     await db.delete(payouts).where(inArray(payouts.userId, userIds));
+    if (otherPayoutIds.length > 0) {
+      await db.delete(payouts).where(inArray(payouts.id, otherPayoutIds));
+    }
     if (orgIds.length > 0) {
       await db.delete(payouts).where(inArray(payouts.organizationId, orgIds));
     }
@@ -571,6 +578,72 @@ describe('payee-wide payout drain', () => {
       });
       const checked = retrieve.mock.calls.map(([id]) => id);
       expect(checked).toHaveLength(2);
+      await clearQueue();
+    });
+
+    it('a payee who never started onboarding takes no place in the batch; their rows stay pending, untouched', async () => {
+      // Older than everyone in the queue, so it would be claimed first.
+      const neverId = await owed(neverOnboardedId, null, 300, {
+        attemptedAt: ancient(0),
+      });
+      await seedQueue();
+      const retrieve = stubAccounts(false);
+      const { service } = serviceWith();
+
+      const result = await service.sweepUnresolvedPayouts(
+        minutesSinceHorizon(),
+        1
+      );
+
+      expect(result.groupsScanned).toBe(1);
+      expect(retrieve).toHaveBeenCalledOnce();
+      const [never] = await rowsOf([neverId]);
+      expect(never?.status).toBe('pending');
+      expect(never?.attemptedAt.toISOString()).toBe(ancient(0).toISOString());
+      await db.delete(payouts).where(eq(payouts.id, neverId));
+      await clearQueue();
+    });
+
+    it('an owed row with neither payee nor organisation takes no place in the batch, and is counted at error', async () => {
+      const orphan = takeFirst(
+        await db
+          .insert(payouts)
+          .values({
+            userId: null,
+            organizationId: null,
+            sourceType: 'purchase',
+            amountCents: 100,
+            currency: 'gbp',
+            payoutType: 'platform_fee',
+            status: 'pending',
+            attemptedAt: ancient(0),
+          })
+          .returning(),
+        'payout'
+      );
+      otherPayoutIds.push(orphan.id);
+      await seedQueue();
+      stubAccounts(false);
+      const { service } = serviceWith();
+      const logged = vi.spyOn(
+        (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+          .obs,
+        'error'
+      );
+
+      const result = await service.sweepUnresolvedPayouts(
+        minutesSinceHorizon(),
+        1
+      );
+
+      // The one place went to a real payee.
+      expect(result.groupsScanned).toBe(1);
+      expect(logged).toHaveBeenCalledWith(
+        expect.stringContaining('neither payee nor organisation'),
+        expect.objectContaining({ errorId: expect.any(String), rowCount: 1 })
+      );
+      const [after] = await rowsOf([orphan.id]);
+      expect(after?.attemptedAt.toISOString()).toBe(ancient(0).toISOString());
       await clearQueue();
     });
 

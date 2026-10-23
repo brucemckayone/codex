@@ -391,9 +391,15 @@ describe('purchase records, currency and client-facing errors', () => {
      * The client sees `mapErrorToResponse(error).response.error.details`; the
      * log keeps Stripe's message under the same errorId.
      */
-    async function expectOnlyAnErrorId(run: () => Promise<unknown>) {
-      const obs = (service as unknown as { obs: { error: () => void } }).obs;
-      const logged = vi.spyOn(obs, 'error');
+    async function expectOnlyAnErrorId(
+      run: () => Promise<unknown>,
+      level: 'error' | 'warn' = 'error'
+    ) {
+      const obs = (
+        service as unknown as { obs: { error: () => void; warn: () => void } }
+      ).obs;
+      const logged = vi.spyOn(obs, level);
+      const other = vi.spyOn(obs, level === 'error' ? 'warn' : 'error');
       try {
         const error = await run().then(
           () => {
@@ -414,8 +420,13 @@ describe('purchase records, currency and client-facing errors', () => {
           expect.any(String),
           expect.objectContaining({ errorId, error: STRIPE_SECRET_MESSAGE })
         );
+        expect(other).not.toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({ errorId })
+        );
       } finally {
         logged.mockRestore();
+        other.mockRestore();
       }
     }
 
@@ -453,16 +464,19 @@ describe('purchase records, currency and client-facing errors', () => {
       );
     });
 
+    // A session Stripe does not know is the client's doing (a stale or
+    // invented success URL): a warning. An outage or API failure: an error.
     it.each([
-      'StripeInvalidRequestError',
-      'StripeConnectionError',
-      'StripeAPIError',
-    ])('verifying a checkout session (%s)', async (type) => {
+      ['StripeInvalidRequestError', 'warn'],
+      ['StripeConnectionError', 'error'],
+      ['StripeAPIError', 'error'],
+    ] as const)('verifying a checkout session (%s, logged at %s)', async (type, level) => {
       vi.mocked(stripe.checkout.sessions.retrieve).mockRejectedValueOnce(
         stripeFailure(type)
       );
-      await expectOnlyAnErrorId(() =>
-        service.verifyCheckoutSession(`cs_rec_${randomUUID()}`, buyerId)
+      await expectOnlyAnErrorId(
+        () => service.verifyCheckoutSession(`cs_rec_${randomUUID()}`, buyerId),
+        level
       );
     });
 

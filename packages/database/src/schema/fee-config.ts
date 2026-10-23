@@ -249,7 +249,11 @@ export const feeConfigOrgCreator = pgTable(
  * Values are stored as text so the same table can record any column type
  * without schema churn. Callers stringify before insert. SQL NULL on either
  * side means "unset, inherits the tier above": a clear back to inherit is
- * old → NULL (Codex-2hxff.23 PAY-16; it used to be the string 'null').
+ * old → NULL (Codex-2hxff.23 PAY-16). Rows written before migration 0112
+ * may hold the STRING 'null' instead. From an update, that was a clear that
+ * never took effect (the old merge kept the value); from removing an
+ * organisation's values or an override, the removal did happen. The current
+ * fee row tells the two apart (docs/payments/fees-and-splits.md).
  */
 export const feeConfigAuditLog = pgTable(
   'fee_config_audit_log',

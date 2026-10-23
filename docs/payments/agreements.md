@@ -35,10 +35,22 @@ which points at it through `current_proposal_id`. The share is read from the
 accepted proposal (`proposed_creator_share_percent`). Every server path reads
 it there: the payment resolver, the 100% check, the termination and
 review-reminder emails, the creator's `/agreements/me` views and the admin
-revenue-by-creator view. An
-agreement whose proposal link is gone pays nothing and counts as 0; that is
-logged as an error. The agreement rows the API returns carry the share as
+revenue-by-creator view. The agreement rows the API returns carry the share as
 `creatorSharePercent`.
+
+An agreement whose proposal link is gone pays nothing. It is shown and counted
+as 0, and every read that meets one logs it at error with the agreement's id.
+The payment resolver (`agreementsInForce`) logs "agreement has no current
+proposal; skipped" at each sale, with an errorId and the sale's moment. These log "agreement
+has no current proposal; it pays nothing", each with an errorId:
+
+- the 100% check, on every propose, counter and accept in that pool;
+- the termination email;
+- the agreement lists behind `GET /agreements`, `/agreements/me` and
+  `/agreements/me/portfolio` (`getActiveAgreements`,
+  `getActiveAgreementsForCreator`, `getTerminatedAgreementsForCreator`);
+- the review-reminder scan (`findExpiringAgreements`);
+- the admin revenue-by-creator view.
 
 The legacy column `organization_fee_percentage` holds `10000 − share` and is
 still written; new code must not read it — **gap**: `Codex-fazy6` (the web
@@ -55,7 +67,11 @@ show the right number).
 | **Decline** | The other side | `declined`, with a reason; both sides are emailed |
 | **Withdraw** | The side that made the proposal | `withdrawn`; no email |
 
-Only one thread can be open per organisation, creator and revenue type. Every
+Only one thread can be open per organisation, creator and revenue type. A
+thread is open while one of its proposals is `open`. Once its last proposal is
+declined or withdrawn, by hand or because the creator left, the thread is over
+and the owner can propose again; the `countered` rows behind it do not hold it
+open. Every
 action locks the row it changes, so two people acting on one proposal at once
 cannot both succeed. Proposing, countering and accepting also take one lock
 per organisation and revenue type before they look for an open thread and add

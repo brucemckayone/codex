@@ -153,7 +153,9 @@ function buildEmailPayload(args: {
     args;
   // The accepted proposal's share, as every payment path reads it
   // (Codex-2hxff.19 AGR-08), never the legacy org-fee column. A missing
-  // proposal pays nothing, so it is quoted as 0 (the service logs it).
+  // proposal pays nothing, so it is quoted as 0;
+  // `AgreementService.findExpiringAgreements` has already logged that row at
+  // error, with an errorId.
   const sharePercent = agreement.creatorSharePercent ?? 0;
   return {
     recipientName,

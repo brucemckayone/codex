@@ -325,4 +325,100 @@ describe('agreement shares (AGR-04, AGR-08, AGR-13)', () => {
       2000
     );
   });
+
+  // Only an `open` proposal makes a thread open. A declined or withdrawn
+  // counter leaves its parent `countered` for good, and counting that as in
+  // flight refused every later proposal for the creator.
+  it.each([
+    'declined',
+    'withdrawn',
+  ] as const)('a thread whose counter was %s can be proposed again', async (ending) => {
+    const fx = await team();
+    const first = await propose(fx, fx.creatorA, 3000);
+    const counter = await service.counterPropose({
+      proposalId: first.id,
+      sharePercent: 5000,
+      termMonths: null,
+      counteredByUserId: fx.creatorA,
+    });
+    if (ending === 'declined') {
+      await service.declineProposal({
+        proposalId: counter.id,
+        declinedByUserId: fx.ownerId,
+      });
+    } else {
+      await service.withdrawProposal({
+        proposalId: counter.id,
+        withdrawnByUserId: fx.creatorA,
+      });
+    }
+
+    await expect(propose(fx, fx.creatorA, 4000)).resolves.toMatchObject({
+      status: 'open',
+      roundNumber: 1,
+    });
+  });
+
+  it('every read that meets an agreement with no proposal logs it, with an errorId', async () => {
+    const fx = await team();
+    // An active agreement whose proposal link is gone; its review date is
+    // due, so the reminder scan meets it too.
+    const [orphan] = await db
+      .insert(schema.creatorOrganizationAgreements)
+      .values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorB,
+        organizationFeePercentage: 2000,
+        revenueType: 'subscription',
+        status: 'active',
+        currentProposalId: null,
+        effectiveFrom: new Date(Date.now() - 60_000),
+        effectiveUntil: new Date(Date.now() + 10 * 86_400_000),
+      })
+      .returning();
+    if (!orphan) throw new Error('orphan agreement not seeded');
+    const obs = (
+      service as unknown as {
+        obs: { error: (message: string, meta?: unknown) => void };
+      }
+    ).obs;
+    const logged = vi.spyOn(obs, 'error');
+    const reported = () =>
+      logged.mock.calls.filter(
+        ([message, meta]) =>
+          message === 'agreement has no current proposal; it pays nothing' &&
+          (meta as { agreementId?: string }).agreementId === orphan.id &&
+          typeof (meta as { errorId?: unknown }).errorId === 'string'
+      ).length;
+
+    try {
+      // The lists.
+      const [listed] = await service.getActiveAgreements({
+        organizationId: fx.orgId,
+      });
+      expect(listed?.creatorSharePercent).toBeNull();
+      expect(reported()).toBe(1);
+
+      // The review-reminder scan.
+      const expiring = await service.findExpiringAgreements({ daysAhead: 30 });
+      expect(
+        expiring.find((e) => e.agreement.id === orphan.id)?.agreement
+          .creatorSharePercent
+      ).toBeNull();
+      expect(reported()).toBe(2);
+
+      // The 100% check (it counts 0).
+      await propose(fx, fx.creatorA, 9000);
+      expect(reported()).toBe(3);
+
+      // The termination email (it quotes 0).
+      await service.terminateAgreement({
+        agreementId: orphan.id,
+        terminatedByUserId: fx.ownerId,
+      });
+      expect(reported()).toBe(4);
+    } finally {
+      logged.mockRestore();
+    }
+  });
 });

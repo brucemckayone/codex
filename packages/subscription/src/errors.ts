@@ -125,6 +125,8 @@ export interface SubscriptionPaymentRequiredErrorContext
   organizationId: string;
   newTierId: string;
   billingInterval: 'month' | 'year';
+  /** Matches the log line that holds Stripe's own message. */
+  errorId?: string;
   /** Banned: the index signature would otherwise accept it again. */
   stripeMessage?: never;
   prorationDate?: number;

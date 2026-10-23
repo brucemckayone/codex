@@ -542,6 +542,68 @@ describe('SubscriptionService', () => {
   // per-case so we can assert against specific Stripe responses.
 
   describe('verifyCheckoutSession', () => {
+    // Codex-2hxff.23 review (M3, L2): a session_id Stripe does not know is the
+    // client's mistake (warn, errorId returned); an outage is ours (error).
+    function sessionLookupFails(error: Error) {
+      (
+        stripe.checkout.sessions as unknown as {
+          retrieve: ReturnType<typeof vi.fn>;
+        }
+      ).retrieve = vi.fn().mockRejectedValue(error);
+      const obs = (
+        service as unknown as {
+          obs: {
+            warn: (...a: unknown[]) => void;
+            error: (...a: unknown[]) => void;
+          };
+        }
+      ).obs;
+      return { warn: vi.spyOn(obs, 'warn'), error: vi.spyOn(obs, 'error') };
+    }
+
+    it("a session Stripe does not know: a warning, and the client gets its errorId, not Stripe's message", async () => {
+      const logged = sessionLookupFails(
+        Object.assign(new Error('No such checkout.session: cs_madeup'), {
+          type: 'StripeInvalidRequestError',
+          code: 'resource_missing',
+          statusCode: 404,
+        })
+      );
+
+      const err = await service
+        .verifyCheckoutSession('cs_madeup', otherCreatorId)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(SubscriptionCheckoutError);
+      const context = (err as SubscriptionCheckoutError).context;
+      expect(logged.error).not.toHaveBeenCalled();
+      expect(logged.warn).toHaveBeenCalledWith(
+        'Stripe refused the checkout session lookup',
+        expect.objectContaining({ errorId: context?.errorId })
+      );
+      expect(typeof context?.errorId).toBe('string');
+      expect(JSON.stringify(context)).not.toContain('No such');
+    });
+
+    it('a connection failure on the session lookup is an error, not a warning', async () => {
+      const logged = sessionLookupFails(
+        Object.assign(new Error('socket hang up'), {
+          type: 'StripeConnectionError',
+        })
+      );
+
+      const err = await service
+        .verifyCheckoutSession('cs_outage', otherCreatorId)
+        .catch((e: unknown) => e);
+
+      expect(err).not.toBeInstanceOf(SubscriptionCheckoutError);
+      expect(logged.error).toHaveBeenCalled();
+      expect(logged.warn).not.toHaveBeenCalledWith(
+        'Stripe refused the checkout session lookup',
+        expect.anything()
+      );
+    });
+
     it('returns complete + subscription row when webhook has landed', async () => {
       const { org, tier1 } = await createFullOrg('verify-complete');
 
@@ -2474,6 +2536,8 @@ describe('SubscriptionService', () => {
         'Your card was declined.'
       );
       expect(err.context).not.toHaveProperty('stripeMessage');
+      // The errorId of the log line that holds it (L2).
+      expect(typeof err.context?.errorId).toBe('string');
       // Codex-w87s4: prorationDate echoes the pinned preview timestamp
       // — this is what lets the dialog branch "stale preview" from
       // "transient payment failure" without needing a second round-trip.
@@ -9768,11 +9832,17 @@ describe('SubscriptionService', () => {
       const retrieveSpy = stubAccountsRetrieve(true);
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
+      const errorSpy = vi.spyOn(
+        (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+          .obs,
+        'error'
+      );
 
       const result = await service.sweepUnresolvedPayouts(15);
 
       // No payee and no organisation: nobody to claim it for, so the sweep
-      // never takes it (Codex-2hxff.13 claims payees, not rows).
+      // never takes it (Codex-2hxff.13 claims payees, not rows), nor gives
+      // it a place in the batch, and says how many such rows there are.
       expect(result).toEqual({
         groupsScanned: 0,
         groupsResolved: 0,
@@ -9781,6 +9851,10 @@ describe('SubscriptionService', () => {
       });
       expect(retrieveSpy).not.toHaveBeenCalled();
       expect(transferSpy).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('neither payee nor organisation'),
+        expect.objectContaining({ errorId: expect.any(String), rowCount: 1 })
+      );
     });
 
     // Codex-2hxff.37: the ownership hand-over moves an org's held no_owner

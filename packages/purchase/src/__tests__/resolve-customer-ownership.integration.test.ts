@@ -281,7 +281,7 @@ describe('withStaleCustomerRecovery: the recovery create key (Codex-2hxff.23)', 
       .mockResolvedValueOnce('session');
 
     const result = await withStaleCustomerRecovery(
-      { db, stripe },
+      { db, stripe, obs: { warn: vi.fn(), error: vi.fn() } },
       { userId, email, environment: ENV },
       call
     );

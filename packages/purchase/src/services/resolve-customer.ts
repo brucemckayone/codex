@@ -66,9 +66,10 @@ export interface ResolveCustomerDeps {
   /**
    * Receives a skipped email candidate (ids only) and a Stripe failure (its
    * message, which never reaches the client; the thrown error carries the
-   * `errorId` that finds it). Services pass their `obs`.
+   * `errorId` that finds it). Services pass their `obs`. Required: without
+   * it the client would get an errorId that no log line holds.
    */
-  obs?: CustomerResolutionLogger;
+  obs: CustomerResolutionLogger;
 }
 
 export interface ResolveCustomerInput {
@@ -133,7 +134,7 @@ async function firstAdoptableCustomer(
   for (const customer of candidates) {
     const taggedUserId = customer.metadata.codex_user_id;
     if (taggedUserId && taggedUserId !== userId) {
-      obs?.warn('Stripe Customer with this email is tagged for another user', {
+      obs.warn('Stripe Customer with this email is tagged for another user', {
         userId,
         stripeCustomerId: customer.id,
         taggedUserId,
@@ -145,7 +146,7 @@ async function firstAdoptableCustomer(
       .map((holder) => holder.userId)
       .filter((holderId) => holderId !== userId);
     if (otherHolderIds.length > 0) {
-      obs?.warn('Stripe Customer with this email is held by another user', {
+      obs.warn('Stripe Customer with this email is held by another user', {
         userId,
         stripeCustomerId: customer.id,
         holderUserIds: otherHolderIds,
@@ -226,7 +227,7 @@ async function resolveCustomer(
     if (isStripeError(error)) {
       // The context is sent to the client: Stripe's message stays in the log.
       const errorId = crypto.randomUUID();
-      obs?.error('Stripe Customer could not be resolved or created', {
+      obs.error('Stripe Customer could not be resolved or created', {
         errorId,
         userId,
         stripeType: error.type,

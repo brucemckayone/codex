@@ -230,8 +230,11 @@ Rules:
   mark it paid afterwards — then looks for a transfer Stripe made for it, and
   reverses that like a paid row's. A transfer that lands after the cancel is
   reversed by whoever sent it: its row is no longer payable, so nothing would
-  ever account for the money. Stripe does not reverse transfers when a charge
-  is refunded.
+  ever account for the money. That includes a transfer whose call failed
+  without an answer from Stripe: the sender looks it up by its `payout_id` and
+  reverses it, and if it cannot be found, logs an error with the row and the
+  transfer's idempotency key for a person to check. Stripe does not reverse
+  transfers when a charge is refunded.
 - **Rows are permanent.** Deleting a user or organisation never deletes ledger
   rows: the database refuses a hard delete of anyone a payout row names
   (`ON DELETE RESTRICT`, migration 0111, `Codex-2hxff.23`), and deleting an
@@ -321,7 +324,18 @@ instead of being asked about first every hour. No session lock is used: the
 database pooler may give each statement a different connection. The sweep
 then checks each claimed payee's account live with Stripe and drains those
 now payable. An ownerless organisation's held rows are claimed the same way
-and re-homed if it has an owner again.
+and re-homed if it has an owner again. Only payees with a Connect account row
+(onboarded, or onboarding) are claimed: someone who never started onboarding
+has nothing to check, so their rows wait, untouched, and cannot crowd payable
+payees out of the batch. A drainable row with neither payee nor organisation
+cannot be claimed by anyone; each run logs how many there are, at error.
+
+Why hourly, and why minute `0`: Neon bills the time the database is awake, and
+the sweep wakes it. At 15 minutes the sweep alone kept the database awake about
+8 hours a day; hourly is about 2. Minute `0` shares one wake with media-api's
+hourly cron and notifications-api's daily `0 8 * * *` cron.
+`packages/constants/src/__tests__/cron-wake-alignment.test.ts` pins the
+alignment.
 
 ### When Stripe keeps refusing a payout
 
@@ -369,15 +383,39 @@ WHERE id = '<payout id>' AND status = 'failed';
 ```
 
 It must report `UPDATE 1`; `UPDATE 0` means the row was paid or cancelled
-meanwhile, and nothing is released. The next drain pays it: the payee's next
-`account.updated` or `/connect/me/sync`, or the hourly sweep.
+meanwhile, and nothing is released. A released row is paid by the next drain
+that reaches its payee: the hourly sweep (once the row's `attempted_at` is 15
+minutes old), or the payee's own `/connect/me/sync`. `account.updated` drains
+only when the account changes from not payable to payable, so it does not
+pay a released row for a payee who is already payable.
 
-Why hourly, and why minute `0`: Neon bills the time the database is awake, and
-the sweep wakes it. At 15 minutes the sweep alone kept the database awake about
-8 hours a day; hourly is about 2. Minute `0` shares one wake with media-api's
-hourly cron and notifications-api's daily `0 8 * * *` cron.
-`packages/constants/src/__tests__/cron-wake-alignment.test.ts` pins the
-alignment.
+**Releasing many at once.** One platform-side incident can flag every payout it
+touches, though nothing is wrong with any payee: for example a deploy with the
+other mode's Stripe key (each transfer is refused with `resource_missing` on
+the `destination`), or the platform losing the right to make transfers
+(`transfers_not_allowed`). Once the cause is fixed, count the rows the incident
+flagged, then release them together, with the incident's code and time window:
+
+```sql
+SELECT count(*), sum(amount_cents)
+FROM payouts
+WHERE status = 'failed'
+  AND needs_review_at IS NOT NULL
+  AND last_error_code = '<code>'
+  AND needs_review_at >= '<incident start>'
+  AND needs_review_at <  '<incident end>';
+
+UPDATE payouts
+SET needs_review_at = NULL, failure_count = 0, updated_at = now()
+WHERE status = 'failed'
+  AND needs_review_at IS NOT NULL
+  AND last_error_code = '<code>'
+  AND needs_review_at >= '<incident start>'
+  AND needs_review_at <  '<incident end>';
+```
+
+The `UPDATE` must report the count the `SELECT` gave. Rows flagged outside the
+window, or for another code, are left for review one by one.
 
 ## Reversals
 

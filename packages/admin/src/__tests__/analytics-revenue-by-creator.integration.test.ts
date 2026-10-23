@@ -43,7 +43,8 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AdminAnalyticsService } from '../services/analytics-service';
 
 describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
@@ -253,6 +254,47 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     expect(second.creatorId).toBe(creatorB);
     expect(second.totalRevenueCents).toBe(600);
     expect(second.splitPercent).toBe(25);
+  });
+
+  it('an agreement with no proposal shows 0% and is logged with an errorId', async () => {
+    const { orgId, creators } = await seedScenario(1);
+    const [creatorId] = creators as [string];
+    const orphan = takeFirst(
+      await db
+        .insert(creatorOrganizationAgreements)
+        .values({
+          creatorId,
+          organizationId: orgId,
+          organizationFeePercentage: 3000,
+          currentProposalId: null,
+        })
+        .returning()
+    );
+    const obs = (
+      service as unknown as {
+        obs: { error: (message: string, meta?: unknown) => void };
+      }
+    ).obs;
+    const logged = vi.spyOn(obs, 'error');
+
+    try {
+      const result = await service.getRevenueByCreator(orgId);
+
+      expect(result.items[0]?.splitPercent).toBe(0);
+      expect(logged).toHaveBeenCalledWith(
+        'agreement has no current proposal; it pays nothing',
+        expect.objectContaining({
+          errorId: expect.any(String),
+          agreementId: orphan.id,
+        })
+      );
+    } finally {
+      logged.mockRestore();
+      // Left behind, it would be met by every later scan of the pool.
+      await db
+        .delete(creatorOrganizationAgreements)
+        .where(eq(creatorOrganizationAgreements.id, orphan.id));
+    }
   });
 
   it('keeps an agreement past its review date and drops a terminated one', async () => {

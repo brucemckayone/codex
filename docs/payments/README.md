@@ -100,9 +100,11 @@ can each pay only one connected account, so neither can split a sale three ways.
    pending until it can be paid. Nothing is dropped with only a log line.
 5. **Financial records are permanent.** Purchases, subscriptions, course
    subscriptions, payouts, refunds, disputes and refund reviews are never
-   hard-deleted or cascade-deleted. The database refuses it: every foreign key
-   from them to a user, organisation or course is `ON DELETE RESTRICT`
-   (migration 0111). Deleting an account anonymises the user (name, email and
+   hard-deleted or cascade-deleted. The database refuses it: no foreign key
+   from them to a user, organisation or course cascades. A required owner is
+   `ON DELETE RESTRICT` (migration 0111); an optional one, such as a course
+   subscription's organisation or a refund's resolver, is `SET NULL`, which
+   keeps the row. Deleting an account anonymises the user (name, email and
    profile are blanked) and keeps their money history. Their Stripe Customer
    is left as it is, because it is the payment record (owner, 2026-10-23).
 6. **Money-moving Stripe calls are idempotent.** Each uses a deterministic

@@ -5,9 +5,9 @@
  * - Codex-2hxff.19 AGR-06: an invoice has no row of its own, so its creator
  *   slice records the agreement it was split by
  *   (`payouts.creator_org_agreement_id`); without one it stays null.
- * - Codex-2hxff.23 PAY-25: an invoice in any currency but GBP is refused with
- *   `UnsupportedCurrencyError` (400, permanent) before anything is written, as
- *   tier invoices are, so no transfer is created.
+ * - Codex-2hxff.23 PAY-25: an invoice in any currency but GBP still renews
+ *   the subscriber's access (they paid), but records no slice and creates no
+ *   transfer; the refusal is logged at error with an errorId for support.
  * - Codex-2hxff.23 SEC-02: Stripe's own message never goes in a client-facing
  *   error context; it is logged with an errorId.
  *
@@ -17,11 +17,7 @@
 
 import { randomUUID } from 'node:crypto';
 import * as schema from '@codex/database/schema';
-import {
-  mapErrorToResponse,
-  ServiceError,
-  UnsupportedCurrencyError,
-} from '@codex/service-errors';
+import { mapErrorToResponse, ServiceError } from '@codex/service-errors';
 import {
   createMockStripe,
   createMockStripeInvoice,
@@ -285,11 +281,17 @@ describe('course subscription records, currency and errors', () => {
     expect(slice?.creatorOrgAgreementId).toBeNull();
   });
 
-  it('a non-GBP invoice is refused before anything is written', async () => {
+  it('a non-GBP invoice still renews access; only its payouts are refused, at error with an errorId', async () => {
     const { sub, row } = await subscribed(creatorId);
     const transfers = vi.mocked(stripe.transfers.create);
     transfers.mockClear();
-    // A renewal that would move the period on, if it were written.
+    const obs = (
+      service as unknown as {
+        obs: { error: (message: string, meta?: unknown) => void };
+      }
+    ).obs;
+    const logged = vi.spyOn(obs, 'error');
+    // The renewal moves the period on: the subscriber paid for it.
     const renewed = {
       ...sub,
       items: {
@@ -301,12 +303,11 @@ describe('course subscription records, currency and errors', () => {
       },
     } as Stripe.Subscription;
 
-    const error = await service
-      .handleCourseInvoicePaymentSucceeded(invoiceFor(renewed, 'usd'), renewed)
-      .catch((e: unknown) => e);
+    await service.handleCourseInvoicePaymentSucceeded(
+      invoiceFor(renewed, 'usd'),
+      renewed
+    );
 
-    expect(error).toBeInstanceOf(UnsupportedCurrencyError);
-    expect((error as ServiceError).statusCode).toBe(400);
     expect(transfers).not.toHaveBeenCalled();
     expect(await creatorSliceOf(row.id)).toBeUndefined();
     const after = takeFirst(
@@ -315,12 +316,28 @@ describe('course subscription records, currency and errors', () => {
         .from(schema.courseSubscriptions)
         .where(eq(schema.courseSubscriptions.id, row.id))
     );
-    expect(after.end?.getTime()).toBe(row.currentPeriodEnd?.getTime());
+    expect(after.end?.getTime()).toBeGreaterThan(
+      row.currentPeriodEnd?.getTime() ?? 0
+    );
+    const refusal = logged.mock.calls.find(([message]) =>
+      String(message).startsWith('Non-GBP course subscription invoice')
+    );
+    expect(refusal?.[1]).toMatchObject({
+      courseSubscriptionId: row.id,
+      currency: 'usd',
+      errorId: expect.any(String),
+    });
+    logged.mockRestore();
   });
 
-  it("a checkout session Stripe cannot find: the client gets an errorId, not Stripe's message", async () => {
-    const obs = (service as unknown as { obs: { error: () => void } }).obs;
-    const logged = vi.spyOn(obs, 'error');
+  // The id came from the client (a stale or invented success URL): a warning,
+  // not an error alert.
+  it("a checkout session Stripe cannot find: the client gets an errorId, not Stripe's message, logged at warn", async () => {
+    const obs = (
+      service as unknown as { obs: { error: () => void; warn: () => void } }
+    ).obs;
+    const logged = vi.spyOn(obs, 'warn');
+    const alerted = vi.spyOn(obs, 'error');
     vi.mocked(stripe.checkout.sessions.retrieve).mockRejectedValueOnce(
       Object.assign(new Error(STRIPE_SECRET_MESSAGE), {
         type: 'StripeInvalidRequestError',
@@ -346,6 +363,8 @@ describe('course subscription records, currency and errors', () => {
         error: STRIPE_SECRET_MESSAGE,
       })
     );
+    expect(alerted).not.toHaveBeenCalled();
     logged.mockRestore();
+    alerted.mockRestore();
   });
 });

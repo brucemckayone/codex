@@ -393,6 +393,11 @@ describe('ConnectAccountService', () => {
         { type: 'StripeInvalidRequestError' }
       );
       stripe.accounts.create = vi.fn().mockRejectedValue(stripeErr);
+      const logged = vi.spyOn(
+        (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+          .obs,
+        'error'
+      );
 
       const err = await service
         .createAccountForUser(
@@ -405,6 +410,18 @@ describe('ConnectAccountService', () => {
       expect(err).toBeInstanceOf(ConnectPlatformNotConfiguredError);
       expect(err.code).toBe('CONNECT_PLATFORM_NOT_CONFIGURED');
       expect(err.statusCode).toBe(500);
+      // The client gets the errorId of the log line that holds Stripe's
+      // message (Codex-2hxff.23, SEC-02), never the message itself.
+      const [, logFields] =
+        logged.mock.calls.find(([message]) =>
+          String(message).includes('Connect not enabled')
+        ) ?? [];
+      expect(err.context).toEqual({
+        userId: creatorId,
+        errorId: (logFields as { errorId?: string } | undefined)?.errorId,
+      });
+      expect(typeof err.context.errorId).toBe('string');
+      expect(JSON.stringify(err.context)).not.toContain('signed up');
 
       // Account creation failed before any DB write — nothing persisted.
       const account = await service.getAccount(org.id, creatorId);

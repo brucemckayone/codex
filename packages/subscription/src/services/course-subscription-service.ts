@@ -59,7 +59,7 @@ import {
   users,
 } from '@codex/database/schema';
 import {
-  assertGbpOnly,
+  isGbpOrUnset,
   issueRefund,
   type LedgerDeps,
   recordPlatformFee,
@@ -1210,9 +1210,11 @@ export class CourseSubscriptionService extends BaseService {
         (error as { type?: string }).type === 'StripeInvalidRequestError'
       ) {
         // The context is sent to the client verbatim, so Stripe's own message
-        // is logged here instead (Codex-2hxff.23 SEC-02).
+        // is logged here instead (Codex-2hxff.23 SEC-02). The session id came
+        // from the client (a stale or invented success URL), so it is a
+        // warning; any other failure reaches handleError, at error.
         const errorId = crypto.randomUUID();
-        this.obs.error('Course checkout session could not be retrieved', {
+        this.obs.warn('Course checkout session could not be retrieved', {
           errorId,
           sessionId,
           userId,
@@ -1826,13 +1828,6 @@ export class CourseSubscriptionService extends BaseService {
     stripeInvoice: Stripe.Invoice,
     stripeSub: Stripe.Subscription
   ): Promise<CourseSubscriptionWebhookResult | undefined> {
-    // GBP-only, before anything is written, as for tier invoices: every slice
-    // is transferred in pounds (Codex-2hxff.23 PAY-25). A 400, so the webhook
-    // acknowledges it and Stripe does not redeliver.
-    assertGbpOnly(stripeInvoice.currency, {
-      invoiceId: stripeInvoice.id,
-      stripeSubscriptionId: stripeSub.id,
-    });
     const presence = await this.ensureDataPresent(stripeSub);
     if (!presence) return;
     const { row } = presence;
@@ -1901,6 +1896,24 @@ export class CourseSubscriptionService extends BaseService {
         // is not refunded and pays out below.
         await this.endRevived(row, supersededBy, latest ?? null);
       }
+    }
+
+    // GBP-only: every slice is transferred in pounds (Codex-2hxff.23 PAY-25).
+    // The subscriber paid, so the renewal above stands and they keep access;
+    // only the payouts are refused, and a person settles them by hand. (A
+    // tier invoice is refused before it writes anything, but tier access
+    // follows the subscription's status, not the invoice.)
+    if (!isGbpOrUnset(stripeInvoice.currency)) {
+      this.obs.error(
+        'Non-GBP course subscription invoice: access renewed, payouts not recorded',
+        {
+          errorId: crypto.randomUUID(),
+          courseSubscriptionId: row.id,
+          invoiceId: stripeInvoice.id,
+          currency: stripeInvoice.currency,
+        }
+      );
+      return result;
     }
 
     const chargeId = await resolveInvoiceCharge(this.stripe, stripeInvoice);

@@ -91,9 +91,11 @@ const VALID_ONBOARD = {
  * Mount the real /connect routes behind a middleware that injects `user`
  * (or none, to exercise the real session middleware's 401 path).
  */
-function buildApp(user: Record<string, unknown> | null) {
+function buildApp(user: Record<string, unknown> | null, obs?: unknown) {
   const app = new Hono<{ Variables: Record<string, unknown> }>();
   app.use('*', async (c, next) => {
+    // The worker's observability middleware, when a test reads the logs.
+    if (obs) c.set('obs', obs);
     if (user) {
       c.set('user', user);
       c.set('session', { id: 'sess_test', userId: user.id });
@@ -355,13 +357,21 @@ describe('POST /connect/me/sync — real resolver', () => {
     ).not.toHaveBeenCalled();
   });
 
-  it('a failed drain never fails the sync response', async () => {
+  it('a failed drain never fails the sync response, and is logged at error with an errorId', async () => {
     subscriptionSpies.resolvePendingPayoutsForAccount.mockRejectedValue(
       new Error('stripe unreachable')
     );
+    const obs = {
+      error: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+      trackError: vi.fn(),
+      setRequestId: vi.fn(),
+    };
 
     const res = await dispatch(
-      buildApp(CREATOR_USER),
+      buildApp(CREATOR_USER, obs),
       postReq('/connect/me/sync')
     );
 
@@ -369,6 +379,14 @@ describe('POST /connect/me/sync — real resolver', () => {
     expect(
       subscriptionSpies.resolvePendingPayoutsForAccount
     ).toHaveBeenCalledOnce();
+    expect(obs.error).toHaveBeenCalledWith(
+      'Failed to resolve pending payouts after sync',
+      expect.objectContaining({
+        errorId: expect.any(String),
+        accountId: 'acct_test_123',
+        error: 'stripe unreachable',
+      })
+    );
   });
 });
 

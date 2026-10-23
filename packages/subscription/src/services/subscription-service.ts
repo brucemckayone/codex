@@ -1190,19 +1190,23 @@ export class SubscriptionService extends BaseService {
         'type' in error &&
         (error as { type?: string }).type === 'StripeInvalidRequestError'
       ) {
-        // The context goes to the client: Stripe's message is logged instead
-        // (Codex-2hxff.23, SEC-02).
+        // A stale or made-up session_id: the client's mistake, so a warning.
+        // The context goes to the client, so it carries the errorId and
+        // Stripe's message is logged instead (Codex-2hxff.23, SEC-02).
+        const errorId = crypto.randomUUID();
         this.obs.warn('Stripe refused the checkout session lookup', {
-          errorId: crypto.randomUUID(),
+          errorId,
           sessionId,
           code: stripeErrorCode(error),
           error: error.message,
         });
         throw new SubscriptionCheckoutError('Checkout session not found', {
           sessionId,
+          errorId,
         });
       }
 
+      // A connection or API failure: handleError logs it at error.
       this.handleError(error, 'verifyCheckoutSession');
     }
   }
@@ -3316,9 +3320,10 @@ export class SubscriptionService extends BaseService {
           // "payment required" response and the UI prompts the user to
           // update their payment method. The error's context is sent to
           // the client, so Stripe's own message is logged, not returned
-          // (Codex-2hxff.23, SEC-02).
+          // (Codex-2hxff.23, SEC-02); the errorId in both ties them.
+          const errorId = crypto.randomUUID();
           this.obs.warn('Tier upgrade payment declined by Stripe', {
-            errorId: crypto.randomUUID(),
+            errorId,
             userId,
             organizationId: orgId,
             newTierId,
@@ -3335,6 +3340,7 @@ export class SubscriptionService extends BaseService {
               organizationId: orgId,
               newTierId,
               billingInterval,
+              errorId,
               // Surface the prorationDate the failed commit pinned to
               // Stripe so the pricing dialog can branch "needs fresh
               // preview" vs "transient payment failure" by comparing
@@ -4934,6 +4940,7 @@ export class SubscriptionService extends BaseService {
         continue;
       }
 
+      const idempotencyKey = `payout_${payout.id}_${attempt}`;
       let transfer: Stripe.Transfer;
       try {
         // GBP-only enforcement (Codex-yv18n) lives INSIDE the per-row
@@ -4966,23 +4973,29 @@ export class SubscriptionService extends BaseService {
               ...stripeEnvMetadata(this.environment),
             },
           },
-          { idempotencyKey: `payout_${payout.id}_${attempt}` }
+          { idempotencyKey }
         );
       } catch (error) {
         failed++;
         // Codex-vv77x: per-row error isolation — one Stripe failure never
         // blocks the remaining rows. The row stays payable for the next
         // drain, unless Stripe has refused it for good or too often: then it
-        // waits for support, logged once (Codex-2hxff.48).
-        await recordTransferFailure(this.ledger(), payout.id, error, {
-          organizationId: orgId,
-          subscriptionId: payout.subscriptionId,
-          purchaseId: payout.purchaseId,
-          payoutType: payout.payoutType,
-          amountCents,
-          sourceType,
-          attempt,
-        });
+        // waits for support, logged once (Codex-2hxff.48). A refund that
+        // cancelled the row meanwhile gets any transfer that landed reversed.
+        await recordTransferFailure(
+          this.ledger(),
+          { payoutId: payout.id, destination: stripeAccountId, idempotencyKey },
+          error,
+          {
+            organizationId: orgId,
+            subscriptionId: payout.subscriptionId,
+            purchaseId: payout.purchaseId,
+            payoutType: payout.payoutType,
+            amountCents,
+            sourceType,
+            attempt,
+          }
+        );
         continue;
       }
 
@@ -5949,7 +5962,12 @@ export class SubscriptionService extends BaseService {
   /**
    * Claim up to `limit` payees whose drainable rows were last checked before
    * `threshold`, least recently checked first (Codex-2hxff.13). A payee is a
-   * user, or an ownerless organisation for its held `no_owner` rows.
+   * user with a Connect account row (onboarded, or onboarding), or an
+   * ownerless organisation for its held `no_owner` rows. A user who never
+   * started onboarding has nothing to check at Stripe, so their rows are left
+   * pending and untouched rather than take a place in the batch. A drainable
+   * row with neither payee nor organisation can be claimed by no one; those
+   * are counted and logged at error.
    *
    * One UPDATE: it stamps `attempted_at = now` on the claimed rows, under
    * `FOR UPDATE SKIP LOCKED`. So the run is bounded; a run that starts while
@@ -5969,7 +5987,28 @@ export class SubscriptionService extends BaseService {
     const payeeKey = sql`CASE WHEN ${payouts.userId} IS NULL THEN 'org:' || ${payouts.organizationId}::text ELSE 'user:' || ${payouts.userId} END`;
     // Failed transfers are retried too (Codex-2hxff.11), unless an old write
     // path failed them or they wait for support (see isDrainablePayout).
-    const due = and(isDrainablePayout(), lt(payouts.attemptedAt, threshold));
+    const drainable = and(
+      isDrainablePayout(),
+      lt(payouts.attemptedAt, threshold)
+    );
+    const due = and(
+      drainable,
+      sql`((${payouts.userId} IS NULL AND ${payouts.organizationId} IS NOT NULL) OR EXISTS (SELECT 1 FROM ${stripeConnectAccounts} WHERE ${stripeConnectAccounts.userId} = ${payouts.userId}))`
+    );
+
+    const [unroutable] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(payouts)
+      .where(
+        and(drainable, isNull(payouts.userId), isNull(payouts.organizationId))
+      );
+    if (unroutable && unroutable.count > 0) {
+      this.obs.error(
+        'sweepUnresolvedPayouts: owed rows with neither payee nor organisation; nobody can be paid them',
+        { errorId: crypto.randomUUID(), rowCount: unroutable.count }
+      );
+    }
+
     const duePayees = this.db
       .select({ payeeKey })
       .from(payouts)

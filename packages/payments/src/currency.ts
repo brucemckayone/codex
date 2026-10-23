@@ -21,8 +21,19 @@ export function assertGbpOnly(
   currency: string | null | undefined,
   context: Record<string, unknown>
 ): void {
-  if (!currency) return;
-  const normalised = currency.toLowerCase();
-  if (normalised === CURRENCY.GBP) return;
-  throw new UnsupportedCurrencyError(normalised, [CURRENCY.GBP], context);
+  if (!currency || isGbpOrUnset(currency)) return;
+  throw new UnsupportedCurrencyError(
+    currency.toLowerCase(),
+    [CURRENCY.GBP],
+    context
+  );
+}
+
+/**
+ * The same rule as a predicate, for a path that must keep going after a
+ * refusal: a course renewal extends the subscriber's access whatever the
+ * currency, and only its payouts are refused.
+ */
+export function isGbpOrUnset(currency: string | null | undefined): boolean {
+  return !currency || currency.toLowerCase() === CURRENCY.GBP;
 }

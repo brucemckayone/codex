@@ -332,7 +332,11 @@ export async function cleanupTables(
     users: schema.users,
   };
 
-  // Delete in correct order to respect foreign keys
+  // Delete in correct order to respect foreign keys. Money rows (purchases,
+  // subscriptions, course subscriptions, payouts) RESTRICT their user,
+  // organisation and course (Codex-2hxff.23), so a database holding any of
+  // them refuses these deletes with 23503; use cleanupDatabaseComplete,
+  // which deletes them first.
   const orderedTables = [
     'content',
     'mediaItems',

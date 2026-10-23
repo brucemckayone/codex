@@ -114,6 +114,7 @@ export async function agreementsInForce(
     resolved.add(row.creatorId);
     if (row.sharePercent === null) {
       params.obs.error('agreement has no current proposal; skipped', {
+        errorId: crypto.randomUUID(),
         agreementId: row.agreementId,
         organizationId: params.organizationId,
         creatorId: row.creatorId,

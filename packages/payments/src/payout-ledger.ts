@@ -419,13 +419,33 @@ async function sendReservedSlice(
   } catch (error) {
     // If the row cannot be marked failed it is left pending with no reason:
     // the sweep picks it up and, finding no transfer in Stripe, sends it.
-    await recordTransferFailure(deps, reserved.id, error, {
-      payoutType: input.payoutType,
-      organizationId: input.organizationId,
-      amountCents: input.amountCents,
-      idempotencyKey: input.idempotencyKey,
-      destination: account.stripeAccountId,
-    });
+    const landed = await recordTransferFailure(
+      deps,
+      {
+        payoutId: reserved.id,
+        destination: account.stripeAccountId,
+        idempotencyKey: input.idempotencyKey,
+      },
+      error,
+      {
+        payoutType: input.payoutType,
+        organizationId: input.organizationId,
+        amountCents: input.amountCents,
+      }
+    );
+    if (
+      landed?.outcome === 'surplus_reversed' ||
+      landed?.outcome === 'surplus_unreversed'
+    ) {
+      // A refund cancelled the row while the transfer was in flight, and the
+      // transfer landed after all.
+      return {
+        kind: 'surplus',
+        payoutId: reserved.id,
+        transferId: landed.transferId,
+        reversed: landed.outcome === 'surplus_reversed',
+      };
+    }
     return { kind: 'failed', payoutId: reserved.id };
   }
 
@@ -830,6 +850,27 @@ export async function markPayoutFailed(
   };
 }
 
+/** The transfer attempt that failed: its row, where it went, and its key. */
+export interface TransferAttempt {
+  payoutId: string;
+  destination: string;
+  idempotencyKey: string;
+}
+
+/** A transfer that landed for a row a refund cancelled while it was in flight. */
+export interface LandedAfterCancel {
+  transferId: string;
+  outcome: SettleOutcome;
+}
+
+/**
+ * Stripe may have made the transfer: it never answered (an outage), or the
+ * call failed outside Stripe's own error types. A refusal means it did not.
+ */
+function mayHaveLanded(failure: TransferFailure): boolean {
+  return failure.kind === 'outage' || !failure.type.startsWith('Stripe');
+}
+
 /**
  * Record a failed transfer on its row and log it at the level it deserves:
  * - flagged for support by this failure: ONE error, with an errorId;
@@ -838,15 +879,23 @@ export async function markPayoutFailed(
  * - anything else (an outage, a refusal below the cap): a warning, as the
  *   drains retry it.
  *
+ * If the row was no longer failable — a refund or a lost dispute cancelled it
+ * while the transfer was in flight — and Stripe may have made the transfer
+ * after all, it is looked up by its `payout_id` and reversed, as any transfer
+ * that lands after the cancel is (`settleTransfer`). The refund's own lookup
+ * ran before it landed, so nothing else would ever take that money back.
+ * Returns what became of such a transfer, or `null`.
+ *
  * Never throws. A row that cannot be updated keeps its state for the drains,
  * and that is logged at error.
  */
 export async function recordTransferFailure(
-  deps: Pick<LedgerDeps, 'db' | 'obs'>,
-  payoutId: string,
+  deps: LedgerDeps,
+  attempt: TransferAttempt,
   error: unknown,
   context: Record<string, unknown>
-): Promise<void> {
+): Promise<LandedAfterCancel | null> {
+  const { payoutId } = attempt;
   const message = error instanceof Error ? error.message : String(error);
   let recorded: PayoutFailureRecord | null;
   try {
@@ -856,7 +905,7 @@ export async function recordTransferFailure(
       'A payout transfer failed and its row could not be marked failed; the drains retry it',
       {
         errorId: crypto.randomUUID(),
-        payoutId,
+        ...attempt,
         ...context,
         error: message,
         updateError:
@@ -865,12 +914,12 @@ export async function recordTransferFailure(
             : String(updateError),
       }
     );
-    return;
+    return null;
   }
 
   const failure = recorded?.failure ?? classifyTransferFailure(error);
   const fields = {
-    payoutId,
+    ...attempt,
     ...context,
     kind: failure.kind,
     code: failure.code,
@@ -879,23 +928,112 @@ export async function recordTransferFailure(
     maxFailures: MAX_PAYOUT_FAILURES,
     error: message,
   };
-  if (recorded?.flagged) {
+  if (!recorded) {
+    return handleFailureOnMovedRow(deps, attempt, failure, fields);
+  }
+  if (recorded.flagged) {
     deps.obs.error(
       failure.kind === 'permanent'
         ? 'Stripe refused a payout transfer for good; it waits for support'
         : `Stripe refused a payout transfer ${MAX_PAYOUT_FAILURES} times; it waits for support`,
       { errorId: crypto.randomUUID(), ...fields }
     );
-    return;
+    return null;
   }
   if (failure.kind === 'platform') {
     deps.obs.error(
       'A payout transfer failed on the platform side; it is retried, but a person must act',
       { errorId: crypto.randomUUID(), ...fields }
     );
-    return;
+    return null;
   }
   deps.obs.warn('A payout transfer failed; the drains retry it', fields);
+  return null;
+}
+
+/**
+ * A transfer failed on a row `markPayoutFailed` could not touch: it was paid,
+ * cancelled or flagged meanwhile. Only a cancelled row can be owed a
+ * reversal, and only if Stripe may have made the transfer.
+ */
+async function handleFailureOnMovedRow(
+  deps: LedgerDeps,
+  attempt: TransferAttempt,
+  failure: TransferFailure,
+  fields: Record<string, unknown>
+): Promise<LandedAfterCancel | null> {
+  let row: Payout | undefined;
+  try {
+    [row] = await deps.db
+      .select()
+      .from(payouts)
+      .where(eq(payouts.id, attempt.payoutId))
+      .limit(1);
+  } catch (readError) {
+    deps.obs.error(
+      'A payout transfer failed and its row could not be read; check Stripe for the idempotency key',
+      {
+        errorId: crypto.randomUUID(),
+        ...fields,
+        readError:
+          readError instanceof Error ? readError.message : String(readError),
+      }
+    );
+    return null;
+  }
+
+  const cancelled =
+    row?.status === 'cancelled_by_refund' ||
+    row?.status === 'cancelled_by_dispute';
+  if (!row || !cancelled) {
+    // Paid by another drain, or already waiting for support: nothing to do.
+    deps.obs.warn(
+      'A payout transfer failed, but its row had already moved on',
+      {
+        ...fields,
+        rowStatus: row?.status ?? null,
+        waitsForSupport: row ? row.needsReviewAt !== null : null,
+      }
+    );
+    return null;
+  }
+  if (!mayHaveLanded(failure)) {
+    deps.obs.warn(
+      'A payout was cancelled while Stripe refused its transfer; nothing was sent',
+      { ...fields, rowStatus: row.status }
+    );
+    return null;
+  }
+
+  let transferId: string | undefined;
+  let lookupError: string | undefined;
+  try {
+    const found = await findTransfersForPayouts(
+      deps.stripe,
+      attempt.destination,
+      [row],
+      deps.obs
+    );
+    transferId = found.get(row.id);
+    if (transferId) {
+      // Reversed in full, and logged, by the path every late transfer takes.
+      const outcome = await settleTransfer(deps, row.id, transferId);
+      return { transferId, outcome };
+    }
+  } catch (cause) {
+    lookupError = cause instanceof Error ? cause.message : String(cause);
+  }
+  deps.obs.error(
+    'A payout was cancelled while its transfer was in flight, and Stripe did not answer: the transfer may have landed. Find it by its idempotency key and reverse it by hand',
+    {
+      errorId: crypto.randomUUID(),
+      ...fields,
+      rowStatus: row.status,
+      ...(transferId ? { stripeTransferId: transferId } : {}),
+      ...(lookupError ? { lookupError } : {}),
+    }
+  );
+  return null;
 }
 
 /** How long an attempt holds a row against every other drain. */

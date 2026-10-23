@@ -82,6 +82,7 @@ import {
   legacyOrgFeeFromCreatorShare,
   validateProposedShare,
 } from './agreement-math';
+import type { ResolverLogger } from './agreement-resolver';
 
 // ─── Public input shapes ──────────────────────────────────────────────────
 
@@ -231,7 +232,8 @@ export interface AgreementServiceConfig extends ServiceConfig {
  * An agreement row with the creator's share of the post-platform pool in
  * basis points, read from its accepted proposal through `current_proposal_id`
  * (Codex-2hxff.19 AGR-08). `null` when the proposal link is gone: the
- * resolver pays such an agreement nothing. The legacy
+ * resolver pays such an agreement nothing, and the read that returned it has
+ * logged it (`reportMissingProposal`). The legacy
  * `organization_fee_percentage` stays on the row for the web pages that
  * still rebuild the share from it.
  */
@@ -244,12 +246,41 @@ const WITH_CURRENT_SHARE = {
   currentProposal: { columns: { proposedCreatorSharePercent: true } },
 } as const;
 
-function withShare({
-  currentProposal,
-  ...agreement
-}: CreatorOrganizationAgreement & {
-  currentProposal: { proposedCreatorSharePercent: number } | null;
-}): AgreementWithShare {
+/**
+ * An agreement with no accepted proposal linked has no share, and the
+ * resolver pays it nothing. Every service path that meets one reports it
+ * here, at error with an errorId and the agreement's id, so it can be
+ * repaired: the lists (`withShare`), the review-reminder scan, the 100%
+ * check and the termination email.
+ */
+function reportMissingProposal(
+  obs: ResolverLogger,
+  context: { agreementId: string; organizationId: string } & Record<
+    string,
+    unknown
+  >
+): void {
+  obs.error('agreement has no current proposal; it pays nothing', {
+    errorId: crypto.randomUUID(),
+    ...context,
+  });
+}
+
+function withShare(
+  {
+    currentProposal,
+    ...agreement
+  }: CreatorOrganizationAgreement & {
+    currentProposal: { proposedCreatorSharePercent: number } | null;
+  },
+  obs: ResolverLogger
+): AgreementWithShare {
+  if (!currentProposal) {
+    reportMissingProposal(obs, {
+      agreementId: agreement.id,
+      organizationId: agreement.organizationId,
+    });
+  }
   return {
     ...agreement,
     creatorSharePercent: currentProposal?.proposedCreatorSharePercent ?? null,
@@ -1155,7 +1186,7 @@ export class AgreementService extends BaseService {
         ),
         orderBy: [desc(creatorOrganizationAgreements.effectiveFrom)],
       });
-      return rows.map(withShare);
+      return rows.map((row) => withShare(row, this.obs));
     } catch (error) {
       this.handleError(error, 'getActiveAgreements');
     }
@@ -1249,7 +1280,7 @@ export class AgreementService extends BaseService {
         ),
         orderBy: [desc(creatorOrganizationAgreements.effectiveFrom)],
       });
-      return rows.map(withShare);
+      return rows.map((row) => withShare(row, this.obs));
     } catch (error) {
       this.handleError(error, 'getActiveAgreementsForCreator');
     }
@@ -1284,7 +1315,7 @@ export class AgreementService extends BaseService {
         ),
         orderBy: [desc(creatorOrganizationAgreements.terminatedAt)],
       });
-      return rows.map(withShare);
+      return rows.map((row) => withShare(row, this.obs));
     } catch (error) {
       this.handleError(error, 'getTerminatedAgreementsForCreator');
     }
@@ -1361,18 +1392,26 @@ export class AgreementService extends BaseService {
           )
         );
 
-      return rows.map((r) => ({
-        agreement: {
-          ...r.agreement,
-          creatorSharePercent: r.creatorSharePercent,
-        },
-        creator: {
-          id: r.agreement.creatorId,
-          email: r.creatorEmail,
-          name: r.creatorName,
-        },
-        orgName: r.orgName,
-      }));
+      return rows.map((r) => {
+        if (r.creatorSharePercent === null) {
+          reportMissingProposal(this.obs, {
+            agreementId: r.agreement.id,
+            organizationId: r.agreement.organizationId,
+          });
+        }
+        return {
+          agreement: {
+            ...r.agreement,
+            creatorSharePercent: r.creatorSharePercent,
+          },
+          creator: {
+            id: r.agreement.creatorId,
+            email: r.creatorEmail,
+            name: r.creatorName,
+          },
+          orgName: r.orgName,
+        };
+      });
     } catch (error) {
       this.handleError(error, 'findExpiringAgreements');
     }
@@ -1915,14 +1954,17 @@ export class AgreementService extends BaseService {
   }
 
   /**
-   * Refuse to open a new round-1 proposal when a thread is already in
-   * flight for the same (org, creator, revenue_type) triple. The
-   * "in flight" set is `status IN ('open', 'countered')` — any
-   * terminal status frees the bucket.
+   * Refuse to open a new round-1 proposal when a thread is already open for
+   * the same (org, creator, revenue_type) triple: one of its proposals is
+   * `open`. A `countered` row is not: a counter marks it in the same
+   * transaction that adds the thread's next `open` row, so a live thread
+   * always shows that row. Counting `countered` too stranded a thread for
+   * good once its last counter was declined or withdrawn (by hand or on
+   * departure): nothing moves a `countered` row on but an accept.
    *
    * If the caller wants to re-open after a decline/withdraw, they
    * call `proposeAgreement` again, which lands in this guard and
-   * passes because the previous thread is fully terminal.
+   * passes because no proposal in the thread is open.
    */
   private async assertNoOpenThread(
     tx: Tx,
@@ -1935,7 +1977,7 @@ export class AgreementService extends BaseService {
         eq(agreementProposals.organizationId, organizationId),
         eq(agreementProposals.creatorId, creatorId),
         eq(agreementProposals.revenueType, revenueType),
-        inArray(agreementProposals.status, ['open', 'countered'])
+        eq(agreementProposals.status, 'open')
       ),
       columns: { id: true, status: true },
     });
@@ -1987,7 +2029,7 @@ export class AgreementService extends BaseService {
           .where(eq(agreementProposals.id, agreement.currentProposalId))
       : [];
     if (!row) {
-      this.obs.error('agreement has no current proposal; its share is 0', {
+      reportMissingProposal(this.obs, {
         agreementId: agreement.id,
         organizationId: agreement.organizationId,
       });
@@ -2044,7 +2086,7 @@ export class AgreementService extends BaseService {
 
     return rows.map((row) => {
       if (row.share !== null) return row.share;
-      this.obs.error('agreement has no current proposal; its share is 0', {
+      reportMissingProposal(this.obs, {
         agreementId: row.agreementId,
         organizationId,
         revenueType,

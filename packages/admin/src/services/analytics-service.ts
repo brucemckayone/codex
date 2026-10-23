@@ -1054,9 +1054,10 @@ export class AdminAnalyticsService extends BaseService {
       // `current_proposal_id` as the payment resolver reads it — never the
       // legacy `organization_fee_percentage`, which holds the ORG's part
       // (Codex-2hxff.19 AGR-08). With no proposal the agreement pays
-      // nothing, so it shows 0.
+      // nothing, so it shows 0, and that is logged below.
       const agreementRows = await this.db
         .select({
+          agreementId: schema.creatorOrganizationAgreements.id,
           creatorId: schema.creatorOrganizationAgreements.creatorId,
           shareBps: schema.agreementProposals.proposedCreatorSharePercent,
           name: schema.users.name,
@@ -1094,6 +1095,15 @@ export class AdminAnalyticsService extends BaseService {
           totalPages: 1,
         };
         return { items: [], pagination };
+      }
+      for (const row of agreementRows) {
+        if (row.shareBps === null) {
+          this.obs.error('agreement has no current proposal; it pays nothing', {
+            errorId: crypto.randomUUID(),
+            agreementId: row.agreementId,
+            organizationId,
+          });
+        }
       }
 
       const creatorIds = agreementRows.map((r) => r.creatorId);

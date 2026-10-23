@@ -280,6 +280,11 @@ describe('payouts Stripe keeps refusing wait for support', () => {
   }
 
   const context = { organizationId: 'org-under-test' };
+  const attemptOn = (payoutId: string) => ({
+    payoutId,
+    destination: stripeAccountId,
+    idempotencyKey: `payout_${payoutId}_1`,
+  });
 
   it('a permanent refusal on the write path flags the row at once, logged once with an errorId', async () => {
     vi.mocked(stripe.transfers.create).mockRejectedValueOnce(
@@ -335,7 +340,7 @@ describe('payouts Stripe keeps refusing wait for support', () => {
     const id = await failedRow();
 
     for (let attempt = 1; attempt < MAX_PAYOUT_FAILURES; attempt++) {
-      await recordTransferFailure(deps, id, refusal(), context);
+      await recordTransferFailure(deps, attemptOn(id), refusal(), context);
       const row = await rowOf(id);
       expect(row.failureCount).toBe(attempt);
       expect(row.needsReviewAt).toBeNull();
@@ -346,7 +351,7 @@ describe('payouts Stripe keeps refusing wait for support', () => {
     expect(obs.error).not.toHaveBeenCalled();
     expect(obs.warn).toHaveBeenCalledTimes(MAX_PAYOUT_FAILURES - 1);
 
-    await recordTransferFailure(deps, id, refusal(), context);
+    await recordTransferFailure(deps, attemptOn(id), refusal(), context);
 
     const flagged = await rowOf(id);
     expect(flagged).toMatchObject({
@@ -366,7 +371,7 @@ describe('payouts Stripe keeps refusing wait for support', () => {
 
     // A failure reported after the flag changes nothing and is not an error.
     obs.error.mockClear();
-    await recordTransferFailure(deps, id, refusal(), context);
+    await recordTransferFailure(deps, attemptOn(id), refusal(), context);
     expect(obs.error).not.toHaveBeenCalled();
     expect((await rowOf(id)).failureCount).toBe(MAX_PAYOUT_FAILURES);
   });
@@ -394,7 +399,12 @@ describe('payouts Stripe keeps refusing wait for support', () => {
     const id = await failedRow();
 
     for (let i = 0; i < 6; i++) {
-      await recordTransferFailure(deps, id, connectionError(), context);
+      await recordTransferFailure(
+        deps,
+        attemptOn(id),
+        connectionError(),
+        context
+      );
     }
 
     const row = await rowOf(id);
@@ -412,7 +422,12 @@ describe('payouts Stripe keeps refusing wait for support', () => {
     const id = await failedRow();
 
     for (let i = 0; i < 6; i++) {
-      await recordTransferFailure(deps, id, balanceInsufficient(), context);
+      await recordTransferFailure(
+        deps,
+        attemptOn(id),
+        balanceInsufficient(),
+        context
+      );
     }
 
     const row = await rowOf(id);
@@ -435,7 +450,12 @@ describe('payouts Stripe keeps refusing wait for support', () => {
 
   it('a flagged row is still owed: a refund cancels it', async () => {
     const id = await failedRow();
-    await recordTransferFailure(deps, id, permanentRefusal(), context);
+    await recordTransferFailure(
+      deps,
+      attemptOn(id),
+      permanentRefusal(),
+      context
+    );
     const flagged = await rowOf(id);
     expect(flagged.needsReviewAt).toBeInstanceOf(Date);
 
@@ -452,7 +472,12 @@ describe('payouts Stripe keeps refusing wait for support', () => {
 
   it('support releases a flagged row with the documented step, and the drains take it again', async () => {
     const id = await failedRow();
-    await recordTransferFailure(deps, id, permanentRefusal(), context);
+    await recordTransferFailure(
+      deps,
+      attemptOn(id),
+      permanentRefusal(),
+      context
+    );
     expect(await isDrainable(id)).toBe(false);
 
     // docs/payments/connect-and-payouts.md, "Releasing a flagged payout".
@@ -482,5 +507,102 @@ describe('payouts Stripe keeps refusing wait for support', () => {
     const row = await rowOf(id);
     expect(row.status).toBe('paid');
     expect(row.needsReviewAt).toBeNull();
+  });
+
+  describe('a refund cancels the row while its transfer is in flight, and Stripe never answers', () => {
+    /** One slice whose transfer call is cut off: the refund lands mid-call. */
+    async function sliceCutOffByRefund(transferLands: boolean) {
+      const stripeChargeId = charge();
+      const create = vi.mocked(stripe.transfers.create);
+      const makeTransfer = create.getMockImplementation();
+      create.mockImplementationOnce(async (params, options) => {
+        if (transferLands) await makeTransfer?.(params, options);
+        // charge.refunded's cancelUnpaidPayout, before the transfer is known.
+        await db
+          .update(payouts)
+          .set({ status: 'cancelled_by_refund', resolvedAt: new Date() })
+          .where(eq(payouts.stripeChargeId, stripeChargeId));
+        throw connectionError();
+      });
+      const idempotencyKey = `${stripeChargeId}_creator_${creatorId}`;
+      const outcome = await recordSlice(deps, {
+        payoutType: 'creator_payout',
+        amountCents: 640,
+        organizationId: orgId,
+        source: { sourceType: 'subscription', subscriptionId },
+        stripeChargeId,
+        transferGroup: `sub_${subscriptionId}`,
+        sendTransferGroup: true,
+        payee: {
+          userId: creatorId,
+          account: { stripeAccountId, chargesEnabled: true },
+        },
+        idempotencyKey,
+        metadata: { subscription_id: subscriptionId },
+      });
+      return { outcome, idempotencyKey };
+    }
+
+    it('a transfer that landed is found by its payout_id and reversed in full', async () => {
+      const { outcome } = await sliceCutOffByRefund(true);
+
+      if (outcome?.kind !== 'surplus') throw new Error('expected surplus');
+      expect(outcome.reversed).toBe(true);
+      expect(stripe.transfers.createReversal).toHaveBeenCalledWith(
+        outcome.transferId,
+        expect.objectContaining({
+          metadata: expect.objectContaining({ payout_id: outcome.payoutId }),
+        }),
+        { idempotencyKey: `${outcome.transferId}_reversal_surplus` }
+      );
+      const row = await rowOf(outcome.payoutId);
+      expect(row.status).toBe('cancelled_by_refund');
+      // Logged once, by the reversal: never a "the drains retry it" warning.
+      expect(obs.warn).not.toHaveBeenCalled();
+      expect(obs.error).toHaveBeenCalledWith(
+        expect.stringContaining('reversed it'),
+        expect.objectContaining({
+          errorId: expect.any(String),
+          payoutId: outcome.payoutId,
+        })
+      );
+    });
+
+    it('a transfer that cannot be found is an error with its idempotency key, for a person to check', async () => {
+      const { outcome, idempotencyKey } = await sliceCutOffByRefund(false);
+
+      if (outcome?.kind !== 'failed') throw new Error('expected failed');
+      expect(stripe.transfers.createReversal).not.toHaveBeenCalled();
+      expect(obs.warn).not.toHaveBeenCalled();
+      expect(obs.error).toHaveBeenCalledOnce();
+      expect(obs.error).toHaveBeenCalledWith(
+        expect.stringContaining('may have landed'),
+        expect.objectContaining({
+          errorId: expect.any(String),
+          payoutId: outcome.payoutId,
+          idempotencyKey,
+          rowStatus: 'cancelled_by_refund',
+        })
+      );
+    });
+
+    it('a refusal on a cancelled row sent nothing: no lookup, no error', async () => {
+      const id = await failedRow();
+      await db
+        .update(payouts)
+        .set({ status: 'cancelled_by_refund', resolvedAt: new Date() })
+        .where(eq(payouts.id, id));
+
+      expect(
+        await recordTransferFailure(deps, attemptOn(id), refusal(), context)
+      ).toBeNull();
+
+      expect(stripe.transfers.list).not.toHaveBeenCalled();
+      expect(obs.error).not.toHaveBeenCalled();
+      expect(obs.warn).toHaveBeenCalledWith(
+        expect.stringContaining('nothing was sent'),
+        expect.objectContaining({ payoutId: id })
+      );
+    });
   });
 });
