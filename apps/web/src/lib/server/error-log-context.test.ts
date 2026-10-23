@@ -25,12 +25,17 @@ import {
   logUnhandledError,
 } from './error-log-context';
 
-const event = (href: string, method = 'GET') =>
+const event = (href: string, method = 'GET', headers?: HeadersInit) =>
   ({
-    request: new Request(href, { method }),
+    request: new Request(href, { method, headers }),
     url: new URL(href),
     locals: { requestId: 'req-1' },
   }) as Parameters<typeof errorLogContext>[1];
+
+/** The Accept a browser's native form submit sends. */
+const BROWSER_ACCEPT = {
+  accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+};
 
 describe('errorLogContext', () => {
   it("carries a worker failure's status and code, and the org's host", () => {
@@ -152,23 +157,18 @@ describe('logUnhandledError', () => {
     expect(context.kitMessage).toHaveLength(200);
   });
 
-  // Kit looks an action up on a plain object and refuses `default` by name,
-  // so these resolve to something that throws: a 500 the client chose.
+  // The 500s Kit raises for `?/default` or `?/valueOf` never get this far
+  // (unservableActionHook refuses those POSTs), so a 500 here is ours, and a
+  // client appending such a name must not be able to hide it.
   it.each([
-    'default',
-    'valueOf',
-    '__proto__',
-    'constructor',
-    'hasOwnProperty',
-  ])('logs the 500 for a POST naming ?/%s as a warning', (name) => {
-    logUnhandledError(
-      new Error('action is not a function'),
-      event(`http://lvh.me:3000/content/first?/${name}`, 'POST'),
-      500
-    );
+    ['a page POST', 'http://lvh.me:3000/content/first?/valueOf'],
+    ['an endpoint POST', 'http://lvh.me:3000/api/progress-beacon?/default'],
+    ['a POST naming __proto__', 'http://lvh.me:3000/login?/__proto__'],
+  ])('tracks every 500, whatever the URL names: %s', (_label, href) => {
+    logUnhandledError(new TypeError('boom'), event(href, 'POST'), 500);
 
-    expect(mockLogger.warn).toHaveBeenCalled();
-    expect(mockLogger.trackError).not.toHaveBeenCalled();
+    expect(mockLogger.trackError).toHaveBeenCalled();
+    expect(mockLogger.warn).not.toHaveBeenCalled();
   });
 
   // A real action that throws is a bug of ours.
@@ -240,7 +240,8 @@ describe('logUnhandledError', () => {
       new Error('POST method not allowed. No form actions exist for this page'),
       event(
         'http://lvh.me:3000/forgot-password?/remote=a1b2c3/requestReset',
-        'POST'
+        'POST',
+        BROWSER_ACCEPT
       ),
       405
     );
@@ -252,11 +253,45 @@ describe('logUnhandledError', () => {
     expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
 
+  // A POST asking for JSON goes to the page's own actions; Kit never takes it
+  // as a remote-form submit, so its 405 is not a stale remote form.
+  it('does not flag a JSON POST carrying ?/remote= as a remote form', () => {
+    logUnhandledError(
+      new Error('POST method not allowed. No form actions exist for this page'),
+      event('http://lvh.me:3000/forgot-password?/remote=a1b2c3/x', 'POST', {
+        accept: 'application/json',
+      }),
+      405
+    );
+
+    const [, context] = mockLogger.warn.mock.calls[0];
+    expect(context).not.toHaveProperty('staleRemoteForm');
+  });
+
+  // For a remote call Kit sets `event.url`'s search from a header the client
+  // sets; the action is read from the request's own URL, as Kit reads it.
+  it("reads the action from the request, not a remote call's page URL", () => {
+    logUnhandledError(
+      new Error("No action with name 'purchase' found"),
+      {
+        request: new Request('http://lvh.me:3000/_app/remote/abc/save', {
+          method: 'POST',
+        }),
+        url: new URL('http://lvh.me:3000/content/first?/purchase'),
+        locals: { requestId: 'req-1' },
+      } as Parameters<typeof errorLogContext>[1],
+      404
+    );
+
+    const [, context] = mockLogger.warn.mock.calls[0];
+    expect(context).not.toHaveProperty('staleAction');
+  });
+
   // Kit takes a POST as a remote-form submit only when the param has a value.
   it('does not flag an empty ?/remote= as either', () => {
     logUnhandledError(
       new Error('POST method not allowed. No form actions exist for this page'),
-      event('http://lvh.me:3000/?/remote=', 'POST'),
+      event('http://lvh.me:3000/?/remote=', 'POST', BROWSER_ACCEPT),
       405
     );
 

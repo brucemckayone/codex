@@ -14,6 +14,7 @@
  */
 import type { RequestEvent } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
+import { namedFormAction } from './form-action';
 import { apiErrorFields } from './read-failure';
 import { issuePaths, type ValidationIssue } from './validation-error';
 
@@ -35,39 +36,33 @@ export function errorLogContext(
   };
 }
 
-/** The form action a request names, as Kit reads it: the first `?/<name>` key. */
-function namedAction(event: LoggedEvent): string | undefined {
-  for (const [key] of event.url.searchParams) {
-    if (key.startsWith('/')) return key.slice(1);
-  }
-  return undefined;
-}
-
-/** A native POST to a remote `form()`: Kit takes one only when `?/remote=` has a value. */
+/**
+ * A native browser POST to a remote `form()`. Kit takes a POST as one only
+ * when `?/remote=` has a value and the request does not ask for JSON (one that
+ * does goes to the page's own actions), and a browser's native submit leads
+ * its Accept header with text/html.
+ */
 function isRemoteFormPost(event: LoggedEvent): boolean {
-  return Boolean(event.url.searchParams.get('/remote'));
+  const accept = event.request.headers.get('accept') ?? '';
+  return (
+    Boolean(new URL(event.request.url).searchParams.get('/remote')) &&
+    accept.trimStart().startsWith('text/html')
+  );
 }
 
 /**
  * True for an error that is SvelteKit refusing the request, which the
- * request, not our code, caused. Below 500 it always is: an HttpError never
+ * request, not our code, caused: any status below 500. An HttpError never
  * reaches `handleError`, so a status below 500 there is one of Kit's own
  * refusals (an unmatched route, a missing form action, a wrong method or
- * content type), and the client chose everything that decided it. So is a 500
- * for a POST naming Kit's reserved `default` action or a member of
- * `Object.prototype` (`?/valueOf`, `?/__proto__`): Kit looks an action up on a
- * plain object, so those resolve to something that throws. They are warnings,
- * never tracked, so no script can raise error-level alarms with them.
+ * content type), and the client chose everything that decided it. They are
+ * warnings, never tracked, so no script can raise error-level alarms with
+ * them. A 500 is always tracked: the 500s Kit raises for an action no page
+ * can have never get this far (`unservableActionHook` refuses those POSTs
+ * first), so a rule here keyed on the URL would only hide real ones.
  */
-function isRequestRefusal(event: LoggedEvent, responseStatus: number): boolean {
-  if (responseStatus < 500) return true;
-  const action = namedAction(event);
-  return (
-    event.request.method === 'POST' &&
-    action !== undefined &&
-    !isRemoteFormPost(event) &&
-    (action === 'default' || action in Object.prototype)
-  );
+function isRequestRefusal(responseStatus: number): boolean {
+  return responseStatus < 500;
 }
 
 /**
@@ -89,7 +84,7 @@ function deployFlags(
     responseStatus === 405 && message.includes('No form actions exist');
   if (noActions && isRemoteFormPost(event)) return { staleRemoteForm: true };
 
-  const action = namedAction(event);
+  const action = namedFormAction(event.request);
   const namedPageAction = action !== undefined && action !== 'remote';
   const noSuchAction =
     responseStatus === 404 && message.startsWith('No action with name');
@@ -115,7 +110,7 @@ export function logUnhandledError(
   responseStatus: number
 ): void {
   const context = errorLogContext(error, event, responseStatus);
-  if (isRequestRefusal(event, responseStatus)) {
+  if (isRequestRefusal(responseStatus)) {
     const message = error instanceof Error ? error.message : String(error);
     logger.warn('Request refused by SvelteKit', {
       ...context,

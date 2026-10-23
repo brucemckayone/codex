@@ -41,6 +41,7 @@ import {
   handleValidationError,
   junkHostHook,
   shouldShortCircuitHost,
+  unservableActionHook,
 } from './hooks.server';
 
 // The real `sequence()` enters SvelteKit's per-request tracing store, which
@@ -442,5 +443,66 @@ describe('handleValidationError — a refused remote input', () => {
       expect.objectContaining({ issues: ['slug'] })
     );
     warn.mockRestore();
+  });
+});
+
+// Kit looks a form action up on a plain object and refuses an explicit
+// `?/default` by throwing, so these POSTs were tracked 500s any client could
+// cause. The hook answers them with a 404 before Kit dispatches them.
+describe('unservableActionHook', () => {
+  const hookInput = (href: string, method: string) => {
+    const resolve = vi.fn(async () => new Response('rendered page'));
+    const input = {
+      event: { url: new URL(href), request: new Request(href, { method }) },
+      resolve,
+    } as unknown as Parameters<typeof unservableActionHook>[0];
+    return { input, resolve };
+  };
+
+  it.each([
+    'default',
+    'valueOf',
+    '__proto__',
+    'constructor',
+    'toString',
+  ])('answers a POST naming ?/%s with a 404, before Kit sees it', async (name) => {
+    const { input, resolve } = hookInput(
+      `http://lvh.me:3000/content/first?/${name}`,
+      'POST'
+    );
+
+    const response = await unservableActionHook(input);
+
+    expect(response.status).toBe(404);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a real action', 'POST', 'http://lvh.me:3000/content/first?/purchase'],
+    ['the default action (no ?/)', 'POST', 'http://lvh.me:3000/login'],
+    [
+      'a remote form submit',
+      'POST',
+      'http://lvh.me:3000/forgot-password?/remote=a1b2c3/requestReset',
+    ],
+    ['a GET naming ?/valueOf', 'GET', 'http://lvh.me:3000/explore?/valueOf'],
+  ])('passes %s through', async (_label, method, href) => {
+    const { input, resolve } = hookInput(href, method);
+
+    await unservableActionHook(input);
+
+    expect(resolve).toHaveBeenCalled();
+  });
+
+  it('runs before the session hook in the real sequence', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const source = await readFile(
+      join(import.meta.dirname, 'hooks.server.ts'),
+      'utf8'
+    );
+    const order = source.match(/export const handle = sequence\(([\s\S]*?)\);/);
+
+    expect(order?.[1]).toMatch(/unservableActionHook,\s*sessionHook/);
   });
 });

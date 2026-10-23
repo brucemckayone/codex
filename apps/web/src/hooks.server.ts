@@ -26,6 +26,7 @@ import {
   logRefusedRemoteInput,
   logUnhandledError,
 } from '$lib/server/error-log-context';
+import { namesUnservableAction } from '$lib/server/form-action';
 import { validationErrorFor } from '$lib/server/validation-error';
 import { getSubdomainContext } from '$lib/utils/subdomain';
 
@@ -151,6 +152,23 @@ export const junkHostHook: Handle = async ({ event, resolve }) => {
 const cdnAssetHook: Handle = async ({ event, resolve }) => {
   const response = await tryServeCdnAsset(event);
   return response ?? resolve(event);
+};
+
+/**
+ * Refuses a POST naming a form action no page can have (Codex-osuqt): Kit's
+ * reserved `default`, or an `Object.prototype` member such as `?/valueOf`
+ * (`namesUnservableAction`). SvelteKit's own handling of those throws, so each
+ * was a tracked 500 any client could cause. Answered here, before Kit
+ * dispatches it, with the 404 Kit gives any other unknown action, so no
+ * error-log rule has to guess which 500s were these. Runs before the session
+ * hook: a refused probe costs no session lookup.
+ */
+export const unservableActionHook: Handle = async ({ event, resolve }) => {
+  if (!namesUnservableAction(event.request)) return resolve(event);
+  return new Response('Not Found', {
+    status: 404,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  });
 };
 
 /**
@@ -282,6 +300,7 @@ const cdnRewriteHook: Handle = async ({ event, resolve }) => {
 export const handle = sequence(
   junkHostHook,
   cdnAssetHook,
+  unservableActionHook,
   sessionHook,
   securityHook,
   cdnRewriteHook
