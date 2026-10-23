@@ -89,17 +89,22 @@ can each pay only one connected account, so neither can split a sale three ways.
 ## Rules that always hold
 
 1. **GBP only.** Every amount is in pence; every Stripe call passes `gbp`.
-   Every transfer site asserts the currency before calling Stripe — **gap**:
-   `Codex-2hxff.23` (one-off transfer site has no assertion).
+   Every payment path checks the currency before it records a split, with one
+   shared guard (`assertGbpOnly` in `@codex/payments`); anything else is
+   refused as `UNSUPPORTED_CURRENCY`.
 2. **Studio is the only place prices are set.** A price edited in the Stripe
    Dashboard is recorded as drift and never applied to anyone.
 3. **No £0 offers.** A price of £0 is refused when it is written.
 4. **Every penny is accounted for.** Each sale stores its split, and every
    slice that is owed to someone has a row in the payouts ledger — paid, or
    pending until it can be paid. Nothing is dropped with only a log line.
-5. **Financial records are permanent.** Purchases, subscriptions, payouts and
-   refund reviews are never hard-deleted or cascade-deleted — **gap**:
-   `Codex-2hxff.23` (user deletion cascades).
+5. **Financial records are permanent.** Purchases, subscriptions, course
+   subscriptions, payouts, refunds, disputes and refund reviews are never
+   hard-deleted or cascade-deleted. The database refuses it: every foreign key
+   from them to a user, organisation or course is `ON DELETE RESTRICT`
+   (migration 0111). Deleting an account anonymises the user (name, email and
+   profile are blanked) and keeps their money history. Their Stripe Customer
+   is left as it is, because it is the payment record (owner, 2026-10-23).
 6. **Money-moving Stripe calls are idempotent.** Each uses a deterministic
    idempotency key built from the charge and the slice, and the slice's ledger
    row is reserved before the transfer, so a retried webhook can never pay

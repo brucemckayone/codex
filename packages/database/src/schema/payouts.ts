@@ -12,7 +12,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { courseSubscriptions } from './course-commerce';
-import { purchases } from './ecommerce';
+import { creatorOrganizationAgreements, purchases } from './ecommerce';
 import { organizations } from './organizations';
 import { subscriptions } from './subscriptions';
 import { users } from './users';
@@ -37,13 +37,15 @@ export const payouts = pgTable(
 
     // organizationId nullable to admit bi-party (creator-direct) payouts —
     // Codex-ne89a unlocks the actual code path, h69cg makes the ledger ready.
+    // Both payee FKs RESTRICT: the ledger outlives its user and organisation
+    // (Codex-2hxff.23, docs/payments/README.md).
     organizationId: uuid('organization_id').references(() => organizations.id, {
-      onDelete: 'cascade',
+      onDelete: 'restrict',
     }),
     // userId nullable to admit platform_fee rows — the platform isn't a user
     // and there is no "recipient" for the platform's retained slice.
     userId: text('user_id').references(() => users.id, {
-      onDelete: 'cascade',
+      onDelete: 'restrict',
     }),
     subscriptionId: uuid('subscription_id').references(() => subscriptions.id, {
       onDelete: 'set null',
@@ -59,6 +61,14 @@ export const payouts = pgTable(
     // deleting the source never destroys the immutable ledger row.
     courseSubscriptionId: uuid('course_subscription_id').references(
       () => courseSubscriptions.id,
+      { onDelete: 'set null' }
+    ),
+    // Codex-2hxff.19: the creator agreement a creator slice was split by
+    // (docs/payments/agreements.md, "the purchase or invoice records which
+    // agreement it used"). An invoice has no row of its own, so its slices
+    // carry it. Null on every other slice, and on rows written before 0111.
+    creatorOrgAgreementId: uuid('creator_org_agreement_id').references(
+      () => creatorOrganizationAgreements.id,
       { onDelete: 'set null' }
     ),
 
@@ -99,6 +109,19 @@ export const payouts = pgTable(
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     retryCount: integer('retry_count').notNull().default(0),
     lastRetryAt: timestamp('last_retry_at', { withTimezone: true }),
+
+    // Codex-2hxff.48: a payout Stripe keeps refusing stops retrying and waits
+    // for support. `failureCount` counts REFUSALS only (an outage retries
+    // without using an attempt, as refund clawbacks do); a permanent refusal
+    // or the fifth one sets `needsReviewAt`, and the drains skip the row. Its
+    // status stays `failed`, so refunds, disputes and earnings still treat
+    // the money as owed. Support releases it by clearing `needsReviewAt` and
+    // `failureCount` (docs/payments/connect-and-payouts.md). `retryCount`
+    // above counts every claim, outages included, so it cannot do this job.
+    lastErrorCode: varchar('last_error_code', { length: 64 }),
+    lastErrorType: varchar('last_error_type', { length: 64 }),
+    failureCount: integer('failure_count').notNull().default(0),
+    needsReviewAt: timestamp('needs_review_at', { withTimezone: true }),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -178,8 +201,18 @@ export const payouts = pgTable(
     index('idx_payouts_unresolved')
       .on(table.userId, table.organizationId, table.attemptedAt)
       .where(sql`${table.status} IN ('pending', 'failed')`),
+    // Support's queue of payouts waiting for a person (Codex-2hxff.48).
+    index('idx_payouts_needs_review')
+      .on(table.needsReviewAt)
+      .where(
+        sql`${table.needsReviewAt} IS NOT NULL AND ${table.status} = 'failed'`
+      ),
 
     check('check_payouts_amount_positive', sql`${table.amountCents} > 0`),
+    check(
+      'check_payouts_failure_count_nonnegative',
+      sql`${table.failureCount} >= 0`
+    ),
     check(
       'check_payouts_status',
       sql`${table.status} IN ('paid', 'pending', 'failed', 'reversed', 'cancelled_by_refund', 'cancelled_by_dispute')`

@@ -25,6 +25,9 @@ export {
   reverseEarlierRefunds,
   reverseEarlierRefundsAfterCommit,
 } from './clawback';
+// GBP in, GBP out: the guard every path runs before it records a split
+// (Codex-2hxff.23 PAY-25)
+export { assertGbpOnly } from './currency';
 // The charge an invoice payment settled on: the key every invoice payout
 // uses (Codex-2hxff.50)
 export { resolveInvoiceCharge } from './invoice-charge';

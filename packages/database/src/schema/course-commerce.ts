@@ -83,12 +83,14 @@ export const courseSubscriptions = pgTable(
   'course_subscriptions',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    // RESTRICT, never cascade: money history outlives its user (Codex-2hxff.23,
+    // docs/payments/README.md). Account deletion anonymises; it never deletes.
     userId: text('user_id')
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
     courseId: uuid('course_id')
       .notNull()
-      .references(() => courses.id, { onDelete: 'cascade' }),
+      .references(() => courses.id, { onDelete: 'restrict' }),
     planId: uuid('plan_id')
       .notNull()
       .references(() => courseSubscriptionPlans.id, { onDelete: 'restrict' }),

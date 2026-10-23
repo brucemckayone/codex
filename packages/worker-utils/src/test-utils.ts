@@ -141,8 +141,9 @@ export async function createTestUser(
 /**
  * Cleans up test user and associated sessions from database
  *
- * SECURITY: Cascade delete is configured in schema, so deleting
- * the user will automatically delete associated sessions.
+ * Sessions cascade from the user. Money rows do NOT: purchases, payouts and
+ * subscriptions RESTRICT their user (Codex-2hxff.23), so a user who bought or
+ * earned anything must have those rows deleted first, or this throws 23503.
  *
  * @param userId - User ID to clean up
  */

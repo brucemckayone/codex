@@ -102,12 +102,14 @@ export const subscriptions = pgTable(
   'subscriptions',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    // RESTRICT, never cascade: money history outlives its user (Codex-2hxff.23,
+    // docs/payments/README.md). Account deletion anonymises; it never deletes.
     userId: text('user_id')
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
     organizationId: uuid('organization_id')
       .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
+      .references(() => organizations.id, { onDelete: 'restrict' }),
     tierId: uuid('tier_id')
       .notNull()
       .references(() => subscriptionTiers.id, { onDelete: 'restrict' }),
@@ -318,15 +320,17 @@ export const pendingPayouts = pgTable(
   'pending_payouts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    // RESTRICT, never cascade: money history outlives its user (Codex-2hxff.23,
+    // docs/payments/README.md). Account deletion anonymises; it never deletes.
     userId: text('user_id')
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
     organizationId: uuid('organization_id')
       .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
+      .references(() => organizations.id, { onDelete: 'restrict' }),
     subscriptionId: uuid('subscription_id')
       .notNull()
-      .references(() => subscriptions.id, { onDelete: 'cascade' }),
+      .references(() => subscriptions.id, { onDelete: 'restrict' }),
 
     amountCents: integer('amount_cents').notNull(),
     currency: varchar('currency', { length: 3 }).notNull().default('gbp'),

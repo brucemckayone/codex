@@ -134,6 +134,12 @@ export interface RecordSliceInput {
   idempotencyKey: string;
   /** Extra transfer metadata (source ids for support). */
   metadata: Record<string, string>;
+  /**
+   * The creator agreement this slice was split by, recorded on the row
+   * (Codex-2hxff.19: "the purchase or invoice records which agreement it
+   * used"). Creator slices only; absent for every other slice.
+   */
+  creatorOrgAgreementId?: string | null;
 }
 
 export type RecordSliceOutcome =
@@ -332,6 +338,7 @@ async function reserveSlice(
       reason,
       stripeChargeId: input.stripeChargeId,
       transferGroup: input.transferGroup,
+      creatorOrgAgreementId: input.creatorOrgAgreementId ?? null,
       // About to transfer: this opens the attempt lease, so no drain sends
       // the row while its first transfer is still in flight.
       ...(reason === null ? { lastRetryAt: new Date() } : {}),
