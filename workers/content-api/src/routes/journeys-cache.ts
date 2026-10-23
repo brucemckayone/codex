@@ -143,9 +143,10 @@ export async function getCachedPublishedCourses<T>(
  * (public info / stats / creators). Those report `contentCount` and member
  * counts, which a portal write does not change — a portal is a course plus a
  * page, and neither is content. Invalidating them here would throw away a
- * 30-minute branding cache on every cover upload for no gain.
+ * 4-hour branding cache on every cover upload for no gain.
  *
- * Call AFTER the DB write has succeeded, never before (@codex/cache rules).
+ * Call after the DB write, also when it throws: a write can commit and still
+ * report failure (Codex-kk9nv.16). Never before it (@codex/cache rules).
  */
 export function bumpOrgJourneysVersion(
   env: HonoEnv['Bindings'],

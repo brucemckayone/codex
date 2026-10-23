@@ -263,6 +263,20 @@ export class OrganizationService extends BaseService {
 
     try {
       return await this.db.transaction(async (tx) => {
+        // A live creator, read under KEY SHARE (Codex-kk9nv.8). An account
+        // deletion holds the row exclusively from its scrub to its commit, so
+        // a create in that window waits, then finds no live user, instead of
+        // giving the org a deleted owner. One that reads first makes the scrub
+        // wait, and the deletion then sees this org and refuses.
+        const [creator] = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(and(eq(users.id, userId), whereNotDeleted(users)))
+          .for('key share');
+        if (!creator) {
+          throw new NotFoundError('User not found');
+        }
+
         const [newOrganization] = await tx
           .insert(organizations)
           .values({
@@ -1042,11 +1056,16 @@ export class OrganizationService extends BaseService {
   }> {
     try {
       return await this.db.transaction(async (tx) => {
-        // Find user by email
-        const user = await tx.query.users.findFirst({
-          where: eq(users.email, input.email),
-          columns: { id: true },
-        });
+        // Find the live user by email, under KEY SHARE (Codex-kk9nv.8). An
+        // account deletion holds the row exclusively from its scrub to its
+        // commit, so an invite reading in that window waits, then finds the
+        // address gone. One that reads first makes the scrub wait, and the
+        // deletion then ends this membership with the others.
+        const [user] = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(and(eq(users.email, input.email), whereNotDeleted(users)))
+          .for('key share');
 
         if (!user) {
           throw new NotFoundError('User not found by email', {
@@ -1144,6 +1163,18 @@ export class OrganizationService extends BaseService {
           throw new OwnershipTransferRequiredError({ organizationId });
         }
 
+        // Before the membership change: every path that locks both takes the
+        // ownership offer first (see removeMember), so none can deadlock.
+        const withdrawn =
+          role === 'admin' || role === 'creator'
+            ? null
+            : await withdrawOfferForIneligibleRecipient(
+                tx,
+                organizationId,
+                userId,
+                new Date()
+              );
+
         const [updated] = await tx
           .update(organizationMemberships)
           .set({ role, updatedAt: new Date() })
@@ -1158,16 +1189,6 @@ export class OrganizationService extends BaseService {
         if (!updated) {
           throw new MemberNotFoundError(userId);
         }
-
-        const withdrawn =
-          role === 'admin' || role === 'creator'
-            ? null
-            : await withdrawOfferForIneligibleRecipient(
-                tx,
-                organizationId,
-                userId,
-                new Date()
-              );
 
         return {
           membership: {
@@ -1221,12 +1242,21 @@ export class OrganizationService extends BaseService {
         }
 
         const now = new Date();
-        // Before the membership change: see withdrawProposalsOnDeparture.
+        // Both before the membership change, in this order: every path that
+        // locks these rows takes a proposal, then an ownership offer, then a
+        // membership (see withdrawProposalsOnDeparture), so none can deadlock
+        // with an accept or an account deletion (Codex-kk9nv.8).
         await withdrawProposalsOnDeparture(tx, {
           organizationId,
           creatorId: userId,
           at: now,
         });
+        const withdrawn = await withdrawOfferForIneligibleRecipient(
+          tx,
+          organizationId,
+          userId,
+          now
+        );
         await tx
           .update(organizationMemberships)
           .set({ status: 'inactive', updatedAt: now })
@@ -1247,12 +1277,6 @@ export class OrganizationService extends BaseService {
           creatorId: userId,
           at: now,
         });
-        const withdrawn = await withdrawOfferForIneligibleRecipient(
-          tx,
-          organizationId,
-          userId,
-          now
-        );
         const departure: MemberDeparture = {
           organizationId,
           creatorId: userId,

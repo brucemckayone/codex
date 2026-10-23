@@ -18,6 +18,7 @@ import {
   agreementProposals,
   content,
   creatorOnboarding,
+  creatorOrganizationAgreements,
   mediaItems,
   notificationPreferences,
   organizationMemberships,
@@ -809,22 +810,26 @@ export class IdentityService extends BaseService {
         listingSlugs,
       } = await this.db.transaction(async (tx) => {
         const now = new Date();
-        // LOCK ORDER. Every other path that locks this user's rows takes a
-        // proposal or an ownership offer first, then the membership, then,
-        // through the foreign key of a row it inserts naming the user, a KEY
-        // SHARE on the user's row: accepting or countering a proposal,
-        // accepting an offer. Taken in any other order, the two transactions
-        // wait on each other and Postgres aborts one (Codex-kk9nv.8). So the
-        // locks are taken in that order, before anything is written.
+        // LOCK ORDER (Codex-kk9nv.8). A member's rows are locked as: a
+        // proposal, then an ownership offer, then the membership, then the
+        // creator's agreements. Accepting or countering a proposal; accepting,
+        // withdrawing or reassigning an offer; removing a member or changing
+        // their role all keep that order. A row inserted naming the user
+        // takes a KEY SHARE on the user's row, through its foreign key. Two
+        // transactions taking the same rows in different orders wait on each
+        // other until Postgres aborts one, so every lock here is taken in that
+        // order before anything is written.
         //
         // The user's row first, as NO KEY UPDATE. It still makes an avatar
         // upload or removal wait for the scrub, so the URL read here is the
         // one the scrub drops (processUserAvatar then skips a deleted user).
         // And it lets another transaction's foreign-key check through, so a
         // transfer or an agreement already under way commits instead of
-        // waiting on this one. The scrub's email change upgrades the lock
-        // later, once every membership is held below, when no path that
-        // inserts a row naming the user can still be part-way through.
+        // waiting on this one. The scrub's email change upgrades the lock to
+        // FOR UPDATE; a transaction then still holding a KEY SHARE only delays
+        // it. The one exception is the subscription webhook, which inserts a
+        // subscription naming the user before it upserts their membership
+        // (Codex-kk9nv.20).
         const [before] = await tx
           .select({ avatarUrl: users.avatarUrl })
           .from(users)
@@ -850,18 +855,28 @@ export class IdentityService extends BaseService {
             )
           )
           .for('update');
-        // The owner check above ran before this transaction, and an ownership
-        // transfer to this user can commit since. Every membership row they
-        // hold is locked, with no role filter, and the question asked again.
-        // A transfer that took its offer first has committed by now, so this
-        // reads the new role and refuses. One that comes second finds its
-        // offer withdrawn below, and refuses.
+        // Every membership row, with no role filter: a transfer that took its
+        // offer first has committed by now, and one that comes second finds
+        // its offer withdrawn below, and refuses.
         await tx
           .select({ id: organizationMemberships.id })
           .from(organizationMemberships)
           .where(eq(organizationMemberships.userId, userId))
           .for('update');
-        await this.refuseIfOwner(tx, userId);
+        // A creator ending their own agreement locks it, then takes a KEY
+        // SHARE on their row (the agreement names them as who ended it), which
+        // the scrub's lock would block. Locked here, under NO KEY UPDATE,
+        // that ending commits first.
+        await tx
+          .select({ id: creatorOrganizationAgreements.id })
+          .from(creatorOrganizationAgreements)
+          .where(
+            and(
+              eq(creatorOrganizationAgreements.creatorId, userId),
+              eq(creatorOrganizationAgreements.status, 'active')
+            )
+          )
+          .for('update');
         // Read while they still list the user: once the account is deleted
         // and its memberships ended, no query finds which cached creators
         // lists still show the real name and avatar (Codex-kk9nv.8). Inside
@@ -890,6 +905,14 @@ export class IdentityService extends BaseService {
         if (!deleted) {
           throw new UserNotFoundError(userId);
         }
+
+        // The owner check above ran before this transaction. Asked again now
+        // that the scrub holds the user's row exclusively. Whatever made them
+        // an owner since inserted a row naming them: a transfer's ownership
+        // period, or a new org's membership. Its KEY SHARE made the scrub
+        // wait, so it has committed, and no new one can start until this
+        // commits. A refusal rolls the scrub back.
+        await this.refuseIfOwner(tx, userId);
 
         // Each write below reads afresh, so it also covers a proposal or an
         // offer whose creator held a membership row this transaction waited
@@ -1003,7 +1026,7 @@ export class IdentityService extends BaseService {
       // abort if that API stalled (Codex-na929). Bounded by the purger's
       // timeout, and it never rejects.
       const purged = this.purgeAvatarEdgeCache(userId);
-      if (this.waitUntil) this.waitUntil(purged);
+      const handedOff = this.handOffPurge(purged, userId);
       try {
         // Every session this user holds, so the caller can clear the cached
         // copies. Read AFTER the tombstone lands: a session created between
@@ -1022,12 +1045,35 @@ export class IdentityService extends BaseService {
 
         return rows.map((r) => r.token);
       } finally {
-        // Without a request to outlive (unit tests, scripts): awaited, still
-        // after the token read.
-        if (!this.waitUntil) await purged;
+        // Without a request to outlive (unit tests, scripts), or when the
+        // hook refused it: awaited, still after the token read.
+        if (!handedOff) await purged;
       }
     } catch (error) {
       throw this.handleError(error, 'IdentityService.deleteAccount');
+    }
+  }
+
+  /**
+   * Hand the purge to `waitUntil`. False when there is no hook, or the hook
+   * throws (a spent ExecutionContext, say): the deletion has committed, so a
+   * hook's failure must not report it failed, and the caller awaits the
+   * purge itself.
+   */
+  private handOffPurge(purge: Promise<void>, userId: string): boolean {
+    if (!this.waitUntil) return false;
+    try {
+      this.waitUntil(purge);
+      return true;
+    } catch (error) {
+      this.obs.warn(
+        'Avatar edge cache purge not handed to waitUntil; awaited',
+        {
+          userId,
+          error: messageForLog(error),
+        }
+      );
+      return false;
     }
   }
 

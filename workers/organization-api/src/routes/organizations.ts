@@ -586,6 +586,8 @@ app.patch(
         const cache = new VersionedCache({
           kv: ctx.env.CACHE_KV,
           waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+          // The cache logs a failed invalidation only through its own obs.
+          obs: ctx.obs,
         });
         const invalidations: Promise<void>[] = [
           invalidateOrgPublicCaches(cache, updated.slug),
@@ -679,6 +681,7 @@ app.delete(
           const cache = new VersionedCache({
             kv: ctx.env.CACHE_KV,
             waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+            obs: ctx.obs,
           });
           invalidations.push(invalidateOrgPublicCaches(cache, org.slug));
           // Drop the `slug -> id` entry too — its 24h TTL is a backstop, far too

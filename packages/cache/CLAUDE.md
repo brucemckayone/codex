@@ -104,8 +104,8 @@ Example: invalidating `userId = 'abc'` increments `cache:version:abc` from `v1` 
 | Data | TTL |
 |---|---|
 | User profile / preferences | 600s (10 min) |
-| Org config / branding | 1800s (30 min) |
-| Org members | 1800s (30 min) |
+| Org config / branding, stats, creators list | 14400s (4h, `CACHE_TTL.ORG_PUBLIC_INFO_SECONDS`) |
+| Org membership (procedure policy check) | 60s (`MEMBERSHIP_CACHE_TTL_SECONDS`, worker-utils `org-helpers.ts`) |
 | Content metadata | 300s (5 min) |
 | Content access / permissions | 60–300s (1–5 min) |
 

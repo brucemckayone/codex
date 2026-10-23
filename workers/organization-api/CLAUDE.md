@@ -13,7 +13,7 @@ Organization CRUD, membership management, subscription tiers, follower relations
 | GET | `/api/organizations/slug/:slug` | `required` | params: `slug` | 200 | Get org by slug |
 | GET | `/api/organizations/my-organizations` | `required` | — | 200 | User's orgs with their role |
 | GET | `/api/organizations/public/:slug` | `none` | params: `slug` | 200 | Public branding fields only (legacy) |
-| GET | `/api/organizations/public/:slug/info` | `none` | params: `slug` | 200 | Full public org identity + branding; KV-cached 30 min |
+| GET | `/api/organizations/public/:slug/info` | `none` | params: `slug` | 200 | Full public org identity + branding; KV-cached 4h |
 | GET | `/api/organizations/public/:slug/stats` | `none` | params: `slug` | 200 | Content counts, duration, creator count, views; KV-cached |
 | GET | `/api/organizations/public/:slug/creators` | `none` | params + query: page/limit | 200 | Paginated public creator profiles; KV-cached |
 | GET | `/api/organizations/public/:slug/members` | `none` | params + query: page/limit/role | 200 | Paginated public member profiles; KV-cached |

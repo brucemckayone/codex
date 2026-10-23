@@ -1016,12 +1016,13 @@ describe('IdentityService', () => {
     const mockExistsLimit = vi.fn();
     const mockSessionsWhere = vi.fn();
     const mockUserFor = vi.fn();
-    // The lock on every membership row the user holds, taken inside the
-    // transaction before the owner question is asked again (Codex-kk9nv.8),
-    // and the locks on their open proposals and offers, taken before it.
+    // The locks on the user's open proposals and offers, every membership
+    // row and their active agreements, taken in that order before any write
+    // (Codex-kk9nv.8).
     const mockMembershipLock = vi.fn();
     const mockProposalLock = vi.fn();
     const mockOfferLock = vi.fn();
+    const mockAgreementLock = vi.fn();
     const mockInnerJoin = vi.fn(() => ({ where: mockOwnedOrgsWhere }));
     const mockExistsWhere = vi.fn(() => ({ limit: mockExistsLimit }));
     // Dispatch by OBJECT IDENTITY against the imported table, not by sniffing a
@@ -1032,6 +1033,10 @@ describe('IdentityService', () => {
       [users, { where: () => ({ for: mockUserFor }) }],
       [agreementProposals, { where: () => ({ for: mockProposalLock }) }],
       [organizationOwnershipOffers, { where: () => ({ for: mockOfferLock }) }],
+      [
+        creatorOrganizationAgreements,
+        { where: () => ({ for: mockAgreementLock }) },
+      ],
       [
         organizationMemberships,
         {
@@ -1063,6 +1068,7 @@ describe('IdentityService', () => {
       mockMembershipLock.mockReset().mockResolvedValue([]);
       mockProposalLock.mockReset().mockResolvedValue([]);
       mockOfferLock.mockReset().mockResolvedValue([]);
+      mockAgreementLock.mockReset().mockResolvedValue([]);
       // Defaults: owns no organizations, has no content/uploads, one session,
       // no avatar.
       mockOwnedOrgsWhere.mockResolvedValue([]);
@@ -1177,33 +1183,36 @@ describe('IdentityService', () => {
       expect(params).toEqual([userId, 'active', 'invited', 'owner']);
     });
 
-    // The owner check runs before the transaction; a transfer to this user
-    // can commit in between. Asked again inside, after every membership row
-    // the user holds is locked, so the transfer is seen (Codex-kk9nv.8).
-    it('refuses inside the transaction when the user became an owner after the first check', async () => {
+    // The owner check runs before the transaction; a transfer to this user,
+    // or an org they create, can commit in between. Asked again once the
+    // scrub holds the user's row exclusively: whatever made them an owner
+    // inserted a row naming them, so it has committed by then (Codex-kk9nv.8).
+    it('refuses after the scrub when the user became an owner after the first check', async () => {
       mockReturning.mockResolvedValue([{ id: userId }]);
       mockOwnedOrgsWhere
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ name: 'Studio Alpha' }]);
+      const update = mockDb.update as ReturnType<typeof vi.fn>;
 
       await expect(service.deleteAccount(userId)).rejects.toThrow(
         AccountOwnsOrganizationError
       );
 
-      expect(mockMembershipLock).toHaveBeenCalledWith('update');
-      // Locked BEFORE the second question, or it could read a stale role.
-      const [lockedAt] = mockMembershipLock.mock.invocationCallOrder;
+      // Asked AFTER the scrub, or it could miss a row still being inserted.
+      const [scrubbedAt] = update.mock.invocationCallOrder;
       const secondAskAt = mockOwnedOrgsWhere.mock.invocationCallOrder[1];
-      expect(lockedAt).toBeLessThan(secondAskAt ?? 0);
-      // Refused before the scrub: nothing was written.
-      expect(mockDb.update).not.toHaveBeenCalled();
+      expect(update.mock.calls[0]?.[0]).toBe(users);
+      expect(scrubbedAt).toBeLessThan(secondAskAt ?? 0);
+      // And refused there: nothing past the scrub was written, and the throw
+      // rolls the scrub back.
+      expect(update).toHaveBeenCalledTimes(1);
     });
 
-    // Accepting or countering a proposal, and accepting an ownership offer,
-    // lock the proposal or the offer, then the membership, then (through a
-    // foreign key) a KEY SHARE on the user's row. Taken in another order, the
-    // two transactions wait on each other and Postgres aborts one.
-    it('takes its locks in the order the transfer and agreement paths take them, before any write', async () => {
+    // Every path that locks a member's rows takes a proposal, then an
+    // ownership offer, then the membership, then the creator's agreements.
+    // Taken in another order, two transactions wait on each other and
+    // Postgres aborts one.
+    it('takes its locks in the order every member path takes them, before any write', async () => {
       mockReturning.mockResolvedValue([{ id: userId }]);
 
       await service.deleteAccount(userId);
@@ -1215,11 +1224,13 @@ describe('IdentityService', () => {
       expect(mockProposalLock).toHaveBeenCalledWith('update');
       expect(mockOfferLock).toHaveBeenCalledWith('update');
       expect(mockMembershipLock).toHaveBeenCalledWith('update');
+      expect(mockAgreementLock).toHaveBeenCalledWith('update');
       const order = [
         mockUserFor,
         mockProposalLock,
         mockOfferLock,
         mockMembershipLock,
+        mockAgreementLock,
       ].map((lock) => lock.mock.invocationCallOrder[0] ?? 0);
       expect(order).toEqual([...order].sort((a, b) => a - b));
       expect(order.at(-1)).toBeLessThan(
@@ -1514,6 +1525,43 @@ describe('IdentityService', () => {
         ]);
         expect(deferred).toHaveLength(1);
         expect(purgePrefixes).toHaveBeenCalledTimes(1);
+      });
+
+      it('still returns the tokens when waitUntil throws, and awaits the purge instead', async () => {
+        // The deletion has committed: a spent ExecutionContext must not report
+        // it failed, or the route never clears the cached sessions.
+        // Settles a macrotask later, so only an awaited purge has settled by
+        // the time deleteAccount resolves.
+        let purgeSettled = false;
+        purgePrefixes.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              setTimeout(() => {
+                purgeSettled = true;
+                resolve({ ok: true });
+              }, 20);
+            })
+        );
+        const target = new IdentityService({
+          db: mockDb,
+          environment: 'test',
+          r2Service: mockR2Service,
+          r2PublicUrlBase: 'https://cdn-test.revelations.studio',
+          cdnPurger: { purgePrefixes },
+          waitUntil: () => {
+            throw new Error('Illegal invocation');
+          },
+        });
+        const warn = vi.spyOn(logsOf(target), 'warn');
+
+        await expect(target.deleteAccount(userId)).resolves.toEqual([
+          'tok-current',
+        ]);
+        expect(purgeSettled).toBe(true);
+        expect(warn).toHaveBeenCalledWith(
+          'Avatar edge cache purge not handed to waitUntil; awaited',
+          { userId, error: 'Illegal invocation' }
+        );
       });
 
       it('logs a missing purge config at error in production', async () => {

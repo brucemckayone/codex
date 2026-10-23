@@ -605,8 +605,10 @@ export async function withdrawOwnershipOffer(
   await expireStaleOwnershipOffers(db, organizationId, now);
 
   return await db.transaction(async (tx) => {
-    await lockOwnerMembership(tx, organizationId, ownerUserId);
+    // The offer, then the membership: the order every path takes them in,
+    // so this cannot deadlock with an accept (Codex-kk9nv.8).
     const offer = await lockOffer(tx, organizationId, offerId);
+    await lockOwnerMembership(tx, organizationId, ownerUserId);
     assertOpen(offer, now);
     return await closeOffer(tx, offer.id, now, {
       status: 'withdrawn',
@@ -736,6 +738,19 @@ export async function reassignOrganisationOwner(
   await expireStaleOwnershipOffers(db, organizationId, now);
 
   return await db.transaction(async (tx) => {
+    // The open offer locked before any membership: the order every path
+    // takes them in, so this cannot deadlock with an accept or an account
+    // deletion (Codex-kk9nv.8). It is closed further down.
+    await tx
+      .select({ id: organizationOwnershipOffers.id })
+      .from(organizationOwnershipOffers)
+      .where(
+        and(
+          eq(organizationOwnershipOffers.organizationId, organizationId),
+          eq(organizationOwnershipOffers.status, 'open')
+        )
+      )
+      .for('update');
     const [currentOwner] = await tx
       .select()
       .from(organizationMemberships)
@@ -759,22 +774,26 @@ export async function reassignOrganisationOwner(
       throw new IneligibleOwnershipRecipientError({ organizationId });
     }
 
-    const [openOffer] = await tx
-      .select()
-      .from(organizationOwnershipOffers)
+    // Closed by a fresh read, not by the id locked above: an offer the owner
+    // created while this waited on their membership has committed since,
+    // and is closed too. One open offer per org at most (its unique index).
+    const [withdrawnOffer = null] = await tx
+      .update(organizationOwnershipOffers)
+      .set({
+        status: 'withdrawn',
+        withdrawnReason: 'support_reassigned',
+        respondedAt: now,
+        updatedAt: now,
+      })
       .where(
         and(
           eq(organizationOwnershipOffers.organizationId, organizationId),
           eq(organizationOwnershipOffers.status, 'open')
         )
       )
-      .for('update');
-    const withdrawnOffer = openOffer
-      ? await closeOffer(tx, openOffer.id, now, {
-          status: 'withdrawn',
-          withdrawnReason: 'support_reassigned',
-        })
-      : null;
+      // Bare `.returning()`: the `Database | DatabaseWs` union collapses the
+      // projected overload.
+      .returning();
 
     const change = await moveOwnership(tx, {
       organizationId,

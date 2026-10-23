@@ -353,6 +353,19 @@ export class ImageProcessingService extends BaseService {
     const nameOf = (folder: string) => folder.split('/').at(-1) ?? '';
     const sized = folders.filter((f) => readStillFolderName(nameOf(f)));
     const unsizedKept = sized.length < folders.length;
+    if (!this.orphanedFileService) {
+      // Nothing records them, so this line is their only trace.
+      this.obs.error(
+        'Still change failed and its outcome is unknown; no orphan service, folders untracked',
+        {
+          context,
+          resourceId: target.entityId,
+          folders: folders.map(nameOf),
+          error: messageForLog(cause),
+        }
+      );
+      return;
+    }
     this.obs[unsizedKept ? 'error' : 'warn'](
       'Still change failed and its outcome is unknown; folders kept for the sweep',
       {
@@ -363,7 +376,7 @@ export class ImageProcessingService extends BaseService {
         error: messageForLog(cause),
       }
     );
-    if (sized.length > 0 && this.orphanedFileService) {
+    if (sized.length > 0) {
       await recordOrphansOrLog(
         this.orphanedFileService,
         sized
