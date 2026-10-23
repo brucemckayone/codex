@@ -32,9 +32,22 @@ export function errorLogContext(
 }
 
 /**
+ * SvelteKit's own 404 for a URL no route matches (`Not found: /path`), the
+ * one error it hands `handleError` that a crawler, not our code, causes.
+ */
+function isUnmatchedRoute(error: unknown, responseStatus: number): boolean {
+  return (
+    responseStatus === 404 &&
+    error instanceof Error &&
+    error.message.startsWith('Not found:')
+  );
+}
+
+/**
  * Logs an error SvelteKit hands `handleError`. It is also called for every
- * unmatched route, with a 404: a crawler's miss is a warning, not a crash, so
- * only a response status of 500 or more is tracked as an error.
+ * unmatched route: a crawler's miss is a warning, not a crash. Every other
+ * error is tracked, including Kit's own sub-500 refusals of a form action (a
+ * 404 for a renamed action, a 405), which a deploy of ours can cause.
  */
 export function logUnhandledError(
   error: unknown,
@@ -42,7 +55,7 @@ export function logUnhandledError(
   responseStatus: number
 ): void {
   const context = errorLogContext(error, event, responseStatus);
-  if (responseStatus < 500) {
+  if (isUnmatchedRoute(error, responseStatus)) {
     logger.warn(
       error instanceof Error ? error.message : String(error),
       context
@@ -53,4 +66,19 @@ export function logUnhandledError(
     error instanceof Error ? error : new Error(String(error)),
     context
   );
+}
+
+/**
+ * The body a status below 500 shows: SvelteKit's own refusal (an unmatched
+ * route, a missing form action, a wrong method), whose `message` ("Not Found")
+ * is safe to show. "An unexpected error occurred" told a visitor with a
+ * mistyped URL the opposite of what happened. Null at 500 and above, which
+ * keep the sanitised body.
+ */
+export function clientErrorBody(
+  status: number,
+  message: string
+): App.Error | null {
+  if (status >= 500) return null;
+  return { message, code: status === 404 ? 'NOT_FOUND' : 'BAD_REQUEST' };
 }

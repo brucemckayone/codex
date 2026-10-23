@@ -18,7 +18,7 @@ import {
   uuidSchema,
 } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
-import { createSearchQuerySchema } from '../shared/search-schema';
+import { createSearchQuerySchema, stripNul } from '../shared/search-schema';
 
 /**
  * Content Management Validation Schemas
@@ -669,7 +669,7 @@ export const contentQuerySchema = paginationSchema.extend({
   status: contentStatusEnum.optional(),
   contentType: contentTypeEnum.optional(),
   accessType: contentAccessTypeEnum.optional(),
-  category: z.string().max(100).optional(),
+  category: z.string().max(100).transform(stripNul).optional(),
   organizationId: uuidSchema.optional(),
   // A user id (BetterAuth text), not a uuid: uuidSchema refused every real
   // one, so /explore's creator filter 400'd (Codex-osuqt).
@@ -756,7 +756,11 @@ export const orgIdQuerySchema = uuidSchema.transform((id) => id.toLowerCase());
 export const publicContentQuerySchema = paginationSchema
   .extend({
     orgId: orgIdQuerySchema.optional(),
-    slug: z.string().max(PUBLIC_CONTENT_SLUG_MAX).optional(),
+    slug: z
+      .string()
+      .max(PUBLIC_CONTENT_SLUG_MAX)
+      .transform(stripNul)
+      .optional(),
     contentType: contentTypeEnum.optional(),
     // Topic-category filter — matches a category slug in the same space (org).
     // Powers the landing "Browse by topic" and the /explore ?category= deep

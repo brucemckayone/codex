@@ -236,6 +236,28 @@ describe('explore +page.server.ts — cache wiring', () => {
       expect(filtered).not.toBe(unfiltered);
     });
 
+    // The key carries the visitor's unvalidated `?category=` text, so the
+    // cache-stats line names a constant, never the key.
+    it('logs cache stats under a constant label, never the raw key', async () => {
+      const { logger } = await import('$lib/observability');
+      const info = vi.spyOn(logger, 'info');
+      const { load } = await import('../+page.server');
+
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: 'http://lvh.me:3000/explore?sort=popular&category=private-words',
+        })
+      );
+
+      const stats = info.mock.calls.find(
+        ([message]) => message === 'cache stats'
+      );
+      expect(stats?.[1]).toMatchObject({ cacheType: 'explore:auth-sort' });
+      expect(JSON.stringify(info.mock.calls)).not.toContain('private-words');
+      info.mockRestore();
+    });
+
     it('forwards category to the browse endpoint (it is part of contentQuerySchema)', async () => {
       const { load } = await import('../+page.server');
 
@@ -272,6 +294,18 @@ describe('explore +page.server.ts — cache wiring', () => {
         expect.objectContaining({ featured: true, sort: 'newest' })
       );
       expect(result.filters.sort).toBe('newest');
+    });
+
+    // paginationSchema caps page at 1000: a hand-edited ?page=1001 was a
+    // content-api 400 that this load let through as a 500.
+    it('bounds the page at what the list accepts', async () => {
+      const { load } = await import('../+page.server');
+
+      await load(baseInput({ url: 'http://lvh.me:3000/explore?page=5000' }));
+
+      expect(getPublicContentMock).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 1000 })
+      );
     });
 
     it('uses 180s TTL for auth-sort cache entries', async () => {

@@ -253,8 +253,10 @@ type ServerApi = ReturnType<typeof createServerApi>;
  * stays empty, and the failure is logged).
  *
  * Through the server API, not the `getPublicContent` remote query, whose SSR
- * result SvelteKit serialises into the page with every body (see
- * {@link withoutRawBody}). The cards render metadata only.
+ * result SvelteKit serialises into the page whatever the load returns. This
+ * is a catalogue read, which listPublic already returns without bodies; the
+ * strip here is defence in depth, so no body reaches the page even if that
+ * changes (see {@link withoutRawBody}). The cards render metadata only.
  */
 export function loadRelatedContent(
   api: ServerApi,

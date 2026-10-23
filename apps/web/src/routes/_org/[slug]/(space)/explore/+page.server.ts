@@ -164,7 +164,13 @@ export const load: PageServerLoad = async ({
     sort = 'newest';
   }
 
-  const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
+  // Bounded to what the list schemas accept (paginationSchema caps page at
+  // 1000): a hand-edited `?page=1001` was a content-api 400 that this load
+  // let through as a 500.
+  const page = Math.min(
+    1000,
+    Math.max(1, Number.parseInt(pageParam ?? '1', 10) || 1)
+  );
 
   // ── Category strip options ────────────────────────────────────────
   // The org's TAXONOMY, deliberately NOT scraped from the loaded items. Three
@@ -255,7 +261,9 @@ export const load: PageServerLoad = async ({
           ),
         { ttl: 180 }
       );
-      logCacheStats(cache, logger, { cacheType: dataType });
+      // A constant label, never the key: the key carries the visitor's
+      // unvalidated `?category=` text, which must not reach a log.
+      logCacheStats(cache, logger, { cacheType: 'explore:auth-sort' });
     } else {
       contentResult = await fetchAuthContent(
         api,

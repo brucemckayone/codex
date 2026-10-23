@@ -262,7 +262,12 @@
     <RelatedContent
       items={filtered}
       {creatorName}
-      hrefBuilder={(item) => buildContentUrl(page.url, item)}
+      hrefBuilder={(item) =>
+        buildContentUrl(page.url, {
+          slug: item.slug,
+          id: item.id,
+          organizationSlug: item.organization?.slug,
+        })}
       class="content-detail__related--streamed"
     />
   {/if}

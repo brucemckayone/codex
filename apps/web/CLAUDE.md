@@ -25,7 +25,7 @@ Frontend SvelteKit application for the Codex platform.
 
 ### Routing
 - **MUST** use root-relative paths on org subdomains — slug is in hostname, not URL path
-- **MUST** use `buildContentUrl(page.url, content)` for content links — handles cross-org subdomain routing. It reads a FLAT `organizationSlug`, so map a public-list row's `organization?.slug`. On a creator's pages, or for any card that may be personal (no org), use `buildCreatorContentUrl(page.url, username, item)`: `buildContentUrl`'s bare `/content/{slug}` matches no route on the creators host (Codex-osuqt)
+- **MUST** use `buildContentUrl(page.url, content)` for content links — handles cross-org subdomain routing. It reads a FLAT `organizationSlug`, so map a public-list row's `organization?.slug`. On a creator's pages (the username comes from the route), use `buildCreatorContentUrl(page.url, username, item)`: `buildContentUrl`'s bare `/content/{slug}` matches no route on the creators host (Codex-osuqt). A public-list row carries no username, so a personal piece's card anywhere else (/discover) has no working link yet (Codex-tdse8)
 - **MUST** use `buildOrgUrl()` for cross-org navigation — different org = different origin
 - **NEVER** include route group names (`(platform)`, `(space)`, `(auth)`) in hrefs or `goto()`
 
@@ -143,7 +143,7 @@ Rerouting: `bruce-studio.lvh.me:3000/explore` → `_org/bruce-studio/(space)/exp
 
 **Exception:** StudioSwitcher and other cross-org navigation uses `buildOrgUrl()` since it targets a different origin.
 
-**Content links:** `buildContentUrl(page.url, content)` from `$lib/utils/subdomain.ts`; on a creator's pages, or for a card that may be personal, `buildCreatorContentUrl(page.url, username, item)`.
+**Content links:** `buildContentUrl(page.url, content)` from `$lib/utils/subdomain.ts`; on a creator's pages (username from the route), `buildCreatorContentUrl(page.url, username, item)`.
 
 ---
 

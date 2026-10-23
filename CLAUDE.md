@@ -214,7 +214,7 @@ comments. The reasoning for its settings lives here.
 ### Implementing Content/Media Features
 
 - Content lifecycle → `@codex/content` `ContentService`
-- Content page URLs → `buildContentUrl(page.url, content)` from `apps/web/src/lib/utils/subdomain.ts` — handles cross-org subdomain routing and slug/ID fallback. On a creator's pages, or for a card that may be personal (no org), `buildCreatorContentUrl(page.url, username, item)`: a bare `/content/{slug}` matches no route on the creators host
+- Content page URLs → `buildContentUrl(page.url, content)` from `apps/web/src/lib/utils/subdomain.ts` — handles cross-org subdomain routing and slug/ID fallback. On a creator's pages (username from the route), `buildCreatorContentUrl(page.url, username, item)`: a bare `/content/{slug}` matches no route on the creators host. A public-list row carries no username, so a personal card elsewhere (/discover) has no working link yet (Codex-tdse8)
 - Media upload/transcode → `@codex/content` `MediaItemService`
 - Streaming URLs → `@codex/access` `ContentAccessService` (signed R2 URLs)
 - Transcoding → `@codex/transcoding` `TranscodingService` → RunPod

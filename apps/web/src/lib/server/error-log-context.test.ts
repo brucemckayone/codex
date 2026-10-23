@@ -16,7 +16,11 @@ const mockLogger = vi.hoisted(() => ({
 }));
 vi.mock('$lib/observability', () => ({ logger: mockLogger }));
 
-import { errorLogContext, logUnhandledError } from './error-log-context';
+import {
+  clientErrorBody,
+  errorLogContext,
+  logUnhandledError,
+} from './error-log-context';
 
 const event = (href: string, method = 'GET') =>
   ({
@@ -102,5 +106,41 @@ describe('logUnhandledError', () => {
       expect.objectContaining({ responseStatus: 500 })
     );
     expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+
+  // Kit's sub-500 refusals of a form action come from our own code (a
+  // renamed action after a deploy), so they stay tracked.
+  it.each([
+    [404, "No action with name 'purchase' found"],
+    [405, 'No form actions exist for this page'],
+  ])('tracks a %i from a form action as an error', (status, message) => {
+    logUnhandledError(
+      new Error(message),
+      event('http://lvh.me:3000/content/first?/purchase', 'POST'),
+      status
+    );
+
+    expect(mockLogger.trackError).toHaveBeenCalled();
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('clientErrorBody', () => {
+  it("shows Kit's own message for a 404, not 'An unexpected error'", () => {
+    expect(clientErrorBody(404, 'Not Found')).toEqual({
+      message: 'Not Found',
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('marks any other status below 500 a bad request', () => {
+    expect(clientErrorBody(405, 'Method Not Allowed')).toEqual({
+      message: 'Method Not Allowed',
+      code: 'BAD_REQUEST',
+    });
+  });
+
+  it('leaves a 500 to the sanitised body', () => {
+    expect(clientErrorBody(500, 'Internal Error')).toBeNull();
   });
 });

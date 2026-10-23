@@ -1323,3 +1323,32 @@ describe('Codex-osuqt: a public orgId is lowercased', () => {
     ).toBe(false);
   });
 });
+
+// Postgres refuses NUL in text, so one in a search, slug or topic from a URL
+// was a 500 and an error-level log, whichever caller sent it.
+describe('Codex-osuqt: NUL is dropped at the schema edge', () => {
+  it('drops a NUL from a public search', () => {
+    const result = publicContentQuerySchema.parse({
+      orgId: '4d111111-1111-4111-8111-111111111111',
+      search: 'ps\0alm',
+    });
+
+    expect(result.search).toBe('psalm');
+  });
+
+  it('drops a NUL from a public slug', () => {
+    expect(publicContentQuerySchema.parse({ slug: 'a\0b' }).slug).toBe('ab');
+  });
+
+  it('drops a NUL from a browse category', () => {
+    expect(contentQuerySchema.parse({ category: 'ritu\0al' }).category).toBe(
+      'ritual'
+    );
+  });
+
+  it('still trims a search after dropping the NUL', () => {
+    expect(
+      publicContentQuerySchema.parse({ slug: 'x', search: '\0 psalm ' }).search
+    ).toBe('psalm');
+  });
+});

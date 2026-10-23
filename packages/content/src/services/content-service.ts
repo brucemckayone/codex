@@ -247,9 +247,10 @@ export class ContentService extends BaseService {
    * IDOR guard: every `categoryId` MUST resolve to a live category in the
    * CONTENT'S OWN SPACE — same `organizationId` for org content, or the
    * creator's own personal space (`organizationId IS NULL AND creatorId` match)
-   * for orgless content — mirroring the `listPublic` space scoping. A foreign
-   * or unknown id fails loudly with a `ValidationError`; ids are never silently
-   * dropped.
+   * for orgless content. (The public read side is narrower: `listPublic`
+   * matches an org's topics only, and refuses a category with no org.) A
+   * foreign or unknown id fails loudly with a `ValidationError`; ids are never
+   * silently dropped.
    *
    * @throws {ValidationError} If any id is out-of-space, unknown, or soft-deleted
    */

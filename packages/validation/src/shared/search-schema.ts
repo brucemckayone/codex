@@ -48,6 +48,14 @@ export const SEARCH_MIN_QUERY_LENGTH = 3;
 // ============================================================================
 
 /**
+ * Drops NUL (U+0000) from a text value (Codex-osuqt). Postgres refuses NUL in
+ * text (22021), so one in a search, slug or topic from a URL was a 500 and an
+ * error-level log any visitor could raise. No real search, slug or topic
+ * contains one, so dropping it changes no legitimate query.
+ */
+export const stripNul = (value: string): string => value.replaceAll('\0', '');
+
+/**
  * Build the schema for an optional free-text `search` query parameter.
  *
  * - **trims**, so `'   '` normalises to `''` rather than becoming a
@@ -79,8 +87,13 @@ export const SEARCH_MIN_QUERY_LENGTH = 3;
 export const createSearchQuerySchema = (maxLength: number = 255) =>
   z
     .string()
-    .trim()
-    .max(maxLength, `Search query must be ${maxLength} characters or less`)
+    .transform(stripNul)
+    .pipe(
+      z
+        .string()
+        .trim()
+        .max(maxLength, `Search query must be ${maxLength} characters or less`)
+    )
     .optional();
 
 // ============================================================================

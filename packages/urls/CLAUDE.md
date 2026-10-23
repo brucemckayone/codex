@@ -53,6 +53,7 @@ import {
   buildPlatformUrl,
   buildCreatorsUrl,
   buildContentUrl,
+  buildCreatorContentUrl, // a creator-page card: personal pieces to /@user/content/…, org pieces to the org subdomain
   buildJourneyUrl,   // journey/portal URL surfaces (JourneyUrlTarget, JourneySurface)
 } from '@codex/urls';
 ```
