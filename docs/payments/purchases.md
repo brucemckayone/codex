@@ -56,8 +56,12 @@ still buy it outright.
    `codex:resolve-customer:${userId}`. If Stripe reports the cached Customer
    missing, the id is cleared and resolution runs once more. A Customer tagged
    by another environment is never adopted (untagged ones, from before tagging,
-   still can be). A Customer is never adopted from another user — **gap**:
-   `Codex-2hxff.23` (today a match by email can adopt one).
+   still can be). A Customer is never adopted from another user: a match by
+   email is skipped when it is tagged with another `codex_user_id`, or when
+   another users row holds it (a deleted user's included), and a new one is
+   created instead. After a stale Customer, the new one is created under
+   `codex:resolve-customer:${userId}:after:${staleId}`, so Stripe cannot replay
+   the stale one.
 2. A Checkout Session is created:
    - `mode: 'payment'`, card payments;
    - one line item with inline `price_data` — currency `gbp`, `unit_amount`

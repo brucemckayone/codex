@@ -188,7 +188,7 @@ preview to confirm.
 - **Upgrade** (higher recurring price): takes effect immediately and the
   prorated difference is charged now. If that payment fails, Stripe keeps the
   old tier and the API returns 402 with a plain message — never Stripe's raw
-  error text (**gap**: `Codex-2hxff.23`). The idempotency key includes the
+  error text, which is logged with an errorId instead. The idempotency key includes the
   target price and the proration date; a downgrade's does too.
 - **Downgrade** (lower recurring price): takes effect at the **end of the paid
   period**; the subscriber keeps the higher tier until then (owner decision

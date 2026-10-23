@@ -28,16 +28,14 @@ lockdown (`.4`) and environment tagging (`.5`) ("Include both"). Follow-ups:
 pre-merge review's findings, `Codex-2hxff.37`–`.46`. Of those, `.37` (an
 organisation with no active owner had no payee, so its slice was dropped) was
 fixed by PR 2 below. The production checks to run around these releases
-(R1–R6) are in [release-checklist.md](release-checklist.md).
+(R1–R7) are in [release-checklist.md](release-checklist.md).
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
-| `Codex-2hxff.13` | P2 | Pending money is released as soon as the payee becomes payable | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
 | `Codex-2hxff.16` | P2 | Downgrades at period end; tier reorders warn first | [subscriptions](subscriptions.md#changing-tier) |
-| `Codex-2hxff.19` | P2 | One agreement resolver for every payment path | [agreements](agreements.md#how-a-share-applies) |
 | `Codex-2hxff.20` | P2 | Revenue screens and agreement emails show the real numbers and working links | [fees-and-splits](fees-and-splits.md#reporting) |
+| `Codex-fazy6` | P3 | The web app shows a creator's share from the accepted proposal, not the legacy column | [agreements](agreements.md#what-an-agreement-is) |
 | `Codex-2hxff.22` | P2 | Success pages wait for our record | [purchases](purchases.md#after-payment) |
-| `Codex-2hxff.23` | P2 | Financial records are permanent; one Customer per user; GBP asserted everywhere | [README](README.md#rules-that-always-hold) |
 | `Codex-2hxff.24` | P3 | Dev and CI Stripe setup mirrors production; customer stub removed | [operations](operations.md#local-development) |
 | `Codex-2hxff.25` | P2 | CI exercises real webhook round trips | [operations](operations.md#testing) |
 | `Codex-2hxff.28` | P2 | Support issues refunds from an admin screen, not the Stripe Dashboard, within 14 days | [purchases](purchases.md#refunds) |
@@ -50,9 +48,29 @@ fixed by PR 2 below. The production checks to run around these releases
 | `Codex-2hxff.58` | P2 | A dispute whose webhook events were missed is still settled, by a reconciliation sweep | [dispute record](dispute-record.md) |
 | `Codex-2hxff.59` | P3 | Dispute edge cases: later re-pay causes, a refund under a full chargeback, zero reductions | [dispute record](dispute-record.md) |
 | `Codex-2hxff.60` | P3 | A subscriber is told when a dispute pauses their access | [subscription disputes](subscription-disputes.md) |
-| `Codex-2hxff.61` | P3 | A revocation also stops streams already playing, not only new stream URLs | [access](access.md) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
+
+`Codex-2hxff.13`, `.19`, `.23`, `.48` and `.61` (the money fixes) are fixed in
+one pull request with migrations `0111` and `0112`, and so are not listed above:
+- the database refuses to delete a user, organisation or course with money
+  history, and account deletion keeps anonymising (owner, "Keep them,
+  anonymise");
+- a Customer is never adopted from another user;
+- every payment path asserts GBP;
+- no raw Stripe text reaches a client;
+- a cleared fee is really cleared, and its audit row says so;
+- one lock and one share source for every agreement path, with the agreement
+  recorded on the purchase or slice;
+- pending money is released across all of a payee's organisations as soon as
+  they are payable, and on a manual sync;
+- a payout Stripe keeps refusing stops after a permanent refusal or the fifth
+  and waits for support (owner, "Stop, flag for support"; only refusals count;
+  release by a documented step, R7);
+- our own dispute pause no longer clears the streaming block, and the docs say
+  plainly that a link already issued plays to its expiry (owner, option c).
+The web app's agreement pages still read the legacy share column (the API now
+also returns `creatorSharePercent`): `Codex-fazy6`.
 
 `Codex-2hxff.7` (fee configuration on every sale path, including the 25p
 minimum), `.8` (partial refunds) and `.9` (disputes) were merged to `dev` and
