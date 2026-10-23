@@ -35,14 +35,24 @@ export function errorLogContext(
  * SvelteKit's own refusals that a crawler or a scanner, not our code, causes:
  * the 404 for a URL no route matches (`Not found: /path`), and the 405 for a
  * POST to a page with no form actions at all (`… No form actions exist for
- * this page`). A renamed action's 404 (`No action with name …`) is a deploy
- * of ours, so it is not noise.
+ * this page`). A deploy of ours is not noise: a renamed action's 404 (`No
+ * action with name …`), and a native POST to a remote `form()` that was
+ * renamed or moved, which Kit refuses with that same 405 text. Kit marks a
+ * remote-form POST with a `?/remote=` param, which is how the two are told
+ * apart.
  */
-function isCrawlerNoise(error: unknown, responseStatus: number): boolean {
+function isCrawlerNoise(
+  error: unknown,
+  event: LoggedEvent,
+  responseStatus: number
+): boolean {
   if (!(error instanceof Error)) return false;
   if (responseStatus === 404) return error.message.startsWith('Not found:');
   if (responseStatus === 405) {
-    return error.message.includes('No form actions exist');
+    return (
+      !event.url.searchParams.has('/remote') &&
+      error.message.includes('No form actions exist')
+    );
   }
   return false;
 }
@@ -51,7 +61,7 @@ function isCrawlerNoise(error: unknown, responseStatus: number): boolean {
  * Logs an error SvelteKit hands `handleError`. It is also called for every
  * unmatched route and every POST to a page without actions: a crawler's
  * noise is a warning, not a crash. Every other error is tracked, including a
- * renamed form action's 404.
+ * renamed form action's 404 and a stale remote form's 405.
  */
 export function logUnhandledError(
   error: unknown,
@@ -59,7 +69,7 @@ export function logUnhandledError(
   responseStatus: number
 ): void {
   const context = errorLogContext(error, event, responseStatus);
-  if (isCrawlerNoise(error, responseStatus)) {
+  if (isCrawlerNoise(error, event, responseStatus)) {
     logger.warn(
       error instanceof Error ? error.message : String(error),
       context

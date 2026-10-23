@@ -132,6 +132,22 @@ describe('logUnhandledError', () => {
     expect(mockLogger.warn).toHaveBeenCalled();
     expect(mockLogger.trackError).not.toHaveBeenCalled();
   });
+
+  // Kit refuses a native POST to a renamed or moved remote form() with the
+  // same 405 text, but that is a deploy of ours: tracked.
+  it("tracks a stale remote form's 405 as an error", () => {
+    logUnhandledError(
+      new Error('POST method not allowed. No form actions exist for this page'),
+      event(
+        'http://lvh.me:3000/forgot-password?/remote=a1b2c3/requestReset',
+        'POST'
+      ),
+      405
+    );
+
+    expect(mockLogger.trackError).toHaveBeenCalled();
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
 });
 
 describe('clientErrorBody', () => {

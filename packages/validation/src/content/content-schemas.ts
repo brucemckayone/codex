@@ -17,8 +17,15 @@ import {
   userIdSchema,
   uuidSchema,
 } from '../primitives';
-import { paginationSchema } from '../shared/pagination-schema';
-import { createSearchQuerySchema, hasNoNul } from '../shared/search-schema';
+import {
+  PAGINATION_MAX_PAGE,
+  paginationSchema,
+} from '../shared/pagination-schema';
+import {
+  createSearchQuerySchema,
+  hasNoNul,
+  SEARCH_MAX_QUERY_LENGTH,
+} from '../shared/search-schema';
 
 /**
  * Content Management Validation Schemas
@@ -659,6 +666,9 @@ export type PublishContentInput = z.infer<typeof publishContentSchema>;
  */
 export const sortOrderEnum = z.enum(['asc', 'desc']);
 
+/** The longest topic (category) slug: the `categories.slug` column width. */
+export const TOPIC_SLUG_MAX = 120;
+
 /**
  * Content query/filter schema
  * Used for listing and searching content
@@ -674,7 +684,7 @@ export const contentQuerySchema = paginationSchema.extend({
   // signed-in sorts). A NUL is refused: Postgres refuses NUL in text.
   category: z
     .string()
-    .max(120)
+    .max(TOPIC_SLUG_MAX)
     .refine(hasNoNul, 'Category must not contain NUL')
     .optional(),
   organizationId: uuidSchema.optional(),
@@ -683,7 +693,7 @@ export const contentQuerySchema = paginationSchema.extend({
   creatorId: userIdSchema.optional(),
 
   // Search
-  search: createSearchQuerySchema(255),
+  search: createSearchQuerySchema(SEARCH_MAX_QUERY_LENGTH),
 
   // Sorting
   sortBy: z
@@ -736,11 +746,20 @@ export const mediaQuerySchema = paginationSchema.extend({
 
 export type MediaQueryInput = z.infer<typeof mediaQuerySchema>;
 
-/**
- * The longest content slug a public read accepts. The web detail pages 404 a
- * longer one before sending it, so the API's 400 never surfaces as a 500.
- */
+/** The longest content slug a public read accepts. */
 export const PUBLIC_CONTENT_SLUG_MAX = 500;
+
+/**
+ * A content slug as a public read matches it. An exact-match identifier, so a
+ * NUL is refused, never stripped: `a\0b` rewritten to `ab` resolved a different
+ * piece, and `\0` rewritten to '' dropped the slug filter and answered a
+ * by-slug lookup with the catalogue. The web detail pages 404 a slug this
+ * refuses before sending it, so the API's 400 never surfaces as a 500.
+ */
+export const publicContentSlugSchema = z
+  .string()
+  .max(PUBLIC_CONTENT_SLUG_MAX)
+  .refine(hasNoNul, 'Slug must not contain NUL');
 
 /**
  * An org id that keys a KV cache (Codex-osuqt). Postgres compares uuids
@@ -763,8 +782,11 @@ export const orgIdQuerySchema = uuidSchema.transform((id) => id.toLowerCase());
  */
 export const topicSlugSchema = z
   .string()
-  .max(120)
+  .max(TOPIC_SLUG_MAX)
   .regex(/^[\p{L}\p{N}-]+$/u, 'Invalid category slug');
+
+/** The orders a public list can sort by. */
+const publicContentSortSchema = z.enum(['newest', 'oldest', 'title']);
 
 /**
  * Public content query schema (org- or creator-scoped)
@@ -777,21 +799,14 @@ export const topicSlugSchema = z
 export const publicContentQuerySchema = paginationSchema
   .extend({
     orgId: orgIdQuerySchema.optional(),
-    // An exact-match identifier, so a NUL is refused, never stripped: `a\0b`
-    // rewritten to `ab` resolved a different piece, and `\0` rewritten to ''
-    // dropped the slug filter and answered a by-slug lookup with the catalogue.
-    slug: z
-      .string()
-      .max(PUBLIC_CONTENT_SLUG_MAX)
-      .refine(hasNoNul, 'Slug must not contain NUL')
-      .optional(),
+    slug: publicContentSlugSchema.optional(),
     contentType: contentTypeEnum.optional(),
     // Topic-category filter — matches a category slug in the same space (org).
     // Powers the landing "Browse by topic" and the /explore ?category= deep
     // link. See topicSlugSchema for why its charset is a security control.
     category: topicSlugSchema.optional(),
-    search: createSearchQuerySchema(255),
-    sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
+    search: createSearchQuerySchema(SEARCH_MAX_QUERY_LENGTH),
+    sort: publicContentSortSchema.default('newest'),
     // A user id (BetterAuth text), not a uuid (Codex-osuqt).
     creatorId: userIdSchema.optional(),
     // Creator-flagged featured filter — true returns only featured items,
@@ -821,6 +836,29 @@ export const publicContentQuerySchema = paginationSchema
   }));
 
 export type PublicContentQueryInput = z.infer<typeof publicContentQuerySchema>;
+
+/**
+ * The arguments of the web `getPublicContent` remote query: an org's public
+ * list, called with JS values (numbers, booleans) rather than URL strings.
+ *
+ * Built from the same field rules as {@link publicContentQuerySchema}, never a
+ * copy of them (Codex-osuqt). A remote query is a public HTTP endpoint. An
+ * argument this refuses is a clean 400, but one it accepts and the API refuses
+ * comes back as an API 400 that SvelteKit turns into a 500, logged at error
+ * level. A hand-copied schema had drifted to accept a NUL slug and any page.
+ */
+export const publicContentArgsSchema = z.object({
+  orgId: orgIdQuerySchema,
+  slug: publicContentSlugSchema.optional(),
+  page: z.number().int().min(1).max(PAGINATION_MAX_PAGE).default(1).optional(),
+  limit: z.number().int().min(1).max(50).default(20).optional(),
+  contentType: contentTypeEnum.optional(),
+  category: topicSlugSchema.optional(),
+  search: createSearchQuerySchema(SEARCH_MAX_QUERY_LENGTH),
+  sort: publicContentSortSchema.default('newest').optional(),
+  creatorId: userIdSchema.optional(),
+  featured: z.boolean().optional(),
+});
 
 /**
  * Discover content query schema (platform-wide)

@@ -9,6 +9,7 @@ import {
   mediaQuerySchema,
   mediaStatusEnum,
   mediaTypeEnum,
+  publicContentArgsSchema,
   publicContentQuerySchema,
   topicSlugSchema,
   updateContentSchema,
@@ -1377,5 +1378,47 @@ describe('Codex-osuqt: one topic slug rule', () => {
     expect(
       contentQuerySchema.safeParse({ category: 'a'.repeat(121) }).success
     ).toBe(false);
+  });
+});
+
+// The web `getPublicContent` remote query is a public endpoint. An argument it
+// accepts but the API refuses came back as a 500 logged at error level; a
+// hand-copied schema had drifted to accept a NUL slug and any page.
+describe('Codex-osuqt: the remote query refuses what the API refuses', () => {
+  const orgId = '4d111111-1111-4111-8111-111111111111';
+
+  it('accepts what the org landing and explore send', () => {
+    expect(
+      publicContentArgsSchema.safeParse({
+        orgId,
+        page: 2,
+        limit: 12,
+        sort: 'newest',
+        category: 'café-del-mar',
+        search: 'psalm',
+        featured: true,
+      }).success
+    ).toBe(true);
+  });
+
+  it.each([
+    ['a NUL slug', { slug: '\0' }],
+    ['a slug carrying a NUL', { slug: 'a\0b' }],
+    ['a slug past the limit', { slug: 'a'.repeat(501) }],
+    ['a page past the last', { page: 1001 }],
+    ['a fractional page', { page: 1.5 }],
+    ['a cache-key delimiter in a topic', { category: 'x:feat:true' }],
+    ['a topic past the column', { category: 'a'.repeat(121) }],
+  ])('refuses %s, as the API does', (_label, extra) => {
+    const args = { orgId, ...extra };
+
+    expect(publicContentArgsSchema.safeParse(args).success).toBe(false);
+    expect(publicContentQuerySchema.safeParse(args).success).toBe(false);
+  });
+
+  it('lowercases the org id, as the API keys its cache', () => {
+    expect(
+      publicContentArgsSchema.parse({ orgId: orgId.toUpperCase() }).orgId
+    ).toBe(orgId);
   });
 });

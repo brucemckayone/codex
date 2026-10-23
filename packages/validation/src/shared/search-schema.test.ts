@@ -42,9 +42,11 @@ import {
 import { listUserLibrarySchema } from '../schemas/access';
 import { listSubscribersQuerySchema } from '../schemas/subscription';
 import {
+  boundSearchParam,
   createSearchQuerySchema,
   gateSearchQuery,
   isSearchQueryBelowFloor,
+  SEARCH_MAX_QUERY_LENGTH,
   SEARCH_MIN_QUERY_LENGTH,
 } from './search-schema';
 
@@ -247,5 +249,32 @@ describe('no hand-rolled search declaration survives in @codex/validation', () =
     }
 
     expect(offenders).toEqual([]);
+  });
+});
+
+// A server load forwards a URL's search to the API, which refuses one it
+// cannot take with a 400 the page logs as its own contract bug (Codex-osuqt).
+// So whatever a visitor puts in the URL, the bound value must parse.
+describe('boundSearchParam', () => {
+  it.each([
+    ['an over-long search', 'x'.repeat(5000)],
+    ['a NUL', 'ps\0alm'],
+    ['padding', '  psalm  '],
+    ['nothing', null],
+  ])('turns %s into a search the schema accepts', (_label, raw) => {
+    const bounded = boundSearchParam(raw);
+
+    expect(createSearchQuerySchema().safeParse(bounded).success).toBe(true);
+  });
+
+  it('cuts at the limit rather than refusing', () => {
+    expect(boundSearchParam('x'.repeat(5000))).toHaveLength(
+      SEARCH_MAX_QUERY_LENGTH
+    );
+  });
+
+  it('drops a NUL and trims, as the schema does', () => {
+    expect(boundSearchParam('\0 ps\0alm ')).toBe('psalm');
+    expect(boundSearchParam(null)).toBe('');
   });
 });

@@ -7,7 +7,7 @@
  * Form actions:
  * - purchase: Creates a Stripe checkout session and returns the redirect URL
  */
-import { PUBLIC_CONTENT_SLUG_MAX } from '@codex/validation';
+import { publicContentSlugSchema } from '@codex/validation';
 import { error } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
 import { createServerApi } from '$lib/server/api';
@@ -58,13 +58,10 @@ export const load: PageServerLoad = async ({
   //
   // No result is a 404. A failed request is not: it propagates as a 500, as
   // the creator detail page's does. A `.catch(() => null)` here used to turn
-  // every content-api outage into "Content not found". A slug longer than the
-  // query accepts, or with a NUL (which Postgres refuses in text), names
-  // nothing, so it is a 404 before any call.
-  if (
-    contentSlug.length > PUBLIC_CONTENT_SLUG_MAX ||
-    contentSlug.includes('\0')
-  ) {
+  // every content-api outage into "Content not found". A slug the public list
+  // refuses (too long, or with a NUL, which Postgres refuses in text) names
+  // nothing, so it is a 404 before any call: the rule is the API's own.
+  if (!publicContentSlugSchema.safeParse(contentSlug).success) {
     error(404, 'Content not found');
   }
   // Through the server API, NOT the `getPublicContent` remote query: SvelteKit

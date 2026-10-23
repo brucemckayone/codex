@@ -7,6 +7,7 @@
  * Sets PRIVATE cache headers — the page is auth-varying (creator layout
  * injects `user`), so it must not be shared-cached.
  */
+import { boundSearchParam, clampPageParam } from '@codex/validation';
 import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
@@ -16,6 +17,17 @@ import { creatorHandle } from '../creator-handle';
 import type { PageServerLoad } from './$types';
 
 const CONTENT_LIMIT = 12;
+
+/**
+ * `?type=` to the API's content type. A Map, not an object literal: an object
+ * answers `constructor` or `toString` from its prototype, so `?type=constructor`
+ * sent a content type the API refused with a 400.
+ */
+const CONTENT_TYPE_BY_FILTER = new Map([
+  ['video', 'video'],
+  ['audio', 'audio'],
+  ['article', 'written'],
+]);
 
 export const load: PageServerLoad = async ({
   params,
@@ -29,20 +41,14 @@ export const load: PageServerLoad = async ({
   const api = createServerApi(platform, cookies);
 
   // Parse URL search params for filtering and pagination. Bounded to what the
-  // public list accepts (page 1-1000, search trimmed to 255 with no NUL, which
-  // Postgres refuses in text and so was a content-api 500), so a hand-edited
-  // URL never reaches content-api as a 400: logReadFailure logs a
-  // 4xx at error level as OUR contract bug, and a visitor must not be able to
-  // raise that alarm with a URL.
-  const search = (url.searchParams.get('search') ?? '')
-    .replaceAll('\0', '')
-    .trim()
-    .slice(0, 255);
+  // public list accepts (a page it lists, a search with no NUL, which Postgres
+  // refuses in text and so was a content-api 500), so a hand-edited URL never
+  // reaches content-api as a 400: logReadFailure logs a 4xx at error level as
+  // OUR contract bug, and a visitor must not be able to raise that alarm with
+  // a URL.
+  const search = boundSearchParam(url.searchParams.get('search'));
   const typeFilter = url.searchParams.get('type') ?? 'all';
-  const page = Math.min(
-    1000,
-    Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1)
-  );
+  const page = clampPageParam(url.searchParams.get('page'));
 
   // The creator's public profile from identity-api. Note this used to read
   // `profileResult?.data?.id` off a raw `api.fetch`, i.e. it expected the
@@ -91,16 +97,9 @@ export const load: PageServerLoad = async ({
       contentParams.set('search', search);
     }
 
-    if (typeFilter && typeFilter !== 'all') {
-      const typeMap: Record<string, string> = {
-        video: 'video',
-        audio: 'audio',
-        article: 'written',
-      };
-      const mappedType = typeMap[typeFilter];
-      if (mappedType) {
-        contentParams.set('contentType', mappedType);
-      }
+    const contentType = CONTENT_TYPE_BY_FILTER.get(typeFilter);
+    if (contentType) {
+      contentParams.set('contentType', contentType);
     }
 
     const contentResult = await api.content.getPublicContent(contentParams);

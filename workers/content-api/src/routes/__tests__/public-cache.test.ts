@@ -244,6 +244,22 @@ describe('getCachedPublicContent', () => {
     expect(mockKV.put).not.toHaveBeenCalled();
   });
 
+  // The budget is in BYTES, as KV counts them: 230 Cyrillic letters are 230
+  // characters but 460 bytes, so a character count would let this key through.
+  it('counts the key in bytes, not characters', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ items: [] });
+
+    await getCachedPublicContent(
+      cache,
+      'org-1',
+      { orgId: 'org-1', slug: 'ж'.repeat(230) },
+      fetcher
+    );
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(mockKV.put).not.toHaveBeenCalled();
+  });
+
   it('still caches an ordinary slug read', async () => {
     const fetcher = vi.fn().mockResolvedValue({ items: [] });
 

@@ -7,7 +7,11 @@
  */
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { CacheType, logCacheStats, VersionedCache } from '@codex/cache';
-import { stripNul, topicSlugSchema } from '@codex/validation';
+import {
+  boundSearchParam,
+  clampPageParam,
+  topicSlugSchema,
+} from '@codex/validation';
 import type { CourseCardSummary } from '$lib/journeys/types';
 import { logger } from '$lib/observability';
 import { getPublicCategories } from '$lib/remote/categories.remote';
@@ -15,6 +19,7 @@ import { getPublicContent } from '$lib/remote/content.remote';
 import { getPublicCreators } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { logReadFailure } from '$lib/server/read-failure';
 import type { PageServerLoad } from './$types';
 
 const VALID_TYPES = ['video', 'audio', 'written'] as const;
@@ -79,9 +84,7 @@ export const load: PageServerLoad = async ({
   // (Codex-osuqt): the signed-in sorts send them straight to the browse API,
   // whose 400 this load let through as a 500 with an error-level "contract
   // bug" log that any visitor could raise by editing a URL.
-  const searchText = stripNul(url.searchParams.get('q') ?? '')
-    .trim()
-    .slice(0, 255);
+  const searchText = boundSearchParam(url.searchParams.get('q'));
   const q = searchText === '' ? undefined : searchText;
   const typeParam = url.searchParams.get('type');
   const sortParam = url.searchParams.get('sort');
@@ -141,9 +144,15 @@ export const load: PageServerLoad = async ({
           contentCount: match.contentCount,
         };
       }
-    } catch {
+    } catch (err) {
       // Degrade gracefully — unknown creator just means we don't render the banner
       // and don't filter the content (defensive: avoids an empty-grid dead-end).
+      // Logged, so a broken creator filter is not mistaken for "no such creator".
+      logReadFailure(
+        'Explore creator filter not resolved',
+        { orgId: org.id },
+        err
+      );
       creator = null;
     }
   }
@@ -175,13 +184,9 @@ export const load: PageServerLoad = async ({
     sort = 'newest';
   }
 
-  // Bounded to what the list schemas accept (paginationSchema caps page at
-  // 1000): a hand-edited `?page=1001` was a content-api 400 that this load
-  // let through as a 500.
-  const page = Math.min(
-    1000,
-    Math.max(1, Number.parseInt(pageParam ?? '1', 10) || 1)
-  );
+  // Bounded to what the list schemas accept: a hand-edited `?page=1001` was a
+  // content-api 400 that this load let through as a 500.
+  const page = clampPageParam(pageParam);
 
   // ── Category strip options ────────────────────────────────────────
   // The org's TAXONOMY, deliberately NOT scraped from the loaded items. Three
@@ -190,7 +195,7 @@ export const load: PageServerLoad = async ({
   //      filter paths match `categories.slug`. Writing the display name to
   //      `?category=` returned zero results for every single-word category and
   //      a full HTTP 400 error page for every one containing a space or `&`,
-  //      since `publicContentQueryParamsSchema.category` only accepts the slug
+  //      since `publicContentArgsSchema.category` only accepts the slug
   //      charset `^[\p{L}\p{N}-]+$`.
   //   2. `items` is server-filtered BY category, so options derived from it
   //      collapsed to just the active one on selection — moving from Ceremony
@@ -213,7 +218,10 @@ export const load: PageServerLoad = async ({
       .then((rows) =>
         (rows ?? []).map((row) => ({ name: row.name, slug: row.slug }))
       )
-      .catch(() => []);
+      .catch((err) => {
+        logReadFailure('Explore topics not loaded', { orgId: org.id }, err);
+        return [];
+      });
 
   // Fork API call: authenticated endpoint for popularity/sales sort, public otherwise
   let contentResult: {
@@ -272,8 +280,8 @@ export const load: PageServerLoad = async ({
           ),
         { ttl: 180 }
       );
-      // A constant label, never the key: the key carries the visitor's
-      // unvalidated `?category=` text, which must not reach a log.
+      // A constant label, never the key: the key carries a visitor-chosen
+      // topic and page, and one stats series per combination is unbounded.
       logCacheStats(cache, logger, { cacheType: 'explore:auth-sort' });
     } else {
       contentResult = await fetchAuthContent(
@@ -317,7 +325,8 @@ export const load: PageServerLoad = async ({
   try {
     const journeysApi = createServerApi(platform, cookies);
     journeys = (await journeysApi.access.listPublishedCourses(org.id)) ?? [];
-  } catch {
+  } catch (err) {
+    logReadFailure('Explore journeys rail not loaded', { orgId: org.id }, err);
     journeys = [];
   }
 

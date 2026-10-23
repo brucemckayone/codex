@@ -13,8 +13,7 @@
 import {
   checkContentSlugSchema,
   contentQuerySchema,
-  createSearchQuerySchema,
-  userIdSchema,
+  publicContentArgsSchema,
 } from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
@@ -193,32 +192,12 @@ export const checkContentSlug = query(
 // Public Content List Query (no auth required)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const publicContentQueryParamsSchema = z.object({
-  orgId: z.string().uuid(),
-  slug: z.string().max(500).optional(),
-  page: z.number().min(1).default(1).optional(),
-  limit: z.number().min(1).max(50).default(20).optional(),
-  contentType: z.enum(['video', 'audio', 'written']).optional(),
-  // Mirror the worker's slug-charset guard: forbids the public-cache-key
-  // delimiter ':' so a crafted value can't poison the public content cache.
-  // Unicode-aware to match `slugify` (accented slugs like `café-del-mar`).
-  category: z
-    .string()
-    .max(120)
-    .regex(/^[\p{L}\p{N}-]+$/u)
-    .optional(),
-  search: createSearchQuerySchema(255),
-  sort: z.enum(['newest', 'oldest', 'title']).default('newest').optional(),
-  // A user id (BetterAuth text), not a uuid: z.string().uuid() refused every
-  // real creator, so /explore's creator filter 400'd (Codex-osuqt).
-  creatorId: userIdSchema.optional(),
-  featured: z.boolean().optional(),
-});
-
 /**
  * List published content for an organization (public, no auth required)
  *
  * Used by org landing and explore pages to display content to unauthenticated visitors.
+ * Its arguments are `publicContentArgsSchema`, built from the API's own field
+ * rules so that an argument the API would refuse is refused here as a 400.
  *
  * Usage in Svelte:
  * ```svelte
@@ -228,7 +207,7 @@ const publicContentQueryParamsSchema = z.object({
  * ```
  */
 export const getPublicContent = query(
-  publicContentQueryParamsSchema,
+  publicContentArgsSchema,
   async (params) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);

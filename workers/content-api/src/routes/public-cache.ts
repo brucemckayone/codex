@@ -167,6 +167,7 @@ export function shouldCachePublicContentQuery(
  *
  * On cache hit: returns cached result.
  * On cache miss: calls `fetcher`, caches the result, returns it.
+ * A type over MAX_CACHED_TYPE_BYTES skips KV entirely and returns `fetcher()`.
  *
  * Every filter combo for `orgId` shares one version key
  * (`cache:version:org:{orgId}:content`) so a single publish-side

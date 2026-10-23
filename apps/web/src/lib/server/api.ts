@@ -770,7 +770,7 @@ export function createServerApi(
        * - status: 'draft' | 'published' | 'archived' (optional)
        * - contentType: 'video' | 'audio' | 'written' (optional)
        * - accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | 'course' (optional list filter — a query KIND label, not the stored flags)
-       * - category: string filter (max 100 chars, optional)
+       * - category: string filter (max 120 chars, no NUL, optional)
        * - organizationId: UUID filter (optional)
        * - creatorId: user id filter (BetterAuth text, not a UUID; optional)
        * - search: text search (max 255 chars, optional)

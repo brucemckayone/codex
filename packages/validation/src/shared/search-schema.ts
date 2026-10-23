@@ -43,6 +43,9 @@ import { z } from 'zod';
  */
 export const SEARCH_MIN_QUERY_LENGTH = 3;
 
+/** The longest search a list accepts, after NUL is dropped and it is trimmed. */
+export const SEARCH_MAX_QUERY_LENGTH = 255;
+
 // ============================================================================
 // The server schema
 // ============================================================================
@@ -83,7 +86,7 @@ export const hasNoNul = (value: string): boolean => !value.includes('\0');
  * Drops a NUL first ({@link stripNul}), then trims and caps.
  *
  * @param maxLength - Maximum accepted length after NUL is dropped and the value
- *   trimmed (default 255)
+ *   trimmed (default {@link SEARCH_MAX_QUERY_LENGTH})
  *
  * @example
  * ```typescript
@@ -92,7 +95,9 @@ export const hasNoNul = (value: string): boolean => !value.includes('\0');
  * });
  * ```
  */
-export const createSearchQuerySchema = (maxLength: number = 255) =>
+export const createSearchQuerySchema = (
+  maxLength: number = SEARCH_MAX_QUERY_LENGTH
+) =>
   z
     .string()
     .transform(stripNul)
@@ -103,6 +108,22 @@ export const createSearchQuerySchema = (maxLength: number = 255) =>
         .max(maxLength, `Search query must be ${maxLength} characters or less`)
     )
     .optional();
+
+/**
+ * A search URL param normalised the way {@link createSearchQuerySchema} does
+ * (NUL dropped, trimmed), then cut to `maxLength` rather than refused, for a
+ * server load that forwards it (Codex-osuqt). An over-long `?q=` would
+ * otherwise reach the API as a 400, which a page logs at error level as its
+ * own contract bug. Returns `''` for no search.
+ */
+export function boundSearchParam(
+  raw: string | null | undefined,
+  maxLength: number = SEARCH_MAX_QUERY_LENGTH
+): string {
+  return stripNul(raw ?? '')
+    .trim()
+    .slice(0, maxLength);
+}
 
 // ============================================================================
 // The client gate

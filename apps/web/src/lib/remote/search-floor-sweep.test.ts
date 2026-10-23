@@ -60,10 +60,12 @@ describe('no hand-rolled search declaration survives in apps/web', () => {
 });
 
 describe('the migrated remote declarations use the shared builder', () => {
-  // The four `search:` declarations that lived in apps/web/src/lib/remote.
+  // The `search:` declarations that live in apps/web/src/lib/remote. A fourth,
+  // content.remote.ts's `getPublicContent` args, moved to @codex/validation as
+  // `publicContentArgsSchema` (Codex-osuqt), where search-schema.test.ts's
+  // sweep of that package covers it.
   const REMOTE_DECLARATIONS = [
     'lib/remote/admin.remote.ts',
-    'lib/remote/content.remote.ts',
     'lib/remote/journeys.remote.ts',
     'lib/remote/subscription.remote.ts',
   ] as const;

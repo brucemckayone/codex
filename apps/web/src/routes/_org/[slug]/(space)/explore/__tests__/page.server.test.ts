@@ -236,8 +236,8 @@ describe('explore +page.server.ts — cache wiring', () => {
       expect(filtered).not.toBe(unfiltered);
     });
 
-    // The key carries the visitor's unvalidated `?category=` text, so the
-    // cache-stats line names a constant, never the key.
+    // The key carries a visitor-chosen topic and page, so the cache-stats line
+    // names a constant, never the key.
     it('logs cache stats under a constant label, never the raw key', async () => {
       const { logger } = await import('$lib/observability');
       const info = vi.spyOn(logger, 'info');
@@ -605,7 +605,7 @@ describe('explore +page.server.ts — cache wiring', () => {
    * `item.category` — a legacy free-text DISPLAY NAME — while both filter paths
    * match `categories.slug`. Every pill returned 0 results ("Somatics" → 0,
    * "somatics" → 7) and any category containing a space or `&` produced a full
-   * HTTP 400 page, because `publicContentQueryParamsSchema.category` only
+   * HTTP 400 page, because `publicContentArgsSchema.category` only
    * accepts `^[\p{L}\p{N}-]+$`.
    *
    * Falsifiability: the name/slug pairing test fails if the load stops
@@ -724,6 +724,53 @@ describe('explore +page.server.ts — cache wiring', () => {
       expect(order.indexOf('categories:start')).toBeLessThan(
         order.indexOf('content:end')
       );
+    });
+  });
+
+  // Each of these reads degrades the page rather than failing it, so the log
+  // is the only trace: without it a broken creator filter read as "this
+  // creator has nothing", and an outage as an org with no topics or journeys.
+  describe('a degraded read is logged, not swallowed', () => {
+    it.each([
+      [
+        'the creator lookup',
+        () => getPublicCreatorsMock.mockRejectedValueOnce(new Error('org 503')),
+        'Explore creator filter not resolved',
+      ],
+      [
+        'the topic strip',
+        () =>
+          getPublicCategoriesMock.mockRejectedValueOnce(
+            new Error('categories 503')
+          ),
+        'Explore topics not loaded',
+      ],
+      [
+        'the journeys rail',
+        () =>
+          listPublishedCoursesMock.mockRejectedValueOnce(
+            new Error('access 503')
+          ),
+        'Explore journeys rail not loaded',
+      ],
+    ])('logs a failed read of %s', async (_label, fail, message) => {
+      fail();
+      const { logger } = await import('$lib/observability');
+      const warn = vi.spyOn(logger, 'warn');
+      const { load } = await import('../+page.server');
+
+      await load(
+        baseInput({
+          user: null,
+          url: 'http://lvh.me:3000/explore?creator=alex',
+        })
+      );
+
+      expect(warn).toHaveBeenCalledWith(
+        message,
+        expect.objectContaining({ orgId: ORG_ID, error: expect.any(String) })
+      );
+      warn.mockRestore();
     });
   });
 

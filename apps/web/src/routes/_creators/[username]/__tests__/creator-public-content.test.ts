@@ -488,4 +488,23 @@ describe('creator public pages read the public list by creator (Codex-osuqt)', (
     });
     expect(mockGetPublicContent).not.toHaveBeenCalled();
   });
+
+  // An object literal answers `constructor` and `toString` from its
+  // prototype, so these were sent as a content type the API refused with a 400.
+  it.each([
+    'constructor',
+    'toString',
+    '__proto__',
+    'nonsense',
+  ])('the catalogue sends no content type for ?type=%s', async (type) => {
+    const { load } = await import('../content/+page.server');
+
+    await load(
+      event({
+        url: new URL(`http://lvh.me:3000/@alex-creator/content?type=${type}`),
+      })
+    );
+
+    expect(sentParams()).not.toHaveProperty('contentType');
+  });
 });

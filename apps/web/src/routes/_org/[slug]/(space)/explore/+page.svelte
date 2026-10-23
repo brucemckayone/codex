@@ -264,7 +264,7 @@
   //     paths match `categories.slug`. Writing the name to `?category=` gave 0
   //     results for single-word categories ("Somatics" → 0, "somatics" → 7) and
   //     a full 400 error page for any containing a space or `&`, since
-  //     `publicContentQueryParamsSchema` only accepts the slug charset.
+  //     `publicContentArgsSchema` only accepts the slug charset.
   //   • `items` is server-filtered BY category, so options derived from it
   //     collapsed to just the active one on selection — lateral movement
   //     between categories cost a round trip through "All".
