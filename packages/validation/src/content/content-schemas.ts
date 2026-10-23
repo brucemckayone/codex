@@ -727,9 +727,12 @@ export const mediaQuerySchema = paginationSchema.extend({
 export type MediaQueryInput = z.infer<typeof mediaQuerySchema>;
 
 /**
- * Public content query schema (org-scoped)
- * Used for unauthenticated listing of published content within an organization.
- * Requires orgId or slug to prevent unscoped platform-wide enumeration.
+ * Public content query schema (org- or creator-scoped)
+ * Used for unauthenticated listing of published content: within an
+ * organization (orgId), or by one creator across every org they publish in
+ * and their personal space (creatorId, for their public profile, Codex-osuqt).
+ * Requires orgId, creatorId or slug to prevent unscoped platform-wide
+ * enumeration.
  */
 export const publicContentQuerySchema = paginationSchema
   .extend({
@@ -762,8 +765,8 @@ export const publicContentQuerySchema = paginationSchema
       ])
       .optional(),
   })
-  .refine((data) => data.orgId || data.slug, {
-    message: 'Either orgId or slug must be provided',
+  .refine((data) => data.orgId || data.creatorId || data.slug, {
+    message: 'One of orgId, creatorId or slug must be provided',
     path: ['orgId'],
   })
   .transform((data) => ({

@@ -7,6 +7,7 @@
  * Sets PRIVATE cache headers — the page is auth-varying (creator layout
  * injects `user`), so it must not be shared-cached.
  */
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
@@ -61,15 +62,15 @@ export const load: PageServerLoad = async ({
   let totalPages = 1;
   let total = 0;
 
+  // The PUBLIC list scoped by creator, not the studio list, which needs a
+  // session and lists the signed-in user's own content (Codex-osuqt).
   if (creatorId) {
     try {
       const contentParams = new URLSearchParams();
       contentParams.set('creatorId', creatorId);
-      contentParams.set('status', 'published');
       contentParams.set('limit', String(CONTENT_LIMIT));
       contentParams.set('page', String(page));
-      contentParams.set('sortBy', 'publishedAt');
-      contentParams.set('sortOrder', 'desc');
+      contentParams.set('sort', 'newest');
 
       if (search) {
         contentParams.set('search', search);
@@ -87,12 +88,18 @@ export const load: PageServerLoad = async ({
         }
       }
 
-      const contentResult = await api.content.list(contentParams);
+      const contentResult = await api.content.getPublicContent(contentParams);
       contentItems = contentResult?.items ?? [];
       totalPages = contentResult?.pagination?.totalPages ?? 1;
       total = contentResult?.pagination?.total ?? 0;
-    } catch {
-      // Content fetch failed - show empty state
+    } catch (error) {
+      // The catalogue still renders, with the empty state. Logged, because
+      // it is otherwise indistinguishable from a creator with nothing
+      // published.
+      logger.warn('Creator catalogue content not loaded', {
+        creatorId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       contentItems = [];
     }
   }

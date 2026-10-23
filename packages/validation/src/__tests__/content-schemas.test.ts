@@ -9,6 +9,7 @@ import {
   mediaQuerySchema,
   mediaStatusEnum,
   mediaTypeEnum,
+  publicContentQuerySchema,
   updateContentSchema,
   updateMediaItemSchema,
   updateOrganizationSchema,
@@ -1232,5 +1233,33 @@ describe('Codex-moyu5: updateContentSchema tag preservation', () => {
       expect('tags' in { tags: undefined }).toBe(true);
       expect('tags' in ({} as { tags?: string[] })).toBe(false);
     });
+  });
+});
+
+// A creator's public profile lists their published content across every org
+// they publish in, by creatorId alone (Codex-osuqt). The scope rule still
+// refuses a query with no scope at all: that is platform-wide enumeration,
+// which only /discover does, on purpose.
+describe('Codex-osuqt: publicContentQuerySchema scopes', () => {
+  const uuid = '5f0c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b';
+
+  it.each([
+    ['orgId', { orgId: uuid }],
+    ['creatorId', { creatorId: uuid }],
+    ['slug', { slug: 'first' }],
+  ])('accepts a query scoped by %s alone', (_scope, query) => {
+    expect(publicContentQuerySchema.safeParse(query).success).toBe(true);
+  });
+
+  it('refuses a query with no scope', () => {
+    const result = publicContentQuerySchema.safeParse({ sort: 'newest' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['orgId']);
+  });
+
+  it('still refuses a creatorId that is not a uuid', () => {
+    expect(
+      publicContentQuerySchema.safeParse({ creatorId: 'not-a-uuid' }).success
+    ).toBe(false);
   });
 });

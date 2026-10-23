@@ -191,6 +191,47 @@ describe('GET /api/content/public — list envelope survives a cache HIT', () =>
   });
 });
 
+/**
+ * The creator form backs a creator's public profile, catalogue and detail
+ * page (Codex-osuqt). The schema used to refuse it, so the web loaders fell
+ * back to the studio list, which lists the SIGNED-IN user's own content.
+ */
+describe('GET /api/content/public?creatorId — a creator without an org (Codex-osuqt)', () => {
+  const CREATOR_ID = '4d333333-3333-4333-8333-333333333333';
+
+  it("returns the list envelope and asks the service for that creator's content only", async () => {
+    const res = await dispatch(`/api/content/public?creatorId=${CREATOR_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      items: ROWS.items,
+      pagination: ROWS.pagination,
+    });
+    const [query] = contentSpies.listPublic.mock.calls[0] ?? [];
+    expect(query).toMatchObject({ creatorId: CREATOR_ID });
+    expect(query).not.toHaveProperty('orgId');
+  });
+
+  it('is not KV-cached: the 60s CDN window is its only cache', async () => {
+    const first = await dispatch(`/api/content/public?creatorId=${CREATOR_ID}`);
+    await dispatch(`/api/content/public?creatorId=${CREATOR_ID}`);
+
+    // `shouldCachePublicContentQuery` keys on orgId, so both reads reach the
+    // service and a publish shows on the profile within the CDN window.
+    expect(contentSpies.listPublic).toHaveBeenCalledTimes(2);
+    expect(first.headers.get('Cache-Control')).toBe(
+      'public, max-age=60, s-maxage=60'
+    );
+  });
+
+  it('still refuses a query with no scope at all', async () => {
+    const res = await dispatch('/api/content/public');
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.listPublic).not.toHaveBeenCalled();
+  });
+});
+
 describe('GET /api/content/public/categories — cache write survives', () => {
   it('serves the second read from cache (single-item envelope, unchanged)', async () => {
     const CATEGORY_ID = '4d000000-0000-4000-8000-0000000000c1';

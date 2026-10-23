@@ -57,19 +57,19 @@ export const load: PageServerLoad = async ({
   }
 
   // Fetch content by creatorId + slug
+  // The PUBLIC list scoped by creator and slug, not the studio list, which
+  // needs a session and lists the signed-in user's own content: a visitor
+  // got a 404 here for every real piece (Codex-osuqt). No result is a 404.
+  // A failed request is not, so it propagates as a 500, as the profile
+  // lookup above does.
   const contentParams = new URLSearchParams();
   contentParams.set('creatorId', creatorProfile.id);
   contentParams.set('slug', contentSlug);
-  contentParams.set('status', 'published');
   contentParams.set('limit', '1');
 
-  let content: ContentWithRelations | null = null;
-  try {
-    const contentResult = await api.content.list(contentParams);
-    content = (contentResult?.items?.[0] as ContentWithRelations) ?? null;
-  } catch {
-    content = null;
-  }
+  const contentResult = await api.content.getPublicContent(contentParams);
+  const content =
+    (contentResult?.items?.[0] as ContentWithRelations | undefined) ?? null;
 
   if (!content) {
     error(404, 'Content not found');

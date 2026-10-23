@@ -4,7 +4,7 @@
  * Unauthenticated endpoints for browsing published content.
  *
  * Endpoints:
- * - GET /api/content/public - List published content for an organization (requires orgId or slug)
+ * - GET /api/content/public - List published content for an organization or a creator (requires orgId, creatorId or slug)
  * - GET /api/content/public/discover - Browse all published content platform-wide (discover page)
  */
 
@@ -141,13 +141,19 @@ function resolveR2Urls(items: ContentWithRelations[], bases: R2PublicBases) {
 
 /**
  * GET /api/content/public
- * List published content for an organization (requires orgId or slug)
+ * List published content for an organization, or for one creator across
+ * every org they publish in and their personal space (requires orgId,
+ * creatorId or slug). The creator form backs their public profile
+ * (Codex-osuqt).
  *
- * Security: Public endpoint, API rate limit. Schema enforces org scoping.
- * Cache: `public` — the body is the org's PUBLISHED catalogue page, identical
+ * Security: Public endpoint, API rate limit. Schema enforces an org, creator
+ * or slug scope.
+ * Cache: `public` — the body is a PUBLISHED catalogue page, identical
  * for every viewer (no session is read; `auth: 'none'` means none is even
  * resolved), so any shared cache may serve one visitor's copy to the next. 60s
- * browser + CDN, bounded by the KV invalidation window above. The docstring
+ * browser + CDN, bounded by the KV invalidation window above. Only an org
+ * query is KV-cached; a creator query's 60s CDN window is its only cache, as
+ * for /discover, so a publish shows on the profile within 60s. The docstring
  * used to say "5 minute public cache"; the header it sat over has emitted 60s
  * since the KV layer's event-driven invalidation landed, and now says so.
  * @returns {PublicContentListResponse}

@@ -10,6 +10,7 @@
  * viewer's chrome to the next. The docstring used to claim DYNAMIC_PUBLIC,
  * which this load has never called.
  */
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
@@ -49,10 +50,7 @@ export const load: PageServerLoad = async ({
   // `catch` did.
   creatorProfile = await api.account.getPublicProfile(username);
 
-  // Fetch creator's published content.
-  // If we got a creator profile with an ID, we could filter by creatorId.
-  // For now, the public content endpoint doesn't support creatorId filter
-  // on its own, so we rely on what's available.
+  // The creator's published content (fetched below).
   let contentItems: Array<{
     id: string;
     title: string;
@@ -77,21 +75,29 @@ export const load: PageServerLoad = async ({
     } | null;
   }> = [];
 
-  // If we have the creator's content via their profile, use that.
-  // Otherwise, content will be populated as endpoints mature.
+  // The creator's published content, newest first, across every org they
+  // publish in and their personal space: the PUBLIC list scoped by creator.
+  // Not `api.content.list`, the studio list, which needs a session and lists
+  // the SIGNED-IN user's own content: a visitor got a 401 here, shown as an
+  // empty profile, and a signed-in visitor saw their own work on someone
+  // else's profile (Codex-osuqt).
   if (creatorProfile?.id) {
     try {
       const params = new URLSearchParams();
       params.set('creatorId', creatorProfile.id);
-      params.set('status', 'published');
       params.set('limit', String(CONTENT_LIMIT));
-      params.set('sortBy', 'publishedAt');
-      params.set('sortOrder', 'desc');
+      params.set('sort', 'newest');
 
-      const contentResult = await api.content.list(params);
+      const contentResult = await api.content.getPublicContent(params);
       contentItems = contentResult?.items ?? [];
-    } catch {
-      // Content fetch failed - show empty state
+    } catch (error) {
+      // The profile still renders, with the empty state. Logged, because an
+      // empty profile is otherwise indistinguishable from a creator with no
+      // published work.
+      logger.warn('Creator profile content not loaded', {
+        creatorId: creatorProfile.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
       contentItems = [];
     }
   }
