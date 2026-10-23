@@ -529,6 +529,41 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
       expect(records.every((record) => record.status === 'done')).toBe(true);
     });
 
+    it('a partial refund first, and a slice whose transfer just failed: the slice is reduced at once, not left "in flight"', async () => {
+      const service = subscribed();
+      const charges = stripeCharges();
+      const chargeId = charges.charge(PRICE);
+      const REFUND = 200;
+      charges.refund(chargeId, REFUND);
+      await chargeRefunded(service, charges, chargeId);
+      // The organisation's slice is the first transfer of the split.
+      vi.mocked(stripe.transfers.create).mockRejectedValueOnce(
+        Object.assign(new Error('Destination cannot receive transfers'), {
+          type: 'StripeInvalidRequestError',
+          statusCode: 400,
+        })
+      );
+
+      await expect(
+        service.handleInvoicePaymentSucceeded(invoiceFor(chargeId))
+      ).resolves.toMatchObject({ userId: subscriberId });
+
+      const rows = await slicesOf(chargeId);
+      expect(statusByType(rows)).toMatchObject({
+        organization_fee: 'failed',
+        creator_payout_to_owner: 'paid',
+      });
+      // The drains pay the failed slice its reduced amount.
+      expect(await netByType(chargeId)).toEqual(
+        Object.fromEntries(
+          Object.entries(grossByType(rows)).map(([type, cents]) => [
+            type,
+            afterRefund(cents, REFUND, PRICE),
+          ])
+        )
+      );
+    });
+
     it('a clawback that fails after the payout committed comes back as an AfterCommitError with the renewal result; the redelivery finishes it', async () => {
       const service = subscribed();
       const charges = stripeCharges();

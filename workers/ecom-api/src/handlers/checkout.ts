@@ -30,6 +30,7 @@ import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
 import {
   isTransientError,
+  rethrowIfTransient,
   settleAfterCommit,
 } from '../utils/error-classification';
 
@@ -239,10 +240,11 @@ export async function handleCheckoutCompleted(
 
     // Complete purchase (atomic transaction: purchase + content access)
     // organizationId already transformed to null by schema if empty/undefined.
-    // A clawback that failed after the commit (Codex-2hxff.67) is rethrown
-    // last, so the receipt and the library bump still go out; a transient one
-    // is rethrown now and the redelivery sends them once. A duplicate pays no
-    // one, so it never fails after its commit.
+    // A clawback that failed after the commit (Codex-2hxff.67) cancels
+    // nothing that follows from the purchase: the session record and the
+    // library bump run anyway; a transient failure is rethrown before the
+    // receipt, which the redelivery sends once; any other after it. A
+    // duplicate pays no one, so it never fails after its commit.
     const { value: purchase, failure } = await settleAfterCommit(() =>
       purchaseService.completePurchase(paymentIntentId, {
         customerId: validatedMetadata.customerId,
@@ -286,6 +288,7 @@ export async function handleCheckoutCompleted(
         logger: obs,
       });
     }
+    rethrowIfTransient(failure);
 
     // Send purchase receipt email (fire-and-forget)
     const customerEmail = session.customer_details?.email;
@@ -391,7 +394,7 @@ async function handleCourseCheckoutCompleted(
     const purchaseService = services.purchase;
 
     // As for content: a clawback that failed after the commit is rethrown
-    // last, or now when transient.
+    // before the receipt when transient, after it otherwise.
     const { value: purchase, failure } = await settleAfterCommit(() =>
       purchaseService.completeCoursePurchase(paymentIntentId, {
         customerId: metadata.customerId,
@@ -434,6 +437,7 @@ async function handleCourseCheckoutCompleted(
         logger: obs,
       });
     }
+    rethrowIfTransient(failure);
 
     const customerEmail = session.customer_details?.email;
     const customerName = session.customer_details?.name || 'there';

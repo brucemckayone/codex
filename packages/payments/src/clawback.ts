@@ -407,9 +407,11 @@ export async function reverseCharge(
  * reads both after the slices are committed. A charge with neither recorded
  * asks Stripe nothing.
  *
- * A failure is alerted here, then rethrown. Nothing else would retry it: the
- * hourly retry revisits only steps already recorded, and this can fail before
- * any is.
+ * A failure is logged here, then rethrown: nothing else would retry it, as
+ * the hourly retry revisits only steps already recorded and this can fail
+ * before any is. A step that could not run YET (another delivery holds it, a
+ * drain is paying the slice) is a warning: the retry finishes it. Anything
+ * else is an error with an errorId, for a person if the event is not retried.
  */
 export async function reverseEarlierRefunds(
   deps: ClawbackDeps,
@@ -426,21 +428,82 @@ export async function reverseEarlierRefunds(
       refunds: () => listClawableRefunds(deps.stripe, charge.id),
     });
   } catch (error) {
-    deps.obs.error(
-      'A refund or chargeback preceded this payout and its transfers were not reversed: a redelivery retries it, or a person must',
-      {
-        errorId: crypto.randomUUID(),
-        chargeId: input.chargeId,
-        sourceType: input.source.sourceType,
-        ...(input.source.sourceType === 'purchase'
-          ? { purchaseId: input.source.purchaseId }
-          : {}),
-        code: errorCodeOf(error),
-        error: error instanceof Error ? error.message : String(error),
-      }
-    );
+    const fields = {
+      chargeId: input.chargeId,
+      sourceType: input.source.sourceType,
+      ...(input.source.sourceType === 'purchase'
+        ? { purchaseId: input.source.purchaseId }
+        : {}),
+      ...rootCauseOf(error),
+    };
+    if (isNotYet(error)) {
+      deps.obs.warn(
+        'A refund or chargeback preceded this payout and is not clawed back yet: another delivery or a drain holds a step, and the retry finishes it',
+        fields
+      );
+    } else {
+      deps.obs.error(
+        'A refund or chargeback preceded this payout and its transfers were not reversed: a retried event runs this again; if the event is not retried, a person must reverse them',
+        { errorId: crypto.randomUUID(), ...fields }
+      );
+    }
     throw error;
   }
+}
+
+/** How far down a cause chain to look (and the guard against a cycle). */
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * Whether every failure under `error` is a step that could not run YET
+ * (`ServiceUnavailableError`, as `reverseCharge` reports one), so a retry
+ * finishes it.
+ */
+function isNotYet(error: unknown, depth = 0): boolean {
+  if (depth > MAX_CAUSE_DEPTH) return false;
+  if (error instanceof ServiceUnavailableError) return true;
+  if (error instanceof AggregateError) {
+    return (
+      error.errors.length > 0 &&
+      error.errors.every((inner) => isNotYet(inner, depth + 1))
+    );
+  }
+  return error instanceof Error && error.cause !== undefined
+    ? isNotYet(error.cause, depth + 1)
+    : false;
+}
+
+/**
+ * The innermost error under `error`, for a log line: its name, its message
+ * and the deepest string `code` on the way. Never a failed query's own
+ * message, which holds the SQL and its bound values.
+ */
+function rootCauseOf(error: unknown): {
+  errorName: string;
+  errorMessage: string;
+  code: string | undefined;
+} {
+  let current: unknown = error;
+  let code: string | undefined;
+  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+    if (!(current instanceof Error)) break;
+    const own = (current as { code?: unknown }).code;
+    if (typeof own === 'string') code = own;
+    const inner =
+      current instanceof AggregateError ? current.errors[0] : current.cause;
+    if (!(inner instanceof Error)) break;
+    current = inner;
+  }
+  if (!(current instanceof Error)) {
+    return { errorName: typeof current, errorMessage: String(current), code };
+  }
+  return {
+    errorName: current.name,
+    errorMessage: current.message.startsWith('Failed query:')
+      ? '(query omitted)'
+      : current.message,
+    code,
+  };
 }
 
 /**
@@ -634,7 +697,14 @@ async function reduceUnpaidSlice(
         and(
           eq(payouts.id, row.id),
           inArray(payouts.status, ['pending', 'failed']),
-          or(isNull(payouts.lastRetryAt), lt(payouts.lastRetryAt, leaseStart))
+          or(
+            isNull(payouts.lastRetryAt),
+            lt(payouts.lastRetryAt, leaseStart),
+            // The lease of the reserve's own transfer, which failed: nothing
+            // is in flight. A drain's claim counts its attempt, so a failed
+            // row a drain is retrying still waits (Codex-2hxff.67).
+            and(eq(payouts.status, 'failed'), eq(payouts.retryCount, 0))
+          )
         )
       )
       .returning();

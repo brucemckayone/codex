@@ -5,6 +5,10 @@
  * Codex-o4jvw; owner decision 2026-10-22, "Say it plainly") replaces the
  * confirmation with a calm notice: they already own it, this payment is being
  * refunded, and the way to the item. A first purchase is unchanged.
+ *
+ * A verify the load reports as failed for good (`verifyFailed`, a 4xx) shows
+ * the error state ("couldn't verify", not "still processing") and stops
+ * polling; a transient one stays pending and polls.
  */
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -15,7 +19,8 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 
-vi.mock('$app/navigation', () => ({ invalidate: vi.fn() }));
+const { invalidateMock } = vi.hoisted(() => ({ invalidateMock: vi.fn() }));
+vi.mock('$app/navigation', () => ({ invalidate: invalidateMock }));
 
 import CheckoutSuccess from './CheckoutSuccess.svelte';
 
@@ -103,5 +108,63 @@ describe('CheckoutSuccess', () => {
       [m.checkout_success_watch_now(), '/content/kettlebell-foundations'],
       [m.checkout_success_browse(), '/explore'],
     ]);
+  });
+});
+
+describe('CheckoutSuccess — a failed verify', () => {
+  function mountFailed(verifyFailed: boolean) {
+    component = mount(CheckoutSuccess, {
+      target: document.body,
+      props: {
+        verification: null,
+        verifyFailed,
+        contentUrl: '/content/kettlebell-foundations',
+        browseUrl: '/explore',
+        libraryUrl: '/library',
+        titleSuffix: 'Of Blood and Bones',
+      },
+    });
+    flushSync();
+  }
+
+  test('a final failure (4xx) shows the error state at once and stops polling', () => {
+    vi.useFakeTimers();
+    try {
+      mountFailed(true);
+
+      expect(clean(document.querySelector('h1'))).toBe(m.common_error());
+      expect(
+        clean(document.querySelector('.checkout-success__description'))
+      ).toBe(m.checkout_success_error());
+      // Not the fallback, which implies the payment is still processing.
+      expect(clean(document.body)).not.toContain(
+        m.checkout_success_almost_there()
+      );
+      const links = [...document.querySelectorAll('a')];
+      expect(links.map((a) => [clean(a), a.getAttribute('href')])).toEqual([
+        [m.checkout_success_go_to_library(), '/library'],
+      ]);
+      vi.advanceTimersByTime(10_000);
+      expect(invalidateMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      invalidateMock.mockClear();
+    }
+  });
+
+  test('a transient failure stays pending and polls', () => {
+    vi.useFakeTimers();
+    try {
+      mountFailed(false);
+
+      expect(clean(document.querySelector('h1'))).toBe(
+        m.checkout_success_confirming()
+      );
+      vi.advanceTimersByTime(3_000);
+      expect(invalidateMock).toHaveBeenCalledWith('checkout:verify');
+    } finally {
+      vi.useRealTimers();
+      invalidateMock.mockClear();
+    }
   });
 });

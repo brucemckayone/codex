@@ -35,6 +35,8 @@ vi.mock('@codex/worker-utils', async (importOriginal) => {
   return {
     ...actual,
     createWebhookServices: vi.fn(),
+    // The receipt: observed, never sent.
+    sendEmailToWorker: vi.fn(),
   };
 });
 
@@ -62,7 +64,7 @@ vi.mock('@codex/validation', () => ({
 }));
 
 import { checkoutSessionMetadataSchema } from '@codex/validation';
-import { createWebhookServices } from '@codex/worker-utils';
+import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 // Import after mocks
 import { handleCheckoutCompleted } from '../checkout';
 
@@ -936,13 +938,17 @@ describe('handleCheckoutCompleted', () => {
       expect(mockRelease).toHaveBeenCalledOnce();
     });
 
-    it('transient → rejects before any side effect: the redelivery sends them once', async () => {
+    it('transient → the session record and the library bump run, the receipt waits; the redelivery sends it once', async () => {
       const failure = afterCommit(transient());
       mockCompletePurchase.mockRejectedValueOnce(failure);
       const event = createMockStripeCheckoutEvent({
         sessionId: 'cs_after_commit_transient',
         metadata: { customerId: 'user_123', contentId: 'content_456' },
       }) as unknown as Stripe.Event;
+      (event.data.object as Stripe.Checkout.Session).customer_details = {
+        email: 'buyer@example.com',
+        name: 'Buyer',
+      } as Stripe.Checkout.Session.CustomerDetails;
       const { context, mock } = createContext({ CACHE_KV: kv() });
       const executionCtx = attachExecutionCtx(mock);
 
@@ -950,11 +956,20 @@ describe('handleCheckoutCompleted', () => {
         handleCheckoutCompleted(event, mockStripe, context)
       ).rejects.toBe(failure);
 
-      expect(mockMarkCheckoutSessionCompleted).not.toHaveBeenCalled();
-      expect(executionCtx.waitUntil).not.toHaveBeenCalled();
-      expect(mock._obs.info).not.toHaveBeenCalledWith(
-        'Purchase completed successfully',
-        expect.anything()
+      expect(mockMarkCheckoutSessionCompleted).toHaveBeenCalledWith(
+        'cs_after_commit_transient'
+      );
+      expect(executionCtx.waitUntil).toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+
+      // The redelivery: the clawback finishes, and the receipt goes once.
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(sendEmailToWorker).toHaveBeenCalledTimes(1);
+      expect(sendEmailToWorker).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ templateName: 'purchase-receipt' })
       );
     });
   });

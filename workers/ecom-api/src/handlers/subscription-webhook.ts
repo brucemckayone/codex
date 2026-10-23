@@ -46,6 +46,7 @@ import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
 import {
   isTransientError,
+  rethrowIfTransient,
   settleAfterCommit,
 } from '../utils/error-classification';
 
@@ -538,8 +539,8 @@ export async function handleSubscriptionWebhook(
           if (stripeSubId) {
             const courseSub = await stripe.subscriptions.retrieve(stripeSubId);
             // A clawback that failed after the payout committed
-            // (Codex-2hxff.67) is rethrown after the library bump, or at once
-            // when transient: see settleAfterCommit.
+            // (Codex-2hxff.67) is rethrown after the library bump, which is
+            // safe to repeat; nothing here must not be: see settleAfterCommit.
             const { value: courseResult, failure } = await settleAfterCommit(
               () =>
                 courseSubService.handleCourseInvoicePaymentSucceeded(
@@ -560,8 +561,9 @@ export async function handleSubscriptionWebhook(
         // via the orchestrator hook inside SubscriptionService. Renewal
         // continues access — both per-user version keys are bumped from
         // inside the service. A clawback that failed after the payout
-        // committed (Codex-2hxff.67) is rethrown after the access clear and
-        // the renewal email, or at once when transient: see settleAfterCommit.
+        // committed (Codex-2hxff.67) never holds back the access clear; a
+        // transient one is rethrown before the renewal email, which the
+        // redelivery sends once, any other after it: see settleAfterCommit.
         const { value: result, failure } = await settleAfterCommit(() =>
           service.handleInvoicePaymentSucceeded(invoice, webAppUrl)
         );
@@ -574,6 +576,7 @@ export async function handleSubscriptionWebhook(
         // idempotent: a clear on a subscription that never went past_due
         // is a free no-op. See bead Codex-13ml3.
         clearAccess(c, result);
+        rethrowIfTransient(failure);
         dispatchEmail(c, result);
 
         obs?.info('Invoice payment succeeded', {

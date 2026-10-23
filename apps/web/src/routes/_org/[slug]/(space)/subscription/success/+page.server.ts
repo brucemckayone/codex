@@ -18,18 +18,9 @@ import { error, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { isTransientFailure } from '$lib/server/checkout-verify';
 import { ApiError } from '$lib/server/errors';
 import type { PageServerLoad } from './$types';
-
-/** A 5xx, the client's own timeout (408), a rate limit (429), or no response. */
-function isTransientFailure(err: unknown): boolean {
-  return (
-    !(err instanceof ApiError) ||
-    err.status >= 500 ||
-    err.status === 408 ||
-    err.status === 429
-  );
-}
 
 export const load: PageServerLoad = async ({
   url,

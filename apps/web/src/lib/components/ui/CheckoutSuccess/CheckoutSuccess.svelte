@@ -2,11 +2,12 @@
   @component CheckoutSuccess
 
   Shared checkout success component used by both org and creator checkout
-  success pages. Handles four states: success (animated checkmark +
+  success pages. Handles five states: success (animated checkmark +
   content preview + CTA + onboarding tips), duplicate (a second payment for
   an item the buyer owns, being refunded: a calm notice, no confirmation),
-  pending (spinner + auto-retry), and fallback (retries exhausted, friendly
-  messaging).
+  pending (spinner + auto-retry), error (`verifyFailed`: a verify failure a
+  retry will not change — "couldn't verify", no polling), and fallback
+  (retries exhausted, friendly messaging).
 
   Auto-retry: When verification is null or not complete, polls via
   invalidate('checkout:verify') every 3 seconds, up to 10 times (~30s
@@ -18,6 +19,7 @@
   import * as m from '$paraglide/messages';
   import { formatPrice } from '$lib/utils/format';
   import {
+    AlertCircleIcon,
     CheckCircleIcon,
     ClockIcon,
     PlayIcon,
@@ -36,6 +38,8 @@
   interface Props {
     /** Verification result from server load (null if API call failed) */
     verification: Verification | null;
+    /** The verify failed in a way a retry will not change (a 4xx): stop polling. */
+    verifyFailed?: boolean;
     /** URL to the purchased content (for "Start Watching/Listening/Reading" CTA) */
     contentUrl: string;
     /** URL for "Continue Browsing" CTA */
@@ -46,7 +50,14 @@
     titleSuffix: string;
   }
 
-  const { verification, contentUrl, browseUrl, libraryUrl, titleSuffix }: Props = $props();
+  const {
+    verification,
+    verifyFailed = false,
+    contentUrl,
+    browseUrl,
+    libraryUrl,
+    titleSuffix
+  }: Props = $props();
 
   const isComplete = $derived(verification?.sessionStatus === 'complete');
   const content = $derived(verification?.content);
@@ -67,7 +78,9 @@
   const MAX_RETRIES = 10;
   const RETRY_INTERVAL_MS = 3000;
   const isExpired = $derived(verification?.sessionStatus === 'expired');
-  const shouldRetry = $derived(!isComplete && !isExpired && retryCount < MAX_RETRIES);
+  const shouldRetry = $derived(
+    !isComplete && !isExpired && !verifyFailed && retryCount < MAX_RETRIES
+  );
 
   $effect(() => {
     if (!shouldRetry) return;
@@ -223,6 +236,23 @@
       <div class="checkout-success__actions">
         <a href={browseUrl} class="checkout-success__btn checkout-success__btn--primary">
           {m.checkout_success_start_over()}
+        </a>
+      </div>
+
+    {:else if verifyFailed}
+      <!-- Error: the verify failed in a way a retry will not change (a 4xx).
+           Say we could not verify it, rather than implying it is still
+           processing. -->
+      <div class="checkout-success__icon checkout-success__icon--pending" aria-hidden="true">
+        <AlertCircleIcon size={48} />
+      </div>
+
+      <h1 class="checkout-success__title">{m.common_error()}</h1>
+      <p class="checkout-success__description">{m.checkout_success_error()}</p>
+
+      <div class="checkout-success__actions">
+        <a href={libraryUrl} class="checkout-success__btn checkout-success__btn--primary">
+          {m.checkout_success_go_to_library()}
         </a>
       </div>
 

@@ -1817,10 +1817,10 @@ export class PurchaseService extends BaseService {
    *
    * Then any refund or chargeback of the charge is clawed back from them
    * (Codex-2hxff.67): one handled between the purchase's commit and this
-   * write found no slices to claw back. Its failure is logged the same way,
-   * and rethrown as an `AfterCommitError` carrying the purchase, so the
-   * webhook still sends what follows from the purchase alone (the receipt,
-   * the library bump) when a retry cannot fix it.
+   * write found no slices to claw back. Its failure is logged once, by the
+   * clawback (with its purchase, charge and an errorId), and rethrown as an
+   * `AfterCommitError` carrying the purchase, so the webhook still does what
+   * follows from the purchase alone.
    */
   private async recordPayoutsAfterCommit(
     purchase: Purchase,
@@ -1850,15 +1850,6 @@ export class PurchaseService extends BaseService {
         }
       );
     } catch (error) {
-      this.obs.error(
-        'Purchase committed and its payout slices recorded, but a refund or chargeback before them was not clawed back; a redelivery retries it',
-        {
-          errorId: crypto.randomUUID(),
-          purchaseId: purchase.id,
-          stripeChargeId,
-          error: error instanceof Error ? error.message : String(error),
-        }
-      );
       throw new AfterCommitError(
         'The purchase completed, but a refund or chargeback before its payout was not clawed back',
         purchase,

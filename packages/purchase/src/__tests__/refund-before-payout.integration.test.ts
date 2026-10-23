@@ -439,7 +439,7 @@ describe('A refund handled before a purchase is paid out (Codex-2hxff.67)', () =
     expect(records.every((record) => record.status === 'done')).toBe(true);
   });
 
-  it('a clawback that fails after the purchase committed is logged as exactly that and comes back as an AfterCommitError with the purchase', async () => {
+  it('a clawback that fails after the purchase committed is logged once, by the clawback, and comes back as an AfterCommitError with the purchase', async () => {
     const charges = stripeCharges();
     const sold = await sale();
     charges.refund(sold.chargeId, PRICE);
@@ -476,12 +476,24 @@ describe('A refund handled before a purchase is paid out (Codex-2hxff.67)', () =
       cause: refusal,
       completed: { stripePaymentIntentId: sold.paymentIntentId },
     });
-    expect(logged).toHaveBeenCalledWith(
-      expect.stringContaining('was not clawed back; a redelivery retries it'),
-      expect.objectContaining({
-        errorId: expect.any(String),
-        stripeChargeId: sold.chargeId,
-      })
+    // Logged once, by the clawback, with its purchase and charge.
+    const clawbackLogs = logged.mock.calls.filter(([message]) =>
+      String(message).includes('preceded this payout')
+    );
+    expect(clawbackLogs).toEqual([
+      [
+        expect.stringContaining('if the event is not retried, a person must'),
+        expect.objectContaining({
+          errorId: expect.any(String),
+          chargeId: sold.chargeId,
+          purchaseId: expect.any(String),
+          errorMessage: 'No such charge',
+        }),
+      ],
+    ]);
+    expect(logged).not.toHaveBeenCalledWith(
+      expect.stringContaining('redelivery retries it'),
+      expect.anything()
     );
     // The purchase did complete: it is not logged as one that failed.
     expect(logged).not.toHaveBeenCalledWith(

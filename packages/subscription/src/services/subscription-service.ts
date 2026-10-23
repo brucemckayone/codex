@@ -1144,7 +1144,10 @@ export class SubscriptionService extends BaseService {
       // response to the webhook. Callers poll this endpoint until the row
       // appears, so an absent row here is expected, not an error.
       const row = await this.db.query.subscriptions.findFirst({
-        where: eq(subscriptions.stripeSubscriptionId, stripeSubId),
+        where: and(
+          eq(subscriptions.stripeSubscriptionId, stripeSubId),
+          eq(subscriptions.userId, userId)
+        ),
         with: {
           tier: { columns: { name: true } },
           organization: { columns: { name: true, slug: true } },

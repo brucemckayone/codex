@@ -4,10 +4,18 @@
  * Verifies the Stripe checkout session after the user returns from payment.
  * Extracts session_id from URL, calls the ecom-api verify endpoint,
  * and returns the purchase status + content details for display.
+ *
+ * A failed verify is logged. A 5xx, a network failure (including the client's
+ * own timeout) or a rate limit is treated as pending and retried; any other
+ * 4xx will not change on retry, so the page stops polling and shows its error
+ * state (`verifyFailed`). Same rule as /subscription/success.
  */
 import { error, redirect } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { isTransientFailure } from '$lib/server/checkout-verify';
+import { ApiError } from '$lib/server/errors';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
@@ -43,14 +51,23 @@ export const load: PageServerLoad = async ({
 
     return {
       verification: result,
+      verifyFailed: false,
       contentSlug,
       org,
     };
-  } catch {
-    // Don't error out — show a graceful fallback message.
-    // The webhook may still be processing (Stripe sends events async).
+  } catch (err) {
+    const transient = isTransientFailure(err);
+    logger.warn('checkout-success: verify failed', {
+      sessionId,
+      status: err instanceof ApiError ? err.status : undefined,
+      transient,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // Don't error out. Transient: the page stays pending and retries — the
+    // webhook may still be processing (Stripe sends events async).
     return {
       verification: null,
+      verifyFailed: !transient,
       contentSlug,
       org,
     };

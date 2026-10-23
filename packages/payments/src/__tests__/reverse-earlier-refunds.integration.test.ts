@@ -76,6 +76,7 @@ describe('reverseEarlierRefunds (Codex-2hxff.67)', () => {
       id: string
     ) => ({ id, object: 'charge', amount: CHARGE, metadata: {} })) as never);
     obs.error.mockClear();
+    obs.warn.mockClear();
     deps = { db, stripe, obs, environment: 'test' };
   });
 
@@ -284,11 +285,104 @@ describe('reverseEarlierRefunds (Codex-2hxff.67)', () => {
         errorId: expect.any(String),
         chargeId,
         sourceType: 'subscription',
-        error: 'Stripe is unreachable',
+        errorName: 'Error',
+        errorMessage: 'Stripe is unreachable',
       })
     );
     // Nothing recorded: the hourly retry would never see it.
     expect(await recordsOf(org.id)).toHaveLength(0);
+  });
+
+  it("a failed query is logged by its driver's error, never its SQL and bound values", async () => {
+    const chargeId = `ch_earlier_${uid()}`;
+    await slices(chargeId);
+    await refunded(chargeId, 400);
+    const driver = Object.assign(new Error('terminating connection'), {
+      code: '57P01',
+    });
+    const query = new Error(
+      `Failed query: select * from payouts where id = $1\nparams: ${chargeId}`,
+      { cause: driver }
+    );
+    vi.mocked(stripe.charges.retrieve).mockRejectedValueOnce(query);
+
+    await expect(
+      reverseEarlierRefunds(deps, { chargeId, source: SOURCE })
+    ).rejects.toBe(query);
+
+    const [, fields] = obs.error.mock.calls[0] ?? [];
+    expect(fields).toMatchObject({
+      errorMessage: 'terminating connection',
+      code: '57P01',
+    });
+    expect(JSON.stringify(fields)).not.toContain('select');
+  });
+
+  // A slice whose first transfer just failed keeps the lease its reserve
+  // opened (`last_retry_at`), but nothing is in flight on it.
+  describe('an unpaid slice whose transfer failed', () => {
+    async function failedSlice(chargeId: string, retryCount: number) {
+      const row = takeFirst(
+        await db
+          .insert(payouts)
+          .values({
+            organizationId: orgId,
+            userId: creatorId,
+            payoutType: 'creator_payout',
+            amountCents: 765,
+            status: 'failed',
+            reason: 'transfer_failed',
+            sourceType: 'subscription',
+            stripeChargeId: chargeId,
+            lastRetryAt: new Date(),
+            retryCount,
+          })
+          .returning()
+      );
+      payoutIds.push(row.id);
+      return row;
+    }
+
+    it("is reduced at once when the lease is its reserve's own", async () => {
+      const chargeId = `ch_earlier_${uid()}`;
+      const row = await failedSlice(chargeId, 0);
+      await refunded(chargeId, 400);
+
+      await reverseEarlierRefunds(deps, { chargeId, source: SOURCE });
+
+      expect(await recordsOf(row.id)).toEqual([
+        expect.objectContaining({
+          kind: 'pending_reduction',
+          amountCents: 306,
+          status: 'done',
+        }),
+      ]);
+      expect(obs.error).not.toHaveBeenCalled();
+    });
+
+    it('waits while a drain holds it, and says so as a warning, not an error', async () => {
+      const chargeId = `ch_earlier_${uid()}`;
+      const row = await failedSlice(chargeId, 1);
+      await refunded(chargeId, 400);
+
+      await expect(
+        reverseEarlierRefunds(deps, { chargeId, source: SOURCE })
+      ).rejects.toMatchObject({
+        cause: expect.objectContaining({ code: 'SERVICE_UNAVAILABLE' }),
+      });
+
+      expect(await recordsOf(row.id)).toEqual([
+        expect.objectContaining({
+          status: 'failed',
+          lastErrorCode: 'payout_in_flight',
+        }),
+      ]);
+      expect(obs.warn).toHaveBeenCalledWith(
+        expect.stringContaining('not clawed back yet'),
+        expect.objectContaining({ chargeId })
+      );
+      expect(obs.error).not.toHaveBeenCalled();
+    });
   });
 
   it('after a commit, a failure is held: finish raises it with the result, as an AfterCommitError', async () => {

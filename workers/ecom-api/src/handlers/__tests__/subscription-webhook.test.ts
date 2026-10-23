@@ -528,22 +528,40 @@ describe('handleSubscriptionWebhook', () => {
         expect(mockRelease).toHaveBeenCalledOnce();
       });
 
-      it('transient (tier) → rejects before the email: the redelivery sends it once', async () => {
+      it('transient (tier) → access is cleared at once, the email waits; the redelivery sends it once', async () => {
+        const renewal = { userId: 'user_1', orgId: 'org_1', email };
         const failure = new AfterCommitError(
           'clawback failed',
-          { userId: 'user_1', orgId: 'org_1', email },
+          renewal,
           transient()
         );
-        mockHandleInvoiceSuccess.mockRejectedValueOnce(failure);
+        mockHandleInvoiceSuccess
+          .mockRejectedValueOnce(failure)
+          .mockResolvedValueOnce(renewal);
         const event = createEvent(STRIPE_EVENTS.INVOICE_PAYMENT_SUCCEEDED, {
           id: 'in_after_commit_transient',
         });
+        const store = kv();
+        const { context } = createContext({ CACHE_KV: store });
 
         await expect(
-          handleSubscriptionWebhook(event, mockStripe, createContext().context)
+          handleSubscriptionWebhook(event, mockStripe, context)
         ).rejects.toBe(failure);
 
+        // A past_due subscriber's streaming block is lifted now, not at its TTL.
+        expect(context.executionCtx.waitUntil).toHaveBeenCalled();
+        expect(store.delete).toHaveBeenCalled();
         expect(sendEmailToWorker).not.toHaveBeenCalled();
+
+        // The redelivery: the clawback finishes, and the email goes once.
+        await handleSubscriptionWebhook(event, mockStripe, context);
+
+        expect(sendEmailToWorker).toHaveBeenCalledTimes(1);
+        expect(sendEmailToWorker).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          email
+        );
       });
 
       it("permanent (course plan) → the buyer's library is still bumped, then it rejects", async () => {

@@ -188,6 +188,25 @@ describe('verifyCheckoutSession on a duplicate subscription (Codex-o4jvw)', () =
       expect(result.subscription?.id).toBe(kept.id);
       expect(result.subscription?.duplicateOf).toBeUndefined();
     });
+
+    it("does not read another user's row for the session", async () => {
+      const { org, basic } = await orgWithTiers();
+      const theirs = takeFirst(
+        await db
+          .insert(subscriptions)
+          .values(createTestSubscriptionInput(creatorId, org.id, basic.id))
+          .returning(),
+        'their subscription'
+      );
+
+      // The session's metadata says it is this user's, but the row is not.
+      const result = await new SubscriptionService(
+        { db, environment: 'test' },
+        stripeReturning(completeSession(userId, theirs.stripeSubscriptionId))
+      ).verifyCheckoutSession('cs_mismatch', userId);
+
+      expect(result).toEqual({ sessionStatus: 'complete' });
+    });
   });
 
   describe('course plan', () => {
