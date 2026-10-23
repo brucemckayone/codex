@@ -540,6 +540,7 @@ export const load: PageServerLoad = async ({ parent }) => {
 - `.catch()` on every returned promise — unhandled rejections crash the server
 - Await data needed for SEO (`<svelte:head>`) and page structure
 - Streaming only works in `+page.server.ts`, NOT universal `+page.ts`
+- An error page under a streaming layout keeps its HTTP status only because of `patches/@sveltejs__kit@2.55.0.patch` (Codex-nqop3; Kit 2's streaming arm dropped it, so a load-thrown 404 went out as 200). Re-key or drop the patch on any Kit bump; `e2e/org-error-status.spec.ts` holds the status
 
 ---
 
