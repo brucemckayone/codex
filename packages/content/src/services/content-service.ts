@@ -35,6 +35,7 @@ import {
   content,
   contentCategories,
   mediaItems,
+  organizations,
   stripeConnectAccounts,
 } from '@codex/database/schema';
 import {
@@ -1290,6 +1291,25 @@ export class ContentService extends BaseService {
 
       if (params.orgId) {
         whereConditions.push(eq(content.organizationId, params.orgId));
+      } else {
+        // With no org in the filter (a creator's public profile, /discover)
+        // nothing else proves the content's org is live. Deleting an org
+        // soft-deletes only the org row, so its content stays published and a
+        // card would link into an org that now 404s. Personal content has no
+        // org and is kept.
+        const liveOrgOrPersonal = or(
+          isNull(content.organizationId),
+          inArray(
+            content.organizationId,
+            this.db
+              .select({ id: organizations.id })
+              .from(organizations)
+              .where(isNull(organizations.deletedAt))
+          )
+        );
+        if (liveOrgOrPersonal) {
+          whereConditions.push(liveOrgOrPersonal);
+        }
       }
 
       // Optional slug filter (exact match for content detail page)
@@ -1316,7 +1336,9 @@ export class ContentService extends BaseService {
         whereConditions.push(eq(content.contentType, params.contentType));
       }
 
-      // Optional creator filter — scopes to a single creator's content within the org
+      // Optional creator filter: one creator's content within the org, or, with
+      // no orgId, across their orgs and personal space (their public profile,
+      // Codex-osuqt)
       if (params.creatorId) {
         whereConditions.push(eq(content.creatorId, params.creatorId));
       }
