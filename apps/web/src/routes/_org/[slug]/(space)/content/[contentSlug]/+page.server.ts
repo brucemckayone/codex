@@ -19,6 +19,7 @@ import {
   isPublicContent,
   loadAccessAndProgress,
   loadSubscriptionContext,
+  withoutRawBody,
 } from '$lib/server/content-detail';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -62,6 +63,11 @@ export const load: PageServerLoad = async ({
   if (!content) {
     error(404, 'Content not found');
   }
+
+  // What the browser receives: the row without its raw body. The body is
+  // rendered below from `content` into contentBodyHtml, and only once access
+  // allows it.
+  const pageContent = withoutRawBody(content);
 
   // Body gating: only render `contentBodyHtml` once access is confirmed.
   // Free content renders immediately (SEO + first-paint). Everything else
@@ -114,7 +120,7 @@ export const load: PageServerLoad = async ({
   if (!locals.user) {
     setHeaders(successCacheHeaders);
     return {
-      content,
+      content: pageContent,
       contentBodyHtml: publicBodyHtml,
       hasAccess: isPublic,
       streamingUrl: null,
@@ -131,7 +137,7 @@ export const load: PageServerLoad = async ({
   if (isPublic) {
     setHeaders(successCacheHeaders);
     return {
-      content,
+      content: pageContent,
       contentBodyHtml: publicBodyHtml,
       hasAccess: null,
       streamingUrl: null,
@@ -165,7 +171,7 @@ export const load: PageServerLoad = async ({
 
   setHeaders(successCacheHeaders);
   return {
-    content,
+    content: pageContent,
     contentBodyHtml: gatedBodyHtml,
     hasAccess: null,
     streamingUrl: null,

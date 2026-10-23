@@ -35,7 +35,7 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServic
 
 | # | Worker | Port | Purpose | Key Endpoints |
 |---|---|---|---|---|
-| 1 | **auth** | 42069 | BetterAuth, sessions (PG+KV cache), rate limiting | `POST /api/auth/sign-up/email`, `POST /api/auth/sign-in/email`, `GET /api/auth/session` |
+| 1 | **auth** | 42069 | BetterAuth, sessions (PG+KV cache), rate limiting | `POST /api/auth/sign-up/email`, `POST /api/auth/sign-in/email`, `GET /api/auth/get-session` |
 | 2 | **content-api** | 4001 | Content CRUD, media registration, access control, streaming | `POST /api/content`, `GET /api/access/content/:id/stream` |
 | 3 | **organization-api** | 42071 | Org CRUD, membership, settings, tiers, followers | `POST /api/organizations`, `GET /api/organizations/slug/:slug` |
 | 4 | **ecom-api** | 42072 | Stripe checkout, webhooks, purchase history | `POST /checkout/create`, `POST /webhooks/stripe/payment` |

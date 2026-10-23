@@ -13,9 +13,10 @@
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
   import { Pagination } from '$lib/components/ui/Pagination';
-  import { buildContentUrl } from '$lib/utils/subdomain';
+  import { buildCreatorContentUrl } from '$lib/utils/subdomain';
   import { ArrowLeftIcon, SearchIcon, FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -137,8 +138,11 @@
     </div>
   </div>
 
-  <!-- Content Grid -->
-  {#if hasContent && contentItems.length > 0}
+  <!-- Content Grid. A failed read is an error, ahead of both empty states:
+       neither "no results" nor "hasn't published" may stand in for it. -->
+  {#if data.contentError}
+    <ErrorBanner title={m.creator_content_error_title()} description={m.creator_content_error_description()} />
+  {:else if hasContent && contentItems.length > 0}
     <div class="content-grid">
       {#each contentItems as item (item.id)}
         <ContentCard
@@ -148,7 +152,7 @@
           description={item.description}
           contentType={item.contentType === 'written' ? 'article' : item.contentType}
           duration={item.mediaItem?.durationSeconds ?? null}
-          href={buildContentUrl(page.url, item)}
+          href={buildCreatorContentUrl(page.url, username, item)}
           price={item.priceCents != null ? {
             amount: item.priceCents,
             currency: 'GBP',

@@ -26,7 +26,8 @@ import type { HeroLayout } from '@codex/validation';
 export interface ContentWithRelations extends Content {
   creator?: {
     id: string;
-    email: string;
+    /** Absent on the anonymous public list, which never selects it. */
+    email?: string;
     name: string | null;
   };
   organization?: Organization | null;

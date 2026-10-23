@@ -1255,8 +1255,11 @@ export class ContentService extends BaseService {
    *
    * Security:
    * - No authentication required
-   * - Only returns published, non-deleted content
-   * - Scoped to a specific organization
+   * - Only returns published, non-deleted content whose org (if any) is live
+   * - Scoped by an org, a creator (their public profile) or a slug; with none
+   *   it is /discover's platform-wide catalogue. The route schemas decide
+   *   which a caller may send.
+   * - The creator relation carries no email: this list is anonymous
    *
    * Features:
    * - Optional contentType filter
@@ -1291,26 +1294,32 @@ export class ContentService extends BaseService {
 
       if (params.orgId) {
         whereConditions.push(eq(content.organizationId, params.orgId));
-      } else {
-        // With no org in the filter (a creator's public profile, /discover)
-        // nothing else proves the content's org is live. Deleting an org
-        // soft-deletes only the org row, so its content stays published and a
-        // card would link into an org that now 404s. Personal content has no
-        // org and is kept.
-        const liveOrgOrPersonal = or(
-          isNull(content.organizationId),
-          inArray(
-            content.organizationId,
-            this.db
-              .select({ id: organizations.id })
-              .from(organizations)
-              .where(isNull(organizations.deletedAt))
-          )
-        );
-        if (liveOrgOrPersonal) {
-          whereConditions.push(liveOrgOrPersonal);
-        }
       }
+
+      // Only content whose org is live, on every path. Deleting an org
+      // soft-deletes only the org row, so its content stays published: a
+      // creator's profile or /discover would show a card into an org that now
+      // 404s, and an org-scoped read of a deleted org would still list it to a
+      // direct API client. Personal content has no org and is kept.
+      const liveOrgOrPersonal = or(
+        isNull(content.organizationId),
+        inArray(
+          content.organizationId,
+          this.db
+            .select({ id: organizations.id })
+            .from(organizations)
+            .where(isNull(organizations.deletedAt))
+        )
+      );
+      // or() is SQL | undefined, and and() drops an undefined silently, which
+      // would quietly lift this filter. Two defined arguments never give
+      // undefined; refuse rather than run unfiltered if that ever changes.
+      if (!liveOrgOrPersonal) {
+        throw new InternalServiceError(
+          'listPublic live-org filter did not build'
+        );
+      }
+      whereConditions.push(liveOrgOrPersonal);
 
       // Optional slug filter (exact match for content detail page)
       if (params.slug) {
@@ -1424,10 +1433,11 @@ export class ContentService extends BaseService {
             orderBy: [orderByClause],
             with: {
               mediaItem: true,
+              // No email: this list is anonymous, and three public creator
+              // pages and /discover serialise each item into their HTML.
               creator: {
                 columns: {
                   id: true,
-                  email: true,
                   name: true,
                 },
               },

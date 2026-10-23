@@ -35,7 +35,9 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
   let creatorId: string;
   const orgIds: string[] = [];
   const ids = { liveOrg: '', deletedOrg: '', personal: '' };
+  let deletedOrgId = '';
   let deletedOrgSlug = '';
+  let liveOrgSlug = '';
 
   async function seedOrg(deletedAt: Date | null): Promise<string> {
     const [org] = await db
@@ -79,8 +81,11 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
     if (!creator) throw new Error('failed to seed creator');
     creatorId = creator;
 
-    ids.liveOrg = (await seedPublished(await seedOrg(null))).id;
-    const inDeletedOrg = await seedPublished(await seedOrg(new Date()));
+    const inLiveOrg = await seedPublished(await seedOrg(null));
+    ids.liveOrg = inLiveOrg.id;
+    liveOrgSlug = inLiveOrg.slug;
+    deletedOrgId = await seedOrg(new Date());
+    const inDeletedOrg = await seedPublished(deletedOrgId);
     ids.deletedOrg = inDeletedOrg.id;
     deletedOrgSlug = inDeletedOrg.slug;
     ids.personal = (await seedPublished(null)).id;
@@ -92,16 +97,20 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
     await teardownTestDatabase();
   });
 
-  const listed = async (scope: { creatorId?: string; slug?: string }) =>
-    (
-      await service.listPublic({
-        ...scope,
-        page: 1,
-        limit: 50,
-        sort: 'newest',
-        search: token,
-      })
-    ).items.map((item) => item.id);
+  const read = (scope: { orgId?: string; creatorId?: string; slug?: string }) =>
+    service.listPublic({
+      ...scope,
+      page: 1,
+      limit: 50,
+      sort: 'newest',
+      search: token,
+    });
+
+  const listed = async (scope: {
+    orgId?: string;
+    creatorId?: string;
+    slug?: string;
+  }) => (await read(scope)).items.map((item) => item.id);
 
   it("a creator's profile lists their live-org and personal content, not a deleted org's", async () => {
     const found = await listed({ creatorId });
@@ -117,7 +126,25 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
     expect(found).not.toContain(ids.deletedOrg);
   });
 
-  it("a creator's detail-page lookup by slug does not find it either", async () => {
+  it("a creator's detail-page lookup by slug finds a live piece, not a deleted org's", async () => {
+    // The positive control: without it an always-empty slug lookup would pass.
+    expect(await listed({ creatorId, slug: liveOrgSlug })).toEqual([
+      ids.liveOrg,
+    ]);
     expect(await listed({ creatorId, slug: deletedOrgSlug })).toEqual([]);
+  });
+
+  it('an org-scoped read of a deleted org lists nothing to a direct API client', async () => {
+    expect(await listed({ orgId: deletedOrgId })).toEqual([]);
+  });
+
+  it('the anonymous list carries no creator email', async () => {
+    const { items } = await read({ creatorId });
+
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      expect(item.creator).toBeDefined();
+      expect(item.creator).not.toHaveProperty('email');
+    }
   });
 });

@@ -760,7 +760,7 @@ export function createServerApi(
        * - accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | 'course' (optional list filter — a query KIND label, not the stored flags)
        * - category: string filter (max 100 chars, optional)
        * - organizationId: UUID filter (optional)
-       * - creatorId: UUID filter (optional)
+       * - creatorId: user id filter (BetterAuth text, not a UUID; optional)
        * - search: text search (max 255 chars, optional)
        * - sortBy: 'createdAt' | 'updatedAt' | 'publishedAt' | 'title' | 'viewCount' | 'purchaseCount' (default: 'createdAt')
        * - sortOrder: 'asc' | 'desc' (default: 'desc')
@@ -883,10 +883,14 @@ export function createServerApi(
         }),
 
       /**
-       * List public content for an organization (no auth required)
+       * List public content for an organization or a creator (no auth required)
        *
-       * Query parameters (from PublicContentQueryInput):
-       * - orgId: UUID (required) - organization to scope content
+       * Query parameters (from PublicContentQueryInput). One of orgId,
+       * creatorId or slug is required:
+       * - orgId: UUID - organization to scope content
+       * - creatorId: user id (BetterAuth text) - one creator's content across
+       *   their orgs and personal space (their public profile, Codex-osuqt)
+       * - slug: exact content slug (a detail-page lookup)
        * - page: number (default: 1)
        * - limit: number (1-50, default: 20)
        * - contentType: 'video' | 'audio' | 'written' (optional)

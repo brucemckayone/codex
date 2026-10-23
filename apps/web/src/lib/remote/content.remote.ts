@@ -14,6 +14,7 @@ import {
   checkContentSlugSchema,
   contentQuerySchema,
   createSearchQuerySchema,
+  userIdSchema,
 } from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
@@ -208,7 +209,9 @@ const publicContentQueryParamsSchema = z.object({
     .optional(),
   search: createSearchQuerySchema(255),
   sort: z.enum(['newest', 'oldest', 'title']).default('newest').optional(),
-  creatorId: z.string().uuid().optional(),
+  // A user id (BetterAuth text), not a uuid: z.string().uuid() refused every
+  // real creator, so /explore's creator filter 400'd (Codex-osuqt).
+  creatorId: userIdSchema.optional(),
   featured: z.boolean().optional(),
 });
 

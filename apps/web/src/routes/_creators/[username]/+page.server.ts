@@ -1,19 +1,20 @@
 /**
  * Creator profile server load
  *
- * Fetches creator's published content via the public content endpoint.
- * Since there is no dedicated "get user by username" API, the page uses the
- * username from the URL and fetches public content scoped by search query.
+ * Resolves the creator by username (`getPublicProfile`; no such creator is a
+ * 404) and lists their newest published content through the public content
+ * list scoped by creatorId (Codex-osuqt).
  * Sets CACHE_HEADERS.PRIVATE (see the call at the end of the load): the
  * (platform) shell around this page renders the signed-in user, and shared
  * caches key on URL and never on Cookie, so a shared window would serve one
  * viewer's chrome to the next. The docstring used to claim DYNAMIC_PUBLIC,
  * which this load has never called.
  */
-import { logger } from '$lib/observability';
+import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
+import { logCreatorContentFailure } from './content-failure';
 
 const CONTENT_LIMIT = 12;
 
@@ -28,9 +29,7 @@ export const load: PageServerLoad = async ({
   const username = params.username.replace(/^@/, '');
   const api = createServerApi(platform, cookies);
 
-  // Attempt to fetch the creator's profile from identity API.
-  // This is a best-effort lookup; if the endpoint doesn't exist or the user
-  // isn't found, we gracefully degrade to showing just the username.
+  // The creator's public profile from identity-api.
   let creatorProfile: {
     id?: string;
     name?: string | null;
@@ -49,6 +48,13 @@ export const load: PageServerLoad = async ({
   // as an anonymous-looking placeholder profile the way the old blanket
   // `catch` did.
   creatorProfile = await api.account.getPublicProfile(username);
+
+  // No such creator is a 404, as on the detail page. It used to render a
+  // placeholder profile with HTTP 200: a soft 404 that crawlers index as a
+  // real creator page.
+  if (!creatorProfile?.id) {
+    error(404, 'Creator not found');
+  }
 
   // The creator's published content (fetched below).
   let contentItems: Array<{
@@ -75,31 +81,35 @@ export const load: PageServerLoad = async ({
     } | null;
   }> = [];
 
+  // Total published, which the hero shows; contentItems holds only the newest
+  // CONTENT_LIMIT of them.
+  let contentTotal = 0;
+  // A failed read renders an error state, never the "hasn't published" empty
+  // state, which would tell a visitor something false.
+  let contentError = false;
+
   // The creator's published content, newest first, across every org they
   // publish in and their personal space: the PUBLIC list scoped by creator.
   // Not `api.content.list`, the studio list, which needs a session and lists
   // the SIGNED-IN user's own content: a visitor got a 401 here, shown as an
   // empty profile, and a signed-in visitor saw their own work on someone
   // else's profile (Codex-osuqt).
-  if (creatorProfile?.id) {
-    try {
-      const params = new URLSearchParams();
-      params.set('creatorId', creatorProfile.id);
-      params.set('limit', String(CONTENT_LIMIT));
-      params.set('sort', 'newest');
+  try {
+    const params = new URLSearchParams();
+    params.set('creatorId', creatorProfile.id);
+    params.set('limit', String(CONTENT_LIMIT));
+    params.set('sort', 'newest');
 
-      const contentResult = await api.content.getPublicContent(params);
-      contentItems = contentResult?.items ?? [];
-    } catch (error) {
-      // The profile still renders, with the empty state. Logged, because an
-      // empty profile is otherwise indistinguishable from a creator with no
-      // published work.
-      logger.warn('Creator profile content not loaded', {
-        creatorId: creatorProfile.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      contentItems = [];
-    }
+    const contentResult = await api.content.getPublicContent(params);
+    contentItems = contentResult?.items ?? [];
+    contentTotal = contentResult?.pagination?.total ?? contentItems.length;
+  } catch (err) {
+    logCreatorContentFailure(
+      'Creator profile content not loaded',
+      creatorProfile.id,
+      err
+    );
+    contentError = true;
   }
 
   // Extract unique organizations from content items
@@ -132,6 +142,8 @@ export const load: PageServerLoad = async ({
     user: locals.user,
     creatorProfile,
     contentItems,
+    contentTotal,
+    contentError,
     organizations,
   };
 };

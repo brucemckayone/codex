@@ -2,14 +2,15 @@
  * Creator Content Catalog - server load
  *
  * Fetches a creator's published content with search, type filtering, and pagination.
- * Reuses the creator profile lookup from the parent page, then queries content
- * scoped by creatorId with URL-driven filters.
+ * Resolves the creator itself (`getPublicProfile`; no such creator is a 404),
+ * then queries the public list scoped by creatorId with URL-driven filters.
  * Sets PRIVATE cache headers — the page is auth-varying (creator layout
  * injects `user`), so it must not be shared-cached.
  */
-import { logger } from '$lib/observability';
+import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { logCreatorContentFailure } from '../content-failure';
 import type { PageServerLoad } from './$types';
 
 const CONTENT_LIMIT = 12;
@@ -33,17 +34,18 @@ export const load: PageServerLoad = async ({
     parseInt(url.searchParams.get('page') || '1', 10) || 1
   );
 
-  // Attempt to fetch the creator's profile from identity API
-  let creatorId: string | null = null;
-  let creatorName: string | null = null;
-
-  // Note this used to read `profileResult?.data?.id` off a raw `api.fetch`,
-  // i.e. it expected the un-unwrapped procedure envelope. `getPublicProfile`
-  // goes through `request()`, which unwraps `{ data: T }` to `T`, so the
-  // fields are read directly.
+  // The creator's public profile from identity-api. Note this used to read
+  // `profileResult?.data?.id` off a raw `api.fetch`, i.e. it expected the
+  // un-unwrapped procedure envelope. `getPublicProfile` goes through
+  // `request()`, which unwraps `{ data: T }` to `T`, so the fields are read
+  // directly.
   const profile = await api.account.getPublicProfile(username);
-  creatorId = profile?.id ?? null;
-  creatorName = profile?.name ?? null;
+  // No such creator is a 404, as on the detail page, not a 200 "no content".
+  if (!profile?.id) {
+    error(404, 'Creator not found');
+  }
+  const creatorId = profile.id;
+  const creatorName = profile.name ?? null;
 
   // Fetch creator's published content with filters
   let contentItems: Array<{
@@ -58,50 +60,50 @@ export const load: PageServerLoad = async ({
       thumbnailUrl?: string | null;
       durationSeconds?: number | null;
     } | null;
+    organization?: { slug?: string | null } | null;
   }> = [];
   let totalPages = 1;
   let total = 0;
+  // A failed read renders an error state, never "hasn't published" or "no
+  // content matches your search", which would blame the visitor's query.
+  let contentError = false;
 
   // The PUBLIC list scoped by creator, not the studio list, which needs a
   // session and lists the signed-in user's own content (Codex-osuqt).
-  if (creatorId) {
-    try {
-      const contentParams = new URLSearchParams();
-      contentParams.set('creatorId', creatorId);
-      contentParams.set('limit', String(CONTENT_LIMIT));
-      contentParams.set('page', String(page));
-      contentParams.set('sort', 'newest');
+  try {
+    const contentParams = new URLSearchParams();
+    contentParams.set('creatorId', creatorId);
+    contentParams.set('limit', String(CONTENT_LIMIT));
+    contentParams.set('page', String(page));
+    contentParams.set('sort', 'newest');
 
-      if (search) {
-        contentParams.set('search', search);
-      }
-
-      if (typeFilter && typeFilter !== 'all') {
-        const typeMap: Record<string, string> = {
-          video: 'video',
-          audio: 'audio',
-          article: 'written',
-        };
-        const mappedType = typeMap[typeFilter];
-        if (mappedType) {
-          contentParams.set('contentType', mappedType);
-        }
-      }
-
-      const contentResult = await api.content.getPublicContent(contentParams);
-      contentItems = contentResult?.items ?? [];
-      totalPages = contentResult?.pagination?.totalPages ?? 1;
-      total = contentResult?.pagination?.total ?? 0;
-    } catch (error) {
-      // The catalogue still renders, with the empty state. Logged, because
-      // it is otherwise indistinguishable from a creator with nothing
-      // published.
-      logger.warn('Creator catalogue content not loaded', {
-        creatorId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      contentItems = [];
+    if (search) {
+      contentParams.set('search', search);
     }
+
+    if (typeFilter && typeFilter !== 'all') {
+      const typeMap: Record<string, string> = {
+        video: 'video',
+        audio: 'audio',
+        article: 'written',
+      };
+      const mappedType = typeMap[typeFilter];
+      if (mappedType) {
+        contentParams.set('contentType', mappedType);
+      }
+    }
+
+    const contentResult = await api.content.getPublicContent(contentParams);
+    contentItems = contentResult?.items ?? [];
+    totalPages = contentResult?.pagination?.totalPages ?? 1;
+    total = contentResult?.pagination?.total ?? 0;
+  } catch (err) {
+    logCreatorContentFailure(
+      'Creator catalogue content not loaded',
+      creatorId,
+      err
+    );
+    contentError = true;
   }
 
   // Auth-varying HTML — the creator layout injects the auth-aware `user`
@@ -115,6 +117,7 @@ export const load: PageServerLoad = async ({
     username,
     creatorName,
     contentItems,
+    contentError,
     search,
     typeFilter,
     pagination: {

@@ -21,6 +21,7 @@ import {
   isPublicContent,
   loadAccessAndProgress,
   loadSubscriptionContext,
+  withoutRawBody,
 } from '$lib/server/content-detail';
 import type { ContentWithRelations } from '$lib/types';
 import type { Actions, PageServerLoad } from './$types';
@@ -62,6 +63,12 @@ export const load: PageServerLoad = async ({
   // got a 404 here for every real piece (Codex-osuqt). No result is a 404.
   // A failed request is not, so it propagates as a 500, as the profile
   // lookup above does.
+  //
+  // A slug longer than publicContentQuerySchema allows (500) names nothing,
+  // so it is a 404 here rather than the API's 400 surfacing as a 500.
+  if (contentSlug.length > 500) {
+    error(404, 'Content not found');
+  }
   const contentParams = new URLSearchParams();
   contentParams.set('creatorId', creatorProfile.id);
   contentParams.set('slug', contentSlug);
@@ -75,14 +82,20 @@ export const load: PageServerLoad = async ({
     error(404, 'Content not found');
   }
 
+  // What the browser receives: the row without its raw body. The body is
+  // rendered below from `content` into contentBodyHtml, and only once access
+  // allows it.
+  const pageContent = withoutRawBody(content);
+
   // Cache header is applied ONLY on the success path right before each return.
   // This page renders auth-aware HTML (the creator layout injects `user` and
   // the CTA switches on isAuthenticated), so the SAME URL yields different
   // markup per auth state. Shared caches (Cloudflare edge, miniflare) key by
   // URL, NOT by Cookie, so any `public` response cached for an anonymous
   // visitor is served to signed-in users too. PRIVATE keeps it out of shared
-  // caches; the public content list (incl. this slug lookup) is KV-cached in
-  // content-api so the DB stays shielded. See docs/caching-strategy.md.
+  // caches. This creator-scoped lookup is NOT KV-cached in content-api
+  // (shouldCachePublicContentQuery skips any query naming a creator), so each
+  // render reads the DB. See docs/caching-strategy.md.
   const successCacheHeaders = CACHE_HEADERS.PRIVATE;
 
   // Body gating: only render the body once access is confirmed. Free content
@@ -135,7 +148,7 @@ export const load: PageServerLoad = async ({
   if (!locals.user) {
     setHeaders(successCacheHeaders);
     return {
-      content,
+      content: pageContent,
       contentBodyHtml: publicBodyHtml,
       hasAccess: isPublic,
       streamingUrl: null,
@@ -153,7 +166,7 @@ export const load: PageServerLoad = async ({
   if (isPublic) {
     setHeaders(successCacheHeaders);
     return {
-      content,
+      content: pageContent,
       contentBodyHtml: publicBodyHtml,
       hasAccess: null,
       streamingUrl: null,
@@ -187,7 +200,7 @@ export const load: PageServerLoad = async ({
 
   setHeaders(successCacheHeaders);
   return {
-    content,
+    content: pageContent,
     contentBodyHtml: gatedBodyHtml,
     hasAccess: null,
     streamingUrl: null,

@@ -79,7 +79,8 @@ export interface MediaItemFilters {
 export interface ContentWithRelations extends Content {
   creator?: {
     id: string;
-    email: string;
+    /** Absent on the anonymous public list (`listPublic`), which never selects it. */
+    email?: string;
     name: string | null;
   };
   organization?: Organization | null;

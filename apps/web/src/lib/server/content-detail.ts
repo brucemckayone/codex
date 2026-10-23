@@ -220,6 +220,24 @@ export function isPublicContent(policy: ContentPublicnessPolicy): boolean {
   );
 }
 
+/**
+ * The content row a detail page returns to the browser, without its raw body.
+ *
+ * Both detail pages render the body server-side into `contentBodyHtml`, and
+ * only once access is confirmed; nothing on the page reads `contentBody` or
+ * `contentBodyJson`. But the row comes from the public list, which strips the
+ * body only when `isFree` is false. A row flagged free that also carries a
+ * gate (which the course service writes on purpose: `isFree` + `courseOnly`)
+ * kept its full body, and returning the row as-is put that body in the load
+ * payload, readable through view-source while the page showed it locked. The
+ * public API itself still returns it; that is tracked separately.
+ */
+export function withoutRawBody<
+  T extends { contentBody?: string | null; contentBodyJson?: unknown },
+>(content: T): T {
+  return { ...content, contentBody: null, contentBodyJson: null };
+}
+
 /** The server-side API surface returned by `createServerApi`. */
 type ServerApi = ReturnType<typeof createServerApi>;
 
