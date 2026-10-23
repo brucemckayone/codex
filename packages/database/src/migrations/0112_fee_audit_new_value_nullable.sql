@@ -1,0 +1,1 @@
+ALTER TABLE "fee_config_audit_log" ALTER COLUMN "new_value" DROP NOT NULL;

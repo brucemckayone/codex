@@ -9,13 +9,17 @@
  * the braces.
  *
  * Use cases:
+ *   - `resolveOrCreateCustomer` (Codex-2hxff.23): an email match another
+ *     users row holds, a deleted user's included, is never adopted —
+ *     `findUsersByStripeCustomerId` is that check.
  *   - Admin console: "detect and fix drifted Customer IDs".
  *   - One-off maintenance scripts post-backfill.
  *   - Pre-unifying-portal guard: a code path that wants to refuse to open
  *     a unified portal if it would expose another user's history.
  *
- * None of these are hot-path — the helpers are intentionally plain
- * Drizzle queries with no caching.
+ * None of these are hot-path — the resolve check runs only while a user has
+ * no Customer yet, once per email candidate — so the helpers are
+ * intentionally plain Drizzle queries with no caching.
  *
  * @see Codex-cmhnv — the backfill script writes these.
  * @see Codex-49gev — resolveOrCreateCustomer guards the first write.

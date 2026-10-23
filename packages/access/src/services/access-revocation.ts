@@ -1,24 +1,37 @@
 /**
  * AccessRevocation
  *
- * Per-user, per-org short-TTL KV "block list" used to close the window where a
- * cryptographic presigned R2 URL outlives its access check. Checked before
- * minting signed URLs in `ContentAccessService.getStreamingUrl()`.
+ * Per-user, per-org short-TTL KV "block list".
+ * `ContentAccessService.getStreamingUrl()` reads it before its DB access
+ * check, so once access ends no NEW stream link is issued for that
+ * organisation.
+ *
+ * What it does not do: stop a link already issued. A stream link is an HLS
+ * token that plays until it expires (`DEFAULT_STREAMING_URL_TTL_SECONDS`,
+ * 10 minutes by default), and the playlist proxy checks only the token, never
+ * this key. The owner accepted that window (Codex-2hxff.61, option c: no
+ * per-segment check). The DB access check is the authority: it refuses a new
+ * link whether or not the key is there, so a missing KV binding, a failed
+ * write or an early clear never grants anything.
  *
  * Design decisions (see docs/payments/access.md, "Streaming revocation"):
  * - Keyspace `revoked:` is deliberately distinct from `cache:` so there is
  *   zero confusion with `@codex/cache` / `VersionedCache`. This is NOT a
  *   versioned cache — it's an authoritative short-TTL block list and does
  *   NOT belong in `CacheType`.
- * - TTL is 1200s (2× the max presigned URL TTL of 600s) to cover in-flight
- *   signed URLs minted just before revocation.
+ * - TTL is `REVOCATION_TTL_SECONDS` (1200s). It bounds only how long the key
+ *   lives; it has no effect on links already issued.
  * - Written by: `customer.subscription.deleted`, `customer.subscription.updated
- *   → unpaid`, `charge.refunded` (a full refund of the latest subscription
- *   payment), `charge.dispute.created`, `customer.subscription.paused`. NOT by
- *   `invoice.payment_failed`: a failed renewal keeps access while Stripe
- *   retries (owner decision P-3).
- * - Cleared by: `customer.subscription.updated → ACTIVE`,
- *   `invoice.payment_succeeded` after PAST_DUE, `customer.subscription.resumed`.
+ *   → unpaid`, `customer.subscription.paused`, `charge.refunded` (a full
+ *   refund of the latest subscription payment), and a chargeback opened or
+ *   lost on a subscription invoice, or on a purchase whose item the buyer
+ *   holds no other way. NOT by `invoice.payment_failed`: a failed renewal
+ *   keeps access while Stripe retries (owner decision P-3).
+ * - Cleared by: `customer.subscription.updated → active` while billing is not
+ *   paused (a `pause_collection` there is our own dispute hold, so it never
+ *   clears the block), `invoice.payment_succeeded`,
+ *   `customer.subscription.resumed`, the reactivate and resume routes, and a
+ *   won dispute that restores the access.
  * - NOT written on `cancel_at_period_end=true` — the user retains paid access
  *   through `currentPeriodEnd` by product decision.
  */
@@ -48,8 +61,9 @@ export interface Revocation {
 }
 
 /**
- * KV TTL in seconds. 2× the maximum presigned URL TTL (600s) to cover
- * in-flight signed URLs minted moments before revocation.
+ * KV TTL in seconds: how long a block refuses new stream links. Links issued
+ * before the block play to their own expiry whatever this is; the DB access
+ * check keeps refusing after the key expires.
  */
 export const REVOCATION_TTL_SECONDS = 1200;
 

@@ -247,7 +247,9 @@ export const feeConfigOrgCreator = pgTable(
  * disambiguate when scope='org' or scope='override'.
  *
  * Values are stored as text so the same table can record any column type
- * without schema churn. Callers stringify before insert.
+ * without schema churn. Callers stringify before insert. SQL NULL on either
+ * side means "unset, inherits the tier above": a clear back to inherit is
+ * old → NULL (Codex-2hxff.23 PAY-16; it used to be the string 'null').
  */
 export const feeConfigAuditLog = pgTable(
   'fee_config_audit_log',
@@ -266,7 +268,7 @@ export const feeConfigAuditLog = pgTable(
 
     columnName: text('column_name').notNull(),
     oldValue: text('old_value'),
-    newValue: text('new_value').notNull(),
+    newValue: text('new_value'),
 
     changedBy: text('changed_by')
       .notNull()

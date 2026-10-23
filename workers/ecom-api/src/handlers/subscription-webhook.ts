@@ -83,9 +83,10 @@ async function applyPendingPriceChangeOrReport(
 
 /**
  * Fire-and-forget write of a per-user, per-org KV revocation key after a
- * Stripe event that REDUCES access (subscription deleted, payment failed,
- * refund). Checked by `ContentAccessService.getStreamingUrl()` to close the
- * window where a presigned R2 URL issued before revocation is still usable.
+ * Stripe event that REDUCES access (subscription deleted or paused, status
+ * `unpaid`). `ContentAccessService.getStreamingUrl()` reads it, so no NEW
+ * stream link is issued; a link already issued plays to its expiry. The DB
+ * access check is the authority.
  *
  * See packages/access/src/services/access-revocation.ts and
  * docs/payments/access.md ("Streaming revocation") for the design.
@@ -409,19 +410,31 @@ export async function handleSubscriptionWebhook(
 
         // Access-RESTORING transition: Stripe reports status=active. The
         // user may have been in a non-active state before this event (e.g.
-        // `unpaid` → `active` after a dispute resolution, or `past_due` →
-        // `active` outside of the invoice.payment_succeeded path). We take
-        // the conservative approach: always clear on status=active. KV
-        // delete is idempotent — if no revocation key exists, it's a free
-        // no-op; if one does, this restores access within the KV TTL.
+        // `unpaid` → `active`, or `past_due` → `active` outside of the
+        // invoice.payment_succeeded path), so the clear runs on every
+        // status=active. KV delete is idempotent — if no revocation key
+        // exists, it's a free no-op; if one does, new stream links are issued
+        // again at once.
         //
         // `cancel_at_period_end=true` also reports status=active; the user
         // never had access revoked in that case (see the comment above on
         // the non-write path) so the clear is still safe — there's simply
         // no key to delete.
         //
+        // Not while billing is paused (`pause_collection` set). That is a
+        // dispute hold: when a chargeback opens, payment-webhook writes the
+        // block and then pauses billing, and the pause fires this event with
+        // status still `active`. Clearing here would undo the block seconds
+        // after it was written (Codex-2hxff.61). The won dispute clears it
+        // itself (payment-webhook `clearRevocation`); so does the
+        // `updated(active)` that resuming billing fires, with
+        // `pause_collection` back to null.
+        //
         // See bead Codex-13ml3 (clear counterpart to Codex-usgf7 writes).
-        if (subscription.status === 'active') {
+        if (
+          subscription.status === 'active' &&
+          !subscription.pause_collection
+        ) {
           clearAccess(c, result);
         }
 
@@ -462,10 +475,10 @@ export async function handleSubscriptionWebhook(
           webAppUrl
         );
 
-        // Revocation list write: close the presigned-URL window. Paired
-        // with a shortened streaming URL TTL in ContentAccessService, this
-        // limits post-cancellation stream access to the URL TTL rather
-        // than the (longer) cache invalidation propagation window.
+        // Revocation list write: no new stream link from now on. A link
+        // already issued plays to its expiry (DEFAULT_STREAMING_URL_TTL_SECONDS
+        // in @codex/access), so post-cancellation playback is bounded by that
+        // TTL rather than by cache invalidation propagating.
         revokeAccess(c, result, 'subscription_deleted');
         dispatchEmail(c, result);
 
@@ -508,12 +521,11 @@ export async function handleSubscriptionWebhook(
         const result = await service.handleSubscriptionResumed(subscription);
 
         // Revocation CLEAR: the paused event wrote a revocation key; the
-        // resume must clear it so already-minted presigned URLs (issued
-        // before the pause) do not stay gated beyond the resume. KV delete
-        // is idempotent — if no key exists (e.g. paused event never landed,
-        // or TTL already expired), the clear is a free no-op. Mirror of
-        // the clear paths in SUBSCRIPTION_UPDATED(status=active) and
-        // INVOICE_PAYMENT_SUCCEEDED.
+        // resume must clear it so new stream links are not refused beyond
+        // the resume. KV delete is idempotent — if no key exists (e.g.
+        // paused event never landed, or TTL already expired), the clear is a
+        // free no-op. Mirror of the clear paths in
+        // SUBSCRIPTION_UPDATED(status=active) and INVOICE_PAYMENT_SUCCEEDED.
         clearAccess(c, result);
 
         obs?.info('Subscription resumed', {
@@ -569,12 +581,12 @@ export async function handleSubscriptionWebhook(
         );
 
         // Access-RESTORING: a successful payment confirms the invoice is
-        // settled. If the subscription was previously PAST_DUE, its
-        // revocation key still lives in KV (TTL = 1200s, 2× the max
-        // presigned URL TTL). Clear it unconditionally — the payment
-        // succeeded, so access should be unblocked. KV delete is
-        // idempotent: a clear on a subscription that never went past_due
-        // is a free no-op. See bead Codex-13ml3.
+        // settled. If an earlier event blocked the subscriber (status
+        // `unpaid`, say), the key may still live in KV
+        // (REVOCATION_TTL_SECONDS in @codex/access). Clear it
+        // unconditionally — the payment succeeded, so access should be
+        // unblocked. KV delete is idempotent: a clear with no block is a
+        // free no-op. See bead Codex-13ml3.
         clearAccess(c, result);
         rethrowIfTransient(failure);
         dispatchEmail(c, result);

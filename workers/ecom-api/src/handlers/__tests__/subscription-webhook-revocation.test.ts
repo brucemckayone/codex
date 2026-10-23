@@ -895,6 +895,47 @@ describe('handleSubscriptionWebhook — access revocation', () => {
       await expect(drainWaitUntil(bundle)).resolves.not.toThrow();
       expect(mockClear).toHaveBeenCalledTimes(1);
     });
+
+    // Codex-2hxff.61: a chargeback writes the block, then pauses billing
+    // (`pause_collection: { behavior: 'void' }`). Stripe reports that pause as
+    // `updated` with status still `active`; it must not clear the block.
+    it('dispute hold: status=active with pause_collection set → clear NOT called', async () => {
+      mockHandleUpdated.mockResolvedValueOnce({
+        userId: 'user_dispute_hold',
+        orgId: 'org_dispute_hold',
+      });
+      const bundle = buildContext();
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        status: 'active',
+        pause_collection: { behavior: 'void', resumes_at: null },
+      });
+
+      await handleSubscriptionWebhook(event, mockStripe, bundle.context);
+      await drainWaitUntil(bundle);
+
+      expect(mockClear).not.toHaveBeenCalled();
+    });
+
+    it('billing resumed: status=active with pause_collection null → clear called', async () => {
+      mockHandleUpdated.mockResolvedValueOnce({
+        userId: 'user_dispute_won',
+        orgId: 'org_dispute_won',
+      });
+      const bundle = buildContext();
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        status: 'active',
+        pause_collection: null,
+      });
+
+      await handleSubscriptionWebhook(event, mockStripe, bundle.context);
+      await drainWaitUntil(bundle);
+
+      expect(mockClear).toHaveBeenCalledTimes(1);
+      expect(mockClear).toHaveBeenCalledWith(
+        'user_dispute_won',
+        'org_dispute_won'
+      );
+    });
   });
 
   describe('invoice.payment_succeeded — access clearing', () => {
