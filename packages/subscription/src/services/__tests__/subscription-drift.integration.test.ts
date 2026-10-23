@@ -42,7 +42,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -1448,6 +1448,90 @@ describe('Subscription drift — tier subscriptions (Codex-2hxff.15)', () => {
       // "2 transactions · 2 need attention", not "1 · 2".
       expect(creatorRow?.transactionCount).toBe(2);
       expect(creatorRow?.needsAttentionCount).toBe(2);
+    });
+  });
+
+  // ─── Lock order against an account deletion (Codex-kk9nv.20) ─────────────
+
+  describe('lock order against an account deletion (Codex-kk9nv.20)', () => {
+    type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+    /**
+     * Resolve once a statement on `table` is waiting on a lock `pid` holds.
+     * The table must match, and a delete or truncate (a peer's cleanup on the
+     * shared database) does not count. The same harness as
+     * packages/organization/src/services/__tests__/lock-order.test.ts.
+     */
+    async function untilBlockedBy(
+      pid: number,
+      table: string,
+      settled: () => { value: unknown } | undefined
+    ): Promise<void> {
+      for (let attempt = 0; attempt < 250; attempt++) {
+        const early = settled();
+        if (early) {
+          throw new Error(
+            `the path under test settled before it waited on ${table}`,
+            { cause: early.value }
+          );
+        }
+        const { rows } = await db.execute(
+          sql`select 1 from pg_stat_activity
+              where ${pid}::int = any(pg_blocking_pids(pid))
+                and query ilike ${`%"${table}"%`}
+                and query not ilike 'delete%'
+                and query not ilike 'truncate%'`
+        );
+        if (rows.length > 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      throw new Error(`the path under test never waited on ${table}`);
+    }
+
+    it('waits on the membership a deletion holds without holding the user row, so the deletion commits', async () => {
+      const { org, tier1 } = await createFullOrg('kk9nv20-lock');
+      // A user with a membership already (here a creator), as the bead's case.
+      await db.insert(organizationMemberships).values({
+        organizationId: org.id,
+        userId: subscriberId,
+        role: 'creator',
+        status: 'active',
+      });
+      const sub = stripeSub(org.id, tier1.id);
+      liveAtStripe(sub);
+
+      let outcome: Promise<unknown> = Promise.resolve('done');
+      let settled: { value: unknown } | undefined;
+      // The deletion: lock the user's memberships FOR UPDATE, then scrub the
+      // user's email, a unique column, which takes FOR UPDATE on the user
+      // row. A webhook holding a KEY SHARE on that row while it waits on the
+      // membership deadlocks with it (40P01).
+      await db.transaction(async (tx: Tx) => {
+        await tx
+          .select({ id: organizationMemberships.id })
+          .from(organizationMemberships)
+          .where(eq(organizationMemberships.userId, subscriberId))
+          .for('update');
+        const { rows } = await tx.execute(sql`select pg_backend_pid() as pid`);
+        const pid = Number((rows[0] as { pid: unknown } | undefined)?.pid);
+        outcome = service.handleSubscriptionCreated(sub).then(
+          () => 'done',
+          (error: unknown) => error
+        );
+        void outcome.then((value) => {
+          settled = { value };
+        });
+        await untilBlockedBy(pid, 'organization_memberships', () => settled);
+        await tx
+          .update(users)
+          .set({ email: `scrubbed-${randomUUID()}@example.invalid` })
+          .where(eq(users.id, subscriberId));
+      });
+
+      expect(await outcome).toBe('done');
+      expect((await rowFor(sub.id))?.status).toBe('active');
+      // The creator keeps the team role.
+      expect((await membershipOf(subscriberId, org.id))?.role).toBe('creator');
     });
   });
 });
