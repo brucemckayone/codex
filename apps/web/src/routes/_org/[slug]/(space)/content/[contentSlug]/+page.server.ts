@@ -7,9 +7,9 @@
  * Form actions:
  * - purchase: Creates a Stripe checkout session and returns the redirect URL
  */
+import { publicContentSlugSchema } from '@codex/validation';
 import { error } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
-import { getPublicContent } from '$lib/remote/content.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
@@ -18,8 +18,11 @@ import {
   handlePurchaseAction,
   isPublicContent,
   loadAccessAndProgress,
+  loadRelatedContent,
   loadSubscriptionContext,
+  withoutRawBody,
 } from '$lib/server/content-detail';
+import { logReadFailure } from '$lib/server/read-failure';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
@@ -52,16 +55,36 @@ export const load: PageServerLoad = async ({
   //   1. api.org.getBySlug(orgSlug) — redundant (org already resolved by layout)
   //   2. api.content.list({ organizationId, slug })
   // Now: single public call, no auth needed, CDN-cacheable.
-  const contentResult = await getPublicContent({
-    orgId: org.id,
-    slug: contentSlug,
-    limit: 1,
-  }).catch(() => null);
+  //
+  // No result is a 404. A failed request is not: it propagates as a 500, as
+  // the creator detail page's does. A `.catch(() => null)` here used to turn
+  // every content-api outage into "Content not found". A slug the public list
+  // refuses (too long, or with a NUL, which Postgres refuses in text) names
+  // nothing, so it is a 404 before any call: the rule is the API's own.
+  if (!publicContentSlugSchema.safeParse(contentSlug).success) {
+    error(404, 'Content not found');
+  }
+  // Through the server API, NOT the `getPublicContent` remote query: SvelteKit
+  // serialises every remote query's SSR result into the page for hydration
+  // (`__sveltekit_*.data`), so the remote form shipped this row, body and all,
+  // whatever the load returned. Measured live: the row's contentBodyJson sat
+  // in that cache while the returned `content` had it nulled.
+  const api = createServerApi(platform, cookies);
+  const contentParams = new URLSearchParams();
+  contentParams.set('orgId', org.id);
+  contentParams.set('slug', contentSlug);
+  contentParams.set('limit', '1');
+  const contentResult = await api.content.getPublicContent(contentParams);
 
-  const content = contentResult?.items?.[0];
+  const content = contentResult.items[0];
   if (!content) {
     error(404, 'Content not found');
   }
+
+  // What the browser receives: the row without its raw body. The body is
+  // rendered below from `content` into contentBodyHtml, and only once access
+  // allows it.
+  const pageContent = withoutRawBody(content);
 
   // Body gating: only render `contentBodyHtml` once access is confirmed.
   // Free content renders immediately (SEO + first-paint). Everything else
@@ -72,23 +95,24 @@ export const load: PageServerLoad = async ({
   const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
 
   // Fetch related content — returned as a bare promise (streamed, below fold)
-  const relatedPromise = getPublicContent({
-    orgId: org.id,
-    sort: 'newest',
-    limit: 5,
-  })
-    .then((r) => r?.items ?? [])
-    .catch(() => [] as Awaited<ReturnType<typeof getPublicContent>>['items']);
+  const relatedPromise = loadRelatedContent(api, { orgId: org.id });
 
   // Journey cross-link (Codex-2pryk.3.10, F19/F20): the PUBLISHED course(s) this
   // item belongs to. Streamed — it's below-the-fold context (breadcrumb signpost
   // + "part of a journey" + free upsell), not first-paint-critical. PUBLIC read
-  // (no auth), so it runs for visitors and owners alike. `.catch(() => null)`
-  // keeps an unhandled rejection from crashing the load; the FE omits the
-  // cross-link gracefully on null / empty.
-  const parentCoursesPromise = createServerApi(platform, cookies)
-    .access.contentCourses(content.id)
-    .catch(() => null);
+  // (no auth), so it runs for visitors and owners alike. The `.catch` keeps an
+  // unhandled rejection from crashing the load and logs the failure; the FE
+  // omits the cross-link gracefully on null / empty.
+  const parentCoursesPromise = api.access
+    .contentCourses(content.id)
+    .catch((error: unknown) => {
+      logReadFailure(
+        'Content course links not loaded',
+        { contentId: content.id },
+        error
+      );
+      return null;
+    });
 
   // Only run the subscription-context fetch when content is tier-gated
   // (includedInTierId set — the WP-1 successor of accessType 'subscribers').
@@ -114,7 +138,7 @@ export const load: PageServerLoad = async ({
   if (!locals.user) {
     setHeaders(successCacheHeaders);
     return {
-      content,
+      content: pageContent,
       contentBodyHtml: publicBodyHtml,
       hasAccess: isPublic,
       streamingUrl: null,
@@ -131,7 +155,7 @@ export const load: PageServerLoad = async ({
   if (isPublic) {
     setHeaders(successCacheHeaders);
     return {
-      content,
+      content: pageContent,
       contentBodyHtml: publicBodyHtml,
       hasAccess: null,
       streamingUrl: null,
@@ -165,7 +189,7 @@ export const load: PageServerLoad = async ({
 
   setHeaders(successCacheHeaders);
   return {
-    content,
+    content: pageContent,
     contentBodyHtml: gatedBodyHtml,
     hasAccess: null,
     streamingUrl: null,

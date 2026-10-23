@@ -13,7 +13,9 @@
 import {
   checkContentSlugSchema,
   contentQuerySchema,
-  createSearchQuerySchema,
+  PAGINATION_MAX_LIMIT,
+  PAGINATION_MAX_PAGE,
+  publicContentArgsSchema,
 } from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
@@ -62,8 +64,13 @@ export const listContent = query(
 
 const browseContentSchema = z.object({
   organizationId: z.string().uuid(),
-  page: z.coerce.number().int().min(1).max(1000).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(100),
+  page: z.coerce.number().int().min(1).max(PAGINATION_MAX_PAGE).default(1),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(PAGINATION_MAX_LIMIT)
+    .default(PAGINATION_MAX_LIMIT),
 });
 
 /**
@@ -192,30 +199,12 @@ export const checkContentSlug = query(
 // Public Content List Query (no auth required)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const publicContentQueryParamsSchema = z.object({
-  orgId: z.string().uuid(),
-  slug: z.string().max(500).optional(),
-  page: z.number().min(1).default(1).optional(),
-  limit: z.number().min(1).max(50).default(20).optional(),
-  contentType: z.enum(['video', 'audio', 'written']).optional(),
-  // Mirror the worker's slug-charset guard: forbids the public-cache-key
-  // delimiter ':' so a crafted value can't poison the public content cache.
-  // Unicode-aware to match `slugify` (accented slugs like `café-del-mar`).
-  category: z
-    .string()
-    .max(120)
-    .regex(/^[\p{L}\p{N}-]+$/u)
-    .optional(),
-  search: createSearchQuerySchema(255),
-  sort: z.enum(['newest', 'oldest', 'title']).default('newest').optional(),
-  creatorId: z.string().uuid().optional(),
-  featured: z.boolean().optional(),
-});
-
 /**
  * List published content for an organization (public, no auth required)
  *
  * Used by org landing and explore pages to display content to unauthenticated visitors.
+ * Its arguments are `publicContentArgsSchema`, built from the API's own field
+ * rules so that an argument the API would refuse is refused here as a 400.
  *
  * Usage in Svelte:
  * ```svelte
@@ -225,7 +214,7 @@ const publicContentQueryParamsSchema = z.object({
  * ```
  */
 export const getPublicContent = query(
-  publicContentQueryParamsSchema,
+  publicContentArgsSchema,
   async (params) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);

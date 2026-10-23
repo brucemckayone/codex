@@ -1,18 +1,22 @@
 /**
  * Creator profile server load
  *
- * Fetches creator's published content via the public content endpoint.
- * Since there is no dedicated "get user by username" API, the page uses the
- * username from the URL and fetches public content scoped by search query.
+ * Resolves the creator by username (`getPublicProfile`; no such creator is a
+ * 404) and lists their newest published content through the public content
+ * list scoped by creatorId (Codex-osuqt).
  * Sets CACHE_HEADERS.PRIVATE (see the call at the end of the load): the
  * (platform) shell around this page renders the signed-in user, and shared
  * caches key on URL and never on Cookie, so a shared window would serve one
  * viewer's chrome to the next. The docstring used to claim DYNAMIC_PUBLIC,
  * which this load has never called.
  */
+import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { withoutRawBody } from '$lib/server/content-detail';
+import { logReadFailure } from '$lib/server/read-failure';
 import type { PageServerLoad } from './$types';
+import { creatorHandle } from './creator-handle';
 
 const CONTENT_LIMIT = 12;
 
@@ -23,13 +27,11 @@ export const load: PageServerLoad = async ({
   cookies,
   setHeaders,
 }) => {
-  // Strip leading @ from username (URL convention: /@alex-creator)
-  const username = params.username.replace(/^@/, '');
+  // The handle without its leading @ (URL convention: /@alex-creator).
+  const username = creatorHandle(params.username);
   const api = createServerApi(platform, cookies);
 
-  // Attempt to fetch the creator's profile from identity API.
-  // This is a best-effort lookup; if the endpoint doesn't exist or the user
-  // isn't found, we gracefully degrade to showing just the username.
+  // The creator's public profile from identity-api.
   let creatorProfile: {
     id?: string;
     name?: string | null;
@@ -49,16 +51,20 @@ export const load: PageServerLoad = async ({
   // `catch` did.
   creatorProfile = await api.account.getPublicProfile(username);
 
-  // Fetch creator's published content.
-  // If we got a creator profile with an ID, we could filter by creatorId.
-  // For now, the public content endpoint doesn't support creatorId filter
-  // on its own, so we rely on what's available.
+  // No such creator is a 404, as on the detail page. It used to render a
+  // placeholder profile with HTTP 200: a soft 404 that crawlers index as a
+  // real creator page.
+  if (!creatorProfile?.id) {
+    error(404, 'Creator not found');
+  }
+
+  // The creator's published content (fetched below).
   let contentItems: Array<{
     id: string;
     title: string;
     slug: string;
     description: string | null;
-    contentType: string;
+    contentType: 'video' | 'audio' | 'written';
     thumbnailUrl?: string | null;
     priceCents?: number | null;
     mediaItem?: {
@@ -77,23 +83,36 @@ export const load: PageServerLoad = async ({
     } | null;
   }> = [];
 
-  // If we have the creator's content via their profile, use that.
-  // Otherwise, content will be populated as endpoints mature.
-  if (creatorProfile?.id) {
-    try {
-      const params = new URLSearchParams();
-      params.set('creatorId', creatorProfile.id);
-      params.set('status', 'published');
-      params.set('limit', String(CONTENT_LIMIT));
-      params.set('sortBy', 'publishedAt');
-      params.set('sortOrder', 'desc');
+  // Total published, which the hero shows; contentItems holds only the newest
+  // CONTENT_LIMIT of them.
+  let contentTotal = 0;
+  // A failed read renders an error state, never the "hasn't published" empty
+  // state, which would tell a visitor something false.
+  let contentError = false;
 
-      const contentResult = await api.content.list(params);
-      contentItems = contentResult?.items ?? [];
-    } catch {
-      // Content fetch failed - show empty state
-      contentItems = [];
-    }
+  // The creator's published content, newest first, across every org they
+  // publish in and their personal space: the PUBLIC list scoped by creator.
+  // Not `api.content.list`, the studio list, which needs a session and lists
+  // the SIGNED-IN user's own content: a visitor got a 401 here, shown as an
+  // empty profile, and a signed-in visitor saw their own work on someone
+  // else's profile (Codex-osuqt).
+  try {
+    const params = new URLSearchParams();
+    params.set('creatorId', creatorProfile.id);
+    params.set('limit', String(CONTENT_LIMIT));
+    params.set('sort', 'newest');
+
+    const contentResult = await api.content.getPublicContent(params);
+    // Cards draw metadata only; no body reaches this page's HTML.
+    contentItems = contentResult.items.map(withoutRawBody);
+    contentTotal = contentResult.pagination.total;
+  } catch (err) {
+    logReadFailure(
+      'Creator profile content not loaded',
+      { creatorId: creatorProfile.id },
+      err
+    );
+    contentError = true;
   }
 
   // Extract unique organizations from content items
@@ -126,6 +145,8 @@ export const load: PageServerLoad = async ({
     user: locals.user,
     creatorProfile,
     contentItems,
+    contentTotal,
+    contentError,
     organizations,
   };
 };

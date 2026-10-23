@@ -191,6 +191,68 @@ describe('GET /api/content/public — list envelope survives a cache HIT', () =>
   });
 });
 
+/**
+ * The creator form backs a creator's public profile, catalogue and detail
+ * page (Codex-osuqt). The schema used to refuse it, so the web loaders fell
+ * back to the studio list, which lists the SIGNED-IN user's own content.
+ */
+describe('GET /api/content/public?creatorId — a creator without an org (Codex-osuqt)', () => {
+  // A BetterAuth user id: 32 alphanumerics, NOT a uuid. The schema first
+  // shipped as uuidSchema, which refused every real creator.
+  const CREATOR_ID = 'a62da3ad5c94736a88f90ff5c666143c';
+
+  it("returns the list envelope and asks the service for that creator's content only", async () => {
+    const res = await dispatch(`/api/content/public?creatorId=${CREATOR_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      items: ROWS.items,
+      pagination: ROWS.pagination,
+    });
+    const [query] = contentSpies.listPublic.mock.calls[0] ?? [];
+    expect(query).toMatchObject({ creatorId: CREATOR_ID });
+    expect(query).not.toHaveProperty('orgId');
+  });
+
+  it('is not KV-cached: the 60s CDN window is its only cache', async () => {
+    const first = await dispatch(`/api/content/public?creatorId=${CREATOR_ID}`);
+    await dispatch(`/api/content/public?creatorId=${CREATOR_ID}`);
+
+    // `shouldCachePublicContentQuery` skips any query naming a creator, so
+    // both reads reach the service and a publish shows within the CDN window.
+    expect(contentSpies.listPublic).toHaveBeenCalledTimes(2);
+    expect(first.headers.get('Cache-Control')).toBe(
+      'public, max-age=60, s-maxage=60'
+    );
+  });
+
+  // The case the rule exists for: with an org named, the read would take the KV
+  // branch, and the slot key carries no creator, so a creator-filtered read
+  // would be served the whole org's list. The creatorId-only case above
+  // skips KV for want of an orgId whatever the rule says.
+  it('is not KV-cached with an org named too', async () => {
+    const query = `/api/content/public?orgId=${ORG_ID}&creatorId=${CREATOR_ID}`;
+    await dispatch(query);
+    await dispatch(query);
+
+    expect(contentSpies.listPublic).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a creatorId that is not a user id', async () => {
+    const res = await dispatch('/api/content/public?creatorId=x%3Afeat%3Atrue');
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.listPublic).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a query with no scope at all', async () => {
+    const res = await dispatch('/api/content/public');
+
+    expect(res.status).toBe(400);
+    expect(contentSpies.listPublic).not.toHaveBeenCalled();
+  });
+});
+
 describe('GET /api/content/public/categories — cache write survives', () => {
   it('serves the second read from cache (single-item envelope, unchanged)', async () => {
     const CATEGORY_ID = '4d000000-0000-4000-8000-0000000000c1';
@@ -230,6 +292,30 @@ describe('GET /api/content/public/categories — cache write survives', () => {
     expect(await first.json()).toEqual(expected);
     expect(await second.json()).toEqual(expected);
     expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(1);
+  });
+
+  // Org delete invalidates under the lowercase DB id, so an uppercase read must
+  // key the same slot, or it caches where no invalidation reaches.
+  it('keys an uppercase org id as the lowercase one', async () => {
+    categorySpies.listPublicForOrg.mockResolvedValue([]);
+
+    await dispatch(
+      `/api/content/public/categories?orgId=${OTHER_ORG_ID.toUpperCase()}`
+    );
+    await dispatch(`/api/content/public/categories?orgId=${OTHER_ORG_ID}`);
+
+    expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(1);
+    expect(categorySpies.listPublicForOrg).toHaveBeenCalledWith(OTHER_ORG_ID);
+  });
+
+  it('keys an uppercase org id as the lowercase one for the content list too', async () => {
+    await dispatch(`/api/content/public?orgId=${OTHER_ORG_ID.toUpperCase()}`);
+    await dispatch(`/api/content/public?orgId=${OTHER_ORG_ID}`);
+
+    expect(contentSpies.listPublic).toHaveBeenCalledTimes(1);
+    expect(contentSpies.listPublic.mock.calls[0]?.[0]).toMatchObject({
+      orgId: OTHER_ORG_ID,
+    });
   });
 });
 

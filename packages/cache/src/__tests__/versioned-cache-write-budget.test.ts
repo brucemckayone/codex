@@ -219,6 +219,31 @@ describe('VersionedCache write budget', () => {
         expect.objectContaining({ id: 'id-1' })
       );
     });
+
+    // A composed type can carry a visitor's slug or topic, so the failure log
+    // names the bounded label, never the raw type (Codex-osuqt).
+    it("logs the type as its bounded label, never the visitor's text", async () => {
+      const kv = createCountingKV({ failReads: true });
+      const { obs } = createMockObservability();
+      const cache = new VersionedCache({
+        kv: kv.kv,
+        obs: obs as unknown as ObservabilityClient,
+      });
+
+      await cache.get(
+        'id-1',
+        'content:public:v2:newest:1:1:all:slug:private-words',
+        vi.fn(async () => ({ ok: true }))
+      );
+
+      expect(obs.error).toHaveBeenCalledWith(
+        'Cache lookup failed, serving from the fetcher',
+        expect.objectContaining({ type: 'content:public:v2:newest' })
+      );
+      expect(JSON.stringify(obs.error.mock.calls)).not.toContain(
+        'private-words'
+      );
+    });
   });
 
   describe('version keys never expire (Codex-kgrdp.5)', () => {

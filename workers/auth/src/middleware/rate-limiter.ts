@@ -45,7 +45,7 @@ export function createAuthRateLimiter() {
     next: Next
   ): Promise<Response | undefined> => {
     // Only the four canonical BetterAuth POST surfaces are gated.
-    // Anything else (GET /api/auth/session, POST /api/auth/sign-out,
+    // Anything else (GET /api/auth/get-session, POST /api/auth/sign-out,
     // verify-email, internal SDK polls) passes straight through.
     if (
       c.req.method !== 'POST' ||

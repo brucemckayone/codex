@@ -76,12 +76,12 @@ describe('buildPublicContentCacheType', () => {
         page: 1,
         contentType: 'video',
       })
-    ).toBe('content:public:newest:20:1:video');
+    ).toBe('content:public:v2:newest:20:1:video');
   });
 
   it('uses sensible defaults for missing params', () => {
     expect(buildPublicContentCacheType({})).toBe(
-      'content:public:newest:20:1:all'
+      'content:public:v2:newest:20:1:all'
     );
   });
 
@@ -167,9 +167,8 @@ describe('buildPublicContentCacheType', () => {
         category: 'fiction',
         featured: true,
       })
-    ).toBe('content:public:newest:20:1:all:cat:fiction:feat:true');
-    // ...and a query with neither new dimension keeps its exact prior shape,
-    // so existing cache entries stay hit-compatible.
+    ).toBe('content:public:v2:newest:20:1:all:cat:fiction:feat:true');
+    // ...and a query with neither dimension adds nothing for them to the key.
     expect(
       buildPublicContentCacheType({
         sort: 'newest',
@@ -177,7 +176,7 @@ describe('buildPublicContentCacheType', () => {
         page: 1,
         contentType: 'video',
       })
-    ).toBe('content:public:newest:20:1:video');
+    ).toBe('content:public:v2:newest:20:1:video');
   });
 });
 
@@ -225,6 +224,53 @@ describe('getCachedPublicContent', () => {
   afterEach(() => {
     dateNowSpy.mockRestore();
     mockKV._reset();
+  });
+
+  // KV refuses a key over 512 bytes, so a slug long enough to push the key past
+  // it made every such read a KV error and an error-level log (Codex-osuqt).
+  it('skips KV for a slug too long to key, and still serves it', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ items: [] });
+
+    const result = await getCachedPublicContent(
+      cache,
+      'org-1',
+      { orgId: 'org-1', slug: 'a'.repeat(450) },
+      fetcher
+    );
+
+    expect(result).toEqual({ items: [] });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(mockKV.get).not.toHaveBeenCalled();
+    expect(mockKV.put).not.toHaveBeenCalled();
+  });
+
+  // The budget is in BYTES, as KV counts them: 230 Cyrillic letters are 230
+  // characters but 460 bytes, so a character count would let this key through.
+  it('counts the key in bytes, not characters', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ items: [] });
+
+    await getCachedPublicContent(
+      cache,
+      'org-1',
+      { orgId: 'org-1', slug: 'ж'.repeat(230) },
+      fetcher
+    );
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(mockKV.put).not.toHaveBeenCalled();
+  });
+
+  it('still caches an ordinary slug read', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ items: [] });
+
+    await getCachedPublicContent(
+      cache,
+      'org-1',
+      { orgId: 'org-1', slug: 'a'.repeat(100) },
+      fetcher
+    );
+
+    expect(mockKV.put).toHaveBeenCalled();
   });
 
   it('uses COLLECTION_ORG_CONTENT(orgId) as the cache id (regression guard for id/type swap)', async () => {
@@ -454,8 +500,8 @@ describe('cache type vs telemetry label', () => {
     // would be asserting that the split is useless.
     expect(new Set(types).size).toBe(7);
     expect([...labels].sort()).toEqual([
-      'content:public:newest',
-      'content:public:oldest',
+      'content:public:v2:newest',
+      'content:public:v2:oldest',
     ]);
   });
 

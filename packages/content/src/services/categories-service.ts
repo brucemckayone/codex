@@ -34,7 +34,12 @@ import {
   withOrgScope,
 } from '@codex/database';
 import type { Category } from '@codex/database/schema';
-import { categories, content, contentCategories } from '@codex/database/schema';
+import {
+  categories,
+  content,
+  contentCategories,
+  organizations,
+} from '@codex/database/schema';
 import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
@@ -229,11 +234,21 @@ export class CategoriesService extends BaseService {
     try {
       // Category ids that have ≥1 published, non-deleted content item in this
       // org. DISTINCT keeps the IN-list bounded by the topic count, not the
-      // membership-row count.
+      // membership-row count. The join on a LIVE org is the same rule as
+      // listPublic's: deleting an org soft-deletes only the org row, so its
+      // content stays published, and without it a deleted org's topics went
+      // on being served (and re-cached after the org-delete bump).
       const activeCategoryIds = this.db
         .selectDistinct({ categoryId: contentCategories.categoryId })
         .from(contentCategories)
         .innerJoin(content, eq(contentCategories.contentId, content.id))
+        .innerJoin(
+          organizations,
+          and(
+            eq(organizations.id, content.organizationId),
+            isNull(organizations.deletedAt)
+          )
+        )
         .where(
           and(
             eq(content.organizationId, organizationId),

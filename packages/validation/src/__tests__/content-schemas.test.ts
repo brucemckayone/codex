@@ -9,6 +9,9 @@ import {
   mediaQuerySchema,
   mediaStatusEnum,
   mediaTypeEnum,
+  publicContentArgsSchema,
+  publicContentQuerySchema,
+  topicSlugSchema,
   updateContentSchema,
   updateMediaItemSchema,
   updateOrganizationSchema,
@@ -849,7 +852,7 @@ describe('Query Schemas', () => {
         accessType: 'free' as const,
         category: 'Programming',
         organizationId: '123e4567-e89b-12d3-a456-426614174000',
-        creatorId: '123e4567-e89b-12d3-a456-426614174001',
+        creatorId: 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b',
         search: 'typescript tutorial',
         sortBy: 'publishedAt' as const,
         sortOrder: 'asc' as const,
@@ -859,19 +862,20 @@ describe('Query Schemas', () => {
       expect(result).toEqual(query);
     });
 
+    // creatorId is a user id (BetterAuth text), not a uuid (Codex-osuqt).
     it('should validate with creatorId filter', () => {
       const query = {
-        creatorId: '123e4567-e89b-12d3-a456-426614174001',
+        creatorId: 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b',
       };
 
       const result = contentQuerySchema.parse(query);
-      expect(result.creatorId).toBe('123e4567-e89b-12d3-a456-426614174001');
+      expect(result.creatorId).toBe('GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b');
     });
 
     it('should reject invalid creatorId format', () => {
       expect(() =>
-        contentQuerySchema.parse({ creatorId: 'not-a-uuid' })
-      ).toThrow('Invalid ID format');
+        contentQuerySchema.parse({ creatorId: 'x:feat:true' })
+      ).toThrow('Invalid user ID format');
     });
 
     it('should reject page less than 1', () => {
@@ -1232,5 +1236,198 @@ describe('Codex-moyu5: updateContentSchema tag preservation', () => {
       expect('tags' in { tags: undefined }).toBe(true);
       expect('tags' in ({} as { tags?: string[] })).toBe(false);
     });
+  });
+});
+
+// A creator's public profile lists their published content across every org
+// they publish in, by creatorId alone (Codex-osuqt). The scope rule still
+// refuses a query with no scope at all: that is platform-wide enumeration,
+// which only /discover does, on purpose.
+describe('Codex-osuqt: publicContentQuerySchema scopes', () => {
+  const uuid = '5f0c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b';
+  const userId = 'GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b';
+
+  it.each([
+    ['orgId', { orgId: uuid }],
+    ['creatorId', { creatorId: userId }],
+    ['slug', { slug: 'first' }],
+  ])('accepts a query scoped by %s alone', (_scope, query) => {
+    expect(publicContentQuerySchema.safeParse(query).success).toBe(true);
+  });
+
+  it('refuses a query with no scope', () => {
+    const result = publicContentQuerySchema.safeParse({ sort: 'newest' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['orgId']);
+  });
+
+  // A creator-only read spans their orgs; a personal-only category match
+  // would silently drop all their org content.
+  it('refuses a category without an org', () => {
+    const result = publicContentQuerySchema.safeParse({
+      creatorId: userId,
+      category: 'breathwork',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['category']);
+  });
+
+  it('accepts a category within an org', () => {
+    expect(
+      publicContentQuerySchema.safeParse({
+        orgId: uuid,
+        category: 'breathwork',
+      }).success
+    ).toBe(true);
+  });
+});
+
+// users.id is BetterAuth text (32 alphanumerics), never a uuid. Both creatorId
+// filters first validated it as a uuid, so they refused every real creator:
+// the profile's public list and /explore's creator filter (browse) 400'd.
+describe('Codex-osuqt: a creatorId filter takes a user id, not a uuid', () => {
+  const userId = 'a62da3ad5c94736a88f90ff5c666143c';
+
+  it.each([
+    ['publicContentQuerySchema', publicContentQuerySchema],
+    ['contentQuerySchema (studio list, /explore browse)', contentQuerySchema],
+  ])('%s accepts a BetterAuth user id', (_name, schema) => {
+    expect(schema.safeParse({ creatorId: userId }).success).toBe(true);
+  });
+
+  it.each([
+    ['a cache-key delimiter', 'x:feat:true'],
+    ['a path', '../etc'],
+    ['an empty string', ''],
+  ])('refuses %s as a creatorId', (_what, creatorId) => {
+    expect(publicContentQuerySchema.safeParse({ creatorId }).success).toBe(
+      false
+    );
+    expect(contentQuerySchema.safeParse({ creatorId }).success).toBe(false);
+  });
+});
+
+// The org id keys a KV cache that publish and org delete invalidate under the
+// lowercase DB id. Postgres matches an uppercase uuid, so an uppercase read
+// found the real rows and cached them where no invalidation reached.
+describe('Codex-osuqt: a public orgId is lowercased', () => {
+  const upper = '4D111111-1111-4111-8111-111111111111';
+
+  it('lowercases an uppercase org id', () => {
+    const result = publicContentQuerySchema.parse({ orgId: upper });
+
+    expect(result.orgId).toBe(upper.toLowerCase());
+  });
+
+  it('still refuses an org id that is not a uuid', () => {
+    expect(
+      publicContentQuerySchema.safeParse({ orgId: 'not-a-uuid' }).success
+    ).toBe(false);
+  });
+});
+
+// Postgres refuses NUL in text, so one in a search, slug or topic from a URL
+// was a 500 and an error-level log, whichever caller sent it. Free text drops
+// it; an exact-match identifier refuses it, because a rewritten one named a
+// different row (`a\0b` as `ab`) or none (`\0` as '', which dropped the slug
+// filter and answered a by-slug lookup with the whole catalogue).
+describe('Codex-osuqt: NUL at the schema edge', () => {
+  it('drops a NUL from a public search', () => {
+    const result = publicContentQuerySchema.parse({
+      orgId: '4d111111-1111-4111-8111-111111111111',
+      search: 'ps\0alm',
+    });
+
+    expect(result.search).toBe('psalm');
+  });
+
+  it.each(['a\0b', '\0'])('refuses a NUL in a public slug (%j)', (slug) => {
+    expect(
+      publicContentQuerySchema.safeParse({
+        orgId: '4d111111-1111-4111-8111-111111111111',
+        slug,
+      }).success
+    ).toBe(false);
+  });
+
+  it('refuses a NUL in a browse category', () => {
+    expect(contentQuerySchema.safeParse({ category: 'ritu\0al' }).success).toBe(
+      false
+    );
+  });
+
+  it('still trims a search after dropping the NUL', () => {
+    expect(
+      publicContentQuerySchema.parse({ slug: 'x', search: '\0 psalm ' }).search
+    ).toBe('psalm');
+  });
+});
+
+// The public list and the signed-in browse list accept the same topics, so a
+// topic that works signed out works on explore's signed-in sorts too.
+describe('Codex-osuqt: one topic slug rule', () => {
+  it('accepts a unicode topic slug and refuses a cache-key delimiter', () => {
+    expect(topicSlugSchema.safeParse('café-del-mar').success).toBe(true);
+    expect(topicSlugSchema.safeParse('x:feat:true').success).toBe(false);
+  });
+
+  it('lets browse take a topic as long as the column (120)', () => {
+    expect(
+      contentQuerySchema.safeParse({ category: 'a'.repeat(120) }).success
+    ).toBe(true);
+    expect(
+      contentQuerySchema.safeParse({ category: 'a'.repeat(121) }).success
+    ).toBe(false);
+  });
+});
+
+// The web `getPublicContent` remote query is a public endpoint. An argument it
+// accepts but the API refuses came back as a 500 logged at error level; a
+// hand-copied schema had drifted to accept a NUL slug and any page.
+describe('Codex-osuqt: the remote query refuses what the API refuses', () => {
+  const orgId = '4d111111-1111-4111-8111-111111111111';
+
+  it('accepts what the org landing and explore send', () => {
+    expect(
+      publicContentArgsSchema.safeParse({
+        orgId,
+        page: 2,
+        limit: 12,
+        sort: 'newest',
+        category: 'café-del-mar',
+        search: 'psalm',
+        featured: true,
+      }).success
+    ).toBe(true);
+  });
+
+  it.each([
+    ['a NUL slug', { slug: '\0' }],
+    ['a slug carrying a NUL', { slug: 'a\0b' }],
+    ['a slug past the limit', { slug: 'a'.repeat(501) }],
+    ['a page past the last', { page: 1001 }],
+    ['a fractional page', { page: 1.5 }],
+    ['a cache-key delimiter in a topic', { category: 'x:feat:true' }],
+    ['a topic past the column', { category: 'a'.repeat(121) }],
+  ])('refuses %s, as the API does', (_label, extra) => {
+    const args = { orgId, ...extra };
+
+    expect(publicContentArgsSchema.safeParse(args).success).toBe(false);
+    expect(publicContentQuerySchema.safeParse(args).success).toBe(false);
+  });
+
+  // The API caps an oversized page silently; only our pages call the remote,
+  // so one there is our bug and is refused.
+  it('refuses a limit the API would cap', () => {
+    expect(
+      publicContentArgsSchema.safeParse({ orgId, limit: 51 }).success
+    ).toBe(false);
+    expect(publicContentQuerySchema.parse({ orgId, limit: 51 }).limit).toBe(50);
+  });
+
+  it('lowercases the org id, as the API keys its cache', () => {
+    expect(
+      publicContentArgsSchema.parse({ orgId: orgId.toUpperCase() }).orgId
+    ).toBe(orgId);
   });
 });

@@ -9,9 +9,10 @@
  *   Phase 1: Personal content purchase is blocked by the backend — returns
  *   a friendly error message instead of a generic 500.
  */
-import { error } from '@sveltejs/kit';
+import { publicContentSlugSchema } from '@codex/validation';
+import { error, redirect } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
-import { getPublicContent } from '$lib/remote/content.remote';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
@@ -20,13 +21,18 @@ import {
   handlePurchaseAction,
   isPublicContent,
   loadAccessAndProgress,
+  loadRelatedContent,
   loadSubscriptionContext,
+  withoutRawBody,
 } from '$lib/server/content-detail';
 import type { ContentWithRelations } from '$lib/types';
+import { buildContentUrl } from '$lib/utils/subdomain';
+import { creatorHandle } from '../../creator-handle';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
   params,
+  url,
   locals,
   setHeaders,
   platform,
@@ -35,8 +41,8 @@ export const load: PageServerLoad = async ({
 }) => {
   depends('app:auth');
   const { contentSlug } = params;
-  // Strip leading @ from username (URL convention: /@alex-creator)
-  const username = params.username.replace(/^@/, '');
+  // The handle without its leading @ (URL convention: /@alex-creator).
+  const username = creatorHandle(params.username);
   const api = createServerApi(platform, cookies);
 
   // Fetch creator profile to get creatorId
@@ -57,23 +63,67 @@ export const load: PageServerLoad = async ({
   }
 
   // Fetch content by creatorId + slug
+  // The PUBLIC list scoped by creator and slug, not the studio list, which
+  // needs a session and lists the signed-in user's own content: a visitor
+  // got a 404 here for every real piece (Codex-osuqt). No result is a 404.
+  // A failed request is not, so it propagates as a 500, as the profile
+  // lookup above does.
+  //
+  // A slug the public list refuses (too long, or with a NUL, which Postgres
+  // refuses in text) names nothing, so it is a 404 here rather than the API's
+  // 400 surfacing as a 500. The rule is the API's own.
+  if (!publicContentSlugSchema.safeParse(contentSlug).success) {
+    error(404, 'Content not found');
+  }
+  // One creator can hold this slug once in their personal space AND once per
+  // org (slugs are unique per org and per creator's personal space, not per
+  // creator), so a single newest match could be the wrong piece. This URL is
+  // the PERSONAL piece's (buildCreatorContentUrl): prefer it, and send an org
+  // piece to its canonical page on the org's subdomain, where its brand,
+  // access and checkout live. A 302, not a 301: a personal piece published
+  // later under this slug takes the URL back.
   const contentParams = new URLSearchParams();
   contentParams.set('creatorId', creatorProfile.id);
   contentParams.set('slug', contentSlug);
-  contentParams.set('status', 'published');
-  contentParams.set('limit', '1');
+  contentParams.set('limit', '50');
 
-  let content: ContentWithRelations | null = null;
-  try {
-    const contentResult = await api.content.list(contentParams);
-    content = (contentResult?.items?.[0] as ContentWithRelations) ?? null;
-  } catch {
-    content = null;
-  }
+  const contentResult = await api.content.getPublicContent(contentParams);
+  const matches = contentResult.items as ContentWithRelations[];
+  const content = matches.find((item) => item.organizationId == null) ?? null;
 
   if (!content) {
+    const orgPiece = matches.find((item) => item.organization?.slug);
+    if (orgPiece?.organization?.slug) {
+      redirect(
+        302,
+        buildContentUrl(url, {
+          slug: orgPiece.slug,
+          id: orgPiece.id,
+          organizationSlug: orgPiece.organization.slug,
+        })
+      );
+    }
+    // Rows matched but none is personal or names its org: the org relation
+    // failed to load (listPublic hides a deleted org's pieces), not a missing
+    // piece. Still a 404 for the visitor, but logged, or a regression that
+    // broke every redirect would look like mistyped URLs.
+    if (matches.length > 0) {
+      logger.error('Creator content slug matched no personal or org piece', {
+        creatorId: creatorProfile.id,
+        contentSlug,
+        matches: matches.map(({ id, organizationId }) => ({
+          id,
+          organizationId,
+        })),
+      });
+    }
     error(404, 'Content not found');
   }
+
+  // What the browser receives: the row without its raw body. The body is
+  // rendered below from `content` into contentBodyHtml, and only once access
+  // allows it.
+  const pageContent = withoutRawBody(content);
 
   // Cache header is applied ONLY on the success path right before each return.
   // This page renders auth-aware HTML (the creator layout injects `user` and
@@ -81,8 +131,9 @@ export const load: PageServerLoad = async ({
   // markup per auth state. Shared caches (Cloudflare edge, miniflare) key by
   // URL, NOT by Cookie, so any `public` response cached for an anonymous
   // visitor is served to signed-in users too. PRIVATE keeps it out of shared
-  // caches; the public content list (incl. this slug lookup) is KV-cached in
-  // content-api so the DB stays shielded. See docs/caching-strategy.md.
+  // caches. This creator-scoped lookup is NOT KV-cached in content-api
+  // (shouldCachePublicContentQuery skips any query naming a creator), so each
+  // render reads the DB. See docs/caching-strategy.md.
   const successCacheHeaders = CACHE_HEADERS.PRIVATE;
 
   // Body gating: only render the body once access is confirmed. Free content
@@ -93,20 +144,12 @@ export const load: PageServerLoad = async ({
   const isPublic = isPublicContent(content);
   const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
 
-  // Fetch related content — returned as a bare promise (streamed, below fold)
-  const relatedPromise = content.organization?.id
-    ? getPublicContent({
-        orgId: content.organization.id,
-        sort: 'newest',
-        limit: 5,
-      })
-        .then((r) => r?.items ?? [])
-        .catch(
-          () => [] as Awaited<ReturnType<typeof getPublicContent>>['items']
-        )
-    : Promise.resolve(
-        [] as Awaited<ReturnType<typeof getPublicContent>>['items']
-      );
+  // "More from this creator", streamed below the fold. By creator, not org:
+  // this page only ever shows a personal piece (an org piece redirects), so an
+  // org-scoped strip never made a request and always rendered empty.
+  const relatedPromise = loadRelatedContent(api, {
+    creatorId: creatorProfile.id,
+  });
 
   // Subscription context (org-scoped content may have tier gating).
   // Skip the round-trip entirely for content that can't require a
@@ -135,7 +178,7 @@ export const load: PageServerLoad = async ({
   if (!locals.user) {
     setHeaders(successCacheHeaders);
     return {
-      content,
+      content: pageContent,
       contentBodyHtml: publicBodyHtml,
       hasAccess: isPublic,
       streamingUrl: null,
@@ -153,7 +196,7 @@ export const load: PageServerLoad = async ({
   if (isPublic) {
     setHeaders(successCacheHeaders);
     return {
-      content,
+      content: pageContent,
       contentBodyHtml: publicBodyHtml,
       hasAccess: null,
       streamingUrl: null,
@@ -187,7 +230,7 @@ export const load: PageServerLoad = async ({
 
   setHeaders(successCacheHeaders);
   return {
-    content,
+    content: pageContent,
     contentBodyHtml: gatedBodyHtml,
     hasAccess: null,
     streamingUrl: null,

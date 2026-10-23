@@ -431,6 +431,25 @@ and organization-api routes (`workers/organization-api/src/routes/{members,follo
 
 **Why content keys are server-only:** Content availability is "server-authoritative always" — SSR renders the correct published list on every page load. There's no localStorage-backed `contentCollection` to invalidate. Bumping the key on the server means the next SSR request gets a fresh DB fetch instead of a stale KV list.
 
+### Org delete and shape versions (Codex-osuqt)
+
+On org delete (2026-10-23): `DELETE /api/organizations/:id`
+bumps content-api's `COLLECTION_ORG_CONTENT(orgId)` and `CATEGORIES(orgId)`
+alongside `invalidateOrgPublicCaches`. Deleting an org soft-deletes only the org
+row, so its content stays published: a bump only helps because the re-read
+drops a deleted org (`listPublic` and browse via `orgIsLive()`, and
+`listPublicForOrg` via a live-org join). Without that rule the bump just
+re-caches the same answer. Journeys (`COLLECTION_ORG_JOURNEYS`) are not bumped
+yet (Codex-62chf). The public `orgId` is lowercased at the schema
+(`orgIdQuerySchema`): Postgres matches an uppercase uuid, but the cache keyed
+the raw string, so an uppercase read cached under a key no invalidation
+reached.
+
+**Shape versions.** A data-slot key encodes the query, not the payload, so a
+read whose payload NARROWS needs a shape version in its `type`
+(`content:public:v2`, `content:auth:v2`) or old slots keep serving the removed
+fields until their TTL. See CLAUDE.md, Server-Side KV Caching.
+
 ### `CacheType` constants (in `@codex/cache`)
 
 ```typescript

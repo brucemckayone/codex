@@ -2055,8 +2055,10 @@ describe('ContentService', () => {
     // Regression guard for the followers-only content body leak: listPublic
     // is a public, KV-cached endpoint, so any gated content's body text
     // (contentBody / contentBodyJson) MUST be stripped before returning.
-    // Free content keeps its body so search / SEO still index the article.
-    it('strips body columns from non-free content and preserves them for free', async () => {
+    // A catalogue read (no slug) strips every body: cards read metadata, and
+    // search filters in SQL. Only the detail page's by-slug read of a free
+    // piece keeps it, which is what a crawler indexes (Codex-osuqt).
+    it('strips every body from a catalogue read and keeps a free one by slug', async () => {
       // Arrange: follower-gated content requires an organizationId, so we
       // need an org before creating the gated article.
       const org = takeFirst(
@@ -2105,19 +2107,34 @@ describe('ContentService', () => {
       const free = result.items.find((i) => i.id === freeArticle.id);
       const followers = result.items.find((i) => i.id === followersArticle.id);
 
-      // Free article exposes its body.
+      // Both are listed (metadata is public), and neither carries a body.
       expect(free).toBeDefined();
-      expect(free?.contentBody).toBe(
-        'This is the freely readable article body.'
-      );
-
-      // Followers-only article is listed (metadata is public) but body
-      // columns are nulled before leaving the service boundary.
+      expect(free?.contentBody).toBeNull();
       expect(followers).toBeDefined();
       expect(followers?.title).toBe('Followers Only Article');
       expect(followers?.isFollowerGated).toBe(true);
       expect(followers?.contentBody).toBeNull();
       expect(followers?.contentBodyJson).toBeNull();
+
+      const bySlug = async (slug: string) =>
+        (
+          await service.listPublic({
+            creatorId,
+            slug,
+            page: 1,
+            limit: 20,
+            sort: 'newest',
+          })
+        ).items[0];
+
+      // The detail page's read: a free article exposes its body, a gated
+      // one still does not.
+      expect((await bySlug(freeArticle.slug))?.contentBody).toBe(
+        'This is the freely readable article body.'
+      );
+      const followersBySlug = await bySlug(followersArticle.slug);
+      expect(followersBySlug?.id).toBe(followersArticle.id);
+      expect(followersBySlug?.contentBody).toBeNull();
     });
   });
 });

@@ -52,6 +52,27 @@ import { CacheType, type VersionedCache } from '@codex/cache';
 const PUBLIC_CONTENT_CACHE_TTL = 7200;
 
 /**
+ * The shape of a cached item. Bump it whenever listPublic's projection NARROWS
+ * (a column or relation dropped, a field stripped). The data-slot key encodes
+ * the query, not the payload, so without a bump every slot written by the old
+ * code stays a valid hit after deploy and keeps serving what was removed, for
+ * up to the TTL. v2 (Codex-osuqt): no creator email, and no body on a
+ * catalogue read. Old slots are never read again and age out. A bump also
+ * renames the cache-stats series (`cacheStatsLabel` keeps four segments, so
+ * `content:public:newest` became `content:public:v2:newest`).
+ */
+const PUBLIC_CONTENT_SHAPE_VERSION = 'v2';
+
+/**
+ * KV refuses a key over 512 bytes. A data-slot key is this type plus about 70
+ * bytes (its prefix, the org's version id and a version stamp), so a type past
+ * this budget, which only a long slug reaches, made every such read a KV error:
+ * an error-level log any visitor could raise with a URL (Codex-osuqt). A read
+ * that long skips KV; a real slug is far shorter.
+ */
+const MAX_CACHED_TYPE_BYTES = 400;
+
+/**
  * Public content list query shape accepted by the cache wiring.
  * Kept narrow so callers can pass the worker's validated input directly.
  *
@@ -85,7 +106,7 @@ export function buildPublicContentCacheType(
     'sort' | 'limit' | 'page' | 'contentType' | 'slug' | 'category' | 'featured'
   >
 ): string {
-  const base = `content:public:${query.sort ?? 'newest'}:${query.limit ?? 20}:${query.page ?? 1}:${query.contentType ?? 'all'}`;
+  const base = `content:public:${PUBLIC_CONTENT_SHAPE_VERSION}:${query.sort ?? 'newest'}:${query.limit ?? 20}:${query.page ?? 1}:${query.contentType ?? 'all'}`;
   let type = base;
   // Category (topic slug) and featured are LIVE filter dimensions that select a
   // strict subset of the catalogue. Each distinct value MUST occupy its own
@@ -93,8 +114,8 @@ export function buildPublicContentCacheType(
   // org version key. `featured` in particular was the latent bug: it is already
   // a live query param, but the prior key omitted it — so `?featured=true`
   // (Editor's picks) and the unfiltered list shared one slot and served each
-  // other's content. Both are appended ONLY when present so existing
-  // (category/featured-free) keys keep their exact shape and stay hit-compatible.
+  // other's content. Both are appended ONLY when present, so an absent
+  // dimension adds nothing to the key.
   if (query.category) {
     type += `:cat:${query.category}`;
   }
@@ -117,8 +138,10 @@ export function buildPublicContentCacheType(
  *
  * Search and creatorId are bypassed:
  * - search: unbounded variant space, would pollute KV
- * - creatorId: lower-volume per-creator filter; skipping avoids key
- *   explosion
+ * - creatorId: a correctness rule, not tuning. The data-slot key carries no
+ *   creator, so a creator-filtered org read cached here would collide with
+ *   the org-wide slot and serve the whole org's list (or seed that slot with
+ *   one creator's pieces).
  *
  * Slug lookups (content-detail pages) ARE cached now that
  * `buildPublicContentCacheType` folds the slug into the data-slot key
@@ -144,6 +167,7 @@ export function shouldCachePublicContentQuery(
  *
  * On cache hit: returns cached result.
  * On cache miss: calls `fetcher`, caches the result, returns it.
+ * A type over MAX_CACHED_TYPE_BYTES skips KV entirely and returns `fetcher()`.
  *
  * Every filter combo for `orgId` shares one version key
  * (`cache:version:org:{orgId}:content`) so a single publish-side
@@ -157,10 +181,11 @@ export async function getCachedPublicContent<T>(
   fetcher: () => Promise<T>,
   opts: { ttl?: number } = {}
 ): Promise<T> {
-  return cache.get(
-    CacheType.COLLECTION_ORG_CONTENT(orgId),
-    buildPublicContentCacheType(query),
-    fetcher,
-    { ttl: opts.ttl ?? PUBLIC_CONTENT_CACHE_TTL }
-  );
+  const type = buildPublicContentCacheType(query);
+  if (new TextEncoder().encode(type).length > MAX_CACHED_TYPE_BYTES) {
+    return fetcher();
+  }
+  return cache.get(CacheType.COLLECTION_ORG_CONTENT(orgId), type, fetcher, {
+    ttl: opts.ttl ?? PUBLIC_CONTENT_CACHE_TTL,
+  });
 }

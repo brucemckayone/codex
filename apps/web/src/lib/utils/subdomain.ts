@@ -12,6 +12,7 @@
 import { isReservedSubdomain as isReservedSubdomainInConstants } from '@codex/constants';
 import {
   buildContentUrl as buildContentUrlInner,
+  buildCreatorContentUrl as buildCreatorContentUrlInner,
   buildCreatorsUrl as buildCreatorsUrlInner,
   buildJourneyUrl as buildJourneyUrlInner,
   buildOrgUrl as buildOrgUrlInner,
@@ -56,6 +57,9 @@ export const buildPlatformUrl = buildPlatformUrlInner;
 export const buildContentUrl = buildContentUrlInner;
 /** Journeys build (Codex-2pryk · WP-0) — sibling of buildContentUrl for course pages. */
 export const buildJourneyUrl = buildJourneyUrlInner;
+
+/** A creator-page card's link (Codex-osuqt): personal pieces on the creators host. */
+export const buildCreatorContentUrl = buildCreatorContentUrlInner;
 
 /**
  * Determine the context type from a hostname.

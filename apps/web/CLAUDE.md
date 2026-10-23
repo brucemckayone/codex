@@ -25,7 +25,7 @@ Frontend SvelteKit application for the Codex platform.
 
 ### Routing
 - **MUST** use root-relative paths on org subdomains — slug is in hostname, not URL path
-- **MUST** use `buildContentUrl(page.url, content)` for content links — handles cross-org subdomain routing
+- **MUST** use `buildContentUrl(page.url, content)` for content links — handles cross-org subdomain routing. It reads a FLAT `organizationSlug`, so map a public-list row's `organization?.slug`. On a creator's pages (the username comes from the route), use `buildCreatorContentUrl(page.url, username, item)`: `buildContentUrl`'s bare `/content/{slug}` matches no route on the creators host (Codex-osuqt). A public-list row carries no username, so a personal piece's card anywhere else (/discover) has no working link yet (Codex-tdse8)
 - **MUST** use `buildOrgUrl()` for cross-org navigation — different org = different origin
 - **NEVER** include route group names (`(platform)`, `(space)`, `(auth)`) in hrefs or `goto()`
 
@@ -143,7 +143,7 @@ Rerouting: `bruce-studio.lvh.me:3000/explore` → `_org/bruce-studio/(space)/exp
 
 **Exception:** StudioSwitcher and other cross-org navigation uses `buildOrgUrl()` since it targets a different origin.
 
-**Content links:** Always `buildContentUrl(page.url, content)` from `$lib/utils/subdomain.ts`.
+**Content links:** `buildContentUrl(page.url, content)` from `$lib/utils/subdomain.ts`; on a creator's pages (username from the route), `buildCreatorContentUrl(page.url, username, item)`.
 
 ---
 
@@ -540,6 +540,8 @@ export const load: PageServerLoad = async ({ parent }) => {
 - `.catch()` on every returned promise — unhandled rejections crash the server
 - Await data needed for SEO (`<svelte:head>`) and page structure
 - Streaming only works in `+page.server.ts`, NOT universal `+page.ts`
+- A remote query's SSR result is serialised into the page whatever the load returns: trimming its items in the load hides nothing from view-source. A load that must withhold a field reads through `createServerApi(...)` (Codex-osuqt)
+- An error page under a streaming layout keeps its HTTP status only because of `patches/@sveltejs__kit@2.55.0.patch` (Codex-nqop3; Kit 2's streaming arm dropped it, so a load-thrown 404 went out as 200). Re-key or drop the patch on any Kit bump; `e2e/org-error-status.spec.ts` holds the status
 
 ---
 
@@ -598,12 +600,13 @@ padding: 12px;
 
 ## Auth on the Frontend
 
-`hooks.server.ts` runs five hooks in sequence:
+`hooks.server.ts` runs six hooks in sequence:
 1. `junkHostHook` — terminates reserved junk hosts (`cdn*`, `preview`, `api`, …) with a cached 404 before any SvelteKit work
 2. `cdnAssetHook` — serves public CDN assets (`cdn-assets*`/`cdn-platform*`) from bound R2
-3. `sessionHook` — validates `codex-session` cookie against auth worker, sets `locals.user`, `locals.session`, `locals.userId`
-4. `securityHook` — applies security headers (`X-Frame-Options`, `X-Content-Type-Options`, etc.)
-5. `cdnRewriteHook` — dev-only: rewrites `localhost:4100` CDN URLs to `nip.io` for LAN mobile access
+3. `unservableActionHook` — answers a POST naming a form action no page can have (`?/default`, or an `Object.prototype` member such as `?/valueOf`) with a 404 before any session work. SvelteKit looks actions up on a plain object, so most of these were 500s any client could cause; `?/toString` ran as an action (Codex-osuqt). Remote-function ids have the same plain-object lookup and are not covered yet (Codex-eaq2r)
+4. `sessionHook` — validates `codex-session` cookie against auth worker, sets `locals.user`, `locals.session`, `locals.userId`
+5. `securityHook` — applies security headers (`X-Frame-Options`, `X-Content-Type-Options`, etc.)
+6. `cdnRewriteHook` — dev-only: rewrites `localhost:4100` CDN URLs to `nip.io` for LAN mobile access
 
 Session validation fails gracefully — auth worker unavailable = treat as unauthenticated.
 
@@ -662,7 +665,7 @@ import * as m from '$paraglide/messages';
 | `src/lib/client/version-manifest.ts` | `getStaleKeys`, `updateStoredVersions` |
 | `src/lib/client/user-scoped-state.ts` | `reconcileStateOwner`, `clearUserScopedState`, `registerUserScopedReset` — the user-scoped-vs-device-scoped key inventory and the clear-on-identity-change primitive |
 | `src/lib/brand-editor/` | Brand editor store, CSS injection, palette generator, presets |
-| `src/lib/utils/subdomain.ts` | `buildContentUrl`, `buildOrgUrl` |
+| `src/lib/utils/subdomain.ts` | `buildContentUrl`, `buildCreatorContentUrl`, `buildOrgUrl` |
 | `src/lib/remote/*.remote.ts` | Remote function wrappers |
 
 ---

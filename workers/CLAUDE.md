@@ -23,7 +23,7 @@ All ports from `@codex/constants` `SERVICE_PORTS`. Use `buildServiceUrl(service,
 | I need to... | Worker | Key Endpoints |
 |---|---|---|
 | Register/login users | auth | `POST /api/auth/sign-up/email`, `POST /api/auth/sign-in/email` |
-| Validate a session | auth | `GET /api/auth/session` |
+| Validate a session | auth | `GET /api/auth/get-session` |
 | Create/manage content | content-api | `POST /api/content`, `PATCH /api/content/:id` |
 | Upload/manage media | content-api | `POST /api/media`, `POST /api/media/:id/upload-complete` |
 | Browse public content | content-api | `GET /api/content/public`, `GET /api/content/public/discover` |

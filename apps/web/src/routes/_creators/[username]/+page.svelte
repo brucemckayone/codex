@@ -10,11 +10,12 @@
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
-  import { buildContentUrl, buildOrgUrl } from '$lib/utils/subdomain';
+  import { buildCreatorContentUrl, buildOrgUrl } from '$lib/utils/subdomain';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
   import { Badge } from '$lib/components/ui/Badge';
   import { GlobeIcon, TwitterIcon, YoutubeIcon, InstagramIcon, FileIcon, UsersIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -26,6 +27,9 @@
   const bio = $derived(profile?.bio ?? m.creator_profile_bio_default());
   const socialLinks = $derived(profile?.socialLinks ?? null);
   const contentItems = $derived(data.contentItems ?? []);
+  // Everything published, not just the newest page of it.
+  const contentTotal = $derived(data.contentTotal);
+  const contentError = $derived(data.contentError);
   const organizations = $derived(data.organizations ?? []);
   const initial = $derived(displayName.charAt(0).toUpperCase());
   const hasSocialLinks = $derived(
@@ -35,7 +39,7 @@
         !!socialLinks.youtube ||
         !!socialLinks.instagram)
   );
-  const hasStats = $derived(contentItems.length > 0 || organizations.length > 0);
+  const hasStats = $derived(contentTotal > 0 || organizations.length > 0);
 </script>
 
 <svelte:head>
@@ -75,7 +79,7 @@
       <div class="profile-hero__stats">
         <div class="stat-item">
           <FileIcon size={16} />
-          <span>{m.creator_profile_stat_content({ count: String(contentItems.length) })}</span>
+          <span>{m.creator_profile_stat_content({ count: String(contentTotal) })}</span>
         </div>
         {#if organizations.length > 0}
           <span class="stat-divider" aria-hidden="true"></span>
@@ -193,7 +197,9 @@
   <section class="content-section">
     <h2 class="content-section__title">{m.creator_profile_latest_content()}</h2>
 
-    {#if contentItems.length > 0}
+    {#if contentError}
+      <ErrorBanner title={m.creator_content_error_title()} description={m.creator_content_error_description()} />
+    {:else if contentItems.length > 0}
       <div class="content-grid">
         {#each contentItems as item (item.id)}
           <ContentCard
@@ -203,7 +209,7 @@
             description={item.description}
             contentType={item.contentType === 'written' ? 'article' : item.contentType}
             duration={item.mediaItem?.durationSeconds ?? null}
-            href={buildContentUrl(page.url, item)}
+            href={buildCreatorContentUrl(page.url, username, item)}
             price={item.priceCents != null ? {
               amount: item.priceCents,
               currency: 'GBP',

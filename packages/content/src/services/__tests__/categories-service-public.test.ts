@@ -31,6 +31,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CategoriesService } from '../categories-service';
 
@@ -196,5 +197,41 @@ describe('CategoriesService.listPublicForOrg', () => {
       .map((r) => r.id);
 
     expect(ordered).toEqual([alpha.id, zeta.id, mid.id]);
+  });
+
+  // Deleting an org soft-deletes only the org row: its content stays
+  // published, so the topics read must check the org itself. Before this the
+  // org-delete cache bump just re-cached the deleted org's topics (Codex-osuqt).
+  it('lists nothing for a deleted org whose content is still published', async () => {
+    const token = uniqueToken();
+    const org = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
+    const topic = await service.create(
+      { name: `Deleted-org ${token}` },
+      { creatorId, organizationId: org.id }
+    );
+    const item = await seedContent({
+      organizationId: org.id,
+      status: 'published',
+    });
+    await db
+      .insert(contentCategories)
+      .values({ contentId: item, categoryId: topic.id });
+
+    // The positive control: the same org lists the topic while it is live.
+    expect((await service.listPublicForOrg(org.id)).map((r) => r.id)).toEqual([
+      topic.id,
+    ]);
+
+    await db
+      .update(organizations)
+      .set({ deletedAt: new Date() })
+      .where(eq(organizations.id, org.id));
+
+    expect(await service.listPublicForOrg(org.id)).toEqual([]);
   });
 });

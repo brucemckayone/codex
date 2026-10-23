@@ -20,6 +20,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./api', () => ({ createServerApi: vi.fn() }));
 
+const mockLogger = vi.hoisted(() => ({
+  warn: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  trackError: vi.fn(),
+}));
+vi.mock('$lib/observability', () => ({ logger: mockLogger }));
+
 import { createServerApi } from './api';
 import {
   ACCESS_CHECK_FAILED_RESULT,
@@ -27,10 +35,88 @@ import {
   EMPTY_SUB_CONTEXT,
   isPublicContent,
   loadAccessAndProgress,
+  loadRelatedContent,
   loadSubscriptionContext,
   resolveAccessGranted,
 } from './content-detail';
 import { ApiError } from './errors';
+
+// The detail pages' "more from" strip (Codex-osuqt review): read through the
+// server API so no remote-query cache carries it, every item without its raw
+// body, and a failure logged rather than swallowed.
+describe('loadRelatedContent', () => {
+  const apiWith = (getPublicContent: ReturnType<typeof vi.fn>) =>
+    ({ content: { getPublicContent } }) as unknown as Parameters<
+      typeof loadRelatedContent
+    >[0];
+  const sent = (getPublicContent: ReturnType<typeof vi.fn>) =>
+    Object.fromEntries(
+      (getPublicContent.mock.calls[0]?.[0] as URLSearchParams).entries()
+    );
+
+  it("lists the org's newest five, each without its raw body", async () => {
+    const getPublicContent = vi.fn().mockResolvedValue({
+      items: [{ id: 'r1', contentBody: 'text', contentBodyJson: { a: 1 } }],
+    });
+
+    const items = await loadRelatedContent(apiWith(getPublicContent), {
+      orgId: 'o1',
+    });
+
+    expect(sent(getPublicContent)).toEqual({
+      orgId: 'o1',
+      sort: 'newest',
+      limit: '5',
+    });
+    expect(items).toEqual([
+      { id: 'r1', contentBody: null, contentBodyJson: null },
+    ]);
+  });
+
+  // The creator page's piece has no org, so an org-scoped strip never made a
+  // request there and always rendered empty.
+  it("lists a creator's newest five for a piece with no org", async () => {
+    const getPublicContent = vi.fn().mockResolvedValue({ items: [] });
+
+    await loadRelatedContent(apiWith(getPublicContent), { creatorId: 'u1' });
+
+    expect(sent(getPublicContent)).toEqual({
+      creatorId: 'u1',
+      sort: 'newest',
+      limit: '5',
+    });
+  });
+
+  it('logs an outage as a warning and stays empty instead of rejecting', async () => {
+    const getPublicContent = vi
+      .fn()
+      .mockRejectedValue(new ApiError(503, 'unavailable'));
+
+    expect(
+      await loadRelatedContent(apiWith(getPublicContent), { orgId: 'o1' })
+    ).toEqual([]);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Related content not loaded',
+      expect.objectContaining({ orgId: 'o1', status: 503 })
+    );
+  });
+
+  it('logs a 400 from our own request as an error, naming the field', async () => {
+    const details = [{ path: 'query.creatorId', message: 'Invalid user id' }];
+    const getPublicContent = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiError(400, 'Invalid request data', 'VALIDATION_ERROR', details)
+      );
+
+    await loadRelatedContent(apiWith(getPublicContent), { creatorId: 'u1' });
+
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Related content not loaded',
+      expect.objectContaining({ creatorId: 'u1', status: 400, details })
+    );
+  });
+});
 
 /** A non-null `/stream` payload — only its presence matters to the seam. */
 type StreamResult = NonNullable<Parameters<typeof resolveAccessGranted>[0]>;

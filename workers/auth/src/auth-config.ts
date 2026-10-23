@@ -115,7 +115,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
         enabled: true,
         // 5 min — client-side signed cookie cache. Trade-off reviewed
         // 2026-04-23 (Codex-5pbwc): shorter TTLs would reduce UI auth-state
-        // staleness but multiply /api/auth/session requests; longer TTLs
+        // staleness but multiply /api/auth/get-session requests; longer TTLs
         // push the revocation SLA. 5 min is acceptable because:
         //   1. Sign-out propagates immediately on the same device —
         //      BetterAuth calls `secondaryStorage.delete` which clears

@@ -31,7 +31,7 @@
  *
  * THE RULE IS STRUCTURAL, NOT A LIST. A label enumerated against `CacheType`
  * would normalise `org:creators:1:12` (a real prefix) and silently miss
- * `content:public:newest:…:slug:…`, because `content:public` is composed in
+ * `content:public:v2:newest:…:slug:…`, because `content:public` is composed in
  * `public-cache.ts` and is not a `CacheType` value at all — the biggest
  * offender would sail straight through. Truncating at the first VARIABLE-shaped
  * segment covers composers nobody has written yet.
@@ -58,7 +58,11 @@ const VALUE_MARKERS = /* @__PURE__ */ new Set([
   'id',
 ]);
 
-/** Backstop on label depth. The deepest real label today is 3 segments. */
+/**
+ * Backstop on label depth. The shape-versioned content types reach it:
+ * `content:public:v2:newest`, and `content:auth:v2:popular`, whose content
+ * type (the fifth segment) the cap now drops.
+ */
 const MAX_LABEL_SEGMENTS = 4;
 
 /** Label used when a type yields no stable segment at all. */

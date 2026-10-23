@@ -37,8 +37,9 @@ import { subscriptionStatusGrantsAccess } from '@codex/constants';
 import type { Cookies } from '@sveltejs/kit';
 import { fail } from '@sveltejs/kit';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
-import { createServerApi } from './api';
+import { createServerApi, type PublicContentListItem } from './api';
 import { ApiError } from './errors';
+import { logReadFailure } from './read-failure';
 
 /**
  * Revocation reasons surfaced from `AccessDeniedError` when a previously-
@@ -220,8 +221,58 @@ export function isPublicContent(policy: ContentPublicnessPolicy): boolean {
   );
 }
 
+/**
+ * The content row a detail page returns to the browser, without its raw body.
+ *
+ * Both detail pages render the body server-side into `contentBodyHtml`, and
+ * only once access is confirmed; nothing on the page reads `contentBody` or
+ * `contentBodyJson`. But the row comes from the public list, which strips the
+ * body only when `isFree` is false. A row flagged free that also carries a
+ * gate (which the course service writes on purpose: `isFree` + `courseOnly`)
+ * kept its full body, and returning the row as-is put that body in the load
+ * payload, readable through view-source while the page showed it locked. The
+ * public API itself still returns it; that is tracked separately (Codex-039vo).
+ *
+ * This only covers what the load RETURNS. Read the row through the server API,
+ * never the `getPublicContent` remote query: SvelteKit serialises each remote
+ * query's SSR result into the page for hydration, body included.
+ */
+export function withoutRawBody<
+  T extends { contentBody?: string | null; contentBodyJson?: unknown },
+>(content: T): T {
+  return { ...content, contentBody: null, contentBodyJson: null };
+}
+
 /** The server-side API surface returned by `createServerApi`. */
 type ServerApi = ReturnType<typeof createServerApi>;
+
+/**
+ * A detail page's "more from" strip: the newest pieces of an org (the org
+ * page) or of a creator (the creator page, whose piece has no org), each
+ * without its raw body, as a streamed promise that never rejects (the strip
+ * stays empty, and the failure is logged).
+ *
+ * Through the server API, not the `getPublicContent` remote query, whose SSR
+ * result SvelteKit serialises into the page whatever the load returns. This
+ * is a catalogue read, which listPublic already returns without bodies; the
+ * strip here is defence in depth, so no body reaches the page even if that
+ * changes (see {@link withoutRawBody}). The cards render metadata only.
+ */
+export function loadRelatedContent(
+  api: ServerApi,
+  scope: { orgId: string } | { creatorId: string }
+): Promise<PublicContentListItem[]> {
+  const params = new URLSearchParams(scope);
+  params.set('sort', 'newest');
+  params.set('limit', '5');
+  return api.content
+    .getPublicContent(params)
+    .then((result) => result.items.map(withoutRawBody))
+    .catch((error: unknown): PublicContentListItem[] => {
+      logReadFailure('Related content not loaded', scope, error);
+      return [];
+    });
+}
 
 /**
  * Resolved payload of the access worker's `/stream` endpoint

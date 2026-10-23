@@ -16,15 +16,38 @@ export interface ValidationIssue {
   path?: ReadonlyArray<PropertyKey | { key: PropertyKey }>;
 }
 
+function pathKeys(issue: ValidationIssue): PropertyKey[] {
+  return (issue.path ?? []).map((segment) =>
+    typeof segment === 'object' ? segment.key : segment
+  );
+}
+
+/** A segment shaped like a schema's own field name. */
+const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,40}$/;
+
+/**
+ * A path segment as a log may name it: an array index, or a field name. Any
+ * other key is `*`, because a record's keys are the caller's, so the key of a
+ * refused record entry (an email, any text) is input, not schema.
+ */
+function loggableSegment(key: PropertyKey): string {
+  if (typeof key === 'number') return String(key);
+  if (typeof key === 'string' && FIELD_NAME.test(key)) return key;
+  return '*';
+}
+
+/** Each issue's path as `a.b.0`: what a log may say about refused input, never its values. */
+export function issuePaths(issues: readonly ValidationIssue[]): string[] {
+  return issues.map((issue) => pathKeys(issue).map(loggableSegment).join('.'));
+}
+
 export function validationErrorFor(
   issues: readonly ValidationIssue[]
 ): App.Error {
   const [first] = issues;
   if (!first) return { message: 'Bad Request', code: 'VALIDATION_ERROR' };
 
-  const path = (first.path ?? []).map((segment) =>
-    typeof segment === 'object' && segment !== null ? segment.key : segment
-  );
+  const path = pathKeys(first);
   // Page saves carry `sections[i]`, and "Section 3" is the name a creator can
   // find; any other path stays out of the message.
   const where =

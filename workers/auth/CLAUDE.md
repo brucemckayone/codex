@@ -8,7 +8,7 @@ Authentication and session management via BetterAuth. The only worker that doesn
 |---|---|---|---|---|
 | POST | `/api/auth/sign-up/email` | None | `auth` (5/15min) | Register; sends verification email |
 | POST | `/api/auth/sign-in/email` | None | `auth` (5/15min) | Login; requires email verified |
-| GET | `/api/auth/session` | Cookie | — | Returns `{ user, session }` or `null` |
+| GET | `/api/auth/get-session` | Cookie | — | Returns `{ user, session }` or `null` |
 | POST | `/api/auth/sign-out` | Cookie | — | Clears session cookie |
 | POST | `/api/auth/verify-email` | Token | — | Verifies email, auto-signs-in |
 | POST | `/api/auth/request-password-reset` | None | `auth` (5/15min) | Sends password reset link (1h expiry). BetterAuth core endpoint — NOT `/forget-password` (that only exists in the unused email-otp plugin) |

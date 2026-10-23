@@ -1,0 +1,17 @@
+diff --git a/src/runtime/server/page/render.js b/src/runtime/server/page/render.js
+index ff11a9c..daeaa43 100644
+--- a/src/runtime/server/page/render.js
++++ b/src/runtime/server/page/render.js
+@@ -696,6 +696,12 @@ export async function render_response({
+ 					type: 'bytes'
+ 				}),
+ 				{
++					// Codex patch (Codex-nqop3): every server load has resolved by
++					// now, so the status is known; only the promise chunks stream.
++					// 2.x dropped it here, so an error page under a layout that
++					// streams promises went out as 200 (sveltejs/kit#12533,
++					// #12987). Kit 3 passes it the same way; drop this on upgrade.
++					status,
+ 					headers
+ 				}
+ 			);

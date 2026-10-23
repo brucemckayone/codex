@@ -27,11 +27,13 @@
  * are not a member of. {@link expectSellPageRendered} fails loudly rather than
  * silently measuring the wrong page.
  *
- * ── TRAP 2 · A LOAD-THROWN 404 RETURNS HTTP 200 ───────────────────────────────
- * `@sveltejs/kit@2.55.0`'s `render_response()` builds the streaming `Response`
- * without passing `status` through (Codex-nqop3 — an UPSTREAM bug, root-caused
- * in round 3, not a defect in this app). So the status code is worthless as
- * evidence on this surface. Assert the rendered title and section count.
+ * ── TRAP 2 · A 200 DOES NOT PROVE THE PAGE RENDERED ───────────────────────────
+ * A load-thrown 404 here used to return HTTP 200: `@sveltejs/kit@2.55.0`'s
+ * streaming `Response` dropped the status (Codex-nqop3, upstream). That is
+ * fixed by `patches/@sveltejs__kit@2.55.0.patch` and guarded by
+ * `org-error-status.spec.ts`, so a status is evidence again. But a 200 is only
+ * evidence that something rendered: the entitlement redirect above ends on a
+ * 200 too. Assert the rendered title and section count.
  */
 
 import { expect, type Page } from '@playwright/test';
@@ -321,9 +323,7 @@ export async function expectSellPageRendered(
           )
         ),
       {
-        message:
-          'the stored sections did not render in stored order — note a load-thrown 404 on this surface still ' +
-          'returns HTTP 200 (Codex-nqop3, upstream SvelteKit)',
+        message: 'the stored sections did not render in stored order',
         timeout: 15_000,
       }
     )

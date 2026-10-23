@@ -35,7 +35,7 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServic
 
 | # | Worker | Port | Purpose | Key Endpoints |
 |---|---|---|---|---|
-| 1 | **auth** | 42069 | BetterAuth, sessions (PG+KV cache), rate limiting | `POST /api/auth/sign-up/email`, `POST /api/auth/sign-in/email`, `GET /api/auth/session` |
+| 1 | **auth** | 42069 | BetterAuth, sessions (PG+KV cache), rate limiting | `POST /api/auth/sign-up/email`, `POST /api/auth/sign-in/email`, `GET /api/auth/get-session` |
 | 2 | **content-api** | 4001 | Content CRUD, media registration, access control, streaming | `POST /api/content`, `GET /api/access/content/:id/stream` |
 | 3 | **organization-api** | 42071 | Org CRUD, membership, settings, tiers, followers | `POST /api/organizations`, `GET /api/organizations/slug/:slug` |
 | 4 | **ecom-api** | 42072 | Stripe checkout, webhooks, purchase history | `POST /checkout/create`, `POST /webhooks/stripe/payment` |
@@ -60,7 +60,7 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServic
 | **@codex/security** | Auth & protection | `requireAuth`, `rateLimit`, `workerAuth`, `securityHeaders` |
 | **@codex/validation** | Zod schemas | `*Schema`, `sanitizeSvgContent` |
 | **@codex/constants** | Shared constants | `SERVICE_PORTS`, `ENV_NAMES`, `CACHE_PRESETS`, `isDev` |
-| **@codex/urls** | URL builders & host/cookie domain logic | `buildServiceUrl`, `buildContentUrl`, `buildOrgUrl`, `parseHost`, `getCookieConfig` |
+| **@codex/urls** | URL builders & host/cookie domain logic | `buildServiceUrl`, `buildContentUrl`, `buildCreatorContentUrl`, `buildOrgUrl`, `parseHost`, `getCookieConfig` |
 
 ### Services (business logic)
 | Package | Purpose | Key Exports |
@@ -214,7 +214,7 @@ comments. The reasoning for its settings lives here.
 ### Implementing Content/Media Features
 
 - Content lifecycle → `@codex/content` `ContentService`
-- Content page URLs → `buildContentUrl(page.url, content)` from `apps/web/src/lib/utils/subdomain.ts` — handles cross-org subdomain routing and slug/ID fallback
+- Content page URLs → `buildContentUrl(page.url, content)` from `apps/web/src/lib/utils/subdomain.ts` — handles cross-org subdomain routing and slug/ID fallback. On a creator's pages (username from the route), `buildCreatorContentUrl(page.url, username, item)`: a bare `/content/{slug}` matches no route on the creators host. A public-list row carries no username, so a personal card elsewhere (/discover) has no working link yet (Codex-tdse8)
 - Media upload/transcode → `@codex/content` `MediaItemService`
 - Streaming URLs → `@codex/access` `ContentAccessService` (signed R2 URLs)
 - Transcoding → `@codex/transcoding` `TranscodingService` → RunPod
@@ -296,6 +296,8 @@ export const load: PageServerLoad = async ({ parent }) => {
 - **MUST** use design tokens in skeleton CSS (shimmer animation, `--color-surface-secondary`)
 - With JS disabled, SvelteKit waits for all promises before sending HTML (graceful degradation)
 - Streaming only works in `+page.server.ts`, NOT `+page.ts` (universal loads)
+- A remote query (`getPublicContent`, `getCreators` above) serialises its SSR result into the page whatever the load returns, so trimming its items in the load hides nothing from view-source. A load that must withhold a field (a body, an email) reads through `createServerApi(...)` instead (Codex-osuqt)
+- One streamed promise anywhere in the branch puts the WHOLE response, error pages included, on SvelteKit's streaming arm. In 2.x that arm dropped the status, so every error page under the org layout (which streams `subscriptionContext`) went out as HTTP 200 (Codex-nqop3). `patches/@sveltejs__kit@2.55.0.patch` restores it and `apps/web/e2e/org-error-status.spec.ts` holds it. A Kit bump must re-key or drop that patch; Kit 3 passes the status itself
 
 **Pages using streaming:** Org landing, content detail (org + creator), pricing, journey detail, creator studio earnings.
 
@@ -349,6 +351,18 @@ executionCtx.waitUntil(
 **Never cache a class instance.** Values round-trip through JSON, so a cached
 `PaginatedResult` loses its identity and `procedure()` emits `{ data: {...} }`
 instead of the list envelope. Cache `{ items, pagination }` and re-wrap after.
+
+**Version a cached type when its payload NARROWS.** A data-slot key encodes the
+QUERY, never the payload, so dropping a field from a cached read (a column, a
+relation, a stripped body) leaves every slot written by the old code a valid hit
+after deploy. It keeps serving what was removed until its TTL runs out. The
+case that taught it: org content lists would have kept serving `creator.email`
+from 2h slots (Codex-osuqt). Put a shape version in the `type`, as
+`PUBLIC_CONTENT_SHAPE_VERSION` (`content:public:v2:…`) and explore's
+`content:auth:v2:…` do, and bump it with the change. Old slots are never read
+again. A bump also renames the cache-stats series. A cached payload is the whole
+thing the slot stores (for content-api, `listPublic` plus `resolveR2Urls`), so
+stripping R2 keys (Codex-tr7it) is a narrowing too.
 
 **Currently cached:** User profile (10min), user preferences (10min), public creator profile (10min, keyed by user id) + its username->id hop (1h), org branding/info and stats (4h, keyed by org slug), the org's public creators list (4h, under its own id `org:{slug}:creators` — bump both through `invalidateOrgPublicCaches`), org tiers (24h), org content collection versions. See `docs/caching-strategy.md` for full details.
 

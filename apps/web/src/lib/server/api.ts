@@ -367,6 +367,9 @@ export function createServerApi(
     options?: RequestInit
   ): Promise<T> {
     const url = `${serverApiUrl(platform, worker)}${path}`;
+    // Logs name the route, never its query: a visitor's search text (and any
+    // other query value) must not reach a perf line or an error message.
+    const logPath = path.split('?')[0];
     const headers: HeadersInit = {
       [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
       ...options?.headers,
@@ -384,7 +387,7 @@ export function createServerApi(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    const timer = logger.startTimer(`api:${worker}${path}`);
+    const timer = logger.startTimer(`api:${worker}${logPath}`);
     let response: Response;
     try {
       response = await fetch(url, {
@@ -398,7 +401,7 @@ export function createServerApi(
         timer.end({ method: options?.method ?? 'GET', status: 408 });
         throw new ApiError(
           408,
-          `Request to ${worker}${path} timed out`,
+          `Request to ${worker}${logPath} timed out`,
           'REQUEST_TIMEOUT'
         );
       }
@@ -490,6 +493,9 @@ export function createServerApi(
       options?: RequestInit
     ): Promise<T> {
       const url = `${serverApiUrl(platform, worker)}${path}`;
+      // Logs name the route, never its query: a visitor's search text (and any
+      // other query value) must not reach a perf line or an error message.
+      const logPath = path.split('?')[0];
       const headers: HeadersInit = {
         [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
         ...options?.headers,
@@ -505,7 +511,7 @@ export function createServerApi(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const timer = logger.startTimer(`api.fetch:${worker}${path}`);
+      const timer = logger.startTimer(`api.fetch:${worker}${logPath}`);
       let response: Response;
       try {
         response = await fetch(url, {
@@ -519,7 +525,7 @@ export function createServerApi(
           timer.end({ method: options?.method ?? 'GET', status: 408 });
           throw new ApiError(
             408,
-            `Request to ${worker}${path} timed out`,
+            `Request to ${worker}${logPath} timed out`,
             'REQUEST_TIMEOUT'
           );
         }
@@ -764,9 +770,9 @@ export function createServerApi(
        * - status: 'draft' | 'published' | 'archived' (optional)
        * - contentType: 'video' | 'audio' | 'written' (optional)
        * - accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | 'course' (optional list filter — a query KIND label, not the stored flags)
-       * - category: string filter (max 100 chars, optional)
+       * - category: string filter (max 120 chars, no NUL, optional)
        * - organizationId: UUID filter (optional)
-       * - creatorId: UUID filter (optional)
+       * - creatorId: user id filter (BetterAuth text, not a UUID; optional)
        * - search: text search (max 255 chars, optional)
        * - sortBy: 'createdAt' | 'updatedAt' | 'publishedAt' | 'title' | 'viewCount' | 'purchaseCount' (default: 'createdAt')
        * - sortOrder: 'asc' | 'desc' (default: 'desc')
@@ -889,10 +895,14 @@ export function createServerApi(
         }),
 
       /**
-       * List public content for an organization (no auth required)
+       * List public content for an organization or a creator (no auth required)
        *
-       * Query parameters (from PublicContentQueryInput):
-       * - orgId: UUID (required) - organization to scope content
+       * Query parameters (from PublicContentQueryInput). One of orgId,
+       * creatorId or slug is required:
+       * - orgId: UUID - organization to scope content
+       * - creatorId: user id (BetterAuth text) - one creator's content across
+       *   their orgs and personal space (their public profile, Codex-osuqt)
+       * - slug: exact content slug (a detail-page lookup)
        * - page: number (default: 1)
        * - limit: number (1-50, default: 20)
        * - contentType: 'video' | 'audio' | 'written' (optional)

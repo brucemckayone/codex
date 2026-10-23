@@ -172,7 +172,7 @@ describe('explore +page.server.ts — cache wiring', () => {
       // Shared version key — one per org — is what `publish` bumps.
       expect(idArg).toBe(CacheType.COLLECTION_ORG_CONTENT(ORG_ID));
       // Per-combo type carries sort + contentType + category + page.
-      expect(typeArg).toMatch(/^content:auth:popular:/);
+      expect(typeArg).toMatch(/^content:auth:v2:popular:/);
     });
 
     it('includes sort + contentType + category + page in the cache type', async () => {
@@ -186,7 +186,7 @@ describe('explore +page.server.ts — cache wiring', () => {
       );
 
       const [, typeArg] = cacheGetMock.mock.calls[0];
-      expect(typeArg).toBe('content:auth:top-selling:video:ritual:3');
+      expect(typeArg).toBe('content:auth:v2:top-selling:video:3:cat:ritual');
     });
 
     it('varies the cache type by category so two filter combos cannot collide', async () => {
@@ -207,8 +207,55 @@ describe('explore +page.server.ts — cache wiring', () => {
 
       const [, firstType] = cacheGetMock.mock.calls[0];
       const [, secondType] = cacheGetMock.mock.calls[1];
-      expect(firstType).toBe('content:auth:popular:all:ritual:1');
-      expect(secondType).toBe('content:auth:popular:all:breath:1');
+      expect(firstType).toBe('content:auth:v2:popular:all:1:cat:ritual');
+      expect(secondType).toBe('content:auth:v2:popular:all:1:cat:breath');
+    });
+
+    // A real category value must never produce the unfiltered key: an 'all'
+    // placeholder let ?category=all (which matches nothing) fill the
+    // unfiltered slot and blank that sort's grid for every viewer.
+    it('never lets a category value share the unfiltered slot', async () => {
+      const { load } = await import('../+page.server');
+
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: 'http://lvh.me:3000/explore?sort=popular&category=all',
+        })
+      );
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: 'http://lvh.me:3000/explore?sort=popular',
+        })
+      );
+
+      const [, filtered] = cacheGetMock.mock.calls[0];
+      const [, unfiltered] = cacheGetMock.mock.calls[1];
+      expect(unfiltered).toBe('content:auth:v2:popular:all:1');
+      expect(filtered).not.toBe(unfiltered);
+    });
+
+    // The key carries a visitor-chosen topic and page, so the cache-stats line
+    // names a constant, never the key.
+    it('logs cache stats under a constant label, never the raw key', async () => {
+      const { logger } = await import('$lib/observability');
+      const info = vi.spyOn(logger, 'info');
+      const { load } = await import('../+page.server');
+
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: 'http://lvh.me:3000/explore?sort=popular&category=private-words',
+        })
+      );
+
+      const stats = info.mock.calls.find(
+        ([message]) => message === 'cache stats'
+      );
+      expect(stats?.[1]).toMatchObject({ cacheType: 'explore:auth-sort' });
+      expect(JSON.stringify(info.mock.calls)).not.toContain('private-words');
+      info.mockRestore();
     });
 
     it('forwards category to the browse endpoint (it is part of contentQuerySchema)', async () => {
@@ -223,6 +270,39 @@ describe('explore +page.server.ts — cache wiring', () => {
 
       const params = browseMock.mock.calls[0][0] as URLSearchParams;
       expect(params.get('category')).toBe('ritual');
+    });
+
+    // The signed-in sorts send these straight to browse, whose 400 this load
+    // let through as a 500 with an error-level "contract bug" log: any
+    // visitor could raise it by editing a URL (Codex-osuqt).
+    it('bounds the search and drops a category that is not a topic slug', async () => {
+      const { load } = await import('../+page.server');
+
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: `http://lvh.me:3000/explore?sort=popular&q=%00${'x'.repeat(300)}&category=Sound%20%26%20Vibration`,
+        })
+      );
+
+      const params = browseMock.mock.calls[0][0] as URLSearchParams;
+      expect(params.get('search')).toBe('x'.repeat(255));
+      expect(params.get('category')).toBeNull();
+    });
+
+    it('still sends a real topic up to the column width', async () => {
+      const { load } = await import('../+page.server');
+      const longTopic = 'a'.repeat(110);
+
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: `http://lvh.me:3000/explore?sort=popular&category=${longTopic}`,
+        })
+      );
+
+      const params = browseMock.mock.calls[0][0] as URLSearchParams;
+      expect(params.get('category')).toBe(longTopic);
     });
 
     it('downgrades an auth-only sort to newest when `featured` is requested', async () => {
@@ -247,6 +327,18 @@ describe('explore +page.server.ts — cache wiring', () => {
         expect.objectContaining({ featured: true, sort: 'newest' })
       );
       expect(result.filters.sort).toBe('newest');
+    });
+
+    // paginationSchema caps page at 1000: a hand-edited ?page=1001 was a
+    // content-api 400 that this load let through as a 500.
+    it('bounds the page at what the list accepts', async () => {
+      const { load } = await import('../+page.server');
+
+      await load(baseInput({ url: 'http://lvh.me:3000/explore?page=5000' }));
+
+      expect(getPublicContentMock).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 1000 })
+      );
     });
 
     it('uses 180s TTL for auth-sort cache entries', async () => {
@@ -513,7 +605,7 @@ describe('explore +page.server.ts — cache wiring', () => {
    * `item.category` — a legacy free-text DISPLAY NAME — while both filter paths
    * match `categories.slug`. Every pill returned 0 results ("Somatics" → 0,
    * "somatics" → 7) and any category containing a space or `&` produced a full
-   * HTTP 400 page, because `publicContentQueryParamsSchema.category` only
+   * HTTP 400 page, because `publicContentArgsSchema.category` only
    * accepts `^[\p{L}\p{N}-]+$`.
    *
    * Falsifiability: the name/slug pairing test fails if the load stops
@@ -632,6 +724,53 @@ describe('explore +page.server.ts — cache wiring', () => {
       expect(order.indexOf('categories:start')).toBeLessThan(
         order.indexOf('content:end')
       );
+    });
+  });
+
+  // Each of these reads degrades the page rather than failing it, so the log
+  // is the only trace: without it a broken creator filter read as "this
+  // creator has nothing", and an outage as an org with no topics or journeys.
+  describe('a degraded read is logged, not swallowed', () => {
+    it.each([
+      [
+        'the creator lookup',
+        () => getPublicCreatorsMock.mockRejectedValueOnce(new Error('org 503')),
+        'Explore creator filter not resolved',
+      ],
+      [
+        'the topic strip',
+        () =>
+          getPublicCategoriesMock.mockRejectedValueOnce(
+            new Error('categories 503')
+          ),
+        'Explore topics not loaded',
+      ],
+      [
+        'the journeys rail',
+        () =>
+          listPublishedCoursesMock.mockRejectedValueOnce(
+            new Error('access 503')
+          ),
+        'Explore journeys rail not loaded',
+      ],
+    ])('logs a failed read of %s', async (_label, fail, message) => {
+      fail();
+      const { logger } = await import('$lib/observability');
+      const warn = vi.spyOn(logger, 'warn');
+      const { load } = await import('../+page.server');
+
+      await load(
+        baseInput({
+          user: null,
+          url: 'http://lvh.me:3000/explore?creator=alex',
+        })
+      );
+
+      expect(warn).toHaveBeenCalledWith(
+        message,
+        expect.objectContaining({ orgId: ORG_ID, error: expect.any(String) })
+      );
+      warn.mockRestore();
     });
   });
 

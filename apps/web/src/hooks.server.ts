@@ -4,9 +4,11 @@
  * Runs on every request to:
  * 1. Terminate junk reserved hosts (cdn*, preview, …) with a cached 404
  * 2. Serve public CDN assets that the wildcard route shadows off R2
- * 3. Generate request ID for tracing and validate session with Auth Worker
- * 4. Apply security headers
- * 5. Handle global errors
+ * 3. Refuse a POST naming a form action no page can have (?/default,
+ *    ?/valueOf, …) with a 404, before any session work
+ * 4. Generate request ID for tracing and validate session with Auth Worker
+ * 5. Apply security headers
+ * 6. Handle global errors
  */
 
 import { APP_SUBDOMAINS, CACHE_PRESETS, COOKIES } from '@codex/constants';
@@ -21,6 +23,16 @@ import { dev } from '$app/environment';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { isPublicCdnHost, tryServeCdnAsset } from '$lib/server/cdn-proxy';
+import {
+  clientErrorBody,
+  logRefusedRemoteInput,
+  logUnhandledError,
+} from '$lib/server/error-log-context';
+import {
+  isNativeFormSubmit,
+  namedFormAction,
+  namesUnservableAction,
+} from '$lib/server/form-action';
 import { validationErrorFor } from '$lib/server/validation-error';
 import { getSubdomainContext } from '$lib/utils/subdomain';
 
@@ -146,6 +158,41 @@ export const junkHostHook: Handle = async ({ event, resolve }) => {
 const cdnAssetHook: Handle = async ({ event, resolve }) => {
   const response = await tryServeCdnAsset(event);
   return response ?? resolve(event);
+};
+
+/**
+ * Refuses a POST naming a form action no page can have (Codex-osuqt): Kit's
+ * reserved `default`, or an `Object.prototype` member such as `?/valueOf`
+ * (`namesUnservableAction`). Most of those threw inside SvelteKit, a tracked
+ * 500 any client could cause. Refused here with a 404 before Kit dispatches
+ * it, so no error-log rule has to guess which 500s were these.
+ *
+ * A `use:enhance` submit gets an ActionResult-shaped JSON body, which Kit's
+ * `deserialize` can read; a native submit gets plain text. Logged as a
+ * warning naming the action, which is one of a closed set, never the client's
+ * own text. Like junkHostHook, the response carries no app security headers
+ * or request id on purpose: the body is a constant and there is no page. Runs
+ * before the session hook, so a refused probe costs no session lookup.
+ */
+export const unservableActionHook: Handle = async ({ event, resolve }) => {
+  if (!namesUnservableAction(event.request)) return resolve(event);
+
+  logger.warn('Form action refused before dispatch', {
+    host: event.url.host,
+    url: event.url.pathname,
+    method: event.request.method,
+    refusedAction: namedFormAction(event.request),
+  });
+  if (isNativeFormSubmit(event.request)) {
+    return new Response('Not Found', {
+      status: 404,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+  }
+  return Response.json(
+    { type: 'error', error: { message: 'Not Found', code: 'NOT_FOUND' } },
+    { status: 404 }
+  );
 };
 
 /**
@@ -277,27 +324,30 @@ const cdnRewriteHook: Handle = async ({ event, resolve }) => {
 export const handle = sequence(
   junkHostHook,
   cdnAssetHook,
+  unservableActionHook,
   sessionHook,
   securityHook,
   cdnRewriteHook
 );
 
 /**
- * Global error handler
- * Logs errors with request context and tracks in analytics
+ * Global error handler. Logs with request context (`logUnhandledError`):
+ * SvelteKit refusing the request is a warning, anything else is tracked.
  */
-export const handleError: HandleServerError = async ({ error, event }) => {
-  const errorId = event.locals.requestId;
+export const handleError: HandleServerError = async ({
+  error,
+  event,
+  status,
+  message,
+}) => {
+  logUnhandledError(error, event, status);
 
-  // Use centralized logger
-  logger.trackError(error instanceof Error ? error : new Error(String(error)), {
-    requestId: errorId,
-    url: event.url.href,
-    method: event.url.search,
-  });
+  const clientError = clientErrorBody(status, message);
+  if (clientError) return clientError;
 
-  // In dev mode, expose the real error message for debugging (production
-  // keeps the sanitised "unexpected error" message to avoid leaking internals).
+  // At 500 and above: in dev mode, expose the real error message for debugging
+  // (production keeps the sanitised "unexpected error" message to avoid leaking
+  // internals). Below 500, the body is SvelteKit's own message in both.
   if (dev) {
     const msg = error instanceof Error ? error.message : String(error);
     return { message: msg, code: 'INTERNAL_ERROR' };
@@ -311,7 +361,13 @@ export const handleError: HandleServerError = async ({ error, event }) => {
 
 /**
  * A remote function's input failed its schema: say which part and why, not
- * SvelteKit's bare "Bad Request" (see `validationErrorFor`).
+ * SvelteKit's bare "Bad Request" (see `validationErrorFor`), and log it, since
+ * this refusal never reaches `handleError`.
  */
-export const handleValidationError: HandleValidationError = ({ issues }) =>
-  validationErrorFor(issues);
+export const handleValidationError: HandleValidationError = ({
+  issues,
+  event,
+}) => {
+  logRefusedRemoteInput(issues, event);
+  return validationErrorFor(issues);
+};
