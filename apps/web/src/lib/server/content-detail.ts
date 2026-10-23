@@ -36,10 +36,10 @@
 import { subscriptionStatusGrantsAccess } from '@codex/constants';
 import type { Cookies } from '@sveltejs/kit';
 import { fail } from '@sveltejs/kit';
-import { logger } from '$lib/observability';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
 import { createServerApi, type PublicContentListItem } from './api';
 import { ApiError } from './errors';
+import { logReadFailure } from './read-failure';
 
 /**
  * Revocation reasons surfaced from `AccessDeniedError` when a previously-
@@ -247,7 +247,8 @@ export function withoutRawBody<
 type ServerApi = ReturnType<typeof createServerApi>;
 
 /**
- * A detail page's "more from this org" strip: the org's newest pieces, each
+ * A detail page's "more from" strip: the newest pieces of an org (the org
+ * page) or of a creator (the creator page, whose piece has no org), each
  * without its raw body, as a streamed promise that never rejects (the strip
  * stays empty, and the failure is logged).
  *
@@ -257,23 +258,16 @@ type ServerApi = ReturnType<typeof createServerApi>;
  */
 export function loadRelatedContent(
   api: ServerApi,
-  orgId: string | null | undefined
+  scope: { orgId: string } | { creatorId: string }
 ): Promise<PublicContentListItem[]> {
-  if (!orgId) return Promise.resolve([]);
-  const params = new URLSearchParams();
-  params.set('orgId', orgId);
+  const params = new URLSearchParams(scope);
   params.set('sort', 'newest');
   params.set('limit', '5');
   return api.content
     .getPublicContent(params)
-    .then((result) => (result?.items ?? []).map(withoutRawBody))
+    .then((result) => result.items.map(withoutRawBody))
     .catch((error: unknown): PublicContentListItem[] => {
-      logger.warn('Related content not loaded', {
-        orgId,
-        status: error instanceof ApiError ? error.status : undefined,
-        code: error instanceof ApiError ? error.code : undefined,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logReadFailure('Related content not loaded', scope, error);
       return [];
     });
 }

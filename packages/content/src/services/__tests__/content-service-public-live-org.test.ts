@@ -17,6 +17,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { content, organizations } from '@codex/database/schema';
+import { ValidationError } from '@codex/service-errors';
 import {
   createUniqueSlug,
   type Database,
@@ -105,7 +106,12 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
     await teardownTestDatabase();
   });
 
-  const read = (scope: { orgId?: string; creatorId?: string; slug?: string }) =>
+  const read = (scope: {
+    orgId?: string;
+    creatorId?: string;
+    slug?: string;
+    category?: string;
+  }) =>
     service.listPublic({
       ...scope,
       page: 1,
@@ -143,7 +149,18 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
   });
 
   it('an org-scoped read of a deleted org lists nothing to a direct API client', async () => {
+    // The positive control: the same read of a live org lists its pieces.
+    expect(await listed({ orgId: liveOrgId })).toEqual(
+      expect.arrayContaining([ids.liveOrg, ids.followerOnly])
+    );
     expect(await listed({ orgId: deletedOrgId })).toEqual([]);
+  });
+
+  // The route refuses this too; the service fails closed for any other caller.
+  it('refuses a category with no org to scope it', async () => {
+    await expect(
+      read({ creatorId, category: 'fiction' })
+    ).rejects.toBeInstanceOf(ValidationError);
   });
 
   it('the anonymous list carries no creator email', async () => {

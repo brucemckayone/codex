@@ -687,7 +687,8 @@ app.delete(
           // content-api caches the org's public content list and its topics
           // under the org's ID for up to 2h, so a deleted org's catalogue went
           // on being served to direct API clients until then. Bump both so
-          // the next read misses and listPublic's live-org filter applies.
+          // the next read misses and re-reads through a live-org rule (listPublic
+          // for the list, listPublicForOrg for the topics), which drops a deleted org.
           invalidations.push(
             cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(org.id)),
             cache.invalidate(CacheType.CATEGORIES(org.id))

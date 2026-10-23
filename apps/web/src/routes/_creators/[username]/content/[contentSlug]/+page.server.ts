@@ -11,6 +11,7 @@
  */
 import { error, redirect } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
@@ -25,6 +26,7 @@ import {
 } from '$lib/server/content-detail';
 import type { ContentWithRelations } from '$lib/types';
 import { buildContentUrl } from '$lib/utils/subdomain';
+import { creatorHandle } from '../../creator-handle';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
@@ -38,8 +40,8 @@ export const load: PageServerLoad = async ({
 }) => {
   depends('app:auth');
   const { contentSlug } = params;
-  // Strip leading @ from username (URL convention: /@alex-creator)
-  const username = params.username.replace(/^@/, '');
+  // The handle without its leading @ (URL convention: /@alex-creator).
+  const username = creatorHandle(params.username);
   const api = createServerApi(platform, cookies);
 
   // Fetch creator profile to get creatorId
@@ -84,7 +86,7 @@ export const load: PageServerLoad = async ({
   contentParams.set('limit', '50');
 
   const contentResult = await api.content.getPublicContent(contentParams);
-  const matches = (contentResult?.items ?? []) as ContentWithRelations[];
+  const matches = contentResult.items as ContentWithRelations[];
   const content = matches.find((item) => item.organizationId == null) ?? null;
 
   if (!content) {
@@ -98,6 +100,17 @@ export const load: PageServerLoad = async ({
           organizationSlug: orgPiece.organization.slug,
         })
       );
+    }
+    // Rows matched but none is personal or names its org: the org relation
+    // failed to load (listPublic hides a deleted org's pieces), not a missing
+    // piece. Still a 404 for the visitor, but logged, or a regression that
+    // broke every redirect would look like mistyped URLs.
+    if (matches.length > 0) {
+      logger.error('Creator content slug matched no personal or org piece', {
+        creatorId: creatorProfile.id,
+        contentSlug,
+        matchCount: matches.length,
+      });
     }
     error(404, 'Content not found');
   }
@@ -126,8 +139,12 @@ export const load: PageServerLoad = async ({
   const isPublic = isPublicContent(content);
   const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
 
-  // Fetch related content — returned as a bare promise (streamed, below fold)
-  const relatedPromise = loadRelatedContent(api, content.organization?.id);
+  // "More from this creator", streamed below the fold. By creator, not org:
+  // this page only ever shows a personal piece (an org piece redirects), so an
+  // org-scoped strip never made a request and always rendered empty.
+  const relatedPromise = loadRelatedContent(api, {
+    creatorId: creatorProfile.id,
+  });
 
   // Subscription context (org-scoped content may have tier gating).
   // Skip the round-trip entirely for content that can't require a

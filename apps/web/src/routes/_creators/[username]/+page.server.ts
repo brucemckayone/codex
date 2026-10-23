@@ -14,8 +14,9 @@ import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { withoutRawBody } from '$lib/server/content-detail';
+import { logReadFailure } from '$lib/server/read-failure';
 import type { PageServerLoad } from './$types';
-import { logCreatorContentFailure } from './content-failure';
+import { creatorHandle } from './creator-handle';
 
 const CONTENT_LIMIT = 12;
 
@@ -26,8 +27,8 @@ export const load: PageServerLoad = async ({
   cookies,
   setHeaders,
 }) => {
-  // Strip leading @ from username (URL convention: /@alex-creator)
-  const username = params.username.replace(/^@/, '');
+  // The handle without its leading @ (URL convention: /@alex-creator).
+  const username = creatorHandle(params.username);
   const api = createServerApi(platform, cookies);
 
   // The creator's public profile from identity-api.
@@ -103,12 +104,12 @@ export const load: PageServerLoad = async ({
 
     const contentResult = await api.content.getPublicContent(params);
     // Cards draw metadata only; no body reaches this page's HTML.
-    contentItems = (contentResult?.items ?? []).map(withoutRawBody);
-    contentTotal = contentResult?.pagination?.total ?? contentItems.length;
+    contentItems = contentResult.items.map(withoutRawBody);
+    contentTotal = contentResult.pagination.total;
   } catch (err) {
-    logCreatorContentFailure(
+    logReadFailure(
       'Creator profile content not loaded',
-      creatorProfile.id,
+      { creatorId: creatorProfile.id },
       err
     );
     contentError = true;

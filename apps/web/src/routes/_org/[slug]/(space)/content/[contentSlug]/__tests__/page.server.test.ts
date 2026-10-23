@@ -20,6 +20,14 @@ const mockServerGetPublicContent = vi.hoisted(() => vi.fn());
 const mockRemoteGetPublicContent = vi.hoisted(() =>
   vi.fn(() => Promise.resolve({ items: [] }))
 );
+const mockContentCourses = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
+const mockLogger = vi.hoisted(() => ({
+  warn: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+}));
+
+vi.mock('$lib/observability', () => ({ logger: mockLogger }));
 
 vi.mock('$lib/remote/content.remote', () => ({
   getPublicContent: mockRemoteGetPublicContent,
@@ -27,7 +35,7 @@ vi.mock('$lib/remote/content.remote', () => ({
 
 vi.mock('$lib/server/api', () => ({
   createServerApi: vi.fn(() => ({
-    access: { contentCourses: vi.fn(() => Promise.resolve(null)) },
+    access: { contentCourses: mockContentCourses },
     content: { getPublicContent: mockServerGetPublicContent },
   })),
 }));
@@ -60,6 +68,17 @@ const event = (contentSlug = 'practice') =>
     setHeaders: vi.fn(),
     depends: vi.fn(),
   }) as never;
+
+/**
+ * A load's data with every streamed promise resolved. JSON.stringify writes a
+ * Promise as `{}`, but SvelteKit serialises each resolved value into the page.
+ */
+const settled = async (data: Record<string, unknown>) =>
+  Object.fromEntries(
+    await Promise.all(
+      Object.entries(data).map(async ([key, value]) => [key, await value])
+    )
+  );
 
 /** The URLSearchParams the page sent to the server API, as an object. */
 const sentParams = () =>
@@ -108,7 +127,10 @@ describe('org content detail: the browser never receives a raw body', () => {
     expect(data.contentBodyHtml).toBeNull();
     expect(data.content.contentBody).toBeNull();
     expect(data.content.contentBodyJson).toBeNull();
-    expect(JSON.stringify(data)).not.toContain('the paid curriculum');
+    const shipped = JSON.stringify(await settled(data));
+    // The calibration: the streamed related strip resolved to the piece.
+    expect(shipped).toContain('"relatedContent":[{"id":"c9"');
+    expect(shipped).not.toContain('the paid curriculum');
   });
 
   it('a public piece still renders: the body arrives as HTML, not as the raw field', async () => {
@@ -124,6 +146,20 @@ describe('org content detail: the browser never receives a raw body', () => {
 
     expect(data.contentBodyHtml).toContain('the article text');
     expect(data.content.contentBody).toBeNull();
+  });
+
+  it('a failed journey cross-link read is logged, and the page still renders', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [row({})] });
+    mockContentCourses.mockRejectedValueOnce(new Error('access-api down'));
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event())) as { parentCourses: Promise<unknown> };
+
+    expect(await data.parentCourses).toBeNull();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Content course links not loaded',
+      expect.objectContaining({ contentId: 'c9', error: 'access-api down' })
+    );
   });
 });
 

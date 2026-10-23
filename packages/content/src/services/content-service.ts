@@ -1299,6 +1299,16 @@ export class ContentService extends BaseService {
   }): Promise<
     PaginatedListResponse<ContentWithRelations & { categorySlugs: string[] }>
   > {
+    // A topic is an org's, so only an org-scoped read can filter by one. The
+    // public route refuses this already (publicContentQuerySchema); this is the
+    // service-level seatbelt, as in list()'s browse scope. Without an org there
+    // is no right answer: a creatorId read is cross-org (their public profile),
+    // where a personal-topic match silently dropped their org content, and a
+    // bare category returned the list unfiltered.
+    if (params.category && !params.orgId) {
+      throw new ValidationError('category requires orgId');
+    }
+
     try {
       // Build WHERE conditions — published, not deleted, optionally scoped to org
       const whereConditions = [
@@ -1375,43 +1385,24 @@ export class ContentService extends BaseService {
       // ids and we match via `IN`, so the relational `findMany` below (with its
       // media/creator/org relations) stays intact — no join reshaping needed.
       //
-      // Space scoping: org listing → org categories; with only a creatorId →
-      // the creator's OWN personal categories (scope by creatorId, NOT merely
-      // `organizationId IS NULL`, which would match personal categories across
-      // ALL creators). A creatorId-only read is now cross-org (their public
-      // profile, Codex-osuqt), where a personal-only match would silently drop
-      // their org content, so the public route refuses `category` without
-      // orgId (publicContentQuerySchema); that branch is for in-process
-      // callers. A bare category slug with neither orgId nor creatorId can't
-      // be space-scoped, so we SKIP the filter rather than perform a
-      // cross-creator personal match. Soft-deleted categories are excluded.
-      if (params.category) {
-        const categorySpaceScope = params.orgId
-          ? eq(categories.organizationId, params.orgId)
-          : params.creatorId
-            ? and(
-                isNull(categories.organizationId),
-                eq(categories.creatorId, params.creatorId)
-              )
-            : undefined;
-
-        if (categorySpaceScope) {
-          const categoryContentIds = this.db
-            .select({ contentId: contentCategories.contentId })
-            .from(contentCategories)
-            .innerJoin(
-              categories,
-              eq(contentCategories.categoryId, categories.id)
+      // The org's own topics only (the guard above refuses a category with no
+      // org). Soft-deleted categories are excluded.
+      if (params.category && params.orgId) {
+        const categoryContentIds = this.db
+          .select({ contentId: contentCategories.contentId })
+          .from(contentCategories)
+          .innerJoin(
+            categories,
+            eq(contentCategories.categoryId, categories.id)
+          )
+          .where(
+            and(
+              eq(categories.slug, params.category),
+              isNull(categories.deletedAt),
+              eq(categories.organizationId, params.orgId)
             )
-            .where(
-              and(
-                eq(categories.slug, params.category),
-                isNull(categories.deletedAt),
-                categorySpaceScope
-              )
-            );
-          whereConditions.push(inArray(content.id, categoryContentIds));
-        }
+          );
+        whereConditions.push(inArray(content.id, categoryContentIds));
       }
 
       // Optional search on title/description

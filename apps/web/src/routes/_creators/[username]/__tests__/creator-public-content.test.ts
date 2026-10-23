@@ -58,8 +58,20 @@ const sentParams = () =>
     (mockGetPublicContent.mock.calls[0]?.[0] as URLSearchParams).entries()
   );
 
-const detailEvent = (contentSlug = 'first') =>
-  event({ params: { username: '@alex-creator', contentSlug } });
+const detailEvent = (contentSlug = 'first', username = '@alex-creator') =>
+  event({ params: { username, contentSlug } });
+
+/**
+ * A load's data with every streamed promise resolved. JSON.stringify writes a
+ * Promise as `{}`, but SvelteKit serialises each resolved value into the page,
+ * so a "never ships" check on raw data cannot see a streamed field.
+ */
+const settled = async (data: Record<string, unknown>) =>
+  Object.fromEntries(
+    await Promise.all(
+      Object.entries(data).map(async ([key, value]) => [key, await value])
+    )
+  );
 
 describe('creator public pages read the public list by creator (Codex-osuqt)', () => {
   beforeEach(() => {
@@ -174,8 +186,11 @@ describe('creator public pages read the public list by creator (Codex-osuqt)', (
   });
 
   it('logs a 400 from our own request as an error: it is a contract bug', async () => {
+    // The field the worker refused: its message alone is always "Invalid
+    // request data", which names nothing.
+    const details = [{ path: 'query.creatorId', message: 'Invalid user id' }];
     mockGetPublicContent.mockRejectedValueOnce(
-      new ApiError(400, 'Invalid request data', 'VALIDATION_ERROR')
+      new ApiError(400, 'Invalid request data', 'VALIDATION_ERROR', details)
     );
     const { load } = await import('../+page.server');
 
@@ -183,9 +198,34 @@ describe('creator public pages read the public list by creator (Codex-osuqt)', (
 
     expect(mockLogger.error).toHaveBeenCalledWith(
       'Creator profile content not loaded',
-      expect.objectContaining({ status: 400, code: 'VALIDATION_ERROR' })
+      expect.objectContaining({
+        status: 400,
+        code: 'VALIDATION_ERROR',
+        details,
+      })
     );
     expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+
+  // identity-api refuses a handle outside usernameSchema with a 400, which
+  // every page let through as a 500 and an error log.
+  it.each([
+    ['the profile', '../+page.server', event({ params: { username: '@a_b' } })],
+    [
+      'the catalogue',
+      '../content/+page.server',
+      event({ params: { username: '@a_b' } }),
+    ],
+    [
+      'the detail page',
+      '../content/[contentSlug]/+page.server',
+      detailEvent('first', '@a_b'),
+    ],
+  ])('%s is a 404 for a handle no creator can have, never sent', async (_page, path, ev) => {
+    const { load } = await import(path);
+
+    await expect(load(ev)).rejects.toMatchObject({ status: 404 });
+    expect(mockGetPublicProfile).not.toHaveBeenCalled();
   });
 
   it('the detail page looks the piece up by creator and slug', async () => {
@@ -227,7 +267,8 @@ describe('creator public pages read the public list by creator (Codex-osuqt)', (
   // gate (the course service writes isFree + courseOnly on purpose). The page
   // must not ship it: it was readable through view-source while shown locked.
   it("the detail page never ships a locked piece's raw body", async () => {
-    mockGetPublicContent.mockResolvedValueOnce({
+    // Every read returns it, the streamed related strip's included.
+    mockGetPublicContent.mockResolvedValue({
       items: [
         {
           id: 'c9',
@@ -253,7 +294,10 @@ describe('creator public pages read the public list by creator (Codex-osuqt)', (
     expect(data.content.contentBody).toBeNull();
     expect(data.content.contentBodyJson).toBeNull();
     expect(data.contentBodyHtml).toBeNull();
-    expect(JSON.stringify(data)).not.toContain('the paid curriculum');
+    const shipped = JSON.stringify(await settled(data));
+    // The calibration: the related strip resolved to the piece, metadata only.
+    expect(shipped).toContain('"relatedContent":[{"id":"c9"');
+    expect(shipped).not.toContain('the paid curriculum');
   });
 
   // The list pages draw cards from metadata; the items serialise verbatim into
@@ -348,6 +392,72 @@ describe('creator public pages read the public list by creator (Codex-osuqt)', (
     await expect(load(detailEvent())).rejects.toMatchObject({
       status: 302,
       location: 'http://studio-alpha.lvh.me:3000/content/first',
+    });
+  });
+
+  // An org row the read returned without its org: a broken relation, not a
+  // missing piece, so it is logged though the visitor still gets a 404.
+  it('logs a slug that matched only an org piece missing its org', async () => {
+    mockGetPublicContent.mockResolvedValueOnce({
+      items: [
+        {
+          id: 'orphan',
+          slug: 'first',
+          organizationId: 'o1',
+          organization: null,
+        },
+      ],
+      pagination: { page: 1, limit: 50, total: 1, totalPages: 1 },
+    });
+    const { load } = await import('../content/[contentSlug]/+page.server');
+
+    await expect(load(detailEvent())).rejects.toMatchObject({ status: 404 });
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Creator content slug matched no personal or org piece',
+      expect.objectContaining({ creatorId: CREATOR_ID, matchCount: 1 })
+    );
+  });
+
+  it('a slug that matched nothing is a 404 with nothing logged', async () => {
+    mockGetPublicContent.mockResolvedValueOnce({
+      items: [],
+      pagination: { page: 1, limit: 50, total: 0, totalPages: 0 },
+    });
+    const { load } = await import('../content/[contentSlug]/+page.server');
+
+    await expect(load(detailEvent())).rejects.toMatchObject({ status: 404 });
+    expect(mockLogger.error).not.toHaveBeenCalled();
+  });
+
+  // This page shows only a personal piece, so an org-scoped strip never made
+  // a request: it streamed a skeleton that always vanished.
+  it("the detail page's related strip reads the creator's newest pieces", async () => {
+    mockGetPublicContent.mockResolvedValue({
+      items: [
+        {
+          id: 'personal-piece',
+          slug: 'first',
+          organizationId: null,
+          organization: null,
+          isFree: true,
+        },
+      ],
+      pagination: { page: 1, limit: 50, total: 1, totalPages: 1 },
+    });
+    const { load } = await import('../content/[contentSlug]/+page.server');
+
+    const data = (await load(detailEvent())) as {
+      relatedContent: Promise<unknown[]>;
+    };
+    await data.relatedContent;
+
+    const relatedParams = Object.fromEntries(
+      (mockGetPublicContent.mock.calls[1]?.[0] as URLSearchParams).entries()
+    );
+    expect(relatedParams).toEqual({
+      creatorId: CREATOR_ID,
+      sort: 'newest',
+      limit: '5',
     });
   });
 });

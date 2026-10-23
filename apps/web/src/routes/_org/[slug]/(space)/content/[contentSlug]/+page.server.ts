@@ -21,6 +21,7 @@ import {
   loadSubscriptionContext,
   withoutRawBody,
 } from '$lib/server/content-detail';
+import { logReadFailure } from '$lib/server/read-failure';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
@@ -73,7 +74,7 @@ export const load: PageServerLoad = async ({
   contentParams.set('limit', '1');
   const contentResult = await api.content.getPublicContent(contentParams);
 
-  const content = contentResult?.items?.[0];
+  const content = contentResult.items[0];
   if (!content) {
     error(404, 'Content not found');
   }
@@ -92,17 +93,24 @@ export const load: PageServerLoad = async ({
   const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
 
   // Fetch related content — returned as a bare promise (streamed, below fold)
-  const relatedPromise = loadRelatedContent(api, org.id);
+  const relatedPromise = loadRelatedContent(api, { orgId: org.id });
 
   // Journey cross-link (Codex-2pryk.3.10, F19/F20): the PUBLISHED course(s) this
   // item belongs to. Streamed — it's below-the-fold context (breadcrumb signpost
   // + "part of a journey" + free upsell), not first-paint-critical. PUBLIC read
-  // (no auth), so it runs for visitors and owners alike. `.catch(() => null)`
-  // keeps an unhandled rejection from crashing the load; the FE omits the
-  // cross-link gracefully on null / empty.
+  // (no auth), so it runs for visitors and owners alike. The `.catch` keeps an
+  // unhandled rejection from crashing the load and logs the failure; the FE
+  // omits the cross-link gracefully on null / empty.
   const parentCoursesPromise = api.access
     .contentCourses(content.id)
-    .catch(() => null);
+    .catch((error: unknown) => {
+      logReadFailure(
+        'Content course links not loaded',
+        { contentId: content.id },
+        error
+      );
+      return null;
+    });
 
   // Only run the subscription-context fetch when content is tier-gated
   // (includedInTierId set — the WP-1 successor of accessType 'subscribers').

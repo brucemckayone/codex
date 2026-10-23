@@ -52,6 +52,16 @@ import { CacheType, type VersionedCache } from '@codex/cache';
 const PUBLIC_CONTENT_CACHE_TTL = 7200;
 
 /**
+ * The shape of a cached item. Bump it whenever listPublic's projection NARROWS
+ * (a column or relation dropped, a field stripped). The data-slot key encodes
+ * the query, not the payload, so without a bump every slot written by the old
+ * code stays a valid hit after deploy and keeps serving what was removed, for
+ * up to the TTL. v2 (Codex-osuqt): no creator email, and no body on a
+ * catalogue read. Old slots are never read again and age out.
+ */
+const PUBLIC_CONTENT_SHAPE_VERSION = 'v2';
+
+/**
  * Public content list query shape accepted by the cache wiring.
  * Kept narrow so callers can pass the worker's validated input directly.
  *
@@ -85,7 +95,7 @@ export function buildPublicContentCacheType(
     'sort' | 'limit' | 'page' | 'contentType' | 'slug' | 'category' | 'featured'
   >
 ): string {
-  const base = `content:public:${query.sort ?? 'newest'}:${query.limit ?? 20}:${query.page ?? 1}:${query.contentType ?? 'all'}`;
+  const base = `content:public:${PUBLIC_CONTENT_SHAPE_VERSION}:${query.sort ?? 'newest'}:${query.limit ?? 20}:${query.page ?? 1}:${query.contentType ?? 'all'}`;
   let type = base;
   // Category (topic slug) and featured are LIVE filter dimensions that select a
   // strict subset of the catalogue. Each distinct value MUST occupy its own

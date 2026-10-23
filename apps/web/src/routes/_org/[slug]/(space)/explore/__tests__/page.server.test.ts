@@ -172,7 +172,7 @@ describe('explore +page.server.ts — cache wiring', () => {
       // Shared version key — one per org — is what `publish` bumps.
       expect(idArg).toBe(CacheType.COLLECTION_ORG_CONTENT(ORG_ID));
       // Per-combo type carries sort + contentType + category + page.
-      expect(typeArg).toMatch(/^content:auth:popular:/);
+      expect(typeArg).toMatch(/^content:auth:v2:popular:/);
     });
 
     it('includes sort + contentType + category + page in the cache type', async () => {
@@ -186,7 +186,7 @@ describe('explore +page.server.ts — cache wiring', () => {
       );
 
       const [, typeArg] = cacheGetMock.mock.calls[0];
-      expect(typeArg).toBe('content:auth:top-selling:video:ritual:3');
+      expect(typeArg).toBe('content:auth:v2:top-selling:video:ritual:3');
     });
 
     it('varies the cache type by category so two filter combos cannot collide', async () => {
@@ -207,8 +207,8 @@ describe('explore +page.server.ts — cache wiring', () => {
 
       const [, firstType] = cacheGetMock.mock.calls[0];
       const [, secondType] = cacheGetMock.mock.calls[1];
-      expect(firstType).toBe('content:auth:popular:all:ritual:1');
-      expect(secondType).toBe('content:auth:popular:all:breath:1');
+      expect(firstType).toBe('content:auth:v2:popular:all:ritual:1');
+      expect(secondType).toBe('content:auth:v2:popular:all:breath:1');
     });
 
     it('forwards category to the browse endpoint (it is part of contentQuerySchema)', async () => {

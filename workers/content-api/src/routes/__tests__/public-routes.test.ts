@@ -226,6 +226,18 @@ describe('GET /api/content/public?creatorId — a creator without an org (Codex-
     );
   });
 
+  // The case the rule exists for: with an org named, the read would take the KV
+  // branch, and the slot key carries no creator, so a creator-filtered read
+  // would be served the whole org's list. The creatorId-only case above
+  // skips KV for want of an orgId whatever the rule says.
+  it('is not KV-cached with an org named too', async () => {
+    const query = `/api/content/public?orgId=${ORG_ID}&creatorId=${CREATOR_ID}`;
+    await dispatch(query);
+    await dispatch(query);
+
+    expect(contentSpies.listPublic).toHaveBeenCalledTimes(2);
+  });
+
   it('refuses a creatorId that is not a user id', async () => {
     const res = await dispatch('/api/content/public?creatorId=x%3Afeat%3Atrue');
 

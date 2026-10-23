@@ -11,7 +11,8 @@ import { error } from '@sveltejs/kit';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { withoutRawBody } from '$lib/server/content-detail';
-import { logCreatorContentFailure } from '../content-failure';
+import { logReadFailure } from '$lib/server/read-failure';
+import { creatorHandle } from '../creator-handle';
 import type { PageServerLoad } from './$types';
 
 const CONTENT_LIMIT = 12;
@@ -23,13 +24,13 @@ export const load: PageServerLoad = async ({
   cookies,
   setHeaders,
 }) => {
-  // Strip leading @ from username (URL convention: /@alex-creator)
-  const username = params.username.replace(/^@/, '');
+  // The handle without its leading @ (URL convention: /@alex-creator).
+  const username = creatorHandle(params.username);
   const api = createServerApi(platform, cookies);
 
   // Parse URL search params for filtering and pagination. Bounded to what the
   // public list accepts (page 1-1000, search trimmed to 255), so a hand-edited
-  // URL never reaches content-api as a 400: logCreatorContentFailure logs a
+  // URL never reaches content-api as a 400: logReadFailure logs a
   // 4xx at error level as OUR contract bug, and a visitor must not be able to
   // raise that alarm with a URL.
   const search = (url.searchParams.get('search') ?? '').trim().slice(0, 255);
@@ -100,15 +101,11 @@ export const load: PageServerLoad = async ({
 
     const contentResult = await api.content.getPublicContent(contentParams);
     // Cards draw metadata only; no body reaches this page's HTML.
-    contentItems = (contentResult?.items ?? []).map(withoutRawBody);
-    totalPages = contentResult?.pagination?.totalPages ?? 1;
-    total = contentResult?.pagination?.total ?? 0;
+    contentItems = contentResult.items.map(withoutRawBody);
+    totalPages = contentResult.pagination.totalPages;
+    total = contentResult.pagination.total;
   } catch (err) {
-    logCreatorContentFailure(
-      'Creator catalogue content not loaded',
-      creatorId,
-      err
-    );
+    logReadFailure('Creator catalogue content not loaded', { creatorId }, err);
     contentError = true;
   }
 
