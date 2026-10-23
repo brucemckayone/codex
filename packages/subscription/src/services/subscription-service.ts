@@ -1344,6 +1344,17 @@ export class SubscriptionService extends BaseService {
         });
         if (replay) return { subscription: replay, justInserted: false };
 
+        // The membership comes FIRST, before any row that names the user
+        // takes a KEY SHARE on it through its foreign key: the lock order
+        // every path keeps (packages/organization/CLAUDE.md, Lock order). An
+        // account deletion locks the user's memberships, then the user row;
+        // a webhook holding that KEY SHARE while waiting on the membership
+        // deadlocked with it (Codex-kk9nv.20). A duplicate or an ended
+        // subscription grants nothing, so it writes no membership.
+        if (!liveId && !ended) {
+          await this.upsertSubscriberMembership(tx, orgId, userId);
+        }
+
         const [row] = await tx
           .insert(subscriptions)
           .values({
@@ -1392,37 +1403,6 @@ export class SubscriptionService extends BaseService {
           .values({ organizationId: orgId, userId })
           .onConflictDoNothing();
 
-        // BUG-016: Upsert membership with role=subscriber (backward compat).
-        // Preserve the team roles (owner/admin/creator/member) on conflict —
-        // but only on a row that is ACTIVE. An invited `member` who
-        // subscribes stays a member, so the subscription ending (which
-        // deactivates `subscriber` rows only) never drops them from the team
-        // (Codex-2hxff.15, owner decision 2026-10-22). A removed member's
-        // inactive row re-enters as a subscriber: re-activating a removed
-        // owner would break uq_org_memberships_one_active_owner (aborting
-        // this insert after the customer has paid) or, in an org with no
-        // active owner, hand them ownership and its money (Codex-2hxff.2).
-        // Both column refs read the EXISTING row; SET expressions never see
-        // each other.
-        await tx
-          .insert(organizationMemberships)
-          .values({
-            organizationId: orgId,
-            userId,
-            role: 'subscriber',
-            status: 'active',
-          })
-          .onConflictDoUpdate({
-            target: [
-              organizationMemberships.organizationId,
-              organizationMemberships.userId,
-            ],
-            set: {
-              status: 'active',
-              role: sql`CASE WHEN ${organizationMemberships.status} = 'active' AND ${organizationMemberships.role} IN ('owner', 'admin', 'creator', 'member') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
-              updatedAt: new Date(),
-            },
-          });
         return { subscription: row, justInserted: true };
       });
     } catch (error) {
@@ -1534,6 +1514,44 @@ export class SubscriptionService extends BaseService {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`subscription:${userId}:${orgId}`}))`
     );
+  }
+
+  /**
+   * The subscriber's membership: role `subscriber`, unless an ACTIVE row
+   * already holds a team role (owner/admin/creator/member), which is kept
+   * (BUG-016). An invited `member` who subscribes stays a member, so the
+   * subscription ending (which deactivates `subscriber` rows only) never
+   * drops them from the team (Codex-2hxff.15, owner decision 2026-10-22). A
+   * removed member's inactive row re-enters as a subscriber: re-activating a
+   * removed owner would break uq_org_memberships_one_active_owner (aborting
+   * this insert after the customer has paid) or, in an org with no active
+   * owner, hand them ownership and its money (Codex-2hxff.2). Both column
+   * refs read the EXISTING row; SET expressions never see each other.
+   */
+  private async upsertSubscriberMembership(
+    tx: Tx,
+    orgId: string,
+    userId: string
+  ): Promise<void> {
+    await tx
+      .insert(organizationMemberships)
+      .values({
+        organizationId: orgId,
+        userId,
+        role: 'subscriber',
+        status: 'active',
+      })
+      .onConflictDoUpdate({
+        target: [
+          organizationMemberships.organizationId,
+          organizationMemberships.userId,
+        ],
+        set: {
+          status: 'active',
+          role: sql`CASE WHEN ${organizationMemberships.status} = 'active' AND ${organizationMemberships.role} IN ('owner', 'admin', 'creator', 'member') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
+          updatedAt: new Date(),
+        },
+      });
   }
 
   /**

@@ -63,9 +63,8 @@ the gate fails closed: no logo can be set at all.
   The reason is that `createOwnershipOffer` holds the recipient's membership while it inserts its new offer, and `proposeAgreement` holds it while it inserts a proposal. Something committed while the membership change waited is withdrawn too. Locking rather than updating the offer early also keeps that insert from waiting on the unique index.
 - **Several rows of one table in id order** (`.orderBy(table.id)` before `.for('update')`). Two paths that lock some of the same rows through different indexes would otherwise take them in different orders.
 - **Guard the write, not only the read.** An UPDATE that waited on a row re-checks only its own WHERE. So a write that must never touch the owner carries the owner condition itself (`notTheActiveOwner`). A missing row means the member was made owner meanwhile, by an accept or a support reassign.
-- **Known exceptions:**
-  - the subscription webhook, which inserts before it upserts the membership (Codex-kk9nv.20);
-  - a fresh write after a wait can lock a row that the transaction it waited on has just committed, while an accept of that new row holds it. That window is milliseconds, and Postgres resolves it with a 40P01.
+- **Known exception:** a fresh write after a wait can lock a row that the transaction it waited on has just committed, while an accept of that new row holds it. That window is milliseconds, and Postgres resolves it with a 40P01.
+- **The subscription webhook keeps the order too** (Codex-kk9nv.20): `ensureSubscriptionDataPresent` upserts the membership before inserting the subscription and follower rows that name the user, so it waits on a deletion's membership lock without holding a KEY SHARE on the user. `subscription-drift.integration.test.ts` pins it with this file's harness.
 
 ### Ownership (Codex-2hxff.2)
 
