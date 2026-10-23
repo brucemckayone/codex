@@ -147,7 +147,10 @@ export function createCheckoutCompletedEvent(
         customer: `cus_test_${timestamp}`,
         customer_email: `test-${timestamp}@example.com`,
         amount_total: params.amountCents, // Already in cents
-        currency: 'usd',
+        // Every Checkout Session the platform creates is GBP, and checkout
+        // now passes the session's currency to completePurchase, which
+        // refuses any other (Codex-2hxff.23 PAY-25).
+        currency: 'gbp',
         metadata: {
           customerId: params.customerId,
           contentId: params.contentId,

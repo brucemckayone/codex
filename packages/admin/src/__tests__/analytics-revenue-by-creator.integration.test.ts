@@ -21,6 +21,7 @@
 
 import { PURCHASE_STATUS } from '@codex/constants';
 import {
+  agreementProposals,
   content as contentTable,
   creatorOrganizationAgreements,
   mediaItems,
@@ -42,7 +43,8 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AdminAnalyticsService } from '../services/analytics-service';
 
 describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
@@ -140,6 +142,35 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     return sub.id;
   }
 
+  /**
+   * An accepted proposal carrying `shareBps`, for an agreement to point at:
+   * the split is read from it, not from the legacy column (Codex-2hxff.19
+   * AGR-08).
+   */
+  async function acceptedProposal(
+    orgId: string,
+    creatorId: string,
+    shareBps: number
+  ): Promise<string> {
+    const proposal = takeFirst(
+      await db
+        .insert(agreementProposals)
+        .values({
+          organizationId: orgId,
+          creatorId,
+          revenueType: 'subscription',
+          roundNumber: 1,
+          proposedByUserId: creatorId,
+          proposedByRole: 'owner',
+          proposedCreatorSharePercent: shareBps,
+          proposedEffectiveFrom: new Date(),
+          status: 'accepted',
+        })
+        .returning()
+    );
+    return proposal.id;
+  }
+
   it('returns empty for an org with no active agreements', async () => {
     const { orgId } = await seedScenario(0);
 
@@ -153,17 +184,20 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     const { orgId, creators, contentByCreator } = await seedScenario(2);
     const [creatorA, creatorB] = creators as [string, string];
 
-    // 75/25 split (bps).
+    // 75/25 split (bps), from the accepted proposals. The legacy column is
+    // deliberately wrong: the split must not read it (AGR-08).
     await db.insert(creatorOrganizationAgreements).values([
       {
         creatorId: creatorA,
         organizationId: orgId,
-        organizationFeePercentage: 7500,
+        organizationFeePercentage: 1234,
+        currentProposalId: await acceptedProposal(orgId, creatorA, 7500),
       },
       {
         creatorId: creatorB,
         organizationId: orgId,
-        organizationFeePercentage: 2500,
+        organizationFeePercentage: 4321,
+        currentProposalId: await acceptedProposal(orgId, creatorB, 2500),
       },
     ]);
 
@@ -220,6 +254,47 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     expect(second.creatorId).toBe(creatorB);
     expect(second.totalRevenueCents).toBe(600);
     expect(second.splitPercent).toBe(25);
+  });
+
+  it('an agreement with no proposal shows 0% and is logged with an errorId', async () => {
+    const { orgId, creators } = await seedScenario(1);
+    const [creatorId] = creators as [string];
+    const orphan = takeFirst(
+      await db
+        .insert(creatorOrganizationAgreements)
+        .values({
+          creatorId,
+          organizationId: orgId,
+          organizationFeePercentage: 3000,
+          currentProposalId: null,
+        })
+        .returning()
+    );
+    const obs = (
+      service as unknown as {
+        obs: { error: (message: string, meta?: unknown) => void };
+      }
+    ).obs;
+    const logged = vi.spyOn(obs, 'error');
+
+    try {
+      const result = await service.getRevenueByCreator(orgId);
+
+      expect(result.items[0]?.splitPercent).toBe(0);
+      expect(logged).toHaveBeenCalledWith(
+        'agreement has no current proposal; it pays nothing',
+        expect.objectContaining({
+          errorId: expect.any(String),
+          agreementId: orphan.id,
+        })
+      );
+    } finally {
+      logged.mockRestore();
+      // Left behind, it would be met by every later scan of the pool.
+      await db
+        .delete(creatorOrganizationAgreements)
+        .where(eq(creatorOrganizationAgreements.id, orphan.id));
+    }
   });
 
   it('keeps an agreement past its review date and drops a terminated one', async () => {

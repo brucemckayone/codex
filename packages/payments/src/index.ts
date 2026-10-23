@@ -25,6 +25,9 @@ export {
   reverseEarlierRefunds,
   reverseEarlierRefundsAfterCommit,
 } from './clawback';
+// GBP in, GBP out: the guard every path runs before it records a split
+// (Codex-2hxff.23 PAY-25)
+export { assertGbpOnly, isGbpOrUnset } from './currency';
 // The charge an invoice payment settled on: the key every invoice payout
 // uses (Codex-2hxff.50)
 export { resolveInvoiceCharge } from './invoice-charge';
@@ -34,18 +37,24 @@ export {
   cancelUnpaidPayout,
   claimPayoutAttempt,
   claimPayoutAttempts,
+  classifyTransferFailure,
   findTransfersForPayouts,
   isDrainablePayout,
   type LedgerDeps,
+  MAX_PAYOUT_FAILURES,
   markPayoutFailed,
+  type PayoutFailureRecord,
   type RecordSliceInput,
   type RecordSliceOutcome,
   recordPlatformFee,
   recordSlice,
   recordSplitOnce,
+  recordTransferFailure,
   renewPayoutAttempt,
   settlePayoutPaid,
   settleTransfer,
+  type TransferFailure,
+  type TransferFailureKind,
   type UnpaidCancelOutcome,
 } from './payout-ledger';
 // Refund a payment the platform decides to give back; the charge.refunded

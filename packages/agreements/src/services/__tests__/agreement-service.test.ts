@@ -116,6 +116,50 @@ async function seedOrgFixture(
   };
 }
 
+/**
+ * Seed an active subscription agreement as acceptance leaves one: an accepted
+ * proposal carrying the share, linked through `current_proposal_id`, with the
+ * legacy column dual-written. The service reads the share from the proposal
+ * (Codex-2hxff.19 AGR-08), so an agreement seeded without one shares nothing.
+ */
+async function seedActiveAgreement(
+  db: Database,
+  fx: OrgFixture,
+  params: {
+    creatorId: string;
+    share: number;
+    effectiveFrom?: Date;
+    effectiveUntil?: Date;
+  }
+): Promise<void> {
+  const effectiveFrom = params.effectiveFrom ?? new Date(Date.now() - 60_000);
+  const [proposal] = await db
+    .insert(schema.agreementProposals)
+    .values({
+      organizationId: fx.orgId,
+      creatorId: params.creatorId,
+      revenueType: 'subscription',
+      roundNumber: 1,
+      proposedByUserId: fx.ownerId,
+      proposedByRole: 'owner',
+      proposedCreatorSharePercent: params.share,
+      proposedEffectiveFrom: effectiveFrom,
+      status: 'accepted',
+    })
+    .returning();
+  if (!proposal) throw new Error('Failed to seed accepted proposal');
+  await db.insert(schema.creatorOrganizationAgreements).values({
+    organizationId: fx.orgId,
+    creatorId: params.creatorId,
+    organizationFeePercentage: 10_000 - params.share,
+    revenueType: 'subscription',
+    status: 'active',
+    currentProposalId: proposal.id,
+    effectiveFrom,
+    effectiveUntil: params.effectiveUntil ?? null,
+  });
+}
+
 // ─── Suite ────────────────────────────────────────────────────────────────
 
 describe('AgreementService', () => {
@@ -277,13 +321,10 @@ describe('AgreementService', () => {
 
     it('throws ShareExceedsAvailableError when proposal + active > 100% of post-platform pool', async () => {
       const fx = await seedOrgFixture(db);
-      // Active 70% subscription agreement to creator B (orgFee=3000).
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
+      // Active 70% subscription agreement to creator B.
+      await seedActiveAgreement(db, fx, {
         creatorId: fx.creatorBId,
-        organizationFeePercentage: 3000, // creator B has 70% share
-        revenueType: 'subscription',
-        status: 'active',
+        share: 7000,
       });
       // 70% existing + 31% proposed = 101% of post-platform pool → fail.
       try {
@@ -588,13 +629,10 @@ describe('AgreementService', () => {
 
     it('rejects when share exceeds available pool', async () => {
       const fx = await seedOrgFixture(db);
-      // Active 80% subscription agreement to creator B (orgFee=2000).
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
+      // Active 80% subscription agreement to creator B.
+      await seedActiveAgreement(db, fx, {
         creatorId: fx.creatorBId,
-        organizationFeePercentage: 2000,
-        revenueType: 'subscription',
-        status: 'active',
+        share: 8000,
       });
       const r1 = await service.proposeAgreement({
         organizationId: fx.orgId,
@@ -825,15 +863,12 @@ describe('AgreementService', () => {
         termMonths: 6,
         proposedByUserId: fx.ownerId,
       });
-      // Between propose and accept, a 50% agreement lands for creator B
-      // (orgFee=5000 → share=5000). Now 50% B + 60% A = 110% of the
-      // post-platform pool — accept-time re-validation must reject.
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
+      // Between propose and accept, a 50% agreement lands for creator B.
+      // Now 50% B + 60% A = 110% of the post-platform pool — accept-time
+      // re-validation must reject.
+      await seedActiveAgreement(db, fx, {
         creatorId: fx.creatorBId,
-        organizationFeePercentage: 5000,
-        revenueType: 'subscription',
-        status: 'active',
+        share: 5000,
       });
       try {
         await service.acceptProposal({
@@ -2424,12 +2459,9 @@ describe('AgreementService', () => {
 
     it('an agreement past its review date still counts against the 100% limit', async () => {
       const fx = await seedOrgFixture(db);
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
+      await seedActiveAgreement(db, fx, {
         creatorId: fx.creatorBId,
-        organizationFeePercentage: 3000, // creator B has 70%
-        revenueType: 'subscription',
-        status: 'active',
+        share: 7000, // creator B has 70%
         effectiveFrom: settledEffectiveFrom(),
         effectiveUntil: yesterday(),
       });

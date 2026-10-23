@@ -7,10 +7,12 @@
  * Key test scenarios (Codex-qigid — re-check from data.object):
  * - Active transition is detected from data.object regardless of
  *   `previous_attributes` content (empty diff, partial diff, ricochet).
- * - Idempotency: resolvePendingPayouts fires ONLY on the persisted
+ * - Idempotency: the payee-wide drain fires ONLY on the persisted
  *   transition (DB row chargesEnabled/payoutsEnabled flip false → true).
- * - Ricochet (active → restricted → active) fires resolvePendingPayouts
- *   on each first-transition-to-active hop.
+ * - Ricochet (active → restricted → active) drains on each
+ *   first-transition-to-active hop.
+ * - The drain is keyed by the account alone: a per-user account carries only
+ *   `codex_user_id` metadata, and that is enough (Codex-2hxff.13).
  * - The payout drain runs through the composition root's `background`, on
  *   the shared pool — no second DB client (Codex-2hxff.54).
  * - account.application.deauthorized still routes correctly.
@@ -64,28 +66,19 @@ function createContext(): {
   };
 }
 
-// Default org UUID for fixtures (Codex-ohjvn: connect-webhook now
-// validates metadata.codex_organization_id as a real UUID).
-const DEFAULT_TEST_ORG_UUID = '00000000-0000-4000-8000-000000000001';
-
 function createAccountUpdatedEvent(opts: {
   accountId?: string;
-  orgId?: string | null;
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
   previousAttributes?: Partial<Stripe.Account>;
 }): Stripe.Event {
+  // What accounts.create sets on a per-user account: no organisation.
   const account: Partial<Stripe.Account> = {
     id: opts.accountId ?? 'acct_test_123',
     object: 'account',
     charges_enabled: opts.chargesEnabled,
     payouts_enabled: opts.payoutsEnabled,
-    metadata:
-      opts.orgId === null
-        ? {}
-        : {
-            codex_organization_id: opts.orgId ?? DEFAULT_TEST_ORG_UUID,
-          },
+    metadata: { codex_user_id: 'user_test_123', codex_env: 'test' },
   };
   return {
     id: `evt_${Date.now()}_${Math.random()}`,
@@ -102,7 +95,7 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
   let mockHandleAccountUpdated: ReturnType<typeof vi.fn>;
   let mockHandleAccountDeauthorized: ReturnType<typeof vi.fn>;
   let mockGetAccountByStripeId: ReturnType<typeof vi.fn>;
-  let mockResolvePendingPayouts: ReturnType<typeof vi.fn>;
+  let mockDrainPayee: ReturnType<typeof vi.fn>;
   let mockBackground: ReturnType<typeof vi.fn>;
   let mockRelease: ReturnType<typeof vi.fn>;
   let dbState: StripeConnectRow | null;
@@ -123,9 +116,7 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     mockGetAccountByStripeId = vi.fn(async () =>
       dbState ? { ...dbState } : null
     );
-    mockResolvePendingPayouts = vi
-      .fn()
-      .mockResolvedValue({ resolved: 0, totalCents: 0 });
+    mockDrainPayee = vi.fn().mockResolvedValue({ resolved: 0, failed: 0 });
     // Pass-through, like the real tracker: returns the task it registers.
     mockBackground = vi.fn((promise: Promise<unknown>) => promise);
     mockRelease = vi.fn();
@@ -141,7 +132,7 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
           getAccountByStripeId: mockGetAccountByStripeId,
         },
         subscription: {
-          resolvePendingPayouts: mockResolvePendingPayouts,
+          resolvePendingPayoutsForAccount: mockDrainPayee,
         },
       } as unknown as WebhookServices['services'],
       background: mockBackground as unknown as WebhookServices['background'],
@@ -171,11 +162,8 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     await handleConnectWebhook(event, mockStripe, context);
 
     expect(mockHandleAccountUpdated).toHaveBeenCalledOnce();
-    expect(mockResolvePendingPayouts).toHaveBeenCalledOnce();
-    expect(mockResolvePendingPayouts).toHaveBeenCalledWith(
-      DEFAULT_TEST_ORG_UUID,
-      'acct_test_123'
-    );
+    expect(mockDrainPayee).toHaveBeenCalledOnce();
+    expect(mockDrainPayee).toHaveBeenCalledWith('acct_test_123');
   });
 
   it('detects activation with PARTIAL previous_attributes (only one field in diff)', async () => {
@@ -195,12 +183,12 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
 
     await handleConnectWebhook(event, mockStripe, context);
 
-    expect(mockResolvePendingPayouts).toHaveBeenCalledOnce();
+    expect(mockDrainPayee).toHaveBeenCalledOnce();
   });
 
   // ─── idempotency: DB-backed debounce ────────────────────────────────────
 
-  it('does NOT call resolvePendingPayouts when DB row is already active', async () => {
+  it('does NOT drain when the DB row is already active (a duplicate event)', async () => {
     // Duplicate active-state event after the account is already active.
     dbState = { chargesEnabled: true, payoutsEnabled: true };
     const event = createAccountUpdatedEvent({
@@ -213,10 +201,10 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     await handleConnectWebhook(event, mockStripe, context);
 
     expect(mockHandleAccountUpdated).toHaveBeenCalledOnce();
-    expect(mockResolvePendingPayouts).not.toHaveBeenCalled();
+    expect(mockDrainPayee).not.toHaveBeenCalled();
   });
 
-  it('fires resolvePendingPayouts only on FIRST transition across two consecutive active events', async () => {
+  it('drains only on the FIRST transition across two consecutive active events', async () => {
     dbState = { chargesEnabled: false, payoutsEnabled: false };
     const event1 = createAccountUpdatedEvent({
       chargesEnabled: true,
@@ -232,12 +220,12 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     await handleConnectWebhook(event2, mockStripe, context);
 
     expect(mockHandleAccountUpdated).toHaveBeenCalledTimes(2);
-    expect(mockResolvePendingPayouts).toHaveBeenCalledOnce();
+    expect(mockDrainPayee).toHaveBeenCalledOnce();
   });
 
   // ─── ricochet: restricted → active → restricted → active ────────────────
 
-  it('fires resolvePendingPayouts on EACH re-activation in a ricochet sequence', async () => {
+  it('drains again on EACH re-activation in a ricochet sequence (restricted → active)', async () => {
     // 1) restricted (initial DB state)
     dbState = { chargesEnabled: false, payoutsEnabled: false };
     const { context } = createContext();
@@ -251,7 +239,7 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
       mockStripe,
       context
     );
-    expect(mockResolvePendingPayouts).toHaveBeenCalledTimes(1);
+    expect(mockDrainPayee).toHaveBeenCalledTimes(1);
 
     // 3) active → restricted (charges flipped off — payouts already off in
     //    Stripe's view of "restricted"; either field flipping clears active)
@@ -263,7 +251,7 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
       mockStripe,
       context
     );
-    expect(mockResolvePendingPayouts).toHaveBeenCalledTimes(1);
+    expect(mockDrainPayee).toHaveBeenCalledTimes(1);
 
     // 4) restricted → active (second activation)
     await handleConnectWebhook(
@@ -274,60 +262,28 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
       mockStripe,
       context
     );
-    expect(mockResolvePendingPayouts).toHaveBeenCalledTimes(2);
+    expect(mockDrainPayee).toHaveBeenCalledTimes(2);
   });
 
   // ─── guard rails ────────────────────────────────────────────────────────
 
-  it('skips resolvePendingPayouts when metadata.codex_organization_id is missing', async () => {
+  // Codex-2hxff.13 (SUB-05): accounts are per user and carry only
+  // `codex_user_id`. The handler used to require `codex_organization_id`, so
+  // every real account warned and skipped the drain.
+  it('drains a per-user account that carries only codex_user_id metadata', async () => {
     dbState = { chargesEnabled: false, payoutsEnabled: false };
     const event = createAccountUpdatedEvent({
+      accountId: 'acct_per_user_1',
       chargesEnabled: true,
       payoutsEnabled: true,
-      orgId: null,
-    });
-    const { context } = createContext();
-
-    await handleConnectWebhook(event, mockStripe, context);
-
-    expect(mockHandleAccountUpdated).toHaveBeenCalledOnce();
-    expect(mockResolvePendingPayouts).not.toHaveBeenCalled();
-  });
-
-  // Codex-ohjvn (F-57 + F-63): on an active transition with missing or
-  // malformed org metadata, the handler WARNs (rather than silently
-  // skipping) so operators see the drift.
-  it('F-57: WARNS (not just skips) when active transition has missing org metadata', async () => {
-    dbState = { chargesEnabled: false, payoutsEnabled: false };
-    const event = createAccountUpdatedEvent({
-      chargesEnabled: true,
-      payoutsEnabled: true,
-      orgId: null,
     });
     const { context, mock } = createContext();
 
     await handleConnectWebhook(event, mockStripe, context);
 
-    expect(mock._obs.warn).toHaveBeenCalledWith(
-      expect.stringMatching(/missing|invalid/i),
-      expect.objectContaining({ accountId: 'acct_test_123' })
-    );
-    expect(mockResolvePendingPayouts).not.toHaveBeenCalled();
-  });
-
-  it('F-63: rejects non-UUID metadata.codex_organization_id without querying', async () => {
-    dbState = { chargesEnabled: false, payoutsEnabled: false };
-    const event = createAccountUpdatedEvent({
-      chargesEnabled: true,
-      payoutsEnabled: true,
-      orgId: 'not-a-valid-uuid',
-    });
-    const { context, mock } = createContext();
-
-    await handleConnectWebhook(event, mockStripe, context);
-
-    expect(mock._obs.warn).toHaveBeenCalled();
-    expect(mockResolvePendingPayouts).not.toHaveBeenCalled();
+    expect(mockDrainPayee).toHaveBeenCalledOnce();
+    expect(mockDrainPayee).toHaveBeenCalledWith('acct_per_user_1');
+    expect(mock._obs.warn).not.toHaveBeenCalled();
   });
 
   it('does NOT fire payouts on inactive update (charges on, payouts off)', async () => {
@@ -340,7 +296,7 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
 
     await handleConnectWebhook(event, mockStripe, context);
 
-    expect(mockResolvePendingPayouts).not.toHaveBeenCalled();
+    expect(mockDrainPayee).not.toHaveBeenCalled();
   });
 
   // ─── deauthorize path ───────────────────────────────────────────────────
@@ -385,10 +341,7 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
 
   it('drains pending payouts through background on the shared pool, logging the result', async () => {
     dbState = { chargesEnabled: false, payoutsEnabled: false };
-    mockResolvePendingPayouts.mockResolvedValueOnce({
-      resolved: 2,
-      totalCents: 1500,
-    });
+    mockDrainPayee.mockResolvedValueOnce({ resolved: 2, failed: 1 });
     const event = createAccountUpdatedEvent({
       chargesEnabled: true,
       payoutsEnabled: true,
@@ -398,10 +351,7 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     await handleConnectWebhook(event, mockStripe, context);
 
     expect(mockBackground).toHaveBeenCalledOnce();
-    expect(mockResolvePendingPayouts).toHaveBeenCalledWith(
-      DEFAULT_TEST_ORG_UUID,
-      'acct_test_123'
-    );
+    expect(mockDrainPayee).toHaveBeenCalledWith('acct_test_123');
     // Registered BEFORE release, so release waits for it.
     const registeredAt = mockBackground.mock.invocationCallOrder[0] ?? 0;
     const releasedAt = mockRelease.mock.invocationCallOrder[0] ?? 0;
@@ -417,18 +367,15 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
       'Pending payouts resolved on account activation',
       expect.objectContaining({
         accountId: 'acct_test_123',
-        organizationId: DEFAULT_TEST_ORG_UUID,
         resolved: 2,
-        totalCents: 1500,
+        failed: 1,
       })
     );
   });
 
   it('logs a failed drain at error level without failing the webhook', async () => {
     dbState = { chargesEnabled: false, payoutsEnabled: false };
-    mockResolvePendingPayouts.mockRejectedValueOnce(
-      new Error('Transfer create failed')
-    );
+    mockDrainPayee.mockRejectedValueOnce(new Error('Transfer create failed'));
     const event = createAccountUpdatedEvent({
       chargesEnabled: true,
       payoutsEnabled: true,
@@ -444,8 +391,8 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     expect(mock._obs.error).toHaveBeenCalledWith(
       'Failed to resolve pending payouts',
       expect.objectContaining({
+        errorId: expect.any(String),
         accountId: 'acct_test_123',
-        organizationId: DEFAULT_TEST_ORG_UUID,
         error: 'Transfer create failed',
       })
     );

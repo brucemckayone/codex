@@ -201,6 +201,24 @@ For each row, look in Stripe for a transfer to the payee's account around
 
 ---
 
+## After the deploy: payouts waiting for support (migration `0111`)
+
+`0111` makes a payout Stripe keeps refusing stop retrying and wait for support
+(`Codex-2hxff.48`). A permanent refusal flags the row at once; any other
+refusal flags it on the fifth. Rows that failed before this release start
+with `failure_count = 0`, so they can take up to five more refusals to flag.
+
+### R7 — the support queue
+
+A day after the deploy, and then as part of support's routine, run the queue
+query in [When Stripe keeps refusing a payout](connect-and-payouts.md#when-stripe-keeps-refusing-a-payout).
+Each row is money still owed. Fix the cause with the payee (most often their
+Connect account), then release the row with that section's `UPDATE`. Nothing
+here needs doing before the deploy: `0111` only adds columns and changes
+`ON DELETE` rules, and every existing row already satisfies them.
+
+---
+
 ## After the deploy: the price-change email (migration `0098`, PR #590)
 
 `0098` replaces "your subscription will renew at the new price on the next

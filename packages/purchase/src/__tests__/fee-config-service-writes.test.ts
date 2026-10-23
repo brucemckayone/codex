@@ -415,7 +415,7 @@ describe('FeeConfigService — deleteOrgFees', () => {
     expect(cache.invalidateMock).not.toHaveBeenCalled();
   });
 
-  it('deletes the row and writes audit rows with newValue="null" for each non-null column', async () => {
+  it('deletes the row and writes audit rows with newValue NULL for each non-null column', async () => {
     const { db, recorder } = buildMockDb({
       fixtures: {
         org: {
@@ -440,7 +440,8 @@ describe('FeeConfigService — deleteOrgFees', () => {
     expect(rows.length).toBe(3); // skips the null minPlatformFeeCents
     for (const row of rows) {
       expect(row.scope).toBe('org');
-      expect(row.newValue).toBe('null');
+      // A real NULL, not the string 'null' (Codex-2hxff.23 PAY-16).
+      expect(row.newValue).toBeNull();
     }
   });
 });
@@ -535,6 +536,139 @@ describe('FeeConfigService — upsertCreatorOverride', () => {
   });
 });
 
+// ─── null: clear back to inherit (Codex-2hxff.23 PAY-16) ───────────────────
+//
+// The zod schemas accept `null` on an org or override column as "inherit the
+// tier above". The write must store NULL, and the audit log must say so with
+// a real NULL; a clear of an already-cleared column is a no-op.
+
+describe('FeeConfigService — null clears an org column back to inherit', () => {
+  it('stores NULL and writes one audit row old → NULL', async () => {
+    const { db, recorder } = buildMockDb({
+      fixtures: {
+        org: {
+          platformFeePercent: 1100,
+          orgFeePercent: 1800,
+          minPlatformFeeCents: null,
+          minTransferCents: 200,
+        },
+      },
+    });
+    const cache = makeMockCache();
+    const svc = new FeeConfigService({ db, environment: 'test', cache });
+    await svc.updateOrgFees('org-1', { orgFeePercent: null }, 'admin-1');
+
+    const orgInsert = recorder.inserts.find((i) => i.table === feeConfigOrg);
+    expect(orgInsert?.values).toMatchObject({ orgFeePercent: null });
+    expect(orgInsert?.onConflict?.set).toMatchObject({
+      platformFeePercent: 1100,
+      orgFeePercent: null,
+      minPlatformFeeCents: null,
+      minTransferCents: 200,
+    });
+    const auditInsert = recorder.inserts.find(
+      (i) => i.table === feeConfigAuditLog
+    );
+    expect(auditInsert?.values).toEqual([
+      expect.objectContaining({
+        columnName: 'orgFeePercent',
+        oldValue: '1800',
+        newValue: null,
+      }),
+    ]);
+    await Promise.resolve();
+    expect(cache.invalidateMock).toHaveBeenCalledWith('org:org-1');
+  });
+
+  it('null on an already-NULL column writes nothing and invalidates nothing', async () => {
+    const { db, recorder } = buildMockDb({
+      fixtures: {
+        org: {
+          platformFeePercent: 1100,
+          orgFeePercent: null,
+          minPlatformFeeCents: null,
+          minTransferCents: 200,
+        },
+      },
+    });
+    const cache = makeMockCache();
+    const svc = new FeeConfigService({ db, environment: 'test', cache });
+    await svc.updateOrgFees('org-1', { orgFeePercent: null }, 'admin-1');
+
+    expect(recorder.inserts).toHaveLength(0);
+    expect(cache.invalidateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('FeeConfigService — null clears an override column back to inherit', () => {
+  it('stores NULL and writes one audit row old → NULL', async () => {
+    const { db, recorder } = buildMockDb({
+      fixtures: {
+        override: {
+          platformFeePercent: 800,
+          orgFeePercent: 0,
+          minPlatformFeeCents: null,
+          minTransferCents: null,
+          notes: 'preferred',
+        },
+      },
+    });
+    const cache = makeMockCache();
+    const svc = new FeeConfigService({ db, environment: 'test', cache });
+    await svc.upsertCreatorOverride(
+      'org-1',
+      'user-9',
+      { platformFeePercent: null },
+      'admin-1'
+    );
+
+    const overrideInsert = recorder.inserts.find(
+      (i) => i.table === feeConfigOrgCreator
+    );
+    expect(overrideInsert?.onConflict?.set).toMatchObject({
+      platformFeePercent: null,
+      orgFeePercent: 0,
+      notes: 'preferred',
+    });
+    const auditInsert = recorder.inserts.find(
+      (i) => i.table === feeConfigAuditLog
+    );
+    expect(auditInsert?.values).toEqual([
+      expect.objectContaining({
+        scope: 'override',
+        columnName: 'platformFeePercent',
+        oldValue: '800',
+        newValue: null,
+      }),
+    ]);
+    await Promise.resolve();
+    expect(cache.invalidateMock).toHaveBeenCalledWith('override:org-1:user-9');
+  });
+
+  it('null on an already-NULL column writes nothing', async () => {
+    const { db, recorder } = buildMockDb({
+      fixtures: {
+        override: {
+          platformFeePercent: null,
+          orgFeePercent: 0,
+          minPlatformFeeCents: null,
+          minTransferCents: null,
+          notes: null,
+        },
+      },
+    });
+    const svc = new FeeConfigService({ db, environment: 'test' });
+    await svc.upsertCreatorOverride(
+      'org-1',
+      'user-9',
+      { platformFeePercent: null, notes: null },
+      'admin-1'
+    );
+
+    expect(recorder.inserts).toHaveLength(0);
+  });
+});
+
 // ─── deleteCreatorOverride ──────────────────────────────────────────────────
 
 describe('FeeConfigService — deleteCreatorOverride', () => {
@@ -565,7 +699,7 @@ describe('FeeConfigService — deleteCreatorOverride', () => {
       expect(row.scope).toBe('override');
       expect(row.scopeOrgId).toBe('org-1');
       expect(row.scopeCreatorId).toBe('user-9');
-      expect(row.newValue).toBe('null');
+      expect(row.newValue).toBeNull();
     }
   });
 

@@ -19,7 +19,7 @@
  * notification-touching; positive AND negative paths are covered.
  */
 
-import type { CreatorOrganizationAgreement } from '@codex/agreements';
+import type { AgreementWithShare } from '@codex/agreements';
 import { describe, expect, it, vi } from 'vitest';
 import type { RunAgreementExpiringSweepDeps } from '../agreement-expiring-sweep';
 import { runAgreementExpiringSweep } from '../agreement-expiring-sweep';
@@ -32,13 +32,13 @@ type MailerFn = NonNullable<RunAgreementExpiringSweepDeps['mailer']>;
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 /**
- * Build a minimal CreatorOrganizationAgreement row shape adequate for
+ * Build a minimal AgreementWithShare row shape adequate for
  * the sweep's display + arithmetic. We deliberately use a SHAPE-only
  * mock — the sweep does not reach into Drizzle metadata, only fields.
  */
 function mockAgreement(
-  overrides: Partial<CreatorOrganizationAgreement> = {}
-): CreatorOrganizationAgreement {
+  overrides: Partial<AgreementWithShare> = {}
+): AgreementWithShare {
   const now = new Date();
   const effectiveFrom = overrides.effectiveFrom ?? new Date('2026-01-01');
   const effectiveUntil = overrides.effectiveUntil ?? new Date('2026-07-01');
@@ -47,6 +47,7 @@ function mockAgreement(
     creatorId: overrides.creatorId ?? 'creator-user-id',
     organizationId: overrides.organizationId ?? 'org-id',
     organizationFeePercentage: overrides.organizationFeePercentage ?? 7000,
+    creatorSharePercent: overrides.creatorSharePercent ?? 3000,
     revenueType: overrides.revenueType ?? 'subscription',
     status: overrides.status ?? 'active',
     terminatedAt: overrides.terminatedAt ?? null,
@@ -302,7 +303,11 @@ describe('runAgreementExpiringSweep', () => {
     resetState();
     const ag = mockAgreement({
       id: 'agr-1',
-      organizationFeePercentage: 6000, // 40% creator share
+      // The accepted proposal's 40% is what the email quotes. The legacy
+      // column is deliberately wrong (it would say 1%), so reading it fails
+      // this test (Codex-2hxff.19 AGR-08).
+      creatorSharePercent: 4000,
+      organizationFeePercentage: 9900,
       revenueType: 'content_purchase',
       effectiveFrom: new Date('2026-01-01T00:00:00Z'),
       effectiveUntil: new Date('2026-07-01T00:00:00Z'), // ~6 months

@@ -93,27 +93,47 @@ bought the item keeps it after renewing.
 
 ## Streaming revocation
 
-A stream URL is a presigned R2 URL that keeps working until it expires,
-whatever happens to access in the meantime. Two layers close that gap:
+A stream link is an HLS token for the content's playlist proxy. The token is
+checked on every playlist request, but access is not: a link already issued
+keeps playing until its token expires, whatever happens to access in the
+meantime. When access ends:
 
-1. **Short URLs.** Stream URLs last 600 seconds
-   (`DEFAULT_STREAMING_URL_TTL_SECONDS`).
-2. **A block list.** When access ends, a KV key `revoked:user:{userId}:{orgId}`
-   is written with the reason and time, for 1200 seconds — twice the longest
-   URL lifetime. `getStreamingUrl` checks it before issuing a URL. The `revoked:`
-   keyspace is kept apart from `cache:` because it is an authoritative block
-   list, not a cache.
+- **New links are refused at once.** `getStreamingUrl` checks access in the
+  database before it issues a link. That check is the authority.
+- **A link already issued plays to its expiry**: 10 minutes by default
+  (`DEFAULT_STREAMING_URL_TTL_SECONDS`), plus at most a minute for segment
+  links fetched just before it expires. The API accepts up to 2 hours when a
+  caller asks for it (`getStreamingUrlSchema`); the web app never asks. The
+  owner accepted this window (`Codex-2hxff.61`): nothing checks access per
+  playlist or per segment.
+- **A block list.** A KV key `revoked:user:{userId}:{orgId}` is written with
+  the reason and time, for 1200 seconds (`REVOCATION_TTL_SECONDS`).
+  `getStreamingUrl` reads it before the database check and refuses a new link
+  while it is there. It does not stop a link already issued, and it grants
+  nothing: the database check refuses without it, so a missing key, a failed
+  write or an early clear changes nothing. The `revoked:` keyspace is kept
+  apart from `cache:` because it is an authoritative block list, not a cache.
 
 | The block is written when | The block is cleared when |
 |---|---|
-| A subscription ends, is paused, or Stripe gives up retrying | A subscription becomes active again or is resumed |
-| A purchase or a tier subscription's current-period payment is fully refunded — **gap**: `Codex-2hxff.8` (not for one-off purchases today) | A payment succeeds after a failure |
-| A dispute opens | A subscription is reactivated or resumed through our routes |
-| | A dispute is won (a purchase's; a subscription's — **gap**: `Codex-2hxff.9`) |
+| A subscription ends, is paused, or Stripe gives up retrying (it becomes `unpaid` or is cancelled) | A subscription becomes active again, unless its billing is paused (see below), or is resumed |
+| A tier subscription's current-period payment is fully refunded (the subscription is cancelled) | A subscription payment succeeds |
+| A chargeback opens, or a dispute is lost, on a subscription invoice | A subscription is reactivated or resumed through our routes |
+| A chargeback opens, or a dispute is lost, on a purchase, unless the buyer holds the item another way | A dispute is won and the access it paused is restored (a purchase's, or a subscription's with no other chargeback open) |
+
+A chargeback on a subscription invoice also pauses its billing at Stripe
+(`pause_collection`), and Stripe reports that as
+`customer.subscription.updated` with the status still `active`. That event does
+not clear the block: only an `active` subscription with no `pause_collection`
+does. Resuming billing after a won dispute sends that event, and the won
+dispute clears the block itself too.
 
 The block is **not** written when a subscriber cancels at period end (they have
-paid for the period), when a renewal payment fails and Stripe is retrying it, or
-when support revokes a grant (see [Support grants](#support-grants)).
+paid for the period), when a renewal payment fails and Stripe is retrying it,
+when a one-off purchase is refunded, or when support revokes a grant (see
+[Support grants](#support-grants)). A one-off refund removes that item's
+access, so the database check refuses new links for it at once; the block is
+per organisation and would also stop the buyer's other items there.
 
 ## Playback progress
 

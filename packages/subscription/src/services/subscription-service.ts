@@ -57,6 +57,7 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  assertGbpOnly,
   type ClawbackCharge,
   claimPayoutAttempts,
   findTransfersForPayouts,
@@ -64,13 +65,13 @@ import {
   issueRefund,
   type LedgerDeps,
   listClawableRefunds,
-  markPayoutFailed,
   type OrganisationPayee,
   pendingReductionsFor,
   type RecordSliceInput,
   type RecordSliceOutcome,
   recordPlatformFee,
   recordSplitOnce,
+  recordTransferFailure,
   renewPayoutAttempt,
   resolveInvoiceCharge,
   resolveOrganisationPayee,
@@ -97,7 +98,6 @@ import {
   NotFoundError,
   type ServiceConfig,
   ServiceUnavailableError,
-  UnsupportedCurrencyError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import {
@@ -187,6 +187,13 @@ function isLiveStatus(status: string): boolean {
 
 /** A tier-change preview's `prorationDate` may run ahead of our clock by this much. */
 const PRORATION_DATE_CLOCK_SKEW_MS = 60 * 1000;
+
+/**
+ * Payees one payouts sweep claims (Codex-2hxff.13). Each costs an
+ * `accounts.retrieve` and, when payable, a drain; the rest wait for the next
+ * run, least recently checked first.
+ */
+const SWEEP_PAYEE_LIMIT = 50;
 
 /**
  * The subscription has ended at Stripe: `canceled` is terminal
@@ -1009,7 +1016,7 @@ export class SubscriptionService extends BaseService {
       // session create exactly once. A second `resource_missing` propagates.
       const session = await this.checkoutReservations.create(reserved, () =>
         withStaleCustomerRecovery(
-          { db: this.db, stripe: this.stripe },
+          { db: this.db, stripe: this.stripe, obs: this.obs },
           { userId, email: user.email, environment: this.environment },
           (stripeCustomerId) =>
             this.stripe.checkout.sessions.create(
@@ -1183,12 +1190,23 @@ export class SubscriptionService extends BaseService {
         'type' in error &&
         (error as { type?: string }).type === 'StripeInvalidRequestError'
       ) {
-        throw new SubscriptionCheckoutError('Checkout session not found', {
-          stripeError: error.message,
+        // A stale or made-up session_id: the client's mistake, so a warning.
+        // The context goes to the client, so it carries the errorId and
+        // Stripe's message is logged instead (Codex-2hxff.23, SEC-02).
+        const errorId = crypto.randomUUID();
+        this.obs.warn('Stripe refused the checkout session lookup', {
+          errorId,
           sessionId,
+          code: stripeErrorCode(error),
+          error: error.message,
+        });
+        throw new SubscriptionCheckoutError('Checkout session not found', {
+          sessionId,
+          errorId,
         });
       }
 
+      // A connection or API failure: handleError logs it at error.
       this.handleError(error, 'verifyCheckoutSession');
     }
   }
@@ -2029,7 +2047,7 @@ export class SubscriptionService extends BaseService {
     // period UPDATE (as this did until Codex-2hxff.6) left a rewritten row with
     // no transfer or ledger row to match. Cross-currency support is a tracked
     // future feature.
-    this.assertGbpOnly(stripeInvoice.currency, {
+    assertGbpOnly(stripeInvoice.currency, {
       invoiceId: stripeInvoice.id,
       stripeSubscriptionId: stripeSubId,
     });
@@ -3300,7 +3318,21 @@ export class SubscriptionService extends BaseService {
           // reverted on Stripe's side — the subscription stays on the
           // old tier. Throw the typed 402 so the route returns a clean
           // "payment required" response and the UI prompts the user to
-          // update their payment method.
+          // update their payment method. The error's context is sent to
+          // the client, so Stripe's own message is logged, not returned
+          // (Codex-2hxff.23, SEC-02); the errorId in both ties them.
+          const errorId = crypto.randomUUID();
+          this.obs.warn('Tier upgrade payment declined by Stripe', {
+            errorId,
+            userId,
+            organizationId: orgId,
+            newTierId,
+            code: stripeErrorCode(stripeError),
+            error:
+              stripeError instanceof Error
+                ? stripeError.message
+                : String(stripeError),
+          });
           throw new SubscriptionPaymentRequiredError(
             'Payment for the upgrade was declined. Update your payment method and try again.',
             {
@@ -3308,7 +3340,7 @@ export class SubscriptionService extends BaseService {
               organizationId: orgId,
               newTierId,
               billingInterval,
-              stripeMessage: (stripeError as Error).message,
+              errorId,
               // Surface the prorationDate the failed commit pinned to
               // Stripe so the pricing dialog can branch "needs fresh
               // preview" vs "transient payment failure" by comparing
@@ -4505,12 +4537,6 @@ export class SubscriptionService extends BaseService {
   /**
    * BUG-014: Resolve accumulated pending payouts for a user within an org.
    *
-   * Called when a Connect account transitions to chargesEnabled + payoutsEnabled.
-   * For each unresolved payout:
-   *   - Attempts stripe.transfers.create()
-   *   - On success: sets resolvedAt and stripeTransferId
-   *   - On failure: logs and continues to the next payout (batch is best-effort)
-   *
    * Codex-69t7c WP5: `orgId` is `string | null`. Regardless of which value the
    * caller passes, the recipient is identified by the Connect account's
    * userId, and BOTH that user's org-scoped (organizationId = orgId) AND
@@ -4518,21 +4544,59 @@ export class SubscriptionService extends BaseService {
    * SQL `col = value` never matches NULL, so the orgless leg would otherwise
    * be stranded. A `null` orgId resolves ONLY the orgless leg.
    *
-   * Returns the count of successfully resolved payouts.
+   * Every trigger now drains the whole payee instead
+   * (`resolvePendingPayoutsForAccount`); this narrower form drains the same
+   * way, within its scope.
    */
   async resolvePendingPayouts(
     orgId: string | null,
     stripeAccountId: string
   ): Promise<{ resolved: number; failed: number }> {
+    return this.drainPayee(stripeAccountId, { orgId });
+  }
+
+  /**
+   * Pay a payee everything they are owed and can be paid now
+   * (Codex-2hxff.13; docs/payments/connect-and-payouts.md, "Releasing pending
+   * money"): every drainable row in the name of the account's owner, in
+   * every organisation, and their orgless rows. Called when their account
+   * becomes payable (`account.updated`, `/connect/me/sync`) and by the hourly
+   * sweep.
+   *
+   * Safe to call at any time and more than once: each row is claimed for one
+   * attempt before it is sent, so a concurrent drain skips it, and a row
+   * already paid is not drainable. Sends at most one payout-released email,
+   * from what was actually paid.
+   */
+  async resolvePendingPayoutsForAccount(
+    stripeAccountId: string
+  ): Promise<{ resolved: number; failed: number }> {
+    return this.drainPayee(stripeAccountId, 'all');
+  }
+
+  /**
+   * The drain behind both entry points. For each payout:
+   *   - attempts stripe.transfers.create();
+   *   - on success: marks it paid with its transfer;
+   *   - on failure: records why and continues (`recordTransferFailure`).
+   *
+   * `scope` is `'all'` for the payee-wide drain, or `{ orgId }` for that
+   * organisation plus the payee's orgless rows (`null`: orgless only).
+   */
+  private async drainPayee(
+    stripeAccountId: string,
+    scope: 'all' | { orgId: string | null }
+  ): Promise<{ resolved: number; failed: number }> {
+    const scopeOrgId = scope === 'all' ? null : scope.orgId;
     let resolved = 0;
     let failed = 0;
     // What transferPendingGroup ACTUALLY paid to this user's creator slices —
     // the payout-released email must report this, not the pre-loop snapshot.
     let creatorPaidCents = 0;
     let creatorPaidCount = 0;
+    // The organisations whose creator slices were paid, for the email.
+    const creatorPaidOrgs = new Set<string | null>();
 
-    // Query all unresolved payouts for this org that belong to the user
-    // whose Connect account just became active.
     // stripeAccountId is globally unique, so it alone identifies the account
     // (one account per user, Codex-69t7c — the org condition is dropped).
     const [connectAccount] = await this.db
@@ -4543,7 +4607,8 @@ export class SubscriptionService extends BaseService {
 
     if (!connectAccount) {
       this.obs.warn('resolvePendingPayouts: Connect account not found', {
-        organizationId: orgId,
+        organizationId: scopeOrgId,
+        payeeWide: scope === 'all',
         stripeAccountId,
       });
       return { resolved: 0, failed: 0 };
@@ -4551,12 +4616,18 @@ export class SubscriptionService extends BaseService {
 
     // Codex-69t7c WP5: a single Connect account belongs to ONE creator
     // (routed by userId), but that creator can accrue BOTH org-scoped
-    // (tri-party) pending rows (organizationId = orgId) AND orgless
-    // (bi-party) pending rows (organizationId IS NULL). SQL `col = value`
-    // never matches NULL, so the original `eq(payouts.organizationId, orgId)`
-    // filter rendered every orgless `creator_payout` row invisible to this
-    // primary webhook drain — stranding the creator's money indefinitely.
-    // Match BOTH shapes for this user so both legs resolve in one pass.
+    // (tri-party) pending rows AND orgless (bi-party) rows (organizationId
+    // IS NULL). SQL `col = value` never matches NULL, so an org filter alone
+    // left every orgless `creator_payout` row invisible to the drain.
+    const orgFilter =
+      scope === 'all'
+        ? undefined
+        : scope.orgId === null
+          ? isNull(payouts.organizationId)
+          : or(
+              eq(payouts.organizationId, scope.orgId),
+              isNull(payouts.organizationId)
+            );
     const unresolvedPayouts = await this.db
       .select()
       .from(payouts)
@@ -4565,18 +4636,9 @@ export class SubscriptionService extends BaseService {
           eq(payouts.userId, connectAccount.userId),
           // Failed transfers are retried too (Codex-2hxff.11): a `failed` row
           // keeps its charge id and stays payable — unless an old write path
-          // failed it (see isDrainablePayout).
+          // failed it, or it waits for support (see isDrainablePayout).
           isDrainablePayout(),
-          // A non-null orgId resolves BOTH that org's rows AND the creator's
-          // orgless rows in one pass; a null orgId (orgless-only caller, e.g.
-          // the sweep's orgless group) resolves ONLY the orgless rows. `eq`
-          // cannot take a null comparand, so branch on it.
-          orgId === null
-            ? isNull(payouts.organizationId)
-            : or(
-                eq(payouts.organizationId, orgId),
-                isNull(payouts.organizationId)
-              )
+          ...(orgFilter ? [orgFilter] : [])
         )
       );
 
@@ -4585,48 +4647,46 @@ export class SubscriptionService extends BaseService {
     }
 
     this.obs.info('Resolving pending payouts', {
-      organizationId: orgId,
+      organizationId: scopeOrgId,
+      payeeWide: scope === 'all',
       stripeAccountId,
       userId: connectAccount.userId,
       count: unresolvedPayouts.length,
     });
 
-    // Codex-iivne + Codex-69t7c WP5: group pending rows by (orgScope,
-    // sourceType) so a creator with many sub-threshold pending rows
-    // (multi-creator split scenarios) gets resolved when the SUM clears the
-    // min-transfer floor — rather than every row failing the per-row floor
-    // check and piling up indefinitely. Fee policy depends on BOTH the
-    // org-scope (orgless → platform-only fees; org-scoped → per-creator
-    // fees) AND the sourceType, so the group key reflects both. The org
-    // attached to each group drives fee resolution in transferPendingGroup:
-    // orgless rows carry `null` and resolve fees via getFeesPlatform().
-    type PendingGroupKey =
-      `${'org' | 'orgless'}:${'purchase' | 'subscription'}`;
+    // Codex-iivne + Codex-69t7c WP5 + Codex-2hxff.13: group pending rows by
+    // (organisation, sourceType) so a creator with many sub-threshold pending
+    // rows gets resolved when the SUM clears the min-transfer floor, rather
+    // than every row failing the per-row floor check and piling up. Fees
+    // depend on the organisation (orgless → platform-only fees; an org → its
+    // own and the creator's config) AND the sourceType, so each group is one
+    // organisation's: a payee-wide drain spans several, and must never pay
+    // one organisation's rows at another's fees.
     const groups = new Map<
-      PendingGroupKey,
-      { orgId: string | null; rows: typeof unresolvedPayouts }
+      string,
+      {
+        orgId: string | null;
+        sourceType: 'purchase' | 'subscription';
+        rows: typeof unresolvedPayouts;
+      }
     >();
     for (const payout of unresolvedPayouts) {
-      const orgScope = payout.organizationId === null ? 'orgless' : 'org';
-      const source =
+      const sourceType =
         payout.sourceType === 'purchase' ? 'purchase' : 'subscription';
-      const key: PendingGroupKey = `${orgScope}:${source}`;
+      const key = `${payout.organizationId ?? 'orgless'}:${sourceType}`;
       const existing = groups.get(key);
       if (existing) {
         existing.rows.push(payout);
       } else {
         groups.set(key, {
           orgId: payout.organizationId,
+          sourceType,
           rows: [payout],
         });
       }
     }
 
-    for (const [key, { orgId: groupOrgId, rows }] of groups) {
-      if (rows.length === 0) continue;
-      const sourceType: 'purchase' | 'subscription' = key.endsWith('purchase')
-        ? 'purchase'
-        : 'subscription';
+    for (const [key, { orgId: groupOrgId, sourceType, rows }] of groups) {
       // One group's failure (a Stripe lookup, a fee read) never blocks the
       // next. Its claimed rows come free when the lease runs out.
       const groupResult = await this.transferPendingGroup(
@@ -4654,10 +4714,12 @@ export class SubscriptionService extends BaseService {
       failed += groupResult.failed;
       creatorPaidCents += groupResult.creatorPaidCents;
       creatorPaidCount += groupResult.creatorPaidCount;
+      if (groupResult.creatorPaidCount > 0) creatorPaidOrgs.add(groupOrgId);
     }
 
     this.obs.info('Pending payout resolution complete', {
-      organizationId: orgId,
+      organizationId: scopeOrgId,
+      payeeWide: scope === 'all',
       stripeAccountId,
       resolved,
       failed,
@@ -4665,10 +4727,10 @@ export class SubscriptionService extends BaseService {
     });
 
     // WP-10 (Codex-69t7c.10): fire payout-released notification when at least
-    // one creator_payout transitioned pending→paid. Fires ONCE per
-    // resolvePendingPayouts invocation (one notification per activation event,
-    // not per-row). Fire-and-forget post-loop — notification failure MUST NOT
-    // roll back or block the already-committed transfers.
+    // one creator_payout transitioned pending→paid. Fires ONCE per drain
+    // (one notification per activation event, not per-row or per
+    // organisation). Fire-and-forget post-loop — notification failure MUST
+    // NOT roll back or block the already-committed transfers.
     //
     // Gate on creator_payout rows ONLY — organization_fee rows are the org
     // admin's slice, not the creator's personal earnings. Counted from what
@@ -4689,13 +4751,17 @@ export class SubscriptionService extends BaseService {
           const dashboardUrl = this.webAppUrl
             ? `${this.webAppUrl}/studio/earnings`
             : '/studio/earnings';
+          // The email names an organisation only when every creator slice
+          // it reports is that organisation's.
+          const [onlyOrg] = creatorPaidOrgs;
+          const emailOrgId = creatorPaidOrgs.size === 1 ? onlyOrg : null;
 
           void this.payoutMailer({
             to: creatorRow.email,
             templateName: 'payout-released',
             category: 'transactional',
             userId: connectAccount.userId,
-            organizationId: orgId,
+            organizationId: emailOrgId ?? null,
             data: {
               creatorName: creatorRow.email, // fallback; template can resolve display name
               amountFormatted,
@@ -4707,7 +4773,7 @@ export class SubscriptionService extends BaseService {
       } catch (err) {
         // Swallow — notification failure must not surface after committed transfers.
         this.obs.warn('payout-released notification dispatch failed', {
-          organizationId: orgId,
+          organizationId: scopeOrgId,
           stripeAccountId,
           creatorPaidCount,
           error: err instanceof Error ? err.message : String(err),
@@ -4719,8 +4785,8 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Codex-iivne: resolve one (userId, orgScope, sourceType) group of pending
-   * payouts. Caller has already filtered by Connect account userId, so
+   * Codex-iivne: resolve one (userId, organisation, sourceType) group of
+   * pending payouts. Caller has already filtered by Connect account userId, so
    * every row in `group` shares one recipient. Fee policy is looked up
    * once per call (was: per-row); floor evaluates against the SUM
    * (was: each row individually).
@@ -4874,13 +4940,15 @@ export class SubscriptionService extends BaseService {
         continue;
       }
 
+      const idempotencyKey = `payout_${payout.id}_${attempt}`;
       let transfer: Stripe.Transfer;
       try {
         // GBP-only enforcement (Codex-yv18n) lives INSIDE the per-row
         // try/catch so a non-GBP row counts as a per-row failure (not a
         // group abort) — keeps mixed-currency batches partially recoverable.
+        // It can never succeed, so the row is flagged for support at once.
         const payoutCurrency = (payout.currency || CURRENCY.GBP).toLowerCase();
-        this.assertGbpOnly(payoutCurrency, {
+        assertGbpOnly(payoutCurrency, {
           pendingPayoutId: payout.id,
           subscriptionId: payout.subscriptionId,
           organizationId: orgId,
@@ -4905,25 +4973,29 @@ export class SubscriptionService extends BaseService {
               ...stripeEnvMetadata(this.environment),
             },
           },
-          { idempotencyKey: `payout_${payout.id}_${attempt}` }
+          { idempotencyKey }
         );
       } catch (error) {
         failed++;
-        this.obs.error('Failed to resolve pending payout', {
-          pendingPayoutId: payout.id,
-          subscriptionId: payout.subscriptionId,
-          amountCents,
-          sourceType,
-          error: (error as Error).message,
-        });
         // Codex-vv77x: per-row error isolation — one Stripe failure never
-        // blocks the remaining rows. The row stays payable for the next drain.
-        await markPayoutFailed(this.db, payout.id).catch((updateError) => {
-          this.obs.error('Could not mark the payout failed', {
-            pendingPayoutId: payout.id,
-            error: (updateError as Error).message,
-          });
-        });
+        // blocks the remaining rows. The row stays payable for the next
+        // drain, unless Stripe has refused it for good or too often: then it
+        // waits for support, logged once (Codex-2hxff.48). A refund that
+        // cancelled the row meanwhile gets any transfer that landed reversed.
+        await recordTransferFailure(
+          this.ledger(),
+          { payoutId: payout.id, destination: stripeAccountId, idempotencyKey },
+          error,
+          {
+            organizationId: orgId,
+            subscriptionId: payout.subscriptionId,
+            purchaseId: payout.purchaseId,
+            payoutType: payout.payoutType,
+            amountCents,
+            sourceType,
+            attempt,
+          }
+        );
         continue;
       }
 
@@ -4958,30 +5030,6 @@ export class SubscriptionService extends BaseService {
   }
 
   // ─── Private Helpers ─────────────────────────────────────────────────────
-
-  /**
-   * Throw `UnsupportedCurrencyError` unless `currency` is GBP (or absent).
-   *
-   * Centralises the GBP-only guard shared by `handleInvoicePaymentSucceeded`
-   * and `resolvePendingPayouts`. Both downstream paths feed
-   * `stripe.transfers.create()` which is hardcoded to `CURRENCY.GBP`; this
-   * guard prevents silent currency mismatch. Cross-currency support is a
-   * tracked future feature (Codex-yv18n).
-   *
-   * Passing `null`/`undefined` is treated as "no currency on this Stripe
-   * object" and skipped — preserves the prior behaviour of letting Stripe
-   * payloads without a `currency` field through (the schema default for
-   * payouts is 'gbp', so the row branch normalises before calling).
-   */
-  private assertGbpOnly(
-    currency: string | null | undefined,
-    context: Record<string, unknown>
-  ): void {
-    if (!currency) return;
-    const normalised = currency.toLowerCase();
-    if (normalised === CURRENCY.GBP) return;
-    throw new UnsupportedCurrencyError(normalised, [CURRENCY.GBP], context);
-  }
 
   private async getSubscriptionOrThrow(
     userId: string,
@@ -5785,6 +5833,9 @@ export class SubscriptionService extends BaseService {
             account: connectByCreator.get(creator.creatorId),
           },
           ...(belowFloor ? { hold: 'min_transfer_floor' as const } : {}),
+          // The agreement this slice was split by, on its row: an invoice has
+          // no row of its own (Codex-2hxff.19).
+          creatorOrgAgreementId: creator.agreementId,
           idempotencyKey: `${chargeId}_creator_${creator.creatorId}`,
           metadata: {
             subscription_id: subscriptionId,
@@ -5836,16 +5887,17 @@ export class SubscriptionService extends BaseService {
   // ─── Pending Payout Sweep (Codex-vv77x) ─────────────────────────────────
   //
   // Hybrid event+sweep resolution pattern per Stripe docs:
-  //   1. account.updated webhook is the primary trigger (connect-webhook.ts:73)
+  //   1. account.updated and /connect/me/sync are the primary triggers
   //   2. Webhooks retry for 3 days then drop — this sweep is the safety net
-  //   3. Periodic sweep groups payouts by (orgId, userId) — each unique
-  //      pair maps to one Connect account — and asks Stripe for current state
-  //   4. If the Connect account is now charges_enabled && payouts_enabled,
-  //      delegate to resolvePendingPayouts(orgId, stripeAccountId) which owns
-  //      the actual transfer loop.
+  //   3. Each run CLAIMS a bounded batch of payees (Codex-2hxff.13): one
+  //      UPDATE stamps `attempted_at` on their rows, so overlapping runs take
+  //      disjoint payees and a payee who is not ready yet goes to the back
+  //   4. For each, it asks Stripe for the account's current state and, if it
+  //      is charges_enabled && payouts_enabled, drains the whole payee
+  //      (resolvePendingPayoutsForAccount)
   //   5. olderThanMinutes guards against racing the webhook on freshly inserted
   //      rows — only sweep rows old enough that the webhook would already have
-  //      fired by now if it was going to.
+  //      fired by now if it was going to — and spaces out a payee's checks.
 
   /**
    * Give an ownerless organisation's held slices to their next owner, now
@@ -5908,40 +5960,121 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Sweep pending payouts rows older than `olderThanMinutes`,
-   * group by (organizationId, userId), and attempt resolution for each
-   * group whose Connect account now reports charges_enabled && payouts_enabled.
+   * Claim up to `limit` payees whose drainable rows were last checked before
+   * `threshold`, least recently checked first (Codex-2hxff.13). A payee is a
+   * user with a Connect account row (onboarded, or onboarding), or an
+   * ownerless organisation for its held `no_owner` rows. A user who never
+   * started onboarding has nothing to check at Stripe, so their rows are left
+   * pending and untouched rather than take a place in the batch. A drainable
+   * row with neither payee nor organisation can be claimed by no one; those
+   * are counted and logged at error.
    *
-   * Returns aggregate counters for observability; never throws on a
-   * per-group failure — failures are isolated and counted.
+   * One UPDATE: it stamps `attempted_at = now` on the claimed rows, under
+   * `FOR UPDATE SKIP LOCKED`. So the run is bounded; a run that starts while
+   * another is claiming skips the rows it holds, and one that starts after
+   * finds them checked; and a payee who cannot be paid yet goes to the back
+   * of the queue. No session lock: the pooler may hand each statement a
+   * different connection. Two runs that start at the same instant can split
+   * one payee's rows between them; both then drain that payee, and the
+   * per-row attempt claims keep that to a repeated check, never a second
+   * transfer.
    */
-  async sweepUnresolvedPayouts(olderThanMinutes = 15): Promise<{
+  private async claimSweepPayees(
+    threshold: Date,
+    limit: number,
+    now: Date = new Date()
+  ): Promise<Array<{ userId: string | null; organizationId: string | null }>> {
+    const payeeKey = sql`CASE WHEN ${payouts.userId} IS NULL THEN 'org:' || ${payouts.organizationId}::text ELSE 'user:' || ${payouts.userId} END`;
+    // Failed transfers are retried too (Codex-2hxff.11), unless an old write
+    // path failed them or they wait for support (see isDrainablePayout).
+    const drainable = and(
+      isDrainablePayout(),
+      lt(payouts.attemptedAt, threshold)
+    );
+    const due = and(
+      drainable,
+      sql`((${payouts.userId} IS NULL AND ${payouts.organizationId} IS NOT NULL) OR EXISTS (SELECT 1 FROM ${stripeConnectAccounts} WHERE ${stripeConnectAccounts.userId} = ${payouts.userId}))`
+    );
+
+    const [unroutable] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(payouts)
+      .where(
+        and(drainable, isNull(payouts.userId), isNull(payouts.organizationId))
+      );
+    if (unroutable && unroutable.count > 0) {
+      this.obs.error(
+        'sweepUnresolvedPayouts: owed rows with neither payee nor organisation; nobody can be paid them',
+        { errorId: crypto.randomUUID(), rowCount: unroutable.count }
+      );
+    }
+
+    const duePayees = this.db
+      .select({ payeeKey })
+      .from(payouts)
+      .where(due)
+      .groupBy(payeeKey)
+      .orderBy(sql`min(${payouts.attemptedAt})`)
+      .limit(limit);
+    const claimable = this.db
+      .select({ id: payouts.id })
+      .from(payouts)
+      .where(and(due, inArray(payeeKey, duePayees)))
+      .for('update', { skipLocked: true });
+    const claimed = await this.db
+      .update(payouts)
+      .set({ attemptedAt: now })
+      .where(inArray(payouts.id, claimable))
+      // Bare `.returning()`: the client union collapses the projected overload.
+      .returning();
+
+    const payees = new Map<
+      string,
+      { userId: string | null; organizationId: string | null }
+    >();
+    for (const row of claimed) {
+      const key = row.userId
+        ? `user:${row.userId}`
+        : `org:${row.organizationId}`;
+      if (!payees.has(key)) {
+        payees.set(key, {
+          userId: row.userId,
+          organizationId: row.userId ? null : row.organizationId,
+        });
+      }
+    }
+    return [...payees.values()];
+  }
+
+  /**
+   * The hourly safety net (Codex-vv77x, Codex-2hxff.13): claim a bounded
+   * batch of payees with rows older than `olderThanMinutes`
+   * (`claimSweepPayees`), and drain each one whose Connect account Stripe
+   * now reports charges_enabled && payouts_enabled — all of their rows, in
+   * every organisation (`resolvePendingPayoutsForAccount`). An ownerless
+   * organisation's held rows are re-homed to its new owner, if it has one.
+   *
+   * A "group" in the counters is one claimed payee. Returns aggregate
+   * counters for observability; never throws on a per-payee failure —
+   * failures are isolated and counted.
+   */
+  async sweepUnresolvedPayouts(
+    olderThanMinutes = 15,
+    limit = SWEEP_PAYEE_LIMIT
+  ): Promise<{
     groupsScanned: number;
     groupsResolved: number;
     groupsSkipped: number;
     errors: number;
   }> {
-    const threshold = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+    const now = new Date();
+    const threshold = new Date(now.getTime() - olderThanMinutes * 60 * 1000);
 
-    // Distinct (orgId, userId) pairs with at least one unresolved row older
-    // than the threshold. We deliberately do NOT join to stripeConnectAccounts
-    // here — we want the sweep to surface orphan pending rows whose Connect
-    // account row may have been re-keyed, and the per-group lookup below
-    // handles the missing-account case (logs warn + returns 0).
-    const groups = await this.db
-      .selectDistinct({
-        organizationId: payouts.organizationId,
-        userId: payouts.userId,
-      })
-      .from(payouts)
-      .where(
-        and(
-          // Failed transfers are retried too (Codex-2hxff.11), unless an old
-          // write path failed them (see isDrainablePayout).
-          isDrainablePayout(),
-          lt(payouts.attemptedAt, threshold)
-        )
-      );
+    // claimSweepPayees takes only payees with a Connect account row (plus
+    // organisations with no owner): a payee who never onboarded cannot be
+    // paid, and must not take a batch slot from one who can. Rows with no
+    // payee and no organisation are counted and logged there.
+    const groups = await this.claimSweepPayees(threshold, limit, now);
 
     const groupsScanned = groups.length;
     let groupsResolved = 0;
@@ -6014,10 +6147,7 @@ export class SubscriptionService extends BaseService {
         if (!connect) {
           this.obs.warn(
             'sweepUnresolvedPayouts: connect row missing for pending group',
-            {
-              organizationId: group.organizationId,
-              userId: group.userId,
-            }
+            { userId: group.userId }
           );
           groupsSkipped++;
           continue;
@@ -6037,17 +6167,15 @@ export class SubscriptionService extends BaseService {
           continue;
         }
 
-        await this.resolvePendingPayouts(
-          group.organizationId,
-          connect.stripeAccountId
-        );
+        // The whole payee, every organisation (Codex-2hxff.13).
+        await this.resolvePendingPayoutsForAccount(connect.stripeAccountId);
         groupsResolved++;
       } catch (error) {
         errors++;
         this.obs.error('sweepUnresolvedPayouts: per-group failure', {
-          organizationId: group.organizationId,
+          errorId: crypto.randomUUID(),
           userId: group.userId,
-          error: (error as Error).message,
+          error: error instanceof Error ? error.message : String(error),
         });
         // Continue to next group — don't fail the whole sweep
       }
@@ -6055,6 +6183,7 @@ export class SubscriptionService extends BaseService {
 
     this.obs.info('sweepUnresolvedPayouts: complete', {
       olderThanMinutes,
+      limit,
       groupsScanned,
       groupsResolved,
       groupsSkipped,

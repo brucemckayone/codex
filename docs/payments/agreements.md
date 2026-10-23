@@ -32,10 +32,30 @@ A **gap** marker means the code does not behave this way yet; see
 **Storage.** Proposals live in `agreement_proposals`, an append-only negotiation
 log. An accepted proposal produces a `creator_organization_agreements` row,
 which points at it through `current_proposal_id`. The share is read from the
-accepted proposal (`proposed_creator_share_percent`). The legacy column
-`organization_fee_percentage` holds `10000 − share` and is still written; new
-code must not read it — **gap**: `Codex-2hxff.19`, `Codex-2hxff.20` (several
-readers still do).
+accepted proposal (`proposed_creator_share_percent`). Every server path reads
+it there: the payment resolver, the 100% check, the termination and
+review-reminder emails, the creator's `/agreements/me` views and the admin
+revenue-by-creator view. The agreement rows the API returns carry the share as
+`creatorSharePercent`.
+
+An agreement whose proposal link is gone pays nothing. It is shown and counted
+as 0, and every read that meets one logs it at error with the agreement's id.
+The payment resolver (`agreementsInForce`) logs "agreement has no current
+proposal; skipped" at each sale, with an errorId and the sale's moment. These log "agreement
+has no current proposal; it pays nothing", each with an errorId:
+
+- the 100% check, on every propose, counter and accept in that pool;
+- the termination email;
+- the agreement lists behind `GET /agreements`, `/agreements/me` and
+  `/agreements/me/portfolio` (`getActiveAgreements`,
+  `getActiveAgreementsForCreator`, `getTerminatedAgreementsForCreator`);
+- the review-reminder scan (`findExpiringAgreements`);
+- the admin revenue-by-creator view.
+
+The legacy column `organization_fee_percentage` holds `10000 − share` and is
+still written; new code must not read it — **gap**: `Codex-fazy6` (the web
+pages that rebuild the share from it still do; while the dual-write holds they
+show the right number).
 
 ## Negotiating
 
@@ -47,10 +67,18 @@ readers still do).
 | **Decline** | The other side | `declined`, with a reason; both sides are emailed |
 | **Withdraw** | The side that made the proposal | `withdrawn`; no email |
 
-Only one thread can be open per organisation, creator and revenue type. Every
-action locks the row it changes, including a new proposal, so two people acting
-at once cannot both succeed — **gap**: `Codex-2hxff.19` (proposing takes no
-lock). Admins can see an organisation's agreements but only the owner can act;
+Only one thread can be open per organisation, creator and revenue type. A
+thread is open while one of its proposals is `open`. Once its last proposal is
+declined or withdrawn, by hand or because the creator left, the thread is over
+and the owner can propose again; the `countered` rows behind it do not hold it
+open. Every
+action locks the row it changes, so two people acting on one proposal at once
+cannot both succeed. Proposing, countering and accepting also take one lock
+per organisation and revenue type before they look for an open thread and add
+up the shares. So two proposals for the same creator made at once open one
+thread, and two acceptances for different creators that together pass 100%
+cannot both succeed: the second waits, sees the first, and is refused.
+Admins can see an organisation's agreements but only the owner can act;
 the screen shows admins only what they can do — **gap**: `Codex-2hxff.20`.
 
 An agreement takes effect from its proposal's start date: the moment it was
@@ -164,8 +192,7 @@ Any new way out must call `withdrawProposalsOnDeparture` and
 | Orgless sale | None | No organisation slice |
 
 One resolver decides which agreements apply, for every path
-(`agreementsInForce` in `@codex/agreements`) — **gap**: `Codex-2hxff.19` for
-the two items marked "today":
+(`agreementsInForce` in `@codex/agreements`):
 
 - it uses the sale's own time: the invoice's creation time for subscriptions,
   and the checkout session's creation time for purchases (`offerAt`), so a
@@ -180,8 +207,12 @@ the two items marked "today":
   first split, even when an agreement accepted since is backdated to before
   the invoice (owner decision 2026-10-21, "Keep its first split",
   `Codex-2hxff.62`). The creator's share starts with the next invoice;
-- the purchase or invoice records which agreement it used (today
-  `creator_org_agreement_id` is always empty).
+- the sale records which agreement it used, in `creator_org_agreement_id`: a
+  purchase (content or course) on its `purchases` row and its creator slice,
+  and a subscription invoice, which has no row of its own, on its creator
+  slices in `payouts`. It is empty when no agreement applied.
+  `platform_agreement_id` stays empty: fee configuration replaced platform
+  agreements.
 
 ## Who sees what
 

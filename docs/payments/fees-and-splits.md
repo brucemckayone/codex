@@ -64,9 +64,18 @@ every change applies to the next sale and nobody is told).
 | `GET` | `/api/admin/fees/audit-log` | Paginated change history |
 
 There is no web screen; a local desktop admin app is planned (`Codex-xyb7v`).
-Every write bumps the row's `version`, writes one `fee_config_audit_log` row per
-column that **actually changed** (**gap**: `Codex-2hxff.23` — today it logs
-changes that never happened), and invalidates the cache. Writes are atomic —
+On an organisation or override write, a value left out is kept, and `null`
+clears it back to inheriting the level above. Every write bumps the row's
+`version`, writes one `fee_config_audit_log` row per column that **actually
+changed** (a clear is recorded as old value → `NULL`, and so is each set
+value when an organisation's values or an override are removed; setting a
+value it already has, or clearing one already clear, records nothing and
+writes nothing), and invalidates the cache. In the log, `NULL` on either side
+means unset, inheriting the level above. Rows written before migration 0112
+hold the string `'null'` instead: from an update, that was a clear that never
+took effect (the old merge kept the value, `Codex-2hxff.23`); from removing an
+organisation's values or an override, the removal did happen. The current fee
+row tells the two apart. Writes are atomic —
 **gap**: `Codex-rtwpv`. Fee values are cached in KV with no TTL: a write
 invalidates them, and they change too rarely for a TTL to be worth the misses.
 A fee is read at the time of each sale; it is never snapshotted on an agreement.

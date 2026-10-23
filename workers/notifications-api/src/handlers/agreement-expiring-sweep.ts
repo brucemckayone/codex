@@ -18,11 +18,7 @@
  * returned tally.
  */
 
-import type { CreatorOrganizationAgreement } from '@codex/agreements';
-import {
-  AgreementService,
-  creatorShareFromLegacyOrgFee,
-} from '@codex/agreements';
+import { AgreementService, type AgreementWithShare } from '@codex/agreements';
 import { createDbClient, type Database } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
 import { workerFetch } from '@codex/security';
@@ -150,14 +146,17 @@ function buildEmailPayload(args: {
   recipientName: string;
   otherPartyName: string;
   orgName: string;
-  agreement: CreatorOrganizationAgreement;
+  agreement: AgreementWithShare;
   deepLinkUrl: string;
 }): Record<string, string | number | boolean> {
   const { recipientName, otherPartyName, orgName, agreement, deepLinkUrl } =
     args;
-  const sharePercent = creatorShareFromLegacyOrgFee(
-    agreement.organizationFeePercentage
-  );
+  // The accepted proposal's share, as every payment path reads it
+  // (Codex-2hxff.19 AGR-08), never the legacy org-fee column. A missing
+  // proposal pays nothing, so it is quoted as 0;
+  // `AgreementService.findExpiringAgreements` has already logged that row at
+  // error, with an errorId.
+  const sharePercent = agreement.creatorSharePercent ?? 0;
   return {
     recipientName,
     orgName,

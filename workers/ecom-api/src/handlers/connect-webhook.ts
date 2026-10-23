@@ -9,19 +9,10 @@
  */
 
 import { STRIPE_EVENTS } from '@codex/constants';
-import { uuidSchema, z } from '@codex/validation';
 import { createWebhookServices } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
-
-// Codex-ohjvn: malformed metadata is an operations error, not a silent
-// skip. A missing or non-UUID `codex_organization_id` on an active
-// transition leaves pending payouts stuck without any signal — WARN
-// distinguishes "legit no-org Connect" from "schema/setup drift".
-const connectMetadataSchema = z.object({
-  codex_organization_id: uuidSchema,
-});
 
 export async function handleConnectWebhook(
   event: Stripe.Event,
@@ -78,44 +69,32 @@ export async function handleConnectWebhook(
           payoutsEnabled: account.payouts_enabled,
         });
 
-        // BUG-014: When an account transitions to fully active, resolve any
-        // accumulated pending payouts via fire-and-forget (waitUntil).
+        // BUG-014 + Codex-2hxff.13: when an account becomes payable, pay its
+        // owner everything they are owed, in every organisation. The account
+        // id alone names the payee: accounts are per user and carry only
+        // `codex_user_id` metadata, so the old requirement for
+        // `codex_organization_id` skipped every drain.
         if (isNowActive && !wasActive) {
-          const parsed = connectMetadataSchema.safeParse(account.metadata);
-          if (!parsed.success) {
-            obs?.warn(
-              'connect-webhook: invalid metadata on active transition; skipping payout resolution',
-              {
-                accountId: account.id,
-                eventId: event.id,
-                reason: parsed.error.issues[0]?.message ?? 'unknown',
-              }
-            );
-          } else {
-            const orgId = parsed.data.codex_organization_id;
-            // After the response, on the shared pool: `release` holds the
-            // pool open until the drain settles. The registry's
-            // SubscriptionService carries the payout-released mailer
-            // (Codex-2hxff.13).
-            void background(
-              services.subscription
-                .resolvePendingPayouts(orgId, account.id)
-                .then((result) => {
-                  obs?.info('Pending payouts resolved on account activation', {
-                    accountId: account.id,
-                    organizationId: orgId,
-                    ...result,
-                  });
-                })
-                .catch((err) => {
-                  obs?.error('Failed to resolve pending payouts', {
-                    accountId: account.id,
-                    organizationId: orgId,
-                    error: (err as Error).message,
-                  });
-                })
-            );
-          }
+          // After the response, on the shared pool: `release` holds the pool
+          // open until the drain settles. The registry's SubscriptionService
+          // carries the payout-released mailer.
+          void background(
+            services.subscription
+              .resolvePendingPayoutsForAccount(account.id)
+              .then((result) => {
+                obs?.info('Pending payouts resolved on account activation', {
+                  accountId: account.id,
+                  ...result,
+                });
+              })
+              .catch((err: unknown) => {
+                obs?.error('Failed to resolve pending payouts', {
+                  errorId: crypto.randomUUID(),
+                  accountId: account.id,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              })
+          );
         }
         break;
       }

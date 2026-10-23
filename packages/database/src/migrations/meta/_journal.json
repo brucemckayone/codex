@@ -778,6 +778,20 @@
       "when": 1792698000229,
       "tag": "0110_subscription_duplicates_tombstones",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1792766184658,
+      "tag": "0111_money_history_restrict_and_payout_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1792766803594,
+      "tag": "0112_fee_audit_new_value_nullable",
+      "breakpoints": true
     }
   ]
 }

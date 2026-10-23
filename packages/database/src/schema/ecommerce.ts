@@ -419,9 +419,11 @@ export const purchases = pgTable(
   'purchases',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    // RESTRICT, never cascade: money history outlives its user (Codex-2hxff.23,
+    // docs/payments/README.md). Account deletion anonymises; it never deletes.
     customerId: text('customer_id')
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
     // Split purchase target (Codex-2pryk WP-6): a purchase pays for EITHER a
     // piece of `content` OR a `course` — exactly one is set (CHECK below),
     // mirroring the `entitlements` split-FK. `contentId` became nullable so a

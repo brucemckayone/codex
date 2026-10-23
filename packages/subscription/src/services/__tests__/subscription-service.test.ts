@@ -542,6 +542,68 @@ describe('SubscriptionService', () => {
   // per-case so we can assert against specific Stripe responses.
 
   describe('verifyCheckoutSession', () => {
+    // Codex-2hxff.23 review (M3, L2): a session_id Stripe does not know is the
+    // client's mistake (warn, errorId returned); an outage is ours (error).
+    function sessionLookupFails(error: Error) {
+      (
+        stripe.checkout.sessions as unknown as {
+          retrieve: ReturnType<typeof vi.fn>;
+        }
+      ).retrieve = vi.fn().mockRejectedValue(error);
+      const obs = (
+        service as unknown as {
+          obs: {
+            warn: (...a: unknown[]) => void;
+            error: (...a: unknown[]) => void;
+          };
+        }
+      ).obs;
+      return { warn: vi.spyOn(obs, 'warn'), error: vi.spyOn(obs, 'error') };
+    }
+
+    it("a session Stripe does not know: a warning, and the client gets its errorId, not Stripe's message", async () => {
+      const logged = sessionLookupFails(
+        Object.assign(new Error('No such checkout.session: cs_madeup'), {
+          type: 'StripeInvalidRequestError',
+          code: 'resource_missing',
+          statusCode: 404,
+        })
+      );
+
+      const err = await service
+        .verifyCheckoutSession('cs_madeup', otherCreatorId)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(SubscriptionCheckoutError);
+      const context = (err as SubscriptionCheckoutError).context;
+      expect(logged.error).not.toHaveBeenCalled();
+      expect(logged.warn).toHaveBeenCalledWith(
+        'Stripe refused the checkout session lookup',
+        expect.objectContaining({ errorId: context?.errorId })
+      );
+      expect(typeof context?.errorId).toBe('string');
+      expect(JSON.stringify(context)).not.toContain('No such');
+    });
+
+    it('a connection failure on the session lookup is an error, not a warning', async () => {
+      const logged = sessionLookupFails(
+        Object.assign(new Error('socket hang up'), {
+          type: 'StripeConnectionError',
+        })
+      );
+
+      const err = await service
+        .verifyCheckoutSession('cs_outage', otherCreatorId)
+        .catch((e: unknown) => e);
+
+      expect(err).not.toBeInstanceOf(SubscriptionCheckoutError);
+      expect(logged.error).toHaveBeenCalled();
+      expect(logged.warn).not.toHaveBeenCalledWith(
+        'Stripe refused the checkout session lookup',
+        expect.anything()
+      );
+    });
+
     it('returns complete + subscription row when webhook has landed', async () => {
       const { org, tier1 } = await createFullOrg('verify-complete');
 
@@ -2465,11 +2527,17 @@ describe('SubscriptionService', () => {
       expect(err.code).toBe('PAYMENT_REQUIRED');
       expect(err.statusCode).toBe(402);
       // Context carries newTierId + billingInterval so the dialog can
-      // re-open the correct row, and stripeMessage so the toast can show
-      // the upstream message verbatim.
+      // re-open the correct row.
       expect(err.context?.newTierId).toBe(tier2.id);
       expect(err.context?.billingInterval).toBe('month');
-      expect(err.context?.stripeMessage).toBe('Your card was declined.');
+      // The context is sent to the client as `details`: Stripe's own
+      // message is logged, never returned (Codex-2hxff.23, SEC-02).
+      expect(JSON.stringify(err.context)).not.toContain(
+        'Your card was declined.'
+      );
+      expect(err.context).not.toHaveProperty('stripeMessage');
+      // The errorId of the log line that holds it (L2).
+      expect(typeof err.context?.errorId).toBe('string');
       // Codex-w87s4: prorationDate echoes the pinned preview timestamp
       // — this is what lets the dialog branch "stale preview" from
       // "transient payment failure" without needing a second round-trip.
@@ -9764,18 +9832,29 @@ describe('SubscriptionService', () => {
       const retrieveSpy = stubAccountsRetrieve(true);
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
+      const errorSpy = vi.spyOn(
+        (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+          .obs,
+        'error'
+      );
 
       const result = await service.sweepUnresolvedPayouts(15);
 
+      // No payee and no organisation: nobody to claim it for, so the sweep
+      // never takes it (Codex-2hxff.13 claims payees, not rows), nor gives
+      // it a place in the batch, and says how many such rows there are.
       expect(result).toEqual({
-        groupsScanned: 1,
+        groupsScanned: 0,
         groupsResolved: 0,
-        groupsSkipped: 1,
+        groupsSkipped: 0,
         errors: 0,
       });
-      // userId-null group is skipped BEFORE any Stripe call.
       expect(retrieveSpy).not.toHaveBeenCalled();
       expect(transferSpy).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('neither payee nor organisation'),
+        expect.objectContaining({ errorId: expect.any(String), rowCount: 1 })
+      );
     });
 
     // Codex-2hxff.37: the ownership hand-over moves an org's held no_owner
@@ -10111,7 +10190,7 @@ describe('SubscriptionService', () => {
       expect(transferSpy).not.toHaveBeenCalled();
     });
 
-    it('groups by (orgId, userId) — N rows for one Connect account → one accounts.retrieve, one resolvePendingPayouts', async () => {
+    it('claims by payee — N rows for one Connect account → one accounts.retrieve, one payee-wide drain', async () => {
       await clearPayoutsLedger(db);
 
       const { org, sub, stripeAccountId } =
@@ -10158,7 +10237,7 @@ describe('SubscriptionService', () => {
       const retrieveSpy = stubAccountsRetrieve(true);
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
-      const resolveSpy = vi.spyOn(service, 'resolvePendingPayouts');
+      const resolveSpy = vi.spyOn(service, 'resolvePendingPayoutsForAccount');
 
       const result = await service.sweepUnresolvedPayouts(15);
 
@@ -10167,10 +10246,10 @@ describe('SubscriptionService', () => {
       // One Stripe accounts.retrieve per Connect account, not per row
       expect(retrieveSpy).toHaveBeenCalledTimes(1);
       expect(retrieveSpy).toHaveBeenCalledWith(stripeAccountId);
-      // One resolvePendingPayouts per group, not per row
+      // One drain per payee, not per row, and for every organisation
       expect(resolveSpy).toHaveBeenCalledTimes(1);
-      expect(resolveSpy).toHaveBeenCalledWith(org.id, stripeAccountId);
-      // Three transfers because resolvePendingPayouts processes 3 rows
+      expect(resolveSpy).toHaveBeenCalledWith(stripeAccountId);
+      // Three transfers because the drain processes 3 rows
       expect(transferSpy).toHaveBeenCalledTimes(3);
 
       resolveSpy.mockRestore();
@@ -12563,7 +12642,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'month',
-      stripeMessage: 'Your card was declined.',
       prorationDate: 1_700_000_000,
       tierIdAtCommit: 'tier_789',
     });
@@ -12577,7 +12655,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'month',
-      stripeMessage: 'Your card was declined.',
       prorationDate: 1_700_000_000,
       tierIdAtCommit: 'tier_789',
     });
@@ -12589,7 +12666,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'year',
-      stripeMessage: 'Insufficient funds.',
     });
 
     expect(err.context).toMatchObject({
@@ -12597,7 +12673,6 @@ describe('SubscriptionPaymentRequiredError', () => {
       organizationId: 'org_456',
       newTierId: 'tier_789',
       billingInterval: 'year',
-      stripeMessage: 'Insufficient funds.',
     });
     expect(err.context?.prorationDate).toBeUndefined();
     expect(err.context?.tierIdAtCommit).toBeUndefined();

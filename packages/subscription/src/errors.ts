@@ -114,6 +114,10 @@ export class SubscriptionCheckoutError extends BusinessLogicError {
  * — exposed so the dialog can correlate the error to the specific row
  * the user clicked (defensive: the dialog could in principle be open on
  * a different tier by the time the error returns).
+ *
+ * The context is sent to the client verbatim as `details`, so it never carries
+ * Stripe's raw message (Codex-2hxff.23, SEC-02). The thrower logs that through
+ * obs with an errorId instead.
  */
 export interface SubscriptionPaymentRequiredErrorContext
   extends Record<string, unknown> {
@@ -121,7 +125,10 @@ export interface SubscriptionPaymentRequiredErrorContext
   organizationId: string;
   newTierId: string;
   billingInterval: 'month' | 'year';
-  stripeMessage: string;
+  /** Matches the log line that holds Stripe's own message. */
+  errorId?: string;
+  /** Banned: the index signature would otherwise accept it again. */
+  stripeMessage?: never;
   prorationDate?: number;
   tierIdAtCommit?: string;
 }

@@ -35,6 +35,7 @@ export {
   AgreementService,
   type AgreementServiceConfig,
   type AgreementTemplateName,
+  type AgreementWithShare,
   agreementsInForce,
   type CounterProposeInput,
   creatorShareFromLegacyOrgFee,

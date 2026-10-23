@@ -13,7 +13,8 @@
  * `ctx.user.id`) — one Connect account per user, no org context (Codex-69t7c.3):
  * - POST /connect/me/onboard   - Create/reuse the creator's account + onboarding URL
  * - GET  /connect/me/status    - Get the creator's account status
- * - POST /connect/me/sync      - Force sync, return refreshed status payload
+ * - POST /connect/me/sync      - Force sync, return refreshed status payload;
+ *                                drain pending payouts if payable
  * - POST /connect/me/dashboard - Get the creator's Express dashboard link
  */
 
@@ -115,6 +116,11 @@ app.get(
  * Note: the returned status is best-effort — a `requirements: null` can mean
  * "no outstanding requirements" OR "the live Stripe read degraded"; surfacing
  * that distinction is tracked in Codex-y2htq.
+ *
+ * When the synced account is payable, everything the creator is owed is paid
+ * out after the response (Codex-2hxff.13), as `account.updated` does. It runs
+ * on every payable sync, not only on a change: a row already paid, or claimed
+ * by another drain, is skipped, so a repeat sends nothing twice.
  */
 app.post(
   '/me/sync',
@@ -124,7 +130,25 @@ app.post(
       rateLimit: 'strict',
     },
     handler: async (ctx) => {
-      await ctx.services.connect.syncAccountStatusForUser(ctx.user.id);
+      const account = await ctx.services.connect.syncAccountStatusForUser(
+        ctx.user.id
+      );
+      if (account?.chargesEnabled && account.payoutsEnabled) {
+        // `background`, not `waitUntil`: the drain uses the database, which
+        // procedure()'s cleanup would otherwise close under it.
+        const { stripeAccountId } = account;
+        ctx.background(
+          ctx.services.subscription
+            .resolvePendingPayoutsForAccount(stripeAccountId)
+            .catch((error: unknown) => {
+              ctx.obs?.error('Failed to resolve pending payouts after sync', {
+                errorId: crypto.randomUUID(),
+                accountId: stripeAccountId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            })
+        );
+      }
       return await ctx.services.connect.getStatusForUser(ctx.user.id);
     },
   })

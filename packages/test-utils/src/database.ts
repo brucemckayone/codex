@@ -215,6 +215,12 @@ export async function cleanupDatabase(db: Database): Promise<void> {
   await db.delete(schema.payoutReversals);
   await db.delete(schema.payouts);
   await db.delete(schema.purchases);
+  // Codex-2hxff.23: subscriptions, course subscriptions and the legacy
+  // pending_payouts RESTRICT their user, organisation and course (money
+  // history is never deleted with its owner), so they go before all three.
+  await db.delete(schema.pendingPayouts);
+  await db.delete(schema.courseSubscriptions);
+  await db.delete(schema.subscriptions);
   await db.delete(schema.contentAccess);
   // Codex-tnft0 (WP-2 of Codex-nk4km): agreement_proposals is referenced by
   // creator_organization_agreements.current_proposal_id (onDelete: 'set null')
@@ -261,6 +267,12 @@ export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   await db.delete(schema.payoutReversals);
   await db.delete(schema.payouts);
   await db.delete(schema.purchases);
+  // Codex-2hxff.23: subscriptions, course subscriptions and the legacy
+  // pending_payouts RESTRICT their user, organisation and course (money
+  // history is never deleted with its owner), so they go before all three.
+  await db.delete(schema.pendingPayouts);
+  await db.delete(schema.courseSubscriptions);
+  await db.delete(schema.subscriptions);
   await db.delete(schema.contentAccess);
   // Codex-tnft0 (WP-2 of Codex-nk4km): agreement_proposals is referenced by
   // creator_organization_agreements.current_proposal_id (onDelete: 'set null')
@@ -320,7 +332,11 @@ export async function cleanupTables(
     users: schema.users,
   };
 
-  // Delete in correct order to respect foreign keys
+  // Delete in correct order to respect foreign keys. Money rows (purchases,
+  // subscriptions, course subscriptions, payouts) RESTRICT their user,
+  // organisation and course (Codex-2hxff.23), so a database holding any of
+  // them refuses these deletes with 23503; use cleanupDatabaseComplete,
+  // which deletes them first.
   const orderedTables = [
     'content',
     'mediaItems',

@@ -6,6 +6,7 @@
  */
 
 import { isForeignStripeEnvironment } from '@codex/constants';
+import { UnsupportedCurrencyError } from '@codex/service-errors';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -118,6 +119,26 @@ export function createWebhookHandler(
         return c.json({ error: 'Temporary failure' }, 500);
       }
 
+      // A payment in a currency the platform does not take was refused before
+      // anything was written (assertGbpOnly, Codex-2hxff.23 PAY-25): the
+      // buyer has paid and nothing records it. A redelivery cannot change
+      // that, so it is acknowledged, but a person must refund it or record it
+      // by hand, so it is an error with an id support can quote.
+      const unsupported = findUnsupportedCurrency(error);
+      if (unsupported) {
+        obs?.error(
+          `${eventType} webhook: a payment in an unsupported currency was not recorded`,
+          {
+            errorId: crypto.randomUUID(),
+            currency: unsupported.received,
+            eventType: event.type,
+            eventId: event.id,
+            ...(unsupported.context ?? {}),
+          }
+        );
+        return c.json({ received: true }, 200);
+      }
+
       // Permanent failure — acknowledge receipt to prevent futile retries
       obs?.warn(`${eventType} webhook permanent error (acknowledged)`, {
         error: err.message,
@@ -128,4 +149,16 @@ export function createWebhookHandler(
       return c.json({ received: true }, 200);
     }
   };
+}
+
+/** The UnsupportedCurrencyError behind `error`, through any `cause` wraps. */
+function findUnsupportedCurrency(
+  error: unknown
+): UnsupportedCurrencyError | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current; depth++) {
+    if (current instanceof UnsupportedCurrencyError) return current;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
 }

@@ -59,6 +59,7 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  isGbpOrUnset,
   issueRefund,
   type LedgerDeps,
   recordPlatformFee,
@@ -1114,7 +1115,7 @@ export class CourseSubscriptionService extends BaseService {
       const email = user.email;
       return await this.checkoutReservations.create(reserved, () =>
         withStaleCustomerRecovery(
-          { db: this.db, stripe: this.stripe },
+          { db: this.db, stripe: this.stripe, obs: this.obs },
           { userId, email, environment: this.environment },
           (stripeCustomerId) =>
             this.stripe.checkout.sessions.create(
@@ -1208,9 +1209,21 @@ export class CourseSubscriptionService extends BaseService {
         'type' in error &&
         (error as { type?: string }).type === 'StripeInvalidRequestError'
       ) {
-        throw new SubscriptionCheckoutError('Checkout session not found', {
-          stripeError: error.message,
+        // The context is sent to the client verbatim, so Stripe's own message
+        // is logged here instead (Codex-2hxff.23 SEC-02). The session id came
+        // from the client (a stale or invented success URL), so it is a
+        // warning; any other failure reaches handleError, at error.
+        const errorId = crypto.randomUUID();
+        this.obs.warn('Course checkout session could not be retrieved', {
+          errorId,
           sessionId,
+          userId,
+          code: stripeErrorCode(error),
+          error: error.message,
+        });
+        throw new SubscriptionCheckoutError('Checkout session not found', {
+          sessionId,
+          errorId,
         });
       }
       this.handleError(error, 'verifyCheckoutSession');
@@ -1885,14 +1898,21 @@ export class CourseSubscriptionService extends BaseService {
       }
     }
 
-    // GBP-only: the fan-out is hardcoded to GBP transfers (same invariant as
-    // the org-subscription pipeline). Reject a non-GBP invoice loudly.
-    if (stripeInvoice.currency && stripeInvoice.currency !== CURRENCY.GBP) {
-      this.obs.error('Non-GBP course subscription invoice — skipping payouts', {
-        courseSubscriptionId: row.id,
-        invoiceId: stripeInvoice.id,
-        currency: stripeInvoice.currency,
-      });
+    // GBP-only: every slice is transferred in pounds (Codex-2hxff.23 PAY-25).
+    // The subscriber paid, so the renewal above stands and they keep access;
+    // only the payouts are refused, and a person settles them by hand. (A
+    // tier invoice is refused before it writes anything, but tier access
+    // follows the subscription's status, not the invoice.)
+    if (!isGbpOrUnset(stripeInvoice.currency)) {
+      this.obs.error(
+        'Non-GBP course subscription invoice: access renewed, payouts not recorded',
+        {
+          errorId: crypto.randomUUID(),
+          courseSubscriptionId: row.id,
+          invoiceId: stripeInvoice.id,
+          currency: stripeInvoice.currency,
+        }
+      );
       return result;
     }
 
@@ -2144,20 +2164,16 @@ export class CourseSubscriptionService extends BaseService {
           minTransferCents: 0,
         };
 
-    const agreementSharePercent = await findActiveCreatorAgreementShare(
-      this.db,
-      {
-        organizationId,
-        creatorId,
-        revenueType: 'subscription',
-        at: invoiceCreatedAt,
-        obs: this.obs,
-      }
-    );
-    const effectiveOrgFeePercent =
-      agreementSharePercent != null
-        ? 10_000 - agreementSharePercent
-        : fees.orgFeePercent;
+    const agreement = await findActiveCreatorAgreementShare(this.db, {
+      organizationId,
+      creatorId,
+      revenueType: 'subscription',
+      at: invoiceCreatedAt,
+      obs: this.obs,
+    });
+    const effectiveOrgFeePercent = agreement
+      ? 10_000 - agreement.sharePercent
+      : fees.orgFeePercent;
 
     const split = applyMinPlatformFeeFloor(
       amountCents,
@@ -2178,7 +2194,7 @@ export class CourseSubscriptionService extends BaseService {
       platformFeeCents: split.platformFeeCents,
       organizationFeeCents: split.organizationFeeCents,
       creatorPayoutCents: split.creatorPayoutCents,
-      agreementApplied: agreementSharePercent != null,
+      agreementApplied: agreement !== null,
       source: 'course_subscription',
     });
 
@@ -2221,6 +2237,9 @@ export class CourseSubscriptionService extends BaseService {
         payee: { userId: creatorId, account: creatorConnect },
         idempotencyKey: `${stripeChargeId}_creator`,
         metadata: { course_subscription_id: sub.id },
+        // The invoice has no row of its own, so its creator slice records the
+        // agreement it was split by (Codex-2hxff.19 AGR-06).
+        creatorOrgAgreementId: agreement?.agreementId ?? null,
       });
     }
 
