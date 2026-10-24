@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'vitest';
 import type { EnrolledCourseSummary } from '$lib/journeys/types';
-import { enrolledCourseRowEntry, resumeProgress } from './journey-entry-card';
+import {
+  enrolledCoursePortalStripEntry,
+  enrolledCourseRowEntry,
+  resumeProgress,
+} from './journey-entry-card';
 
 /**
  * `resumeProgress` — the resume rail's progress projection (Codex-tnwnu review
@@ -117,6 +121,7 @@ describe('enrolledCourseRowEntry', () => {
             ? 'Tooth Talismans'
             : overrides.nextPracticeTitle,
       },
+      disputeHold: null,
     };
   }
 
@@ -154,5 +159,62 @@ describe('enrolledCourseRowEntry', () => {
     expect(
       enrolledCourseRowEntry(summary({ nextPracticeTitle: null }), '/j').meta
     ).toBe('Next · Continue');
+  });
+
+  // A course paused by a payment dispute carries the practice rows' pause
+  // chip and dims (Codex-2hxff.60); any other course carries neither.
+  test('carries a pause label and dims only when the call site says so', () => {
+    const plain = enrolledCourseRowEntry(summary(), '/j');
+    expect(plain.accessLabel).toBeNull();
+    expect(plain.dimmed).toBe(false);
+
+    const paused = enrolledCourseRowEntry(summary(), '/j', {
+      accessLabel: 'Paused: payment dispute',
+      dimmed: true,
+    });
+    expect(paused.accessLabel).toBe('Paused: payment dispute');
+    expect(paused.dimmed).toBe(true);
+  });
+});
+
+describe('enrolledCoursePortalStripEntry', () => {
+  test('forwards the pause from its extras, and is undimmed by default', () => {
+    const base = {
+      course: {
+        id: 'c-1',
+        slug: 'rootwork',
+        title: 'Rootwork',
+        organizationSlug: 'acme',
+        kicker: null,
+        lede: null,
+        guideName: null,
+        coverImageUrl: null,
+      },
+      enrollment: {
+        courseId: 'c-1',
+        enrolledAt: '2026-07-01T00:00:00.000Z',
+        lastActivityAt: null,
+        completedAt: null,
+      },
+      enrollmentSource: 'course_purchase',
+      progress: {
+        done: 1,
+        total: 12,
+        percent: 8,
+        status: 'in-progress',
+        lastCompletedAt: null,
+        nextPracticeSlug: null,
+        nextPracticeTitle: null,
+      },
+      disputeHold: 'purchase_dispute',
+    } satisfies EnrolledCourseSummary;
+
+    expect(enrolledCoursePortalStripEntry(base, '/j').dimmed).toBe(false);
+    const paused = enrolledCoursePortalStripEntry(base, '/j', {
+      accessLabel: 'Paused: payment dispute',
+      dimmed: true,
+    });
+    expect(paused.dimmed).toBe(true);
+    expect(paused.accessLabel).toBe('Paused: payment dispute');
   });
 });

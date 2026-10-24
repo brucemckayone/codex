@@ -192,6 +192,14 @@ export interface EnrolledCourseProgress {
 }
 
 /**
+ * The open payment dispute that holds back a reader's course (Codex-2hxff.60):
+ * on the course purchase or on the course subscription. The kind only, never a
+ * date. The worker sends it on the enrolled-course summary and on a refused
+ * can-enter.
+ */
+export type CourseDisputeHold = 'purchase_dispute' | 'subscription_dispute';
+
+/**
  * One enrolled course as the member LIBRARY "Your journeys" shelf reads it
  * (SPEC §8.4). FE-facing twin of `@codex/shared-types`' `EnrolledCourseSummary`
  * (the content-api serialises the structurally-identical shape). Strictly
@@ -219,4 +227,11 @@ export interface EnrolledCourseSummary {
   /** `course_enrollments.source` (e.g. `course_purchase`) → access badge. */
   enrollmentSource: string;
   progress: EnrolledCourseProgress;
+  /**
+   * Set while an open payment dispute on the course purchase or the course
+   * subscription holds back this grant and nothing else opens the course
+   * (Codex-2hxff.60): the shelf dims the card and labels it, exactly when the
+   * course's lessons show the dispute notice. The kind only. `null` otherwise.
+   */
+  disputeHold: CourseDisputeHold | null;
 }

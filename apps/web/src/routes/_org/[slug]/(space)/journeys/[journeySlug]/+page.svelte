@@ -125,6 +125,8 @@
       coursePage: data.coursePage,
       sellPreview: data.sellPreview,
       enrolled: renderEnrolled,
+      // A visitor's page under `?preview`, like `enrolled` (Codex-2hxff.60).
+      disputeHold: previewing ? null : (data.disputeHold ?? null),
       offer: previewing ? offerAsVisitor(data.offer) : data.offer,
       mediaBaseUrl: data.coursePage.mediaBaseUrl ?? null,
       url: page.url,

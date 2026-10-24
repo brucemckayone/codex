@@ -6,15 +6,18 @@
 
     buy         → the creator's label (or "Join now") to the checkout
     continue    → "Continue" to the member's dashboard; sales small print hidden
+    paused      → the dispute notice and "Contact support", never a checkout
+                  link (Codex-2hxff.60)
     unavailable → an explicit notice where the button would be
 
   The second link is navigation, not a sale, so it stays in every state.
 -->
 <script lang="ts">
+  import { supportMailto } from '$lib/utils/support-mailto';
   import { safeHref } from '../../render/safe-href';
   import type { JourneySalesContext } from '../../render/types';
   import { COPY } from '../model/copy';
-  import { resolvePrimaryCta } from '../model/cta';
+  import { pausedLine, resolvePrimaryCta } from '../model/cta';
   import type { SectionTypeId } from '../model/ids';
   import type { BlockEdit } from '../model/types';
   import Button from './Button.svelte';
@@ -56,10 +59,19 @@
 <div class="lp-actions {className ?? ''}" data-align={align}>
   {#if cta.state === 'unavailable'}
     <Notice title={COPY.cta.unavailableTitle} body={COPY.cta.unavailableBody} />
+  {:else if cta.state === 'paused' && context.disputeHold}
+    <Notice title={COPY.cta.pausedTitle} body={pausedLine(context.disputeHold)} />
   {/if}
-  {#if cta.href || secondaryLabel}
+  {#if cta.href || cta.state === 'paused' || secondaryLabel}
     <div class="lp-actions__row">
-      {#if cta.href}
+      {#if cta.state === 'paused'}
+        <Button
+          href={supportMailto('Access issue')}
+          label={COPY.cta.contactSupport}
+          {size}
+          {section}
+        />
+      {:else if cta.href}
         <Button
           href={cta.href}
           label={cta.label}

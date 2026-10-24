@@ -26,6 +26,15 @@ export const DOMAINS = {
   LOCAL: 'localhost',
 } as const;
 
+/**
+ * The address every "Contact support" link mails (owner decision 2026-10-24,
+ * Codex-2hxff.60). One constant, so a change is one edit. A literal rather
+ * than built from `DOMAINS.PROD`: the platform domain may change, and the
+ * mailbox does not move with it. Confirming that the mailbox exists and is
+ * read before production is Codex-5vvwj.1.
+ */
+export const PLATFORM_SUPPORT_EMAIL = 'support@revelations.studio';
+
 // ---------------------------------------------------------------------------
 // Infrastructure hostname axes
 // ---------------------------------------------------------------------------

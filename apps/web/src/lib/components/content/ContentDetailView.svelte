@@ -47,6 +47,7 @@
     formatDurationHuman,
     formatSentenceDate,
   } from '$lib/utils/format';
+  import { supportMailto } from '$lib/utils/support-mailto';
   import { PriceBadge } from '$lib/components/ui/PriceBadge';
   import {
     LockIcon,
@@ -1116,7 +1117,7 @@
                   : m.access_paused_dispute_subscription()}
               </span>
             </div>
-            <a href="mailto:support@codex.example?subject=Access%20issue" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+            <a href={supportMailto('Access issue')} class="content-detail__purchase-btn content-detail__purchase-btn--link">
               {m.access_contact_support()}
             </a>
           </section>
@@ -1245,7 +1246,7 @@
                   <p class="content-detail__purchase-error-text">{formResult.checkoutError}</p>
                   {#if (formResult?.retryCount ?? 0) >= 3}
                     <p class="content-detail__purchase-error-escalation">
-                      Still stuck? <a href="mailto:support@codex.example?subject=Checkout%20help">Contact support</a>.
+                      Still stuck? <a href={supportMailto('Checkout help')}>Contact support</a>.
                     </p>
                   {/if}
                 </div>

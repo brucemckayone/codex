@@ -37,6 +37,11 @@
   } from '$lib/components/journeys/journey-entry-card';
   import type { EnrolledCourseSummary } from '$lib/journeys/types';
   import { filterLibraryItemsByOrg } from '$lib/library/filter-by-org';
+  import {
+    getEnrolledCourseAccessState,
+    getLibraryDisputeState,
+  } from '$lib/subscription/library-access';
+  import * as m from '$paraglide/messages';
   import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
 
   let { data } = $props();
@@ -175,9 +180,24 @@
     }
   };
   /**
+   * Is this owned item paused by an open payment dispute on its purchase? The
+   * platform library's rule (Codex-2hxff.60): the row stays, dimmed, and says
+   * so, and its link opens the item's page, which explains.
+   */
+  const isDisputePaused = (item: LibraryItem): boolean =>
+    getLibraryDisputeState({
+      accessType: item.accessType,
+      organizationSlug: item.content?.organizationSlug ?? null,
+      purchaseDisputedAt: item.purchase?.disputedAt ?? null,
+    }).kind === 'disputed';
+
+  /**
    * The badge an owned row carries.
    *
-   * Portal PROVENANCE wins over access route. A practice inside a portal is
+   * A dispute pause wins over everything: the row will not open until the
+   * dispute is settled, and nothing else on it says so.
+   *
+   * Then portal PROVENANCE wins over access route. A practice inside a portal is
    * almost always ALSO reachable some other way (an owner reaches everything
    * "via membership"), so showing the access route there would bury the more
    * useful fact — that opening this practice means stepping into a portal, and
@@ -185,6 +205,9 @@
    * several portals, which `stage_practices` permits.
    */
   const ownedBadge = (item: LibraryItem): Badge | null => {
+    if (isDisputePaused(item)) {
+      return { cls: 'paused', label: m.access_paused_dispute_label() };
+    }
     const portals = item.journeys ?? [];
     const first = portals[0];
     if (first) {
@@ -235,6 +258,16 @@
     c.progress.nextPracticeSlug
       ? `${buildJourneyUrl(page.url, journeyUrlTarget(c))}/practice/${c.progress.nextPracticeSlug}`
       : journeyDashboardHref(c);
+
+  /**
+   * A course whose purchase or subscription has an open payment dispute
+   * (Codex-2hxff.60): its card stays, dimmed, with the library's label, and
+   * the label replaces the access chip. The library's own rule decides it.
+   * It still opens the dashboard, which sends a refused reader to the sales
+   * page, where every Buy and Join slot shows the dispute notice instead.
+   */
+  const isCoursePaused = (c: EnrolledCourseSummary): boolean =>
+    getEnrolledCourseAccessState(c).kind === 'disputed';
 
   // ── Filter state ─────────────────────────────────────────────────────────
   let facetKind = $state<'all' | 'inprogress' | 'journeys' | 'type'>('all');
@@ -371,12 +404,17 @@
   </span>
 {/snippet}
 
-<!-- One portal in the "Your portals" carousel. -->
+<!-- One portal in the "Your portals" carousel. A paused one says so in place
+     of its access chip (Codex-2hxff.60). -->
 {#snippet portalCard(c: EnrolledCourseSummary)}
   {@const badge = badgeFor(c.enrollmentSource)}
+  {@const paused = isCoursePaused(c)}
   <JourneyEntryCard
     {...enrolledCoursePortalStripEntry(c, journeyDashboardHref(c), {
-      accessLabel: badge?.label ?? null,
+      accessLabel: paused
+        ? m.access_paused_dispute_label()
+        : (badge?.label ?? null),
+      dimmed: paused,
     })}
   />
 {/snippet}
@@ -474,30 +512,40 @@
         -->
         <div class="cont">
           {#each continueJourneys as c (c.course.id)}
+            {@const paused = isCoursePaused(c)}
             <JourneyEntryCard
-              {...enrolledCourseRowEntry(c, journeyResumeHref(c))}
+              {...enrolledCourseRowEntry(c, journeyResumeHref(c), {
+                accessLabel: paused ? m.access_paused_dispute_label() : null,
+                dimmed: paused,
+              })}
             />
           {/each}
           {#each continueMedia as item (item.content?.id)}
-            {@const m = typeMeta(item.content?.contentType)}
+            {@const kind = typeMeta(item.content?.contentType)}
             {@const pos = item.progress?.positionSeconds ?? 0}
             {@const dur = item.progress?.durationSeconds ?? 0}
             {@const href = buildContentUrl(page.url, item.content)}
+            {@const paused = isDisputePaused(item)}
             <!--
               `resumeProgress` returns NULL, not 0%, when the duration is
               unknown — see its doc comment. Every item in this rail has been
               started, so a determinate "0%" bar would be a false claim about
               something demonstrably in progress.
+
+              A purchase paused by a payment dispute stays, dimmed and labelled
+              (Codex-2hxff.60); its link opens the page that explains.
             -->
             <JourneyEntryCard
               {href}
               title={item.content?.title ?? ''}
-              kicker={m.label}
+              kicker={kind.label}
               meta={`${fmtTime(pos)}${dur > 0 ? ` of ${fmtTime(dur)}` : ''}`}
               coverImageUrl={item.content?.thumbnailUrl ?? null}
               layout="row"
               cta="Resume"
               progress={resumeProgress(pos, dur)}
+              accessLabel={paused ? m.access_paused_dispute_label() : null}
+              dimmed={paused}
             />
           {/each}
         </div>
@@ -623,16 +671,20 @@
               {/if}
               <div class="rows">
                 {#each group.items as item (item.content?.id)}
-                  {@const m = typeMeta(item.content?.contentType)}
+                  {@const kind = typeMeta(item.content?.contentType)}
                   {@const badge = ownedBadge(item)}
                   {@const opened = relativeTime(
                     item.progress?.updatedAt ?? item.purchase?.purchasedAt
                   )}
-                  <a class="row" href={buildContentUrl(page.url, item.content)}>
-                    {@render motif(item.content?.title ?? '', m.glyph)}
+                  <a
+                    class="row"
+                    class:row--paused={isDisputePaused(item)}
+                    href={buildContentUrl(page.url, item.content)}
+                  >
+                    {@render motif(item.content?.title ?? '', kind.glyph)}
                     <span class="row__t">
                       <span class="row__title">{item.content?.title}</span>
-                      <span class="row__meta">{m.label}</span>
+                      <span class="row__meta">{kind.label}</span>
                     </span>
                     {#if badge}
                       <!-- Sits NEXT TO the title, not at the far right edge:
@@ -1151,6 +1203,20 @@
     color: var(--lib-accent);
     background: color-mix(in oklab, var(--lib-accent) 12%, transparent);
     border-color: color-mix(in oklab, var(--lib-accent) 30%, transparent);
+  }
+  /* Paused by a payment dispute (Codex-2hxff.60). The status tokens derive
+     from the page's own surface, so the chip reads on a light or dark org. */
+  .badge--paused {
+    color: var(--color-status-warning-text);
+    background: var(--color-status-warning-surface);
+    border-color: var(--color-status-warning-border);
+  }
+  /* Its row dims, as a paused library card does: opacity, not colour. The
+     badge stays at full strength, because it says why. */
+  .row--paused .thumb,
+  .row--paused .row__t,
+  .row--paused .row__opened {
+    opacity: var(--opacity-60);
   }
   /*
     Provenance chips carry a PROPER NOUN — the portal's title — where every

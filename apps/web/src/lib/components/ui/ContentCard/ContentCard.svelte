@@ -1148,6 +1148,16 @@
     pointer-events: auto;
   }
 
+  /* A resume card's body sits BELOW its cover, so the band, pinned to the
+     card's bottom edge, covered the resume button. The disputed label is
+     always shown, so on a resume card it joins the flow instead, directly
+     under the cover (its place in the markup) (Codex-2hxff.60). */
+  .cc[data-variant='resume'] .cc__access-cta[data-access-cta='disputed'] {
+    position: static;
+    margin-top: var(--space-2);
+    border-radius: var(--radius-md);
+  }
+
   .cc__access-cta:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: calc(-1 * var(--border-width-thick));

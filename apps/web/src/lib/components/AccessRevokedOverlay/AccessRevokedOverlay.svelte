@@ -27,6 +27,7 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import type { AccessRevocationReason } from '$lib/server/content-detail';
+  import { supportMailto } from '$lib/utils/support-mailto';
   import type { Component } from 'svelte';
 
   interface Props {
@@ -139,7 +140,7 @@
       return;
     }
     if (action === 'support') {
-      window.location.href = 'mailto:support@codex.example?subject=Access%20issue';
+      window.location.href = supportMailto('Access issue');
       return;
     }
     if (action === 'reactivate') {

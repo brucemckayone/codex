@@ -12,13 +12,20 @@ import type { InCoursePracticeData } from '$lib/journeys/types';
  * the `sanitizeContentHtml` call from the seam makes these assertions fail.
  */
 
-const { inCoursePractice } = vi.hoisted(() => ({ inCoursePractice: vi.fn() }));
-
-vi.mock('$lib/server/api', () => ({
-  createServerApi: () => ({ access: { inCoursePractice } }),
+const { inCoursePractice, courseEntry } = vi.hoisted(() => ({
+  inCoursePractice: vi.fn(),
+  courseEntry: vi.fn(),
 }));
 
-import { fetchInCoursePractice } from '../round-d-seam';
+vi.mock('$lib/server/api', () => ({
+  createServerApi: () => ({ access: { inCoursePractice, courseEntry } }),
+}));
+
+import {
+  fetchInCoursePractice,
+  resolveCanEnterCourse,
+  resolveCourseEntry,
+} from '../round-d-seam';
 
 const ctx = {} as Parameters<typeof fetchInCoursePractice>[0];
 
@@ -95,5 +102,36 @@ describe('fetchInCoursePractice', () => {
     );
 
     expect(result).toBeNull();
+  });
+});
+
+// The can-enter read, whole and as a boolean (Codex-2hxff.60): the sales page
+// and the in-course player need the refusal's `disputeHold`; the dashboard
+// needs only `canEnter`.
+describe('resolveCourseEntry / resolveCanEnterCourse', () => {
+  beforeEach(() => {
+    courseEntry.mockReset();
+  });
+
+  it('returns the whole response, dispute included', async () => {
+    courseEntry.mockResolvedValue({
+      canEnter: false,
+      disputeHold: 'subscription_dispute',
+    });
+    expect(await resolveCourseEntry(ctx, 'u1', 'course-1')).toEqual({
+      canEnter: false,
+      disputeHold: 'subscription_dispute',
+    });
+    expect(courseEntry).toHaveBeenCalledWith('course-1');
+  });
+
+  it('keeps the bare boolean for the gates that need only that', async () => {
+    courseEntry.mockResolvedValue({ canEnter: true, disputeHold: null });
+    expect(await resolveCanEnterCourse(ctx, 'u1', 'course-1')).toBe(true);
+    courseEntry.mockResolvedValue({
+      canEnter: false,
+      disputeHold: 'purchase_dispute',
+    });
+    expect(await resolveCanEnterCourse(ctx, 'u1', 'course-1')).toBe(false);
   });
 });

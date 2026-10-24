@@ -318,7 +318,9 @@ describe('AccessRevokedOverlay: a payment dispute', () => {
     flushSync();
 
     expect(hrefSpy).toHaveBeenCalledTimes(1);
-    expect(hrefSpy.mock.calls[0][0]).toMatch(/^mailto:/);
+    expect(hrefSpy.mock.calls[0][0]).toBe(
+      'mailto:support@revelations.studio?subject=Access%20issue'
+    );
     expect(vi.mocked(openBillingPortal)).not.toHaveBeenCalled();
     expect(vi.mocked(reactivateSubscription)).not.toHaveBeenCalled();
   });

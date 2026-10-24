@@ -80,17 +80,21 @@ const MOCK_OFFER = {
   entitled: false,
 } satisfies CourseOffer;
 
+/** The can-enter read's two answers with no dispute (Codex-2hxff.60). */
+const REFUSED = { canEnter: false, disputeHold: null };
+const ENTERED = { canEnter: true, disputeHold: null };
+
 const {
   getCoursePageMock,
   getCoursePagePreviewMock,
   resolveSellPreviewMock,
-  resolveCanEnterCourseMock,
+  resolveCourseEntryMock,
   offerMock,
 } = vi.hoisted(() => ({
   getCoursePageMock: vi.fn(),
   getCoursePagePreviewMock: vi.fn(),
   resolveSellPreviewMock: vi.fn(),
-  resolveCanEnterCourseMock: vi.fn(),
+  resolveCourseEntryMock: vi.fn(),
   offerMock: vi.fn(),
 }));
 
@@ -108,7 +112,7 @@ vi.mock('$lib/server/api', () => ({
 // → dashboard). Mocked so the load's CTA-branch wiring is tested without a
 // content-api round-trip.
 vi.mock('$lib/server/journeys/round-d-seam', () => ({
-  resolveCanEnterCourse: resolveCanEnterCourseMock,
+  resolveCourseEntry: resolveCourseEntryMock,
 }));
 
 // NOTE: `$lib/server/cache` is intentionally NOT mocked — the assertion below
@@ -158,7 +162,7 @@ describe('journey sales +page.server load', () => {
     getCoursePageMock.mockResolvedValue(MOCK_COURSE_PAGE);
     getCoursePagePreviewMock.mockResolvedValue(null);
     resolveSellPreviewMock.mockResolvedValue(MOCK_SELL_PREVIEW);
-    resolveCanEnterCourseMock.mockResolvedValue(false);
+    resolveCourseEntryMock.mockResolvedValue(REFUSED);
     offerMock.mockResolvedValue(MOCK_OFFER);
   });
 
@@ -530,11 +534,11 @@ describe('journey sales +page.server load', () => {
     // No session ⇒ definitionally not enrolled; the worker round-trip is skipped
     // entirely so the SEO-critical anonymous path never blocks on it.
     expect(data.enrolled).toBe(false);
-    expect(resolveCanEnterCourseMock).not.toHaveBeenCalled();
+    expect(resolveCourseEntryMock).not.toHaveBeenCalled();
   });
 
   it('resolves enrolled=true for an entitled member (CTA → dashboard)', async () => {
-    resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+    resolveCourseEntryMock.mockResolvedValueOnce(ENTERED);
     const { load } = await import('../+page.server');
     // `preview=1` so the load RETURNS rather than 303-ing to the dashboard
     // (Codex-aectb) — this case is about the flag the CTA reads, and the preview
@@ -543,7 +547,7 @@ describe('journey sales +page.server load', () => {
 
     const data = (await load(event)) as LoadData;
 
-    expect(resolveCanEnterCourseMock).toHaveBeenCalledWith(
+    expect(resolveCourseEntryMock).toHaveBeenCalledWith(
       expect.anything(),
       'user-1',
       MOCK_COURSE_PAGE.course.id
@@ -552,7 +556,7 @@ describe('journey sales +page.server load', () => {
   });
 
   it('degrades to enrolled=false when the entitlement check throws', async () => {
-    resolveCanEnterCourseMock.mockRejectedValueOnce(new Error('resolver down'));
+    resolveCourseEntryMock.mockRejectedValueOnce(new Error('resolver down'));
     const { load } = await import('../+page.server');
     const { event } = makeEvent('rootwork', { id: 'user-1' });
 
@@ -561,6 +565,36 @@ describe('journey sales +page.server load', () => {
     // A resolver hiccup must never throw the SEO-critical load — it degrades to
     // the public/join CTA.
     expect(data.enrolled).toBe(false);
+    expect(data.disputeHold).toBeNull();
+  });
+
+  // A disputed owner (Codex-2hxff.60): the refused can-enter names the
+  // dispute, and the load hands it to the page, which then offers no Buy or
+  // Join. It still renders the page: a refusal never redirects.
+  it.each([
+    'purchase_dispute',
+    'subscription_dispute',
+  ] as const)('returns the %s that refuses a disputed owner', async (hold) => {
+    resolveCourseEntryMock.mockResolvedValueOnce({
+      canEnter: false,
+      disputeHold: hold,
+    });
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork', { id: 'user-1' });
+
+    const data = (await load(event)) as LoadData;
+
+    expect(data.enrolled).toBe(false);
+    expect(data.disputeHold).toBe(hold);
+  });
+
+  it('returns no dispute for an anonymous visitor', async () => {
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork', null);
+
+    const data = (await load(event)) as LoadData;
+
+    expect(data.disputeHold).toBeNull();
   });
 
   // ── Draft preview vs LIVE (Codex-xzwl5) ───────────────────────────────────
@@ -633,7 +667,7 @@ describe('journey sales +page.server load', () => {
     const DASHBOARD_URL = '/journeys/rootwork/dashboard';
 
     it('303s an entitled viewer to their course dashboard', async () => {
-      resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+      resolveCourseEntryMock.mockResolvedValueOnce(ENTERED);
       const { load } = await import('../+page.server');
       const { event } = makeEvent('rootwork', { id: 'user-1' });
 
@@ -654,7 +688,7 @@ describe('journey sales +page.server load', () => {
         page: { ...MOCK_COURSE_PAGE.page, slug: 'rootwork-landing' },
         course: { ...MOCK_COURSE_PAGE.course, slug: 'rootwork-course' },
       } satisfies JourneyCoursePage);
-      resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+      resolveCourseEntryMock.mockResolvedValueOnce(ENTERED);
       const { load } = await import('../+page.server');
       const { event } = makeEvent('rootwork-landing', { id: 'user-1' });
 
@@ -678,7 +712,7 @@ describe('journey sales +page.server load', () => {
         ...MOCK_COURSE_PAGE,
         course: { ...MOCK_COURSE_PAGE.course, slug: null },
       });
-      resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+      resolveCourseEntryMock.mockResolvedValueOnce(ENTERED);
       const { load } = await import('../+page.server');
       const { event } = makeEvent('rootwork', { id: 'user-1' });
 
@@ -698,11 +732,11 @@ describe('journey sales +page.server load', () => {
       expect(data.coursePage).toBe(MOCK_COURSE_PAGE);
       expect(data.enrolled).toBe(false);
       // The SEO-critical anonymous path never pays for the worker round-trip.
-      expect(resolveCanEnterCourseMock).not.toHaveBeenCalled();
+      expect(resolveCourseEntryMock).not.toHaveBeenCalled();
     });
 
     it('renders the sales page for a signed-in visitor who is NOT entitled', async () => {
-      resolveCanEnterCourseMock.mockResolvedValueOnce(false);
+      resolveCourseEntryMock.mockResolvedValueOnce(REFUSED);
       const { load } = await import('../+page.server');
       const { event } = makeEvent('rootwork', { id: 'window-shopper' });
 
@@ -713,7 +747,7 @@ describe('journey sales +page.server load', () => {
     });
 
     it('renders the sales page for an entitled viewer when ?preview=1 is set', async () => {
-      resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+      resolveCourseEntryMock.mockResolvedValueOnce(ENTERED);
       const { load } = await import('../+page.server');
       const { event } = makeEvent('rootwork', { id: 'creator-1' }, 'preview=1');
 
@@ -734,7 +768,7 @@ describe('journey sales +page.server load', () => {
         ...MOCK_COURSE_PAGE,
         page: { ...MOCK_COURSE_PAGE.page, status: 'draft', publishedAt: null },
       } satisfies JourneyCoursePage);
-      resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+      resolveCourseEntryMock.mockResolvedValueOnce(ENTERED);
       const { load } = await import('../+page.server');
       const { event } = makeEvent('rootwork', { id: 'manager-1' }); // no ?preview
 
@@ -745,7 +779,7 @@ describe('journey sales +page.server load', () => {
     });
 
     it('renders the sales page when the entitlement resolver THROWS', async () => {
-      resolveCanEnterCourseMock.mockRejectedValueOnce(new Error('access down'));
+      resolveCourseEntryMock.mockRejectedValueOnce(new Error('access down'));
       const { load } = await import('../+page.server');
       const { event } = makeEvent('rootwork', { id: 'user-1' });
 

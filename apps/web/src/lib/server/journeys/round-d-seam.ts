@@ -16,7 +16,8 @@
  *  MAPPING (seam fn → real call)
  * ═══════════════════════════════════════════════════════════════════════════
  *   resolveCourseBySlug   → resolve org from host → api.access.courseBySlug(orgId, slug)
- *   resolveCanEnterCourse → api.access.canEnterCourse(courseId)              [WP-2]
+ *   resolveCourseEntry    → api.access.courseEntry(courseId)                 [WP-2]
+ *   resolveCanEnterCourse → resolveCourseEntry(…).canEnter
  *   resolveCanView        → api.access.canView(contentId)                   [WP-2]
  *   fetchCourseDashboard  → api.access.courseDashboard(courseId)
  *   fetchInCoursePractice → api.access.inCoursePractice(courseId, contentSlug)
@@ -32,6 +33,7 @@
  * server-only ($lib/server/*): never bundled to the client.
  */
 
+import type { CourseEntryResponse } from '@codex/access';
 import type { RequestEvent } from '@sveltejs/kit';
 import type {
   CompletionSource,
@@ -81,13 +83,27 @@ export async function resolveCourseBySlug(
   return api.access.courseBySlug(org.id, slug);
 }
 
-/** `api.access.canEnterCourse` (WP-2 resolver; worker derives the user). */
-export async function resolveCanEnterCourse(
+/**
+ * `api.access.courseEntry` (WP-2 resolver; worker derives the user): whether
+ * the user may enter, and on a refusal the open payment dispute that explains
+ * it (Codex-2hxff.60). For the surfaces that must not sell the course again
+ * to a disputed owner: the sales page and the in-course player.
+ */
+export async function resolveCourseEntry(
   ctx: SeamContext,
   _userId: string | null,
   courseId: string
+): Promise<CourseEntryResponse> {
+  return apiFor(ctx).access.courseEntry(courseId);
+}
+
+/** The boolean half of {@link resolveCourseEntry}, for gates that need only that. */
+export async function resolveCanEnterCourse(
+  ctx: SeamContext,
+  userId: string | null,
+  courseId: string
 ): Promise<boolean> {
-  return apiFor(ctx).access.canEnterCourse(courseId);
+  return (await resolveCourseEntry(ctx, userId, courseId)).canEnter;
 }
 
 /** `api.access.canView` (gates the signed stream; works unauthenticated). */

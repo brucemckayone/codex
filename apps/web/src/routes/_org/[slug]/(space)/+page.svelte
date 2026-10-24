@@ -34,6 +34,7 @@
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
   import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
+  import { getLibraryDisputeState } from '$lib/subscription/library-access';
   import { extractPlainText } from '@codex/validation';
   import {
     eq,
@@ -624,6 +625,13 @@
           ariaLabel={m.org_continue_watching_title()}
         >
           {#snippet renderItem(item)}
+            {@const access = getLibraryDisputeState({
+              accessType: item.accessType,
+              organizationSlug: item.organizationSlug,
+              purchaseDisputedAt: item.purchaseDisputedAt,
+            })}
+            <!-- A purchase paused by a payment dispute is dimmed and
+                 labelled, as in the platform library (Codex-2hxff.60). -->
             <ContentCard
               variant="resume"
               shape="16:9"
@@ -640,6 +648,7 @@
                 organizationSlug: item.organizationSlug,
               })}
               progress={item.progress}
+              accessState={access.kind}
             />
           {/snippet}
         </Carousel>

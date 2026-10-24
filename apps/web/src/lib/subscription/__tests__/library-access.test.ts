@@ -21,7 +21,9 @@
 import { describe, expect, it } from 'vitest';
 import type { SubscriptionItem } from '$lib/collections';
 import {
+  getEnrolledCourseAccessState,
   getLibraryAccessState,
+  getLibraryDisputeState,
   indexSubscriptionsBySlug,
 } from '../library-access';
 
@@ -221,5 +223,60 @@ describe('getLibraryAccessState: a payment dispute', () => {
       subs
     );
     expect(state).toEqual({ kind: 'past_due' });
+  });
+});
+
+// The org landing's "Jump back in" rail and the org library never joined the
+// subscription collection; they take the dispute part of the same rule only
+// (Codex-2hxff.60).
+describe('getLibraryDisputeState', () => {
+  it('returns disputed for a purchased item whose purchase is disputed', () => {
+    expect(
+      getLibraryDisputeState({
+        accessType: 'purchased',
+        organizationSlug: 'acme',
+        purchaseDisputedAt: '2026-10-20T09:00:00.000Z',
+      })
+    ).toEqual({ kind: 'disputed' });
+  });
+
+  it('returns active for a purchased item with no dispute', () => {
+    expect(
+      getLibraryDisputeState({
+        accessType: 'purchased',
+        organizationSlug: 'acme',
+        purchaseDisputedAt: null,
+      })
+    ).toEqual({ kind: 'active' });
+  });
+
+  it('never reads a subscription item as ended: it has no subscription rows', () => {
+    expect(
+      getLibraryDisputeState({
+        accessType: 'subscription',
+        organizationSlug: 'acme',
+        purchaseDisputedAt: null,
+      })
+    ).toEqual({ kind: 'active' });
+  });
+});
+
+// The org library's course shelf (Codex-2hxff.60): the worker's `disputeHold`
+// decides it, and the card takes the same `disputed` state.
+describe('getEnrolledCourseAccessState', () => {
+  it.each([
+    'purchase_dispute',
+    'subscription_dispute',
+  ] as const)('returns disputed while a %s holds the course back', (hold) => {
+    expect(getEnrolledCourseAccessState({ disputeHold: hold })).toEqual({
+      kind: 'disputed',
+    });
+  });
+
+  it('returns active with no hold, or from a worker that sends no field', () => {
+    expect(getEnrolledCourseAccessState({ disputeHold: null })).toEqual({
+      kind: 'active',
+    });
+    expect(getEnrolledCourseAccessState({})).toEqual({ kind: 'active' });
   });
 });

@@ -191,7 +191,10 @@ POSTGRES_ERROR_CODES // { UNIQUE_VIOLATION: '23505', FOREIGN_KEY_VIOLATION: '235
 DOMAINS              // { PROD: 'revelations.studio', STAGING: 'staging.revelations.studio', DEV_REMOTE: 'dev.revelations.studio', DEV: 'lvh.me', LOCAL: 'localhost' }
 RESERVED_SUBDOMAINS  // Array of reserved org slug names (cdn, api, auth, www, admin, etc.)
 RESERVED_SUBDOMAINS_SET  // Set<string> for O(1) lookups
+PLATFORM_SUPPORT_EMAIL   // 'support@revelations.studio': every "Contact support" mailto in apps/web
 ```
+
+**`PLATFORM_SUPPORT_EMAIL`** (owner decision 2026-10-24, Codex-2hxff.60) replaced the undeliverable `support@codex.example`. It is a literal, not built from `DOMAINS.PROD`, because the domain may change and the mailbox would not move with it. Confirm the mailbox exists and is read before production (Codex-5vvwj.1). apps/web builds its links with `supportMailto(subject)` (`$lib/utils/support-mailto.ts`), never by hand.
 
 **MUST** check `isReservedSubdomain(slug)` when validating org slugs (built into `createOrganizationSchema` in `@codex/validation`). The helper adds the `cdn-` prefix rule on top of `RESERVED_SUBDOMAINS_SET` — reading the Set directly re-opens that gap.
 
@@ -225,7 +228,7 @@ INFRA_KEYS.DATABASE  // { URL, URL_LOCAL_PROXY }
 
 ## Reference Files
 
-- `packages/constants/src/urls.ts` — `SERVICE_PORTS`, `DOMAINS`, `RESERVED_SUBDOMAINS`
+- `packages/constants/src/urls.ts` — `SERVICE_PORTS`, `DOMAINS`, `RESERVED_SUBDOMAINS`, `PLATFORM_SUPPORT_EMAIL`
 - `packages/constants/src/env.ts` — `ENV_NAMES`, `isDev`, `isDevRemote`, `validateServiceUrl`, `INFRA_KEYS` (URL building moved to `@codex/urls`)
 - `packages/constants/src/cookies.ts` — `COOKIES`, `CookieConfig` (`getCookieConfig` moved to `@codex/urls`)
 - `packages/constants/src/limits.ts` — `PAGINATION`, `FILE_SIZES`, `RATE_LIMIT_PRESETS`, `CACHE_TTL`, `CACHE_PRESETS`, `CachePresetName`, `R2_OVERWRITTEN_OBJECT_CACHE_CONTROL`

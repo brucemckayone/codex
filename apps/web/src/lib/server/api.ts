@@ -10,6 +10,7 @@
 
 import type {
   ContentHeld,
+  CourseEntryResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
@@ -1152,14 +1153,16 @@ export function createServerApi(
       // function the Phase-2 FE swaps its mock body for.
 
       /**
-       * Entitlement gate for a course dashboard/journey (SPEC §6.3). Unwraps the
-       * `{ canEnter }` envelope to the bare boolean the seam expects.
+       * Entitlement gate for a course dashboard/journey (SPEC §6.3), whole:
+       * `canEnter`, and on a refusal the `disputeHold` that explains it
+       * (Codex-2hxff.60). The seam's `resolveCanEnterCourse` keeps the bare
+       * boolean for the gates that need only that.
        */
-      canEnterCourse: (courseId: string) =>
-        request<{ canEnter: boolean }>(
+      courseEntry: (courseId: string) =>
+        request<CourseEntryResponse>(
           'access',
           `/api/access/courses/${courseId}/can-enter`
-        ).then((r) => r.canEnter),
+        ),
 
       /**
        * Entitlement check gating a signed stream (SPEC §6.3). Works

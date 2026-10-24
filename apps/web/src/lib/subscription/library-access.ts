@@ -9,6 +9,10 @@
  * Consumed by:
  *   - LibraryPageView.svelte (grid)
  *   - ContinueWatching.svelte (rail)
+ *   - through {@link getLibraryDisputeState}, the org landing's "Jump back
+ *     in" rail and the org library (rows and resume rail)
+ *   - through {@link getEnrolledCourseAccessState}, the org library's course
+ *     shelf ("Your portals" and the courses in its resume rail)
  *
  * Design constraints (P2 decoration — see bead):
  *   - Only subscription-gated entries are joined. Membership-gated items
@@ -115,7 +119,7 @@ export function indexSubscriptionsBySlug(
  */
 export function getLibraryAccessState(
   item: LibraryAccessInput,
-  subscriptionsBySlug: Map<string, SubscriptionItem>
+  subscriptionsBySlug: ReadonlyMap<string, SubscriptionItem>
 ): LibraryAccessState {
   if (item.accessType === 'purchased' && item.purchaseDisputedAt != null) {
     return { kind: 'disputed' };
@@ -147,4 +151,35 @@ export function getLibraryAccessState(
     case null:
       return { kind: 'revoked' };
   }
+}
+
+/** No subscription rows: every subscription item stays `active`. */
+const NO_SUBSCRIPTION_JOIN: ReadonlyMap<string, SubscriptionItem> = new Map();
+
+/**
+ * {@link getLibraryAccessState} for a surface that never joined the
+ * subscription collection (the org landing's "Jump back in" rail, the org
+ * library): the same rule, with no subscription rows, so the only state it
+ * can add there is `disputed` (Codex-2hxff.60). Those surfaces never showed
+ * "Subscription ended", and this does not start them doing so.
+ */
+export function getLibraryDisputeState(
+  item: LibraryAccessInput
+): LibraryAccessState {
+  return getLibraryAccessState(item, NO_SUBSCRIPTION_JOIN);
+}
+
+/**
+ * The same state for an enrolled course on the org library's course shelf
+ * (Codex-2hxff.60): `disputed` while the worker's `disputeHold` says an open
+ * payment dispute on the course purchase or the course subscription holds the
+ * grant back, so the card dims and carries the library's label. The worker
+ * sets it exactly when the course's lessons show the dispute notice, so no
+ * second rule is needed here. A missing field (a worker older than it) reads
+ * as `active`.
+ */
+export function getEnrolledCourseAccessState(course: {
+  disputeHold?: string | null;
+}): LibraryAccessState {
+  return course.disputeHold != null ? { kind: 'disputed' } : { kind: 'active' };
 }
