@@ -232,9 +232,11 @@ export interface ContentPublicnessPolicy {
  * requires `isFree` AND no gate, and a row in the database with a divergent
  * shape still reads as not public. Fail closed on disagreement.
  *
- * It is STRICTER than `decideContentAccess`
+ * For a PUBLISHED row it is STRICTER than `decideContentAccess`
  * (`packages/access/src/services/content-access/access-decision.ts`), never
- * looser: every row it calls public, the decision grants to anyone. The
+ * looser: every published row it calls public, the decision grants to anyone.
+ * It has no status input, and the decision denies an unpublished free row, so
+ * a caller must only ever pass published rows (`listPublic`'s are). The
  * decision reads five gates (price, tier, followers, team, course-only); it
  * reads neither `isPurchasable` nor `isFree`. So it grants two malformed shapes
  * this rejects: purchasable with no price, and `isFree: false` with no gate.

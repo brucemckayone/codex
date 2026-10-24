@@ -363,7 +363,9 @@ export async function loadAccessAndProgress(
  *   flag (a content-api rolled back behind this web build drops the unknown
  *   query key), so this would be the empty page again. It is logged as an
  *   error, never read as "the piece has no body" (that is `body` with both
- *   fields null).
+ *   fields null). The reader gets no note, by choice: the only way here is a
+ *   worker older than this flag, a window of one deploy after it ships, and
+ *   a broken flag on this side fails `api-stream-include.test.ts` first.
  * - Media not ready (a 422 the worker raises after access passed). The call
  *   threw, so it carried nothing: the page reads as granted, with no body
  *   until the media is ready. Narrow, since publishing needs ready media.

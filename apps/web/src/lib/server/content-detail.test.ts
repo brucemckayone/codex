@@ -445,7 +445,10 @@ describe('loadAccessWithBody (Codex-039vo)', () => {
     expect(mockLogger.error).not.toHaveBeenCalled();
   });
 
-  it('returns no body when access is denied', async () => {
+  // The contract-fault log fires only for a GRANT without a body. A denial or
+  // an outage is not that fault: logging them would put an error on every
+  // paywall view and bury the real one.
+  it('returns no body when access is denied, and logs no fault', async () => {
     streamThrows(new ApiError(403, 'denied', 'ACCESS_DENIED'));
 
     const { access, body } = await loadAccessWithBody(
@@ -457,6 +460,22 @@ describe('loadAccessWithBody (Codex-039vo)', () => {
 
     expect(access.hasAccess).toBe(false);
     expect(body).toBeNull();
+    expect(mockLogger.error).not.toHaveBeenCalled();
+  });
+
+  it('an outage is a failed check with no body, and logs no fault', async () => {
+    streamThrows(new ApiError(500, 'boom'));
+
+    const { access, body } = await loadAccessWithBody(
+      'c1',
+      undefined,
+      cookies,
+      followers
+    );
+
+    expect(access).toMatchObject({ hasAccess: false, accessCheckFailed: true });
+    expect(body).toBeNull();
+    expect(mockLogger.error).not.toHaveBeenCalled();
   });
 
   it('the fast path (loadAccessAndProgress) never asks for the body', async () => {

@@ -140,10 +140,13 @@ export async function getCachedPublishedCourses<T>(
  * write that already succeeded.
  *
  * Unlike `bumpOrgContentVersion` this does NOT touch the slug-keyed org caches
- * (public info / stats / creators). Those report `contentCount` and member
- * counts, which a portal write does not change — a portal is a course plus a
- * page, and neither is content. Invalidating them here would throw away a
- * 4-hour branding cache on every cover upload for no gain.
+ * (public info / stats / creators) or the org content collection. For a cover
+ * or page write that is right: a portal is a course plus a page, neither is
+ * content, and invalidating them would throw away a 4-hour branding cache on
+ * every cover upload for no gain. A CURRICULUM save is different: it sets
+ * `courseOnly` on the practices it links, and the creators list and public
+ * content reads exclude course-only practices (Codex-ot6vj, Codex-039vo), so
+ * it does change them. That save needs the content fan-out too (Codex-u3vil).
  *
  * Call after the DB write, also when it throws: a write can commit and still
  * report failure (Codex-kk9nv.16). Never before it (@codex/cache rules).

@@ -171,9 +171,11 @@ app.get(
     policy: {
       auth: 'required',
       rateLimit: 'streaming', // 60 req/min - allows HLS segment refreshes
-      // `private, no-store`, as the HLS playlist routes: the response carries
-      // a per-user HLS token, and with `include=body` a gated piece's body. No
-      // copy may outlive the request on any disk, the viewer's own included.
+      // `private, no-store`, as the HLS playlist routes: this response carries
+      // a per-user HLS token, and with `include=body` a gated piece's body, so
+      // no copy of IT may outlive the request on any disk. That covers this
+      // response only: the detail page that renders the body sends its own
+      // header (`CACHE_HEADERS.PRIVATE`), which keeps it out of shared caches.
       cache: 'fresh',
     },
     input: {
