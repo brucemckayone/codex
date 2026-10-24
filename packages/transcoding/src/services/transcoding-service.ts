@@ -48,6 +48,39 @@ import type {
 } from '../types';
 
 /**
+ * The columns both media reads select. `satisfies` makes it name every
+ * TranscodingMediaItem field: a field added to the type but not selected is a
+ * compile error, not an `undefined` that the `as TranscodingMediaItem` casts
+ * below would hide (the status endpoint would report a missing error code as
+ * "nothing went wrong").
+ */
+const TRANSCODING_MEDIA_COLUMNS = {
+  id: true,
+  creatorId: true,
+  mediaType: true,
+  status: true,
+  r2Key: true,
+  transcodingAttempts: true,
+  runpodJobId: true,
+  transcodingError: true,
+  transcodingErrorCode: true,
+  transcodingPriority: true,
+  hlsMasterPlaylistKey: true,
+  hlsPreviewKey: true,
+  thumbnailKey: true,
+  waveformKey: true,
+  waveformImageKey: true,
+  durationSeconds: true,
+  width: true,
+  height: true,
+  readyVariants: true,
+  mezzanineKey: true,
+  mezzanineStatus: true,
+  transcodingProgress: true,
+  transcodingStep: true,
+} as const satisfies Record<keyof TranscodingMediaItem, true>;
+
+/**
  * Extended service config for TranscodingService
  *
  * SECURITY: All storage credentials (B2 and R2) are configured in
@@ -686,6 +719,7 @@ export class TranscodingService extends BaseService {
       status: media.status,
       transcodingAttempts: media.transcodingAttempts,
       transcodingError: media.transcodingError,
+      transcodingErrorCode: media.transcodingErrorCode,
       runpodJobId: media.runpodJobId,
       transcodingPriority: media.transcodingPriority,
       transcodingProgress: media.transcodingProgress ?? null,
@@ -766,28 +800,7 @@ export class TranscodingService extends BaseService {
           eq(mediaItems.id, mediaId),
           scopedNotDeleted(mediaItems, creatorId)
         ),
-        columns: {
-          id: true,
-          creatorId: true,
-          mediaType: true,
-          status: true,
-          r2Key: true,
-          transcodingAttempts: true,
-          runpodJobId: true,
-          transcodingError: true,
-          transcodingPriority: true,
-          transcodingProgress: true,
-          transcodingStep: true,
-          hlsMasterPlaylistKey: true,
-          hlsPreviewKey: true,
-          thumbnailKey: true,
-          waveformKey: true,
-          waveformImageKey: true,
-          durationSeconds: true,
-          width: true,
-          height: true,
-          readyVariants: true,
-        },
+        columns: TRANSCODING_MEDIA_COLUMNS,
       });
 
       if (!media) {
@@ -827,28 +840,7 @@ export class TranscodingService extends BaseService {
   ): Promise<TranscodingMediaItem> {
     const media = await this.db.query.mediaItems.findFirst({
       where: and(eq(mediaItems.id, mediaId), isNull(mediaItems.deletedAt)),
-      columns: {
-        id: true,
-        creatorId: true,
-        mediaType: true,
-        status: true,
-        r2Key: true,
-        transcodingAttempts: true,
-        runpodJobId: true,
-        transcodingError: true,
-        transcodingPriority: true,
-        transcodingProgress: true,
-        transcodingStep: true,
-        hlsMasterPlaylistKey: true,
-        hlsPreviewKey: true,
-        thumbnailKey: true,
-        waveformKey: true,
-        waveformImageKey: true,
-        durationSeconds: true,
-        width: true,
-        height: true,
-        readyVariants: true,
-      },
+      columns: TRANSCODING_MEDIA_COLUMNS,
     });
 
     if (!media) {

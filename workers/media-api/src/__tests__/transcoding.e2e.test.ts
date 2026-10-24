@@ -355,7 +355,8 @@ describe('Transcoding E2E Tests', () => {
     });
 
     // Skipped: workerd sandbox can't validate sessions via Neon HTTP (hangs on DB lookup).
-    // Equivalent coverage in e2e/tests/09-media-workflow.test.ts against real workers.
+    // Not covered elsewhere at the route level (09-media-workflow reads the DB, never
+    // this route); transcoding-service.test.ts covers getTranscodingStatus' projection.
     it.skip('should return transcoding status to authenticated user (GET /api/transcoding/status/:id)', async () => {
       /**
        * Test Flow:

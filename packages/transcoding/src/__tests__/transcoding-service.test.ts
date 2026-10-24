@@ -895,4 +895,36 @@ describe('TranscodingService.retryTranscoding', () => {
     // inspect the last write.
     expect(writes.map((w) => w.status)).not.toContain('failed');
   });
+
+  describe('getTranscodingStatus', () => {
+    const mediaId = '550e8400-e29b-41d4-a716-446655440000';
+    const creatorId = 'user_123';
+
+    it('returns the stored error code of a waiting item', async () => {
+      mockDb.query.mediaItems.findFirst.mockResolvedValue({
+        id: mediaId,
+        creatorId,
+        status: 'uploaded' as MediaStatus,
+        transcodingAttempts: 0,
+        transcodingError: 'RunPod endpoint is paused',
+        transcodingErrorCode: 'TRANSCODER_PAUSED',
+        runpodJobId: null,
+        transcodingPriority: 2,
+        transcodingProgress: null,
+        transcodingStep: null,
+        readyVariants: null,
+      });
+
+      const status = await service.getTranscodingStatus(mediaId, creatorId);
+
+      expect(status.transcodingErrorCode).toBe('TRANSCODER_PAUSED');
+      // A mock returns whatever it is given, so the select is asserted too:
+      // without the column there, production reads undefined.
+      expect(mockDb.query.mediaItems.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          columns: expect.objectContaining({ transcodingErrorCode: true }),
+        })
+      );
+    });
+  });
 });

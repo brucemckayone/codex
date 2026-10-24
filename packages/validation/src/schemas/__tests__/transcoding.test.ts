@@ -10,6 +10,7 @@ import {
   runpodWebhookUnionSchema,
   THUMBNAIL_SIZES,
   thumbnailSizeSchema,
+  transcodingStatusResponseSchema,
 } from '../transcoding';
 
 describe('Thumbnail Sizes', () => {
@@ -479,5 +480,42 @@ describe('Sized poster folders (Codex-l2c48)', () => {
         },
       }).success
     ).toBe(true);
+  });
+});
+
+describe('transcodingStatusResponseSchema', () => {
+  const waiting = {
+    status: 'uploaded',
+    transcodingAttempts: 0,
+    transcodingError: 'RunPod endpoint is paused',
+    transcodingErrorCode: 'TRANSCODER_PAUSED',
+    runpodJobId: null,
+    transcodingPriority: 2,
+    transcodingProgress: null,
+    transcodingStep: null,
+    readyVariants: null,
+  };
+
+  it('carries the error code of a waiting item', () => {
+    const parsed = transcodingStatusResponseSchema.parse(waiting);
+    expect(parsed.transcodingErrorCode).toBe('TRANSCODER_PAUSED');
+  });
+
+  it('accepts a null code when nothing has gone wrong', () => {
+    expect(
+      transcodingStatusResponseSchema.safeParse({
+        ...waiting,
+        transcodingError: null,
+        transcodingErrorCode: null,
+      }).success
+    ).toBe(true);
+  });
+
+  // The response tracks the column: a status built without it is a bug.
+  it('rejects a response that leaves the code out', () => {
+    const { transcodingErrorCode: _omitted, ...withoutCode } = waiting;
+    expect(transcodingStatusResponseSchema.safeParse(withoutCode).success).toBe(
+      false
+    );
   });
 });

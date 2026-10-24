@@ -221,6 +221,7 @@ export function createTestMediaItem(
       mediaType === MEDIA_TYPES.AUDIO ? `waveforms/${id}/waveform.png` : null,
     runpodJobId: null, // Transcoding Phase 1 field
     transcodingError: null, // Transcoding Phase 1 field
+    transcodingErrorCode: null,
     transcodingAttempts: 0, // Transcoding Phase 1 field
     transcodingPriority: 2, // Transcoding Phase 1 field (normal priority)
     mezzanineKey: null, // Transcoding Phase 1 field

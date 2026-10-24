@@ -123,6 +123,8 @@ export interface TranscodingMediaItem {
   transcodingAttempts: number;
   runpodJobId: string | null;
   transcodingError: string | null;
+  /** Why transcoding is waiting or failed, as a TRANSCODING_ERROR_CODES code */
+  transcodingErrorCode: string | null;
   transcodingPriority: number;
   hlsMasterPlaylistKey: string | null;
   hlsPreviewKey: string | null;
