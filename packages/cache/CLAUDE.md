@@ -66,7 +66,7 @@ CacheType.USERNAME_TO_ID       // 'user:username-to-id' — keyed by USERNAME_LO
 CacheType.USER_PREFERENCES     // 'user:preferences'
 CacheType.ORG_CONFIG           // 'org:config'
 CacheType.ORG_STATS            // 'org:stats:v2'
-CacheType.ORG_CREATORS         // 'org:creators'
+CacheType.ORG_CREATORS         // 'org:creators:v2' (v2: no course-only practices, Codex-ot6vj)
 CacheType.ORG_MEMBERS          // 'org:members'
 CacheType.CONTENT_METADATA     // 'content:metadata'
 CacheType.CONTENT_ACCESS       // 'content:access'

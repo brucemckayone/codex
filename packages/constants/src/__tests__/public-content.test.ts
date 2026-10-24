@@ -39,7 +39,6 @@ describe('isPublicContent (Codex-039vo: a body goes unchecked only when no gate 
   it.each([
     ['isFree false', { ...open, isFree: false }],
     ['isFree null', { ...open, isFree: null }],
-    ['isFree missing', { courseOnly: false }],
   ])('is not public when %s (fails closed)', (_case, policy) => {
     expect(isPublicContent(policy)).toBe(false);
   });

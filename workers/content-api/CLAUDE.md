@@ -29,7 +29,7 @@ gate rejects it.
 
 | Method | Path | Policy | Notes |
 |---|---|---|---|
-| GET | `/api/content/public` | `auth: 'none'` | List published content for an org or a creator (orgId, creatorId or slug required; `category` needs orgId). Only a by-slug read of a free piece carries its body |
+| GET | `/api/content/public` | `auth: 'none'` | List published content for an org or a creator (orgId, creatorId or slug required; `category` needs orgId). Only a by-slug read of a PUBLIC piece (`isPublicContent`: free and no gate) carries its body; an entitled reader gets a gated body from `/stream?include=body` (Codex-039vo) |
 | GET | `/api/content/public/discover` | `auth: 'none'` | Platform-wide content browse |
 
 ### Media (`/api/media`)
@@ -48,7 +48,7 @@ gate rejects it.
 
 | Method | Path | Policy | Rate Limit | Notes |
 |---|---|---|---|---|
-| GET | `/api/access/content/:id/stream` | `auth: 'required'` | `streaming` (60/min) | Returns signed streaming URL + waveformUrl + contentType |
+| GET | `/api/access/content/:id/stream` | `auth: 'required'` | `streaming` (60/min) | Returns signed streaming URL + waveformUrl + contentType. `?include=body` also returns `contentBody`/`contentBodyJson` once access is granted: the detail pages' body for a gated piece (Codex-039vo). Never pass it from a remote query or the player refresh |
 | POST | `/api/access/content/:id/progress` | `auth: 'required'` | `api` | Save playback progress; 204 |
 | GET | `/api/access/content/:id/progress` | `auth: 'required'` | `api` | Get playback progress |
 | GET | `/api/access/user/library` | `auth: 'required'` | `api` | User's purchased content (paginated) |
@@ -68,10 +68,12 @@ gate rejects it.
 
 ### Streaming URL Generation
 ```
-GET /api/access/content/:id/stream
+GET /api/access/content/:id/stream[?include=body]
   → verify access: free → granted, paid → check purchase/membership
   → generate signed R2 URL (SigV4, time-limited)
   → return { streamingUrl, waveformUrl, expiresAt, contentType }
+    (+ { contentBody, contentBodyJson } with include=body, from the row the
+    access decision read, after it granted)
 ```
 
 ### Cache Invalidation on Publish/Unpublish/Delete

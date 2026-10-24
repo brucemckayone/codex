@@ -24,6 +24,7 @@ import type {
 import { and, eq, isNull } from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY } from '../constants';
 import { AccessDeniedError, ContentNotFoundError } from '../errors';
+import type { ContentBodySource } from '../types';
 import { AccessRevocation } from './access-revocation';
 import {
   assertStreamingAccess,
@@ -273,10 +274,7 @@ export class ContentAccessService
      */
     readyVariants?: string[];
     /** The content's body. Present only when `options.includeBody` was set. */
-    body?: {
-      contentBody: string | null;
-      contentBodyJson: Record<string, unknown> | null;
-    };
+    body?: ContentBodySource;
   }> {
     // Resolve the TTL once. The Zod schema already applies a default when
     // input flows through `procedure()`, but programmatic callers that

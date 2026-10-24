@@ -358,7 +358,7 @@ relation, a stripped body) leaves every slot written by the old code a valid hit
 after deploy. It keeps serving what was removed until its TTL runs out. The
 case that taught it: org content lists would have kept serving `creator.email`
 from 2h slots (Codex-osuqt). Put a shape version in the `type`, as
-`PUBLIC_CONTENT_SHAPE_VERSION` (`content:public:v2:…`) and explore's
+`PUBLIC_CONTENT_SHAPE_VERSION` (`content:public:v3:…`) and explore's
 `content:auth:v2:…` do, and bump it with the change. Old slots are never read
 again. A bump also renames the cache-stats series. A cached payload is the whole
 thing the slot stores (for content-api, `listPublic` plus `resolveR2Urls`), so

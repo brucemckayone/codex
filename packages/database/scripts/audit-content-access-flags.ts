@@ -176,8 +176,9 @@ async function checkFreeWithAGate(): Promise<number> {
       and(eq(schema.content.isFree, true), isNull(schema.content.deletedAt))
     );
 
-  // Mirrors isPublicContent() in apps/web/src/lib/server/content-detail.ts —
-  // keep the two in step, and keep both in step with decideContentAccess.
+  // Mirrors isPublicContent() in @codex/constants (packages/constants/src/
+  // content.ts) — keep the two in step, and keep both in step with
+  // decideContentAccess.
   const gateOf = (r: (typeof free)[number]): string | null => {
     if (r.isPurchasable) return 'isPurchasable';
     if ((r.priceCents ?? 0) > 0) return `priceCents=${r.priceCents}`;

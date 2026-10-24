@@ -200,19 +200,21 @@ export function canBeSold(
 }
 
 /**
- * The policy fields publicness depends on. Every field optional and nullable,
- * so a full content row, a public list item or a partial projection satisfies
- * it without a cast. Missing reads as "no gate", except `isFree`, which must be
- * present and true.
+ * The policy fields publicness depends on. Every field is REQUIRED but nullable,
+ * so a full content row or a public list item satisfies it without a cast, and
+ * a projection that leaves a gate out fails to type-check. Optional fields
+ * would read a missing gate as "no gate" and ship a gated body publicly (fail
+ * open); `decideContentAccess`'s row type requires every gate for the same
+ * reason.
  */
 export interface ContentPublicnessPolicy {
-  isFree?: boolean | null;
-  isPurchasable?: boolean | null;
-  priceCents?: number | null;
-  includedInTierId?: string | null;
-  isFollowerGated?: boolean | null;
-  isTeamOnly?: boolean | null;
-  courseOnly?: boolean | null;
+  isFree: boolean | null;
+  isPurchasable: boolean | null;
+  priceCents: number | null;
+  includedInTierId: string | null;
+  isFollowerGated: boolean | null;
+  isTeamOnly: boolean | null;
+  courseOnly: boolean | null;
 }
 
 /**

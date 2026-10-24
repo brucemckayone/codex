@@ -83,8 +83,9 @@ export const load: PageServerLoad = async ({
   }
 
   // What the browser receives: the row without its raw body. The body is
-  // rendered below from `content` into contentBodyHtml, and only once access
-  // allows it.
+  // rendered below into contentBodyHtml, only once access allows it: from
+  // `content` when the piece is public, from the access check's body when it
+  // is gated (a gated public row carries none, Codex-039vo).
   const pageContent = withoutRawBody(content);
 
   // Body gating: only render `contentBodyHtml` once access is confirmed.

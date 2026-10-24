@@ -105,9 +105,14 @@ export const streamingUrlResponseSchema = z.object({
   expiresAt: z.string(),
   contentType: z.string(),
   readyVariants: z.array(hlsVariantSchema).optional(),
-  // Only with `?include=body`, after access is granted (Codex-039vo).
-  contentBody: z.string().nullable().optional(),
-  contentBodyJson: z.record(z.string(), z.unknown()).nullable().optional(),
+  // Only with `?include=body`, after access is granted (Codex-039vo). Both or
+  // neither: absent means not returned, never "no body".
+  body: z
+    .object({
+      contentBody: z.string().nullable(),
+      contentBodyJson: z.record(z.string(), z.unknown()).nullable(),
+    })
+    .optional(),
 });
 
 export type StreamingUrlResponseSchema = z.infer<

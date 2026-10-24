@@ -35,6 +35,8 @@
  * - `resolveAccessGranted`  — THE access-grant seam (WP-2 swap point)
  * - `handlePurchaseAction`  — Stripe checkout session creation with error handling
  */
+
+import type { ContentBodySource } from '@codex/access';
 import {
   type ContentPublicnessPolicy,
   isPublicContent,
@@ -42,6 +44,7 @@ import {
 } from '@codex/constants';
 import type { Cookies } from '@sveltejs/kit';
 import { fail } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
 import { createServerApi, type PublicContentListItem } from './api';
 import { ApiError } from './errors';
@@ -335,18 +338,12 @@ export async function loadAccessAndProgress(
   contentId: string,
   platform: App.Platform | undefined,
   cookies: Cookies,
-  policy?: ContentPublicnessPolicy
+  policy: ContentPublicnessPolicy
 ): Promise<AccessAndProgress> {
   const { access } = await fetchAccess(contentId, platform, cookies, policy, {
     includeBody: false,
   });
   return access;
-}
-
-/** A content body as the API stores it: TipTap JSON, or legacy markdown. */
-export interface ContentBodySource {
-  contentBody: string | null;
-  contentBodyJson: Record<string, unknown> | null;
 }
 
 /**
@@ -356,15 +353,26 @@ export interface ContentBodySource {
  * only once it granted (Codex-039vo). Before that, the gated path rendered the
  * stripped public row and every entitled reader got an empty page.
  *
- * `body` is null unless the worker granted access. It is kept apart from
- * `access` because `access` is returned to the browser (`accessAndProgress`),
- * which needs only the rendered HTML, never the raw body.
+ * `body` is null unless the worker granted access and returned the body. It is
+ * kept apart from `access` because `access` is returned to the browser
+ * (`accessAndProgress`), which needs only the rendered HTML, never the raw
+ * body.
+ *
+ * Two grants come back without a body:
+ * - A granted response with no `body` at all. The worker didn't honour the
+ *   flag (a content-api rolled back behind this web build drops the unknown
+ *   query key), so this would be the empty page again. It is logged as an
+ *   error, never read as "the piece has no body" (that is `body` with both
+ *   fields null).
+ * - Media not ready (a 422 the worker raises after access passed). The call
+ *   threw, so it carried nothing: the page reads as granted, with no body
+ *   until the media is ready. Narrow, since publishing needs ready media.
  */
 export async function loadAccessWithBody(
   contentId: string,
   platform: App.Platform | undefined,
   cookies: Cookies,
-  policy?: ContentPublicnessPolicy
+  policy: ContentPublicnessPolicy
 ): Promise<{ access: AccessAndProgress; body: ContentBodySource | null }> {
   const { access, stream } = await fetchAccess(
     contentId,
@@ -373,13 +381,10 @@ export async function loadAccessWithBody(
     policy,
     { includeBody: true }
   );
-  const body = stream
-    ? {
-        contentBody: stream.contentBody ?? null,
-        contentBodyJson: stream.contentBodyJson ?? null,
-      }
-    : null;
-  return { access, body };
+  if (stream && !stream.body) {
+    logger.error('Access granted but /stream returned no body', { contentId });
+  }
+  return { access, body: stream?.body ?? null };
 }
 
 /**
@@ -391,7 +396,7 @@ async function fetchAccess(
   contentId: string,
   platform: App.Platform | undefined,
   cookies: Cookies,
-  policy: ContentPublicnessPolicy | undefined,
+  policy: ContentPublicnessPolicy,
   options: { includeBody: boolean }
 ): Promise<{ access: AccessAndProgress; stream: StreamResult | null }> {
   const api = createServerApi(platform, cookies);
@@ -423,7 +428,7 @@ async function fetchAccess(
   const accessGranted = resolveAccessGranted(streamResult, streamError);
   const accessCheckFailed =
     !accessGranted && classifyStreamFailure(streamError) === 'unknown';
-  const hasAccess = isPublicContent(policy ?? {}) || accessGranted;
+  const hasAccess = isPublicContent(policy) || accessGranted;
   const streamingUrl =
     (streamResult as StreamResult | null)?.streamingUrl ?? null;
   const waveformUrl =

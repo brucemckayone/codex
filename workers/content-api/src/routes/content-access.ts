@@ -186,18 +186,15 @@ app.get(
         { includeBody: query?.include === 'body' }
       );
 
-      const response: StreamingUrlResponse = {
+      // `body` is undefined unless asked for and granted, and JSON drops it.
+      return {
         streamingUrl: result.streamingUrl,
         waveformUrl: result.waveformUrl,
         expiresAt: result.expiresAt.toISOString(),
         contentType: result.contentType,
         readyVariants: result.readyVariants,
+        body: result.body,
       };
-      if (result.body) {
-        response.contentBody = result.body.contentBody;
-        response.contentBodyJson = result.body.contentBodyJson;
-      }
-      return response;
     },
   })
 );

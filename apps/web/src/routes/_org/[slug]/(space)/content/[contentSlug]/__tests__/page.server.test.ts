@@ -196,7 +196,9 @@ describe('org content detail: an entitled reader of a gated piece sees its body 
   it('renders the body the access check returned', async () => {
     mockServerGetPublicContent.mockResolvedValue({ items: [gated] });
     mockGetStreamingUrl.mockResolvedValue(
-      granted({ contentBody: 'the followers-only text', contentBodyJson: null })
+      granted({
+        body: { contentBody: 'the followers-only text', contentBodyJson: null },
+      })
     );
     const { load } = await import('../+page.server');
 
@@ -211,7 +213,7 @@ describe('org content detail: an entitled reader of a gated piece sees its body 
     expect(data.contentBodyHtml).toContain('the followers-only text');
     // The raw body rides nothing the page returns but the rendered HTML.
     const access = await data.accessAndProgress;
-    expect(access).not.toHaveProperty('contentBody');
+    expect(access).not.toHaveProperty('body');
   });
 
   it('a reader the access check denies gets no body', async () => {

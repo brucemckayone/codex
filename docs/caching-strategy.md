@@ -447,7 +447,7 @@ reached.
 
 **Shape versions.** A data-slot key encodes the query, not the payload, so a
 read whose payload NARROWS needs a shape version in its `type`
-(`content:public:v2`, `content:auth:v2`) or old slots keep serving the removed
+(`content:public:v3`, `content:auth:v2`, `org:creators:v2`) or old slots keep serving the removed
 fields until their TTL. See CLAUDE.md, Server-Side KV Caching.
 
 ### `CacheType` constants (in `@codex/cache`)

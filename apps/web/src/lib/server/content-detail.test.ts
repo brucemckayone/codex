@@ -16,7 +16,7 @@
  *   - the shared fallback constants keep a stable field set so drift is caught
  *     in one place.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./api', () => ({ createServerApi: vi.fn() }));
 
@@ -31,6 +31,7 @@ vi.mock('$lib/observability', () => ({ logger: mockLogger }));
 import { createServerApi } from './api';
 import {
   ACCESS_CHECK_FAILED_RESULT,
+  type ContentPublicnessPolicy,
   classifyStreamFailure,
   EMPTY_SUB_CONTEXT,
   isPublicContent,
@@ -122,70 +123,31 @@ describe('loadRelatedContent', () => {
 /** A non-null `/stream` payload — only its presence matters to the seam. */
 type StreamResult = NonNullable<Parameters<typeof resolveAccessGranted>[0]>;
 
+// The rule's truth table lives with the rule, in @codex/constants
+// (`public-content.test.ts`, Codex-039vo). The seam only re-exports it, and this
+// pins that it is the shared function, not a second copy that could drift.
 describe('isPublicContent', () => {
-  it('treats free content (isFree=true, no gate) as publicly readable', () => {
-    expect(isPublicContent({ isFree: true })).toBe(true);
-  });
-
-  it('gates non-free content (isFree=false) behind the access check', () => {
-    // Purchasable / follower / tier / team content all report isFree=false and
-    // must fall through to the authenticated access check (WP-1 §6.1).
-    expect(isPublicContent({ isFree: false })).toBe(false);
-  });
-
-  it('is not public for null / undefined isFree', () => {
-    expect(isPublicContent({ isFree: null })).toBe(false);
-    expect(isPublicContent({ isFree: undefined })).toBe(false);
-    expect(isPublicContent({})).toBe(false);
-  });
-
-  // ── Codex-al9ft: the predicate reads the WHOLE policy, and fails CLOSED ──
-  // `isFree` alone used to decide whether `renderContentBody()` runs
-  // UNAUTHENTICATED. A row carrying a gate AND `isFree: true` is a contradiction
-  // that `@codex/access` resolves as DENIED, so this must resolve it the same
-  // way. These are not hypothetical shapes: `priceCents` was absent from both
-  // `ContentService.create`'s isFree derivation and `update`'s `effHasGate`
-  // clamp, so a price-only payload persisted exactly the first row below, and a
-  // PATCH clearing `isPurchasable` rewrote a correct row into it.
-  describe('a gate present alongside isFree:true is NOT public', () => {
-    it('a priced row is not public (the al9ft leak)', () => {
-      expect(isPublicContent({ isFree: true, priceCents: 1999 })).toBe(false);
-    });
-
-    it('a purchasable row is not public', () => {
-      expect(isPublicContent({ isFree: true, isPurchasable: true })).toBe(
-        false
-      );
-    });
-
-    it('a tier-gated row is not public', () => {
-      expect(
-        isPublicContent({ isFree: true, includedInTierId: 'tier-1' })
-      ).toBe(false);
-    });
-
-    it('a follower-gated row is not public', () => {
-      expect(isPublicContent({ isFree: true, isFollowerGated: true })).toBe(
-        false
-      );
-    });
-
-    it('a team-only row is not public', () => {
-      expect(isPublicContent({ isFree: true, isTeamOnly: true })).toBe(false);
-    });
-
-    it('a course-only row is not public', () => {
-      expect(isPublicContent({ isFree: true, courseOnly: true })).toBe(false);
-    });
-
-    it('priceCents of 0 or null is not a gate', () => {
-      // Only a POSITIVE price gates — mirrors @codex/access's
-      // `(priceCents ?? 0) > 0`. A zero/null price on free content is normal.
-      expect(isPublicContent({ isFree: true, priceCents: 0 })).toBe(true);
-      expect(isPublicContent({ isFree: true, priceCents: null })).toBe(true);
-    });
+  it('is the @codex/constants rule, shared with the public content API', async () => {
+    const constants = await import('@codex/constants');
+    expect(isPublicContent).toBe(constants.isPublicContent);
   });
 });
+
+/** A full access policy (every gate present), open unless overridden. */
+function policy(
+  overrides: Partial<ContentPublicnessPolicy> = {}
+): ContentPublicnessPolicy {
+  return {
+    isFree: true,
+    isPurchasable: false,
+    priceCents: null,
+    includedInTierId: null,
+    isFollowerGated: false,
+    isTeamOnly: false,
+    courseOnly: false,
+    ...overrides,
+  };
+}
 
 describe('resolveAccessGranted (WP-2 swap point)', () => {
   it('denies when the /stream call threw (null result)', () => {
@@ -321,7 +283,7 @@ describe('loadSubscriptionContext (non-subscriber early return)', () => {
 describe('loadAccessAndProgress reads WHY /stream failed (Codex-h3ipg)', () => {
   type Cookies = Parameters<typeof loadAccessAndProgress>[2];
   const cookies = {} as unknown as Cookies;
-  const paid = { isFree: false, priceCents: 900 };
+  const paid = policy({ isFree: false, priceCents: 900 });
 
   function streamThrows(error: unknown) {
     vi.mocked(createServerApi).mockReturnValue({
@@ -363,9 +325,12 @@ describe('loadAccessAndProgress reads WHY /stream failed (Codex-h3ipg)', () => {
 
   it('keeps public content readable when the check fails', async () => {
     streamThrows(new TypeError('fetch failed'));
-    const result = await loadAccessAndProgress('c1', undefined, cookies, {
-      isFree: true,
-    });
+    const result = await loadAccessAndProgress(
+      'c1',
+      undefined,
+      cookies,
+      policy()
+    );
     expect(result).toMatchObject({ hasAccess: true, accessCheckFailed: true });
   });
 });
@@ -376,8 +341,18 @@ describe('loadAccessAndProgress reads WHY /stream failed (Codex-h3ipg)', () => {
 describe('loadAccessWithBody (Codex-039vo)', () => {
   type Cookies = Parameters<typeof loadAccessWithBody>[2];
   const cookies = {} as unknown as Cookies;
-  const followers = { isFree: false, isFollowerGated: true };
+  const followers = policy({ isFree: false, isFollowerGated: true });
   const bodyJson = { type: 'doc', content: [] };
+  const granted = {
+    streamingUrl: null,
+    waveformUrl: null,
+    expiresAt: '2026-10-23T22:00:00.000Z',
+    contentType: 'written',
+  };
+
+  beforeEach(() => {
+    mockLogger.error.mockClear();
+  });
 
   function streamReturns(response: unknown) {
     const getStreamingUrl = vi.fn(() => Promise.resolve(response));
@@ -398,12 +373,8 @@ describe('loadAccessWithBody (Codex-039vo)', () => {
 
   it('asks /stream for the body and returns it once access is granted', async () => {
     const getStreamingUrl = streamReturns({
-      streamingUrl: null,
-      waveformUrl: null,
-      expiresAt: '2026-10-23T22:00:00.000Z',
-      contentType: 'written',
-      contentBody: null,
-      contentBodyJson: bodyJson,
+      ...granted,
+      body: { contentBody: null, contentBodyJson: bodyJson },
     });
 
     const { access, body } = await loadAccessWithBody(
@@ -416,16 +387,13 @@ describe('loadAccessWithBody (Codex-039vo)', () => {
     expect(getStreamingUrl).toHaveBeenCalledWith('c1', { includeBody: true });
     expect(access.hasAccess).toBe(true);
     expect(body).toEqual({ contentBody: null, contentBodyJson: bodyJson });
+    expect(mockLogger.error).not.toHaveBeenCalled();
   });
 
   it('never puts the raw body on the access result the page returns', async () => {
     streamReturns({
-      streamingUrl: null,
-      waveformUrl: null,
-      expiresAt: '2026-10-23T22:00:00.000Z',
-      contentType: 'written',
-      contentBody: '# secret',
-      contentBodyJson: null,
+      ...granted,
+      body: { contentBody: '# secret', contentBodyJson: null },
     });
 
     const { access } = await loadAccessWithBody(
@@ -435,9 +403,46 @@ describe('loadAccessWithBody (Codex-039vo)', () => {
       followers
     );
 
-    expect(access).not.toHaveProperty('contentBody');
-    expect(access).not.toHaveProperty('contentBodyJson');
+    expect(access).not.toHaveProperty('body');
     expect(JSON.stringify(access)).not.toContain('secret');
+  });
+
+  // A content-api behind this web build drops the unknown `include` key, so a
+  // grant comes back with no `body`. That must never read as "no body" (the
+  // empty page again, silently): it is logged as a contract fault.
+  it('a grant with no body field returns no body and logs the fault', async () => {
+    streamReturns(granted);
+
+    const { access, body } = await loadAccessWithBody(
+      'c1',
+      undefined,
+      cookies,
+      followers
+    );
+
+    expect(access.hasAccess).toBe(true);
+    expect(body).toBeNull();
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Access granted but /stream returned no body',
+      { contentId: 'c1' }
+    );
+  });
+
+  // Accepted and pinned: the worker raises MEDIA_NOT_READY after access
+  // passed, so the page reads as granted, but the thrown call carried nothing.
+  it('media not ready: granted, with no body until the media is ready', async () => {
+    streamThrows(new ApiError(422, 'not ready', 'MEDIA_NOT_READY'));
+
+    const { access, body } = await loadAccessWithBody(
+      'c1',
+      undefined,
+      cookies,
+      followers
+    );
+
+    expect(access.hasAccess).toBe(true);
+    expect(body).toBeNull();
+    expect(mockLogger.error).not.toHaveBeenCalled();
   });
 
   it('returns no body when access is denied', async () => {
@@ -455,14 +460,9 @@ describe('loadAccessWithBody (Codex-039vo)', () => {
   });
 
   it('the fast path (loadAccessAndProgress) never asks for the body', async () => {
-    const getStreamingUrl = streamReturns({
-      streamingUrl: null,
-      waveformUrl: null,
-      expiresAt: '2026-10-23T22:00:00.000Z',
-      contentType: 'written',
-    });
+    const getStreamingUrl = streamReturns(granted);
 
-    await loadAccessAndProgress('c1', undefined, cookies, { isFree: true });
+    await loadAccessAndProgress('c1', undefined, cookies, policy());
 
     expect(getStreamingUrl).toHaveBeenCalledWith('c1', { includeBody: false });
   });

@@ -96,7 +96,7 @@ describe('GET /api/access/content/:id/stream — the body only on request (Codex
     expect(input).toMatchObject({ contentId: CONTENT_ID });
     expect(options).toEqual({ includeBody: true });
     const { data } = (await res.json()) as { data: Record<string, unknown> };
-    expect(data).toMatchObject({
+    expect(data.body).toEqual({
       contentBody: null,
       contentBodyJson: { type: 'doc' },
     });
@@ -112,8 +112,7 @@ describe('GET /api/access/content/:id/stream — the body only on request (Codex
       includeBody: false,
     });
     const { data } = (await res.json()) as { data: Record<string, unknown> };
-    expect(data).not.toHaveProperty('contentBody');
-    expect(data).not.toHaveProperty('contentBodyJson');
+    expect(data).not.toHaveProperty('body');
   });
 
   it('an include value other than body is refused', async () => {

@@ -24,7 +24,7 @@ All validation schemas are re-exported from `@codex/validation` for convenience.
 | `unpublish` | `(id: string, creatorId: string)` | Reverts published → draft. |
 | `delete` | `(id: string, creatorId: string)` | Soft delete via `deletedAt`. |
 | `list` | `(creatorId: string, filters: ContentFilters, pagination?)` | Paginated. Supports status/search/type filters. |
-| `listPublic` | `(params)` | Public-facing list: published, non-deleted content whose org is live (or personal). A catalogue read carries no body; only a by-slug read of a free piece keeps it. No creator email. `category` needs `orgId` (ValidationError). |
+| `listPublic` | `(params)` | Public-facing list: published, non-deleted content whose org is live (or personal). A catalogue read carries no body; only a by-slug read of a PUBLIC piece keeps it (`isPublicContent` from `@codex/constants`: free and no gate, so a free-flagged course-only practice has none; Codex-039vo). No creator email. `category` needs `orgId` (ValidationError). |
 | `setCache` | `(cache: VersionedCache)` | Inject `VersionedCache` for cache invalidation on mutations. |
 
 ### Constructor
