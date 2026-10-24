@@ -12,6 +12,7 @@
  * | won                        | restored                       | settleWonDispute (paid back)             |
  * | lost                       | purchase refunded              | both sources clawed back, then outcome   |
  * | inquiry closed             | —                              | outcome marked                           |
+ * | prevented                  | —                              | outcome marked; alert if it clawed back  |
  *
  * Strategy: mock the webhook composition root (`createWebhookServices`),
  * `@codex/subscription` (`invalidateForUser`) and `@codex/access`
@@ -399,6 +400,29 @@ describe('handlePaymentWebhook — disputes', () => {
     expect(mockClear).toHaveBeenCalledWith('user_won', 'org_won');
   });
 
+  it('won: a re-pay that rejects is rethrown for Stripe to redeliver, and the webhook marks no outcome itself', async () => {
+    // `repayDispute` can reject with the clawback's error once it re-runs a
+    // refund against the new re-pay rows; `settleWonDispute` marks the
+    // outcome only after it succeeds.
+    const failure = new Error('clawback after re-pay failed (test)');
+    purchase.settleWonDispute?.mockRejectedValueOnce(failure);
+    const bundle = buildContext();
+
+    await expect(
+      handlePaymentWebhook(
+        {
+          ...createDisputeEvent({ status: 'won' }),
+          type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+        } as Stripe.Event,
+        mockStripe,
+        bundle.context
+      )
+    ).rejects.toBe(failure);
+
+    expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
+    expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
   it('lost: the purchase is refunded, both sources clawed back (held slices cancelled), THEN the outcome marked', async () => {
     purchase.processLostDispute?.mockResolvedValueOnce({
       userId: 'user_lost',
@@ -694,5 +718,55 @@ describe('handlePaymentWebhook — disputes', () => {
     );
     expect(mockRevoke).toHaveBeenCalledWith('user_sub', 'org_sub', 'refund');
     expect(calls).toEqual(['pause', 'clawback', 'cancel', 'mark']);
+  });
+
+  // ── `prevented` (Codex-2hxff.59 item 5) ──────────────────────────────────
+  // Stripe defines it as a dispute "prevented from becoming a formal
+  // chargeback": a closed inquiry, with nothing to restore or re-pay.
+
+  function preventedEvent(): Stripe.Event {
+    return {
+      ...createDisputeEvent({ status: 'prevented' }),
+      type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+    } as Stripe.Event;
+  }
+
+  it('prevented is a closed inquiry: marked applied, nothing restored, re-paid or clawed back, and no alert', async () => {
+    purchase.countDisputeReversalSteps = vi.fn().mockResolvedValue(0);
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(preventedEvent(), mockStripe, bundle.context);
+
+    expect(purchase.countDisputeReversalSteps).toHaveBeenCalledWith(
+      'dp_test_dispute'
+    );
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
+      'dp_test_dispute'
+    );
+    expect(purchase.restoreDisputedPurchase).not.toHaveBeenCalled();
+    expect(purchase.settleWonDispute).not.toHaveBeenCalled();
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
+    expect(bundle.mock._obs.error).not.toHaveBeenCalled();
+  });
+
+  it('a prevented dispute that has a dispute reversal step anyway is alerted at error with an errorId, and still marked applied', async () => {
+    purchase.countDisputeReversalSteps = vi.fn().mockResolvedValue(2);
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(preventedEvent(), mockStripe, bundle.context);
+
+    expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining("ended 'prevented' after money was clawed back"),
+      {
+        errorId: expect.any(String),
+        disputeId: 'dp_test_dispute',
+        chargeId: 'ch_test',
+        reversalSteps: 2,
+      }
+    );
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
+      'dp_test_dispute'
+    );
+    expect(purchase.settleWonDispute).not.toHaveBeenCalled();
   });
 });
