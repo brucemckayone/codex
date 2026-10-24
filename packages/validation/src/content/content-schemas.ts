@@ -207,8 +207,8 @@ export type UpdateMediaItemInput = z.infer<typeof updateMediaItemSchema>;
  * Body of `POST /api/media/:id/upload-complete`.
  *
  * Carries the CLIENT's own `loadedmetadata` measurement of the file it just
- * uploaded. `media_items.duration_seconds` is otherwise written only by
- * `MediaService.markAsReady` from the RunPod webhook, so the column stayed NULL
+ * uploaded. `media_items.duration_seconds` is otherwise written only by the
+ * RunPod completion webhook (TranscodingService), so the column stayed NULL
  * for the minutes between a creator finishing an upload and transcoding
  * completing — which is exactly when they are building the page that shows the
  * runtime badge.

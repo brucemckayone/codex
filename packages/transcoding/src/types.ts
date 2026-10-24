@@ -82,15 +82,14 @@ export interface RunPodJobRequest {
     inputKey: string;
     webhookUrl: string;
     priority?: number;
+    /** TRANSCODING_JOB_CONTRACT: what this build expects the handler to do */
+    contract: number;
   };
-}
-
-/**
- * RunPod API response when triggering a job
- */
-export interface RunPodJobResponse {
-  id: string;
-  status: string;
+  /** RunPod per-request limits, in ms (see transcodingJobPolicy) */
+  policy: {
+    executionTimeout: number;
+    ttl: number;
+  };
 }
 
 /**

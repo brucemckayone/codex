@@ -12,17 +12,43 @@
  * Error handling uses mapErrorToResponse() for consistency.
  */
 
-import { createDbClient } from '@codex/database';
+import { createDbClient, messageForLog } from '@codex/database';
 import { isServiceError, ValidationError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
-import {
-  runpodWebhookUnionSchema,
-  TranscodingService,
-} from '@codex/transcoding';
-import { Hono } from 'hono';
+import { classifyWebhookPayload, TranscodingService } from '@codex/transcoding';
+import { type Context, Hono } from 'hono';
 import { verifyRunpodSignature } from '../middleware/verify-runpod-signature';
 
 const app = new Hono<HonoEnv>();
+
+/**
+ * How a webhook that threw is answered (same pattern as Stripe webhooks):
+ * - Permanent (bad payload, business logic) → 200 to stop retries
+ * - Transient (DB/network failure) → 500 to trigger RunPod retry
+ */
+function answerWebhookError(c: Context<HonoEnv>, error: unknown): Response {
+  const obs = c.get('obs');
+  const message =
+    error instanceof Error ? error.message : 'Unknown webhook error';
+
+  if (error instanceof ValidationError || isServiceError(error)) {
+    // A signed payload we cannot read is a handler contract break, and the
+    // 200 means RunPod will not send it again.
+    const log = error instanceof ValidationError ? obs?.error : obs?.warn;
+    log?.call(obs, 'transcoding.webhook_permanent_error', { error: message });
+    return c.json({ received: true, error: message }, 200);
+  }
+
+  // Transient error: let RunPod retry. Logged at error, because a row stays
+  // 'transcoding' until a retry gets through.
+  obs?.error('transcoding.webhook_transient_error', {
+    error: messageForLog(error),
+  });
+  return c.json(
+    { error: { code: 'INTERNAL_ERROR', message: 'Transient failure' } },
+    500
+  );
+}
 
 // ============================================================================
 // Webhook Routes (HMAC Signature Verification)
@@ -48,6 +74,7 @@ app.post(
     maxAge: 300, // 5 minutes
   }),
   async (c) => {
+    const obs = c.get('obs');
     try {
       // Raw body was stored by verifyRunpodSignature middleware
       // Type assertion: middleware guarantees rawBody is a string
@@ -66,18 +93,18 @@ app.post(
         throw new ValidationError('Invalid JSON in request body');
       }
 
-      // Validate against union schema (completed | failed | progress)
-      const result = runpodWebhookUnionSchema.safeParse(payload);
-      if (!result.success) {
-        const zodErrors = result.error.issues
-          .map((i) => `${i.path.join('.')}: ${i.message}`)
-          .join('; ');
-        console.error(
-          '[webhook] Schema validation failed:',
-          zodErrors,
-          JSON.stringify(payload).slice(0, 500)
+      const classified = classifyWebhookPayload(payload);
+      if (classified.kind === 'unreadable') {
+        throw new ValidationError(
+          `Invalid webhook payload: ${classified.issues}`
         );
-        throw new ValidationError(`Invalid webhook payload: ${zodErrors}`);
+      }
+      if (classified.kind === 'rejected-progress') {
+        // A progress update is advisory; the completion that follows decides.
+        obs?.warn('transcoding.progress_webhook_rejected', {
+          issues: classified.issues,
+        });
+        return c.json({ received: true, ignored: true }, 200);
       }
 
       // Create database client and TranscodingService
@@ -102,11 +129,28 @@ app.post(
         webhookBaseUrl: c.env.API_URL || 'http://localhost:4002',
       });
 
+      if (classified.kind === 'rejected-terminal') {
+        // The job is over but its result is unusable. Failing the row now
+        // (OUTPUT_REJECTED) beats leaving it 'transcoding' until the cron
+        // gives up. The creator sees a fixed sentence; the issues go to logs.
+        obs?.error('transcoding.webhook_payload_rejected', {
+          jobId: classified.jobId,
+          mediaId: classified.mediaId,
+          issues: classified.issues,
+          payload: rawBody.slice(0, 500),
+        });
+        await service.rejectWebhookOutput(
+          { jobId: classified.jobId, mediaId: classified.mediaId },
+          "The transcoder's result did not pass validation"
+        );
+        return c.json({ received: true, rejected: true }, 200);
+      }
+
       // Dispatch based on webhook type
-      if (result.data.status === 'progress') {
-        await service.handleProgressWebhook(result.data);
+      if (classified.payload.status === 'progress') {
+        await service.handleProgressWebhook(classified.payload);
       } else {
-        await service.handleWebhook(result.data);
+        await service.handleWebhook(classified.payload);
 
         // TODO: Send transcoding status email to creator
         // Requires DB join (mediaItems → content → users) to resolve creator email.
@@ -117,28 +161,7 @@ app.post(
       // Return success - RunPod expects 200 OK to acknowledge receipt
       return c.json({ received: true }, 200);
     } catch (error) {
-      // Transient/permanent classification (same pattern as Stripe webhooks):
-      // - Permanent (bad payload, business logic) → 200 to stop retries
-      // - Transient (DB/network failure) → 500 to trigger RunPod retry
-      const isPermanent =
-        error instanceof ValidationError || isServiceError(error);
-
-      const message =
-        error instanceof Error ? error.message : 'Unknown webhook error';
-
-      if (isPermanent) {
-        console.error(
-          '[webhook] Permanent webhook error (returning 200, no retry):',
-          message
-        );
-        return c.json({ received: true, error: message }, 200);
-      }
-
-      // Transient error — let RunPod retry
-      return c.json(
-        { error: { code: 'INTERNAL_ERROR', message: 'Transient failure' } },
-        500
-      );
+      return answerWebhookError(c, error);
     }
   }
 );

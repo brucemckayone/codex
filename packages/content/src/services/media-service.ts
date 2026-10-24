@@ -13,7 +13,13 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
-import { MEDIA_STATUS, MIME_TO_EXTENSION, PAGINATION } from '@codex/constants';
+import {
+  MEDIA_STATUS,
+  MIME_TO_EXTENSION,
+  PAGINATION,
+  TRANSCODING_ERROR_CODES,
+  TRANSCODING_ERROR_MAX_LENGTH,
+} from '@codex/constants';
 import {
   paginatedQuery,
   scopedNotDeleted,
@@ -578,6 +584,35 @@ export class MediaItemService extends BaseService {
   }
 
   /**
+   * Record that the upload finished: `uploading` -> `uploaded`, stamping
+   * `uploaded_at`. The maintenance cron gives up on an upload 24 h after that
+   * stamp, so it must be the time the file arrived.
+   *
+   * Guarded on `uploading`: upload-complete is idempotent (a re-POST
+   * re-triggers transcoding), and a repeat must not move the stamp.
+   */
+  async markUploaded(id: string, creatorId: string): Promise<void> {
+    try {
+      await this.db
+        .update(mediaItems)
+        .set({
+          status: MEDIA_STATUS.UPLOADED,
+          uploadedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(mediaItems.id, id),
+            scopedNotDeleted(mediaItems, creatorId),
+            eq(mediaItems.status, MEDIA_STATUS.UPLOADING)
+          )
+        );
+    } catch (error) {
+      this.handleError(error, 'markUploaded');
+    }
+  }
+
+  /**
    * Mark media as ready with transcoding metadata
    *
    * Called by transcoding service when HLS generation is complete.
@@ -607,7 +642,6 @@ export class MediaItemService extends BaseService {
         durationSeconds: metadata.durationSeconds,
         width: metadata.width,
         height: metadata.height,
-        uploadedAt: new Date(),
       },
       creatorId
     );
@@ -616,19 +650,21 @@ export class MediaItemService extends BaseService {
   /**
    * Record that triggering transcoding failed.
    *
-   * The upload-complete handler dispatches the media-api transcode call in the
-   * background (waitUntil) and returns immediately, so a dispatch failure
-   * (media-api unreachable, HMAC rejected, RunPod endpoint dead) would
-   * otherwise be invisible — the media row sits in 'uploaded' forever with no
-   * signal. Persisting the error makes it diagnosable: the transcoding-status
+   * The upload-complete handler makes the media-api transcode call in the
+   * background (ctx.background) and returns immediately, so a failed hop
+   * (media-api unreachable or down, worker auth refusing it) would otherwise
+   * be invisible — the media row sits in 'uploaded' with no signal. Persisting the error makes it diagnosable: the transcoding-status
    * endpoint surfaces `transcodingError`, and the row stays in 'uploaded' so
    * re-POSTing /upload-complete re-dispatches (the existing idempotent recovery
-   * path). On a successful (re)trigger the transcoding service flips status →
-   * 'transcoding' and clears this field.
+   * path). The code TRANSCODER_UNAVAILABLE marks the row as waiting, so the
+   * maintenance cron re-dispatches it too. The transcoding service's claim
+   * flips status → 'transcoding' and clears both fields.
    *
-   * Deliberately a single scoped UPDATE (no transaction) so it can run on a
-   * stateless HTTP db client created inside `waitUntil`, after the request's
-   * own db lifecycle has ended.
+   * Guarded on 'uploaded': when media-api answered late, after it had already
+   * claimed the row, this must not stamp an error on a running transcode.
+   *
+   * A single scoped UPDATE: it runs after the response, and ctx.background
+   * holds the registry's db cleanup off until it settles.
    */
   async recordTranscodingTriggerFailure(
     id: string,
@@ -638,12 +674,16 @@ export class MediaItemService extends BaseService {
     await this.db
       .update(mediaItems)
       .set({
-        // Cap at the column limit (2KB) to prevent oversized error payloads.
-        transcodingError: error.slice(0, 2000),
+        transcodingError: error.slice(0, TRANSCODING_ERROR_MAX_LENGTH),
+        transcodingErrorCode: TRANSCODING_ERROR_CODES.TRANSCODER_UNAVAILABLE,
         updatedAt: new Date(),
       })
       .where(
-        and(eq(mediaItems.id, id), scopedNotDeleted(mediaItems, creatorId))
+        and(
+          eq(mediaItems.id, id),
+          scopedNotDeleted(mediaItems, creatorId),
+          eq(mediaItems.status, MEDIA_STATUS.UPLOADED)
+        )
       );
   }
 }

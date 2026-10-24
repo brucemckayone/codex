@@ -48,6 +48,26 @@ export type TranscodingErrorCode =
 /** The longest code; `media_items.transcoding_error_code` is this wide. */
 export const TRANSCODING_ERROR_CODE_MAX_LENGTH = 50;
 
+/**
+ * The longest detail; `media_items.transcoding_error` is this wide, and a
+ * longer write is a Postgres error, not a truncation.
+ */
+export const TRANSCODING_ERROR_MAX_LENGTH = 2000;
+
+/**
+ * The `error.details.code`s media-api's upload trigger answers when the
+ * answer is about the ITEM (gone or not the caller's, still uploading, no
+ * attempts left). content-api records nothing for these. Anything else (a
+ * 5xx, worker auth's 401/403, a router 404 from a wrong URL) failed the hop,
+ * and the item is marked waiting. @codex/transcoding's errors carry these
+ * codes; a test there pins them.
+ */
+export const TRANSCODING_TRIGGER_ITEM_ANSWER_CODES = [
+  'TRANSCODING_MEDIA_NOT_FOUND',
+  'INVALID_MEDIA_STATE',
+  'MAX_RETRIES_EXCEEDED',
+] as const;
+
 /** Which sentence the studio shows; one per category, not per code. */
 export type TranscodingErrorCategory =
   | 'service' // the transcoder was unavailable

@@ -3,7 +3,7 @@
  * when it has none of its own.
  *
  * THE GAP THIS CLOSES. `media_items.duration_seconds` was written in exactly
- * one place — `MediaService.markAsReady`, from the RunPod webhook. So the column
+ * one place — the RunPod completion webhook (TranscodingService). So the column
  * stayed NULL from the moment a creator finished uploading until transcoding
  * completed, minutes later on `/runsync`. The three journey sections that show
  * a runtime badge already fall back correctly (`p.duration ??
@@ -27,8 +27,13 @@
  * assertions be about `update()` call arguments rather than about the database.
  */
 
-import { createExecutionContext, env } from 'cloudflare:test';
+import {
+  createExecutionContext,
+  env,
+  waitOnExecutionContext,
+} from 'cloudflare:test';
 import type { MediaItemService } from '@codex/content';
+import { workerFetch } from '@codex/security';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -65,10 +70,13 @@ const mediaSpies = {
   update: vi.fn(async (..._args: Parameters<Svc['update']>) => ({
     id: MEDIA_ID,
   })),
-  updateStatus: vi.fn(async (..._args: Parameters<Svc['updateStatus']>) => ({
-    id: MEDIA_ID,
-  })),
-  recordTranscodingTriggerFailure: vi.fn(async () => undefined),
+  markUploaded: vi.fn(
+    async (..._args: Parameters<Svc['markUploaded']>) => undefined
+  ),
+  recordTranscodingTriggerFailure: vi.fn(
+    async (..._args: Parameters<Svc['recordTranscodingTriggerFailure']>) =>
+      undefined
+  ),
   setCache: vi.fn(),
 };
 
@@ -210,19 +218,108 @@ describe('upload-complete records the client-measured duration', () => {
     // No measurement was sent, so nothing is written — but the upload still
     // completes, which is the whole point.
     expect(mediaSpies.update).not.toHaveBeenCalled();
-    expect(mediaSpies.updateStatus).toHaveBeenCalledWith(
-      MEDIA_ID,
-      'uploaded',
-      USER.id
-    );
+    // markUploaded, not updateStatus: it also stamps uploaded_at, the
+    // maintenance cron's 24 h clock.
+    expect(mediaSpies.markUploaded).toHaveBeenCalledWith(MEDIA_ID, USER.id);
   });
 
   it('still advances the status — the duration is a side errand', async () => {
     await post({ durationSeconds: 137 });
-    expect(mediaSpies.updateStatus).toHaveBeenCalledWith(
+    // markUploaded, not updateStatus: it also stamps uploaded_at, the
+    // maintenance cron's 24 h clock.
+    expect(mediaSpies.markUploaded).toHaveBeenCalledWith(MEDIA_ID, USER.id);
+  });
+});
+
+describe('upload-complete records a failed trigger hop', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    stored = { status: 'uploading', durationSeconds: null };
+  });
+
+  /** POST, then wait for the background hop the route registered. */
+  async function postAndSettle(): Promise<Response> {
+    const app = new Hono<{ Variables: Record<string, unknown> }>();
+    app.use('*', async (c, next) => {
+      c.set('user', USER);
+      c.set('session', { id: 'sess_test', userId: USER.id });
+      await next();
+    });
+    app.route('/api/media', media);
+    const executionCtx = createExecutionContext();
+    const res = await app.fetch(
+      new Request(
+        `http://content-api.test/api/media/${MEDIA_ID}/upload-complete`,
+        { method: 'POST' }
+      ),
+      testEnv,
+      executionCtx
+    );
+    await waitOnExecutionContext(executionCtx);
+    return res;
+  }
+
+  it('marks the item waiting on a 5xx, with the status and never the body', async () => {
+    vi.mocked(workerFetch).mockResolvedValueOnce(
+      new Response('{"error":{"message":"pool exhausted at 10.0.0.7"}}', {
+        status: 503,
+      })
+    );
+
+    expect((await postAndSettle()).status).toBe(200);
+    expect(mediaSpies.recordTranscodingTriggerFailure).toHaveBeenCalledWith(
       MEDIA_ID,
-      'uploaded',
-      USER.id
+      USER.id,
+      'Transcoding dispatch returned 503'
+    );
+  });
+
+  it("records nothing for media-api's answer about the item", async () => {
+    vi.mocked(workerFetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'BUSINESS_LOGIC_ERROR',
+            message: 'Maximum transcoding attempts exceeded',
+            details: { code: 'MAX_RETRIES_EXCEEDED' },
+          },
+        }),
+        { status: 422 }
+      )
+    );
+
+    expect((await postAndSettle()).status).toBe(200);
+    expect(mediaSpies.recordTranscodingTriggerFailure).not.toHaveBeenCalled();
+  });
+
+  it('marks the item waiting when worker auth refuses the hop', async () => {
+    vi.mocked(workerFetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: { code: 'UNAUTHORIZED', message: 'Invalid signature' },
+        }),
+        { status: 401 }
+      )
+    );
+
+    expect((await postAndSettle()).status).toBe(200);
+    expect(mediaSpies.recordTranscodingTriggerFailure).toHaveBeenCalledWith(
+      MEDIA_ID,
+      USER.id,
+      'Transcoding dispatch returned 401'
+    );
+  });
+
+  it('marks the item waiting when media-api cannot be reached', async () => {
+    vi.mocked(workerFetch).mockRejectedValueOnce(
+      new TypeError('Network connection lost')
+    );
+
+    expect((await postAndSettle()).status).toBe(200);
+    expect(mediaSpies.recordTranscodingTriggerFailure).toHaveBeenCalledWith(
+      MEDIA_ID,
+      USER.id,
+      'Transcoding dispatch could not reach the media service'
     );
   });
 });

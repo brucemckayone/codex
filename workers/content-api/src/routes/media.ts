@@ -26,12 +26,11 @@ import type {
 } from '@codex/content';
 import {
   createMediaItemSchema,
-  MediaItemService,
   MediaNotFoundError,
   mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/content';
-import { createDbClient } from '@codex/database';
+import { messageForLog } from '@codex/database';
 import { workerFetch } from '@codex/security';
 import { ConflictError, InternalServiceError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
@@ -42,37 +41,9 @@ import {
   procedure,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import { triggerFailureReason } from '../transcoding-trigger';
 
 const app = new Hono<HonoEnv>();
-
-/**
- * Persist a transcoding-dispatch failure so it's diagnosable + recoverable.
- *
- * Runs inside `waitUntil`, after the request's own db lifecycle has ended, so
- * it builds a fresh stateless HTTP db client (same pattern as the cache-bump
- * helpers in content.ts). Never throws — failing to record a failure must not
- * crash the background task; it's logged instead.
- */
-async function recordTranscodingTriggerFailure(
-  env: HonoEnv['Bindings'],
-  mediaId: string,
-  creatorId: string,
-  reason: string,
-  obs?: { error: (message: string, metadata?: Record<string, unknown>) => void }
-): Promise<void> {
-  try {
-    const media = new MediaItemService({
-      db: createDbClient(env),
-      environment: env.ENVIRONMENT,
-    });
-    await media.recordTranscodingTriggerFailure(mediaId, creatorId, reason);
-  } catch (error) {
-    obs?.error('Failed to persist transcoding-trigger failure', {
-      mediaId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
 
 /**
  * POST /api/media
@@ -280,8 +251,8 @@ app.post(
       // 3. Record the client's measurement, so the runtime badge is available
       // IMMEDIATELY rather than only after RunPod calls back minutes later.
       //
-      // ONLY WHEN WE HAVE NOTHING. `markAsReady` writes the figure measured off
-      // the transcoded output, and that is the better authority for the file
+      // ONLY WHEN WE HAVE NOTHING. The RunPod completion webhook writes the
+      // figure measured off the transcoded output, and that is the better authority for the file
       // that actually gets streamed — so this must never overwrite it. This
       // route is also deliberately idempotent (step 2 re-triggers transcoding
       // when a dispatch failed), and without the null check a retry arriving
@@ -296,18 +267,16 @@ app.post(
         );
       }
 
-      // 4. Update status to 'uploaded' (no-op if already uploaded)
+      // 4. Update status to 'uploaded' and stamp uploaded_at (no-op if
+      // already uploaded: the stamp is the time the file arrived).
       if (media.status === MEDIA_STATUS.UPLOADING) {
-        await ctx.services.media.updateStatus(
-          mediaId,
-          MEDIA_STATUS.UPLOADED,
-          creatorId
-        );
+        await ctx.services.media.markUploaded(mediaId, creatorId);
       }
 
-      // 5. Trigger transcoding via media-api worker (fire-and-forget)
-      // The media-api call blocks until RunPod completes (minutes on /runsync),
-      // so we dispatch it via waitUntil and return immediately to the client.
+      // 5. Trigger transcoding via media-api (worker HMAC). media-api claims
+      // the item and answers at once (its RunPod call runs after its own
+      // reply), but the hop still runs after ours: the bytes are in R2, so
+      // the creator is answered whatever media-api says.
       const mediaApiUrl = ctx.env.MEDIA_API_URL;
       if (!mediaApiUrl) {
         throw new InternalServiceError(
@@ -320,50 +289,68 @@ app.post(
         throw new InternalServiceError('Worker shared secret not configured');
       }
 
-      const triggerPromise = workerFetch(
-        `${mediaApiUrl}/internal/media/${mediaId}/transcode`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ creatorId }),
-        },
-        workerSecret
-      )
-        .then(async (response) => {
-          if (!response.ok) {
-            const errorText = await response.text();
-            ctx.obs?.error('Failed to trigger transcoding', {
-              mediaId,
-              statusCode: response.status,
-              error: errorText,
-            });
-            await recordTranscodingTriggerFailure(
-              ctx.env,
-              mediaId,
-              creatorId,
-              `Transcoding dispatch returned ${response.status}: ${errorText}`,
-              ctx.obs
-            );
-          }
-        })
-        .catch(async (error) => {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          ctx.obs?.error('Transcoding trigger failed', {
-            mediaId,
-            error: message,
-          });
-          await recordTranscodingTriggerFailure(
-            ctx.env,
+      // The row stays `uploaded`, marked TRANSCODER_UNAVAILABLE, for the
+      // maintenance cron to re-claim. Only a fixed sentence reaches the
+      // creator; the cause goes to the logs.
+      const recordTriggerFailure = async (reason: string) => {
+        try {
+          await ctx.services.media.recordTranscodingTriggerFailure(
             mediaId,
             creatorId,
-            `Transcoding dispatch failed: ${message}`,
-            ctx.obs
+            reason
           );
-        });
+        } catch (error) {
+          ctx.obs?.error('transcoding.trigger_failure_not_recorded', {
+            mediaId,
+            error: messageForLog(error),
+          });
+        }
+      };
 
-      ctx.executionCtx.waitUntil(triggerPromise);
+      // ctx.background, not waitUntil: it holds the service registry's
+      // cleanup off until the hop (and its failure write) has settled.
+      ctx.background(
+        workerFetch(
+          `${mediaApiUrl}/internal/media/${mediaId}/transcode`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ creatorId }),
+            // media-api answers after one UPDATE; a hung hop must reject
+            // (and be recorded) rather than be cancelled at the budget.
+            signal: AbortSignal.timeout(10_000),
+          },
+          workerSecret
+        )
+          .then(async (response) => {
+            if (response.ok) return;
+            let body = '';
+            try {
+              body = await response.text();
+            } catch {
+              // The status alone decides; the body is for the logs.
+            }
+            const reason = triggerFailureReason(response.status, body);
+            const log = reason ? ctx.obs?.error : ctx.obs?.warn;
+            log?.call(ctx.obs, 'transcoding.trigger_failed', {
+              mediaId,
+              statusCode: response.status,
+              itemAnswer: reason === null,
+              error: body.slice(0, 500),
+            });
+            if (reason) await recordTriggerFailure(reason);
+          })
+          .catch(async (error: unknown) => {
+            ctx.obs?.error('transcoding.trigger_unreachable', {
+              mediaId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            await recordTriggerFailure(
+              'Transcoding dispatch could not reach the media service'
+            );
+          })
+      );
 
-      // Note: transcoding dispatch runs in background via waitUntil.
+      // Note: the transcoding hop runs in the background.
       // Frontend should poll media status rather than relying on this field.
       return {
         success: true,

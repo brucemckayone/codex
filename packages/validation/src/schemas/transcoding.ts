@@ -1,3 +1,4 @@
+import { TRANSCODING_ERROR_MAX_LENGTH } from '@codex/constants';
 import { z } from 'zod';
 import { readStillFolderName } from '../image';
 import { uuidSchema } from '../primitives';
@@ -249,7 +250,7 @@ export const runpodWebhookSchema = z.object({
   // failure webhook and lose the failure it reports.
   error: z
     .string()
-    .transform((message) => message.slice(0, 2000))
+    .transform((message) => message.slice(0, TRANSCODING_ERROR_MAX_LENGTH))
     .optional(),
 
   // Why the job failed, ideally a job-side TRANSCODING_ERROR_CODES value

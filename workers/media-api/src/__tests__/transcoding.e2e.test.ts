@@ -84,7 +84,7 @@ describe('Transcoding E2E Tests', () => {
 
       // Generate worker signature
       // Generate worker signature using correct format: timestamp:payload
-      const message = `${timestamp}:${JSON.stringify({ priority: 2 })}`;
+      const message = `${timestamp}:${JSON.stringify({ creatorId: testUserId, priority: 2 })}`;
       const encoder = new TextEncoder();
       const key = await crypto.subtle.importKey(
         'raw',
@@ -110,7 +110,7 @@ describe('Transcoding E2E Tests', () => {
           'X-Worker-Signature': base64Signature,
           'X-Worker-Timestamp': timestamp,
         },
-        body: JSON.stringify({ priority: 2 }),
+        body: JSON.stringify({ creatorId: testUserId, priority: 2 }),
       });
 
       if (triggerResponse.status === 401) {
@@ -568,8 +568,9 @@ describe('Transcoding E2E Tests', () => {
         }
       );
 
-      // Ownership check fails, returns 403 Forbidden
-      expect(retryResponse.status).toBe(403);
+      // The same 404 as a media id that does not exist: a 403 would tell any
+      // account that the id is real (Codex-jxvg8).
+      expect(retryResponse.status).toBe(404);
     });
 
     it('should ack webhook for non-existent media with 200 (permanent-error policy)', async () => {

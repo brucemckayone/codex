@@ -227,8 +227,8 @@
       // Step 3: Mark upload complete and trigger transcoding.
       //
       // The runtime is measured HERE, on the client, because
-      // `media_items.duration_seconds` is otherwise written only by
-      // `markAsReady` from the RunPod webhook — so it stayed NULL for the
+      // `media_items.duration_seconds` is otherwise written only by the
+      // RunPod completion webhook — so it stayed NULL for the
       // minutes a creator spends building the page right after uploading, and
       // the three journey sections that show a runtime badge rendered nothing
       // despite their field hint promising "leave blank to use the clip's real

@@ -2,8 +2,8 @@
  * Measure a media file's runtime IN THE BROWSER, before it is uploaded.
  *
  * ── WHY THIS EXISTS ────────────────────────────────────────────────────────
- * `media_items.duration_seconds` was written in exactly one place:
- * `MediaService.markAsReady`, called by the RunPod transcoding webhook. So the
+ * `media_items.duration_seconds` was written in exactly one place: the RunPod
+ * completion webhook (TranscodingService.handleWebhook). So the
  * column stayed NULL from the moment a creator finished uploading until
  * transcoding completed — minutes on `/runsync`.
  *
@@ -22,8 +22,8 @@
  * own `loadedmetadata` duration is the truth and wins", and `FeelSection`
  * demotes the stored figure to advisory for exactly that reason.
  *
- * This does NOT replace the transcoder's value, it precedes it. `markAsReady`
- * still overwrites with the figure measured off the transcoded output, which is
+ * This does NOT replace the transcoder's value, it precedes it. The completion
+ * webhook still overwrites with the figure measured off the transcoded output, which is
  * the right authority for the file that actually gets streamed. This only fills
  * the window before that arrives.
  *

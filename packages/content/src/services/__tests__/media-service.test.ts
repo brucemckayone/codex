@@ -19,6 +19,7 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
+import { TRANSCODING_ERROR_MAX_LENGTH } from '@codex/constants';
 import {
   type Database,
   seedTestUsers,
@@ -401,6 +402,8 @@ describe('MediaItemService', () => {
         },
         creatorId
       );
+      await service.markUploaded(created.id, creatorId);
+      const uploadedAt = (await service.get(created.id, creatorId))?.uploadedAt;
 
       const metadata = {
         hlsMasterPlaylistKey: 'hls/test/master.m3u8',
@@ -418,7 +421,10 @@ describe('MediaItemService', () => {
       expect(ready.durationSeconds).toBe(metadata.durationSeconds);
       expect(ready.width).toBe(metadata.width);
       expect(ready.height).toBe(metadata.height);
-      expect(ready.uploadedAt).not.toBeNull();
+      // uploaded_at is when the FILE arrived (markUploaded), the maintenance
+      // cron's 24 h clock: finishing the transcode must not move it.
+      expect(uploadedAt).toBeInstanceOf(Date);
+      expect(ready.uploadedAt?.getTime()).toBe(uploadedAt?.getTime());
     });
   });
 
@@ -876,36 +882,90 @@ describe('MediaItemService', () => {
     });
   });
 
-  describe('recordTranscodingTriggerFailure', () => {
-    const makeMedia = () =>
-      service.create(
-        {
-          title: 'Trigger failure media',
-          mediaType: 'video',
-          mimeType: 'video/mp4',
-          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'tf.mp4'),
-          fileSizeBytes: 1024,
-        },
-        creatorId
-      );
+  const makeUploadingMedia = () =>
+    service.create(
+      {
+        title: 'Trigger failure media',
+        mediaType: 'video',
+        mimeType: 'video/mp4',
+        r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'tf.mp4'),
+        fileSizeBytes: 1024,
+      },
+      creatorId
+    );
 
-    it('persists the error WITHOUT changing status so re-trigger still works', async () => {
+  describe('markUploaded', () => {
+    it('moves an upload to uploaded and stamps when the file arrived', async () => {
+      const created = await makeUploadingMedia();
+
+      await service.markUploaded(created.id, creatorId);
+
+      const after = await service.get(created.id, creatorId);
+      expect(after?.status).toBe('uploaded');
+      expect(after?.uploadedAt).toBeInstanceOf(Date);
+    });
+
+    it('a repeat leaves the stamp: it is the 24 h clock', async () => {
+      const created = await makeUploadingMedia();
+      await service.markUploaded(created.id, creatorId);
+      const first = (await service.get(created.id, creatorId))?.uploadedAt;
+
+      await service.markUploaded(created.id, creatorId);
+
+      const again = (await service.get(created.id, creatorId))?.uploadedAt;
+      expect(again?.getTime()).toBe(first?.getTime());
+    });
+
+    it('is creator-scoped — never touches another creator’s upload', async () => {
+      const created = await makeUploadingMedia();
+
+      await service.markUploaded(created.id, otherCreatorId);
+
+      expect((await service.get(created.id, creatorId))?.status).toBe(
+        'uploading'
+      );
+    });
+  });
+
+  describe('recordTranscodingTriggerFailure', () => {
+    const makeMedia = async () => {
+      const created = await makeUploadingMedia();
+      await service.markUploaded(created.id, creatorId);
+      return created;
+    };
+
+    it('marks the item waiting WITHOUT changing status so re-trigger still works', async () => {
       const created = await makeMedia();
 
       await service.recordTranscodingTriggerFailure(
         created.id,
         creatorId,
-        'media-api returned 503'
+        'Transcoding dispatch returned 503'
       );
 
       const after = await service.get(created.id, creatorId);
-      expect(after?.transcodingError).toBe('media-api returned 503');
-      // Status stays 'uploaded'/'uploading' (not flipped to 'failed') so the
-      // idempotent /upload-complete re-POST remains a valid recovery path.
-      expect(after?.status).toBe('uploading');
+      expect(after?.transcodingError).toBe('Transcoding dispatch returned 503');
+      expect(after?.transcodingErrorCode).toBe('TRANSCODER_UNAVAILABLE');
+      // Status stays 'uploaded' (not flipped to 'failed') so the idempotent
+      // /upload-complete re-POST, and the maintenance cron, can re-dispatch.
+      expect(after?.status).toBe('uploaded');
     });
 
-    it('truncates the error message to the 2KB column limit', async () => {
+    it('never stamps a row that is not uploaded: media-api may have claimed it', async () => {
+      const created = await makeUploadingMedia();
+
+      await service.recordTranscodingTriggerFailure(
+        created.id,
+        creatorId,
+        'Transcoding dispatch returned 503'
+      );
+
+      const after = await service.get(created.id, creatorId);
+      expect(after?.transcodingError).toBeNull();
+      expect(after?.transcodingErrorCode).toBeNull();
+    });
+
+    it('truncates the error message to the column limit', async () => {
       const created = await makeMedia();
 
       await service.recordTranscodingTriggerFailure(
@@ -915,7 +975,9 @@ describe('MediaItemService', () => {
       );
 
       const after = await service.get(created.id, creatorId);
-      expect(after?.transcodingError?.length).toBe(2000);
+      expect(after?.transcodingError?.length).toBe(
+        TRANSCODING_ERROR_MAX_LENGTH
+      );
     });
 
     it('is creator-scoped — never touches another creator’s media', async () => {

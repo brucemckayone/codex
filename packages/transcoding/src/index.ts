@@ -26,14 +26,17 @@
  *   webhookBaseUrl: 'https://media-api.codex.com',
  * });
  *
- * // Trigger transcoding (async - returns immediately)
- * await service.triggerJob(mediaId, creatorId);
+ * // Claim an uploaded item; the RunPod call runs after the reply
+ * const result = await service.triggerJobInternal(mediaId, creatorId);
+ * if (!result.alreadyQueued) ctx.background(result.dispatchPromise);
  *
  * // Handle webhook callback (when RunPod completes)
  * await service.handleWebhook(validatedPayload);
  * ```
  */
 
+// Dispatch rules (the webhook route classifies payloads before the service)
+export { classifyWebhookPayload } from './dispatch';
 // Errors
 export {
   // Re-exported base errors
@@ -46,11 +49,10 @@ export {
   InvalidWebhookSignatureError,
   isTranscodingServiceError,
   MaxRetriesExceededError,
-  MediaOwnershipError,
   NotFoundError,
-  RunPodApiError,
   TranscodingJobNotFoundError,
   TranscodingMediaNotFoundError,
+  TranscodingNotRetryableError,
   TranscodingServiceError,
   ValidationError,
 } from './errors';
@@ -102,7 +104,6 @@ export {
   mezzanineStatusEnum,
   type RetryTranscodingInput,
   type RunPodJobRequest,
-  type RunPodJobResponse,
   type RunPodProgressWebhookPayload,
   type RunPodWebhookOutput,
   type RunPodWebhookPayload,

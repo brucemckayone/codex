@@ -1,930 +1,734 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  type Mock,
-  vi,
-} from 'vitest';
+/**
+ * TranscodingService: the dispatch state machine (Codex-l2c48.4).
+ *
+ * A fake db records every write and renders its WHERE with drizzle's own
+ * dialect, so these tests assert the GUARDS (the SQL that makes each write
+ * conditional) and not just that a write happened. Whether the guards hold
+ * under concurrency is a database question: see the DB-backed suite.
+ */
+
+import { TRANSCODING_ERROR_MAX_LENGTH } from '@codex/constants';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   TranscodingService,
   type TranscodingServiceFullConfig,
 } from '../services/transcoding-service';
-import type { MediaStatus, MediaType, RunPodWebhookPayload } from '../types';
+import type { MediaStatus, MediaType, TranscodingMediaItem } from '../types';
 
-// Mock Dependencies
-const mockDb = {
-  query: {
-    mediaItems: {
-      findFirst: vi.fn(),
-    },
-  },
-  update: vi.fn(),
-};
+const dialect = new PgDialect();
+const render = (value: unknown) =>
+  value && typeof value === 'object' && 'getSQL' in value
+    ? dialect.sqlToQuery((value as { getSQL(): SQL }).getSQL()).sql
+    : '';
 
-const mockConfig = {
-  db: mockDb as unknown as TranscodingServiceFullConfig['db'],
-  environment: 'test',
-  runpodApiKey: 'mock-api-key',
-  runpodEndpointId: 'mock-endpoint-id',
-  webhookBaseUrl: 'https://api.example.com',
-  runpodApiBaseUrl: 'https://api.mock', // For testing with mock RunPod
-  runpodTimeout: 30000,
-} as TranscodingServiceFullConfig;
+interface Write {
+  set: Record<string, unknown>;
+  where: string;
+  params: unknown[];
+}
 
-describe('TranscodingService', () => {
-  let service: TranscodingService;
-
-  beforeEach(() => {
-    service = new TranscodingService(mockConfig);
-    vi.clearAllMocks();
-    global.fetch = vi.fn();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  describe('triggerJob', () => {
-    const mediaId = '550e8400-e29b-41d4-a716-446655440000';
-    const creatorId = 'user_123';
-
-    // Valid media item for testing
-    const validMedia = {
-      id: mediaId,
-      creatorId,
-      status: 'uploaded' as MediaStatus,
-      mediaType: 'video' as MediaType,
-      r2Key: 'user_123/originals/uuid/video.mp4',
-      transcodingPriority: 1,
+function makeDb() {
+  const writes: Write[] = [];
+  /** Rows each successive `.returning()` resolves to; default one row. */
+  const returning: unknown[][] = [];
+  const findFirst = vi.fn();
+  const update = vi.fn(() => {
+    const write: Write = { set: {}, where: '', params: [] };
+    writes.push(write);
+    const chain = {
+      set(values: Record<string, unknown>) {
+        write.set = values;
+        return chain;
+      },
+      where(condition: SQL) {
+        const query = dialect.sqlToQuery(condition);
+        write.where = query.sql;
+        write.params = query.params;
+        // Awaitable as-is (progress updates) or via .returning().
+        return Object.assign(Promise.resolve(undefined), {
+          returning: async () => returning.shift() ?? [{ id: 'row' }],
+        });
+      },
     };
+    return chain;
+  });
+  return {
+    db: { query: { mediaItems: { findFirst } }, update },
+    writes,
+    returning,
+    findFirst,
+  };
+}
 
-    it('should successfully trigger a job for uploaded media', async () => {
-      // Mock DB findFirst
-      mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
+const MEDIA_ID = '550e8400-e29b-41d4-a716-446655440000';
+const CREATOR_ID = 'user_123';
+const JOB_ID = 'runpod-job-123';
 
-      // Mock RunPod API response
-      (global.fetch as Mock).mockResolvedValue({
-        ok: true,
-        json: async () => ({ id: 'runpod-job-123' }),
-      });
+function media(
+  overrides: Partial<TranscodingMediaItem> = {}
+): TranscodingMediaItem {
+  return {
+    id: MEDIA_ID,
+    creatorId: CREATOR_ID,
+    mediaType: 'video' as MediaType,
+    status: 'uploaded' as MediaStatus,
+    r2Key: `${CREATOR_ID}/originals/${MEDIA_ID}/video.mov`,
+    transcodingAttempts: 0,
+    runpodJobId: null,
+    transcodingError: null,
+    transcodingErrorCode: null,
+    transcodingPriority: 2,
+    hlsMasterPlaylistKey: null,
+    hlsPreviewKey: null,
+    thumbnailKey: null,
+    waveformKey: null,
+    waveformImageKey: null,
+    durationSeconds: 646,
+    width: null,
+    height: null,
+    readyVariants: null,
+    mezzanineKey: null,
+    mezzanineStatus: null,
+    transcodingProgress: null,
+    transcodingStep: null,
+    ...overrides,
+  };
+}
 
-      // Mock DB update
-      mockDb.update.mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({}),
-        }),
-      });
+const config = (db: unknown): TranscodingServiceFullConfig =>
+  ({
+    db: db as TranscodingServiceFullConfig['db'],
+    environment: 'test',
+    runpodApiKey: 'mock-api-key',
+    runpodEndpointId: 'mock-endpoint-id',
+    webhookBaseUrl: 'https://api.example.com',
+    runpodApiBaseUrl: 'https://api.mock',
+  }) as TranscodingServiceFullConfig;
 
-      await service.triggerJob(mediaId, creatorId);
+// spyOn, not `global.fetch = vi.fn()`: restoreAllMocks() undoes a spy only.
+function runpodAnswers(status: number, body: unknown) {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    new Response(typeof body === 'string' ? body : JSON.stringify(body), {
+      status,
+    })
+  );
+}
 
-      // Verify RunPod API called correctly
-      expect(global.fetch).toHaveBeenCalledWith(
-        `${mockConfig.runpodApiBaseUrl}/${mockConfig.runpodEndpointId}/run`,
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            Authorization: `Bearer ${mockConfig.runpodApiKey}`,
-          }),
-          body: expect.stringContaining(mediaId),
-        })
-      );
-      // Verify storage credentials are NOT in body (security: configured in RunPod env)
-      const call = (global.fetch as Mock).mock.calls[0] as [
-        string,
-        RequestInit,
-      ];
-      const body = JSON.parse(call[1].body as string);
-      // Should NOT have B2 or R2 credentials in payload
-      expect(body.input.b2Endpoint).toBeUndefined();
-      expect(body.input.b2AccessKeyId).toBeUndefined();
-      expect(body.input.b2SecretAccessKey).toBeUndefined();
-      expect(body.input.b2BucketName).toBeUndefined();
-      expect(body.input.r2Endpoint).toBeUndefined();
-      expect(body.input.r2AccessKeyId).toBeUndefined();
-      expect(body.input.r2SecretAccessKey).toBeUndefined();
-      expect(body.input.r2BucketName).toBeUndefined();
-      // Should only have path information
-      expect(body.input.inputKey).toBeDefined();
-      expect(body.input.webhookUrl).toBeDefined();
-      // Verify required fields ARE present
-      expect(body.input).toMatchObject({
-        mediaId,
-        type: 'video',
-        creatorId,
-        webhookUrl: expect.stringContaining('/api/transcoding/webhook'),
-      });
+let fake: ReturnType<typeof makeDb>;
+let service: TranscodingService;
 
-      // Verify DB update status='transcoding'
-      expect(mockDb.update).toHaveBeenCalled();
+beforeEach(() => {
+  fake = makeDb();
+  service = new TranscodingService(config(fake.db));
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('claimForDispatch', () => {
+  it('counts the attempt and clears the last run in the same statement', async () => {
+    fake.returning.push([
+      media({ status: 'transcoding', transcodingAttempts: 1 }),
+    ]);
+
+    const claimed = await service.claimForDispatch(
+      MEDIA_ID,
+      ['uploaded'],
+      CREATOR_ID
+    );
+
+    expect(claimed?.status).toBe('transcoding');
+    const [write] = fake.writes;
+    expect(write?.set).toMatchObject({
+      status: 'transcoding',
+      transcodingError: null,
+      transcodingErrorCode: null,
+      runpodJobId: null,
+      transcodingProgress: 0,
+      transcodingStep: null,
     });
+    expect(render(write?.set.transcodingAttempts)).toContain(
+      '"transcoding_attempts" + 1'
+    );
+  });
 
-    it('should throw Error if media is not in uploaded state', async () => {
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        ...validMedia,
-        status: 'transcoding', // Invalid state for trigger
-      });
+  it("claims only the creator's undeleted row, from the allowed states, with attempts left", async () => {
+    fake.returning.push([media()]);
 
-      await expect(service.triggerJob(mediaId, creatorId)).rejects.toThrow(
-        /Media must be in 'uploaded' status/
-      );
+    await service.claimForDispatch(
+      MEDIA_ID,
+      ['uploaded', 'failed'],
+      CREATOR_ID
+    );
+
+    const where = fake.writes[0]?.where ?? '';
+    expect(where).toContain('"media_items"."creator_id" = $2');
+    expect(where).toContain('"media_items"."deleted_at" is null');
+    expect(where).toContain('"media_items"."status" in ($3, $4)');
+    expect(where).toContain('"media_items"."transcoding_attempts" < $5');
+    expect(fake.writes[0]?.params.slice(0, 5)).toEqual([
+      MEDIA_ID,
+      CREATOR_ID,
+      'uploaded',
+      'failed',
+      3,
+    ]);
+  });
+
+  it('never claims a row stopped by its file: the WHERE is the whole guard', async () => {
+    fake.returning.push([media()]);
+
+    await service.claimForDispatch(MEDIA_ID, ['failed'], CREATOR_ID);
+
+    const write = fake.writes[0];
+    expect(write?.where).toMatch(
+      /\("media_items"\."transcoding_error_code" is null or "media_items"\."transcoding_error_code" not in \(/
+    );
+    expect(write?.params).toEqual(
+      expect.arrayContaining(['CORRUPT_INPUT', 'UPLOAD_INCOMPLETE'])
+    );
+    expect(write?.params).not.toContain('TIMED_OUT');
+    expect(write?.params).not.toContain('TRANSCODER_PAUSED');
+  });
+
+  it('restarts the 24 h clock only for a resubmission from failed', async () => {
+    fake.returning.push([media()]);
+
+    await service.claimForDispatch(
+      MEDIA_ID,
+      ['uploaded', 'failed'],
+      CREATOR_ID
+    );
+
+    expect(render(fake.writes[0]?.set.uploadedAt)).toMatch(
+      /CASE WHEN "media_items"\."status" = \$\d+ THEN now\(\) ELSE "media_items"\."uploaded_at" END/
+    );
+  });
+
+  it('returns null when nothing matched', async () => {
+    fake.returning.push([]);
+
+    expect(
+      await service.claimForDispatch(MEDIA_ID, ['uploaded'], CREATOR_ID)
+    ).toBeNull();
+  });
+});
+
+describe('dispatch', () => {
+  const claimed = media({ status: 'transcoding', transcodingAttempts: 1 });
+
+  it('sends the job contract and a per-job policy sized from the duration', async () => {
+    runpodAnswers(200, { id: JOB_ID, status: 'IN_QUEUE' });
+
+    await service.dispatch(claimed);
+
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe('https://api.mock/mock-endpoint-id/run');
+    const body = JSON.parse(init.body as string);
+    expect(body.input).toMatchObject({
+      mediaId: MEDIA_ID,
+      inputKey: claimed.r2Key,
+      contract: 2,
     });
-
-    it('should throw Error if r2Key is missing', async () => {
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        ...validMedia,
-        r2Key: null,
-      });
-
-      await expect(service.triggerJob(mediaId, creatorId)).rejects.toThrow(
-        /Input file not uploaded/
-      );
+    const executionTimeout = 15 * 60_000 + 5 * 646 * 1000;
+    expect(body.policy).toEqual({
+      executionTimeout,
+      ttl: executionTimeout + 60 * 60_000,
     });
+    // Storage credentials live in RunPod's secret manager, never the payload.
+    expect(JSON.stringify(body)).not.toMatch(/accessKey|secret/i);
+  });
 
-    it('should throw Error if RunPod API fails', async () => {
-      mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
+  it('stores an accepted job id only while the claim still holds', async () => {
+    runpodAnswers(200, { id: JOB_ID });
 
-      (global.fetch as Mock).mockResolvedValue({
-        ok: false,
-        status: 500,
-        statusText: 'Internal Server Error',
-        text: async () => 'Internal Server Error',
-      });
+    const outcome = await service.dispatch(claimed);
 
-      await expect(service.triggerJob(mediaId, creatorId)).rejects.toThrow(
-        /RunPod API error/
-      );
+    expect(outcome).toEqual({ kind: 'accepted', jobId: JOB_ID });
+    const [write] = fake.writes;
+    expect(write?.set).toMatchObject({ runpodJobId: JOB_ID });
+    expect(write?.where).toContain('"media_items"."status" = $2');
+    expect(write?.where).toContain('"media_items"."runpod_job_id" is null');
+    expect(write?.params).toEqual([MEDIA_ID, 'transcoding']);
+  });
+
+  it('a paused endpoint leaves the item waiting and gives the attempt back', async () => {
+    runpodAnswers(409, { code: 'ENDPOINT_PAUSED' });
+
+    const outcome = await service.dispatch(claimed);
+
+    expect(outcome).toMatchObject({
+      kind: 'rejected',
+      code: 'TRANSCODER_PAUSED',
     });
-
-    it('never puts the RunPod upstream body in the client-visible error context', async () => {
-      // RunPodApiError extends InternalServiceError, and
-      // mapErrorToResponse copies `context` straight into the response's
-      // `details` field — so a `responseBody` in the context forwards a
-      // third-party upstream body to whoever called the API. The body is
-      // still logged via obs; it just must not ride on the error.
-      mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
-
-      const upstreamBody =
-        'RunPod internal: worker-77 at 10.4.2.9 rejected token sk_live_UPSTREAM';
-      (global.fetch as Mock).mockResolvedValue({
-        ok: false,
-        status: 502,
-        statusText: 'Bad Gateway',
-        text: async () => upstreamBody,
-      });
-
-      const err = await service
-        .triggerJob(mediaId, creatorId)
-        .then(() => null)
-        .catch((e: unknown) => e);
-
-      expect(err).toBeInstanceOf(Error);
-      const serialised = JSON.stringify({
-        message: (err as Error).message,
-        context: (err as { context?: unknown }).context,
-      });
-      expect(serialised).not.toContain(upstreamBody);
-      expect(serialised).not.toContain('sk_live_UPSTREAM');
-      expect(serialised).not.toContain('10.4.2.9');
-      // The operation and status code ARE safe correlation data.
-      expect(
-        (err as { context?: { statusCode?: number } }).context?.statusCode
-      ).toBe(502);
+    const [write] = fake.writes;
+    expect(write?.set).toMatchObject({
+      status: 'uploaded',
+      transcodingErrorCode: 'TRANSCODER_PAUSED',
+      transcodingError: 'RunPod answered 409 (ENDPOINT_PAUSED)',
     });
+    expect(render(write?.set.transcodingAttempts)).toContain(
+      'GREATEST("media_items"."transcoding_attempts" - 1, 0)'
+    );
+    expect(write?.where).toContain('"media_items"."runpod_job_id" is null');
+  });
 
-    it('never puts the transport error message in the error context', async () => {
-      // The timeout/abort branch had no log at all and passed
-      // `originalError: error.message` into the context — a fetch failure
-      // message can carry internal hostnames and the endpoint URL.
-      mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
+  it.each([
+    [429, {}, 'TRANSCODER_BUSY'],
+    [401, {}, 'TRANSCODER_MISCONFIGURED'],
+    [503, 'upstream down', 'TRANSCODER_UNAVAILABLE'],
+  ])('a %i also leaves it waiting, as %s', async (status, body, code) => {
+    runpodAnswers(status, body);
 
-      const transportMessage =
-        'request to https://internal-runpod.codex.local/v2/ep-secret/run failed';
-      (global.fetch as Mock).mockRejectedValue(new Error(transportMessage));
+    await service.dispatch(claimed);
 
-      const err = await service
-        .triggerJob(mediaId, creatorId)
-        .then(() => null)
-        .catch((e: unknown) => e);
-
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).toMatch(/RunPod API error/);
-      const serialised = JSON.stringify({
-        message: (err as Error).message,
-        context: (err as { context?: unknown }).context,
-      });
-      expect(serialised).not.toContain(transportMessage);
-      expect(serialised).not.toContain('internal-runpod.codex.local');
-      expect(serialised).not.toContain('ep-secret');
+    expect(fake.writes[0]?.set).toMatchObject({
+      status: 'uploaded',
+      transcodingErrorCode: code,
     });
   });
 
-  describe('handleWebhook', () => {
-    const jobId = 'runpod-job-123';
-    const mediaId = '550e8400-e29b-41d4-a716-446655440000';
+  it('a timeout is ambiguous: the row stays transcoding, nothing is written', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new DOMException('The operation timed out.', 'TimeoutError')
+    );
 
-    it('should update status to ready and save keys on success', async () => {
-      const payload: RunPodWebhookPayload = {
-        jobId: jobId,
-        status: 'completed',
-        output: {
-          mediaId,
-          type: 'video',
-          hlsMasterKey: 'path/to/master.m3u8',
-          hlsPreviewKey: 'path/to/preview.m3u8',
-          thumbnailKey: 'path/to/thumb.jpg',
-          durationSeconds: 120,
-          width: 1920,
-          height: 1080,
-          readyVariants: ['1080p', '720p'],
-        },
-      };
+    const outcome = await service.dispatch(claimed);
 
-      // Mock DB to return media in 'transcoding' state
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        id: mediaId,
-        status: 'transcoding',
-        runpodJobId: jobId,
-      });
-
-      // Mock update chain
-      const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
-      const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await service.handleWebhook(payload);
-
-      expect(mockDb.update).toHaveBeenCalled();
-      expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'ready',
-          hlsMasterPlaylistKey: 'path/to/master.m3u8',
-          durationSeconds: 120,
-        })
-      );
+    expect(outcome).toEqual({
+      kind: 'ambiguous',
+      detail: 'RunPod did not answer within 10 s',
     });
-
-    it('should update status to failed on error and increment transcodingAttempts', async () => {
-      const payload: RunPodWebhookPayload = {
-        jobId: jobId,
-        status: 'failed',
-        error: 'Transcoding failed due to GPU error',
-      };
-
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        id: mediaId,
-        status: 'transcoding',
-        runpodJobId: jobId,
-        transcodingAttempts: 1,
-      });
-
-      const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
-      const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await service.handleWebhook(payload);
-
-      expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'failed',
-          transcodingError: 'Transcoding failed due to GPU error',
-          transcodingAttempts: 2,
-        })
-      );
-    });
-
-    it('should reject completed webhook with empty readyVariants', async () => {
-      const payload: RunPodWebhookPayload = {
-        jobId: jobId,
-        status: 'completed',
-        output: {
-          mediaId,
-          type: 'video',
-          hlsMasterKey: 'path/to/master.m3u8',
-          durationSeconds: 120,
-          width: 320,
-          height: 240,
-          readyVariants: [],
-        },
-      };
-
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        id: mediaId,
-        status: 'transcoding',
-        runpodJobId: jobId,
-        transcodingAttempts: 0,
-      });
-
-      const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
-      const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await service.handleWebhook(payload);
-
-      expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'failed',
-          transcodingError:
-            'Transcoding completed but produced no playable variants',
-          transcodingAttempts: 1,
-        })
-      );
-    });
-
-    it('should store mezzanineKey on completed webhook', async () => {
-      const payload: RunPodWebhookPayload = {
-        jobId: jobId,
-        status: 'completed',
-        output: {
-          mediaId,
-          type: 'video',
-          hlsMasterKey: 'path/to/master.m3u8',
-          thumbnailKey: 'path/to/thumb.webp',
-          durationSeconds: 120,
-          width: 1920,
-          height: 1080,
-          readyVariants: ['1080p', '720p'],
-          mezzanineKey: 'user_123/mezzanine/media-456/mezzanine.mp4',
-        },
-      };
-
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        id: mediaId,
-        status: 'transcoding',
-        runpodJobId: jobId,
-        transcodingAttempts: 0,
-      });
-
-      const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
-      const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await service.handleWebhook(payload);
-
-      expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'ready',
-          mezzanineKey: 'user_123/mezzanine/media-456/mezzanine.mp4',
-          mezzanineStatus: 'ready',
-        })
-      );
-    });
-
-    it('should accept source variant in readyVariants', async () => {
-      const payload: RunPodWebhookPayload = {
-        jobId: jobId,
-        status: 'completed',
-        output: {
-          mediaId,
-          type: 'video',
-          hlsMasterKey: 'path/to/master.m3u8',
-          thumbnailKey: 'path/to/thumb.webp',
-          durationSeconds: 3,
-          width: 320,
-          height: 240,
-          readyVariants: ['source'],
-        },
-      };
-
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        id: mediaId,
-        status: 'transcoding',
-        runpodJobId: jobId,
-        transcodingAttempts: 0,
-      });
-
-      const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
-      const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await service.handleWebhook(payload);
-
-      expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'ready',
-          readyVariants: ['source'],
-        })
-      );
-    });
-
-    // ----- Codex-d3g6 sub-item 4: fallback-mediaId lookup + progress clearing -----
-
-    it('should look up media via top-level fallback mediaId when output.mediaId is absent (failure path)', async () => {
-      // Python handler sends top-level mediaId on failure when runpodJobId
-      // hasn't been stored yet (local /runsync flow — Codex-49y3 contract).
-      const payload: RunPodWebhookPayload & { mediaId?: string } = {
-        jobId: jobId,
-        status: 'failed',
-        error: 'Dispatch failed before jobId was stored',
-        mediaId, // top-level fallback mediaId
-      };
-
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        id: mediaId,
-        status: 'transcoding',
-        runpodJobId: null, // jobId not yet stored — fallback path required
-        transcodingAttempts: 0,
-      });
-
-      const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
-      const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await service.handleWebhook(payload);
-
-      // Verify findFirst was called (the OR clause includes the fallback mediaId)
-      expect(mockDb.query.mediaItems.findFirst).toHaveBeenCalled();
-      // Verify the failure update was applied with the resolved media
-      expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'failed',
-          transcodingError: 'Dispatch failed before jobId was stored',
-          transcodingAttempts: 1,
-        })
-      );
-    });
-
-    it('should clear transcodingProgress and transcodingStep on completed webhook', async () => {
-      const payload: RunPodWebhookPayload = {
-        jobId: jobId,
-        status: 'completed',
-        output: {
-          mediaId,
-          type: 'video',
-          hlsMasterKey: 'path/to/master.m3u8',
-          durationSeconds: 60,
-          width: 1280,
-          height: 720,
-          readyVariants: ['720p'],
-        },
-      };
-
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        id: mediaId,
-        status: 'transcoding',
-        runpodJobId: jobId,
-        transcodingAttempts: 0,
-        transcodingProgress: 95, // mid-flight progress
-        transcodingStep: 'finalizing',
-      });
-
-      const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
-      const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await service.handleWebhook(payload);
-
-      expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'ready',
-          transcodingError: null,
-          transcodingProgress: null,
-          transcodingStep: null,
-        })
-      );
-    });
-
-    it('should clear transcodingProgress and transcodingStep on failed webhook', async () => {
-      const payload: RunPodWebhookPayload = {
-        jobId: jobId,
-        status: 'failed',
-        error: 'GPU OOM',
-      };
-
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        id: mediaId,
-        status: 'transcoding',
-        runpodJobId: jobId,
-        transcodingAttempts: 1,
-        transcodingProgress: 42,
-        transcodingStep: 'encoding_variants',
-      });
-
-      const returningMock = vi.fn().mockResolvedValue([{ id: mediaId }]);
-      const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await service.handleWebhook(payload);
-
-      expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'failed',
-          transcodingProgress: null,
-          transcodingStep: null,
-        })
-      );
-    });
+    expect(fake.writes).toHaveLength(0);
   });
 
-  // ============================================================================
-  // Codex-d3g6 sub-item 2: handleProgressWebhook
-  // ============================================================================
-  describe('handleProgressWebhook', () => {
-    const jobId = 'runpod-job-progress-1';
-    const mediaId = '550e8400-e29b-41d4-a716-446655440000';
+  it('a network error is ambiguous too: RunPod may have the job', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new TypeError('fetch failed')
+    );
 
-    it('should update transcodingProgress and transcodingStep with valid mediaId', async () => {
-      const whereMock = vi.fn().mockResolvedValue({});
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await service.handleProgressWebhook({
-        jobId,
-        status: 'progress',
-        progress: 42,
-        step: 'encoding_variants',
-        mediaId,
-      });
-
-      expect(mockDb.update).toHaveBeenCalled();
-      expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          transcodingProgress: 42,
-          transcodingStep: 'encoding_variants',
-        })
-      );
-    });
-
-    it("should be a no-op for terminal status (only matches WHERE status='transcoding')", async () => {
-      // The DB update has a WHERE clause requiring status='transcoding'.
-      // Drizzle returns an empty rowset for non-matching updates — the call
-      // still goes through but does not affect terminal-state media.
-      const whereMock = vi.fn().mockResolvedValue([]); // no rows affected
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await expect(
-        service.handleProgressWebhook({
-          jobId,
-          status: 'progress',
-          progress: 50,
-          step: 'finalizing',
-          mediaId,
-        })
-      ).resolves.toBeUndefined();
-
-      // Update was attempted, but the WHERE clause filters by status='transcoding'.
-      // Verify the WHERE filter exists by checking that whereMock was called.
-      expect(whereMock).toHaveBeenCalled();
-    });
-
-    it('should match via mediaId fallback when payload includes both jobId and mediaId', async () => {
-      // The OR clause matches either runpodJobId OR mediaId; this exercises
-      // the local /runsync flow where runpodJobId may not yet be stored.
-      const whereMock = vi.fn().mockResolvedValue({});
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await service.handleProgressWebhook({
-        jobId,
-        status: 'progress',
-        progress: 10,
-        step: 'downloading',
-        mediaId,
-      });
-
-      // The where clause was constructed; we can't directly inspect Drizzle's
-      // SQL fragment, but we can verify the call shape includes both update fn
-      // and the where call (which holds the OR(eq(runpodJobId, jobId),
-      // eq(id, mediaId)) condition).
-      expect(setMock).toHaveBeenCalled();
-      expect(whereMock).toHaveBeenCalled();
-    });
-
-    it('should re-throw DB errors after logging (not silently swallow)', async () => {
-      // Per docstring: "Fire-and-forget: silently ignores updates for
-      // completed/failed jobs." — but DB *errors* (vs no-op updates) ARE
-      // logged and re-thrown so the route handler can wrap them.
-      const dbError = new Error('connection refused');
-      const whereMock = vi.fn().mockRejectedValue(dbError);
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await expect(
-        service.handleProgressWebhook({
-          jobId,
-          status: 'progress',
-          progress: 25,
-          step: 'mezzanine',
-          mediaId,
-        })
-      ).rejects.toThrow('connection refused');
-    });
-
-    it('should accept payload without mediaId (jobId-only match)', async () => {
-      const whereMock = vi.fn().mockResolvedValue({});
-      const setMock = vi.fn().mockReturnValue({ where: whereMock });
-      mockDb.update.mockReturnValue({ set: setMock });
-
-      await expect(
-        service.handleProgressWebhook({
-          jobId,
-          status: 'progress',
-          progress: 75,
-          step: 'thumbnails',
-          // mediaId intentionally omitted — RunPod cloud flow stores jobId first
-        })
-      ).resolves.toBeUndefined();
-
-      expect(setMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          transcodingProgress: 75,
-          transcodingStep: 'thumbnails',
-        })
-      );
-    });
+    expect((await service.dispatch(claimed)).kind).toBe('ambiguous');
+    expect(fake.writes).toHaveLength(0);
   });
 
-  // ============================================================================
-  // Codex-d3g6 sub-item 3: triggerJobInternal async refactor (post-Codex-49y3)
-  // ============================================================================
-  describe('triggerJobInternal async refactor', () => {
-    const mediaId = '550e8400-e29b-41d4-a716-446655440000';
-    const creatorId = 'user_internal_123';
-
-    const validMedia = {
-      id: mediaId,
-      creatorId,
-      status: 'uploaded' as MediaStatus,
-      mediaType: 'video' as MediaType,
-      r2Key: 'user_internal_123/originals/uuid/video.mp4',
-      transcodingPriority: 2,
-    };
-
-    it('returns an object containing dispatchPromise (not void)', async () => {
-      mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
-
-      const updateWhereMock = vi.fn().mockResolvedValue({});
-      const updateSetMock = vi.fn().mockReturnValue({ where: updateWhereMock });
-      mockDb.update.mockReturnValue({ set: updateSetMock });
-
-      // RunPod fetch succeeds (consumed inside dispatchPromise)
-      (global.fetch as Mock).mockResolvedValue({
-        ok: true,
-        json: async () => ({ id: 'runpod-job-internal-1' }),
-      });
-
-      const result = await service.triggerJobInternal(mediaId);
-
-      expect(result).toBeDefined();
-      expect(result.dispatchPromise).toBeInstanceOf(Promise);
-
-      // Drain the dispatch promise to avoid unhandled rejections in test runner
-      await result.dispatchPromise;
+  it('never rejects, even when recording the outcome fails', async () => {
+    runpodAnswers(200, { id: JOB_ID });
+    fake.db.update.mockImplementationOnce(() => {
+      throw new Error('connection terminated');
     });
 
-    it('updates DB status to transcoding BEFORE calling RunPod (ordering)', async () => {
-      mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
-
-      const callOrder: string[] = [];
-      const updateWhereMock = vi.fn().mockImplementation(async () => {
-        callOrder.push('db.update');
-        return {};
-      });
-      const updateSetMock = vi.fn().mockReturnValue({ where: updateWhereMock });
-      mockDb.update.mockReturnValue({ set: updateSetMock });
-
-      (global.fetch as Mock).mockImplementation(async () => {
-        callOrder.push('runpod.fetch');
-        return {
-          ok: true,
-          json: async () => ({ id: 'runpod-job-internal-2' }),
-        };
-      });
-
-      const result = await service.triggerJobInternal(mediaId);
-      // The DB update should already have happened by the time
-      // triggerJobInternal returns (it awaits the update before dispatching).
-      expect(callOrder[0]).toBe('db.update');
-      // Drain dispatch promise — fetch happens inside it.
-      await result.dispatchPromise;
-      expect(callOrder).toContain('runpod.fetch');
-      // The fetch must occur AFTER the first DB update.
-      expect(callOrder.indexOf('db.update')).toBeLessThan(
-        callOrder.indexOf('runpod.fetch')
-      );
-    });
-
-    it('marks media as failed (via markTranscodingFailed) when RunPod dispatch rejects', async () => {
-      mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
-
-      const setCalls: Array<Record<string, unknown>> = [];
-      const updateWhereMock = vi.fn().mockResolvedValue({});
-      const updateSetMock = vi.fn().mockImplementation((payload) => {
-        setCalls.push(payload as Record<string, unknown>);
-        return { where: updateWhereMock };
-      });
-      mockDb.update.mockReturnValue({ set: updateSetMock });
-
-      // RunPod call throws — dispatch must catch and mark failed
-      (global.fetch as Mock).mockRejectedValue(
-        new Error('Network unreachable')
-      );
-
-      const result = await service.triggerJobInternal(mediaId);
-      // Dispatch should NOT throw out of the promise — markTranscodingFailed
-      // catches and logs (per docstring).
-      await expect(result.dispatchPromise).resolves.toBeUndefined();
-
-      // Look for the failure-marking update among recorded set() calls
-      const failedSet = setCalls.find((c) => c.status === 'failed');
-      expect(failedSet).toBeDefined();
-      expect(failedSet).toMatchObject({
-        status: 'failed',
-        transcodingError: expect.stringContaining('Network unreachable'),
-        transcodingProgress: null,
-        transcodingStep: null,
-      });
-    });
-
-    it('rejects with InvalidMediaStateError when media is not in uploaded status (TOCTOU guard)', async () => {
-      // The atomic WHERE clause requires status='uploaded' — but the upfront
-      // status check throws InvalidMediaStateError synchronously before the
-      // DB update fires.
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        ...validMedia,
-        status: 'transcoding',
-      });
-
-      await expect(service.triggerJobInternal(mediaId)).rejects.toThrow(
-        /uploaded/i
-      );
-      // Verify no fetch happened — guard tripped before dispatch
-      expect(global.fetch).not.toHaveBeenCalled();
+    await expect(service.dispatch(claimed)).resolves.toEqual({
+      kind: 'accepted',
+      jobId: JOB_ID,
     });
   });
 });
 
-/**
- * retryTranscoding — the compensating write
- *
- * The claim (`failed` -> `uploaded`, attempts+1) commits before the RunPod
- * dispatch, so a dispatch failure used to leave the row in `uploaded` with no
- * job attached. Nothing moved it again: the webhook needs a job that was never
- * created, and the next retry re-read `status !== 'failed'` and threw
- * InvalidMediaStateError (HTTP 422). One upstream blip stranded a creator's
- * media permanently.
- *
- * That is the exact sequence that failed CI run 33667762392 and skipped the
- * 2026-09-02 production deploy: 500 from the dispatch, then 422 on both vitest
- * retries.
- */
-describe('TranscodingService.retryTranscoding', () => {
-  const mediaId = '550e8400-e29b-41d4-a716-446655440000';
-  const creatorId = 'user_123';
+describe('retryTranscoding', () => {
+  it('claims a failed item for its creator and hands back the dispatch', async () => {
+    fake.findFirst.mockResolvedValue(
+      media({
+        status: 'failed',
+        transcodingAttempts: 1,
+        transcodingErrorCode: 'INFRA_ERROR',
+      })
+    );
+    fake.returning.push([
+      media({ status: 'transcoding', transcodingAttempts: 2 }),
+    ]);
+    runpodAnswers(200, { id: JOB_ID });
 
-  /** The row as it sits after a genuine transcoding failure. */
-  const failedMedia = {
-    id: mediaId,
-    creatorId,
-    status: 'failed' as MediaStatus,
-    mediaType: 'video' as MediaType,
-    r2Key: 'user_123/originals/uuid/video.mp4',
-    transcodingPriority: 1,
-    transcodingAttempts: 1,
-    transcodingError: 'Corrupted input file',
-    runpodJobId: 'runpod-job-earlier',
-  };
+    const { dispatchPromise } = await service.retryTranscoding(
+      MEDIA_ID,
+      CREATOR_ID
+    );
 
-  /** Every `.set()` payload the service wrote, in order. */
-  let writes: Record<string, unknown>[];
-  let service: TranscodingService;
+    expect(fake.writes[0]?.params).toEqual(
+      expect.arrayContaining([MEDIA_ID, 'failed', 'uploaded', CREATOR_ID])
+    );
+    await expect(dispatchPromise).resolves.toMatchObject({ kind: 'accepted' });
+  });
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-    global.fetch = vi.fn();
-    service = new TranscodingService(mockConfig);
-    writes = [];
+  it.each([
+    'CORRUPT_INPUT',
+    'UNSUPPORTED_CODEC',
+    'INVALID_DURATION',
+    'MISSING_STREAM',
+  ])('refuses a %s failure: the creator re-uploads', async (code) => {
+    fake.findFirst.mockResolvedValue(
+      media({
+        status: 'failed',
+        transcodingAttempts: 1,
+        transcodingErrorCode: code,
+      })
+    );
 
-    mockDb.update.mockReturnValue({
-      set: vi.fn((payload: Record<string, unknown>) => {
-        writes.push(payload);
-        return {
-          // `where` is awaited directly by triggerJob and chained with
-          // `.returning()` by the claim and the revert, so it has to satisfy
-          // both shapes.
-          where: vi.fn(() => ({
-            returning: vi.fn().mockResolvedValue([{ id: mediaId }]),
-          })),
-        };
+    await expect(
+      service.retryTranscoding(MEDIA_ID, CREATOR_ID)
+    ).rejects.toMatchObject({
+      context: expect.objectContaining({ code: 'TRANSCODING_NOT_RETRYABLE' }),
+    });
+    expect(fake.writes).toHaveLength(0);
+  });
+
+  it('refuses once all 3 attempts are used', async () => {
+    fake.findFirst.mockResolvedValue(
+      media({
+        status: 'failed',
+        transcodingAttempts: 3,
+        transcodingErrorCode: 'INFRA_ERROR',
+      })
+    );
+
+    await expect(
+      service.retryTranscoding(MEDIA_ID, CREATOR_ID)
+    ).rejects.toMatchObject({
+      context: expect.objectContaining({
+        code: 'MAX_RETRIES_EXCEEDED',
+        maxAttempts: 3,
+      }),
+    });
+    expect(fake.writes).toHaveLength(0);
+  });
+
+  it.each([
+    'transcoding',
+    'ready',
+    'uploading',
+  ])('refuses an item that is %s', async (status) => {
+    fake.findFirst.mockResolvedValue(media({ status: status as MediaStatus }));
+
+    await expect(
+      service.retryTranscoding(MEDIA_ID, CREATOR_ID)
+    ).rejects.toMatchObject({
+      context: expect.objectContaining({ code: 'INVALID_MEDIA_STATE' }),
+    });
+  });
+
+  it('a waiting item may be retried; a pause just waits again', async () => {
+    fake.findFirst.mockResolvedValue(
+      media({ status: 'uploaded', transcodingErrorCode: 'TRANSCODER_PAUSED' })
+    );
+    fake.returning.push([
+      media({ status: 'transcoding', transcodingAttempts: 1 }),
+    ]);
+    runpodAnswers(409, { code: 'ENDPOINT_PAUSED' });
+
+    const { dispatchPromise } = await service.retryTranscoding(
+      MEDIA_ID,
+      CREATOR_ID
+    );
+
+    await expect(dispatchPromise).resolves.toMatchObject({
+      code: 'TRANSCODER_PAUSED',
+    });
+    expect(fake.writes[1]?.set).toMatchObject({ status: 'uploaded' });
+  });
+
+  it('says what changed when the row moved between the read and the claim', async () => {
+    fake.findFirst
+      .mockResolvedValueOnce(
+        media({ status: 'failed', transcodingErrorCode: 'INFRA_ERROR' })
+      )
+      .mockResolvedValueOnce(media({ status: 'transcoding' }));
+    fake.returning.push([]);
+
+    await expect(
+      service.retryTranscoding(MEDIA_ID, CREATOR_ID)
+    ).rejects.toMatchObject({
+      context: expect.objectContaining({
+        code: 'INVALID_MEDIA_STATE',
+        currentStatus: 'transcoding',
       }),
     });
   });
 
-  it('restores the row to retryable when the RunPod dispatch fails', async () => {
-    // retryTranscoding reads the failed row; triggerJob then re-reads it and
-    // requires 'uploaded', which the claim has just made true.
-    mockDb.query.mediaItems.findFirst
-      .mockResolvedValueOnce(failedMedia)
-      .mockResolvedValueOnce({ ...failedMedia, status: 'uploaded' });
-
-    // The 2026-09-02 failure verbatim: wrangler answers a request that lands
-    // during an isolate reload with a 503, which TranscodingService reports as
-    // a RunPod API error.
-    (global.fetch as Mock).mockResolvedValue({
-      ok: false,
-      status: 503,
-      text: async () =>
-        'Your worker restarted mid-request. Please try sending the request again.',
-    });
+  it('answers "not found" alike for media that is missing or another creator\'s', async () => {
+    fake.findFirst.mockResolvedValue(undefined);
 
     await expect(
-      service.retryTranscoding(mediaId, creatorId)
-    ).rejects.toThrow();
+      service.retryTranscoding(MEDIA_ID, 'someone_else')
+    ).rejects.toMatchObject({
+      context: expect.objectContaining({ code: 'TRANSCODING_MEDIA_NOT_FOUND' }),
+    });
+    // One scoped read: no second, unscoped probe for whose media it is.
+    expect(fake.findFirst).toHaveBeenCalledTimes(1);
+  });
+});
 
-    // The claim went out first...
-    expect(writes[0]).toMatchObject({
-      status: 'uploaded',
-      transcodingAttempts: 2,
+describe('triggerJobInternal', () => {
+  it('claims an uploaded item and hands back the dispatch', async () => {
+    fake.returning.push([
+      media({ status: 'transcoding', transcodingAttempts: 1 }),
+    ]);
+    runpodAnswers(200, { id: JOB_ID });
+
+    const result = await service.triggerJobInternal(MEDIA_ID, CREATOR_ID, 1);
+
+    expect(fake.writes[0]?.set).toMatchObject({ transcodingPriority: 1 });
+    expect(result.alreadyQueued).toBe(false);
+    if (result.alreadyQueued) return;
+    await expect(result.dispatchPromise).resolves.toMatchObject({
+      kind: 'accepted',
+    });
+  });
+
+  it.each([
+    'transcoding',
+    'ready',
+    'failed',
+  ])('answers alreadyQueued for an item that is %s, and dispatches nothing', async (status) => {
+    fake.returning.push([]);
+    fake.findFirst.mockResolvedValue(media({ status: status as MediaStatus }));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    expect(await service.triggerJobInternal(MEDIA_ID, CREATOR_ID)).toEqual({
+      alreadyQueued: true,
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('refuses an item still uploading: not uploaded, so not queued', async () => {
+    fake.returning.push([]);
+    fake.findFirst.mockResolvedValue(media({ status: 'uploading' }));
+
+    await expect(
+      service.triggerJobInternal(MEDIA_ID, CREATOR_ID)
+    ).rejects.toMatchObject({
+      context: expect.objectContaining({ code: 'INVALID_MEDIA_STATE' }),
+    });
+  });
+
+  it('throws not-found for media that does not exist', async () => {
+    fake.returning.push([]);
+    fake.findFirst.mockResolvedValue(undefined);
+
+    await expect(
+      service.triggerJobInternal(MEDIA_ID, CREATOR_ID)
+    ).rejects.toMatchObject({
+      context: expect.objectContaining({ code: 'TRANSCODING_MEDIA_NOT_FOUND' }),
+    });
+  });
+});
+
+describe('handleWebhook', () => {
+  const completed = {
+    jobId: JOB_ID,
+    status: 'completed' as const,
+    output: {
+      mediaId: MEDIA_ID,
+      type: 'video' as const,
+      hlsMasterKey: 'path/to/master.m3u8',
+      hlsPreviewKey: 'path/to/preview.m3u8',
+      thumbnailKey: 'path/to/thumb.jpg',
+      durationSeconds: 120,
+      width: 1920,
+      height: 1080,
+      readyVariants: ['1080p', '720p'] as ('1080p' | '720p')[],
+    },
+  };
+
+  beforeEach(() => {
+    fake.findFirst.mockResolvedValue(
+      media({ status: 'transcoding', runpodJobId: JOB_ID })
+    );
+  });
+
+  it('marks the item ready and clears both error fields, for the held job only', async () => {
+    await service.handleWebhook(completed);
+
+    const [write] = fake.writes;
+    expect(write?.set).toMatchObject({
+      status: 'ready',
+      hlsMasterPlaylistKey: 'path/to/master.m3u8',
       transcodingError: null,
-      runpodJobId: null,
+      transcodingErrorCode: null,
     });
+    expect(write?.where).toContain(
+      '("media_items"."runpod_job_id" is null or "media_items"."runpod_job_id" = $3)'
+    );
+    expect(write?.params).toEqual([MEDIA_ID, 'transcoding', JOB_ID]);
+  });
 
-    // ...and the LAST write puts every one of those columns back, so the row
-    // is exactly as retryable as it was before the attempt.
-    expect(writes.at(-1)).toMatchObject({
+  it('never counts an attempt: the claim already did', async () => {
+    await service.handleWebhook({
+      jobId: JOB_ID,
       status: 'failed',
-      transcodingAttempts: 1,
-      transcodingError: 'Corrupted input file',
-      runpodJobId: 'runpod-job-earlier',
+      error: 'x',
+    });
+
+    expect(fake.writes[0]?.set).not.toHaveProperty('transcodingAttempts');
+  });
+
+  it("records a failed job's own code, for the held job only", async () => {
+    await service.handleWebhook({
+      jobId: JOB_ID,
+      status: 'failed',
+      error: 'moov atom not found',
+      errorCode: 'CORRUPT_INPUT',
+    });
+
+    const [write] = fake.writes;
+    expect(write?.set).toMatchObject({
+      status: 'failed',
+      transcodingErrorCode: 'CORRUPT_INPUT',
+      transcodingError: 'moov atom not found',
+    });
+    expect(write?.where).toContain(
+      '("media_items"."runpod_job_id" is null or "media_items"."runpod_job_id" = $3)'
+    );
+    expect(write?.params).toEqual([MEDIA_ID, 'transcoding', JOB_ID]);
+  });
+
+  it('cuts the detail to the column at the write', async () => {
+    await service.handleWebhook({
+      jobId: JOB_ID,
+      status: 'failed',
+      error: 'x'.repeat(TRANSCODING_ERROR_MAX_LENGTH),
+      errorCode: 'GPU_ON_FIRE',
+    });
+
+    const written = fake.writes[0]?.set.transcodingError;
+    expect(String(written)).toHaveLength(TRANSCODING_ERROR_MAX_LENGTH);
+    expect(String(written).startsWith('[raw:GPU_ON_FIRE] x')).toBe(true);
+  });
+
+  it('keeps an unrecognised code visible in the detail', async () => {
+    await service.handleWebhook({
+      jobId: JOB_ID,
+      status: 'failed',
+      error: 'boom',
+      errorCode: 'GPU_ON_FIRE',
+    });
+
+    expect(fake.writes[0]?.set).toMatchObject({
+      transcodingErrorCode: 'INFRA_ERROR',
+      transcodingError: '[raw:GPU_ON_FIRE] boom',
     });
   });
 
-  it('does not spend a retry on an attempt that never reached RunPod', async () => {
-    mockDb.query.mediaItems.findFirst
-      .mockResolvedValueOnce(failedMedia)
-      .mockResolvedValueOnce({ ...failedMedia, status: 'uploaded' });
-    (global.fetch as Mock).mockResolvedValue({
-      ok: false,
-      status: 503,
-      text: async () => 'upstream unavailable',
+  it('fails a completion with no playable variants as OUTPUT_REJECTED', async () => {
+    await service.handleWebhook({
+      ...completed,
+      output: { ...completed.output, readyVariants: [] },
     });
 
-    await expect(
-      service.retryTranscoding(mediaId, creatorId)
-    ).rejects.toThrow();
-
-    // The budget guards against re-transcoding media that is itself broken.
-    // Nothing was transcoded here, so the counter must come back to 1 — three
-    // upstream blips must not exhaust a creator's three retries.
-    expect(writes.at(-1)?.transcodingAttempts).toBe(1);
+    expect(fake.writes[0]?.set).toMatchObject({
+      status: 'failed',
+      transcodingErrorCode: 'OUTPUT_REJECTED',
+    });
   });
 
-  it('leaves the claim in place when the dispatch succeeds', async () => {
-    mockDb.query.mediaItems.findFirst
-      .mockResolvedValueOnce(failedMedia)
-      .mockResolvedValueOnce({ ...failedMedia, status: 'uploaded' });
-    (global.fetch as Mock).mockResolvedValue({
-      ok: true,
-      json: async () => ({ id: 'runpod-job-new' }),
+  it('a stale job changes nothing and does not throw', async () => {
+    fake.returning.push([]);
+
+    await expect(service.handleWebhook(completed)).resolves.toBeUndefined();
+  });
+
+  it('throws for a job that matches no media', async () => {
+    fake.findFirst.mockResolvedValue(undefined);
+
+    await expect(service.handleWebhook(completed)).rejects.toMatchObject({
+      context: expect.objectContaining({ jobId: JOB_ID }),
+    });
+  });
+});
+
+describe('handleProgressWebhook', () => {
+  it('updates progress only for the job the row holds', async () => {
+    await service.handleProgressWebhook({
+      jobId: JOB_ID,
+      status: 'progress',
+      progress: 40,
+      step: 'encoding_variants',
+      mediaId: MEDIA_ID,
     });
 
-    await service.retryTranscoding(mediaId, creatorId);
+    expect(fake.writes[0]?.set).toMatchObject({ transcodingProgress: 40 });
+    expect(fake.writes[0]?.where).toContain(
+      '"media_items"."runpod_job_id" is null or'
+    );
+    expect(fake.writes[0]?.where).toContain('"media_items"."status" = ');
+  });
+});
 
-    // Calibration for the two tests above: if a revert were written on the
-    // HAPPY path they would pass for the wrong reason, because they only
-    // inspect the last write.
-    expect(writes.map((w) => w.status)).not.toContain('failed');
+describe('rejectWebhookOutput', () => {
+  it('fails the transcoding row that holds the job', async () => {
+    const failed = await service.rejectWebhookOutput(
+      { jobId: JOB_ID, mediaId: MEDIA_ID },
+      'rejected'
+    );
+
+    expect(failed).toBe(true);
+    const [write] = fake.writes;
+    expect(write?.set).toMatchObject({
+      status: 'failed',
+      transcodingErrorCode: 'OUTPUT_REJECTED',
+    });
+    expect(write?.where).toContain('"media_items"."status" = ');
+    expect(write?.where).toContain('"media_items"."runpod_job_id" is null or');
   });
 
-  describe('getTranscodingStatus', () => {
-    const mediaId = '550e8400-e29b-41d4-a716-446655440000';
-    const creatorId = 'user_123';
+  it('without a job id, fails only a row that holds no job', async () => {
+    await service.rejectWebhookOutput(
+      { jobId: null, mediaId: MEDIA_ID },
+      'rejected'
+    );
 
-    it('returns the stored error code of a waiting item', async () => {
-      mockDb.query.mediaItems.findFirst.mockResolvedValue({
-        id: mediaId,
-        creatorId,
-        status: 'uploaded' as MediaStatus,
-        transcodingAttempts: 0,
-        transcodingError: 'RunPod endpoint is paused',
+    const where = fake.writes[0]?.where ?? '';
+    expect(where).toContain('"media_items"."id" = $1');
+    expect(where).toContain('"media_items"."runpod_job_id" is null');
+    expect(where).not.toContain(' or ');
+  });
+
+  it('with no ids at all, writes nothing: an empty match must never widen', async () => {
+    expect(
+      await service.rejectWebhookOutput(
+        { jobId: null, mediaId: null },
+        'rejected'
+      )
+    ).toBe(false);
+    expect(fake.writes).toHaveLength(0);
+  });
+});
+
+describe('recoverStuckTranscoding', () => {
+  it('fails stuck rows with a code, so NULL keeps meaning "nothing went wrong"', async () => {
+    fake.returning.push([]);
+
+    await service.recoverStuckTranscoding(120);
+
+    expect(fake.writes[0]?.set).toMatchObject({
+      status: 'failed',
+      transcodingErrorCode: 'TIMED_OUT',
+    });
+  });
+});
+
+describe('getTranscodingStatus', () => {
+  it('returns the stored error code of a waiting item', async () => {
+    fake.findFirst.mockResolvedValue(
+      media({
+        transcodingError: 'RunPod answered 409',
         transcodingErrorCode: 'TRANSCODER_PAUSED',
-        runpodJobId: null,
-        transcodingPriority: 2,
-        transcodingProgress: null,
-        transcodingStep: null,
-        readyVariants: null,
-      });
+      })
+    );
 
-      const status = await service.getTranscodingStatus(mediaId, creatorId);
+    const status = await service.getTranscodingStatus(MEDIA_ID, CREATOR_ID);
 
-      expect(status.transcodingErrorCode).toBe('TRANSCODER_PAUSED');
-      // A mock returns whatever it is given, so the select is asserted too:
-      // without the column there, production reads undefined.
-      expect(mockDb.query.mediaItems.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          columns: expect.objectContaining({ transcodingErrorCode: true }),
-        })
-      );
-    });
+    expect(status.transcodingErrorCode).toBe('TRANSCODER_PAUSED');
+    // A mock returns whatever it is given, so the select is asserted too:
+    // without the column there, production reads undefined.
+    expect(fake.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        columns: expect.objectContaining({ transcodingErrorCode: true }),
+      })
+    );
   });
 });
