@@ -12,6 +12,7 @@ import {
   payoutReversals,
   payouts,
   refundReviews,
+  refunds,
 } from '@codex/database/schema';
 import { ServiceUnavailableError } from '@codex/service-errors';
 import {
@@ -38,6 +39,7 @@ import {
   type ClawbackCharge,
   type ClawbackDeps,
   type ClawbackRefund,
+  pendingReductionsFor,
   retryFailedClawbacks,
   reverseCharge,
 } from '../clawback';
@@ -55,6 +57,7 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
   const obs = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
   const createdPayoutIds: string[] = [];
   const createdDisputeIds: string[] = [];
+  const createdRefundIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -76,7 +79,8 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
   });
 
   // Payout rows feed global drains and sweeps: never leave them behind. A
-  // re-pay row is referenced by its reversal (restrict), so reversals go first.
+  // re-pay row is referenced by its reversal (restrict), and can carry steps
+  // of its own (a later cause's), so every reversal goes first.
   afterAll(async () => {
     if (createdPayoutIds.length > 0) {
       const repays = await db
@@ -88,22 +92,27 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
             isNotNull(payoutReversals.repaidByPayoutId)
           )
         );
-      await db
-        .delete(refundReviews)
-        .where(inArray(refundReviews.payoutId, createdPayoutIds));
-      await db
-        .delete(payoutReversals)
-        .where(inArray(payoutReversals.payoutId, createdPayoutIds));
       const all = [
         ...createdPayoutIds,
         ...repays.flatMap((r) => (r.id ? [r.id] : [])),
       ];
+      await db
+        .delete(refundReviews)
+        .where(inArray(refundReviews.payoutId, all));
+      await db
+        .delete(payoutReversals)
+        .where(inArray(payoutReversals.payoutId, all));
       await db.delete(payouts).where(inArray(payouts.id, all));
     }
     if (createdDisputeIds.length > 0) {
       await db
         .delete(disputes)
         .where(inArray(disputes.stripeDisputeId, createdDisputeIds));
+    }
+    if (createdRefundIds.length > 0) {
+      await db
+        .delete(refunds)
+        .where(inArray(refunds.stripeRefundId, createdRefundIds));
     }
     await teardownTestDatabase();
   });
@@ -421,27 +430,100 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
     }
   });
 
-  it('a re-pay row is never a slice of the charge; a later refund of a re-paid slice is recorded for a person', async () => {
+  // ── a later cause on a re-paid slice (Codex-2hxff.59) ─────────────────
+
+  /** A paid 765p creator slice of a 1000p charge, disputed, won, re-paid. */
+  async function repaidSlice(disputeCents: number) {
     const charge = newCharge(1000);
     const creator = await slice(charge, {
       payoutType: 'creator_payout',
       amountCents: 765,
     });
-    const disputeId = await dispute(charge, 'needs_response', 500);
+    const disputeId = await dispute(charge, 'needs_response', disputeCents);
     await run(charge);
     await setDisputeStatus(disputeId, 'won');
     await repayDispute(deps, { disputeId });
     vi.mocked(stripe.transfers.createReversal).mockClear();
+    return { charge, creator, disputeId, repay: await repayOf(creator.id) };
+  }
+
+  async function repayOf(sliceId: string): Promise<Payout> {
+    const [step] = (await records(sliceId)).filter(
+      (r) => r.repaidByPayoutId !== null
+    );
+    return readRow(step?.repaidByPayoutId ?? '');
+  }
+
+  /**
+   * What the payee ends with from a paid slice: its transfer, less what was
+   * reversed from it, plus what its re-pay rows will still pay.
+   */
+  async function payeeNets(sliceId: string): Promise<number> {
+    const row = await readRow(sliceId);
+    const reversed = (await records(sliceId))
+      .filter((r) => r.status === 'done' && r.kind === 'transfer_reversal')
+      .reduce((sum, r) => sum + r.amountCents, 0);
+    const repay = await repayOf(sliceId);
+    const reductions = await pendingReductionsFor(db, [repay.id]);
+    const repays =
+      repay.status === 'pending'
+        ? repay.amountCents - (reductions.get(repay.id) ?? 0)
+        : 0;
+    return row.amountCents - reversed + repays;
+  }
+
+  async function reviewsFor(payoutIds: string[]) {
+    return db
+      .select()
+      .from(refundReviews)
+      .where(inArray(refundReviews.payoutId, payoutIds));
+  }
+
+  it('a later refund of a re-paid slice takes its share off the pending re-pay row: no review, and the payee nets what the refund alone leaves', async () => {
+    const { charge, creator, repay } = await repaidSlice(500);
+    expect(repay.amountCents).toBe(382);
 
     await run(charge, [{ id: `re_${uid()}`, amountCents: 300, createdAt: 1 }]);
 
     expect(stripe.transfers.createReversal).not.toHaveBeenCalled();
+    const [step] = await records(repay.id);
+    // floor(765 × 300/1000) = 229, off the 382 re-pay.
+    expect(step).toMatchObject({
+      causeType: 'refund',
+      kind: 'pending_reduction',
+      amountCents: 229,
+      status: 'done',
+    });
+    expect(
+      (await records(creator.id)).filter((r) => r.causeType === 'refund')
+    ).toHaveLength(0);
+    expect(await reviewsFor([creator.id, repay.id])).toHaveLength(0);
+    expect((await readRow(repay.id)).status).toBe('pending');
+    expect(await payeeNets(creator.id)).toBe(765 - 229);
+  });
+
+  it('a later refund of a re-paid slice whose re-pay has been paid is recorded for a person, as before', async () => {
+    const { charge, creator, repay } = await repaidSlice(500);
+    await db
+      .update(payouts)
+      .set({
+        status: 'paid',
+        stripeTransferId: `tr_repay_${uid()}`,
+        resolvedAt: new Date(),
+      })
+      .where(eq(payouts.id, repay.id));
+
+    await run(charge, [{ id: `re_${uid()}`, amountCents: 300, createdAt: 1 }]);
+
+    expect(stripe.transfers.createReversal).not.toHaveBeenCalled();
+    expect(await records(repay.id)).toHaveLength(0);
     const refundRecord = (await records(creator.id)).find(
       (r) => r.causeType === 'refund'
     );
     expect(refundRecord).toMatchObject({
       status: 'debt',
       lastErrorCode: 'slice_repaid',
+      amountCents: 229,
     });
     const [review] = await db
       .select()
@@ -451,6 +533,250 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
       errorCode: 'slice_repaid',
       creatorUserId: creatorA,
     });
+  });
+
+  it('a full refund after a won full chargeback cancels the re-pay row, and a redelivery changes nothing', async () => {
+    const { charge, creator, repay } = await repaidSlice(1000);
+    expect(repay.amountCents).toBe(765);
+    const refund = { id: `re_${uid()}`, amountCents: 1000, createdAt: 1 };
+
+    await run(charge, [refund]);
+    await run(charge, [refund]);
+
+    expect((await readRow(repay.id)).status).toBe('cancelled_by_refund');
+    expect(await records(repay.id)).toMatchObject([
+      { kind: 'cancellation', amountCents: 765, status: 'done' },
+    ]);
+    expect(await reviewsFor([creator.id, repay.id])).toHaveLength(0);
+    expect(await payeeNets(creator.id)).toBe(0);
+  });
+
+  it('a second dispute on a re-paid slice holds its re-pay row while open, and a loss cuts it', async () => {
+    const { charge, creator, repay } = await repaidSlice(500);
+    const second = await dispute(charge, 'needs_response', 300);
+
+    await run(charge);
+    expect(await records(repay.id)).toHaveLength(0);
+    expect(
+      (await records(creator.id)).filter((r) => r.causeId === second)
+    ).toHaveLength(0);
+
+    await setDisputeStatus(second, 'lost');
+    await run(charge);
+
+    // floor(765 × 300/1000) = 229, off the 382 re-pay.
+    expect(await records(repay.id)).toMatchObject([
+      {
+        causeId: second,
+        kind: 'pending_reduction',
+        amountCents: 229,
+        status: 'done',
+      },
+    ]);
+    expect(await reviewsFor([creator.id, repay.id])).toHaveLength(0);
+    expect(stripe.transfers.createReversal).not.toHaveBeenCalled();
+  });
+
+  it('a step on a re-pay row that could not run is retried by the cron, through its slice’s charge', async () => {
+    const { charge, repay } = await repaidSlice(500);
+    const refund = { id: `re_${uid()}`, amountCents: 300, createdAt: 1 };
+    // A drain is paying the re-pay row: the reduction must wait.
+    await db
+      .update(payouts)
+      .set({ lastRetryAt: new Date(), retryCount: 1 })
+      .where(eq(payouts.id, repay.id));
+    await expect(run(charge, [refund])).rejects.toThrow('Clawback incomplete');
+    const [waiting] = await records(repay.id);
+    expect(waiting).toMatchObject({
+      status: 'failed',
+      lastErrorCode: 'payout_in_flight',
+    });
+
+    // The drain's attempt failed and released the row; the cron runs later.
+    await db
+      .update(payouts)
+      .set({ status: 'failed', lastRetryAt: new Date('2026-01-01T00:00:00Z') })
+      .where(eq(payouts.id, repay.id));
+    await db
+      .update(payoutReversals)
+      .set({ updatedAt: new Date('2000-01-01T00:00:00Z') })
+      .where(eq(payoutReversals.id, waiting?.id ?? ''));
+    vi.mocked(stripe.charges.retrieve).mockImplementation((async (
+      id: string
+    ) => ({
+      id,
+      object: 'charge',
+      amount: id === charge.id ? charge.amountCents : 0,
+    })) as never);
+    vi.mocked(stripe.refunds.list).mockImplementation((async (params: {
+      charge: string;
+    }) => ({
+      object: 'list',
+      data:
+        params.charge === charge.id
+          ? [
+              {
+                id: refund.id,
+                amount: refund.amountCents,
+                created: refund.createdAt,
+                status: 'succeeded',
+              },
+            ]
+          : [],
+      has_more: false,
+    })) as never);
+
+    await retryFailedClawbacks(deps, { olderThanMinutes: 15 });
+
+    expect((await records(repay.id))[0]).toMatchObject({
+      kind: 'pending_reduction',
+      amountCents: 229,
+      status: 'done',
+    });
+    expect(obs.error).not.toHaveBeenCalledWith(
+      'A failed clawback step has no charge id to retry by',
+      expect.anything()
+    );
+  });
+
+  // ── a refund that settles under a full chargeback (Codex-2hxff.59) ────
+
+  it('a refund created before a full chargeback and settled after it opens: on a win the payee nets what the refund alone leaves', async () => {
+    const charge = newCharge(1000);
+    const creator = await slice(charge, {
+      payoutType: 'creator_payout',
+      amountCents: 765,
+    });
+    const disputeId = await dispute(charge, 'needs_response');
+    await run(charge);
+    expect((await readRow(creator.id)).status).toBe('reversed');
+
+    // The refund settles now. The chargeback took the whole slice, so there
+    // is nothing left of it to claw back.
+    const refund = { id: `re_${uid()}`, amountCents: 300, createdAt: 1 };
+    createdRefundIds.push(refund.id);
+    await db.insert(refunds).values({
+      stripeRefundId: refund.id,
+      stripeChargeId: charge.id,
+      amountCents: refund.amountCents,
+      currency: 'gbp',
+      status: 'succeeded',
+      stripeCreatedAt: new Date(refund.createdAt * 1000),
+    });
+    await run(charge, [refund]);
+    expect(
+      (await records(creator.id)).filter((r) => r.causeType === 'refund')
+    ).toHaveLength(0);
+
+    await setDisputeStatus(disputeId, 'won');
+    vi.mocked(stripe.charges.retrieve).mockResolvedValue({
+      id: charge.id,
+      object: 'charge',
+      amount: charge.amountCents,
+    } as never);
+    vi.mocked(stripe.refunds.list).mockResolvedValue({
+      object: 'list',
+      data: [
+        {
+          id: refund.id,
+          amount: refund.amountCents,
+          created: refund.createdAt,
+          status: 'succeeded',
+        },
+      ],
+      has_more: false,
+    } as never);
+
+    const result = await repayDispute(deps, { disputeId });
+
+    expect(result.repaid).toBe(1);
+    // floor(765 × 300/1000) = 229 is the refund's: 765 − 229.
+    expect(await payeeNets(creator.id)).toBe(536);
+    // A later run of the same refund takes nothing more.
+    await run(charge, [refund]);
+    expect(await payeeNets(creator.id)).toBe(536);
+    expect(await reviewsFor([creator.id])).toHaveLength(0);
+  });
+
+  it('a won dispute whose charge was refunded only in the usual order pays back the whole reversal', async () => {
+    const charge = newCharge(1000);
+    const creator = await slice(charge, {
+      payoutType: 'creator_payout',
+      amountCents: 765,
+    });
+    const refund = { id: `re_${uid()}`, amountCents: 400, createdAt: 1 };
+    createdRefundIds.push(refund.id);
+    await db.insert(refunds).values({
+      stripeRefundId: refund.id,
+      stripeChargeId: charge.id,
+      amountCents: refund.amountCents,
+      currency: 'gbp',
+      status: 'succeeded',
+      stripeCreatedAt: new Date(refund.createdAt * 1000),
+    });
+    const disputeId = await dispute(charge, 'under_review', 600);
+    await run(charge, [refund]);
+    await setDisputeStatus(disputeId, 'won');
+    vi.mocked(stripe.charges.retrieve).mockResolvedValue({
+      id: charge.id,
+      object: 'charge',
+      amount: charge.amountCents,
+    } as never);
+    vi.mocked(stripe.refunds.list).mockResolvedValue({
+      object: 'list',
+      data: [
+        {
+          id: refund.id,
+          amount: refund.amountCents,
+          created: refund.createdAt,
+          status: 'succeeded',
+        },
+      ],
+      has_more: false,
+    } as never);
+
+    await repayDispute(deps, { disputeId });
+
+    // The refund's 306 was reversed when it ran; the dispute's 459 comes back.
+    const repay = await repayOf(creator.id);
+    expect(repay.amountCents).toBe(459);
+    expect(await records(repay.id)).toHaveLength(0);
+    expect(await payeeNets(creator.id)).toBe(765 - 306);
+  });
+
+  // ── an unpaid slice cut to nothing (Codex-2hxff.59) ───────────────────
+
+  it('a partial loss, then a refund for the rest: the slice is cancelled_by_refund, so no drain meets it', async () => {
+    const charge = newCharge(1000);
+    const held = await slice(charge, {
+      payoutType: 'creator_payout',
+      amountCents: 800,
+      status: 'pending',
+    });
+    const disputeId = await dispute(charge, 'lost', 250);
+    await run(charge);
+    expect(await records(held.id)).toMatchObject([
+      { kind: 'pending_reduction', amountCents: 200, status: 'done' },
+    ]);
+
+    await run(charge, [{ id: `re_${uid()}`, amountCents: 750, createdAt: 1 }]);
+
+    // floor(800 × 750/1000) = 600, which with the loss's 200 is all of it.
+    const refundStep = (await records(held.id)).find(
+      (r) => r.causeType === 'refund'
+    );
+    expect(refundStep).toMatchObject({
+      kind: 'cancellation',
+      amountCents: 600,
+      status: 'done',
+    });
+    expect((await readRow(held.id)).status).toBe('cancelled_by_refund');
+    // With the loss applied the hold lifts, and the drain still skips it.
+    await db
+      .update(disputes)
+      .set({ outcomeAppliedAt: new Date() })
+      .where(eq(disputes.stripeDisputeId, disputeId));
+    expect(await drainable(held.id)).toBe(false);
   });
 
   it('won: a step that had not run is cancelled, a debt is closed as dispute_won, and a fee slice the dispute reversed is paid again', async () => {

@@ -41,7 +41,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, or } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -89,6 +89,10 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
   afterAll(async () => {
     if (createdPayoutIds.length > 0) {
       // A won dispute's re-pay rows are live pending payouts: delete them too.
+      // A reversal references a payout twice (payout_id, and
+      // repaid_by_payout_id), and a later refund records its own step ON a
+      // re-pay row (Codex-2hxff.59 item 1a), so every reversal touching any of
+      // these rows goes before the rows.
       const repays = await db
         .select({ id: payoutReversals.repaidByPayoutId })
         .from(payoutReversals)
@@ -98,20 +102,22 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
             isNotNull(payoutReversals.repaidByPayoutId)
           )
         );
+      const all = [
+        ...createdPayoutIds,
+        ...repays.flatMap((r) => (r.id ? [r.id] : [])),
+      ];
       await db
         .delete(refundReviews)
-        .where(inArray(refundReviews.payoutId, createdPayoutIds));
+        .where(inArray(refundReviews.payoutId, all));
       await db
         .delete(payoutReversals)
-        .where(inArray(payoutReversals.payoutId, createdPayoutIds));
-      await db
-        .delete(payouts)
         .where(
-          inArray(payouts.id, [
-            ...createdPayoutIds,
-            ...repays.flatMap((r) => (r.id ? [r.id] : [])),
-          ])
+          or(
+            inArray(payoutReversals.payoutId, all),
+            inArray(payoutReversals.repaidByPayoutId, all)
+          )
         );
+      await db.delete(payouts).where(inArray(payouts.id, all));
     }
     if (createdDisputeIds.length > 0) {
       await db
@@ -837,7 +843,12 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
       stripeChargeId: null,
     });
 
-    // …but a later refund never claws it back as a slice of the charge.
+    // …but is never clawed back as a slice of the charge. Codex-2hxff.59 item
+    // 1a: a later refund takes the CREATOR SLICE's share,
+    // floor(765 × 300/1000) = 229, off the still-unpaid re-pay row, by a
+    // reduction recorded on that row. It is not a share of the re-pay row's
+    // own 382, no transfer is reversed, and no person is needed: the
+    // `slice_repaid` review is only for a re-pay row already paid.
     vi.mocked(stripe.transfers.createReversal).mockClear();
     stripeRefunds([{ id: `re_after_${seeded.tag}`, amount: 300 }]);
     await refundEvent(seeded, `re_after_${seeded.tag}`, 300);
@@ -846,8 +857,23 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
         .select()
         .from(payoutReversals)
         .where(eq(payoutReversals.payoutId, repay.id))
-    ).toHaveLength(0);
+    ).toMatchObject([
+      {
+        causeType: 'refund',
+        causeId: `re_after_${seeded.tag}`,
+        kind: 'pending_reduction',
+        amountCents: 229,
+        status: 'done',
+      },
+    ]);
+    expect(stripe.transfers.createReversal).not.toHaveBeenCalled();
     expect((await readRow(repay.id)).status).toBe('pending');
+    expect(
+      await db
+        .select()
+        .from(refundReviews)
+        .where(inArray(refundReviews.payoutId, [creator.id, repay.id]))
+    ).toHaveLength(0);
   });
 
   it('restoreDisputedPurchase: a won dispute restores the access a chargeback paused, and clears the mark', async () => {
