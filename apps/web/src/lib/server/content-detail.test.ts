@@ -387,7 +387,10 @@ describe('loadAccessWithBody (Codex-039vo)', () => {
     expect(getStreamingUrl).toHaveBeenCalledWith('c1', { includeBody: true });
     expect(access.hasAccess).toBe(true);
     expect(body).toEqual({ contentBody: null, contentBodyJson: bodyJson });
-    expect(mockLogger.error).not.toHaveBeenCalled();
+    expect(mockLogger.error).not.toHaveBeenCalledWith(
+      'Access granted but /stream returned no body',
+      expect.anything()
+    );
   });
 
   it('never puts the raw body on the access result the page returns', async () => {
@@ -442,7 +445,10 @@ describe('loadAccessWithBody (Codex-039vo)', () => {
 
     expect(access.hasAccess).toBe(true);
     expect(body).toBeNull();
-    expect(mockLogger.error).not.toHaveBeenCalled();
+    expect(mockLogger.error).not.toHaveBeenCalledWith(
+      'Access granted but /stream returned no body',
+      expect.anything()
+    );
   });
 
   // The contract-fault log fires only for a GRANT without a body. A denial or
@@ -460,7 +466,10 @@ describe('loadAccessWithBody (Codex-039vo)', () => {
 
     expect(access.hasAccess).toBe(false);
     expect(body).toBeNull();
-    expect(mockLogger.error).not.toHaveBeenCalled();
+    expect(mockLogger.error).not.toHaveBeenCalledWith(
+      'Access granted but /stream returned no body',
+      expect.anything()
+    );
   });
 
   it('an outage is a failed check with no body, and logs no fault', async () => {
@@ -475,7 +484,10 @@ describe('loadAccessWithBody (Codex-039vo)', () => {
 
     expect(access).toMatchObject({ hasAccess: false, accessCheckFailed: true });
     expect(body).toBeNull();
-    expect(mockLogger.error).not.toHaveBeenCalled();
+    expect(mockLogger.error).not.toHaveBeenCalledWith(
+      'Access granted but /stream returned no body',
+      expect.anything()
+    );
   });
 
   it('the fast path (loadAccessAndProgress) never asks for the body', async () => {

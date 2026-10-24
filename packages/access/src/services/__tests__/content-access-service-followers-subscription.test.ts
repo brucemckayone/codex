@@ -572,5 +572,50 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       expect(outcome).toBeInstanceOf(AccessDeniedError);
       expect(JSON.stringify(outcome)).not.toContain('the followers-only text');
     });
+
+    // A purchase grant outlives unpublication (an item withdrawn after it was
+    // sold), but a row never published was never offered: no body, as the
+    // course player's released-only rule (Codex-039vo review, cycle 3).
+    const paidRow = (publishedAt: Date | null) => ({
+      ...followersContentRow,
+      isFollowerGated: false,
+      isPurchasable: true,
+      priceCents: 900,
+      status: 'draft',
+      publishedAt,
+      contentBody: 'the paid text',
+      contentBodyJson: null,
+    });
+
+    it('a buyer of an item never published gets the grant but no body', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(paidRow(null));
+
+      const { service, verifyPurchase } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+      const result = await service.getStreamingUrl(userId, streamingInput, {
+        includeBody: true,
+      });
+
+      // The calibration: the grant itself stands (the stream is minted).
+      expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
+      expect(result).not.toHaveProperty('body');
+    });
+
+    it('a buyer of an item withdrawn after release keeps the body', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(
+        paidRow(new Date('2026-01-01T00:00:00.000Z'))
+      );
+
+      const { service, verifyPurchase } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+      const result = await service.getStreamingUrl(userId, streamingInput, {
+        includeBody: true,
+      });
+
+      expect(result.body).toEqual({
+        contentBody: 'the paid text',
+        contentBodyJson: null,
+      });
+    });
   });
 });

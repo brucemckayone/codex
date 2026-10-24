@@ -1,6 +1,6 @@
 import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
-import { ENV_NAMES, type Env } from '@codex/constants';
+import { CONTENT_STATUS, ENV_NAMES, type Env } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
 import { content } from '@codex/database/schema';
 import {
@@ -244,8 +244,10 @@ export class ContentAccessService
    * read-committed, read-only snapshot.
    *
    * With `options.includeBody`, the result also carries the content's body,
-   * taken from the row the access decision just read, and only once that
-   * decision granted. It is how an entitled reader gets a gated piece's body:
+   * taken from the row the access decision just read, only once that decision
+   * granted, and only for a released row (published now, or once): a draft
+   * never published carries none even to a grant that outlives
+   * unpublication. It is how an entitled reader gets a gated piece's body:
    * the public content API returns a body only for fully public rows
    * (Codex-039vo). The detail pages ask for it; the player's URL refreshes do
    * not, so they never carry it.
@@ -386,18 +388,28 @@ export class ContentAccessService
           // (written article → null-URL, else validated HLS descriptor). The
           // body, when asked for, is this same row's: read under the snapshot
           // that granted access, after the decision, never before it.
+          //
+          // And only for a RELEASED row (published now, or once). Purchase and
+          // course grants outlive unpublication, for an item withdrawn after
+          // it was sold. A practice never published (a draft an editor put in a
+          // curriculum) was never offered, so its text stays out, as the
+          // course player's released-only rule keeps it (Codex-039vo review).
+          const released =
+            contentRecord.status === CONTENT_STATUS.PUBLISHED ||
+            contentRecord.publishedAt != null;
           return {
             target: resolveStreamableMedia(
               this.obs,
               input.contentId,
               contentRecord
             ),
-            body: options.includeBody
-              ? {
-                  contentBody: contentRecord.contentBody,
-                  contentBodyJson: contentRecord.contentBodyJson,
-                }
-              : undefined,
+            body:
+              options.includeBody && released
+                ? {
+                    contentBody: contentRecord.contentBody,
+                    contentBodyJson: contentRecord.contentBodyJson,
+                  }
+                : undefined,
           };
         },
         {

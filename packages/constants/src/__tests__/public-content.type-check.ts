@@ -6,13 +6,14 @@
  * ship its body through the unauthenticated public API. The only guard is
  * that `ContentPublicnessPolicy` makes all seven fields REQUIRED (nullable).
  * Each call below omits one field and carries `// @ts-expect-error`. That
- * directive fails the build when the error does NOT occur (TS2578), so making
- * any field optional again turns `pnpm typecheck` red. The full policy is
- * written bare, so a type that rejected every policy would turn it red too.
+ * directive fails `pnpm typecheck` when the error does NOT occur (TS2578), so
+ * making any field optional again turns it red. The full policy is written
+ * bare, so a type that rejected every policy would turn it red too.
  *
- * NOT A `*.test.ts` FILE: this package's tsconfig excludes those, and vitest
- * transpiles without typechecking, so an `@ts-expect-error` there is checked by
- * nothing. The same reason as worker-utils' `*.type-check.ts` files.
+ * A `.type-check.ts`, not a `.test.ts`: it has no runtime assertions, so
+ * vitest has nothing to run, and `pnpm typecheck` (tsconfig.typecheck.json,
+ * which includes test files since Codex-629bw) is what checks it. The build
+ * never sees it. Same pattern as worker-utils' `*.type-check.ts` files.
  */
 import { isPublicContent } from '../content';
 
