@@ -304,3 +304,180 @@ describe('runpodWebhookUnionSchema', () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe('Webhook contract fields (Codex-l2c48)', () => {
+  // The output today's deployed handler sends for a video (main.py `result`),
+  // with every feature flag at its default.
+  const deployedVideoOutput = {
+    mediaId: '550e8400-e29b-41d4-a716-446655440000',
+    type: 'video',
+    hlsMasterKey:
+      'creator/hls/550e8400-e29b-41d4-a716-446655440000/master.m3u8',
+    hlsPreviewKey:
+      'creator/hls/550e8400-e29b-41d4-a716-446655440000/preview/preview.m3u8',
+    thumbnailKey: 'creator/media-thumbnails/550e8400/lg.webp',
+    thumbnailVariants: {
+      sm: 'creator/media-thumbnails/550e8400/sm.webp',
+      md: 'creator/media-thumbnails/550e8400/md.webp',
+      lg: 'creator/media-thumbnails/550e8400/lg.webp',
+    },
+    waveformKey: null,
+    waveformImageKey: null,
+    mezzanineKey: null,
+    durationSeconds: 646,
+    width: 3840,
+    height: 2160,
+    readyVariants: ['720p', '480p'],
+    loudnessIntegrated: -2181,
+    loudnessPeak: -1608,
+    loudnessRange: 10,
+  };
+
+  it("accepts the deployed handler's output unchanged", () => {
+    expect(
+      runpodWebhookOutputSchema.safeParse(deployedVideoOutput).success
+    ).toBe(true);
+  });
+
+  it('accepts null loudness, sent when loudness analysis is switched off', () => {
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...deployedVideoOutput,
+      loudnessIntegrated: null,
+      loudnessPeak: null,
+      loudnessRange: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts an xl poster from the sized image layout', () => {
+    const folder = 'creator/media-thumbnails/550e8400/3840x2160-0a1b2c3d';
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...deployedVideoOutput,
+      thumbnailKey: `${folder}/lg.webp`,
+      thumbnailVariants: {
+        sm: `${folder}/sm.webp`,
+        md: `${folder}/md.webp`,
+        lg: `${folder}/lg.webp`,
+        xl: `${folder}/xl.webp`,
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.thumbnailVariants?.xl).toBe(`${folder}/xl.webp`);
+  });
+
+  it('still requires sm, md and lg beside xl', () => {
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...deployedVideoOutput,
+      thumbnailVariants: { lg: 'k/lg.webp', xl: 'k/xl.webp' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('keeps an errorCode on a failure, including one this build does not know', () => {
+    const result = runpodWebhookUnionSchema.safeParse({
+      jobId: 'runpod-job-9',
+      status: 'failed',
+      error: 'ffprobe failed (exit 1): moov atom not found',
+      errorCode: 'SOME_FUTURE_CODE',
+      mediaId: '550e8400-e29b-41d4-a716-446655440000',
+    });
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({ errorCode: 'SOME_FUTURE_CODE' });
+  });
+
+  // A failure webhook must never be rejected for a detail: a rejected one
+  // loses the very failure it reports, and the row waits 2 h for the cron.
+  it.each([
+    ['a null errorCode (Python None)', { errorCode: null }],
+    ['an over-long errorCode', { errorCode: 'X'.repeat(51) }],
+    ['an errorCode that is not a string', { errorCode: 42 }],
+    ['a null mediaId (failure raised before it was read)', { mediaId: null }],
+  ])('accepts a failure webhook with %s and keeps its error', (_, detail) => {
+    const result = runpodWebhookUnionSchema.safeParse({
+      jobId: 'runpod-job-9',
+      status: 'failed',
+      error: 'ffprobe failed (exit 1): moov atom not found',
+      ...detail,
+    });
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      error: 'ffprobe failed (exit 1): moov atom not found',
+    });
+  });
+
+  it('truncates an error message to the 2KB column instead of rejecting it', () => {
+    // 1999 code points that are 2001 UTF-16 units: Python's [:2000] cut lets
+    // this through, and a .max(2000) bound would have refused it.
+    const message = `${'a'.repeat(1997)}🎬🎬`;
+    const result = runpodWebhookUnionSchema.safeParse({
+      jobId: 'runpod-job-9',
+      status: 'failed',
+      error: message,
+    });
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({ error: message.slice(0, 2000) });
+  });
+});
+
+describe('Sized poster folders (Codex-l2c48)', () => {
+  const folder = 'creator/media-thumbnails/550e8400/1080x1920-0a1b2c3d';
+  const output = {
+    mediaId: '550e8400-e29b-41d4-a716-446655440000',
+    type: 'video',
+    thumbnailKey: `${folder}/lg.webp`,
+    readyVariants: ['720p'],
+  };
+  const allFour = {
+    sm: `${folder}/sm.webp`,
+    md: `${folder}/md.webp`,
+    lg: `${folder}/lg.webp`,
+    xl: `${folder}/xl.webp`,
+  };
+
+  it('accepts a sized folder holding all four sizes', () => {
+    expect(
+      runpodWebhookOutputSchema.safeParse({
+        ...output,
+        thumbnailVariants: allFour,
+      }).success
+    ).toBe(true);
+  });
+
+  it('rejects a sized folder without xl, which the web lists by folder name', () => {
+    const { xl: _xl, ...threeSizes } = allFour;
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...output,
+      thumbnailVariants: threeSizes,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['thumbnailVariants', 'xl']);
+  });
+
+  it('rejects a sized folder whose sizes live in another folder', () => {
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...output,
+      thumbnailVariants: { ...allFour, md: 'creator/elsewhere/md.webp' },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['thumbnailVariants', 'md']);
+  });
+
+  it('rejects a sized folder with no variants at all', () => {
+    expect(runpodWebhookOutputSchema.safeParse(output).success).toBe(false);
+  });
+
+  it('accepts the flat layout an older handler writes, without xl', () => {
+    const flat = 'creator/media-thumbnails/550e8400';
+    expect(
+      runpodWebhookOutputSchema.safeParse({
+        ...output,
+        thumbnailKey: `${flat}/lg.webp`,
+        thumbnailVariants: {
+          sm: `${flat}/sm.webp`,
+          md: `${flat}/md.webp`,
+          lg: `${flat}/lg.webp`,
+        },
+      }).success
+    ).toBe(true);
+  });
+});

@@ -306,7 +306,7 @@ export class TranscodingService extends BaseService {
    * @throws {TranscodingJobNotFoundError} If no media matches the jobId
    */
   async handleWebhook(
-    payload: RunPodWebhookPayload & { mediaId?: string }
+    payload: RunPodWebhookPayload & { mediaId?: string | null }
   ): Promise<void> {
     const { jobId, status, output, error: errorMessage } = payload;
     // Top-level mediaId sent by Python handler on failure (fallback when
