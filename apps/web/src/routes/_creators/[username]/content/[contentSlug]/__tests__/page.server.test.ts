@@ -271,6 +271,25 @@ describe('creator content detail: a personal piece withdrawn from sale opens for
     );
   });
 
+  // The worker found the reader's piece; only the access check failed. The
+  // 503 is theirs to retry, never a redirect to another item.
+  it('a failed access check on a found withdrawn piece is a 503, never the org redirect', async () => {
+    const { ApiError } = await import('$lib/server/errors');
+    mockGetPublicContent.mockResolvedValue({ items: [orgPiece] });
+    mockGetWithdrawnContent.mockResolvedValue({
+      content: withdrawnPiece,
+      held,
+    });
+    mockGetStreamingUrl.mockRejectedValue(
+      new ApiError(502, 'bad gateway', 'UPSTREAM')
+    );
+    const { load } = await import('../+page.server');
+
+    await expect(load(event({ id: 'u1' }))).rejects.toMatchObject({
+      status: 503,
+    });
+  });
+
   it('with no org piece, a failed withdrawn read propagates: not a 404', async () => {
     const outage = new Error('content-api unavailable');
     mockGetPublicContent.mockResolvedValue({ items: [] });

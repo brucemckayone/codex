@@ -451,7 +451,10 @@ export async function loadWithdrawnDetail(
       // back to "Content not found" with nothing said.
       const details = err.details as { code?: unknown } | null | undefined;
       if (details?.code !== 'CONTENT_NOT_FOUND') {
-        logger.error('Withdrawn read 404 without CONTENT_NOT_FOUND', { key });
+        logger.error('Withdrawn read 404 without CONTENT_NOT_FOUND', {
+          key,
+          code: err.code,
+        });
       }
       return null;
     });
@@ -519,6 +522,12 @@ async function fetchAccess(
   const accessGranted = resolveAccessGranted(streamResult, streamError);
   const accessCheckFailed =
     !accessGranted && classifyStreamFailure(streamError) === 'unknown';
+  // The only trace of a check that failed without a verdict (a timeout, a
+  // network failure, a 5xx): the view asks for a refresh, or the withdrawn
+  // path answers a 503, and neither logs why.
+  if (accessCheckFailed) {
+    logReadFailure('/stream access check failed', { contentId }, streamError);
+  }
   const hasAccess = isPublicContent(policy) || accessGranted;
   const streamingUrl =
     (streamResult as StreamResult | null)?.streamingUrl ?? null;

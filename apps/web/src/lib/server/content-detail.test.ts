@@ -532,6 +532,7 @@ describe('loadWithdrawnDetail (Codex-ov2ii)', () => {
 
   beforeEach(() => {
     mockLogger.error.mockClear();
+    mockLogger.warn.mockClear();
   });
 
   function reads(
@@ -587,7 +588,7 @@ describe('loadWithdrawnDetail (Codex-ov2ii)', () => {
     expect(await loadWithdrawnDetail(key, undefined, cookies)).toBeNull();
     expect(mockLogger.error).toHaveBeenCalledWith(
       'Withdrawn read 404 without CONTENT_NOT_FOUND',
-      { key }
+      { key, code: 'NOT_FOUND' }
     );
   });
 
@@ -642,5 +643,10 @@ describe('loadWithdrawnDetail (Codex-ov2ii)', () => {
     );
 
     expect(isHttpError(failure, 503)).toBe(true);
+    // A 503 is an expected HttpError, which no hook logs: this is its trace.
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      '/stream access check failed',
+      expect.objectContaining({ contentId: 'c1', status: 502 })
+    );
   });
 });

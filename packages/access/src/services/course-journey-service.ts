@@ -763,8 +763,8 @@ export class CourseJourneyService extends BaseService {
    * off-critical-path payload of the sales page. PUBLIC: NO auth, NO `canView` (HARDENING §E). The clips reuse the
    * SAME public preview path the org-landing hero consumes —
    * `mediaItems.hlsPreviewKey` resolved to a CDN URL by plain concatenation with
-   * `R2_PUBLIC_URL_BASE` (mirrors `content-api/routes/public.ts` `resolveR2Urls`);
-   * NO R2 signing is ever involved. A clip is `null` when the course has no such
+   * `R2_PUBLIC_URL_BASE` (mirrors `resolveR2Urls` in
+   * `content-api/routes/r2-public-urls.ts`); NO R2 signing is ever involved. A clip is `null` when the course has no such
    * media, its preview has not transcoded (`hlsPreviewKey` null), or no CDN base
    * is configured. Returns `null` when the course is not published/non-deleted.
    */

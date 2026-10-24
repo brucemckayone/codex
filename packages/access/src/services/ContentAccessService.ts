@@ -509,9 +509,10 @@ export class ContentAccessService
    *
    * An item leaves the storefront when its creator unpublishes it, or when the
    * creator leaves the organisation (archived, stamped `offSaleAt`). The access
-   * decision keeps granting some readers (a buyer, a subscriber until their
-   * next renewal, the team), but the detail pages found rows only through the
-   * published-only public list, so those readers got "Content not found".
+   * decision keeps granting some readers (a buyer, a course owner, a
+   * subscriber until their next renewal; never staff, who preview in the
+   * studio), but the detail pages found rows only through the published-only
+   * public list, so those readers got "Content not found".
    *
    * Narrow on purpose: a published row is the public list's, and a row never
    * released (`publishedAt` null) is a draft that was never offered. The

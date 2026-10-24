@@ -10,7 +10,7 @@
  *   a friendly error message instead of a generic 500.
  */
 import { publicContentSlugSchema } from '@codex/validation';
-import { error, redirect } from '@sveltejs/kit';
+import { error, isHttpError, redirect } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
@@ -101,7 +101,9 @@ export const load: PageServerLoad = async ({
   // still has it keeps it even when an org piece shares the slug. If that read
   // fails while an org piece is there to send them to, the redirect stands,
   // as it did before this read existed; with none, the failure propagates (an
-  // outage is not "not found").
+  // outage is not "not found"). An HttpError always propagates: it is the
+  // helper's own answer AFTER it found the reader's piece (the 503 of a failed
+  // access check), and redirecting then would send them to another item.
   const hasOrgPiece = matches.some((item) => item.organization?.slug);
   const withdrawn =
     personalPiece || !locals.user
@@ -111,7 +113,7 @@ export const load: PageServerLoad = async ({
           platform,
           cookies
         ).catch((err: unknown) => {
-          if (!hasOrgPiece) throw err;
+          if (!hasOrgPiece || isHttpError(err)) throw err;
           logReadFailure(
             'Withdrawn read failed; redirecting to the org piece',
             { creatorId: creatorProfile.id, contentSlug },
