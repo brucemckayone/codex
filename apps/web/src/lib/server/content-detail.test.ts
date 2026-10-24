@@ -319,6 +319,30 @@ describe('loadAccessAndProgress reads WHY /stream failed (Codex-h3ipg)', () => {
     });
   });
 
+  // A refused stream names an open payment dispute in `details.reason`, from
+  // the KV block or from the database (Codex-2hxff.60). The page's notice
+  // depends on the mirror keeping both values.
+  it.each([
+    'purchase_dispute',
+    'subscription_dispute',
+  ] as const)('carries the %s reason from a 403', async (reason) => {
+    streamThrows(new ApiError(403, 'paused', 'ACCESS_DENIED', { reason }));
+    const result = await loadAccessAndProgress('c1', undefined, cookies, paid);
+    expect(result).toMatchObject({
+      hasAccess: false,
+      accessCheckFailed: false,
+      revocationReason: reason,
+    });
+  });
+
+  it('drops an ordinary denial reason, which is no revocation', async () => {
+    streamThrows(
+      new ApiError(403, 'denied', 'ACCESS_DENIED', { reason: 'paid' })
+    );
+    const result = await loadAccessAndProgress('c1', undefined, cookies, paid);
+    expect(result).toMatchObject({ hasAccess: false, revocationReason: null });
+  });
+
   it('keeps an outage closed but marks the check failed', async () => {
     streamThrows(new ApiError(503, 'unavailable'));
     const result = await loadAccessAndProgress('c1', undefined, cookies, paid);

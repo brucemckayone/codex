@@ -48,9 +48,9 @@ A chargeback on a subscription invoice moved the money, but the subscriber kept 
 | Event | What happens to the subscription |
 |---|---|
 | Inquiry | Nothing (Q1) |
-| Chargeback opened | `disputed_at` set; the streaming block written; library caches cleared. Billing paused: `pause_collection = { behavior: 'void' }` (Q-A) |
+| Chargeback opened | `disputed_at` set; the streaming block written with reason `'subscription_dispute'`; library caches cleared. Billing paused: `pause_collection = { behavior: 'void' }` (Q-A). A tier change is refused (409) until the dispute ends (Codex-2hxff.60) |
 | Won | `disputed_at` cleared and billing resumed (`pause_collection` unset), unless another chargeback on the same subscription is still open, or lost (it is being cancelled); the block cleared. A course subscription's grant moves to the current period end: renewals voided during the pause never moved it |
-| Lost | Cancelled at Stripe at once, with no proration: the bank has already returned the money. The existing `customer.subscription.deleted` handling then ends access and sends the cancellation email |
+| Lost | The streaming block written with reason `'refund'`, then cancelled at Stripe at once, with no proration: the bank has already returned the money. The existing `customer.subscription.deleted` handling then ends access, overwrites the block's reason with `'subscription_deleted'`, and sends the cancellation email |
 
 A subscription that is already cancelled when the event arrives gets no Stripe call. Only its access marker changes.
 
@@ -77,6 +77,7 @@ A subscription that is already cancelled when the event arrives gets no Stripe c
 
 - **Q-A: billing is paused while a chargeback is open.** `pause_collection` with `void`: the subscription stays `active` and no renewal is charged while access is paused. A win resumes billing from the next renewal; a loss cancels the subscription. This replaces "no Stripe change" in dispute-record.md §5.
 - **Q-B: no new notice in this PR.** The subscriber sees locked content while the account page still says Active. A notice is filed, to be mocked up first: Codex-2hxff.60.
+  - Built in Codex-2hxff.60 (owner decisions 2026-10-24): a refused stream carries `reason: 'subscription_dispute'` (from the KV block, then from the database), so the content page says "Access paused" with no Buy button; the account page shows a "Paused: payment dispute" badge and hides Change Plan, and `changeTier` refuses with a 409. A subscription's items still leave the library while it is disputed.
 
 ## 8. Known limits (from review, 2026-10-19)
 

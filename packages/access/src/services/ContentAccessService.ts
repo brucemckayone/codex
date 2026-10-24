@@ -737,7 +737,12 @@ export class ContentAccessService
     input: ListUserLibraryInput
   ): Promise<UserLibraryResponse> {
     return buildUserLibrary(
-      { db: this.db, obs: this.obs, r2PublicUrlBase: this.r2PublicUrlBase },
+      {
+        db: this.db,
+        obs: this.obs,
+        r2PublicUrlBase: this.r2PublicUrlBase,
+        purchaseService: this.purchaseService,
+      },
       userId,
       input
     );

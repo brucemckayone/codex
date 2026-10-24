@@ -11,8 +11,9 @@
  *   - ContinueWatching.svelte (rail)
  *
  * Design constraints (P2 decoration — see bead):
- *   - Only subscription-gated entries are affected. Purchased and
- *     membership-gated items always render untouched.
+ *   - Only subscription-gated entries are joined. Membership-gated items
+ *     always render untouched, and a purchased item changes only while a
+ *     payment dispute on it is open (Codex-2hxff.60).
  *   - We only know the subscription status for orgs the user has
  *     visited (subscriptionCollection is populated on org-layout mount).
  *     When the map has no entry we return `active` — conservative default
@@ -51,6 +52,13 @@ interface LibraryAccessInput {
     | 'followers';
   /** Slug of the owning org (join key against subscriptionCollection). */
   organizationSlug: string | null;
+  /**
+   * `purchase.disputedAt` of the library row: set while a chargeback on the
+   * purchase is open. The library lists only completed purchases and a won
+   * dispute clears the mark, so "set" means "open". A row cached before the
+   * field shipped has none; callers pass `null` for it.
+   */
+  purchaseDisputedAt: string | null;
 }
 
 /**
@@ -61,12 +69,15 @@ interface LibraryAccessInput {
  *   revoked    — dimmed card + hover CTA "Subscription ended — reactivate"
  *   past_due   — corner badge "Payment failed — update payment"; card stays
  *                fully accessible while Stripe retries the card
+ *   disputed   — dimmed card + label "Paused: payment dispute", always shown;
+ *                a purchase with an open payment dispute
  */
 type LibraryAccessState =
   | { kind: 'active' }
   | { kind: 'cancelling'; periodEnd: string }
   | { kind: 'revoked' }
-  | { kind: 'past_due' };
+  | { kind: 'past_due' }
+  | { kind: 'disputed' };
 
 /**
  * Build a slug → SubscriptionItem map from the collection values.
@@ -89,6 +100,7 @@ export function indexSubscriptionsBySlug(
  * Resolve a library item's access state.
  *
  * Join rules:
+ *   - Purchased item with an open dispute       → disputed
  *   - Non-subscription items                    → active (no change)
  *   - Subscription item, no slug (edge case)    → active (can't resolve)
  *   - Subscription item, sub entry missing      → active (conservative;
@@ -105,6 +117,9 @@ export function getLibraryAccessState(
   item: LibraryAccessInput,
   subscriptionsBySlug: Map<string, SubscriptionItem>
 ): LibraryAccessState {
+  if (item.accessType === 'purchased' && item.purchaseDisputedAt != null) {
+    return { kind: 'disputed' };
+  }
   if (item.accessType !== 'subscription') return { kind: 'active' };
   if (!item.organizationSlug) return { kind: 'active' };
 

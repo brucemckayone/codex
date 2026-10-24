@@ -126,6 +126,12 @@ export interface PurchaseListItem {
   courseTitle: string | null;
   amountCents: number;
   status: 'completed' | 'pending' | 'failed' | 'refunded';
+  /**
+   * ISO 8601: when a chargeback on this payment opened (Codex-2hxff.60). A
+   * dispute is open while `status` is still `'completed'`. A win clears it; a
+   * loss keeps it on a row that is now `'refunded'`.
+   */
+  disputedAt: string | null;
 }
 
 /**

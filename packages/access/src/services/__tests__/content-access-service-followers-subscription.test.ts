@@ -57,6 +57,8 @@ interface QueryMocks {
   organizationFollowers: { findFirst: FindFirstFn };
   subscriptions: { findFirst: FindFirstFn };
   subscriptionTiers: { findFirst: FindFirstFn };
+  /** Read on the deny path only, by `disputeHold` (Codex-2hxff.60). */
+  purchases: { findFirst: FindFirstFn };
 }
 
 interface StubDb {
@@ -97,6 +99,7 @@ function createStubDb(): StubDb {
     organizationFollowers: { findFirst: vi.fn() },
     subscriptions: { findFirst: vi.fn() },
     subscriptionTiers: { findFirst: vi.fn() },
+    purchases: { findFirst: vi.fn() },
   };
 
   const tx = { query: mocks, select: emptySelect };

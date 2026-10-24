@@ -58,6 +58,19 @@ const { service, cleanup } = createContentAccessService(env);
 Content must be non-deleted. A soft-deleted row → `ContentNotFoundError` (404);
 granted-but-unauthorized paths map to `AccessDeniedError` (403).
 
+### Why a stream is refused (`AccessDeniedError.context.reason`)
+
+The KV block answers first and carries its own `RevocationReason`. Otherwise
+the reason is the decision's `DenyReason`, unless `disputeHold` (deny path only)
+finds an open payment dispute behind the refusal (Codex-2hxff.60):
+`'purchase_dispute'` for a completed purchase with `disputed_at` set, where the
+branch reads a purchase (tier-gated or paid); `'subscription_dispute'` for a
+tier-gated or followers-only item that a subscription would grant but for its
+`disputed_at`. The web shows "Access paused" with no Buy button for either. The
+context is client-facing: it names the kind of dispute only, never a date,
+amount or reason. Chargeback writers use the same two values in the KV block;
+a lost dispute writes `'refund'`.
+
 ### Publication vs entitlement (Codex-p3m5j)
 
 Content does NOT have to be **published**. Owner decision, 2026-09-23: *a one-off
@@ -127,7 +140,7 @@ Inside the followers branch, checks run in this order:
 ## Library Query
 
 `listUserLibrary()` runs five independent query arms in parallel:
-- `queryPurchased` — content with completed purchases, unioned with live support grants (`entitlements.source = 'grant'`); an item both bought and granted is one row
+- `queryPurchased` — content with completed purchases, unioned with live support grants (`entitlements.source = 'grant'`); an item both bought and granted is one row. A purchase with an open chargeback stays listed, paused, with `purchase.disputedAt` set (Codex-2hxff.60); a lost one is `refunded` and leaves. `purchase.disputedAt` is `null` for a grant. No second-copy check: `uq_purchases_completed_customer_content` allows one completed purchase per item
 - `queryMembership` — content accessible via org membership
 - `querySubscription` — content accessible via subscription tier
 - `queryFreeRelationship` — `isFree` content of followed/subscribed orgs

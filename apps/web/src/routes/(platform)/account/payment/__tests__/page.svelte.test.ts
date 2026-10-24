@@ -43,6 +43,7 @@ const CONTENT: PurchaseListItem = {
   courseTitle: null,
   amountCents: 1500,
   status: 'completed',
+  disputedAt: null,
 };
 const COURSE: PurchaseListItem = {
   id: 'p2',
@@ -55,6 +56,7 @@ const COURSE: PurchaseListItem = {
   courseTitle: 'Mindful Running: Eight-Week Course',
   amountCents: 4900,
   status: 'completed',
+  disputedAt: null,
 };
 
 let component: ReturnType<typeof mount> | null = null;
@@ -112,5 +114,37 @@ describe('purchase history', () => {
     // The other columns are untouched: the course row's amount and status.
     expect(clean(courseRow)).toContain('£49.00');
     expect(clean(courseRow)).toContain(m.account_payments_status_complete());
+  });
+});
+
+// A chargeback leaves the row `completed` until the bank decides; a lost one
+// refunds it and leaves `disputedAt` set (Codex-2hxff.60).
+describe('purchase history: a payment dispute', () => {
+  const DISPUTED_AT = '2026-10-20T09:00:00.000Z';
+  const statusBadge = (row: Element) =>
+    row.querySelectorAll('td')[3].querySelector('.badge');
+
+  test('an open dispute on a completed payment shows a warning badge, "Payment dispute"', () => {
+    mountPage([{ ...CONTENT, disputedAt: DISPUTED_AT }]);
+
+    const badge = statusBadge(document.querySelector('tbody tr') as Element);
+    expect(clean(badge)).toBe(m.account_payments_status_disputed());
+    expect(badge?.getAttribute('data-variant')).toBe('warning');
+  });
+
+  test('a lost dispute, now refunded, shows "Refunded"', () => {
+    mountPage([{ ...CONTENT, status: 'refunded', disputedAt: DISPUTED_AT }]);
+
+    const badge = statusBadge(document.querySelector('tbody tr') as Element);
+    expect(clean(badge)).toBe(m.account_payments_status_refunded());
+    expect(badge?.getAttribute('data-variant')).toBe('neutral');
+  });
+
+  test('a completed payment with no dispute still shows "Complete"', () => {
+    mountPage([CONTENT]);
+
+    const badge = statusBadge(document.querySelector('tbody tr') as Element);
+    expect(clean(badge)).toBe(m.account_payments_status_complete());
+    expect(badge?.getAttribute('data-variant')).toBe('success');
   });
 });

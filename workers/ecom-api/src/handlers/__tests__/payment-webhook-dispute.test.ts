@@ -282,7 +282,13 @@ describe('handlePaymentWebhook — disputes', () => {
       expect.objectContaining({ userId: 'user_disp', reason: 'refund' }),
       expect.anything()
     );
-    expect(mockRevoke).toHaveBeenCalledWith('user_disp', 'org_disp', 'refund');
+    // Paused, not ended: the content page shows the dispute notice
+    // (Codex-2hxff.60). The library bump keeps its own 'refund' reason.
+    expect(mockRevoke).toHaveBeenCalledWith(
+      'user_disp',
+      'org_disp',
+      'purchase_dispute'
+    );
     expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
     expect(purchase.clawBackPurchaseCharge).toHaveBeenCalledWith(
       'pi_test_dispute',
@@ -625,7 +631,11 @@ describe('handlePaymentWebhook — disputes', () => {
     await drainWaitUntil(bundle);
 
     expect(subscription.pauseForDispute).toHaveBeenCalledWith(disputeInput);
-    expect(mockRevoke).toHaveBeenCalledWith('user_sub', 'org_sub', 'refund');
+    expect(mockRevoke).toHaveBeenCalledWith(
+      'user_sub',
+      'org_sub',
+      'subscription_dispute'
+    );
     expect(subscription.pauseBillingForDispute).toHaveBeenCalledWith(
       disputedSubscription,
       'dp_test_dispute'

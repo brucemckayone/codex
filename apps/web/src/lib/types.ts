@@ -382,6 +382,12 @@ export interface PurchaseListItem {
   courseTitle: string | null;
   amountCents: number;
   status: string;
+  /**
+   * ISO 8601; set when a chargeback opened on the payment. A won dispute
+   * clears it. A lost one refunds the row and leaves it set, so the dispute
+   * is open only while `status` is still `'completed'` (Codex-2hxff.60).
+   */
+  disputedAt: string | null;
 }
 
 // ─── Ownership Transfer Types (Codex-2hxff.2) ──────────────────────────────

@@ -25,7 +25,9 @@
  *   → unpaid`, `customer.subscription.paused`, `charge.refunded` (a full
  *   refund of the latest subscription payment), and a chargeback opened or
  *   lost on a subscription invoice, or on a purchase whose item the buyer
- *   holds no other way. NOT by `invoice.payment_failed`: a failed renewal
+ *   holds no other way (opened: `'purchase_dispute'` or
+ *   `'subscription_dispute'`; lost: `'refund'`). NOT by
+ *   `invoice.payment_failed`: a failed renewal
  *   keeps access while Stripe retries (owner decision P-3).
  * - Cleared by: `customer.subscription.updated → active` while billing is not
  *   paused (a `pause_collection` there is our own dispute hold, so it never
@@ -43,12 +45,20 @@ import { ValidationError } from '@codex/service-errors';
 /**
  * Why access was revoked. Used for observability and optional UX messaging,
  * never for authorization branching — revocation is binary (present or not).
+ *
+ * The two dispute values mean access is PAUSED, not ended: a chargeback is
+ * open on the purchase, or on one of the subscription's invoices. The content
+ * page says so, and offers no Buy button (Codex-2hxff.60). The writer knows
+ * which kind it is, and the payload has no room for a second field, so the
+ * kind is in the value. A lost dispute writes `'refund'`: the access has ended.
  */
 export type RevocationReason =
   | 'subscription_deleted'
   | 'payment_failed'
   | 'refund'
-  | 'admin_revoke';
+  | 'admin_revoke'
+  | 'purchase_dispute'
+  | 'subscription_dispute';
 
 /**
  * Payload stored in KV under `revoked:user:{userId}:{orgId}`.
@@ -183,11 +193,18 @@ export class AccessRevocation {
   }
 }
 
+/**
+ * Every reason a reader accepts. A value missing here makes its key read as
+ * malformed, so the block is ignored (the DB check still refuses the stream,
+ * but the content page loses its copy).
+ */
 const REVOCATION_REASONS: ReadonlySet<RevocationReason> = new Set([
   'subscription_deleted',
   'payment_failed',
   'refund',
   'admin_revoke',
+  'purchase_dispute',
+  'subscription_dispute',
 ]);
 
 function isRevocation(value: unknown): value is Revocation {

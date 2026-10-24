@@ -17,6 +17,7 @@
 
 import { PRICE_LIMITS } from '@codex/constants';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import * as m from '$paraglide/messages';
 import {
   createRawSnippet,
   flushSync,
@@ -485,6 +486,79 @@ describe('withdrawn from sale, still the reader’s (Codex-ov2ii)', () => {
   test('an item on the storefront shows no note', () => {
     render({ content: makeContent(SELLABLE), hasAccess: true });
     expect(note()).toBeNull();
+  });
+});
+
+describe('paused by a payment dispute (Codex-2hxff.60)', () => {
+  const anyGate = () => document.querySelector('.content-detail__purchase');
+  const purchaseForm = () => document.querySelector(`.${PURCHASE_FORM}`);
+  const subscribeButton = () =>
+    document.querySelector('[data-testid="subscribe-button"]');
+  const announcement = () =>
+    document
+      .querySelector('.content-detail__player-status')
+      ?.textContent?.trim();
+
+  test('a disputed buyer sees the notice in the player and no Buy below it', () => {
+    render({
+      content: makeContent(SELLABLE),
+      hasAccess: false,
+      revocationReason: 'purchase_dispute',
+    });
+    const overlay = player().querySelector('.access-revoked');
+    expect(overlay?.getAttribute('data-reason')).toBe('purchase_dispute');
+    expect(anyGate()).toBeNull();
+    expect(purchaseForm()).toBeNull();
+    expect(announcement()).toBe('Access paused.');
+  });
+
+  test('a disputed subscriber is offered no Subscribe, Upgrade or Buy', () => {
+    render({
+      content: makeContent({ ...SELLABLE, includedInTierId: 'tier-1' }),
+      hasAccess: false,
+      requiresSubscription: true,
+      hasSubscription: false,
+      revocationReason: 'subscription_dispute',
+    });
+    expect(
+      player().querySelector('.access-revoked')?.getAttribute('data-reason')
+    ).toBe('subscription_dispute');
+    expect(anyGate()).toBeNull();
+    expect(subscribeButton()).toBeNull();
+    expect(purchaseForm()).toBeNull();
+    expect(announcement()).toBe('Access paused.');
+  });
+
+  test.each([
+    ['purchase_dispute', m.access_paused_dispute_purchase()],
+    ['subscription_dispute', m.access_paused_dispute_subscription()],
+  ] as const)('a written item, with no player, shows the %s notice in the gate slot', (reason, line) => {
+    render({
+      content: makeContent({
+        ...SELLABLE,
+        contentType: 'written',
+        mediaItem: null,
+      }),
+      contentBodyHtml: '<p>The first paragraph of the article.</p>',
+      hasAccess: false,
+      revocationReason: reason,
+    });
+    const gate = document
+      .getElementById('purchase-label-dispute')
+      ?.closest('.content-detail__purchase');
+    expect(gate?.textContent).toContain(m.access_paused_dispute_title());
+    expect(gate?.textContent).toContain(line);
+    const support = gate?.querySelector('a');
+    expect(support?.textContent?.trim()).toBe(m.access_contact_support());
+    expect(support?.getAttribute('href')).toMatch(/^mailto:/);
+    // The dispute section is the only gate, and the body lock agrees with it.
+    expect(document.querySelectorAll('.content-detail__purchase')).toHaveLength(
+      1
+    );
+    expect(purchaseForm()).toBeNull();
+    expect(
+      document.querySelector('.content-detail__body-lock-text')?.textContent
+    ).toBe(m.access_paused_dispute_title());
   });
 });
 

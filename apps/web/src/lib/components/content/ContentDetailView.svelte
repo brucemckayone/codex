@@ -216,6 +216,15 @@
   // never for first-time paywall encounters (those render the purchase /
   // subscribe gates below). A non-null revocation reason is the signal.
   const showRevokedOverlay = $derived(!hasAccess && !!revocationReason);
+  // An open payment dispute pauses access (Codex-2hxff.60). There is nothing
+  // to buy or subscribe to until it is settled, so it takes the gate slot.
+  const disputeReason = $derived(
+    !hasAccess &&
+      (revocationReason === 'purchase_dispute' ||
+        revocationReason === 'subscription_dispute')
+      ? revocationReason
+      : null
+  );
 
   // Checkout-error dismiss state (Codex-8aibi). Resets whenever a fresh
   // formResult identity lands, so a new error shows even if the previous
@@ -428,6 +437,7 @@
    */
   const accessAnnouncement = $derived.by<string>(() => {
     if (accessLoading) return '';
+    if (disputeReason) return 'Access paused.';
     if (accessState.status === 'unlocked') return 'Content unlocked.';
     if (accessState.status === 'preview') return 'Preview playing.';
     if (accessState.status === 'locked') {
@@ -535,6 +545,7 @@
    * Codex-jdmp6 — previously generic purchase copy for every gate.
    */
   const bodyLockText = $derived.by<string>(() => {
+    if (disputeReason) return m.access_paused_dispute_title();
     if (accessCheckFailed) return m.content_detail_refresh_description();
     if (isFollowersOnly) return m.followers_only_cta_description();
     if (isTeamOnly) return m.team_only_cta_description();
@@ -1091,7 +1102,26 @@
       price amount span (Codex-jo819 O2).
     -->
     {#if !accessLoading}
-      {#if accessCheckFailed && !hasAccess}
+      {#if disputeReason}
+        <!-- Paused by a payment dispute: no Buy, Subscribe or Upgrade. Video
+             and audio say why in the player's overlay; a written item has
+             no player, so the notice sits here (Codex-2hxff.60). -->
+        {#if content.contentType !== 'video' && content.contentType !== 'audio'}
+          <section class="content-detail__purchase" aria-labelledby="purchase-label-dispute">
+            <div class="content-detail__price">
+              <span id="purchase-label-dispute" class="content-detail__price-amount">{m.access_paused_dispute_title()}</span>
+              <span class="content-detail__price-label">
+                {disputeReason === 'purchase_dispute'
+                  ? m.access_paused_dispute_purchase()
+                  : m.access_paused_dispute_subscription()}
+              </span>
+            </div>
+            <a href="mailto:support@codex.example?subject=Access%20issue" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+              {m.access_contact_support()}
+            </a>
+          </section>
+        {/if}
+      {:else if accessCheckFailed && !hasAccess}
         <!-- No verdict, so no gate: a purchase CTA here would ask an
              entitled viewer to pay again (Codex-h3ipg). -->
         <section class="content-detail__purchase" aria-labelledby="purchase-label-check">

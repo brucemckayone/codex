@@ -31,6 +31,7 @@ import {
   videoPlayback,
 } from '@codex/database/schema';
 import type { ObservabilityClient } from '@codex/observability';
+import type { PurchaseService } from '@codex/purchase';
 import type { ListUserLibraryInput } from '@codex/validation';
 import {
   and,
@@ -45,6 +46,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import { resolvePracticeThumbnail } from '../practice-thumbnail';
+import { resolveHasContentAccess } from './access-decision';
 
 /**
  * Is this content on offer to a subscription whose current period began at
@@ -105,6 +107,15 @@ export type UserLibraryItem = {
   purchase: {
     purchasedAt: string;
     priceCents: number;
+    /**
+     * When a chargeback on this purchase opened; set while it is open AND
+     * nothing else opens the item (Codex-2hxff.60). The item stays on the
+     * shelf, paused: a win clears the mark, and a loss refunds the purchase,
+     * which then leaves the shelf. `null` for a support grant, and while a
+     * subscription, a grant or a staff role still opens the item (the
+     * stream's own decision says which).
+     */
+    disputedAt: string | null;
   } | null;
   progress: {
     positionSeconds: number;
@@ -159,11 +170,13 @@ export async function listUserLibrary(
      * (Codex-kk9nv.6). Absent, that item draws its no-picture state.
      */
     r2PublicUrlBase?: string;
+    /** For the access decision a disputed purchase's row is checked against. */
+    purchaseService: PurchaseService;
   },
   userId: string,
   input: ListUserLibraryInput
 ): Promise<UserLibraryResponse> {
-  const { db, obs, r2PublicUrlBase } = deps;
+  const { db, obs, r2PublicUrlBase, purchaseService } = deps;
 
   // Without the CDN base, every tile that has only a video poster draws its
   // no-picture state. Say so, or a config regression blanks them unnoticed.
@@ -354,6 +367,28 @@ export async function listUserLibrary(
     };
   };
 
+  /**
+   * Does the item still open for the user while its purchase is disputed?
+   * The stream's own decision answers, so the card cannot disagree with the
+   * stream. If the decision fails, the row keeps its mark (the purchase IS
+   * disputed) and the page still loads; the failure is logged.
+   */
+  const playsDespiteDispute = async (contentId: string): Promise<boolean> => {
+    try {
+      return await resolveHasContentAccess(
+        { db, purchaseService, obs },
+        userId,
+        contentId
+      );
+    } catch {
+      obs.warn(
+        'Library: access check failed for a disputed purchase; shown paused',
+        { contentId }
+      );
+      return false;
+    }
+  };
+
   // ── Step 3: Query purchased items ─────────────────────────────────
   // "Purchased" is what the user acquired one-off: completed purchases AND
   // live support grants (`entitlements.source = 'grant'`, Codex-2hxff.21),
@@ -371,11 +406,13 @@ export async function listUserLibrary(
       return { items: [] as UserLibraryItem[], count: 0 };
     }
 
+    // One completed purchase per item (uq_purchases_completed_customer_content): no second-copy check.
     const purchasedRows = db
       .select({
         contentId: purchases.contentId,
         acquiredAt: purchases.createdAt,
         amountPaidCents: purchases.amountPaidCents,
+        disputedAt: purchases.disputedAt,
       })
       .from(purchases)
       .where(
@@ -394,6 +431,8 @@ export async function listUserLibrary(
         contentId: entitlements.contentId,
         acquiredAt: entitlements.grantedAt,
         amountPaidCents: sql<number>`0`,
+        // A grant is never disputed.
+        disputedAt: sql<Date | null>`NULL`,
       })
       .from(entitlements)
       .innerJoin(content, eq(content.id, entitlements.contentId))
@@ -440,6 +479,7 @@ export async function listUserLibrary(
         orgSlug: organizations.slug,
         purchasedAt: acquired.acquiredAt,
         amountPaidCents: acquired.amountPaidCents,
+        disputedAt: acquired.disputedAt,
         progressPositionSeconds: videoPlayback.positionSeconds,
         progressDurationSeconds: videoPlayback.durationSeconds,
         progressCompleted: videoPlayback.completed,
@@ -500,12 +540,25 @@ export async function listUserLibrary(
       purchase: {
         purchasedAt: row.purchasedAt.toISOString(),
         priceCents: row.amountPaidCents,
+        disputedAt: toIso(row.disputedAt),
       },
       progress: mapProgress(row),
       // Populated by `attachJourneyProvenance` once the page is final — one
       // lookup for the page beats one per arm.
       journeys: [],
     }));
+
+    // A disputed purchase is paused only while nothing else opens the item
+    // (Codex-2hxff.60): a covering subscription, a support grant or a staff
+    // role keeps it playing, and its card must not say otherwise. Disputed
+    // rows only, in parallel.
+    await Promise.all(
+      items.map(async ({ content: item, purchase }) => {
+        if (purchase?.disputedAt && (await playsDespiteDispute(item.id))) {
+          purchase.disputedAt = null;
+        }
+      })
+    );
 
     return { items, count: countResult[0]?.count ?? 0 };
   };

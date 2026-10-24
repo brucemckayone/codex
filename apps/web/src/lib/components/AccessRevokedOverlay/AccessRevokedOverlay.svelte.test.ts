@@ -35,6 +35,7 @@ vi.mock('$app/state', () => ({
 import { toast } from '$lib/components/ui/Toast';
 import { openBillingPortal } from '$lib/remote/account.remote';
 import { reactivateSubscription } from '$lib/remote/subscription.remote';
+import * as m from '$paraglide/messages';
 import AccessRevokedOverlay from './AccessRevokedOverlay.svelte';
 
 const ORG_ID = '00000000-0000-0000-0000-000000000000';
@@ -249,5 +250,76 @@ describe('AccessRevokedOverlay', () => {
 
     expect(reactivateMock).toHaveBeenCalledTimes(1);
     expect(reactivateMock.mock.calls[0][0]).toEqual({ organizationId: orgB });
+  });
+});
+
+// An open payment dispute pauses access (Codex-2hxff.60): the notice names
+// which kind, and support is the only way on. No Buy, Browse plans or
+// Reactivate, since none of them can help until the bank decides.
+describe('AccessRevokedOverlay: a payment dispute', () => {
+  let component: ReturnType<typeof mount> | null = null;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  test.each([
+    ['purchase_dispute', m.access_paused_dispute_purchase()],
+    ['subscription_dispute', m.access_paused_dispute_subscription()],
+  ] as const)('%s shows the paused notice and only Contact support', (reason, body) => {
+    component = mount(AccessRevokedOverlay, {
+      target: document.body,
+      props: { reason, organizationId: ORG_ID },
+    });
+
+    const root = document.body.querySelector('.access-revoked');
+    expect(root?.getAttribute('data-reason')).toBe(reason);
+    expect(root?.querySelector('.access-revoked__title')?.textContent).toBe(
+      m.access_paused_dispute_title()
+    );
+    expect(root?.querySelector('.access-revoked__body')?.textContent).toBe(
+      body
+    );
+
+    const labels = Array.from(document.body.querySelectorAll('button')).map(
+      (b) => b.textContent?.trim()
+    );
+    expect(labels).toEqual([m.access_contact_support()]);
+  });
+
+  test('Contact support opens the support mail, not checkout or the portal', () => {
+    component = mount(AccessRevokedOverlay, {
+      target: document.body,
+      props: { reason: 'purchase_dispute', organizationId: ORG_ID },
+    });
+
+    const hrefSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        get href() {
+          return 'http://localhost/';
+        },
+        set href(value: string) {
+          hrefSpy(value);
+        },
+      },
+    });
+
+    buttonByLabel(m.access_contact_support())?.click();
+    flushSync();
+
+    expect(hrefSpy).toHaveBeenCalledTimes(1);
+    expect(hrefSpy.mock.calls[0][0]).toMatch(/^mailto:/);
+    expect(vi.mocked(openBillingPortal)).not.toHaveBeenCalled();
+    expect(vi.mocked(reactivateSubscription)).not.toHaveBeenCalled();
   });
 });

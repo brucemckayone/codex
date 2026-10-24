@@ -24,7 +24,7 @@
  * - Idempotent: processRefund / processDispute check state before mutating
  */
 
-import { AccessRevocation } from '@codex/access';
+import { AccessRevocation, type RevocationReason } from '@codex/access';
 import { VersionedCache } from '@codex/cache';
 import {
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
@@ -46,6 +46,12 @@ import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
 import { isTransientError } from '../utils/error-classification';
 
+/** The reasons a refund or a dispute writes into the streaming block. */
+type PaymentBlockReason = Extract<
+  RevocationReason,
+  'refund' | 'purchase_dispute' | 'subscription_dispute'
+>;
+
 /**
  * What a refund or dispute does outside the database: the buyer's library
  * cache and the per-org streaming block. Every effect is fire-and-forget and a
@@ -66,8 +72,12 @@ export interface AccessEffects {
    * `{ userId }` only and deliberately skip it (the library bump is enough,
    * because `processRefund` soft-deletes `contentAccess`). Mirror of
    * `revokeAccess` in `subscription-webhook.ts`.
+   *
+   * `reason` is what the content page shows while the key lives: an opened
+   * chargeback pauses access (`'purchase_dispute'`, `'subscription_dispute'`,
+   * Codex-2hxff.60); a refund or a lost dispute ends it (`'refund'`).
    */
-  revokeAccess(userId: string, orgId: string): void;
+  revokeAccess(userId: string, orgId: string, reason: PaymentBlockReason): void;
   /**
    * Clear that key once a won dispute has restored the access the chargeback
    * paused (Codex-2hxff.9). The stream endpoint still checks access before
@@ -131,13 +141,13 @@ export function createAccessEffects(deps: {
         });
       }
     },
-    revokeAccess(userId, orgId) {
+    revokeAccess(userId, orgId, reason) {
       if (!kv) return;
       const revocation = new AccessRevocation(kv, obs);
       inBackground(
-        () => revocation.revoke(userId, orgId, 'refund'),
+        () => revocation.revoke(userId, orgId, reason),
         'payment-webhook: AccessRevocation.revoke failed',
-        { userId, orgId }
+        { userId, orgId, reason }
       );
     },
     clearRevocation(userId, orgId) {
@@ -460,7 +470,7 @@ async function endSubscriptionForFullRefund(
     const effects = accessEffectsFor(c);
     effects.invalidateLibrary(subscription.userId);
     if (deleted?.userId && deleted.orgId) {
-      effects.revokeAccess(deleted.userId, deleted.orgId);
+      effects.revokeAccess(deleted.userId, deleted.orgId, 'refund');
     }
     if (deleted?.email) {
       sendEmailToWorker(c.env, c.executionCtx, deleted.email);
@@ -717,9 +727,8 @@ export async function processDispute(
       // Org-scoped purchases revoke access within their org; orgless
       // creator-direct purchases (`purchases.organizationId` nullable,
       // Codex-69t7c) have no org, so the guard below skips org-scoped
-      // revocation. Revocation reason reuses 'refund' because the
-      // AccessRevocation reason enum is observability-only and disputes are
-      // the same access-reducing class.
+      // revocation. The reason says access is paused, not ended, so the
+      // content page shows the dispute notice (Codex-2hxff.60).
       const paused = await purchase.processDispute(paymentIntentId, {
         stripeDisputeId: dispute.id,
         disputeReason: dispute.reason ?? undefined,
@@ -729,11 +738,11 @@ export async function processDispute(
       // of a duplicate payment): the block would stop every stream in the
       // org, including the copy they own (Codex-2hxff.14).
       if (paused?.userId && paused.orgId && paused.accessEnded) {
-        effects.revokeAccess(paused.userId, paused.orgId);
+        effects.revokeAccess(paused.userId, paused.orgId, 'purchase_dispute');
       }
     }
     const pausedSubscription = await subscription.pauseForDispute(disputeInput);
-    blockSubscriber(effects, pausedSubscription);
+    blockSubscriber(effects, pausedSubscription, 'subscription_dispute');
     await clawBack();
     if (pausedSubscription) {
       await subscription.pauseBillingForDispute(pausedSubscription, dispute.id);
@@ -806,13 +815,15 @@ export async function processDispute(
       // Written when it opened, unless it opened already lost: again here.
       // Not when the buyer keeps the item through another purchase.
       if (ended?.userId && ended.orgId && ended.accessEnded) {
-        effects.revokeAccess(ended.userId, ended.orgId);
+        effects.revokeAccess(ended.userId, ended.orgId, 'refund');
       }
     }
     // A subscription's access ends now; it is cancelled at Stripe after the
     // clawback, so the cancel cannot keep the held slices from being cut.
+    // `customer.subscription.deleted` then overwrites the reason with
+    // `'subscription_deleted'`: the later reason wins.
     const endedSubscription = await subscription.pauseForDispute(disputeInput);
-    blockSubscriber(effects, endedSubscription);
+    blockSubscriber(effects, endedSubscription, 'refund');
     // The clawback now cancels or reduces the held slices like a refund.
     await clawBack();
     if (endedSubscription) {
@@ -877,16 +888,22 @@ async function alertPreventedAfterClawback(
 
 /**
  * A subscription a dispute paused or ended: its library caches cleared, and
- * the streaming block written for its organisation.
+ * the streaming block written for its organisation, with `reason`
+ * (`'subscription_dispute'` while paused, `'refund'` once lost).
  */
 function blockSubscriber(
   effects: AccessEffects,
-  subscription: { userId: string; organizationId: string | null } | undefined
+  subscription: { userId: string; organizationId: string | null } | undefined,
+  reason: PaymentBlockReason
 ): void {
   if (!subscription) return;
   effects.invalidateLibrary(subscription.userId);
   if (subscription.organizationId) {
-    effects.revokeAccess(subscription.userId, subscription.organizationId);
+    effects.revokeAccess(
+      subscription.userId,
+      subscription.organizationId,
+      reason
+    );
   }
 }
 

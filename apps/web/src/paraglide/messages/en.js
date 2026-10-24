@@ -879,6 +879,14 @@ export const account_payments_status_refunded = () => `Refunded`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const account_payments_status_disputed = () => `Payment dispute`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const account_payments_status_unknown = () => `Unknown`
 
 
@@ -4627,6 +4635,14 @@ export const subscription_tier_change_preview_expired = () => `Prices changed �
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_tier_change_disputed = () => `This plan can't be changed while a payment dispute on it is open.`
+
+
+/**
  * @param {{ date: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -5128,6 +5144,46 @@ export const library_access_subscription_ended = () => `Subscription ended — r
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const library_access_payment_failed = () => `Payment failed — update payment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const access_paused_dispute_label = () => `Paused: payment dispute`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const access_paused_dispute_title = () => `Access paused`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const access_paused_dispute_purchase = () => `Access is paused while a payment dispute on this purchase is open.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const access_paused_dispute_subscription = () => `Access is paused while a payment dispute on this subscription is open.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const access_contact_support = () => `Contact support`
 
 
 /**

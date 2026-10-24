@@ -2228,6 +2228,7 @@ export class PurchaseService extends BaseService {
           courseTitle: p.course?.title ?? null,
           amountCents: p.amountPaidCents,
           status: coercePurchaseStatus(p.status),
+          disputedAt: toIso(p.disputedAt),
         })
       ),
       pagination: result.pagination,
@@ -2809,9 +2810,9 @@ export class PurchaseService extends BaseService {
    *   charge is still a completed payment until it is evaluated)
    * - Soft-delete matching `contentAccess` rows. Unlike a refund, the
    *   purchase stays in the library while the dispute is open: the
-   *   library's purchased arm reads `status = 'completed'`. Opening it is
-   *   refused, because every access check reads `disputedAt`
-   *   (Codex-2hxff.60 owns the subscriber-facing notice)
+   *   library's purchased arm reads `status = 'completed'`, and shows it
+   *   paused unless something else still grants it. Opening it is refused,
+   *   because every access check reads `disputedAt` (Codex-2hxff.60)
    *
    * Idempotent: if the purchase already has `disputedAt` set, this is a
    * near-no-op — we still return `{ userId, orgId }` so the webhook
@@ -2822,9 +2823,9 @@ export class PurchaseService extends BaseService {
    * `orgId` is null for an orgless creator-direct purchase
    * (`purchases.organizationId` is nullable, Codex-69t7c), and the webhook
    * then skips the org-scoped revocation. Otherwise it writes
-   * `AccessRevocation.revoke(userId, orgId, 'refund')`: the revocation
-   * reason enum has no 'dispute', so the content page shows the refund
-   * copy for the block's 20 minutes (Codex-2hxff.60).
+   * `AccessRevocation.revoke(userId, orgId, 'purchase_dispute')`, so the
+   * content page shows the dispute notice. After the block's 20 minutes the
+   * access check's own `disputeHold` gives the same reason (Codex-2hxff.60).
    *
    * @param paymentIntentId - The payment intent ID from the disputed charge
    * @param disputeDetails - Optional Stripe dispute metadata

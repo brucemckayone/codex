@@ -45,20 +45,23 @@ import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   CONTENT_STATUS,
   ORGANIZATION_ROLES,
+  PURCHASE_STATUS,
 } from '@codex/constants';
 import type { DatabaseClient } from '@codex/database';
 import {
   content,
   organizationFollowers,
   organizationMemberships,
+  purchases,
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
 import type { ObservabilityClient } from '@codex/observability';
 import type { PurchaseService } from '@codex/purchase';
-import { and, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY } from '../../constants';
 import { AccessDeniedError } from '../../errors';
+import type { RevocationReason } from '../access-revocation';
 import {
   type AccessQueryClient,
   contentReachableViaOwnedCourse,
@@ -200,6 +203,46 @@ const deny = (reason: DenyReason): AccessDecision => ({
 });
 
 /**
+ * The user's subscription to `orgId` that meets the content's minimum tier (by
+ * sortOrder), or `null`. `minimumTierId === null` → any subscription qualifies
+ * (community gate). Returns the subscription's `currentPeriodStart`, which the
+ * renewal rule in `decideContentAccess` reads, and its `currentPeriodEnd`,
+ * which a withdrawn item's note reads.
+ *
+ * `disputed` picks the side of the dispute pause it reads. The decision reads
+ * `false`: a subscription is paused while a chargeback on one of its invoices
+ * is open. {@link disputeHold} reads `true`, to say why a refusal is one.
+ */
+async function findGrantingSubscription(
+  db: AccessQueryClient,
+  userId: string,
+  orgId: string,
+  minimumTierId: string | null,
+  disputed: boolean
+): Promise<{ currentPeriodStart: Date; currentPeriodEnd: Date } | null> {
+  const userSub = await db.query.subscriptions.findFirst({
+    where: and(
+      eq(subscriptions.userId, userId),
+      eq(subscriptions.organizationId, orgId),
+      inArray(subscriptions.status, [...ACCESS_GRANTING_SUBSCRIPTION_STATUSES]),
+      disputed
+        ? isNotNull(subscriptions.disputedAt)
+        : isNull(subscriptions.disputedAt),
+      gt(subscriptions.currentPeriodEnd, new Date())
+    ),
+    with: { tier: true },
+  });
+  if (!userSub) return null;
+  if (!minimumTierId) return userSub;
+  const contentTier = await db.query.subscriptionTiers.findFirst({
+    where: eq(subscriptionTiers.id, minimumTierId),
+    columns: { sortOrder: true },
+  });
+  if (!contentTier) return null;
+  return userSub.tier.sortOrder >= contentTier.sortOrder ? userSub : null;
+}
+
+/**
  * THE decision core — pure (no logging, no throw, no URL signing). Returns a
  * grant or a reasoned denial for the (userId, content) pair. `userId` is `null`
  * for anonymous visitors (public sales pages / free content) — every user-scoped
@@ -253,36 +296,13 @@ async function decidePolicyAccess(
     return !!row;
   };
 
-  // Active subscription meeting the content's minimum tier (by sortOrder).
-  // `minimumTierId === null` → any active subscription grants (community gate).
-  // Returns the GRANTING subscription, or `null` when none grants: the renewal
-  // rule in `decideContentAccess` reads its `currentPeriodStart`, and a
-  // withdrawn item's note its `currentPeriodEnd`.
+  // The GRANTING subscription, or `null` when none grants. One that a
+  // chargeback holds back grants nothing.
   const grantingSubscription = async (
     minimumTierId: string | null
   ): Promise<{ currentPeriodStart: Date; currentPeriodEnd: Date } | null> => {
     if (userId == null || orgId == null) return null;
-    const userSub = await db.query.subscriptions.findFirst({
-      where: and(
-        eq(subscriptions.userId, userId),
-        eq(subscriptions.organizationId, orgId),
-        inArray(subscriptions.status, [
-          ...ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
-        ]),
-        // Paused while a chargeback on one of its invoices is open.
-        isNull(subscriptions.disputedAt),
-        gt(subscriptions.currentPeriodEnd, new Date())
-      ),
-      with: { tier: true },
-    });
-    if (!userSub) return null;
-    if (!minimumTierId) return userSub;
-    const contentTier = await db.query.subscriptionTiers.findFirst({
-      where: eq(subscriptionTiers.id, minimumTierId),
-      columns: { sortOrder: true },
-    });
-    if (!contentTier) return null;
-    return userSub.tier.sortOrder >= contentTier.sortOrder ? userSub : null;
+    return findGrantingSubscription(db, userId, orgId, minimumTierId, false);
   };
 
   const verifyPurchase = async (): Promise<boolean> => {
@@ -476,7 +496,17 @@ async function decideContentAccess(
   policy: ContentAccessPolicyRow
 ): Promise<AccessDecision> {
   const decision = await decidePolicyAccess(deps, userId, contentId, policy);
+  return applyPublicationRule(decision, policy);
+}
 
+/**
+ * The publication rule, asked of a decision the policy branches made. Its own
+ * function so {@link disputeHold} asks it of the grant a dispute holds back.
+ */
+function applyPublicationRule(
+  decision: AccessDecision,
+  policy: ContentAccessPolicyRow
+): AccessDecision {
   if (!decision.granted) return decision;
   if (policy.status === CONTENT_STATUS.PUBLISHED) return decision;
   if (subscriptionCoversOffSaleItem(decision, policy.offSaleAt)) {
@@ -486,6 +516,79 @@ async function decideContentAccess(
   return GRANT_SURVIVES_UNPUBLICATION[decision.via]
     ? decision
     : deny('unpublished_requires_purchase');
+}
+
+/** A refusal that a payment dispute explains (a {@link RevocationReason}). */
+type DisputeHold = Extract<
+  RevocationReason,
+  'purchase_dispute' | 'subscription_dispute'
+>;
+
+/**
+ * Is a refused stream refused because of an open payment dispute?
+ * (Codex-2hxff.60.) Run on the deny path only, so a grant costs nothing more.
+ *
+ * The KV block says so for its first 20 minutes, and the hourly dispute
+ * reconcile writes no block at all, so the content page's "Access is paused"
+ * notice has to come from the database too.
+ *
+ * - `'purchase_dispute'`: a `completed` purchase of this item that carries
+ *   `disputed_at`, the purchase `verifyPurchase` refuses because of the mark.
+ *   Only where the policy branch reads a purchase (tier-gated or paid): a
+ *   course-only, team-only or followers-only item would stay refused after a
+ *   win, so a dispute does not explain it.
+ * - `'subscription_dispute'`: a tier-gated or followers-only item that a
+ *   subscription would grant but for its `disputed_at`, publication rule
+ *   included.
+ * - `null` otherwise.
+ *
+ * Mirrors the branch order of `decidePolicyAccess`. It only picks the copy
+ * the page shows; the refusal itself stands either way.
+ */
+async function disputeHold(
+  db: AccessQueryClient,
+  userId: string,
+  contentId: string,
+  policy: ContentAccessPolicyRow
+): Promise<DisputeHold | null> {
+  const orgId = policy.organizationId;
+  if (policy.courseOnly || policy.isTeamOnly) return null;
+  if (orgId == null && policy.includedInTierId != null) return null;
+
+  // The branch `decidePolicyAccess` takes: followers-only before tier-gated.
+  const followersOnly = policy.isFollowerGated;
+  const tierGated = !followersOnly && policy.includedInTierId != null;
+  const paid = !followersOnly && !tierGated && (policy.priceCents ?? 0) > 0;
+
+  if (tierGated || paid) {
+    const disputed = await db.query.purchases.findFirst({
+      where: and(
+        eq(purchases.contentId, contentId),
+        eq(purchases.customerId, userId),
+        eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+        isNotNull(purchases.disputedAt)
+      ),
+      columns: { id: true },
+    });
+    if (disputed) return 'purchase_dispute';
+  }
+
+  if (orgId == null || !(followersOnly || tierGated)) return null;
+  const held = await findGrantingSubscription(
+    db,
+    userId,
+    orgId,
+    followersOnly ? null : policy.includedInTierId,
+    true
+  );
+  if (!held) return null;
+  const heldGrant = grantBySubscription(
+    followersOnly ? 'followers_subscription' : 'subscribers_subscription',
+    held
+  );
+  return applyPublicationRule(heldGrant, policy).granted
+    ? 'subscription_dispute'
+    : null;
 }
 
 /**
@@ -637,6 +740,9 @@ export async function resolveContentGrant(
  * throws `AccessDeniedError` on denial; returns normally on grant. Preserves the
  * orgless fail-closed guard (Codex-up7bx), the management-role bypass, and the
  * `subscribers ⊇ followers ⊇ public` hierarchy (Codex-xybr3).
+ *
+ * A denial that an open payment dispute explains carries that as its `reason`
+ * ({@link disputeHold}); any other keeps the decision's own.
  */
 export async function assertStreamingAccess(
   tx: Tx,
@@ -663,18 +769,23 @@ export async function assertStreamingAccess(
     return;
   }
 
+  const hold = await disputeHold(tx, userId, contentId, contentRecord);
+
   obs.warn('Access denied', {
     userId,
     contentId,
     organizationId: contentRecord.organizationId,
     reason: decision.reason,
+    disputeHold: hold,
     securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
     severity: LOG_SEVERITY.MEDIUM,
     eventType: LOG_EVENTS.ACCESS_CONTROL,
   });
 
+  // The context is sent to the client as `details`: the hold names only the
+  // kind of dispute, never its date, amount or reason.
   throw new AccessDeniedError(userId, contentId, {
-    reason: decision.reason,
+    reason: hold ?? decision.reason,
     ...(contentRecord.organizationId
       ? { organizationId: contentRecord.organizationId }
       : {}),

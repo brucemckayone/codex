@@ -142,11 +142,17 @@
      *   'past_due'   — corner 'Payment failed — update payment' badge, card still
      *                  fully accessible while Stripe retries (owner decision P-3)
      *   'revoked'    — dimmed card + hover CTA 'Subscription ended — reactivate'
+     *   'disputed'   — dimmed card + label 'Paused: payment dispute', always
+     *                  shown; it links to the card's own `href`, where the
+     *                  content page explains (Codex-2hxff.60)
      */
-    accessState?: 'active' | 'cancelling' | 'past_due' | 'revoked';
+    accessState?: 'active' | 'cancelling' | 'past_due' | 'revoked' | 'disputed';
     /** ISO period-end date, paired with accessState='cancelling' for the badge copy. */
     accessStatePeriodEnd?: string | null;
-    /** Destination for the reactivate/update-payment affordance. Defaults to /account/subscriptions. */
+    /**
+     * Destination for the reactivate/update-payment affordance. Defaults to
+     * /account/subscriptions. Not used for 'disputed'.
+     */
     accessStateActionHref?: string;
     /**
      * Explicit media aspect-ratio, driving a `data-shape` attribute + CSS
@@ -470,9 +476,18 @@
   // Cancelling and past_due: card stays fully interactive; small corner badge
   // (a failed renewal keeps access while Stripe retries the card).
   // Revoked: card is dimmed + hover CTA overlay.
-  const isDimmed = $derived(accessState === 'revoked');
+  // Disputed: dimmed the same way; its label is always shown, because on
+  // desktop it is the only explanation the library gives (Codex-2hxff.60).
+  const isDimmed = $derived(accessState === 'revoked' || accessState === 'disputed');
   const accessCtaLabel = $derived(
-    accessState === 'revoked' ? m.library_access_subscription_ended() : ''
+    accessState === 'revoked'
+      ? m.library_access_subscription_ended()
+      : accessState === 'disputed'
+        ? m.access_paused_dispute_label()
+        : ''
+  );
+  const accessCtaHref = $derived(
+    accessState === 'disputed' ? href : accessStateActionHref
   );
   // Format the period-end date for the 'Ends {date}' badge using the
   // user's locale. Short form keeps the badge compact.
@@ -686,11 +701,11 @@
       {/if}
     </div>
 
-    <!-- Access state: hover/tap CTA for revoked -->
+    <!-- Access state: hover/tap CTA for revoked, label for disputed -->
     {#if isDimmed}
       <a
         class="cc__access-cta"
-        href={accessStateActionHref}
+        href={accessCtaHref}
         data-access-cta={accessState}
       >
         {accessCtaLabel}
@@ -1083,7 +1098,8 @@
     -webkit-backdrop-filter: blur(var(--blur-sm));
   }
 
-  /* Dim the card when the underlying subscription has lapsed.
+  /* Dim the card when the underlying subscription has lapsed, or a payment
+     dispute pauses a purchase.
      Per design: use opacity, NOT colour — keeps the brand palette intact. */
   .cc--access-dimmed .cc__thumb,
   .cc--access-dimmed .cc__body {
@@ -1106,7 +1122,10 @@
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-normal);
-    color: var(--color-text-inverse);
+    /* The near-white media ink, not --color-text-inverse: the band is a fixed
+       near-black in both themes, and the inverse ink turns near-black in dark
+       (Codex-2hxff.60). */
+    color: var(--media-glyph);
     background: color-mix(in srgb, var(--color-neutral-900) 82%, transparent);
     backdrop-filter: blur(var(--blur-sm));
     -webkit-backdrop-filter: blur(var(--blur-sm));
@@ -1122,7 +1141,8 @@
 
   .cc--access-dimmed:hover .cc__access-cta,
   .cc--access-dimmed:focus-within .cc__access-cta,
-  .cc__access-cta:focus-visible {
+  .cc__access-cta:focus-visible,
+  .cc__access-cta[data-access-cta='disputed'] {
     opacity: 1;
     transform: translateY(0);
     pointer-events: auto;
