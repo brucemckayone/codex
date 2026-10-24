@@ -178,4 +178,58 @@ describe('Admin API Worker', () => {
       expect(json.error?.code).toBe('UNAUTHORIZED');
     });
   });
+
+  // Codex-2hxff.28: support refunds are rejected at the real procedure()
+  // boundary without a session, before any read, Stripe call or write. The
+  // 403 for a creator or an organisation owner is pinned in
+  // support-routes.test.ts.
+  describe('Support refund routes — auth gate (Codex-2hxff.28)', () => {
+    const CHARGE = 'ch_3QiC9bLk2vAbCdEf';
+    const ID = '00000000-0000-0000-0000-000000000003';
+
+    it.each([
+      { method: 'GET', path: '/api/admin/support/charges?q=a@b.com' },
+      { method: 'GET', path: `/api/admin/support/charges/${CHARGE}` },
+      {
+        method: 'GET',
+        path: `/api/admin/support/charges/${CHARGE}/refund-preview?amountCents=1`,
+      },
+      {
+        method: 'POST',
+        path: `/api/admin/support/charges/${CHARGE}/refunds`,
+        body: {
+          amountCents: 100,
+          reason: 'requested_by_customer',
+          expectedRefundCount: 0,
+        },
+      },
+      { method: 'GET', path: '/api/admin/support/queue/counts' },
+      { method: 'GET', path: '/api/admin/support/queue/failed-refunds' },
+      { method: 'GET', path: '/api/admin/support/queue/creator-debts' },
+      {
+        method: 'POST',
+        path: `/api/admin/support/refunds/${ID}/resolve`,
+        body: { resolution: 'refunded_elsewhere' },
+      },
+      {
+        method: 'POST',
+        path: `/api/admin/support/creator-debts/${ID}/resolve`,
+        body: { resolution: 'creator_absorbed' },
+      },
+    ])('rejects anonymous $method $path with 401', async ({
+      method,
+      path,
+      body,
+    }) => {
+      const response = await SELF.fetch(`http://localhost${path}`, {
+        method,
+        headers: body ? { 'content-type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      expect(response.status).toBe(401);
+      const json = (await response.json()) as { error?: { code: string } };
+      expect(json.error?.code).toBe('UNAUTHORIZED');
+    });
+  });
 });

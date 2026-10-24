@@ -107,6 +107,9 @@ export {
   isDuplicatePayment,
   type PurchaseMailer,
   PurchaseService,
+  type RestoredRefundAccess,
+  STANDING_REFUND_STATUSES,
+  supportRequesterOf,
 } from './services/purchase-service';
 // Customer resolution (Codex-49gev)
 export {

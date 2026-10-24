@@ -19,6 +19,7 @@ import type {
   AdminAnalyticsService,
   AdminContentManagementService,
   AdminCustomerManagementService,
+  SupportService,
 } from '@codex/admin';
 import type { AgreementService } from '@codex/agreements';
 import type { CachePresetName } from '@codex/constants';
@@ -213,6 +214,13 @@ export interface ServiceRegistry {
   adminAnalytics: AdminAnalyticsService;
   adminContent: AdminContentManagementService;
   adminCustomer: AdminCustomerManagementService;
+  /**
+   * Platform support's refund screen and queue (Codex-2hxff.28): search,
+   * charge detail, refund preview, refunds, and settling failed refunds and
+   * creator debts. Platform-wide, gated by `platform_owner` at the route.
+   * Stripe-backed, on admin-api's own restricted key.
+   */
+  support: SupportService;
 
   // Notification domain
   templates: TemplateService;
