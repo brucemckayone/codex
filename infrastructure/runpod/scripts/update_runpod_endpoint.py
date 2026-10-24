@@ -9,6 +9,8 @@ red while the deploy step, which did its job, stays green.
 
 import os
 import sys
+import time
+
 import requests
 
 GRAPHQL_URL = "https://api.runpod.io/graphql"
@@ -19,6 +21,7 @@ MAX_IDLE_TIMEOUT_S = 60
 # A job is killed at the endpoint's execution timeout, with no webhook.
 MIN_EXECUTION_TIMEOUT_MS = 60 * 60 * 1000
 HEALTH_FIELDS = ("workersMax", "idleTimeout", "executionTimeoutMs")
+HEALTH_READ_ATTEMPTS = 3
 
 
 def graphql(headers, operation, query, variables=None):
@@ -93,6 +96,7 @@ def update_template(headers, template_id, new_image_name):
                 containerDiskInGb
                 volumeInGb
                 dockerArgs
+                containerRegistryAuthId
                 env {
                     key
                     value
@@ -115,6 +119,22 @@ def update_template(headers, template_id, new_image_name):
         f"📦 Found template: {template['name']} (current image: {template['imageName']})"
     )
 
+    # Every production deploy runs this; most change nothing in the
+    # transcoder, and re-saving an unchanged template only churns workers.
+    # Safe to skip by name because runpod-ci never pushes over a src- tag.
+    current = template.get("imageName") or ""
+    if current == new_image_name:
+        print(f"✅ Template {template_id} already uses {new_image_name}")
+        return True
+
+    repository = new_image_name.rsplit(":", 1)[0]
+    if not current.startswith(f"{repository}:src-"):
+        print(
+            f"::warning::Template image {current or '(none)'} was not set by a "
+            f"production deploy; replacing it with {new_image_name}. Roll back "
+            "with git revert on main: a console edit lasts until the next deploy."
+        )
+
     mutation = """
     mutation saveTemplate($input: SaveTemplateInput!) {
         saveTemplate(input: $input) {
@@ -125,8 +145,9 @@ def update_template(headers, template_id, new_image_name):
     }
     """
 
-    # saveTemplate replaces the template, so every field it holds is sent back
-    # as read. Dropping `env` would delete the RunPod secret mappings.
+    # saveTemplate replaces the template, so the fields this template uses are
+    # sent back as read. Dropping `env` would delete the RunPod secret
+    # mappings; dropping the registry auth would unlink its pull credentials.
     variables = {
         "input": {
             "id": template_id,
@@ -139,6 +160,10 @@ def update_template(headers, template_id, new_image_name):
             "isServerless": True,
         }
     }
+    if template.get("containerRegistryAuthId"):
+        variables["input"]["containerRegistryAuthId"] = template[
+            "containerRegistryAuthId"
+        ]
 
     data = graphql(headers, "saveTemplate", mutation, variables)
     if data is None:
@@ -157,6 +182,12 @@ def update_template(headers, template_id, new_image_name):
         return False
 
     print(f"✅ Updated template {result['id']} to image: {result['imageName']}")
+    # Swaps are rare (the inputs changed, or someone edited the console), so
+    # every one is annotated: an overwritten console rollback shows up here.
+    print(
+        f"::notice title=Transcoder image replaced::{current or '(none)'} -> "
+        f"{new_image_name}"
+    )
     return True
 
 
@@ -164,11 +195,14 @@ def update_endpoint():
     api_key = os.environ.get("RUNPOD_API_KEY")
     endpoint_id = os.environ.get("RUNPOD_ENDPOINT_ID")
     docker_image_base = os.environ.get("DOCKER_IMAGE")
-    image_tag = os.environ.get("IMAGE_TAG", "latest")
+    image_tag = os.environ.get("IMAGE_TAG")
 
-    if not api_key or not endpoint_id or not docker_image_base:
+    # IMAGE_TAG has no default: a renamed workflow step id reads as '' with no
+    # error, and `repo:` would then be written to the template.
+    if not api_key or not endpoint_id or not docker_image_base or not image_tag:
         print(
-            "❌ Missing required environment variables: RUNPOD_API_KEY, RUNPOD_ENDPOINT_ID, DOCKER_IMAGE"
+            "❌ Missing required environment variables: RUNPOD_API_KEY, "
+            "RUNPOD_ENDPOINT_ID, DOCKER_IMAGE, IMAGE_TAG"
         )
         sys.exit(1)
 
@@ -208,20 +242,8 @@ def config_warnings(endpoint):
     return warnings
 
 
-def check_endpoint_health():
-    """Print the endpoint's live settings; 2 when it cannot take jobs, else 0.
-
-    A settings read that fails is a warning, not a failure: the check could not
-    run, which says nothing about the endpoint.
-    """
-    api_key = os.environ.get("RUNPOD_API_KEY")
-    endpoint_id = os.environ.get("RUNPOD_ENDPOINT_ID")
-    if not api_key or not endpoint_id:
-        print(
-            "❌ Missing required environment variables: RUNPOD_API_KEY, RUNPOD_ENDPOINT_ID"
-        )
-        return 1
-
+def read_endpoint(api_key, endpoint_id):
+    """The endpoint's settings, or (None, why) when they could not be read."""
     try:
         response = requests.get(
             f"{REST_URL}/endpoints/{endpoint_id}",
@@ -231,21 +253,46 @@ def check_endpoint_health():
         response.raise_for_status()
         endpoint = response.json()
     except (requests.RequestException, ValueError) as e:
-        print(f"::warning::Could not read endpoint config, health NOT checked: {e}")
-        return 0
+        return None, str(e)
 
     if not isinstance(endpoint, dict):
-        print(
-            f"::warning::Endpoint config is not an object, health NOT checked: {endpoint!r}"
-        )
-        return 0
+        return None, f"config is not an object: {endpoint!r}"
     missing = [f for f in HEALTH_FIELDS if not isinstance(endpoint.get(f), int)]
     if missing:
+        return None, f"config lacks {', '.join(missing)}: {endpoint!r}"
+    return endpoint, None
+
+
+def check_endpoint_health():
+    """Print the endpoint's live settings: 0 when it can take jobs.
+
+    2 when it is paused, 3 when its settings could not be read. Both are red:
+    the step runs last and blocks nothing, and a warning on a green step is
+    how the 2026-10-23 pause went unseen.
+
+    This reads configuration only, not whether a worker can start; the daily
+    ping job is what proves that.
+    """
+    api_key = os.environ.get("RUNPOD_API_KEY")
+    endpoint_id = os.environ.get("RUNPOD_ENDPOINT_ID")
+    if not api_key or not endpoint_id:
         print(
-            f"::warning::Endpoint config lacks {', '.join(missing)}, health NOT "
-            f"checked: {endpoint!r}"
+            "❌ Missing required environment variables: RUNPOD_API_KEY, RUNPOD_ENDPOINT_ID"
         )
-        return 0
+        return 1
+
+    for attempt in range(1, HEALTH_READ_ATTEMPTS + 1):
+        endpoint, why = read_endpoint(api_key, endpoint_id)
+        if endpoint is not None:
+            break
+        print(f"⏳ Endpoint config read {attempt}/{HEALTH_READ_ATTEMPTS} failed: {why}")
+        if attempt < HEALTH_READ_ATTEMPTS:
+            time.sleep(2**attempt)
+    else:
+        print(
+            f"::error::Could not read endpoint {endpoint_id}, health NOT checked: {why}"
+        )
+        return 3
 
     print(
         "⚙️  Live endpoint config: "

@@ -3,9 +3,12 @@ name: RunPod Transcoder CI/CD
 on:
   push:
     branches: [main]
+    # The tag script names the image deploy-production.yml looks for, so a
+    # change to it must publish under the new name.
     paths:
       - "infrastructure/runpod/**"
       - ".github/workflows/runpod-ci.yml"
+      - ".github/scripts/runpod-image-tag.sh"
   # PRs land on dev, so dev is here too: without it the handler's unit tests
   # and the container verification only ran on the dev -> main promotion.
   pull_request:
@@ -13,10 +16,13 @@ on:
     paths:
       - "infrastructure/runpod/**"
       - ".github/workflows/runpod-ci.yml"
+      - ".github/scripts/runpod-image-tag.sh"
+  # Publishes a src- tag that no push published (one whose publish failed, or
+  # a deleted package version). Publishing runs on main only.
+  workflow_dispatch:
 
-# Whole-workflow, so pushes to main queue in push order: a job-level group is
-# entered when the deploy job becomes ready, and a run with a faster build
-# could deploy, then be overwritten by an older one.
+# Whole-workflow, so pushes to main publish in push order. That cannot change
+# what a src- tag names: each one is written once (see "Publish image").
 concurrency:
   group: runpod-ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -55,10 +61,20 @@ jobs:
       - name: Run Unit Tests
         run: pytest tests/unit --cov=handler --cov-report=xml
 
+      # Publishing runs this on main only; here a broken script, or an input
+      # it can no longer find, fails the PR instead.
+      - name: Check the image tag inputs
+        run: |
+          "$GITHUB_WORKSPACE/.github/scripts/runpod-image-tag.sh"
+
   container-verification:
     name: Container Integration Verification
     runs-on: ubuntu-latest
     needs: [quality-and-unit-test]
+
+    permissions:
+      contents: read
+      packages: write # "Publish image", main only
 
     steps:
       - uses: actions/checkout@v5
@@ -97,84 +113,71 @@ jobs:
             test-worker:local \
             tests/integration/verify_cpu_transcode.py
 
-  deploy:
-    name: Deploy to RunPod
-    runs-on: ubuntu-latest
-    needs: [container-verification]
-    # Push to main only. A pull_request run used to deploy too, which put
-    # unmerged handler code on the production endpoint (2026-02-11).
-    if: github.event_name == 'push'
-    # Its own environment, with no required reviewer: main is already gated by
-    # the owner's dev -> main promotion. Under `production` every deploy since
-    # July sat waiting for an approval and expired after 30 days (Codex-l2c48.2).
-    environment: runpod-production
-
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - uses: actions/checkout@v5
-
-      # Fail loudly, before anything is pushed. A missing secret used to skip
-      # the endpoint update and leave the job green, so no deploy happened and
-      # nothing said so.
-      - name: Require deploy secrets
-        env:
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+      # --- Publish (main only) ---
+      # The image published is the one verified above, not a second build.
+      # Pointing the RunPod endpoint at it happens in deploy-production.yml,
+      # under the `production` environment that holds the RunPod key and the
+      # owner's approval (Codex-l2c48.2). This workflow used to deploy too: on
+      # pull_request runs (unmerged code reached the prod endpoint on
+      # 2026-02-11), and under a reviewer gate nobody saw, so every deploy since
+      # July expired after 30 days.
+      - name: Image tag
+        id: tag
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
-          if [ -z "$RUNPOD_API_KEY" ] || [ -z "$RUNPOD_ENDPOINT_ID" ]; then
-            echo "::error::RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID must be set on the runpod-production environment"
-            exit 1
-          fi
+          src=$(.github/scripts/runpod-image-tag.sh)
+          echo "src=$src" >> "$GITHUB_OUTPUT"
 
       - name: Login to GitHub Container Registry
+        if: steps.tag.outcome == 'success'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build and Push
-        uses: docker/build-push-action@v7
-        with:
-          context: ${{ env.WORKING_DIR }}
-          push: true
-          # ghcr.io/username/repo_name:tag
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/codex-transcoder:latest
-            ghcr.io/${{ github.repository_owner }}/codex-transcoder:sha-${{ github.sha }}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-      # NOTE: runpodctl is useless for this specific image update flow via script
-      # so we skip installing it and just use the script.
-
-      - name: Setup Python for deployment script
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.10"
-
-      - name: Install script deps
-        run: pip install requests
-
-      - name: Update RunPod Endpoint
+      # src-<hash>: what deploy-production.yml looks for. sha-<commit>:
+      # traceability. latest: the most recently built image, used only by
+      # scripts/setup_endpoint.py to create an endpoint (the next production
+      # deploy points it at the right src- tag).
+      - name: Publish image
+        if: steps.tag.outcome == 'success'
         env:
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
-          # Pass the full base image path to the script so it can construct the tag
-          DOCKER_IMAGE: ghcr.io/${{ github.repository_owner }}/codex-transcoder
-          IMAGE_TAG: sha-${{ github.sha }}
-        run: python ${{ env.WORKING_DIR }}/scripts/update_runpod_endpoint.py
-
-      # Its own step: red when the endpoint cannot take jobs (paused), while the
-      # step above, which deployed the image, stays green.
-      - name: Endpoint health
-        env:
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
-        run: python ${{ env.WORKING_DIR }}/scripts/update_runpod_endpoint.py --health
+          REPOSITORY: ghcr.io/${{ github.repository_owner }}/codex-transcoder
+          SRC: ${{ steps.tag.outputs.src }}
+        run: |
+          repository="${REPOSITORY,,}"
+          # Write-once. The tag is named from the inputs, but a rebuild can
+          # still differ (floor-pinned pip, unversioned apt). Pushing over it
+          # would change what production runs with no deploy: the template's
+          # image name stays the same, so deploy-production skips it.
+          missing=""
+          for attempt in 1 2 3; do
+            if answer=$(timeout 20 docker manifest inspect "$repository:$SRC" 2>&1); then
+              echo "::notice title=Transcoder image unchanged::$repository:$SRC is already published, and is never rebuilt over."
+              exit 0
+            fi
+            last=${answer##*$'\n'}
+            case "$answer" in
+              *"manifest unknown"* | *[Nn]"o such manifest"*)
+                missing=yes
+                break
+                ;;
+              *denied* | *unauthorized*)
+                echo "::error title=Registry check failed::$repository:$SRC: $last. The package is missing, or this workflow cannot write it: check the package's Actions access in its GitHub settings."
+                exit 1
+                ;;
+            esac
+            echo "⏳ Registry check $attempt/3 failed: ${last:-timed out}"
+            sleep 10
+          done
+          if [ -z "$missing" ]; then
+            echo "::error title=Registry check failed::$repository:$SRC: ${last:-timed out}"
+            exit 1
+          fi
+          # src last: it is the marker both the check above and
+          # deploy-production read, so it exists only once the others do.
+          for tag in "sha-$GITHUB_SHA" latest "$SRC"; do
+            docker tag test-worker:local "$repository:$tag"
+            docker push "$repository:$tag"
+          done

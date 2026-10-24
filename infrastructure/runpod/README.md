@@ -87,18 +87,48 @@ docker run --rm \
 
 ## CI/CD Pipeline
 
-The GitHub Actions workflow (`runpod-ci.yml`) automatically:
+Two workflows share the work: the image is built where the transcoder changed,
+and the endpoint is switched where production is deployed.
 
-1.  **Quality & Unit**: Lints (Black, Flake8) and runs unit tests. Runs on PRs into `dev` and `main`.
+`runpod-ci.yml` (PRs into `dev` and `main`, pushes to `main` that touch the transcoder, and
+manual runs):
+
+1.  **Quality & Unit**: Lints (Black, Flake8), runs unit tests, and runs the image tag script.
 2.  **Container Verification**: Builds the Docker image and runs the integration script.
-3.  **Deployment** (push to `main` only, never on a PR):
-    -   Pushes the image to GHCR (`ghcr.io/<owner>/codex-transcoder:sha-<commit>`).
-    -   Points the endpoint's template at it (`scripts/update_runpod_endpoint.py`); the job fails unless RunPod echoes the new image.
-    -   **Endpoint health** (`update_runpod_endpoint.py --health`): prints the live config, warns on a long `idleTimeout` or a short `executionTimeoutMs`, and goes red when the endpoint is paused (`workersMax=0`).
+3.  **Publish image** (`main` only, never on a PR): pushes the image it just verified to GHCR as
+    `codex-transcoder:src-<hash>`, plus `sha-<commit>` and `latest` (the most recently built
+    image, used only by `scripts/setup_endpoint.py`). `.github/scripts/runpod-image-tag.sh`
+    names the tag from every tracked file here except tests, scripts, docs and local-dev files,
+    so a new file counts until it is excluded there. A `src-` tag is written **once** (and last):
+    when it already exists, nothing is pushed, so a docs-only push can never swap the image
+    production runs. It holds no RunPod secret and changes nothing on RunPod.
+
+`deploy-production.yml` (production deploys; these are its last steps, so a RunPod problem never
+holds back a worker deploy):
+
+1.  **Wait for the transcoder image**: computes the same `src-<hash>` and waits up to 20 min for
+    it to appear in GHCR. An auth or invalid-reference answer fails at once; other registry
+    errors are retried until the deadline. The tag may be due from an
+    earlier commit (the last one that changed the inputs); if that commit's publish failed, every
+    deploy goes red here until it is published: re-run that run, or run `runpod-ci.yml` on `main`.
+2.  **Point RunPod at the transcoder image** (`scripts/update_runpod_endpoint.py`): does nothing
+    when the template already uses it; otherwise fails unless RunPod echoes the new image.
+3.  **Transcoder endpoint health** (`update_runpod_endpoint.py --health`): prints the live
+    config, warns on a long `idleTimeout` or a short `executionTimeoutMs`, and goes red when the
+    endpoint is paused (`workersMax=0`) or its config cannot be read after 3 tries. It checks
+    configuration, not whether a worker can start.
+
+Steps 1 and 2 run only when every earlier deploy step passed; the next green deploy catches up,
+because the tag comes from the deployed commit. Step 3 runs on every deploy that is not
+cancelled.
+
+**Rolling back**: `git revert` on `main`, then deploy. The image set in the RunPod console is
+not authoritative: the next production deploy replaces it, and the run's annotations show the
+replacement.
 
 ### Required GitHub Secrets
 
-On the `runpod-production` environment (no required reviewer; the dev → main promotion is the gate):
+On the `production` environment, beside the Cloudflare secrets (its required reviewer approves the whole deploy):
 
 - `RUNPOD_API_KEY`: RunPod API key with write access (the deploy edits the template).
 - `RUNPOD_ENDPOINT_ID`: The ID of the serverless endpoint to update.

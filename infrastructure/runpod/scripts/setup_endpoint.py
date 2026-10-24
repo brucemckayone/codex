@@ -211,7 +211,7 @@ def main():
 
         print(
             "\nAdd to GitHub: gh secret set RUNPOD_ENDPOINT_ID "
-            f'--env runpod-production --body "{endpoint_id}"'
+            f'--env production --body "{endpoint_id}"'
         )
 
     except Exception as e:
