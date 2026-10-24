@@ -10,6 +10,8 @@
  *   transfer; the refusal is logged at error with an errorId for support.
  * - Codex-2hxff.23 SEC-02: Stripe's own message never goes in a client-facing
  *   error context; it is logged with an errorId.
+ * - Codex-2hxff.49: a replay keeps the first split and the platform fee
+ *   recorded, whatever the fees are by then.
  *
  * Real DB, mocked Stripe. Every row hangs off this file's own organisation
  * and users and is deleted in afterAll (the local database is shared).
@@ -17,6 +19,7 @@
 
 import { randomUUID } from 'node:crypto';
 import * as schema from '@codex/database/schema';
+import type { FeeConfigService } from '@codex/purchase';
 import { mapErrorToResponse, ServiceError } from '@codex/service-errors';
 import {
   createMockStripe,
@@ -122,6 +125,10 @@ describe('course subscription records, currency and errors', () => {
     await db
       .delete(schema.stripeConnectAccounts)
       .where(inArray(schema.stripeConnectAccounts.userId, users));
+    // Written by the trigger, from the delete above (Codex-2hxff.47); no FK.
+    await db
+      .delete(schema.stripeConnectAccountHistory)
+      .where(inArray(schema.stripeConnectAccountHistory.userId, users));
     await db
       .delete(schema.organizationMemberships)
       .where(eq(schema.organizationMemberships.organizationId, orgId));
@@ -279,6 +286,145 @@ describe('course subscription records, currency and errors', () => {
     const slice = await creatorSliceOf(row.id);
     expect(slice).toBeDefined();
     expect(slice?.creatorOrgAgreementId).toBeNull();
+  });
+
+  // Owner decision 2026-10-23, "Keep recorded fee" (Codex-2hxff.49): a replay
+  // keeps the first split, and the platform fee recorded, so a fee change
+  // between deliveries can neither re-size a slice nor leave the slices short
+  // of the gross.
+  describe('a replayed invoice after the fees changed (Codex-2hxff.49)', () => {
+    /** A service whose fees are `platform` and `org`, in basis points. */
+    const serviceAt = (platformFeePercent: number, orgFeePercent: number) =>
+      new CourseSubscriptionService(
+        {
+          db,
+          environment: 'test',
+          feeConfig: {
+            getFeesForCreator: vi.fn(async () => ({
+              platformFeePercent,
+              orgFeePercent,
+              minPlatformFeeCents: 0,
+              minTransferCents: 0,
+            })),
+          } as unknown as FeeConfigService,
+        },
+        stripe
+      );
+
+    /** The charge `invoiceFor` settles on (paymentIntents.retrieve, above). */
+    const chargeOf = (invoice: Stripe.Invoice) => {
+      const [paid] = (
+        invoice as unknown as {
+          payments: { data: Array<{ payment: { payment_intent: string } }> };
+        }
+      ).payments.data;
+      return (paid?.payment.payment_intent ?? '').replace(/^pi_/, 'ch_');
+    };
+
+    const slicesOf = (courseSubscriptionId: string) =>
+      db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.courseSubscriptionId, courseSubscriptionId));
+
+    /** A slice an earlier delivery recorded, and paid. */
+    const recorded = (
+      courseSubscriptionId: string,
+      stripeChargeId: string,
+      payoutType: 'platform_fee' | 'creator_payout',
+      amountCents: number
+    ): typeof schema.payouts.$inferInsert => ({
+      userId: payoutType === 'creator_payout' ? creatorId : null,
+      organizationId: orgId,
+      courseSubscriptionId,
+      sourceType: 'subscription',
+      amountCents,
+      payoutType,
+      status: 'paid',
+      stripeChargeId,
+      ...(payoutType === 'creator_payout'
+        ? { stripeTransferId: `tr_first_${randomUUID().slice(0, 8)}` }
+        : {}),
+      transferGroup: `course_sub_${courseSubscriptionId}`,
+      resolvedAt: new Date(),
+    });
+
+    it("the creator slice written only: the replay keeps it and records the organisation's from what is left, to the gross", async () => {
+      const { sub, row } = await subscribed(creatorId);
+      const invoice = invoiceFor(sub, 'gbp');
+      const chargeId = chargeOf(invoice);
+      // Before .49 each slice was written on its own, so a delivery could die
+      // between the creator's and the organisation's, at 10% / 15%.
+      await db
+        .insert(schema.payouts)
+        .values([
+          recorded(row.id, chargeId, 'platform_fee', 500),
+          recorded(row.id, chargeId, 'creator_payout', 3825),
+        ]);
+      vi.mocked(stripe.transfers.create).mockClear();
+
+      await serviceAt(2000, 1500).handleCourseInvoicePaymentSucceeded(
+        invoice,
+        sub
+      );
+
+      // 5000 less the 500 and 3825 recorded, not the 600 the new fees compute.
+      const rows = await slicesOf(row.id);
+      expect(rows.map((r) => [r.payoutType, r.amountCents]).sort()).toEqual([
+        ['creator_payout', 3825],
+        ['organization_fee', 675],
+        ['platform_fee', 500],
+      ]);
+      expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(5000);
+      // The creator's slice stands: it is never sent again.
+      const sentTypes = vi
+        .mocked(stripe.transfers.create)
+        .mock.calls.map(([params]) => params.metadata?.type);
+      expect(sentTypes).not.toContain('creator_payout');
+    });
+
+    it('the platform fee written only: the replay splits the rest from it, to the gross', async () => {
+      const { sub, row } = await subscribed(creatorId);
+      const invoice = invoiceFor(sub, 'gbp');
+      const chargeId = chargeOf(invoice);
+      await db
+        .insert(schema.payouts)
+        .values(recorded(row.id, chargeId, 'platform_fee', 500));
+
+      await serviceAt(2000, 1500).handleCourseInvoicePaymentSucceeded(
+        invoice,
+        sub
+      );
+
+      const rows = await slicesOf(row.id);
+      // 500 recorded at 10%; the 4500 left split at 15% to the organisation.
+      expect(
+        Object.fromEntries(rows.map((r) => [r.payoutType, r.amountCents]))
+      ).toEqual({
+        platform_fee: 500,
+        organization_fee: 675,
+        creator_payout: 3825,
+      });
+      expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(5000);
+    });
+
+    it('a plain redelivery moves no money', async () => {
+      const { sub, row } = await subscribed(creatorId);
+      const invoice = invoiceFor(sub, 'gbp');
+      const same = serviceAt(1000, 1500);
+      await same.handleCourseInvoicePaymentSucceeded(invoice, sub);
+      const first = await slicesOf(row.id);
+      vi.mocked(stripe.transfers.create).mockClear();
+
+      await same.handleCourseInvoicePaymentSucceeded(invoice, sub);
+
+      const again = await slicesOf(row.id);
+      expect(again.map((r) => r.id).sort()).toEqual(
+        first.map((r) => r.id).sort()
+      );
+      expect(again.reduce((sum, r) => sum + r.amountCents, 0)).toBe(5000);
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
+    });
   });
 
   it('a non-GBP invoice still renews access; only its payouts are refused, at error with an errorId', async () => {

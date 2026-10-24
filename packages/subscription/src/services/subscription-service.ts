@@ -66,6 +66,8 @@ import {
   type LedgerDeps,
   listClawableRefunds,
   type OrganisationPayee,
+  type PayeeAccounts,
+  payeeAccountIds,
   pendingReductionsFor,
   type RecordSliceInput,
   type RecordSliceOutcome,
@@ -4654,6 +4656,10 @@ export class SubscriptionService extends BaseService {
       count: unresolvedPayouts.length,
     });
 
+    // Where an earlier attempt's transfer can be: this account, or one the
+    // payee has since replaced (Codex-2hxff.47). Read once per payee.
+    const accounts = await payeeAccountIds(this.db, connectAccount.userId);
+
     // Codex-iivne + Codex-69t7c WP5 + Codex-2hxff.13: group pending rows by
     // (organisation, sourceType) so a creator with many sub-threshold pending
     // rows gets resolved when the SUM clears the min-transfer floor, rather
@@ -4694,7 +4700,8 @@ export class SubscriptionService extends BaseService {
         sourceType,
         groupOrgId,
         stripeAccountId,
-        connectAccount.userId
+        connectAccount.userId,
+        accounts
       ).catch((error: unknown) => {
         this.obs.error('resolvePendingPayouts: group failed', {
           errorId: crypto.randomUUID(),
@@ -4807,7 +4814,8 @@ export class SubscriptionService extends BaseService {
     sourceType: 'purchase' | 'subscription',
     orgId: string | null,
     stripeAccountId: string,
-    userId: string
+    userId: string,
+    accounts: PayeeAccounts
   ): Promise<{
     resolved: number;
     failed: number;
@@ -4874,9 +4882,12 @@ export class SubscriptionService extends BaseService {
     );
     const payable = (payout: (typeof group)[number]) =>
       payout.amountCents - (reductions.get(payout.id) ?? 0);
+    // On the payee's current account, and on a replaced one for a row with
+    // an attempt on record (Codex-2hxff.47). `claimed` holds the rows as read
+    // BEFORE the claim, so `lastRetryAt` is an earlier attempt's, not this one.
     const alreadySent = await findTransfersForPayouts(
       this.stripe,
-      stripeAccountId,
+      accounts,
       claimed,
       this.obs
     );
@@ -5387,23 +5398,63 @@ export class SubscriptionService extends BaseService {
    * 2026-10-21, "Keep its first split"): see `recordSplitOnce`. Returns each
    * slice's outcome, or `null` when an earlier delivery already split the
    * charge. Then the replay adds nothing, even if an agreement accepted since
-   * is backdated to before the invoice.
+   * is backdated to before the invoice — only a slice missing entirely, from
+   * what is left of the charge's `grossCents` (Codex-2hxff.49).
    */
   private async recordInvoiceSplit(
     subscriptionId: string,
     orgId: string,
     chargeId: string,
+    grossCents: number,
     slices: RecordSliceInput[]
   ): Promise<Array<RecordSliceOutcome | null> | null> {
-    const result = await recordSplitOnce(this.ledger(), chargeId, slices);
-    if (result.kind === 'already_split') {
+    const result = await recordSplitOnce(
+      this.ledger(),
+      { id: chargeId, grossCents },
+      slices
+    );
+    if (result.kind !== 'recorded') {
       this.obs.info(
-        'Invoice already split by an earlier delivery; the replay keeps that split',
+        result.kind === 'completed'
+          ? 'Invoice already split by an earlier delivery that died part-way; the replay recorded only the slices it lacked'
+          : 'Invoice already split by an earlier delivery; the replay keeps that split',
         { subscriptionId, organizationId: orgId, stripeChargeId: chargeId }
       );
       return null;
     }
     return result.outcomes;
+  }
+
+  /**
+   * The post-platform pool of an invoice charge whose recorded platform fee
+   * differs from the one computed now: the fees changed between deliveries.
+   * The recorded fee wins, and the pool is the gross minus it, split by the
+   * organisation's fee-config share as a first delivery's is
+   * (`calculateRevenueSplit`), so the slices sum to the gross (owner decision
+   * 2026-10-23, "Keep recorded fee"; Codex-2hxff.49).
+   */
+  private async poolAfterRecordedFee(
+    ids: { subscriptionId: string; orgId: string; chargeId: string },
+    grossCents: number,
+    computedFeeCents: number,
+    recordedFeeCents: number
+  ): Promise<{ organizationFeeCents: number; creatorPayoutCents: number }> {
+    this.obs.warn(
+      'A replay found a different platform fee on record; the rest of the charge is split from it',
+      {
+        subscriptionId: ids.subscriptionId,
+        organizationId: ids.orgId,
+        stripeChargeId: ids.chargeId,
+        recordedFeeCents,
+        computedFeeCents,
+      }
+    );
+    const fees = await this.resolvePayoutFees(ids.orgId, 'subscription');
+    return calculateRevenueSplit(
+      Math.max(grossCents - recordedFeeCents, 0),
+      0,
+      fees.orgFeePercent
+    );
   }
 
   /**
@@ -5648,14 +5699,26 @@ export class SubscriptionService extends BaseService {
     const source = { sourceType: 'subscription', subscriptionId } as const;
 
     // Platform fee — retained in the platform Stripe balance at charge time;
-    // no transfer. One paid row per charge (Codex-h69cg, Codex-g9owu).
-    await recordPlatformFee(ledger, {
+    // no transfer. One paid row per charge (Codex-h69cg, Codex-g9owu). A
+    // replay keeps the fee an earlier delivery recorded, and the rest of the
+    // charge is split from it (Codex-2hxff.49).
+    const recordedFeeCents = await recordPlatformFee(ledger, {
       amountCents: platformFeeCents,
       organizationId: orgId,
       source,
       stripeChargeId: chargeId,
       transferGroup,
     });
+    const grossCents = platformFeeCents + orgFeeCents + creatorPayoutCents;
+    const pool =
+      recordedFeeCents === platformFeeCents
+        ? { organizationFeeCents: orgFeeCents, creatorPayoutCents }
+        : await this.poolAfterRecordedFee(
+            { subscriptionId, orgId, chargeId },
+            grossCents,
+            platformFeeCents,
+            recordedFeeCents
+          );
 
     // Codex-2hxff.2: the org slice and the no-agreement creator pool go to
     // whoever owned the org when the invoice was created — the same instant
@@ -5692,7 +5755,8 @@ export class SubscriptionService extends BaseService {
       obs: this.obs,
     });
 
-    const postPlatformCents = orgFeeCents + creatorPayoutCents;
+    const postPlatformCents =
+      pool.organizationFeeCents + pool.creatorPayoutCents;
     const totalShareBps = creatorAgreements.reduce(
       (sum, a) => sum + a.sharePercent,
       0
@@ -5729,17 +5793,23 @@ export class SubscriptionService extends BaseService {
           }
         );
       }
-      await this.recordInvoiceSplit(subscriptionId, orgId, chargeId, [
-        orgSlice(orgFeeCents),
-        this.creatorPoolToOwnerSlice(
-          subscriptionId,
-          orgId,
-          chargeId,
-          transferGroup,
-          creatorPayoutCents,
-          orgPayee
-        ),
-      ]);
+      await this.recordInvoiceSplit(
+        subscriptionId,
+        orgId,
+        chargeId,
+        grossCents,
+        [
+          orgSlice(pool.organizationFeeCents),
+          this.creatorPoolToOwnerSlice(
+            subscriptionId,
+            orgId,
+            chargeId,
+            transferGroup,
+            pool.creatorPayoutCents,
+            orgPayee
+          ),
+        ]
+      );
       return;
     }
 
@@ -5849,6 +5919,7 @@ export class SubscriptionService extends BaseService {
       subscriptionId,
       orgId,
       chargeId,
+      grossCents,
       [orgSlice(effectiveOrgFeeCents), ...creatorSlices.map((c) => c.slice)]
     );
     if (!outcomes) return;

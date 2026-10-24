@@ -78,7 +78,9 @@ organisation's values or an override, the removal did happen. The current fee
 row tells the two apart. Writes are atomic —
 **gap**: `Codex-rtwpv`. Fee values are cached in KV with no TTL: a write
 invalidates them, and they change too rarely for a TTL to be worth the misses.
-A fee is read at the time of each sale; it is never snapshotted on an agreement.
+A fee is read when each sale is processed; it is never snapshotted on an
+agreement. A replayed invoice keeps the platform fee its first delivery
+recorded ([below](#a-replayed-invoice)).
 
 ## Minimum platform fee
 
@@ -190,6 +192,39 @@ row above). Owner decision 2026-10-13, "The organisation": the remainder is
 added to the organisation slice and recorded with it, so every penny of the
 invoice is in the ledger: the organisation's slice is the post-platform pool
 minus what the creators take.
+
+### A replayed invoice
+
+Owner decision 2026-10-23, "Keep recorded fee" (`Codex-2hxff.49`). Stripe can
+deliver an invoice's payment more than once, and the fees may change in
+between. Each slice is recorded once per charge
+([the payouts ledger](connect-and-payouts.md#the-payouts-ledger)), and:
+
+- **The platform fee on record wins.** A redelivery that computes a different
+  platform fee keeps the one recorded, and logs the difference at warn.
+- **The rest is split from it.** If no other slice was recorded yet (the first
+  delivery died after the platform fee), the pool is the gross minus the
+  recorded fee, divided by the rules above with the fees in force now. So the
+  slices always sum exactly to the gross, and no transfer exceeds the charge.
+- **A split already recorded stands.** If any creator or organisation slice
+  exists, every recorded slice is kept, for organisation and course-plan
+  invoices alike. Each one the redelivery would have computed differently is
+  logged at error for a person to check.
+- **A slice missing entirely gets what is left.** A slice the split defines
+  but the charge has no row for (a delivery that died between slices) is
+  recorded from the gross less every row on the charge, so the slices sum to
+  the gross. With nothing left, as after a complete first split, it is not
+  added. Several missing slices take their computed amounts in turn, and the
+  last takes the rest.
+
+| £10.00 invoice, no agreements | Platform | Organisation | Owner pool |
+|---|---|---|---|
+| First delivery at 10% / 15% | 100 | 135 | 765 |
+| It died after the platform fee; the replay runs at 20% / 15% | 100 (recorded) | 135 | 765 |
+| The same replay split afresh (what the rule prevents) | 100 (recorded) | 120 | 680, £1.00 short of the gross |
+
+Using the fees in force at the invoice's own time instead waits for fee
+effective dates (`Codex-2hxff.33`).
 
 ---
 

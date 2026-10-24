@@ -14,8 +14,11 @@
  */
 
 import {
+  disputes,
   organizations,
+  payoutReversals,
   payouts,
+  stripeConnectAccountHistory,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
@@ -30,7 +33,7 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -46,14 +49,21 @@ import {
   claimPayoutAttempt,
   claimPayoutAttempts,
   findTransfersForPayouts,
+  isDrainablePayout,
   type LedgerDeps,
+  type PayeeAccounts,
+  payeeAccountIds,
   type RecordSliceInput,
   recordPlatformFee,
   recordSlice,
+  recordSplitOnce,
   renewPayoutAttempt,
   settlePayoutPaid,
   settleTransfer,
 } from '../payout-ledger';
+
+/** Only this account: the lookup of one destination. */
+const only = (current: string): PayeeAccounts => ({ current, replaced: [] });
 
 describe('payouts ledger', () => {
   let db: Database;
@@ -61,17 +71,23 @@ describe('payouts ledger', () => {
   let deps: LedgerDeps;
   let creatorId: string;
   let ownerId: string;
+  /** A payee who replaced their Connect account (Codex-2hxff.47). */
+  let movedId: string;
   let orgId: string;
   let subscriptionId: string;
   const obs = { error: vi.fn(), warn: vi.fn() };
   const createdPayoutIds: string[] = [];
+  const disputeIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
-    const [creator, owner, subscriber] = await seedTestUsers(db, 3);
-    if (!creator || !owner || !subscriber) throw new Error('seed failed');
+    const [creator, owner, subscriber, moved] = await seedTestUsers(db, 4);
+    if (!creator || !owner || !subscriber || !moved) {
+      throw new Error('seed failed');
+    }
     creatorId = creator;
     ownerId = owner;
+    movedId = moved;
     const [org] = await db
       .insert(organizations)
       .values({ name: 'Ledger Org', slug: createUniqueSlug('ledger') })
@@ -108,13 +124,31 @@ describe('payouts ledger', () => {
 
   // The hourly sweep is global: a pending row left here would feed it.
   afterAll(async () => {
-    if (createdPayoutIds.length > 0) {
-      await db.delete(payouts).where(inArray(payouts.id, createdPayoutIds));
+    const orgRows = await db
+      .select({ id: payouts.id })
+      .from(payouts)
+      .where(eq(payouts.organizationId, orgId));
+    const rowIds = [...createdPayoutIds, ...orgRows.map((row) => row.id)];
+    if (rowIds.length > 0) {
+      // payout_reversals RESTRICT the rows they name.
+      await db
+        .delete(payoutReversals)
+        .where(inArray(payoutReversals.payoutId, rowIds));
+      await db.delete(payouts).where(inArray(payouts.id, rowIds));
     }
-    await db.delete(payouts).where(eq(payouts.organizationId, orgId));
+    if (disputeIds.length > 0) {
+      await db
+        .delete(disputes)
+        .where(inArray(disputes.stripeDisputeId, disputeIds));
+    }
+    const userIds = [creatorId, movedId];
     await db
       .delete(stripeConnectAccounts)
-      .where(eq(stripeConnectAccounts.userId, creatorId));
+      .where(inArray(stripeConnectAccounts.userId, userIds));
+    // Written by the trigger, from the deletes above too; no FK.
+    await db
+      .delete(stripeConnectAccountHistory)
+      .where(inArray(stripeConnectAccountHistory.userId, userIds));
     await teardownTestDatabase();
   });
 
@@ -369,11 +403,18 @@ describe('payouts ledger', () => {
 
   it('a failed reservation is thrown, so the webhook answers by its cause and retries', async () => {
     const outage = new Error('Connection terminated unexpectedly');
-    const failingDb = {
-      insert: () => {
-        throw outage;
+    // Reads still work (the dispute-hold check); the reserve's INSERT fails.
+    const failingDb = new Proxy(db, {
+      get(target, property) {
+        if (property === 'insert') {
+          return () => {
+            throw outage;
+          };
+        }
+        const value = Reflect.get(target, property);
+        return typeof value === 'function' ? value.bind(target) : value;
       },
-    } as unknown as Database;
+    });
 
     await expect(recordSlice({ ...deps, db: failingDb }, slice())).rejects.toBe(
       outage
@@ -420,6 +461,34 @@ describe('payouts ledger', () => {
     });
   });
 
+  it('the platform fee on record is returned: a replay at another fee gets the first (Codex-2hxff.49)', async () => {
+    const stripeChargeId = charge();
+    const fee = {
+      amountCents: 100,
+      organizationId: orgId,
+      source: { sourceType: 'subscription', subscriptionId } as const,
+      stripeChargeId,
+      transferGroup: `sub_${subscriptionId}`,
+    };
+
+    expect(await recordPlatformFee(deps, fee)).toBe(100);
+    // The fees changed before the redelivery.
+    expect(await recordPlatformFee(deps, { ...fee, amountCents: 200 })).toBe(
+      100
+    );
+    // A fee now computed as nothing still finds the one recorded.
+    expect(await recordPlatformFee(deps, { ...fee, amountCents: 0 })).toBe(100);
+    expect(
+      await recordPlatformFee(deps, {
+        ...fee,
+        stripeChargeId: charge(),
+        amountCents: 0,
+      })
+    ).toBe(0);
+    const rows = await rowsFor(stripeChargeId);
+    expect(rows.map((r) => r.amountCents)).toEqual([100]);
+  });
+
   it('a drain finds the transfer already made for a row, by its payout_id', async () => {
     const input = slice();
     const outcome = await recordSlice(deps, input);
@@ -436,14 +505,14 @@ describe('payouts ledger', () => {
 
     const found = await findTransfersForPayouts(
       stripe,
-      payable.stripeAccountId,
+      only(payable.stripeAccountId),
       [row, { id: 'legacy-row', createdAt: row.createdAt }]
     );
 
     expect(found.get(row.id)).toBe(outcome.transferId);
     expect(found.get('legacy-row')).toMatch(/^tr_/);
     expect(
-      await findTransfersForPayouts(stripe, 'acct_someone_else', [row])
+      await findTransfersForPayouts(stripe, only('acct_someone_else'), [row])
     ).toEqual(new Map());
   });
 
@@ -465,7 +534,7 @@ describe('payouts ledger', () => {
 
     const found = await findTransfersForPayouts(
       stripe,
-      payable.stripeAccountId,
+      only(payable.stripeAccountId),
       [row]
     );
 
@@ -488,7 +557,7 @@ describe('payouts ledger', () => {
 
     const found = await findTransfersForPayouts(
       stripe,
-      payable.stripeAccountId,
+      only(payable.stripeAccountId),
       [row],
       obs
     );
@@ -772,6 +841,369 @@ describe('payouts ledger', () => {
       expect(await claimPayoutAttempt(db, outcome.payoutId, afterLease)).toBe(
         1
       );
+    });
+  });
+
+  // Owner decision 2026-10-23, "Keep account history": a transfer to an
+  // account the payee has since replaced is still found, so it is never sent
+  // twice and a refund can still reverse it.
+  describe('a payee who replaced their Connect account (Codex-2hxff.47)', () => {
+    const oldAccount = `acct_ledger_old_${crypto.randomUUID().slice(0, 8)}`;
+    const newAccount = `acct_ledger_new_${crypto.randomUUID().slice(0, 8)}`;
+
+    beforeAll(async () => {
+      await db.insert(stripeConnectAccounts).values({
+        userId: movedId,
+        stripeAccountId: oldAccount,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+      });
+      // Support re-keys the row; the trigger keeps the old account.
+      await db
+        .update(stripeConnectAccounts)
+        .set({ stripeAccountId: newAccount })
+        .where(eq(stripeConnectAccounts.userId, movedId));
+    });
+
+    /** A pending row of `userId`'s; `attempted`: a drain sent it an hour ago. */
+    async function rowOf(userId: string, attempted: boolean) {
+      const outcome = await recordSlice(
+        deps,
+        slice({ payee: { userId, account: undefined } })
+      );
+      if (outcome?.kind !== 'pending') throw new Error('expected pending');
+      createdPayoutIds.push(outcome.payoutId);
+      const [row] = attempted
+        ? await db
+            .update(payouts)
+            .set({
+              lastRetryAt: new Date(Date.now() - 60 * 60_000),
+              retryCount: 1,
+            })
+            .where(eq(payouts.id, outcome.payoutId))
+            .returning()
+        : await db
+            .select()
+            .from(payouts)
+            .where(eq(payouts.id, outcome.payoutId));
+      if (!row) throw new Error('row missing');
+      return row;
+    }
+
+    /** The transfer that attempt made, to `destination`; its row update failed. */
+    const landedOn = (destination: string, row: { id: string }) =>
+      stripe.transfers.create({
+        amount: 765,
+        currency: 'gbp',
+        destination,
+        metadata: { payout_id: row.id },
+      });
+
+    it('lists the current account, then the one it replaced', async () => {
+      expect(await payeeAccountIds(db, movedId)).toEqual({
+        current: newAccount,
+        replaced: [oldAccount],
+      });
+    });
+
+    it('a transfer to the replaced account is found, so the row is settled, not sent again', async () => {
+      const row = await rowOf(movedId, true);
+      const landed = await landedOn(oldAccount, row);
+
+      const found = await findTransfersForPayouts(
+        stripe,
+        await payeeAccountIds(db, movedId),
+        [row]
+      );
+
+      expect(found.get(row.id)).toBe(landed.id);
+      const searched = vi
+        .mocked(stripe.transfers.list)
+        .mock.calls.map(
+          ([params]) => (params as Stripe.TransferListParams).destination
+        );
+      expect(searched).toEqual([newAccount, oldAccount]);
+    });
+
+    it('a refund cancelling the row finds that transfer, for the refund to reverse', async () => {
+      const row = await rowOf(movedId, true);
+      const landed = await landedOn(oldAccount, row);
+
+      expect(
+        await cancelUnpaidPayout(deps, row, 'cancelled_by_refund')
+      ).toEqual({ kind: 'cancelled', transferId: landed.id });
+    });
+
+    it('a row with no attempt on record is not looked for on a replaced account', async () => {
+      const row = await rowOf(movedId, false);
+
+      await findTransfersForPayouts(
+        stripe,
+        await payeeAccountIds(db, movedId),
+        [row]
+      );
+
+      expect(stripe.transfers.list).toHaveBeenCalledTimes(1);
+    });
+
+    it('a payee with no history asks Stripe once', async () => {
+      const row = await rowOf(creatorId, true);
+      expect(await payeeAccountIds(db, creatorId)).toEqual({
+        current: payable.stripeAccountId,
+        replaced: [],
+      });
+
+      await cancelUnpaidPayout(deps, row, 'cancelled_by_refund');
+
+      expect(stripe.transfers.list).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('the dispute hold (Codex-2hxff.59)', () => {
+    async function dispute(stripeChargeId: string, status: string) {
+      const id = `dp_ledger_${crypto.randomUUID().slice(0, 12)}`;
+      disputeIds.push(id);
+      await db.insert(disputes).values({
+        stripeDisputeId: id,
+        stripeChargeId,
+        amountCents: 1000,
+        currency: 'gbp',
+        status,
+        stripeCreatedAt: new Date(),
+      });
+      return id;
+    }
+
+    const setDispute = (
+      id: string,
+      values: Partial<typeof disputes.$inferInsert>
+    ) =>
+      db.update(disputes).set(values).where(eq(disputes.stripeDisputeId, id));
+
+    async function drainable(payoutId: string): Promise<boolean> {
+      const rows = await db
+        .select({ id: payouts.id })
+        .from(payouts)
+        .where(and(eq(payouts.id, payoutId), isDrainablePayout()));
+      return rows.length === 1;
+    }
+
+    it("a second dispute of the charge holds a subscription's re-pay row until its loss is applied", async () => {
+      const stripeChargeId = charge();
+      const paid = await recordSlice(deps, slice({ stripeChargeId }));
+      if (paid?.kind !== 'paid') throw new Error('expected paid');
+      const won = await dispute(stripeChargeId, 'won');
+      // The won dispute paid its reversal back: a re-pay row, which has no
+      // charge id of its own (repay.ts writeRepay).
+      const [repay] = await db
+        .insert(payouts)
+        .values({
+          userId: creatorId,
+          organizationId: orgId,
+          subscriptionId,
+          sourceType: 'subscription',
+          amountCents: 765,
+          payoutType: 'creator_payout',
+          status: 'pending',
+          transferGroup: `sub_${subscriptionId}`,
+        })
+        .returning();
+      if (!repay) throw new Error('re-pay row not inserted');
+      createdPayoutIds.push(repay.id);
+      await db.insert(payoutReversals).values({
+        payoutId: paid.payoutId,
+        causeType: 'dispute',
+        causeId: won,
+        amountCents: 765,
+        kind: 'transfer_reversal',
+        status: 'done',
+        stripeReversalId: `trr_${crypto.randomUUID().slice(0, 12)}`,
+        repaidByPayoutId: repay.id,
+        resolvedAt: new Date(),
+      });
+      expect(await drainable(repay.id)).toBe(true);
+
+      const second = await dispute(stripeChargeId, 'needs_response');
+
+      expect(await drainable(repay.id)).toBe(false);
+      expect(await claimPayoutAttempt(db, repay.id)).toBeNull();
+      await setDispute(second, { status: 'lost' });
+      expect(await drainable(repay.id)).toBe(false);
+      await setDispute(second, { outcomeAppliedAt: new Date() });
+      expect(await drainable(repay.id)).toBe(true);
+    });
+
+    it('a slice recorded during an open inquiry is held, not sent, and drains once the inquiry closes', async () => {
+      const input = slice();
+      const inquiry = await dispute(
+        input.stripeChargeId,
+        'warning_needs_response'
+      );
+
+      const outcome = await recordSlice(deps, input);
+
+      expect(outcome).toMatchObject({ kind: 'held' });
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
+      const [row] = await rowsFor(input.stripeChargeId);
+      if (!row) throw new Error('row missing');
+      // No attempt on record: nothing was sent.
+      expect(row).toMatchObject({
+        status: 'pending',
+        reason: null,
+        lastRetryAt: null,
+      });
+      expect(await claimPayoutAttempt(db, row.id)).toBeNull();
+
+      await setDispute(inquiry, { status: 'warning_closed' });
+
+      expect(await claimPayoutAttempt(db, row.id)).toBe(1);
+    });
+
+    it('a split recorded during an open chargeback is held whole, never sent at gross', async () => {
+      const stripeChargeId = charge();
+      await dispute(stripeChargeId, 'needs_response');
+
+      const result = await recordSplitOnce(
+        deps,
+        { id: stripeChargeId, grossCents: 1000 },
+        [
+          slice({
+            stripeChargeId,
+            payoutType: 'organization_fee',
+            payee: { userId: ownerId, account: payable },
+            amountCents: 135,
+            idempotencyKey: `${stripeChargeId}_org_fee`,
+          }),
+          slice({ stripeChargeId }),
+        ]
+      );
+
+      expect(result).toMatchObject({
+        kind: 'recorded',
+        outcomes: [{ kind: 'held' }, { kind: 'held' }],
+      });
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
+      expect(await rowsFor(stripeChargeId)).toHaveLength(2);
+    });
+
+    it('a won dispute holds nothing: the slice is sent at once', async () => {
+      const input = slice();
+      await dispute(input.stripeChargeId, 'won');
+
+      expect(await recordSlice(deps, input)).toMatchObject({ kind: 'paid' });
+      await rowsFor(input.stripeChargeId);
+    });
+  });
+
+  // Owner decision 2026-10-23, "Keep recorded fee" (Codex-2hxff.49): on a
+  // charge split before, what is recorded stands, and a slice the split
+  // defines that is missing entirely gets what the charge has left, so
+  // nothing owed is left without a row.
+  describe('a replay of a charge split before (Codex-2hxff.49)', () => {
+    const GROSS = 1000;
+
+    /** What an earlier delivery recorded on the charge, and paid. */
+    async function recorded(
+      stripeChargeId: string,
+      rows: Array<{
+        payoutType: 'platform_fee' | 'organization_fee' | 'creator_payout';
+        amountCents: number;
+      }>
+    ) {
+      for (const { payoutType, amountCents } of rows) {
+        await db.insert(payouts).values({
+          userId:
+            payoutType === 'platform_fee'
+              ? null
+              : payoutType === 'creator_payout'
+                ? creatorId
+                : ownerId,
+          organizationId: orgId,
+          subscriptionId,
+          sourceType: 'subscription',
+          amountCents,
+          payoutType,
+          status: 'paid',
+          stripeChargeId,
+          ...(payoutType === 'platform_fee'
+            ? {}
+            : { stripeTransferId: `tr_first_${crypto.randomUUID()}` }),
+          transferGroup: `sub_${subscriptionId}`,
+          resolvedAt: new Date(),
+        });
+      }
+    }
+
+    /** The split as a replay computes it, at fees that have changed. */
+    const replayed = (stripeChargeId: string) => [
+      slice({ stripeChargeId, amountCents: 680 }),
+      slice({
+        stripeChargeId,
+        payoutType: 'organization_fee',
+        payee: { userId: ownerId, account: payable },
+        amountCents: 120,
+        idempotencyKey: `${stripeChargeId}_org_fee`,
+      }),
+    ];
+
+    it('the creator slice recorded, the organisation slice missing: the replay records it from what is left, to the gross', async () => {
+      const stripeChargeId = charge();
+      await recorded(stripeChargeId, [
+        { payoutType: 'platform_fee', amountCents: 100 },
+        { payoutType: 'creator_payout', amountCents: 765 },
+      ]);
+
+      const result = await recordSplitOnce(
+        deps,
+        { id: stripeChargeId, grossCents: GROSS },
+        replayed(stripeChargeId)
+      );
+
+      expect(result).toMatchObject({
+        kind: 'completed',
+        outcomes: [null, { kind: 'paid' }],
+      });
+      const rows = await rowsFor(stripeChargeId);
+      expect(
+        Object.fromEntries(rows.map((r) => [r.payoutType, r.amountCents]))
+      ).toEqual({
+        platform_fee: 100,
+        creator_payout: 765,
+        organization_fee: 135,
+      });
+      expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(GROSS);
+      expect(stripe.transfers.create).toHaveBeenCalledTimes(1);
+      expect(stripe.transfers.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 135 }),
+        expect.anything()
+      );
+      // The creator slice present at another amount stands, and is reported.
+      expect(obs.error).toHaveBeenCalledWith(
+        expect.stringContaining('different slice'),
+        expect.objectContaining({
+          recordedAmountCents: 765,
+          replayAmountCents: 680,
+        })
+      );
+    });
+
+    it('a slice missing with nothing left of the charge is not added: the first split stands', async () => {
+      const stripeChargeId = charge();
+      await recorded(stripeChargeId, [
+        { payoutType: 'platform_fee', amountCents: 100 },
+        { payoutType: 'organization_fee', amountCents: 900 },
+      ]);
+
+      const result = await recordSplitOnce(
+        deps,
+        { id: stripeChargeId, grossCents: GROSS },
+        replayed(stripeChargeId)
+      );
+
+      expect(result).toEqual({ kind: 'already_split' });
+      expect(await rowsFor(stripeChargeId)).toHaveLength(2);
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
     });
   });
 });
