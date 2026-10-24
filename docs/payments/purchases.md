@@ -301,8 +301,17 @@ self-served by customers (owner decision 2026-10-13, "Platform support") — fro
 an admin screen that calls Stripe and then lets the `charge.refunded` webhook do
 the rest, so there is one refund path — **gap**: `Codex-2hxff.28` (today refunds
 can only be started in the Stripe Dashboard). Support can refund up to **14 days**
-after the purchase (owner decision 2026-10-13, "14 days"). The customer-facing
-refund policy is being drafted for legal review — `Codex-2hxff.31`.
+after the purchase (owner decision 2026-10-13, "14 days"): 14 × 24 hours from
+Stripe's `charge.created`, for a purchase and a subscription invoice alike, so a
+renewal's window runs from that renewal (owner decision 2026-10-24, Q1). The
+rule is `refundWindow` in `@codex/payments` (`REFUND_WINDOW_DAYS`), checked on
+the server's clock before Stripe is called. Only support's screen enforces it:
+Dashboard refunds and the platform's own refunds (duplicates, the early-fraud
+refund) are not support decisions. `issueRefund` refunds in part or in full;
+the screen previews what a refund will take from each slice with the engine's
+own rules (`planClawback`), so the preview and the clawback cannot disagree.
+The customer-facing refund policy is being drafted for legal review —
+`Codex-2hxff.31`.
 
 Stripe sends `charge.refunded` to `/webhooks/stripe/payment`. The clawback
 reads the charge's **settled** refunds (succeeded or failed) from Stripe, not
@@ -318,9 +327,33 @@ refund can fail even after it succeeded, up to 30 days later. Stripe returns
 the money to the platform balance, but the customer must still be refunded
 some other way. So the clawback stands, and the failure is recorded in
 `refunds` (support's queue is its failed rows) and logged with an `errorId`.
-Support then either refunds the customer elsewhere or re-pays the creators —
-**gap**: `Codex-2hxff.28` (the screen and the re-pay action; until then a
-person does it by hand). A
+Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
+
+- **refunded elsewhere**: the customer was refunded another way, so the
+  clawback stands and the row is just resolved;
+- **creators re-paid**: the customer is not refunded, so the payees get back
+  what the refund took (`repayFailedRefund`, `@codex/payments`). Each step of
+  its clawback that took money from a payee, on a slice or on a re-pay row,
+  gets one pending re-pay row for its amount, as a won dispute's does
+  ([dispute record](dispute-record.md#the-re-pay-a-new-pending-payout-row-per-reversed-slice)).
+  The refund then leaves the charge's running refund total, so a later refund
+  or chargeback is shared as if it had never been made, and takes its share
+  off the re-pay rows. Three rules (owner decisions 2026-10-24):
+  1. **A step that can never move money is cancelled**: one never claimed (it
+     never reached Stripe), and one Stripe refused on every try (out of
+     attempts) that no delivery holds. A step still retrying, or held by a
+     delivery right now, may yet reach Stripe, so the settlement is refused
+     (`REFUND_CLAWBACK_UNFINISHED`): the clawback is still running, and support
+     tries again later.
+  2. **A debt the payee already paid** (`creator_absorbed`,
+     `manually_reversed`) gets a re-pay row too; one the platform wrote off
+     (`platform_absorbed`) gets nothing. The refund's open debts close as
+     `refund_failed`.
+  3. **The platform fee's share is cancelled** and the fee slice is `paid`
+     again, with no re-pay row: the money is back in the platform's balance.
+
+The screen and its two actions are **gap**: `Codex-2hxff.28`; until it ships, a
+person settles a failed refund by hand. A
 `canceled` refund paid nothing out and is never clawed back, but the purchase
 `charge.refunded` recorded stays refunded, so it is logged for a person to
 check the buyer's access.

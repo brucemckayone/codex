@@ -10,6 +10,9 @@
  * unique indexes do not apply. `payout_reversals.repaid_by_payout_id` links
  * the reversal to it: that link is what makes a redelivery a no-op, and what
  * keeps the clawback from ever treating a re-pay row as a slice of the charge.
+ *
+ * A failed refund that support settles as `creators_repaid` is paid back the
+ * same way, by the same row writer (`repayFailedRefund`, Codex-2hxff.28).
  */
 
 import {
@@ -21,12 +24,28 @@ import {
   refundReviews,
   refunds,
 } from '@codex/database/schema';
-import { ConflictError, ServiceUnavailableError } from '@codex/service-errors';
-import { and, eq, inArray, isNull, lt, or, type SQL, sql } from 'drizzle-orm';
+import {
+  BusinessLogicError,
+  ConflictError,
+  ServiceUnavailableError,
+} from '@codex/service-errors';
+import {
+  and,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import {
   type ClawbackDeps,
   type ClawbackSource,
+  cancelUnclaimedStep,
   listClawableRefunds,
+  MAX_CLAWBACK_ATTEMPTS,
   reverseCharge,
   settleIfFullyReversed,
 } from './clawback';
@@ -51,6 +70,8 @@ const PAYEE_PAID_RESOLUTIONS: ReadonlySet<string> = new Set([
 ]);
 
 type Tx = Parameters<Parameters<ClawbackDeps['db']['transaction']>[0]>[0];
+/** The database, or a transaction on it. */
+type Client = ClawbackDeps['db'] | Tx;
 
 /**
  * Settle a WON dispute's clawback, idempotently:
@@ -103,7 +124,10 @@ export async function repayDispute(
       continue;
     }
     if (record.status === 'done') {
-      if (!record.repaidByPayoutId && (await writeRepay(deps, record, slice))) {
+      if (
+        !record.repaidByPayoutId &&
+        (await writeRepay(deps.db, record, slice))
+      ) {
         result.repaid++;
       }
       continue;
@@ -132,7 +156,7 @@ export async function repayDispute(
         // As the clawback does after a reversal: a slice reversed whole is
         // `reversed`, so totals count its re-pay row and not it as well.
         await settleIfFullyReversed(deps, slice.id);
-        if (await writeRepay(deps, done, slice)) result.repaid++;
+        if (await writeRepay(deps.db, done, slice)) result.repaid++;
       } else if (await cancelUnfinished(deps, record)) {
         result.cancelled++;
       } else {
@@ -224,6 +248,177 @@ async function clawBackRefundsUnderDispute(
   }
 }
 
+/** A re-pay row `repayFailedRefund` wrote. */
+export interface FailedRefundRepay {
+  /** The new pending `payouts` row. */
+  payoutId: string;
+  /** Who it pays: null for an organisation's slice with no owner yet. */
+  payeeUserId: string | null;
+  amountCents: number;
+}
+
+/** The steps that took money from a payee: every kind but the fee's share. */
+const PAYEE_STEP_KINDS: ReadonlySet<string> = new Set([
+  'transfer_reversal',
+  'pending_reduction',
+  'cancellation',
+]);
+
+/**
+ * Pay back what a FAILED refund's clawback took, when support settles it as
+ * `creators_repaid`: the customer is not to be refunded some other way, so
+ * the payees keep their part (Codex-2hxff.28 §8; owner decisions Q5a, Q5b).
+ * A won dispute's re-pay, for a refund:
+ *
+ * - each `done` step of the refund that took money from a payee (a transfer
+ *   reversal, or a reduction or cancellation of an unpaid row), on a slice or
+ *   on a re-pay row, gets one pending re-pay row for its amount, linked by
+ *   `repaid_by_payout_id`. That column is unique, so a second run writes
+ *   nothing.
+ *
+ * Three rules the owner chose on 2026-10-24:
+ *
+ * 1. A step that can never move money is cancelled: one never claimed (it
+ *    never reached Stripe), and one Stripe refused on every try (`failed` at
+ *    `MAX_CLAWBACK_ATTEMPTS`, which only definitive refusals advance) that no
+ *    delivery holds. A step still retrying, or held by a delivery, may yet
+ *    reach Stripe, so this throws `REFUND_CLAWBACK_UNFINISHED` and the
+ *    caller's transaction rolls back: the clawback is still running, and
+ *    support tries again later.
+ * 2. A debt the payee already settled (`creator_absorbed`,
+ *    `manually_reversed`) gets a re-pay row too; one the platform wrote off
+ *    (`platform_absorbed`) gets nothing. The refund's open debts close as
+ *    `refund_failed`, with who settled them and the note.
+ * 3. The platform fee's share (`retained_fee`) is cancelled, and a fee slice
+ *    it had marked `reversed` is `paid` again, with no re-pay row: the money is
+ *    back in the platform's balance.
+ *
+ * It runs INSIDE the caller's transaction, which locks the `refunds` row and
+ * records the resolution, so the settlement commits whole or not at all. Once
+ * it has, the clawback leaves the refund out (`withoutRepaidRefunds`): nothing
+ * claws it back again, and a later refund's share comes off the re-pay rows.
+ */
+export async function repayFailedRefund(
+  tx: Tx,
+  input: {
+    stripeRefundId: string;
+    resolvedByUserId: string;
+    note: string;
+    now: Date;
+  }
+): Promise<FailedRefundRepay[]> {
+  const steps = await tx
+    .select({ record: payoutReversals, payout: payouts })
+    .from(payoutReversals)
+    .innerJoin(payouts, eq(payoutReversals.payoutId, payouts.id))
+    .where(
+      and(
+        eq(payoutReversals.causeType, 'refund'),
+        eq(payoutReversals.causeId, input.stripeRefundId)
+      )
+    );
+
+  let unfinished = 0;
+  for (const { record } of steps) {
+    if (record.status !== 'pending' && record.status !== 'failed') continue;
+    if (!(await cancelDeadStep(tx, record))) unfinished++;
+  }
+  if (unfinished > 0) {
+    throw new BusinessLogicError(
+      "This refund's clawback is still running. Try again later.",
+      { code: 'REFUND_CLAWBACK_UNFINISHED', unfinishedSteps: unfinished }
+    );
+  }
+
+  const repaid: FailedRefundRepay[] = [];
+  const repay = async (record: PayoutReversal, payout: Payout) => {
+    const row = await writeRepay(tx, record, payout);
+    if (row) {
+      repaid.push({
+        payoutId: row.id,
+        payeeUserId: row.userId,
+        amountCents: row.amountCents,
+      });
+    }
+  };
+  for (const { record, payout } of steps) {
+    if (record.status !== 'done') continue;
+    if (record.kind === 'retained_fee') {
+      await cancelFeeShareIn(tx, record, payout.id);
+    } else if (PAYEE_STEP_KINDS.has(record.kind) && !record.repaidByPayoutId) {
+      await repay(record, payout);
+    }
+  }
+
+  // Locked, as `settleDebt` locks its review: support settling one of these
+  // debts at the same moment waits, so a payee's payment is never closed
+  // instead of paid back.
+  const debts = steps.filter(({ record }) => record.status === 'debt');
+  const reviews =
+    debts.length === 0
+      ? []
+      : await tx
+          .select()
+          .from(refundReviews)
+          .where(
+            inArray(
+              refundReviews.payoutReversalId,
+              debts.map(({ record }) => record.id)
+            )
+          )
+          .for('update');
+  for (const { record, payout } of debts) {
+    const review = reviews.find((row) => row.payoutReversalId === record.id);
+    if (!review) continue;
+    if (!review.resolvedAt) {
+      await tx
+        .update(refundReviews)
+        .set({
+          resolution: 'refund_failed',
+          resolvedAt: input.now,
+          resolvedByUserId: input.resolvedByUserId,
+          resolutionNote: input.note,
+        })
+        .where(
+          and(eq(refundReviews.id, review.id), isNull(refundReviews.resolvedAt))
+        );
+    } else if (
+      review.resolution &&
+      PAYEE_PAID_RESOLUTIONS.has(review.resolution) &&
+      !record.repaidByPayoutId
+    ) {
+      await repay(record, payout);
+    }
+  }
+  return repaid;
+}
+
+/**
+ * Cancel a step of a failed refund that can never move money (rule 1 of
+ * `repayFailedRefund`): never claimed, or refused by Stripe on every try and
+ * held by no delivery. True if it cancelled it.
+ */
+async function cancelDeadStep(
+  tx: Tx,
+  record: PayoutReversal
+): Promise<boolean> {
+  if (record.status === 'pending') return cancelUnclaimedStep(tx, record.id);
+  const now = new Date();
+  const [cancelled] = await tx
+    .update(payoutReversals)
+    .set({ status: 'cancelled', attemptedAt: null, resolvedAt: now })
+    .where(
+      and(
+        eq(payoutReversals.id, record.id),
+        eq(payoutReversals.status, 'failed'),
+        gte(payoutReversals.attempt, MAX_CLAWBACK_ATTEMPTS),
+        unleased(now)
+      )
+    )
+    .returning();
+  return cancelled !== undefined;
+}
+
 function leaseStart(now: Date): Date {
   return new Date(now.getTime() - PAYOUT_ATTEMPT_LEASE_MINUTES * 60_000);
 }
@@ -309,16 +504,19 @@ async function recordLanded(
 }
 
 /**
- * The re-pay row and its link, in one transaction: a concurrent delivery that
- * linked first rolls this one back. False when it lost that race.
+ * A step's re-pay row and its link, in one transaction: a concurrent run that
+ * linked first rolls this one back. On a transaction already open (the
+ * failed-refund re-pay), it is a savepoint, so only this row rolls back. The
+ * row pays the step's amount to the same payee, organisation and source as
+ * `slice`, the step's own payout. Undefined when it lost that race.
  */
 async function writeRepay(
-  deps: ClawbackDeps,
+  db: Client,
   record: PayoutReversal,
   slice: Payout
-): Promise<boolean> {
+): Promise<Payout | undefined> {
   try {
-    await deps.db.transaction(async (tx) => {
+    return await db.transaction(async (tx) => {
       const [repay] = await tx
         .insert(payouts)
         .values({
@@ -353,10 +551,10 @@ async function writeRepay(
           payoutReversalId: record.id,
         });
       }
+      return repay;
     });
-    return true;
   } catch (error) {
-    if (error instanceof ConflictError) return false;
+    if (error instanceof ConflictError) return undefined;
     throw error;
   }
 }
@@ -420,7 +618,7 @@ async function settleDebt(
   });
   if (outcome !== 'payee_paid') return outcome;
   if (record.repaidByPayoutId) return 'none';
-  return (await writeRepay(deps, record, slice)) ? 'repaid' : 'none';
+  return (await writeRepay(deps.db, record, slice)) ? 'repaid' : 'none';
 }
 
 /**
@@ -433,39 +631,46 @@ async function cancelFeeShare(
   record: PayoutReversal,
   payoutId: string
 ): Promise<boolean> {
-  return deps.db.transaction(async (tx) => {
-    // A parameter, not NOW(): Hyperdrive caches by the query's text.
-    const now = new Date();
-    const [cancelled] = await tx
-      .update(payoutReversals)
-      .set({ status: 'cancelled', attemptedAt: null, resolvedAt: now })
-      .where(
-        and(
-          eq(payoutReversals.id, record.id),
-          or(
-            eq(payoutReversals.status, 'done'),
-            and(
-              inArray(payoutReversals.status, ['pending', 'failed']),
-              unleased(now)
-            )
+  return deps.db.transaction((tx) => cancelFeeShareIn(tx, record, payoutId));
+}
+
+/** `cancelFeeShare`'s two writes, in a transaction the caller holds. */
+async function cancelFeeShareIn(
+  tx: Tx,
+  record: PayoutReversal,
+  payoutId: string
+): Promise<boolean> {
+  // A parameter, not NOW(): Hyperdrive caches by the query's text.
+  const now = new Date();
+  const [cancelled] = await tx
+    .update(payoutReversals)
+    .set({ status: 'cancelled', attemptedAt: null, resolvedAt: now })
+    .where(
+      and(
+        eq(payoutReversals.id, record.id),
+        or(
+          eq(payoutReversals.status, 'done'),
+          and(
+            inArray(payoutReversals.status, ['pending', 'failed']),
+            unleased(now)
           )
         )
       )
-      .returning();
-    if (!cancelled) return false;
-    await tx
-      .update(payouts)
-      .set({ status: 'paid', updatedAt: now })
-      .where(
-        and(
-          eq(payouts.id, payoutId),
-          eq(payouts.status, 'reversed'),
-          eq(payouts.payoutType, 'platform_fee'),
-          sql`${payouts.amountCents} > (SELECT COALESCE(SUM(${payoutReversals.amountCents}), 0) FROM ${payoutReversals} WHERE ${payoutReversals.payoutId} = ${payoutId} AND ${payoutReversals.status} = 'done')`
-        )
-      );
-    return true;
-  });
+    )
+    .returning();
+  if (!cancelled) return false;
+  await tx
+    .update(payouts)
+    .set({ status: 'paid', updatedAt: now })
+    .where(
+      and(
+        eq(payouts.id, payoutId),
+        eq(payouts.status, 'reversed'),
+        eq(payouts.payoutType, 'platform_fee'),
+        sql`${payouts.amountCents} > (SELECT COALESCE(SUM(${payoutReversals.amountCents}), 0) FROM ${payoutReversals} WHERE ${payoutReversals.payoutId} = ${payoutId} AND ${payoutReversals.status} = 'done')`
+      )
+    );
+  return true;
 }
 
 async function cancelIn(

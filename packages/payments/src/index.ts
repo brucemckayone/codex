@@ -13,12 +13,18 @@ export {
   type ClawbackCharge,
   type ClawbackDeps,
   type ClawbackDispute,
+  type ClawbackPlan,
+  type ClawbackPlanInput,
+  type ClawbackPlanLine,
+  type ClawbackPlanMethod,
   type ClawbackRefund,
   type ClawbackSource,
   listChargeRefunds,
   listClawableRefunds,
+  loadClawbackPlanInput,
   MAX_CLAWBACK_ATTEMPTS,
   pendingReductionsFor,
+  planClawback,
   refundShare,
   retryFailedClawbacks,
   reverseCharge,
@@ -59,16 +65,25 @@ export {
   type TransferFailureKind,
   type UnpaidCancelOutcome,
 } from './payout-ledger';
-// Refund a payment the platform decides to give back; the charge.refunded
-// webhook then does the rest (architecture C5, Codex-2hxff.14)
+// Refund a payment the platform decides to give back, in part or in full; the
+// charge.refunded webhook then does the rest (architecture C5, Codex-2hxff.14).
+// Support refunds only inside the 14-day window (Codex-2hxff.28)
 export {
   type IssueRefundInput,
   type IssueRefundResult,
   issueRefund,
+  type RefundWindow,
+  refundWindow,
 } from './refund';
-// A won dispute's clawback paid back by new pending payout rows the sweep
-// pays (Codex-2hxff.9)
-export { type DisputeRepayResult, repayDispute } from './repay';
+// A won dispute's clawback, or a failed refund's that support settles as
+// creators_repaid, paid back by new pending payout rows the sweep pays
+// (Codex-2hxff.9, .28)
+export {
+  type DisputeRepayResult,
+  type FailedRefundRepay,
+  repayDispute,
+  repayFailedRefund,
+} from './repay';
 // Who is paid the organisation's part of a sale (Codex-2hxff.2)
 export {
   type OrganisationPayee,

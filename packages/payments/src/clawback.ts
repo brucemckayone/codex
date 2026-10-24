@@ -206,6 +206,9 @@ export async function listChargeRefunds(
  * A failed refund stays in the list, so a refund that fails after its
  * clawback began keeps its place in the order: the shares of the refunds after
  * it do not move, and a step of its clawback still to be retried is retried.
+ * The one failed refund that leaves it is one support settled as
+ * `creators_repaid`: `reverseCharge` drops it (`withoutRepaidRefunds`), so
+ * every caller's list is filtered, however it was read.
  */
 export async function listClawableRefunds(
   stripe: Stripe,
@@ -246,6 +249,86 @@ export function refundShare(
     (grossCents * cap(refundedAfterCents)) / chargeCents
   );
   return after - before;
+}
+
+/** The charge amount is every share's denominator (D1): it must be known. */
+function assertChargeAmount(charge: ClawbackCharge): void {
+  if (!(charge.amountCents > 0)) {
+    throw new InternalServiceError('Clawback needs the charge amount', {
+      chargeId: charge.id,
+    });
+  }
+}
+
+/** A cause, with the running total it is shared on. */
+interface CauseInOrder {
+  cause: ClawbackCause;
+  /** What the causes before it took of the charge. */
+  before: number;
+  /** `before` plus this cause. */
+  after: number;
+  /** It completes the charge's refund: an unpaid slice is cancelled, not reduced. */
+  isFinal: boolean;
+}
+
+/**
+ * The causes in the order the engine claws them back: the refunds as given
+ * (oldest first), then the chargebacks, on one cumulative share. So a
+ * chargeback on a partly refunded charge takes only what the refunds left,
+ * and a new refund, last among the refunds, is shared before every
+ * chargeback. `reverseCharge` and `planClawback` both walk this.
+ */
+function inClawbackOrder(
+  charge: ClawbackCharge,
+  refunds: readonly ClawbackRefund[],
+  chargebacks: readonly ClawbackDispute[]
+): CauseInOrder[] {
+  const causes: ClawbackCause[] = [
+    ...refunds.map((refund) => ({ type: 'refund' as const, ...refund })),
+    ...chargebacks.map((dispute) => ({ type: 'dispute' as const, ...dispute })),
+  ];
+  let before = 0;
+  return causes.map((cause) => {
+    const after = before + cause.amountCents;
+    const inOrder = {
+      cause,
+      before,
+      after,
+      isFinal: after >= charge.amountCents,
+    };
+    before = after;
+    return inOrder;
+  });
+}
+
+/**
+ * The refunds, less any support settled as `creators_repaid` (Codex-2hxff.28,
+ * Q5c). Such a refund failed, and what it took was paid back to its payees
+ * (`repayFailedRefund`), so it leaves the running total: a later refund or
+ * chargeback of the charge is shared as if it had never been made, and on a
+ * re-paid slice it takes its share off the new re-pay rows. Left in, it would
+ * keep counting as refunded, and a later refund's share would floor to zero.
+ */
+async function withoutRepaidRefunds(
+  db: Client,
+  listed: readonly ClawbackRefund[]
+): Promise<readonly ClawbackRefund[]> {
+  if (listed.length === 0) return listed;
+  const repaid = await db
+    .select({ id: refunds.stripeRefundId })
+    .from(refunds)
+    .where(
+      and(
+        inArray(
+          refunds.stripeRefundId,
+          listed.map((refund) => refund.id)
+        ),
+        eq(refunds.resolution, 'creators_repaid')
+      )
+    );
+  if (repaid.length === 0) return listed;
+  const skip = new Set(repaid.map((row) => row.id));
+  return listed.filter((refund) => !skip.has(refund.id));
 }
 
 /**
@@ -297,6 +380,36 @@ function kindFor(
   // to claw back. That is also what keeps a refund handled before
   // payout_reversals existed from being reversed again by a later refund.
   return null;
+}
+
+/**
+ * The step a cause new to a slice records there; null if it records none.
+ * `kindFor`, except that an unpaid slice is cancelled, not reduced, once the
+ * steps already recorded against it (`takenCents`) and this share take all of
+ * it (Codex-2hxff.59). A lost partial dispute processed before a refund for
+ * the rest is the case: neither charge is final on its own, and a pending row
+ * reduced to nothing would stay pending, logged by every drain and never sent.
+ */
+function newStepKind(
+  row: Payout,
+  isFinal: boolean,
+  cause: ClawbackCause,
+  share: number,
+  takenCents: number
+): PayoutReversalKind | null {
+  const kind = kindFor(row, isFinal, cause);
+  return kind === 'pending_reduction' && takenCents + share >= row.amountCents
+    ? 'cancellation'
+    : kind;
+}
+
+/** What steps take from their row: all of them but the cancelled ones. */
+function uncancelledCents(
+  steps: readonly Pick<PayoutReversal, 'amountCents' | 'status'>[]
+): number {
+  return steps
+    .filter((step) => step.status !== 'cancelled')
+    .reduce((sum, step) => sum + step.amountCents, 0);
 }
 
 interface StepContext {
@@ -360,36 +473,30 @@ export async function reverseCharge(
     .where(sourceScope(source, charge.id));
   if (listed.length === 0) return;
 
-  const refunds =
-    typeof input.refunds === 'function' ? await input.refunds() : input.refunds;
+  const refunds = await withoutRepaidRefunds(
+    deps.db,
+    typeof input.refunds === 'function' ? await input.refunds() : input.refunds
+  );
   const chargebacks = await chargebacksFor(deps.db, charge.id);
   if (refunds.length === 0 && chargebacks.length === 0) return;
-  if (!(charge.amountCents > 0)) {
-    throw new InternalServiceError('Clawback needs the charge amount', {
-      chargeId: charge.id,
-    });
-  }
+  assertChargeAmount(charge);
 
-  const causes: ClawbackCause[] = [
-    ...refunds.map((refund) => ({ type: 'refund' as const, ...refund })),
-    ...chargebacks.map((dispute) => ({ type: 'dispute' as const, ...dispute })),
-  ];
   const failures: unknown[] = [];
-  let takenBefore = 0;
-  for (const cause of causes) {
-    const takenAfter = takenBefore + cause.amountCents;
-    const isFinal = takenAfter >= charge.amountCents;
+  for (const { cause, before, after, isFinal } of inClawbackOrder(
+    charge,
+    refunds,
+    chargebacks
+  )) {
     for (const { id } of listed) {
       const result = await clawBackShare(
         { deps, charge, cause },
         id,
-        takenBefore,
-        takenAfter,
+        before,
+        after,
         isFinal
       );
       if (result.failure !== undefined) failures.push(result.failure);
     }
-    takenBefore = takenAfter;
   }
 
   if (failures.length > 0) {
@@ -402,6 +509,224 @@ export async function reverseCharge(
       }
     );
   }
+}
+
+/** How a line of a refund's clawback is taken, as support's preview names it. */
+export type ClawbackPlanMethod =
+  // Reversed from the payee's paid transfer; a low balance makes it a debt.
+  | 'transfer_reversal'
+  // Taken off an unpaid slice before the drain pays it.
+  | 'reduce_unpaid'
+  // An unpaid slice cancelled: the refund takes the rest of it.
+  | 'cancel_unpaid'
+  // The platform fee's share (`retained_fee`).
+  | 'platform_bears'
+  // Taken off an unpaid re-pay row of a slice that was paid back.
+  | 'from_repay_payout'
+  // What no unpaid re-pay row can carry: a `slice_repaid` debt for a person.
+  | 'needs_person'
+  // What no slice gives back, which the platform bears.
+  | 'rounding';
+
+export interface ClawbackPlanLine {
+  /** The slice; null on the rounding line. */
+  payoutId: string | null;
+  /** On a `from_repay_payout` line, the re-pay row the share comes off. */
+  repayPayoutId: string | null;
+  amountCents: number;
+  method: ClawbackPlanMethod;
+}
+
+export interface ClawbackPlan {
+  /** The refund completes the charge's refund: unpaid slices are cancelled. */
+  isFinal: boolean;
+  /** One line per step the engine will record, then the rounding line. */
+  lines: ClawbackPlanLine[];
+}
+
+/** What a refund's clawback is planned from: the charge as the engine sees it. */
+export interface ClawbackPlanInput {
+  charge: ClawbackCharge;
+  /** The source's slices of the charge (`sourceScope`): no re-pay row. */
+  slices: readonly Payout[];
+  /** Every step on the slices and on their re-pay rows. */
+  steps: readonly PayoutReversal[];
+  /** The slices' re-pay rows, each slice's oldest first (`repayRowsOf`). */
+  repayRows: readonly Payout[];
+  /**
+   * The charge's causes as `reverseCharge` reads them: the refunds
+   * (`listClawableRefunds`, less `withoutRepaidRefunds`), and the chargebacks
+   * open or lost (`disputes`).
+   */
+  causes: {
+    refunds: readonly ClawbackRefund[];
+    chargebacks: readonly ClawbackDispute[];
+  };
+  /** The refund to plan, in pence. */
+  newRefundCents: number;
+}
+
+/** The planned refund's id: never a Stripe id, so no recorded step is its. */
+const PLANNED_REFUND_ID = 'planned_refund';
+
+const PLAN_METHOD: Record<PayoutReversalKind, ClawbackPlanMethod> = {
+  transfer_reversal: 'transfer_reversal',
+  pending_reduction: 'reduce_unpaid',
+  cancellation: 'cancel_unpaid',
+  retained_fee: 'platform_bears',
+};
+
+/**
+ * What a new refund of `newRefundCents` would take from each slice of the
+ * charge, before it is made: support's refund preview (Codex-2hxff.28 §3). The
+ * engine's own rules decide it, so the preview cannot drift from what
+ * `charge.refunded` then records: the running total (`inClawbackOrder`, with
+ * the refund last among the refunds), each share (`refundShare`), the re-paid
+ * path first (`splitRepaid`, as `clawBackShare` takes it), then the step
+ * (`newStepKind`).
+ *
+ * It plans from the recorded state. What it cannot know is Stripe's answer: a
+ * `transfer_reversal` line becomes a creator debt if the payee's balance cannot
+ * cover it, and an unpaid slice a drain pays meanwhile is reversed instead.
+ * The rounding line is the refund less every other line: a share's floored
+ * pennies, and the share of a slice with nothing left to take.
+ */
+export function planClawback(input: ClawbackPlanInput): ClawbackPlan {
+  const { charge, slices, steps, repayRows, causes, newRefundCents } = input;
+  assertChargeAmount(charge);
+  const planned = inClawbackOrder(
+    charge,
+    [
+      ...causes.refunds,
+      // After every refund listed: Stripe orders a charge's refunds by it.
+      {
+        id: PLANNED_REFUND_ID,
+        amountCents: newRefundCents,
+        createdAt: Number.MAX_SAFE_INTEGER,
+      },
+    ],
+    causes.chargebacks
+  ).find(
+    ({ cause }) => cause.type === 'refund' && cause.id === PLANNED_REFUND_ID
+  );
+  if (!planned) {
+    throw new InternalServiceError('The planned refund is not in the order');
+  }
+  const { cause, before, after, isFinal } = planned;
+
+  const lines: ClawbackPlanLine[] = [];
+  for (const slice of slices) {
+    const share = refundShare(
+      slice.amountCents,
+      charge.amountCents,
+      before,
+      after
+    );
+    if (share <= 0) continue;
+    const onSlice = steps.filter((step) => step.payoutId === slice.id);
+    const repayIds = new Set(
+      onSlice.flatMap((step) =>
+        step.repaidByPayoutId ? [step.repaidByPayoutId] : []
+      )
+    );
+    if (repayIds.size > 0) {
+      // Paid back (`wasRepaid`): the share comes off the re-pay rows. A cause
+      // new to the slice has left nothing with a person on it yet.
+      const split = splitRepaid(
+        cause,
+        share,
+        0,
+        repayRows.filter((row) => repayIds.has(row.id)),
+        steps
+      );
+      for (const take of split.takes) {
+        lines.push({
+          payoutId: slice.id,
+          repayPayoutId: take.repayPayoutId,
+          amountCents: take.amountCents,
+          method: 'from_repay_payout',
+        });
+      }
+      if (split.leftCents > 0) {
+        lines.push({
+          payoutId: slice.id,
+          repayPayoutId: null,
+          amountCents: split.leftCents,
+          method: 'needs_person',
+        });
+      }
+      continue;
+    }
+    const kind = newStepKind(
+      slice,
+      isFinal,
+      cause,
+      share,
+      uncancelledCents(onSlice)
+    );
+    if (!kind) continue;
+    lines.push({
+      payoutId: slice.id,
+      repayPayoutId: null,
+      amountCents: share,
+      method: PLAN_METHOD[kind],
+    });
+  }
+  const taken = lines.reduce((sum, line) => sum + line.amountCents, 0);
+  lines.push({
+    payoutId: null,
+    repayPayoutId: null,
+    amountCents: newRefundCents - taken,
+    method: 'rounding',
+  });
+  return { isFinal, lines };
+}
+
+/**
+ * Read what `planClawback` needs for one source of a charge, as
+ * `reverseCharge` reads it: the same slices (`sourceScope`), their steps and
+ * re-pay rows (`repayRowsOf`), the refunds less those support re-paid, and the
+ * chargebacks open or lost. It writes nothing. `refunds` is what
+ * `reverseCharge` takes, usually `() => listClawableRefunds(stripe, id)`.
+ */
+export async function loadClawbackPlanInput(
+  db: LedgerDeps['db'],
+  input: {
+    charge: ClawbackCharge;
+    source: ClawbackSource;
+    refunds:
+      | readonly ClawbackRefund[]
+      | (() => Promise<readonly ClawbackRefund[]>);
+  }
+): Promise<Omit<ClawbackPlanInput, 'newRefundCents'>> {
+  const { charge, source } = input;
+  const slices = await db
+    .select()
+    .from(payouts)
+    .where(sourceScope(source, charge.id));
+  const repayRows: Payout[] = [];
+  for (const slice of slices) {
+    repayRows.push(...(await repayRowsOf(db, slice.id)));
+  }
+  const payoutIds = [...slices, ...repayRows].map((row) => row.id);
+  const steps =
+    payoutIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(payoutReversals)
+          .where(inArray(payoutReversals.payoutId, payoutIds));
+  const refunds = await withoutRepaidRefunds(
+    db,
+    typeof input.refunds === 'function' ? await input.refunds() : input.refunds
+  );
+  return {
+    charge,
+    slices,
+    steps,
+    repayRows,
+    causes: { refunds, chargebacks: await chargebacksFor(db, charge.id) },
+  };
 }
 
 /**
@@ -654,7 +979,7 @@ async function runRecord(
     if (cause.type === 'dispute' && !(await isStillClawed(deps, cause.id))) {
       // A step never claimed is cancelled. One claimed before may have
       // reached Stripe: the won dispute's re-pay asks Stripe and settles it.
-      await cancelUnclaimedStep(deps, record.id);
+      await cancelUnclaimedStep(deps.db, record.id);
       return {};
     }
     // Another delivery is working on it. Not done yet, so ask for a retry.
@@ -1164,14 +1489,9 @@ async function readPayout(
 }
 
 /**
- * The step's record, for a slice that has none yet: inserted once, then read
- * back (a concurrent delivery's insert wins, and is what comes back).
- *
- * An unpaid slice is cancelled, not reduced, once the steps already recorded
- * against it and this share take all of it (Codex-2hxff.59). A lost partial
- * dispute processed before a refund for the rest is the case: neither charge
- * is final on its own, and a pending row reduced to nothing would stay
- * pending, logged by every drain and never sent.
+ * The step's record, for a slice that has none yet (`newStepKind`): inserted
+ * once, then read back (a concurrent delivery's insert wins, and is what comes
+ * back).
  */
 async function ensureRecord(
   ctx: StepContext,
@@ -1180,14 +1500,14 @@ async function ensureRecord(
   isFinal: boolean
 ): Promise<PayoutReversal | undefined> {
   const { deps, cause } = ctx;
-  let kind = kindFor(row, isFinal, cause);
+  const kind = newStepKind(
+    row,
+    isFinal,
+    cause,
+    share,
+    await takenCents(deps.db, row.id)
+  );
   if (!kind) return undefined;
-  if (
-    kind === 'pending_reduction' &&
-    (await takenCents(deps.db, row.id)) + share >= row.amountCents
-  ) {
-    kind = 'cancellation';
-  }
   await deps.db
     .insert(payoutReversals)
     .values({
@@ -1244,20 +1564,17 @@ async function wasRepaid(
   return repaid !== undefined;
 }
 
-/** What the steps recorded against a row take from it, cancelled ones aside. */
+/** What the steps recorded against a row take from it (`uncancelledCents`). */
 async function takenCents(db: Client, payoutId: string): Promise<number> {
-  const [taken] = await db
-    .select({
-      cents: sql<number>`COALESCE(SUM(${payoutReversals.amountCents}), 0)::int`,
-    })
-    .from(payoutReversals)
-    .where(
-      and(
-        eq(payoutReversals.payoutId, payoutId),
-        ne(payoutReversals.status, 'cancelled')
-      )
-    );
-  return taken?.cents ?? 0;
+  return uncancelledCents(
+    await db
+      .select({
+        amountCents: payoutReversals.amountCents,
+        status: payoutReversals.status,
+      })
+      .from(payoutReversals)
+      .where(eq(payoutReversals.payoutId, payoutId))
+  );
 }
 
 /**
@@ -1388,36 +1705,22 @@ async function splitRepaidShare(
         )
       )
       .limit(1);
-    let left = share - (debt?.amountCents ?? 0);
-    for (const repay of repays) {
-      if (left <= 0) break;
-      const onRow = steps.filter((step) => step.payoutId === repay.id);
-      const own = onRow.find(
-        (step) => step.causeType === cause.type && step.causeId === cause.id
-      );
-      if (own) {
-        left -= own.amountCents;
-        continue;
-      }
-      if (repay.status !== 'pending' && repay.status !== 'failed') continue;
-      const rest =
-        repay.amountCents -
-        onRow
-          .filter((step) => step.status !== 'cancelled')
-          .reduce((sum, step) => sum + step.amountCents, 0);
-      const take = Math.min(left, rest);
-      if (take <= 0) continue;
-      left -= take;
-      // Held, not cut, while the chargeback is open (owner decision P-2).
-      if (cause.type === 'dispute' && !cause.lost) continue;
+    const split = splitRepaid(
+      cause,
+      share,
+      debt?.amountCents ?? 0,
+      repays,
+      steps
+    );
+    for (const take of split.takes) {
       await tx
         .insert(payoutReversals)
         .values({
-          payoutId: repay.id,
+          payoutId: take.repayPayoutId,
           causeType: cause.type,
           causeId: cause.id,
-          amountCents: take,
-          kind: take >= rest ? 'cancellation' : 'pending_reduction',
+          amountCents: take.amountCents,
+          kind: take.kind,
           status: 'pending',
         })
         .onConflictDoNothing({
@@ -1430,7 +1733,9 @@ async function splitRepaidShare(
     }
     return {
       debt:
-        left > 0 ? await recordRepaidDebt(tx, slice, cause, left) : undefined,
+        split.leftCents > 0
+          ? await recordRepaidDebt(tx, slice, cause, split.leftCents)
+          : undefined,
       moved: moving !== undefined,
     };
   });
@@ -1460,6 +1765,60 @@ async function splitRepaidShare(
       }
     );
   }
+}
+
+/** How a cause's share of a re-paid slice splits over its re-pay rows. */
+interface RepaidSplit {
+  /** The cause's steps to write on the re-pay rows. */
+  takes: Array<{
+    repayPayoutId: string;
+    amountCents: number;
+    kind: 'cancellation' | 'pending_reduction';
+  }>;
+  /** What no unpaid re-pay row can carry: a `slice_repaid` debt if positive. */
+  leftCents: number;
+}
+
+/**
+ * The arithmetic of `splitRepaidShare`, which `planClawback` runs too. Over
+ * the slice's re-pay rows, oldest first: a row that already has a step of
+ * this cause counts it; an unpaid row carries what its steps have not taken,
+ * cancelled when the share takes the rest of it; a paid one carries nothing.
+ * `debtCents` is what the cause already left with a person on the slice.
+ */
+function splitRepaid(
+  cause: ClawbackCause,
+  share: number,
+  debtCents: number,
+  repays: readonly Payout[],
+  steps: readonly PayoutReversal[]
+): RepaidSplit {
+  const takes: RepaidSplit['takes'] = [];
+  let left = share - debtCents;
+  for (const repay of repays) {
+    if (left <= 0) break;
+    const onRow = steps.filter((step) => step.payoutId === repay.id);
+    const own = onRow.find(
+      (step) => step.causeType === cause.type && step.causeId === cause.id
+    );
+    if (own) {
+      left -= own.amountCents;
+      continue;
+    }
+    if (repay.status !== 'pending' && repay.status !== 'failed') continue;
+    const rest = repay.amountCents - uncancelledCents(onRow);
+    const take = Math.min(left, rest);
+    if (take <= 0) continue;
+    left -= take;
+    // Held, not cut, while the chargeback is open (owner decision P-2).
+    if (cause.type === 'dispute' && !cause.lost) continue;
+    takes.push({
+      repayPayoutId: repay.id,
+      amountCents: take,
+      kind: take >= rest ? 'cancellation' : 'pending_reduction',
+    });
+  }
+  return { takes, leftCents: left };
 }
 
 /** The re-pay rows of a slice, oldest first. */
@@ -1563,13 +1922,14 @@ async function isStillClawed(
  * it was never claimed: `pending` with no `attempted_at`, so it never reached
  * Stripe. The won dispute's re-pay may already have looked, and would not see
  * it. A step claimed before (`failed`, or a lease that ran out) may have
- * landed; the re-pay checks it with Stripe instead.
+ * landed; the re-pay checks it with Stripe instead. A failed refund's re-pay
+ * (`repayFailedRefund`) cancels such a step too. True if it cancelled it.
  */
-async function cancelUnclaimedStep(
-  deps: ClawbackDeps,
+export async function cancelUnclaimedStep(
+  db: Client,
   recordId: string
-): Promise<void> {
-  await deps.db
+): Promise<boolean> {
+  const [cancelled] = await db
     .update(payoutReversals)
     .set({ status: 'cancelled', resolvedAt: new Date() })
     .where(
@@ -1578,7 +1938,9 @@ async function cancelUnclaimedStep(
         eq(payoutReversals.status, 'pending'),
         isNull(payoutReversals.attemptedAt)
       )
-    );
+    )
+    .returning();
+  return cancelled !== undefined;
 }
 
 /**

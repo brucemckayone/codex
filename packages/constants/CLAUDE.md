@@ -65,9 +65,12 @@ PURCHASE_STATUS          // { PENDING, COMPLETED, FAILED, REFUNDED }
 SUBSCRIPTION_STATUS      // { ACTIVE, PAST_DUE, CANCELLING, CANCELLED, INCOMPLETE, PAUSED }
 BILLING_INTERVAL         // { MONTH, YEAR }
 CONNECT_ACCOUNT_STATUS   // { ONBOARDING, ACTIVE, RESTRICTED, DISABLED }
+REFUND_WINDOW_DAYS       // 14: support's refund window, from Stripe's charge.created
 ```
 
 **Default currency is GBP (£)**, not USD.
+
+**`REFUND_WINDOW_DAYS`** (Codex-2hxff.28, owner decision Q1): support can refund a payment for 14 × 24 hours after Stripe's `charge.created`, so a renewal's window runs from that renewal. Read it only through `refundWindow(chargeCreatedSeconds, now)` in `@codex/payments`, so the page and the refund route cannot disagree. Only the support refund route enforces it: Dashboard refunds and the platform's own refunds (duplicates, early cancels, the early-fraud refund) are not support decisions.
 
 ## Limits & File Sizes
 
@@ -226,7 +229,7 @@ INFRA_KEYS.DATABASE  // { URL, URL_LOCAL_PROXY }
 - `packages/constants/src/env.ts` — `ENV_NAMES`, `isDev`, `isDevRemote`, `validateServiceUrl`, `INFRA_KEYS` (URL building moved to `@codex/urls`)
 - `packages/constants/src/cookies.ts` — `COOKIES`, `CookieConfig` (`getCookieConfig` moved to `@codex/urls`)
 - `packages/constants/src/limits.ts` — `PAGINATION`, `FILE_SIZES`, `RATE_LIMIT_PRESETS`, `CACHE_TTL`, `CACHE_PRESETS`, `CachePresetName`, `R2_OVERWRITTEN_OBJECT_CACHE_CONTROL`
-- `packages/constants/src/commerce.ts` — `FEES`, `CURRENCY`, `STRIPE_EVENTS`, `PURCHASE_STATUS`
+- `packages/constants/src/commerce.ts` — `FEES`, `CURRENCY`, `STRIPE_EVENTS`, `PURCHASE_STATUS`, `REFUND_WINDOW_DAYS`
 - `packages/constants/src/content.ts` — `CONTENT_STATUS`, `MEDIA_STATUS`, `CONTENT_TYPES`, `VISIBILITY`
 - `packages/constants/src/mime.ts` — `MIME_TYPES`, `HEADERS`, `SUPPORTED_*_MIME_TYPES`
 - `packages/constants/src/database.ts` — `POSTGRES_ERROR_CODES`, `ORGANIZATION_ROLES`, `DB_METHODS`

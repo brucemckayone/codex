@@ -140,6 +140,16 @@ export const CHECKOUT_SESSION_KIND = {
  */
 export const TIER_CHANGE_PREVIEW_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * How long support can refund a payment: 14 × 24 hours from Stripe's
+ * `charge.created`, so a renewal's window runs from that renewal (owner
+ * decisions 2026-10-13 and 2026-10-24, Q1; Codex-2hxff.28). Only the support
+ * refund route enforces it: Dashboard refunds and the platform's own
+ * (duplicates, early cancels) are not support decisions. `refundWindow` in
+ * @codex/payments is the one reader.
+ */
+export const REFUND_WINDOW_DAYS = 14;
+
 export const SUBSCRIPTION_STATUS = {
   ACTIVE: 'active',
   PAST_DUE: 'past_due',

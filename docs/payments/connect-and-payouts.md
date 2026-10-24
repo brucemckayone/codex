@@ -356,6 +356,9 @@ held by a dispute ([disputes](purchases.md#disputes)):
   follow-up, which takes a refund's share off the re-pay row, may have failed
   and be waiting for the reconcile to retry it. Paid in full first, that
   share would become a debt for a person to collect.
+- A re-pay row for a failed refund support settled as `creators_repaid`
+  (`Codex-2hxff.28`) is held the same way, through the slice it re-pays. No
+  outcome waits on it, so it is otherwise paid by the next drain.
 - A slice recorded while a dispute holds its sale is not sent at write time
   either. It is reserved `pending` (no reason, no attempt) and paid by the
   drains once the dispute is won or closed (owner decision Q1, "the sale's
