@@ -72,7 +72,7 @@ GET /api/access/content/:id/stream[?include=body]
   → KV revocation check, then decideContentAccess in a read-only transaction
     (price / tier / followers / team / course-only arms + the publication rule)
   → mint an HLS token + master-playlist proxy URL; presign the waveform
-  → return { streamingUrl, waveformUrl, expiresAt, contentType }
+  → return { streamingUrl, waveformUrl, expiresAt, contentType, readyVariants? }
     (+ body: { contentBody, contentBodyJson } with include=body, from the row
     the access decision read, after it granted, for a released row only);
     Cache-Control private, no-store

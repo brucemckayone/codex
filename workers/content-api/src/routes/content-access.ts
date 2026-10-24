@@ -157,13 +157,14 @@ app.get(
  *
  * Access verification done at service layer:
  * - Content's organizationId is fetched from database
- * - User access verified via purchase OR organization membership
+ * - Access is decided by `decideContentAccess` (price, tier, followers, team,
+ *   course-only), as for every other content read
  * - Works from both org subdomains and root domain (revelations.studio)
  *
  * `?include=body` also returns the content's body once access is granted, for
- * a released row (published now, or once): the
- * body source for an entitled reader of a gated piece, whose public row
- * carries none (Codex-039vo). Only the detail pages send it.
+ * a released row (published now, or once): the body source for an entitled
+ * reader of a gated piece, whose public row carries none (Codex-039vo). Only
+ * the detail pages send it.
  * @returns {StreamingUrlResponse}
  */
 app.get(

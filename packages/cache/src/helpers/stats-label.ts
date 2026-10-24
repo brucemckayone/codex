@@ -61,8 +61,8 @@ const VALUE_MARKERS = /* @__PURE__ */ new Set([
 /**
  * Backstop on label depth. The shape-versioned content types reach it:
  * `content:public:vN:newest` (v3 since Codex-039vo), and
- * `content:auth:v2:popular`, whose content
- * type (the fifth segment) the cap now drops.
+ * `content:auth:v2:popular`, whose content type (the fifth segment) the cap
+ * now drops.
  */
 const MAX_LABEL_SEGMENTS = 4;
 
@@ -115,7 +115,7 @@ function isVariableSegment(segment: string): boolean {
  * @example
  * cacheStatsLabel('content:public:newest:1:1:all:slug:some-post')
  * // 'content:public:newest'
- * cacheStatsLabel('org:creators:1:12')  // 'org:creators'
+ * cacheStatsLabel('org:creators:v2:1:12')  // 'org:creators:v2'
  * cacheStatsLabel('org:stats:v2')       // 'org:stats:v2'  (v2 is not a number)
  */
 export function cacheStatsLabel(type: string): string {

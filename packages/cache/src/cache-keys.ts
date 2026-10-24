@@ -83,6 +83,8 @@ export const CacheType = {
    * Organization public creators (paginated, includes content counts + recent
    * content). v2 (Codex-ot6vj): course-only practices no longer counted or
    * listed; the bump keeps old slots, which still show them, from being read.
+   * It also renames the cache-stats series: the label is now `org:creators:v2`
+   * (`cacheStatsLabel` keeps a `vN` segment, which is not a number).
    */
   ORG_CREATORS: 'org:creators:v2',
 

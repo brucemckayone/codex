@@ -125,7 +125,7 @@ Results are merged, deduplicated, and enriched with progress data.
 | Error | HTTP | When |
 |---|---|---|
 | `AccessDeniedError` | 403 | User has no valid access path to paid content |
-| `ContentNotFoundError` | 404 | Content doesn't exist, is draft, or deleted |
+| `ContentNotFoundError` | 404 | Content doesn't exist or is deleted (a draft is not a 404: see Access Decision Logic) |
 | `MediaNotReadyForStreamingError` | 422 | Content has no associated media item |
 | `R2SigningError` | 500 | Failed to generate signed URL |
 | `InvalidContentTypeError` | 422 | Unexpected media type |
