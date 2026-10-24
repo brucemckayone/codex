@@ -444,8 +444,16 @@ export async function loadWithdrawnDetail(
   const withdrawn = await createServerApi(platform, cookies)
     .access.getWithdrawnContent(key)
     .catch((err: unknown) => {
-      if (ApiError.isApiError(err) && err.status === 404) return null;
-      throw err;
+      if (!ApiError.isApiError(err) || err.status !== 404) throw err;
+      // The worker's miss names the content. Any other 404 (a content-api
+      // without this route, behind this web build) is a fault: still the
+      // page's 404, but logged, or every holder of a withdrawn item would be
+      // back to "Content not found" with nothing said.
+      const details = err.details as { code?: unknown } | null | undefined;
+      if (details?.code !== 'CONTENT_NOT_FOUND') {
+        logger.error('Withdrawn read 404 without CONTENT_NOT_FOUND', { key });
+      }
+      return null;
     });
   if (!withdrawn) return null;
 

@@ -27,6 +27,7 @@ import {
   loadWithdrawnDetail,
   withoutRawBody,
 } from '$lib/server/content-detail';
+import { logReadFailure } from '$lib/server/read-failure';
 import type { ContentWithRelations } from '$lib/types';
 import { buildContentUrl } from '$lib/utils/subdomain';
 import { creatorHandle } from '../../creator-handle';
@@ -97,7 +98,11 @@ export const load: PageServerLoad = async ({
   // No personal piece on the storefront. For a signed-in reader it may be one
   // withdrawn from sale that they still have (Codex-ov2ii). Asked before the
   // org redirect below: this URL is the personal piece's, so a reader who
-  // still has it keeps it even when an org piece shares the slug.
+  // still has it keeps it even when an org piece shares the slug. If that read
+  // fails while an org piece is there to send them to, the redirect stands,
+  // as it did before this read existed; with none, the failure propagates (an
+  // outage is not "not found").
+  const hasOrgPiece = matches.some((item) => item.organization?.slug);
   const withdrawn =
     personalPiece || !locals.user
       ? null
@@ -105,7 +110,15 @@ export const load: PageServerLoad = async ({
           { creatorId: creatorProfile.id, slug: contentSlug },
           platform,
           cookies
-        );
+        ).catch((err: unknown) => {
+          if (!hasOrgPiece) throw err;
+          logReadFailure(
+            'Withdrawn read failed; redirecting to the org piece',
+            { creatorId: creatorProfile.id, contentSlug },
+            err
+          );
+          return null;
+        });
   const content = personalPiece ?? withdrawn?.content ?? null;
 
   if (!content) {

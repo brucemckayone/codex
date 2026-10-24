@@ -306,7 +306,7 @@ app.get(
  * show either). Fully PUBLIC (`auth: 'optional'`,
  * NO `canView`). Clips reuse the SAME public preview path the org-landing hero
  * consumes — `mediaItems.hlsPreviewKey` → a CDN URL via `R2_PUBLIC_URL_BASE`,
- * NO R2 signing (mirrors `public.ts` `resolveR2Urls`). The URL base is supplied
+ * NO R2 signing (mirrors `r2-public-urls.ts` `resolveR2Urls`). The URL base is supplied
  * by the route (env-owned) and resolved inside the service. Returns `null` when
  * the course is not published/non-deleted; a clip is `null` when its media has
  * no transcoded preview.

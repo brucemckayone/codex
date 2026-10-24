@@ -58,28 +58,30 @@ export interface StreamingUrlResponse {
  * the access decision that granted, so the note can never give a reason the
  * gate did not use.
  */
-export type ContentHeldBy =
-  | 'purchase'
-  | 'entitlement'
-  | 'course'
-  | 'subscription';
+export type ContentHeld =
+  | { by: 'purchase' | 'entitlement' | 'course'; until: null }
+  | {
+      by: 'subscription';
+      /**
+       * ISO 8601 end of the granting subscription's current period, when the
+       * item stops being covered. Always set: the date is the note's point.
+       */
+      until: string;
+    };
 
-export interface ContentHeld {
-  by: ContentHeldBy;
-  /**
-   * ISO 8601 end of the granting subscription's current period, when the item
-   * stops being covered. Set only for `subscription`.
-   */
-  until: string | null;
-}
+export type ContentHeldBy = ContentHeld['by'];
 
 /**
- * Response for GET /api/access/content/withdrawn (Codex-ov2ii): an item that
- * was published once, is not now, and that this reader still has access to.
- * `content` is the public row's shape with no body (the body comes from
- * `/stream?include=body`, as for any gated piece). Every other case is a 404.
+ * What `getWithdrawnContent` returns (Codex-ov2ii): an item that was published
+ * once, is not now, and that this reader still has access to. `content` is the
+ * public row's shape with no body (the body comes from `/stream?include=body`,
+ * as for any gated piece). Every other case is a 404.
+ *
+ * NOT the wire shape: the route resolves the media's R2 keys to CDN URLs
+ * before sending, as the public list does. The response is typed where it is
+ * read, in the web's `WithdrawnContentItem`, as `PublicContentListItem` is.
  */
-export interface WithdrawnContentResponse {
+export interface WithdrawnContent {
   content: ContentWithRelations & { categorySlugs: string[] };
   held: ContentHeld;
 }

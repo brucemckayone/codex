@@ -348,13 +348,9 @@
       case 'course':
         return m.content_detail_withdrawn_course();
       case 'subscription':
-        // Always set for a subscription; the neutral line if it ever is not.
-        if (held.until) {
-          return m.content_detail_withdrawn_subscription({
-            date: formatSentenceDate(held.until),
-          });
-        }
-        return m.content_detail_withdrawn_entitlement();
+        return m.content_detail_withdrawn_subscription({
+          date: formatSentenceDate(held.until),
+        });
       case 'entitlement':
         return m.content_detail_withdrawn_entitlement();
     }

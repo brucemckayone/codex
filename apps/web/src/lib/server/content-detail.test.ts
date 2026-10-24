@@ -566,11 +566,29 @@ describe('loadWithdrawnDetail (Codex-ov2ii)', () => {
 
   it('is null on the worker’s 404, with no access check', async () => {
     const { getStreamingUrl } = reads(() =>
-      Promise.reject(new ApiError(404, 'Content not found', 'NOT_FOUND'))
+      Promise.reject(
+        new ApiError(404, 'Content not found', 'NOT_FOUND', {
+          contentId: 'breathing',
+          code: 'CONTENT_NOT_FOUND',
+        })
+      )
     );
 
     expect(await loadWithdrawnDetail(key, undefined, cookies)).toBeNull();
     expect(getStreamingUrl).not.toHaveBeenCalled();
+    expect(mockLogger.error).not.toHaveBeenCalled();
+  });
+
+  // A content-api without this route (behind this web build) 404s too, with
+  // no details. Still the page's 404, but never silent.
+  it('logs a 404 that is not the worker’s content miss', async () => {
+    reads(() => Promise.reject(new ApiError(404, 'Not found', 'NOT_FOUND')));
+
+    expect(await loadWithdrawnDetail(key, undefined, cookies)).toBeNull();
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Withdrawn read 404 without CONTENT_NOT_FOUND',
+      { key }
+    );
   });
 
   it('lets any other failure of the withdrawn read propagate', async () => {

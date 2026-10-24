@@ -2,7 +2,8 @@
  * Raw R2 keys to public CDN URLs, for every route that returns content rows
  * to a client: the public list (`public.ts`) and the withdrawn read
  * (`content-access.ts`, Codex-ov2ii), so a withdrawn item draws its thumbnail
- * and preview exactly as it did on the storefront. Clients never see raw keys.
+ * and preview exactly as it did on the storefront. It ADDS the URLs; it does
+ * not remove the media row's other columns, raw keys included (Codex-ve5eh).
  */
 
 import type { ContentWithRelations } from '@codex/content';
@@ -81,7 +82,11 @@ export function resolveR2Url<T extends ContentWithRelations>(
   };
 }
 
-/** Resolve raw R2 keys to full CDN URLs — clients must never see raw keys */
+/**
+ * Resolve each row's thumbnail and preview keys to CDN URLs. The rest of the
+ * media row passes through as selected: narrowing it is the query's job
+ * (Codex-ve5eh).
+ */
 export function resolveR2Urls<T extends ContentWithRelations>(
   items: T[],
   bases: R2PublicBases

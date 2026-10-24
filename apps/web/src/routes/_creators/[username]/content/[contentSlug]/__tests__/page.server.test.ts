@@ -249,6 +249,37 @@ describe('creator content detail: a personal piece withdrawn from sale opens for
     });
   });
 
+  // The read is new on the redirect path: its failure must not turn a
+  // working redirect into a 500.
+  it('a failed withdrawn read still redirects to the org piece, and is logged', async () => {
+    const { ApiError } = await import('$lib/server/errors');
+    mockGetPublicContent.mockResolvedValue({ items: [orgPiece] });
+    mockGetWithdrawnContent.mockRejectedValue(
+      new ApiError(503, 'unavailable', 'SERVICE_UNAVAILABLE')
+    );
+    const { load } = await import('../+page.server');
+
+    await expect(load(event({ id: 'u1' }))).rejects.toMatchObject({
+      status: 302,
+    });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Withdrawn read failed; redirecting to the org piece',
+      expect.objectContaining({
+        creatorId: 'creator-1',
+        contentSlug: 'practice',
+      })
+    );
+  });
+
+  it('with no org piece, a failed withdrawn read propagates: not a 404', async () => {
+    const outage = new Error('content-api unavailable');
+    mockGetPublicContent.mockResolvedValue({ items: [] });
+    mockGetWithdrawnContent.mockRejectedValue(outage);
+    const { load } = await import('../+page.server');
+
+    await expect(load(event({ id: 'u1' }))).rejects.toBe(outage);
+  });
+
   it('a visitor gets the 404 with no withdrawn read', async () => {
     mockGetPublicContent.mockResolvedValue({ items: [] });
     const { load } = await import('../+page.server');

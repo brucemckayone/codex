@@ -256,7 +256,7 @@ describe('getWithdrawnContent (Codex-ov2ii)', () => {
   });
 
   it('is a 404 for a revoked reader, before any database work', async () => {
-    const { service, isRevoked } = buildService(stub, {
+    const { service, isRevoked, logs } = buildService(stub, {
       revoked: true,
       purchased: true,
     });
@@ -264,6 +264,13 @@ describe('getWithdrawnContent (Codex-ov2ii)', () => {
     await expectTheSame404(service.getWithdrawnContent(userId, query));
     expect(isRevoked).toHaveBeenCalledWith(userId, orgId);
     expect(stub.transaction).not.toHaveBeenCalled();
+    // Logged as getStreamingUrl logs a revoked attempt, for monitoring.
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        level: 'warn',
+        message: 'getWithdrawnContent blocked — access revoked',
+      })
+    );
   });
 
   it('checks no org revocation for a personal piece', async () => {

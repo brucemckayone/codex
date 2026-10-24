@@ -27,15 +27,18 @@ import { LOG_EVENTS, LOG_SEVERITY } from '../constants';
 import { AccessDeniedError, ContentNotFoundError } from '../errors';
 import type {
   ContentBodySource,
+  ContentHeld,
   ContentHeldBy,
-  WithdrawnContentResponse,
+  WithdrawnContent,
 } from '../types';
 import { AccessRevocation } from './access-revocation';
 import {
+  type AccessGrant,
   assertStreamingAccess,
   type GrantVia,
   resolveContentGrant,
   resolveHasContentAccess,
+  type SubscriptionGrantVia,
 } from './content-access/access-decision';
 import {
   hasCourseEntitlement,
@@ -122,15 +125,20 @@ export interface ContentAccessServiceConfig extends ServiceConfig {
 
 /**
  * How the arm that granted a withdrawn item holds it, for the note the detail
- * page shows (Codex-ov2ii). Exhaustive, so a new arm cannot ship without one.
+ * page shows (Codex-ov2ii). Exhaustive over every arm but the two subscription
+ * ones, so a new arm cannot ship without a note. A subscription grant carries
+ * its period, so {@link heldFrom} reads it from the grant itself: those arms
+ * reach here only through the departed-creator rule, until the next renewal.
  *
  * The nulls are the arms the decision never grants an unpublished row
  * (`GRANT_SURVIVES_UNPUBLICATION`): `free`, a follow, and every staff arm.
  * Staff preview their own drafts in the studio, so the team keeps the 404 on
- * a public URL. The two subscription arms reach here only through the
- * departed-creator rule, until the subscriber's next renewal.
+ * a public URL.
  */
-const HELD_BY: Record<GrantVia, ContentHeldBy | null> = {
+const HELD_BY: Record<
+  Exclude<GrantVia, SubscriptionGrantVia>,
+  Exclude<ContentHeldBy, 'subscription'> | null
+> = {
   paid_purchase: 'purchase',
   subscribers_purchase: 'purchase',
   paid_entitlement: 'entitlement',
@@ -138,8 +146,6 @@ const HELD_BY: Record<GrantVia, ContentHeldBy | null> = {
   course: 'course',
   paid_course: 'course',
   subscribers_course: 'course',
-  followers_subscription: 'subscription',
-  subscribers_subscription: 'subscription',
   free: null,
   followers_follower: null,
   management: null,
@@ -148,6 +154,15 @@ const HELD_BY: Record<GrantVia, ContentHeldBy | null> = {
   subscribers_management: null,
   paid_management: null,
 };
+
+/** How a grant holds a withdrawn item, or null for an arm with no note. */
+function heldFrom(grant: AccessGrant): ContentHeld | null {
+  if ('periodEnd' in grant) {
+    return { by: 'subscription', until: grant.periodEnd.toISOString() };
+  }
+  const by = HELD_BY[grant.via];
+  return by == null ? null : { by, until: null };
+}
 
 /**
  * Content Access Service
@@ -508,23 +523,34 @@ export class ContentAccessService
    * not learn that a withdrawn item exists, and `ContentNotFoundError`'s
    * context is serialised to the client.
    *
+   * Revoked is a 404 too, by choice. On a published item a revoked reader
+   * sees why (`AccessRevokedOverlay`, e.g. "payment failed"); here they see
+   * "not found" for as long as the revocation key lives (its KV TTL, minutes).
+   * Telling them why would need the row looked up first, for a reader the
+   * gate has just refused, and a withdrawn item is the rarer page.
+   *
    * @returns The public row's shape with no body, and how the reader holds it
    * @throws {ContentNotFoundError} In every case but a grant
    */
   async getWithdrawnContent(
     userId: string,
     query: WithdrawnContentQuery
-  ): Promise<WithdrawnContentResponse> {
+  ): Promise<WithdrawnContent> {
     const notFound = () => new ContentNotFoundError(query.slug);
 
     try {
       if (this.revocation && 'orgId' in query) {
         const revocation = await this.revocation.isRevoked(userId, query.orgId);
         if (revocation) {
-          this.obs.info('Withdrawn content: access revoked', {
+          // As getStreamingUrl logs it, so monitoring sees revoked attempts
+          // on this path too.
+          this.obs.warn('getWithdrawnContent blocked — access revoked', {
             userId,
             organizationId: query.orgId,
             reason: revocation.reason,
+            securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+            severity: LOG_SEVERITY.MEDIUM,
+            eventType: LOG_EVENTS.ACCESS_CONTROL,
           });
           throw notFound();
         }
@@ -581,10 +607,10 @@ export class ContentAccessService
         { isolationLevel: 'read committed', accessMode: 'read only' }
       );
 
-      const by = HELD_BY[grant.via];
+      const held = heldFrom(grant);
       // The decision never grants these arms an unpublished row; if it ever
       // does, say so and fail closed rather than invent a reason for the note.
-      if (by == null) {
+      if (held == null) {
         this.obs.error('Withdrawn content granted by an arm with no note', {
           userId,
           contentId: row.id,
@@ -602,10 +628,7 @@ export class ContentAccessService
           contentBodyJson: null,
           categorySlugs: [],
         },
-        held: {
-          by,
-          until: 'periodEnd' in grant ? grant.periodEnd.toISOString() : null,
-        },
+        held,
       };
     } catch (error) {
       this.handleError(error, 'getWithdrawnContent');

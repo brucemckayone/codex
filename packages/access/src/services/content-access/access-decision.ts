@@ -155,7 +155,7 @@ export type GrantVia =
   | 'paid_management';
 
 /** The two arms granted by a subscription the user is paying for. */
-type SubscriptionGrantVia =
+export type SubscriptionGrantVia =
   | 'followers_subscription'
   | 'subscribers_subscription';
 
@@ -600,9 +600,9 @@ export async function resolveHasContentAccess(
 /**
  * GRANT adapter — backs `getWithdrawnContent` (Codex-ov2ii). Runs the SAME
  * decision core against the read-only transaction snapshot and returns the
- * grant itself, so the caller can say how the reader holds the item, or `null`
- * on denial. It logs the grant as the streaming adapter does, and leaves the
- * denial to the caller: a reader opening an old link to an item withdrawn
+ * grant itself, so the caller can say how the reader holds the item, or the
+ * denial's reason. It logs the grant as the streaming adapter does, and leaves
+ * the denial to the caller: a reader opening an old link to an item withdrawn
  * from sale is not a security event.
  */
 export async function resolveContentGrant(

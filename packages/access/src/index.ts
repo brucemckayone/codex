@@ -103,5 +103,5 @@ export type {
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
   UserLibraryResponse,
-  WithdrawnContentResponse,
+  WithdrawnContent,
 } from './types';

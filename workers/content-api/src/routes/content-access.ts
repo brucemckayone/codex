@@ -4,7 +4,6 @@ import {
   type StreamingUrlResponse,
   type UpdatePlaybackProgressResponse,
   verifyHlsToken,
-  type WithdrawnContentResponse,
 } from '@codex/access';
 import { CACHE_PRESETS } from '@codex/constants';
 import {
@@ -222,14 +221,15 @@ app.get(
  *
  * Every other case is a 404, the same one whether or not the item exists.
  * `private, no-store`: the answer is per reader, and nothing caches it.
- * @returns {WithdrawnContentResponse}
+ * @returns `{ content, held }`, the row's media with its R2 keys resolved (typed
+ *   on the web as `WithdrawnContentItem`)
  */
 app.get(
   '/content/withdrawn',
   procedure({
     policy: { auth: 'required', cache: 'fresh' },
     input: { query: withdrawnContentQuerySchema },
-    handler: async (ctx): Promise<WithdrawnContentResponse> => {
+    handler: async (ctx) => {
       const { content, held } = await ctx.services.access.getWithdrawnContent(
         ctx.user.id,
         ctx.input.query
