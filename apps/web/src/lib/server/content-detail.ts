@@ -526,7 +526,12 @@ async function fetchAccess(
   // network failure, a 5xx): the view asks for a refresh, or the withdrawn
   // path answers a 503, and neither logs why.
   if (accessCheckFailed) {
-    logReadFailure('/stream access check failed', { contentId }, streamError);
+    logReadFailure(
+      '/stream access check failed',
+      // includeBody tells the free fast path from a gated or withdrawn one.
+      { contentId, includeBody: options.includeBody },
+      streamError
+    );
   }
   const hasAccess = isPublicContent(policy) || accessGranted;
   const streamingUrl =
