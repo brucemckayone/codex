@@ -22,6 +22,11 @@ place the code does not match yet with its bead.
 - **`calculateRevenueSplit(amountCents, platformFeeBps, orgFeeBps)`** — integer
   three-way split; the platform and organisation round up, the creator pool takes
   the remainder
+- **`isCurrentPeriodPayment(deps, paymentIntentId)`** — the test
+  `cancelForFullRefund` makes: the payment is the subscription's newest paid
+  period invoice. Support's refund preview reads it to say whether a full refund
+  cancels (Codex-2hxff.28). Reads Stripe only; false for a one-off purchase, a
+  proration invoice or an earlier period
 
 Errors (`src/errors.ts`): `TierNotFoundError`, `TierHasSubscribersError`,
 `TierSortOrderConflictError`, `SubscriptionNotFoundError`,

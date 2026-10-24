@@ -1,5 +1,5 @@
 {
-  "id": "c03b3807-9bfd-48cd-82b2-d8f7a2255f77",
+  "id": "0b8a7a0e-be3b-4897-8e72-a2e2848bbefb",
   "prevId": "9f3ed115-1770-444b-a10b-4d48f1a5e9ce",
   "version": "7",
   "dialect": "postgresql",
@@ -7943,6 +7943,27 @@
           "method": "btree",
           "with": {}
         },
+        "idx_payout_reversals_cause": {
+          "name": "idx_payout_reversals_cause",
+          "columns": [
+            {
+              "expression": "cause_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "cause_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "uq_payout_reversals_repaid_by": {
           "name": "uq_payout_reversals_repaid_by",
           "columns": [
@@ -8476,6 +8497,21 @@
           ],
           "isUnique": false,
           "where": "\"payouts\".\"needs_review_at\" IS NOT NULL AND \"payouts\".\"status\" = 'failed'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_payouts_stripe_charge": {
+          "name": "idx_payouts_stripe_charge",
+          "columns": [
+            {
+              "expression": "stripe_charge_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}

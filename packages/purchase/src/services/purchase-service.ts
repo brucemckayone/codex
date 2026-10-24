@@ -32,6 +32,7 @@ import {
   FEES,
   PRICE_LIMITS,
   PURCHASE_STATUS,
+  STRIPE_REQUESTED_BY_METADATA_KEY,
   stripeEnvMetadata,
 } from '@codex/constants';
 import {
@@ -366,12 +367,6 @@ export function isDuplicatePayment(
 }
 
 /**
- * The Stripe refund metadata key naming who in support issued it. Support's
- * refund route (`SupportService`, @codex/admin) writes it.
- */
-const SUPPORT_REQUESTED_BY_KEY = 'codex_requested_by';
-
-/**
  * Who in support issued a refund (Codex-2hxff.28, Q3), from its metadata;
  * null for one made in the Stripe Dashboard or by the platform. Metadata can
  * be edited in the Dashboard, so it is only a candidate: `recordRefund`
@@ -381,7 +376,7 @@ const SUPPORT_REQUESTED_BY_KEY = 'codex_requested_by';
 export function supportRequesterOf(
   refund: Pick<Stripe.Refund, 'metadata'>
 ): string | null {
-  const value = refund.metadata?.[SUPPORT_REQUESTED_BY_KEY];
+  const value = refund.metadata?.[STRIPE_REQUESTED_BY_METADATA_KEY];
   return typeof value === 'string' &&
     value.length > 0 &&
     value.length <= 255 &&
@@ -3238,38 +3233,18 @@ export class PurchaseService extends BaseService {
         .limit(1);
       if (holding) return { ...scope, restored: false };
 
-      const standing = await tx
-        .select({
-          stripeRefundId: refunds.stripeRefundId,
-          amountCents: refunds.amountCents,
-          reason: refunds.reason,
-        })
-        .from(refunds)
-        .where(
-          and(
-            eq(refunds.purchaseId, purchase.id),
-            inArray(refunds.status, STANDING_REFUND_STATUSES)
-          )
-        )
-        .orderBy(desc(refunds.stripeCreatedAt), desc(refunds.stripeRefundId));
-      const standingCents = standing.reduce(
-        (sum, refund) => sum + refund.amountCents,
-        0
-      );
-      if (standingCents >= purchase.amountPaidCents) {
+      const standing = await this.standingRefundFields(tx, purchase.id);
+      if ((standing.refundAmountCents ?? 0) >= purchase.amountPaidCents) {
         return { ...scope, restored: false };
       }
 
       const now = new Date();
-      const [newest] = standing;
       await tx
         .update(purchases)
         .set({
+          ...standing,
           status: PURCHASE_STATUS.COMPLETED,
           refundedAt: null,
-          refundAmountCents: standingCents > 0 ? standingCents : null,
-          stripeRefundId: newest?.stripeRefundId ?? null,
-          refundReason: newest?.reason ?? null,
           updatedAt: now,
         })
         .where(eq(purchases.id, purchase.id));
@@ -3302,6 +3277,78 @@ export class PurchaseService extends BaseService {
     } catch (error) {
       this.handleError(error, 'restoreAfterFailedRefund');
     }
+  }
+
+  /**
+   * A refund that FAILED returned nothing to the buyer (Codex-2hxff.28,
+   * owner decision 2026-10-24). A purchase it refunded in part is still
+   * `completed` (P-1), and `processRefund` only ever raises its refunded
+   * amount, so the amount is restated here from the refunds that still stand,
+   * with the newest one's id and reason: the restatement support's settlement
+   * makes (`restoreAfterFailedRefund`). Studio Sales and `getSalesStats` read
+   * it. A `refunded` purchase is left as it is: a failed full refund is
+   * support's to settle. Idempotent; the caller runs it after `processRefund`.
+   */
+  async restateStandingRefunds(paymentIntentId: string): Promise<void> {
+    try {
+      const restated = await this.db.transaction(async (tx) => {
+        const [purchase] = await tx
+          .select({ id: purchases.id, status: purchases.status })
+          .from(purchases)
+          .where(eq(purchases.stripePaymentIntentId, paymentIntentId))
+          .for('update');
+        if (purchase?.status !== PURCHASE_STATUS.COMPLETED) return undefined;
+        const standing = await this.standingRefundFields(tx, purchase.id);
+        await tx
+          .update(purchases)
+          .set({ ...standing, updatedAt: new Date() })
+          .where(eq(purchases.id, purchase.id));
+        return { purchaseId: purchase.id, ...standing };
+      });
+      if (restated) {
+        this.obs.info('Failed refund: purchase refund amount restated', {
+          purchaseId: restated.purchaseId,
+          refundAmountCents: restated.refundAmountCents,
+        });
+      }
+    } catch (error) {
+      this.handleError(error, 'restateStandingRefunds');
+    }
+  }
+
+  /**
+   * A purchase's refund fields as the refunds that still stand
+   * (`STANDING_REFUND_STATUSES`) make them: their total, and the newest one's
+   * id and reason; all null when none stands. A failed or canceled refund
+   * returned nothing, so it never counts.
+   */
+  private async standingRefundFields(
+    db: Tx | DatabaseClient,
+    purchaseId: string
+  ): Promise<
+    Pick<Purchase, 'refundAmountCents' | 'stripeRefundId' | 'refundReason'>
+  > {
+    const standing = await db
+      .select({
+        stripeRefundId: refunds.stripeRefundId,
+        amountCents: refunds.amountCents,
+        reason: refunds.reason,
+      })
+      .from(refunds)
+      .where(
+        and(
+          eq(refunds.purchaseId, purchaseId),
+          inArray(refunds.status, STANDING_REFUND_STATUSES)
+        )
+      )
+      .orderBy(desc(refunds.stripeCreatedAt), desc(refunds.stripeRefundId));
+    const cents = standing.reduce((sum, refund) => sum + refund.amountCents, 0);
+    const [newest] = standing;
+    return {
+      refundAmountCents: cents > 0 ? cents : null,
+      stripeRefundId: newest?.stripeRefundId ?? null,
+      refundReason: newest?.reason ?? null,
+    };
   }
 
   /**

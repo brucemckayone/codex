@@ -8,7 +8,9 @@
  * - `restoreAfterFailedRefund` gives a failed FULL refund's access back when
  *   support re-pays the payees (Q5d), undoing exactly what `processRefund`
  *   did, and touches nothing when another refund, a dispute or a newer
- *   purchase decides the access.
+ *   purchase decides the access;
+ * - `restateStandingRefunds`: a failed part refund stops counting as refunded,
+ *   with the same restatement (owner decision 2026-10-24).
  *
  * Every row is created here and deleted in afterAll; nothing cleans a table.
  */
@@ -398,6 +400,115 @@ describe('support refunds: the purchase side', () => {
       expect((await readState(bought)).purchase?.status).toBe(
         PURCHASE_STATUS.COMPLETED
       );
+    });
+  });
+
+  // ── a failed part refund (owner decision 2026-10-24) ─────────────────
+
+  describe('restateStandingRefunds: a refund that failed returned nothing', () => {
+    /** A refund as `recordRefund` writes it from the refund's events. */
+    async function recordRefund(
+      row: Purchase,
+      stripeRefundId: string,
+      amountCents: number,
+      status: string,
+      reason: string,
+      createdAt: Date
+    ) {
+      await service.recordRefund({
+        stripeRefundId,
+        stripeChargeId: `ch_spr${uid()}`,
+        paymentIntentId: row.stripePaymentIntentId,
+        amountCents,
+        currency: 'gbp',
+        status,
+        reason,
+        failureReason: status === 'failed' ? 'expired_or_canceled_card' : null,
+        stripeCreatedAt: createdAt,
+      });
+    }
+
+    /** What `processRefund`'s part-refund path wrote: it only ever raises. */
+    async function partRefunded(
+      row: Purchase,
+      refundAmountCents: number,
+      stripeRefundId: string,
+      refundReason: string
+    ) {
+      await db
+        .update(purchases)
+        .set({ refundAmountCents, stripeRefundId, refundReason })
+        .where(eq(purchases.id, row.id));
+    }
+
+    const refundedInSales = async () =>
+      (await service.getSalesStats(orgId, {})).refundedCents;
+
+    it('a £3 refund of £10 that fails leaves nothing refunded, and Sales agrees', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const bought = await purchase(buyer ?? '', (await item()).id);
+      const id = `re_spr${uid()}`;
+      created.stripeRefundIds.push(id);
+      await recordRefund(bought, id, 300, 'pending', 'duplicate', new Date());
+      await partRefunded(bought, 300, id, 'duplicate');
+      const before = await refundedInSales();
+
+      await recordRefund(bought, id, 300, 'failed', 'duplicate', new Date());
+      await service.restateStandingRefunds(bought.stripePaymentIntentId);
+
+      expect((await readState(bought)).purchase).toMatchObject({
+        status: PURCHASE_STATUS.COMPLETED,
+        refundAmountCents: null,
+        stripeRefundId: null,
+        refundReason: null,
+      });
+      expect(await refundedInSales()).toBe(before - 300);
+    });
+
+    it('a refund that still stands keeps its amount, and is named again', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const bought = await purchase(buyer ?? '', (await item()).id);
+      const kept = `re_spr${uid()}`;
+      const lost = `re_spr${uid()}`;
+      created.stripeRefundIds.push(kept, lost);
+      const earlier = new Date(Date.now() - 60_000);
+      await recordRefund(
+        bought,
+        kept,
+        300,
+        'succeeded',
+        'requested_by_customer',
+        earlier
+      );
+      await recordRefund(bought, lost, 200, 'pending', 'duplicate', new Date());
+      await partRefunded(bought, 500, lost, 'duplicate');
+      const before = await refundedInSales();
+
+      await recordRefund(bought, lost, 200, 'failed', 'duplicate', new Date());
+      await service.restateStandingRefunds(bought.stripePaymentIntentId);
+
+      expect((await readState(bought)).purchase).toMatchObject({
+        status: PURCHASE_STATUS.COMPLETED,
+        refundAmountCents: 300,
+        stripeRefundId: kept,
+        refundReason: 'requested_by_customer',
+      });
+      expect(await refundedInSales()).toBe(before - 200);
+    });
+
+    it('leaves a failed full refund to support', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const bought = await purchase(buyer ?? '', (await item()).id);
+      const failed = await refundRow(bought, 1000, 'failed');
+      await refundedInFull(bought, failed);
+
+      await service.restateStandingRefunds(bought.stripePaymentIntentId);
+
+      expect((await readState(bought)).purchase).toMatchObject({
+        status: PURCHASE_STATUS.REFUNDED,
+        refundAmountCents: 1000,
+        stripeRefundId: failed,
+      });
     });
   });
 });

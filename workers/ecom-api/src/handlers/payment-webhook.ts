@@ -33,7 +33,7 @@ import {
   STRIPE_EVENTS,
 } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
-import type { PurchaseService } from '@codex/purchase';
+import { type PurchaseService, supportRequesterOf } from '@codex/purchase';
 import type { Bindings } from '@codex/shared-types';
 import {
   type CourseSubscriptionService,
@@ -507,7 +507,8 @@ async function endSubscriptionForFullRefund(
  *   customer must still be refunded some other way, so the clawback stands
  *   (one that failed straight from pending is clawed back now). The row is
  *   support's to settle: they refund the customer elsewhere or re-pay the
- *   creators (owner decision 2026-10-19, "Hold it for support").
+ *   creators (owner decision 2026-10-19, "Hold it for support"). A purchase
+ *   it refunded in part no longer counts it as refunded (2026-10-24).
  * - `canceled`: nothing was paid out and nothing is clawed back.
  */
 async function handleRefundUpdated(
@@ -552,6 +553,9 @@ async function handleRefundUpdated(
     reason: refund.reason ?? null,
     failureReason: refund.failure_reason ?? null,
     stripeCreatedAt: new Date(refund.created * 1000),
+    // A support refund names its requester (Codex-2hxff.28); one made in the
+    // Stripe Dashboard has none.
+    requestedByUserId: supportRequesterOf(refund),
   });
 
   if (refund.status === 'canceled') {
@@ -590,6 +594,12 @@ async function handleRefundUpdated(
         paidAt: stripeTime(charge.created),
       })
     : undefined;
+  if (refund.status === 'failed' && paymentIntentId) {
+    // It returned nothing (owner decision 2026-10-24): a purchase it refunded
+    // in part counts only the refunds that still stand. After processRefund,
+    // which may raise the amount from the charge's.
+    await service.restateStandingRefunds(paymentIntentId);
+  }
   // Usually emailed at charge.refunded already; one that was waiting on the
   // customer then is emailed now. A failed refund is never emailed.
   if (refund.status === 'succeeded') {

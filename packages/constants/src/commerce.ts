@@ -101,6 +101,22 @@ export function isForeignStripeEnvironment(
   return typeof tag === 'string' && tag !== '' && tag !== environment;
 }
 
+/**
+ * The metadata key on a support refund naming its decision: the idempotency
+ * key `support_refund_{charge}_{refundCount}_{amount}` (Codex-2hxff.28 §5).
+ * A repeat of the same submit finds the refund by it and answers `replayed`.
+ * Written by `SupportService.issueRefund` (@codex/admin).
+ */
+export const STRIPE_SUPPORT_KEY_METADATA_KEY = 'codex_support_key';
+
+/**
+ * The metadata key on a support refund naming who in support issued it
+ * (Codex-2hxff.28, Q3). Written by `SupportService.issueRefund`; read back by
+ * the refund webhook (`supportRequesterOf`, @codex/purchase) into
+ * `refunds.requested_by_user_id`. A Dashboard refund carries none.
+ */
+export const STRIPE_REQUESTED_BY_METADATA_KEY = 'codex_requested_by';
+
 export const PURCHASE_STATUS = {
   PENDING: 'pending',
   COMPLETED: 'completed',

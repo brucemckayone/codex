@@ -191,6 +191,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
   let mockRecordRefund: ReturnType<typeof vi.fn>;
   let mockRecordChargeRefunds: ReturnType<typeof vi.fn>;
   let mockClaimRefundEmails: ReturnType<typeof vi.fn>;
+  let mockRestateStandingRefunds: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -219,6 +220,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
       .mockResolvedValue([
         { stripeRefundId: 're_test_refund', amountCents: 1999 },
       ]);
+    mockRestateStandingRefunds = vi.fn().mockResolvedValue(undefined);
     mockRelease = vi.fn();
     mockStripe = {} as Stripe;
 
@@ -231,6 +233,7 @@ describe('handlePaymentWebhook — charge.refunded', () => {
           recordRefund: mockRecordRefund,
           recordChargeRefunds: mockRecordChargeRefunds,
           claimRefundEmails: mockClaimRefundEmails,
+          restateStandingRefunds: mockRestateStandingRefunds,
         },
         // charge.refunded reverses subscription payouts first (Codex-13v21),
         // and last cancels on a full refund of the latest payment (P-4).
@@ -863,6 +866,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
       refundReason: 'requested_by_customer',
     });
     expect(sendEmailToWorker).not.toHaveBeenCalled();
+    // A refund that succeeded still stands: nothing to restate.
+    expect(mockRestateStandingRefunds).not.toHaveBeenCalled();
     expect(mockRelease).toHaveBeenCalledOnce();
   });
 
@@ -890,6 +895,29 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     expect(emails()).toEqual([
       expect.objectContaining({ refundAmount: '£10.00' }),
     ]);
+  });
+
+  it('refund.updated for a support refund passes its requester on, so support sees who issued it', async () => {
+    // Codex-2hxff.28: a support refund that settles late reaches recordRefund
+    // here, not at charge.refunded, so this is the path that names its sender.
+    const bundle = buildContext();
+    const { stripe } = stripeWithCharge();
+
+    await handlePaymentWebhook(
+      refundUpdatedEvent({
+        status: 'pending',
+        metadata: { codex_requested_by: 'support_user_1' },
+      }),
+      stripe,
+      bundle.context
+    );
+
+    expect(mockRecordRefund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeRefundId: 're_pending_then_paid',
+        requestedByUserId: 'support_user_1',
+      })
+    );
   });
 
   it('refund.updated still pending: its status is recorded and nothing is clawed back', async () => {
@@ -934,6 +962,8 @@ describe('handlePaymentWebhook — charge.refunded', () => {
       reason: 'requested_by_customer',
       failureReason: 'expired_or_canceled_card',
       stripeCreatedAt: new Date(1_790_000_000 * 1000),
+      // A Dashboard refund carries no codex_requested_by.
+      requestedByUserId: null,
     });
     expect(bundle.mock._obs.error).toHaveBeenCalledWith(
       expect.stringContaining('support must refund the customer another way'),
@@ -955,6 +985,13 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     // Recorded before the clawback, so support sees it while a step retries.
     expect(mockRecordRefund.mock.invocationCallOrder[0]).toBeLessThan(
       mockReverseSubscription.mock.invocationCallOrder[0] ?? 0
+    );
+    // It returned nothing: a part-refunded purchase stops counting it, after
+    // processRefund, which may raise the amount from the charge's
+    // (owner decision 2026-10-24).
+    expect(mockRestateStandingRefunds).toHaveBeenCalledWith('pi_updated');
+    expect(mockProcessRefund.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRestateStandingRefunds.mock.invocationCallOrder[0] ?? 0
     );
   });
 

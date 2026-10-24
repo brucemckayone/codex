@@ -34,7 +34,11 @@
  *   preview, for a subscription invoice.
  */
 
-import { STRIPE_ENV_METADATA_KEY } from '@codex/constants';
+import {
+  STRIPE_ENV_METADATA_KEY,
+  STRIPE_REQUESTED_BY_METADATA_KEY,
+  STRIPE_SUPPORT_KEY_METADATA_KEY,
+} from '@codex/constants';
 import { type DatabaseClient, toIso, withPagination } from '@codex/database';
 import {
   content,
@@ -161,10 +165,6 @@ export interface FailedRefundSettlement {
   settled: ResolvedFailedRefund;
   restoredAccess: RestoredRefundAccess | null;
 }
-
-/** The metadata keys support's refunds carry (read back by `supportRequesterOf`). */
-const SUPPORT_KEY_METADATA = 'codex_support_key';
-const REQUESTED_BY_METADATA = 'codex_requested_by';
 
 /** Dispute statuses that await an answer: their evidence deadline is shown. */
 const AWAITING_RESPONSE = new Set(['needs_response', 'warning_needs_response']);
@@ -1026,7 +1026,7 @@ export class SupportService extends BaseService {
         input.amountCents
       );
       const replay = listed.find(
-        (refund) => refund.metadata?.[SUPPORT_KEY_METADATA] === key
+        (refund) => refund.metadata?.[STRIPE_SUPPORT_KEY_METADATA_KEY] === key
       );
       if (replay) {
         return {
@@ -1071,8 +1071,8 @@ export class SupportService extends BaseService {
           idempotencyKey: key,
           environment: this.environment,
           metadata: {
-            [SUPPORT_KEY_METADATA]: key,
-            [REQUESTED_BY_METADATA]: requestedByUserId,
+            [STRIPE_SUPPORT_KEY_METADATA_KEY]: key,
+            [STRIPE_REQUESTED_BY_METADATA_KEY]: requestedByUserId,
           },
         });
       } catch (error) {
