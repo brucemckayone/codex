@@ -50,6 +50,7 @@ import {
   type SQL,
   sql,
 } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import {
   cancelUnpaidPayout,
@@ -67,6 +68,22 @@ interface ClawbackLogger {
 export interface ClawbackDeps extends LedgerDeps {
   obs: ClawbackLogger;
 }
+
+type Tx = Parameters<Parameters<ClawbackDeps['db']['transaction']>[0]>[0];
+/** The database, or a transaction on it. */
+type Client = ClawbackDeps['db'] | Tx;
+
+/**
+ * The code of a debt step for a person: a cause's share of a slice a won
+ * dispute paid back, which no unpaid re-pay row could carry.
+ */
+const SLICE_REPAID = 'slice_repaid';
+
+/**
+ * The code of a `cancelled` step whose share moved off its slice to the
+ * slice's re-pay rows (`belongsOnRepayRows`, `splitRepaidShare`).
+ */
+const MOVED_TO_REPAY = 'moved_to_repay';
 
 /** The refunded charge. Its amount is every source's denominator (D1). */
 export interface ClawbackCharge {
@@ -591,16 +608,42 @@ async function clawBackShare(
     return {};
   }
 
-  const record = await ensureRecord(ctx, row, share, isFinal);
+  const existing = await findRecord(deps, row.id, cause);
+  // A slice a won dispute paid back: the cause takes its share off the re-pay
+  // row instead. A cause that reached the slice before its re-pay keeps its
+  // own step. A `slice_repaid` debt, or a step moved off the slice
+  // (`moved_to_repay`), is the re-paid path's too: a redelivery goes back that
+  // way, to finish its steps on the re-pay rows.
   if (
-    !record ||
+    (!existing ||
+      existing.lastErrorCode === SLICE_REPAID ||
+      existing.lastErrorCode === MOVED_TO_REPAY) &&
+    (await wasRepaid(deps, row.id))
+  ) {
+    return clawBackRepaidShare(ctx, row, share);
+  }
+
+  const record = existing ?? (await ensureRecord(ctx, row, share, isFinal));
+  if (!record || isSettled(record)) return {};
+  return runRecord(ctx, row, record);
+}
+
+/** A step with nothing left to do. */
+function isSettled(record: PayoutReversal): boolean {
+  return (
     record.status === 'done' ||
     record.status === 'debt' ||
     record.status === 'cancelled'
-  ) {
-    return {};
-  }
+  );
+}
 
+/** Claim a step and run it: the tail every step shares. */
+async function runRecord(
+  ctx: StepContext,
+  row: Payout,
+  record: PayoutReversal
+): Promise<StepResult> {
+  const { deps, cause } = ctx;
   // A dispute's step is claimed only while the dispute is still clawed back
   // (open or lost): once it is won, its re-pay owns every step, and a step
   // this delivery read before the win must not reach Stripe after it.
@@ -828,6 +871,12 @@ async function reverseTransfer(
       return {};
     }
     const definitive = isDefinitiveStripeError(error);
+    if (definitive && (await belongsOnRepayRows(deps, row, record))) {
+      const slice = await readPayout(deps, row.id);
+      return slice
+        ? clawBackRepaidShare(ctx, slice, record.amountCents, record)
+        : {};
+    }
     await markFailed(deps, record, code, definitive);
     logStepFailure(ctx, row, record, error);
     // Stripe refused. A redelivery would get the same answer, and rejecting
@@ -853,6 +902,28 @@ async function reverseTransfer(
     await settleIfFullyReversed(deps, row.id);
   }
   return {};
+}
+
+/**
+ * Stripe refused a reversal of a slice that has since been reversed whole and
+ * paid back by a won dispute (Codex-2hxff.59): the step was recorded while the
+ * slice was still paid, and a chargeback's reversal took the rest of the
+ * transfer first. It can never run on that transfer, and the share belongs on
+ * the re-pay row, which would otherwise pay it out.
+ *
+ * Nothing of this step reached the payee's balance: the slice's own recorded
+ * reversals cover its whole transfer, so Stripe holds none of this one. The
+ * caller moves the share down the re-paid path, in the same transaction that
+ * splits it (`splitRepaidShare`).
+ */
+async function belongsOnRepayRows(
+  deps: ClawbackDeps,
+  row: Payout,
+  record: PayoutReversal
+): Promise<boolean> {
+  if (record.kind !== 'transfer_reversal') return false;
+  const current = await readPayout(deps, row.id);
+  return current?.status === 'reversed' && (await wasRepaid(deps, row.id));
 }
 
 /**
@@ -934,6 +1005,11 @@ export const MAX_CLAWBACK_ATTEMPTS = 5;
  * Each charge is isolated: one that fails again is logged and the rest run.
  * An outage keeps a step's attempt (its key), so it is retried every run until
  * it succeeds; only Stripe refusing it uses up attempts.
+ *
+ * It never marks a lost dispute applied: steps that finished say nothing
+ * about whether the LOST handling ran, since the ones a chargeback wrote when
+ * it opened finish too. The dispute reconcile (Codex-2hxff.58) re-runs the
+ * whole lost path and marks it only once that succeeds.
  */
 export async function retryFailedClawbacks(
   deps: ClawbackDeps,
@@ -942,18 +1018,26 @@ export async function retryFailedClawbacks(
   charges: number;
   retried: number;
   stillFailing: number;
-  lostDisputesApplied: number;
 }> {
   const { olderThanMinutes = 15, limit = 50 } = options;
   const before = new Date(Date.now() - olderThanMinutes * 60_000);
+  // A step on a re-pay row (Codex-2hxff.59) is retried by its slice's
+  // charge: the re-pay row has none of its own.
+  const repaid = alias(payoutReversals, 'repaid_reversal');
+  const repaidSlice = alias(payouts, 'repaid_slice');
+  const chargeId = sql<
+    string | null
+  >`COALESCE(${payouts.stripeChargeId}, ${repaidSlice.stripeChargeId})`;
   const targets = await deps.db
     .select({
-      chargeId: payouts.stripeChargeId,
+      chargeId,
       sourceType: payouts.sourceType,
       purchaseId: payouts.purchaseId,
     })
     .from(payoutReversals)
     .innerJoin(payouts, eq(payoutReversals.payoutId, payouts.id))
+    .leftJoin(repaid, eq(repaid.repaidByPayoutId, payouts.id))
+    .leftJoin(repaidSlice, eq(repaidSlice.id, repaid.payoutId))
     .where(
       and(
         eq(payoutReversals.status, 'failed'),
@@ -961,7 +1045,7 @@ export async function retryFailedClawbacks(
         lt(payoutReversals.updatedAt, before)
       )
     )
-    .groupBy(payouts.stripeChargeId, payouts.sourceType, payouts.purchaseId)
+    .groupBy(chargeId, payouts.sourceType, payouts.purchaseId)
     // Oldest failure first. A step that fails again is touched, so it goes to
     // the back and steps past the limit get their turn.
     .orderBy(sql`min(${payoutReversals.updatedAt}) asc`)
@@ -1002,47 +1086,7 @@ export async function retryFailedClawbacks(
       );
     }
   }
-  const lostDisputesApplied = await applyFinishedLostDisputes(deps);
-  return {
-    charges: targets.length,
-    retried,
-    stillFailing,
-    lostDisputesApplied,
-  };
-}
-
-/**
- * Mark a lost dispute applied once its clawback has finished, which lifts its
- * hold (`isDrainablePayout`). The webhook marks it after its own clawback run,
- * but a step that failed there can only finish here: a permanent failure is
- * answered 200, so Stripe never redelivers, and the hold would stay for good.
- *
- * Only a dispute with steps, none of them still `pending` or `failed`. One
- * with no steps never reached its clawback; the dispute sweep re-runs it
- * (Codex-2hxff.58).
- */
-async function applyFinishedLostDisputes(deps: ClawbackDeps): Promise<number> {
-  // A parameter, not NOW(): Hyperdrive caches by the query's text.
-  const now = new Date();
-  const applied = await deps.db
-    .update(disputes)
-    .set({ outcomeAppliedAt: now, updatedAt: now })
-    .where(
-      and(
-        eq(disputes.status, 'lost'),
-        isNull(disputes.outcomeAppliedAt),
-        sql`EXISTS (SELECT 1 FROM ${payoutReversals} WHERE ${payoutReversals.causeType} = 'dispute' AND ${payoutReversals.causeId} = ${disputes.stripeDisputeId})`,
-        sql`NOT EXISTS (SELECT 1 FROM ${payoutReversals} WHERE ${payoutReversals.causeType} = 'dispute' AND ${payoutReversals.causeId} = ${disputes.stripeDisputeId} AND ${payoutReversals.status} IN ('pending', 'failed'))`
-      )
-    )
-    .returning();
-  if (applied.length > 0) {
-    deps.obs.warn(
-      'A lost dispute finished its clawback in the retry; its hold is lifted',
-      { disputeIds: applied.map((row) => row.stripeDisputeId) }
-    );
-  }
-  return applied.length;
+  return { charges: targets.length, retried, stillFailing };
 }
 
 /**
@@ -1120,12 +1164,14 @@ async function readPayout(
 }
 
 /**
- * The step's record: inserted once, then read back (a redelivery finds it).
+ * The step's record, for a slice that has none yet: inserted once, then read
+ * back (a concurrent delivery's insert wins, and is what comes back).
  *
- * A slice that a won dispute paid back (`repaid_by_payout_id`) is no longer
- * what the cumulative share describes: its re-pay row carries part of it. A
- * cause new to such a slice is recorded as a debt for a person
- * (`slice_repaid`), not run (docs/payments/dispute-record.md §3).
+ * An unpaid slice is cancelled, not reduced, once the steps already recorded
+ * against it and this share take all of it (Codex-2hxff.59). A lost partial
+ * dispute processed before a refund for the rest is the case: neither charge
+ * is final on its own, and a pending row reduced to nothing would stay
+ * pending, logged by every drain and never sent.
  */
 async function ensureRecord(
   ctx: StepContext,
@@ -1134,21 +1180,14 @@ async function ensureRecord(
   isFinal: boolean
 ): Promise<PayoutReversal | undefined> {
   const { deps, cause } = ctx;
-  const existing = await findRecord(deps, row.id, cause);
-  if (existing) return existing;
-
-  if (await wasRepaid(deps, row.id)) {
-    await holdRepaidSlice(
-      ctx,
-      row,
-      share,
-      kindFor(row, isFinal, cause) ?? 'transfer_reversal'
-    );
-    return findRecord(deps, row.id, cause);
-  }
-
-  const kind = kindFor(row, isFinal, cause);
+  let kind = kindFor(row, isFinal, cause);
   if (!kind) return undefined;
+  if (
+    kind === 'pending_reduction' &&
+    (await takenCents(deps.db, row.id)) + share >= row.amountCents
+  ) {
+    kind = 'cancellation';
+  }
   await deps.db
     .insert(payoutReversals)
     .values({
@@ -1205,65 +1244,296 @@ async function wasRepaid(
   return repaid !== undefined;
 }
 
-/** A debt for a person: the share of a cause new to a re-paid slice. */
-async function holdRepaidSlice(
+/** What the steps recorded against a row take from it, cancelled ones aside. */
+async function takenCents(db: Client, payoutId: string): Promise<number> {
+  const [taken] = await db
+    .select({
+      cents: sql<number>`COALESCE(SUM(${payoutReversals.amountCents}), 0)::int`,
+    })
+    .from(payoutReversals)
+    .where(
+      and(
+        eq(payoutReversals.payoutId, payoutId),
+        ne(payoutReversals.status, 'cancelled')
+      )
+    );
+  return taken?.cents ?? 0;
+}
+
+/**
+ * A cause new to a slice a won dispute paid back (Codex-2hxff.59). The
+ * cumulative share no longer describes the slice, since its re-pay rows carry
+ * part of it, but the share is still the payee's to give back, and a re-pay
+ * row not yet paid is where it can come from:
+ *
+ * - a pending or failed re-pay row is reduced by the share, or cancelled when
+ *   the share takes the rest of it, by a step of the cause ON the re-pay row,
+ *   run like any unpaid slice's;
+ * - an open chargeback only holds such a row, as it holds any unpaid slice:
+ *   the drain skips it (`isDrainablePayout`), and a loss cuts it here;
+ * - what no unpaid re-pay row can carry (one already paid, or a share larger
+ *   than the rows) is a `slice_repaid` debt on the slice, for a person.
+ *
+ * The share is split once. A redelivery finds the cause's steps and only
+ * finishes them. `moving` is a step of the cause still on the slice, which
+ * Stripe refused there (`belongsOnRepayRows`): it moves in the split's own
+ * transaction.
+ */
+async function clawBackRepaidShare(
   ctx: StepContext,
-  row: Payout,
+  slice: Payout,
   share: number,
-  kind: PayoutReversalKind
+  moving?: PayoutReversal
+): Promise<StepResult> {
+  const { deps, cause } = ctx;
+  await splitRepaidShare(ctx, slice, share, moving);
+
+  const repayIds = (await repayRowsOf(deps.db, slice.id)).map((row) => row.id);
+  if (repayIds.length === 0) return {};
+  const steps = await deps.db
+    .select()
+    .from(payoutReversals)
+    .where(
+      and(
+        inArray(payoutReversals.payoutId, repayIds),
+        eq(payoutReversals.causeType, cause.type),
+        eq(payoutReversals.causeId, cause.id)
+      )
+    );
+  const failures: unknown[] = [];
+  for (const step of steps) {
+    if (isSettled(step)) continue;
+    // Read fresh: the drain may have claimed or paid it since.
+    const repay = await readPayout(deps, step.payoutId);
+    if (!repay) continue;
+    const result = await runRecord(ctx, repay, step);
+    if (result.failure !== undefined) failures.push(result.failure);
+  }
+  if (failures.length === 0) return {};
+  return {
+    failure: failures.length === 1 ? failures[0] : new AggregateError(failures),
+  };
+}
+
+/**
+ * Record how a cause's share of a re-paid slice splits over its re-pay rows,
+ * oldest first, and the debt for what they cannot carry. One transaction,
+ * under a lock on the slice, so two deliveries of the same cause never split
+ * it twice: the second finds the first's steps, and counts them.
+ *
+ * A `moving` step leaves the slice in the same transaction: `cancelled`, code
+ * `moved_to_repay`, and it becomes the debt if the re-pay rows cannot carry
+ * the share. A failure rolls both back, so the step stays to be retried.
+ */
+async function splitRepaidShare(
+  ctx: StepContext,
+  slice: Payout,
+  share: number,
+  moving?: PayoutReversal
 ): Promise<void> {
   const { deps, charge, cause } = ctx;
+  const { debt, moved } = await deps.db.transaction(async (tx) => {
+    await tx
+      .select({ id: payouts.id })
+      .from(payouts)
+      .where(eq(payouts.id, slice.id))
+      .for('update');
+    if (moving) {
+      const [movedRow] = await tx
+        .update(payoutReversals)
+        .set({
+          status: 'cancelled',
+          lastErrorCode: MOVED_TO_REPAY,
+          attemptedAt: null,
+          resolvedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(payoutReversals.id, moving.id),
+            inArray(payoutReversals.status, ['pending', 'failed'])
+          )
+        )
+        .returning();
+      // Settled by someone else meanwhile: nothing to move.
+      if (!movedRow) return { debt: undefined, moved: false };
+    }
+    const repays = await repayRowsOf(tx, slice.id);
+    const steps =
+      repays.length === 0
+        ? []
+        : await tx
+            .select()
+            .from(payoutReversals)
+            .where(
+              inArray(
+                payoutReversals.payoutId,
+                repays.map((row) => row.id)
+              )
+            );
+
+    // What the cause already left with a person on the slice is split
+    // already: a `slice_repaid` debt, this code's or one the earlier
+    // all-to-a-person rule wrote for the whole share. Taking it again off a
+    // re-pay row would claw it twice while its review stays open.
+    const [debt] = await tx
+      .select({ amountCents: payoutReversals.amountCents })
+      .from(payoutReversals)
+      .where(
+        and(
+          eq(payoutReversals.payoutId, slice.id),
+          eq(payoutReversals.causeType, cause.type),
+          eq(payoutReversals.causeId, cause.id),
+          eq(payoutReversals.lastErrorCode, SLICE_REPAID),
+          ne(payoutReversals.status, 'cancelled')
+        )
+      )
+      .limit(1);
+    let left = share - (debt?.amountCents ?? 0);
+    for (const repay of repays) {
+      if (left <= 0) break;
+      const onRow = steps.filter((step) => step.payoutId === repay.id);
+      const own = onRow.find(
+        (step) => step.causeType === cause.type && step.causeId === cause.id
+      );
+      if (own) {
+        left -= own.amountCents;
+        continue;
+      }
+      if (repay.status !== 'pending' && repay.status !== 'failed') continue;
+      const rest =
+        repay.amountCents -
+        onRow
+          .filter((step) => step.status !== 'cancelled')
+          .reduce((sum, step) => sum + step.amountCents, 0);
+      const take = Math.min(left, rest);
+      if (take <= 0) continue;
+      left -= take;
+      // Held, not cut, while the chargeback is open (owner decision P-2).
+      if (cause.type === 'dispute' && !cause.lost) continue;
+      await tx
+        .insert(payoutReversals)
+        .values({
+          payoutId: repay.id,
+          causeType: cause.type,
+          causeId: cause.id,
+          amountCents: take,
+          kind: take >= rest ? 'cancellation' : 'pending_reduction',
+          status: 'pending',
+        })
+        .onConflictDoNothing({
+          target: [
+            payoutReversals.payoutId,
+            payoutReversals.causeType,
+            payoutReversals.causeId,
+          ],
+        });
+    }
+    return {
+      debt:
+        left > 0 ? await recordRepaidDebt(tx, slice, cause, left) : undefined,
+      moved: moving !== undefined,
+    };
+  });
+
+  if (moved && moving) {
+    deps.obs.warn(
+      `${causeLabel(cause)} step moved off a slice reversed whole and paid back: its share goes to the re-pay row`,
+      {
+        chargeId: charge.id,
+        ...causeFields(cause),
+        payoutId: slice.id,
+        payoutReversalId: moving.id,
+        amountCents: moving.amountCents,
+      }
+    );
+  }
+  if (debt) {
+    deps.obs.error(
+      'A cause reached a slice a won dispute paid back, and its re-pay has been paid; recorded for a person',
+      {
+        errorId: crypto.randomUUID(),
+        chargeId: charge.id,
+        ...causeFields(cause),
+        payoutId: slice.id,
+        payoutReversalId: debt.id,
+        amountCents: debt.amountCents,
+      }
+    );
+  }
+}
+
+/** The re-pay rows of a slice, oldest first. */
+async function repayRowsOf(db: Client, sliceId: string): Promise<Payout[]> {
+  const rows = await db
+    .select({ repay: payouts })
+    .from(payoutReversals)
+    .innerJoin(payouts, eq(payouts.id, payoutReversals.repaidByPayoutId))
+    .where(eq(payoutReversals.payoutId, sliceId))
+    .orderBy(asc(payouts.createdAt), asc(payouts.id));
+  return rows.map((row) => row.repay);
+}
+
+/**
+ * A debt for a person: what of a cause's share no unpaid re-pay row of the
+ * slice could carry. Returns the step if this call wrote it.
+ *
+ * The cause's one slot on the slice may hold its step moved off it
+ * (`moved_to_repay`): that row becomes the debt. Any other row there is left
+ * alone, as before.
+ */
+async function recordRepaidDebt(
+  tx: Tx,
+  slice: Payout,
+  cause: ClawbackCause,
+  cents: number
+): Promise<PayoutReversal | undefined> {
   const now = new Date();
-  const [record] = await deps.db
+  const debt = {
+    amountCents: cents,
+    kind: 'transfer_reversal' as const,
+    status: 'debt' as const,
+    lastErrorCode: SLICE_REPAID,
+    attemptedAt: null,
+    resolvedAt: now,
+  };
+  const [record] = await tx
     .insert(payoutReversals)
     .values({
-      payoutId: row.id,
+      payoutId: slice.id,
       causeType: cause.type,
       causeId: cause.id,
-      amountCents: share,
-      kind,
-      status: 'debt',
-      lastErrorCode: 'slice_repaid',
-      resolvedAt: now,
+      ...debt,
     })
-    .onConflictDoNothing({
+    .onConflictDoUpdate({
       target: [
         payoutReversals.payoutId,
         payoutReversals.causeType,
         payoutReversals.causeId,
       ],
+      set: debt,
+      setWhere: sql`${payoutReversals.lastErrorCode} = ${MOVED_TO_REPAY}`,
     })
     .returning();
-  if (!record) return;
-  if (row.userId) {
-    await deps.db
+  if (!record) return undefined;
+  if (slice.userId) {
+    await tx
       .insert(refundReviews)
       .values({
         payoutReversalId: record.id,
-        payoutId: row.id,
-        purchaseId: row.purchaseId,
-        creatorUserId: row.userId,
-        attemptedReversalCents: share,
-        errorCode: 'slice_repaid',
+        payoutId: slice.id,
+        purchaseId: slice.purchaseId,
+        creatorUserId: slice.userId,
+        attemptedReversalCents: cents,
+        errorCode: SLICE_REPAID,
         errorMessage:
-          'A won dispute paid this slice back; its share of a later refund or dispute needs a person',
+          'A won dispute paid this slice back and the re-pay has been paid; its share of a later refund or dispute needs a person',
       })
       .onConflictDoNothing({
         target: refundReviews.payoutReversalId,
         where: sql`${refundReviews.payoutReversalId} IS NOT NULL`,
       });
   }
-  deps.obs.error(
-    'A cause reached a slice a won dispute paid back; recorded for a person',
-    {
-      errorId: crypto.randomUUID(),
-      chargeId: charge.id,
-      ...causeFields(cause),
-      payoutId: row.id,
-      payoutReversalId: record.id,
-      amountCents: share,
-    }
-  );
+  return record;
 }
 
 /** The dispute is still a clawback cause: open, or lost. */

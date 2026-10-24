@@ -33,7 +33,9 @@ import { payouts } from './payouts';
  * `status`: `pending` (recorded, not yet acted on), `done`, `failed` (retried
  * by redelivery, then the hourly cron), `debt` (the payee's balance could not
  * cover it; a `refund_reviews` row records the debt), or `cancelled` (its
- * cause was undone before the step ran: a dispute won, Codex-2hxff.9).
+ * cause was undone before the step ran: a dispute won, Codex-2hxff.9; or the
+ * step was moved to its slice's re-pay row after the slice was reversed and
+ * re-paid, `last_error_code = 'moved_to_repay'`, Codex-2hxff.59).
  *
  * `repaid_by_payout_id`: a `done` reversal paid back to the payee by a new
  * pending `payouts` row (a won dispute; docs/payments/dispute-record.md §3).

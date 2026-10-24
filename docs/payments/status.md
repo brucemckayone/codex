@@ -35,7 +35,8 @@ fixed by PR 2 below. The production checks to run around these releases
 | `Codex-2hxff.16` | P2 | Downgrades at period end; tier reorders warn first | [subscriptions](subscriptions.md#changing-tier) |
 | `Codex-2hxff.20` | P2 | Revenue screens and agreement emails show the real numbers and working links | [fees-and-splits](fees-and-splits.md#reporting) |
 | `Codex-fazy6` | P3 | The web app shows a creator's share from the accepted proposal, not the legacy column | [agreements](agreements.md#what-an-agreement-is) |
-| `Codex-2hxff.22` | P2 | Success pages wait for our record | [purchases](purchases.md#after-payment) |
+| `Codex-mat01` | P3 | A redelivered checkout event sends no second receipt | [purchases](purchases.md) |
+| `Codex-2hxff.22` | P2 | Success pages wait for our record | [purchases](purchases.md) |
 | `Codex-2hxff.24` | P3 | Dev and CI Stripe setup mirrors production; customer stub removed | [operations](operations.md#local-development) |
 | `Codex-2hxff.25` | P2 | CI exercises real webhook round trips | [operations](operations.md#testing) |
 | `Codex-2hxff.28` | P2 | Support issues refunds from an admin screen, not the Stripe Dashboard, within 14 days | [purchases](purchases.md#refunds) |
@@ -45,8 +46,6 @@ fixed by PR 2 below. The production checks to run around these releases
 | `Codex-2hxff.34` | P3 | Creators are reminded monthly about money waiting for them | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
 | `Codex-2hxff.52` | P2 | Pausing, resuming, a failed payment and a trial ending work for course subscriptions as for tiers | [subscriptions](subscriptions.md#lifecycle-and-access) |
 | `Codex-2hxff.55` | P2 | A service built without its money dependencies (fee configuration) cannot compile | [architecture](architecture.md) |
-| `Codex-2hxff.58` | P2 | A dispute whose webhook events were missed is still settled, by a reconciliation sweep | [dispute record](dispute-record.md) |
-| `Codex-2hxff.59` | P3 | Dispute edge cases: later re-pay causes, a refund under a full chargeback, zero reductions | [dispute record](dispute-record.md) |
 | `Codex-2hxff.60` | P3 | A subscriber is told when a dispute pauses their access | [subscription disputes](subscription-disputes.md) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
@@ -69,6 +68,21 @@ one pull request with migrations `0111` and `0112`, and so are not listed above:
   release by a documented step, R7);
 - our own dispute pause no longer clears the streaming block, and the docs say
   plainly that a link already issued plays to its expiry (owner, option c).
+`Codex-2hxff.47`, `.49`, `.58`, `.59` and `.68` (the ledger edges) are fixed in
+one pull request with migration `0113`, and so are not listed above:
+- a transfer to a creator's replaced Connect account is still found: a trigger
+  keeps every account a user had (owner, "Keep account history");
+- a replay keeps the platform fee already recorded and splits the rest so the
+  slices sum to what was paid, a missing slice included (owner, "Keep recorded
+  fee"); course plans split once, as tiers do;
+- missed dispute events are settled by an hourly reconcile (owner, "Retry
+  hourly, alert");
+- the dispute edge cases: a later refund on re-paid money, a refund under a
+  full chargeback, a slice cut to nothing, an inherited course grant, and a
+  slice recorded while its sale is disputed (held, not sent);
+- an early partial refund no longer under-pays the creator, and a course refund
+  that arrives before its purchase is recorded too.
+
 The web app's agreement pages still read the legacy share column (the API now
 also returns `creatorSharePercent`): `Codex-fazy6`.
 

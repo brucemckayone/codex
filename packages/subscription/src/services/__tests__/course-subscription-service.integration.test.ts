@@ -533,29 +533,38 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     const { cId, pId } = await makeCourseWithPlan();
     const { sub, invoice, slices } = await paidCourseInvoice(cId, pId);
 
-    // First delivery: the database drops while the creator slice is reserved.
-    const failing = new Proxy(db, {
-      get(target, prop, receiver) {
-        if (prop === 'insert') {
-          // biome-ignore lint/suspicious/noExplicitAny: Drizzle builder shape
-          return (table: any) => {
-            const builder = target.insert(table);
-            const realValues = builder.values.bind(builder);
-            // biome-ignore lint/suspicious/noExplicitAny: row payload
-            (builder as any).values = (rows: any) => {
-              const row = Array.isArray(rows) ? rows[0] : rows;
-              if (row?.payoutType === 'creator_payout') {
-                throw new Error('Connection terminated unexpectedly');
-              }
-              return realValues(rows);
+    // First delivery: the database drops while the creator slice is reserved,
+    // inside the split's transaction (recordSplitOnce, Codex-2hxff.49).
+    const dropsOnCreatorSlice = (client: Database): Database =>
+      new Proxy(client, {
+        get(target, prop, receiver) {
+          if (prop === 'transaction') {
+            return (run: (tx: Database) => Promise<unknown>) =>
+              target.transaction((tx) =>
+                run(dropsOnCreatorSlice(tx as unknown as Database))
+              );
+          }
+          if (prop === 'insert') {
+            // biome-ignore lint/suspicious/noExplicitAny: Drizzle builder shape
+            return (table: any) => {
+              const builder = target.insert(table);
+              const realValues = builder.values.bind(builder);
+              // biome-ignore lint/suspicious/noExplicitAny: row payload
+              (builder as any).values = (rows: any) => {
+                const row = Array.isArray(rows) ? rows[0] : rows;
+                if (row?.payoutType === 'creator_payout') {
+                  throw new Error('Connection terminated unexpectedly');
+                }
+                return realValues(rows);
+              };
+              return builder;
             };
-            return builder;
-          };
-        }
-        const value = Reflect.get(target, prop, receiver);
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    });
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    const failing = dropsOnCreatorSlice(db);
     const dying = new CourseSubscriptionService(
       { db: failing, environment: 'test' },
       stripeWithStableCharges()

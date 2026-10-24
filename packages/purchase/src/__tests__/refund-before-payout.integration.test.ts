@@ -11,9 +11,11 @@
  * timing: the completing service's database lets the refund run the moment
  * the purchase's transaction commits.
  *
- * (When the refund is handled before the purchase is recorded at all, the
- * self-heal records it refunded and no slice is ever written: a full refund
- * already pays no one. That path is not this file's.)
+ * A refund handled before the purchase is recorded AT ALL rebuilds it from its
+ * checkout session (the self-heal), and the later completion replays into it
+ * (Codex-2hxff.68, and PAY-11 for courses): the last block below. The
+ * rebuilt purchase carries the real split and the access grant, so a partial
+ * refund nets the same as the late order, and a full one pays no one.
  *
  * Every test runs the late order on a second purchase as its oracle: same
  * price, same split, the refund after the payout. Real DB, mocked Stripe that
@@ -24,7 +26,13 @@
 
 import { randomUUID } from 'node:crypto';
 import {
+  agreementProposals,
   content,
+  contentAccess,
+  courseEnrollments,
+  courses,
+  creatorOrganizationAgreements,
+  entitlements,
   organizations,
   type Payout,
   payoutReversals,
@@ -32,8 +40,12 @@ import {
   purchases,
   refunds,
   stripeConnectAccounts,
+  users,
 } from '@codex/database/schema';
-import { AfterCommitError } from '@codex/service-errors';
+import {
+  AfterCommitError,
+  UnsupportedCurrencyError,
+} from '@codex/service-errors';
 import {
   createMockStripe,
   createTestConnectAccountInput,
@@ -46,7 +58,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -57,6 +69,7 @@ import {
   it,
   vi,
 } from 'vitest';
+import type { FeeConfigService } from '../services/fee-config-service';
 import { PurchaseService } from '../services/purchase-service';
 
 const uid = () => randomUUID().slice(0, 8);
@@ -506,5 +519,452 @@ describe('A refund handled before a purchase is paid out (Codex-2hxff.67)', () =
       organization_fee: 0,
       creator_payout: 0,
     });
+  });
+
+  // ── a refund before the purchase exists (Codex-2hxff.68, PAY-11) ───────
+  //
+  // `charge.refunded` beats `checkout.session.completed`: the self-heal
+  // rebuilds the purchase from its checkout session, then the completion
+  // replays into it. Last in this file: the creator agreement it adds to the
+  // shared organisation is deleted when it ends.
+
+  describe('a refund handled before the purchase is recorded at all', () => {
+    // The configured fees and the creator's agreement, so the split is not
+    // the default one a self-heal used to write.
+    const FEES = {
+      platformFeePercent: 1500,
+      orgFeePercent: 2000,
+      minPlatformFeeCents: 0,
+      minTransferCents: 0,
+    };
+    const CREATOR_SHARE = 7000;
+    /** The checkout's start: the agreement is resolved at it. */
+    const sessionCreated = Math.floor(Date.now() / 1000) - 3600;
+    const paidAt = new Date((sessionCreated + 600) * 1000);
+    const feeConfig = {
+      getFeesForCreator: vi.fn(async () => FEES),
+      getFeesForOrg: vi.fn(async () => FEES),
+      getFeesPlatform: vi.fn(async () => FEES),
+    } as unknown as FeeConfigService;
+
+    // The self-heal parses the session with the booking webhook's schema,
+    // whose user id is alphanumeric, as production ids are.
+    const healBuyerId = `refundheal${uid()}`.replace(/[^a-zA-Z0-9]/g, '');
+    let agreementId: string;
+    const itemIds: { content: string[]; courses: string[] } = {
+      content: [],
+      courses: [],
+    };
+    const chargeIds: string[] = [];
+    /** Checkout sessions as Stripe holds them, by PaymentIntent. */
+    let sessions: Map<string, Record<string, unknown>>;
+
+    beforeAll(async () => {
+      await db.insert(users).values({
+        id: healBuyerId,
+        name: 'Refund-first buyer',
+        email: `${healBuyerId}@example.com`,
+        emailVerified: true,
+        role: 'customer',
+      });
+      const effectiveFrom = new Date(Date.now() - 86_400_000);
+      const proposal = takeFirst(
+        await db
+          .insert(agreementProposals)
+          .values({
+            organizationId: orgId,
+            creatorId,
+            revenueType: 'content_purchase',
+            roundNumber: 1,
+            proposedByUserId: creatorId,
+            proposedByRole: 'owner',
+            proposedCreatorSharePercent: CREATOR_SHARE,
+            proposedEffectiveFrom: effectiveFrom,
+            status: 'accepted',
+          })
+          .returning()
+      );
+      agreementId = takeFirst(
+        await db
+          .insert(creatorOrganizationAgreements)
+          .values({
+            organizationId: orgId,
+            creatorId,
+            organizationFeePercentage: 10_000 - CREATOR_SHARE,
+            revenueType: 'content_purchase',
+            status: 'active',
+            currentProposalId: proposal.id,
+            effectiveFrom,
+          })
+          .returning()
+      ).id;
+    });
+
+    beforeEach(() => {
+      sessions = new Map();
+      Object.assign(stripe.checkout.sessions, {
+        list: vi.fn(async (params: { payment_intent?: string }) => {
+          const session = sessions.get(params.payment_intent ?? '');
+          return { object: 'list', data: session ? [session] : [] };
+        }),
+      });
+    });
+
+    afterAll(async () => {
+      const bought = await db
+        .select({ id: purchases.id })
+        .from(purchases)
+        .where(eq(purchases.customerId, healBuyerId));
+      const boughtIds = bought.map((row) => row.id);
+      if (boughtIds.length > 0) {
+        const slices = await db
+          .select({ id: payouts.id })
+          .from(payouts)
+          .where(inArray(payouts.purchaseId, boughtIds));
+        const sliceIds = slices.map((row) => row.id);
+        if (sliceIds.length > 0) {
+          await db
+            .delete(payoutReversals)
+            .where(inArray(payoutReversals.payoutId, sliceIds));
+          await db.delete(payouts).where(inArray(payouts.id, sliceIds));
+        }
+      }
+      if (chargeIds.length > 0) {
+        await db
+          .delete(refunds)
+          .where(inArray(refunds.stripeChargeId, chargeIds));
+      }
+      await db.delete(entitlements).where(eq(entitlements.userId, healBuyerId));
+      await db
+        .delete(courseEnrollments)
+        .where(eq(courseEnrollments.userId, healBuyerId));
+      await db
+        .delete(contentAccess)
+        .where(eq(contentAccess.userId, healBuyerId));
+      await db.delete(purchases).where(eq(purchases.customerId, healBuyerId));
+      await db
+        .delete(creatorOrganizationAgreements)
+        .where(eq(creatorOrganizationAgreements.id, agreementId));
+      await db
+        .delete(agreementProposals)
+        .where(
+          and(
+            eq(agreementProposals.organizationId, orgId),
+            eq(agreementProposals.creatorId, creatorId)
+          )
+        );
+      if (itemIds.courses.length > 0) {
+        await db.delete(courses).where(inArray(courses.id, itemIds.courses));
+      }
+      if (itemIds.content.length > 0) {
+        await db.delete(content).where(inArray(content.id, itemIds.content));
+      }
+      await db.delete(users).where(eq(users.id, healBuyerId));
+    });
+
+    function service(): PurchaseService {
+      return new PurchaseService(
+        { db, environment: 'test', feeConfig },
+        stripe
+      );
+    }
+
+    /** One sale of a new item, and the checkout session Stripe holds for it. */
+    async function healSale(kind: 'content' | 'course') {
+      const tag = uid();
+      const paymentIntentId = `pi_heal_${tag}`;
+      const chargeId = `ch_heal_${tag}`;
+      chargeIds.push(chargeId);
+      if (kind === 'content') {
+        const item = takeFirst(
+          await db
+            .insert(content)
+            .values(
+              createTestContentInput(creatorId, {
+                organizationId: orgId,
+                contentType: 'written',
+                slug: createUniqueSlug('refund-heal'),
+              })
+            )
+            .returning()
+        );
+        itemIds.content.push(item.id);
+        sessions.set(paymentIntentId, {
+          id: `cs_${tag}`,
+          amount_total: PRICE,
+          currency: 'gbp',
+          created: sessionCreated,
+          metadata: {
+            customerId: healBuyerId,
+            contentId: item.id,
+            organizationId: orgId,
+          },
+        });
+        return {
+          kind,
+          paymentIntentId,
+          chargeId,
+          itemId: item.id,
+          complete: () =>
+            service().completePurchase(paymentIntentId, {
+              contentId: item.id,
+              customerId: healBuyerId,
+              organizationId: orgId,
+              amountPaidCents: PRICE,
+              currency: 'gbp',
+              stripeChargeId: chargeId,
+              paidAt,
+              offerAt: new Date(sessionCreated * 1000),
+            }),
+        };
+      }
+      const course = takeFirst(
+        await db
+          .insert(courses)
+          .values({
+            organizationId: orgId,
+            creatorId,
+            slug: createUniqueSlug('refund-heal-course'),
+            title: 'Refund-first course',
+            status: 'published',
+            priceCents: PRICE,
+          })
+          .returning()
+      );
+      itemIds.courses.push(course.id);
+      sessions.set(paymentIntentId, {
+        id: `cs_${tag}`,
+        amount_total: PRICE,
+        currency: 'gbp',
+        created: sessionCreated,
+        metadata: {
+          kind: 'course',
+          customerId: healBuyerId,
+          courseId: course.id,
+          courseTitle: course.title,
+        },
+      });
+      return {
+        kind,
+        paymentIntentId,
+        chargeId,
+        itemId: course.id,
+        complete: () =>
+          service().completeCoursePurchase(paymentIntentId, {
+            courseId: course.id,
+            customerId: healBuyerId,
+            amountPaidCents: PRICE,
+            currency: 'gbp',
+            stripeChargeId: chargeId,
+            paidAt,
+            offerAt: new Date(sessionCreated * 1000),
+          }),
+      };
+    }
+
+    type HealSale = Awaited<ReturnType<typeof healSale>>;
+
+    /** `charge.refunded`'s purchase half, as the webhook runs it. */
+    async function refunded(sold: HealSale): Promise<void> {
+      const svc = service();
+      const [latest] = await svc.recordChargeRefunds({
+        id: sold.chargeId,
+        paymentIntentId: sold.paymentIntentId,
+      });
+      const charge = await stripe.charges.retrieve(sold.chargeId);
+      await svc.processRefund(sold.paymentIntentId, {
+        charge: { id: charge.id, amountCents: charge.amount },
+        stripeRefundId: latest?.id,
+        refundAmountCents: charge.amount_refunded,
+        paidAt,
+      });
+    }
+
+    async function purchaseOf(sold: HealSale) {
+      return takeFirst(
+        await db
+          .select()
+          .from(purchases)
+          .where(eq(purchases.stripePaymentIntentId, sold.paymentIntentId))
+      );
+    }
+
+    /** Whether the buyer can open what they bought, by every grant. */
+    async function hasAccess(sold: HealSale): Promise<boolean> {
+      const purchase = await purchaseOf(sold);
+      const [grant] = await db
+        .select()
+        .from(entitlements)
+        .where(eq(entitlements.sourceRef, purchase.id));
+      const live = grant !== undefined && grant.revokedAt === null;
+      if (sold.kind === 'course') return live;
+      const [row] = await db
+        .select()
+        .from(contentAccess)
+        .where(
+          and(
+            eq(contentAccess.userId, healBuyerId),
+            eq(contentAccess.contentId, sold.itemId)
+          )
+        );
+      const verified = await service().verifyPurchase(sold.itemId, healBuyerId);
+      return live && row?.deletedAt === null && verified;
+    }
+
+    function split(purchase: Awaited<ReturnType<typeof purchaseOf>>) {
+      return {
+        platformFeeCents: purchase.platformFeeCents,
+        organizationFeeCents: purchase.organizationFeeCents,
+        creatorPayoutCents: purchase.creatorPayoutCents,
+        creatorOrgAgreementId: purchase.creatorOrgAgreementId,
+      };
+    }
+
+    for (const kind of ['content', 'course'] as const) {
+      it(`${kind}: a partial refund first — the rebuilt purchase keeps its real split and the buyer's access, and each payee nets what the late refund leaves`, async () => {
+        const charges = stripeCharges();
+        const REFUND = 300;
+        const early = await healSale(kind);
+        const late = await healSale(kind);
+
+        charges.refund(early.chargeId, REFUND);
+        await refunded(early);
+        const rebuilt = await purchaseOf(early);
+        expect(rebuilt).toMatchObject({
+          status: 'completed',
+          refundAmountCents: REFUND,
+          purchasedAt: paidAt,
+        });
+        // Nothing is paid before the completion.
+        expect(await slicesOf(early.chargeId)).toEqual([]);
+        expect(await hasAccess(early)).toBe(true);
+
+        await early.complete();
+
+        // The oracle: the same sale, refunded after its payout.
+        await late.complete();
+        charges.refund(late.chargeId, REFUND);
+        await refunded(late);
+
+        // The split completion computes: the configured fees, and the
+        // agreement in force when the checkout started (not the default).
+        expect(split(rebuilt)).toEqual(split(await purchaseOf(late)));
+        expect(rebuilt.creatorOrgAgreementId).toBe(agreementId);
+        expect(rebuilt.platformFeeCents).toBe(150);
+        expect(rebuilt.creatorPayoutCents).toBe(595);
+
+        const rows = await slicesOf(early.chargeId);
+        expect(await netByType(early.chargeId)).toEqual(
+          await netByType(late.chargeId)
+        );
+        expect(await netByType(early.chargeId)).toEqual(
+          Object.fromEntries(
+            rows
+              .filter((row) => row.payoutType !== 'platform_fee')
+              .map((row) => [
+                row.payoutType,
+                afterRefund(row.amountCents, REFUND),
+              ])
+          )
+        );
+        expect(statusByType(rows)).toEqual({
+          platform_fee: 'paid',
+          organization_fee: 'paid',
+          creator_payout: 'paid',
+        });
+        // P-1: a partial refund keeps access, whichever came first.
+        expect(await hasAccess(early)).toBe(true);
+        expect(await hasAccess(late)).toBe(true);
+      });
+
+      it(`${kind}: a full refund first — the purchase is refunded, the buyer has no access, and nothing is ever paid`, async () => {
+        const charges = stripeCharges();
+        const early = await healSale(kind);
+
+        charges.refund(early.chargeId, PRICE);
+        await refunded(early);
+        await early.complete();
+
+        const purchase = await purchaseOf(early);
+        expect(purchase).toMatchObject({
+          status: 'refunded',
+          refundAmountCents: PRICE,
+          stripeRefundId: expect.stringMatching(/^re_order_/),
+        });
+        expect(await hasAccess(early)).toBe(false);
+        // Rebuilt already refunded, so access was never granted at all: there
+        // is no grant a failed revoke could leave behind.
+        expect(
+          await db
+            .select()
+            .from(entitlements)
+            .where(eq(entitlements.sourceRef, purchase.id))
+        ).toEqual([]);
+        expect(
+          await db
+            .select()
+            .from(contentAccess)
+            .where(
+              and(
+                eq(contentAccess.userId, healBuyerId),
+                eq(contentAccess.contentId, early.itemId)
+              )
+            )
+        ).toEqual([]);
+        expect(await slicesOf(early.chargeId)).toEqual([]);
+        expect(moneyCalls()).toEqual({ transfers: 0, reversals: 0 });
+      });
+
+      it(`${kind}: a sale in another currency is refused before anything is written, as completion refuses it (PAY-25)`, async () => {
+        const charges = stripeCharges();
+        const early = await healSale(kind);
+        const session = sessions.get(early.paymentIntentId);
+        if (session) session.currency = 'usd';
+
+        charges.refund(early.chargeId, 300);
+        await expect(refunded(early)).rejects.toBeInstanceOf(
+          UnsupportedCurrencyError
+        );
+
+        expect(
+          await db
+            .select()
+            .from(purchases)
+            .where(eq(purchases.stripePaymentIntentId, early.paymentIntentId))
+        ).toEqual([]);
+        expect(
+          await db
+            .select()
+            .from(entitlements)
+            .where(eq(entitlements.userId, healBuyerId))
+        ).toEqual(
+          expect.not.arrayContaining([
+            expect.objectContaining({
+              [kind === 'content' ? 'contentId' : 'courseId']: early.itemId,
+            }),
+          ])
+        );
+      });
+
+      it(`${kind}: redeliveries of either event move no more money`, async () => {
+        const charges = stripeCharges();
+        const early = await healSale(kind);
+        charges.refund(early.chargeId, 450);
+        await refunded(early);
+        await early.complete();
+        const settled = await netByType(early.chargeId);
+        const calls = moneyCalls();
+
+        await refunded(early);
+        await early.complete();
+        await refunded(early);
+        await early.complete();
+
+        expect(moneyCalls()).toEqual(calls);
+        expect(await netByType(early.chargeId)).toEqual(settled);
+        expect(await slicesOf(early.chargeId)).toHaveLength(3);
+        expect(await hasAccess(early)).toBe(true);
+      });
+    }
   });
 });

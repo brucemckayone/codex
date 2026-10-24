@@ -15,6 +15,10 @@
  * Consolidated into ecom-api 2026-05-13 so the Stripe cron colocates with
  * Stripe webhooks in a single Worker (no separate payouts-sweep deploy).
  *
+ * The same wake first settles disputes whose webhook events were missed
+ * (./dispute-reconcile.ts, Codex-2hxff.58), then runs the course off-sale and
+ * owed-duplicate sweeps.
+ *
  * Error handling: NEVER throws. The function is invoked from
  * `scheduled()` inside a `waitUntil` chain — if we throw, the cron
  * invocation can crash mid-cycle and skip its observability logging.
@@ -32,6 +36,8 @@ import {
 } from '@codex/worker-utils';
 import type Stripe from 'stripe';
 import { runCourseOffSaleSweep } from './course-off-sale-sweep';
+import { runDisputeReconcile } from './dispute-reconcile';
+import { createAccessEffects } from './payment-webhook';
 
 /** Default age threshold — only sweep rows old enough that the
  *  account.updated webhook would already have fired by now if it was
@@ -190,6 +196,40 @@ export async function runOwedDuplicatesSweep(
 }
 
 /**
+ * Settle disputes whose webhook events were missed (Codex-2hxff.58,
+ * ./dispute-reconcile.ts). Isolated like the clawback retry: its failure is
+ * logged and never fails the cron, so the other sweeps still run. Access
+ * effects go through the scheduled handler's own bindings and `waitUntil`.
+ */
+async function reconcileDisputes(
+  env: Bindings,
+  ctx: ExecutionContext,
+  stripe: Stripe,
+  services: WebhookServices['services'],
+  obs: ObservabilityClient
+): Promise<void> {
+  try {
+    await runDisputeReconcile({
+      stripe,
+      purchase: services.purchase,
+      subscription: services.subscription,
+      environment: env.ENVIRONMENT || 'development',
+      obs,
+      effects: createAccessEffects({
+        kv: env.CACHE_KV,
+        waitUntil: (promise) => ctx.waitUntil(promise),
+        obs,
+      }),
+    });
+  } catch (error) {
+    obs.error('payouts-sweep cron could not reconcile disputes', {
+      errorId: crypto.randomUUID(),
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Scheduled-handler entry point. Validates required env vars (logs and exits
  * cleanly on missing config), builds the registry's services through the
  * webhook composition root (Codex-2hxff.54) — so the drain carries fee config
@@ -222,20 +262,26 @@ export async function runScheduledPayoutsSweep(
     return;
   }
 
+  // Inside the try, so a client that cannot be built is logged through obs
+  // and the run ends cleanly: every step below needs it.
+  let stripe: Stripe;
   let webhookServices: WebhookServices;
   try {
-    webhookServices = await createWebhookServices(env, ctx, {
-      obs,
-      stripe: deps?.stripe ?? createStripeClient(env.STRIPE_SECRET_KEY),
-    });
+    stripe = deps?.stripe ?? createStripeClient(env.STRIPE_SECRET_KEY);
+    webhookServices = await createWebhookServices(env, ctx, { obs, stripe });
   } catch (error) {
     obs.error('payouts-sweep: could not build services, skipping', {
+      errorId: crypto.randomUUID(),
       error: error instanceof Error ? error.message : String(error),
     });
     return;
   }
 
   try {
+    // First, so a dispute whose events were missed holds (or releases) its
+    // sale's unpaid slices before the drain below looks at them
+    // (Codex-2hxff.58). Never throws.
+    await reconcileDisputes(env, ctx, stripe, webhookServices.services, obs);
     await runPayoutsSweep({
       subscription: webhookServices.services.subscription,
       obs,

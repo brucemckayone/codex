@@ -16,8 +16,8 @@
  *   `pending` with no reason while its transfer is in flight. If the transfer
  *   succeeds but the row cannot be marked paid, it stays that way; before a
  *   drain re-sends any row it looks the transfer up in Stripe by the
- *   `payout_id` metadata (`findTransfersForPayouts`), so it settles the row
- *   instead of paying twice.
+ *   `payout_id` metadata (`findTransfersForPayouts`), on every Connect account
+ *   the payee has had, so it settles the row instead of paying twice.
  * - **A refund freezes the row, then asks Stripe.** It cancels a pending or
  *   failed row first, so nothing can settle it afterwards, then looks for a
  *   transfer that went out anyway and reverses it
@@ -37,7 +37,9 @@
  * - **Nothing is dropped.** A slice whose payee cannot be paid yet is a
  *   pending row in their name; the organisation's slices while it has no
  *   owner are pending `no_owner` rows with no payee, handed to the next owner
- *   (owner decision 2026-10-18).
+ *   (owner decision 2026-10-18). A slice recorded while a dispute holds its
+ *   sale is pending too, and is paid by the drains once the dispute is won or
+ *   closed (`isDrainablePayout`).
  *
  * Errors: a failed INSERT is thrown, not logged and swallowed — the webhook
  * answers by its cause (a database outage → 500, Stripe retries, and the
@@ -54,7 +56,9 @@ import type { DatabaseClient } from '@codex/database';
 import {
   disputes,
   type Payout,
+  payoutReversals,
   payouts,
+  stripeConnectAccountHistory,
   stripeConnectAccounts,
 } from '@codex/database/schema';
 import {
@@ -63,6 +67,7 @@ import {
 } from '@codex/service-errors';
 import {
   and,
+  desc,
   eq,
   inArray,
   isNotNull,
@@ -155,6 +160,12 @@ export type RecordSliceOutcome =
   /** A replay: the slice is already in the ledger. Nothing was sent. */
   | { kind: 'exists' }
   | { kind: 'pending'; payoutId: string; reason: PendingReason }
+  /**
+   * Payable, but its sale is held by a dispute or inquiry (`isDrainablePayout`):
+   * the row is pending and nothing was sent. The drains pay it once the
+   * dispute is won or closed (owner decision Q1, Codex-2hxff.59).
+   */
+  | { kind: 'held'; payoutId: string }
   | { kind: 'paid'; payoutId: string; transferId: string }
   /** The transfer failed; the row is `failed` and the drains retry it. */
   | { kind: 'failed'; payoutId: string }
@@ -194,12 +205,61 @@ const DRAINABLE: Array<'pending' | 'failed'> = ['pending', 'failed'];
  * cancels it (`cancelled_by_dispute`) or reduces it: released any earlier, a
  * drain could pay a slice the buyer's bank has already taken back.
  *
+ * A re-pay row (a won dispute paying a reversal back) has no charge id, so it
+ * is held through the slice it re-pays: while THAT slice's charge has a
+ * dispute holding it — a second dispute of the same charge, which Stripe
+ * allows (Codex-2hxff.59). It is also held while the dispute that re-paid it
+ * is `won` but its outcome is not applied yet (`outcome_applied_at`): the
+ * win's follow-up, a refund's share taken off the re-pay row, may have failed
+ * and be waiting for its retry, and a drain must not pay the row in full
+ * first. `repaid_by_payout_id` is unique-indexed, so this costs one index
+ * probe per row.
+ *
  * A row flagged for support (`needs_review_at`, Codex-2hxff.48) is skipped
  * until support releases it. It is still `failed`, so a refund still cancels
  * it and earnings still count it as owed: they key on the status, not this.
  */
 export function isDrainablePayout(): SQL {
-  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND ${payouts.needsReviewAt} IS NULL AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE (${notInArray(disputes.status, [...DISPUTE_CLOSED_STATUSES])} OR (${disputes.status} = 'lost' AND ${disputes.outcomeAppliedAt} IS NULL)) AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})))`;
+  // In the second subquery the slice re-paid is aliased, so `payouts` there
+  // still names the outer row.
+  return sql`((${payouts.status} = 'pending' OR (${payouts.status} = 'failed' AND ${payouts.lastRetryAt} IS NOT NULL)) AND ${payouts.needsReviewAt} IS NULL AND NOT EXISTS (SELECT 1 FROM ${disputes} WHERE ${holdsItsSale()} AND (${disputes.stripeChargeId} = ${payouts.stripeChargeId} OR ${disputes.purchaseId} = ${payouts.purchaseId})) AND NOT EXISTS (SELECT 1 FROM ${payoutReversals} JOIN ${payouts} AS repaid_slice ON repaid_slice.id = ${payoutReversals.payoutId} JOIN ${disputes} ON (${disputes.stripeChargeId} = repaid_slice.stripe_charge_id OR ${disputes.stripeDisputeId} = ${payoutReversals.causeId}) WHERE ${payoutReversals.repaidByPayoutId} = ${payouts.id} AND (${holdsItsSale()} OR (${disputes.stripeDisputeId} = ${payoutReversals.causeId} AND ${disputes.status} = 'won' AND ${disputes.outcomeAppliedAt} IS NULL))))`;
+}
+
+/**
+ * A dispute that holds its sale's unpaid slices: open, an inquiry included,
+ * or lost with its loss not yet applied. See `isDrainablePayout`.
+ */
+function holdsItsSale(): SQL {
+  return sql`(${notInArray(disputes.status, [...DISPUTE_CLOSED_STATUSES])} OR (${disputes.status} = 'lost' AND ${disputes.outcomeAppliedAt} IS NULL))`;
+}
+
+/**
+ * Whether a dispute holds this sale now, by the drains' own rule: a slice
+ * recorded while it does is left pending, not sent (owner decision Q1, "the
+ * sale's pending slices held"; Codex-2hxff.59). Sent, an inquiry's slice
+ * would be paid at once, and a chargeback's sent at gross only to be
+ * reversed. Asked only when one of `inputs` could be sent at once; they are
+ * one sale's slices.
+ */
+async function saleIsHeld(
+  db: DatabaseClient | Tx,
+  inputs: readonly RecordSliceInput[]
+): Promise<boolean> {
+  const sendable = inputs.find(
+    (input) => input.amountCents > 0 && pendingReasonFor(input) === null
+  );
+  if (!sendable) return false;
+  const { stripeChargeId, source } = sendable;
+  const sameSale =
+    'purchaseId' in source
+      ? sql`(${disputes.stripeChargeId} = ${stripeChargeId} OR ${disputes.purchaseId} = ${source.purchaseId})`
+      : eq(disputes.stripeChargeId, stripeChargeId);
+  const [holding] = await db
+    .select({ id: disputes.id })
+    .from(disputes)
+    .where(and(holdsItsSale(), sameSale))
+    .limit(1);
+  return holding !== undefined;
 }
 
 /**
@@ -246,13 +306,14 @@ export async function recordSlice(
   deps: LedgerDeps,
   input: RecordSliceInput
 ): Promise<RecordSliceOutcome | null> {
-  const reserved = await reserveSlice(deps.db, input);
+  const held = await saleIsHeld(deps.db, [input]);
+  const reserved = await reserveSlice(deps.db, input, held);
   if (reserved === null) return null;
   if (reserved === 'exists') {
     await reportReplayMismatch(deps, input);
     return { kind: 'exists' };
   }
-  return sendReservedSlice(deps, reserved, input);
+  return sendReservedSlice(deps, reserved, input, held);
 }
 
 /**
@@ -261,69 +322,179 @@ export async function recordSlice(
  *
  * The slices are reserved together, in one transaction that holds a lock on
  * the charge. If the charge already has any slice, an earlier delivery
- * decided its split, and nothing is added: `already_split`. That covers a
- * redelivery after an agreement is accepted and backdated to its proposal,
- * which would otherwise find a creator in force who was not paid the first
- * time, and pay them on top of the owner. A row that was reserved but never
- * sent (the delivery died) is left to the drains, as for `recordSlice`.
+ * decided its split: a slice it recorded stands, and nothing is added on top
+ * of it. That covers a redelivery after an agreement is accepted and
+ * backdated to its proposal, which would otherwise find a creator in force
+ * who was not paid the first time, and pay them on top of the owner. A row
+ * that was reserved but never sent (the delivery died) is left to the drains,
+ * as for `recordSlice`. A replay that computed a different split is logged,
+ * slice by slice (`reportReplayMismatch`).
  *
- * Returns each slice's outcome in `inputs` order (`null` for a zero amount).
+ * A slice the split defines that is MISSING entirely is recorded from what
+ * the charge has left (`completingSlices`): `completed`. Only a delivery that
+ * died between slices, under the per-slice writers before this, leaves one.
+ * With nothing left, the charge is `already_split`.
+ *
+ * Returns each slice's outcome in `inputs` order (`null` for a slice not
+ * recorded now), and the slice as recorded (`slices`: a completed one's
+ * amount is what the charge had left, not the one computed).
  */
 export async function recordSplitOnce(
   deps: LedgerDeps,
-  stripeChargeId: string,
+  charge: { id: string; grossCents: number },
   inputs: readonly RecordSliceInput[]
 ): Promise<
   | { kind: 'already_split' }
-  | { kind: 'recorded'; outcomes: Array<RecordSliceOutcome | null> }
+  | {
+      kind: 'recorded' | 'completed';
+      outcomes: Array<RecordSliceOutcome | null>;
+      slices: Array<RecordSliceInput | null>;
+    }
 > {
-  const reserved = await deps.db.transaction(async (tx) => {
+  const split = await deps.db.transaction(async (tx) => {
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`payout_split:${stripeChargeId}`}))`
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`payout_split:${charge.id}`}))`
     );
-    const [decided] = await tx
-      .select({ id: payouts.id })
+    const onCharge = await tx
+      .select({
+        payoutType: payouts.payoutType,
+        userId: payouts.userId,
+        amountCents: payouts.amountCents,
+      })
       .from(payouts)
-      .where(
-        and(
-          eq(payouts.stripeChargeId, stripeChargeId),
-          inArray(payouts.payoutType, [
-            'organization_fee',
-            'creator_payout_to_owner',
-            'creator_payout',
-          ])
-        )
-      )
-      .limit(1);
-    if (decided) return null;
+      .where(eq(payouts.stripeChargeId, charge.id));
+    const decided = onCharge.some((row) =>
+      SPLIT_SLICE_TYPES.some((type) => type === row.payoutType)
+    );
+    const toRecord = decided
+      ? completingSlices(inputs, onCharge, charge.grossCents)
+      : [...inputs];
+    if (decided && toRecord.every((input) => input === null)) return null;
+    const held = await saleIsHeld(
+      tx,
+      toRecord.filter((input): input is RecordSliceInput => input !== null)
+    );
     const rows: Array<Payout | 'exists' | null> = [];
-    for (const input of inputs) rows.push(await reserveSlice(tx, input));
-    return rows;
+    for (const input of toRecord) {
+      rows.push(input ? await reserveSlice(tx, input, held) : null);
+    }
+    return {
+      kind: decided ? ('completed' as const) : ('recorded' as const),
+      toRecord,
+      rows,
+      held,
+    };
   });
-  if (reserved === null) return { kind: 'already_split' };
+  if (split === null) {
+    for (const input of inputs) await reportReplayMismatch(deps, input);
+    return { kind: 'already_split' };
+  }
+  if (split.kind === 'completed') {
+    for (const [index, input] of inputs.entries()) {
+      const added = split.toRecord[index];
+      if (!added) {
+        await reportReplayMismatch(deps, input);
+        continue;
+      }
+      deps.obs.warn(
+        'A replay found a slice its first split never recorded; recorded it from what is left of the charge',
+        {
+          stripeChargeId: charge.id,
+          payoutType: added.payoutType,
+          amountCents: added.amountCents,
+          computedAmountCents: input.amountCents,
+        }
+      );
+    }
+  }
 
   const outcomes: Array<RecordSliceOutcome | null> = [];
-  for (const [index, row] of reserved.entries()) {
-    const input = inputs[index];
+  for (const [index, row] of split.rows.entries()) {
+    const input = split.toRecord[index];
     if (row === null || !input) {
       outcomes.push(null);
     } else if (row === 'exists') {
-      // Unreachable under the lock: no slice existed when it was taken.
+      // Unreachable under the lock: the slice was missing when it was taken.
       outcomes.push({ kind: 'exists' });
     } else {
-      outcomes.push(await sendReservedSlice(deps, row, input));
+      outcomes.push(await sendReservedSlice(deps, row, input, split.held));
     }
   }
-  return { kind: 'recorded', outcomes };
+  return { kind: split.kind, outcomes, slices: split.toRecord };
+}
+
+/** The slices a split decides; the platform fee is recorded on its own. */
+const SPLIT_SLICE_TYPES: readonly SlicePayoutType[] = [
+  'organization_fee',
+  'creator_payout_to_owner',
+  'creator_payout',
+];
+
+/**
+ * What a replay records on a charge already split, in `inputs` order: `null`
+ * for a slice already recorded (it stands, whatever its amount) and for one
+ * there is nothing left for; a missing slice from what the charge has left,
+ * the gross less every row recorded on it, platform fee included (owner
+ * decision 2026-10-23, "Keep recorded fee"; Codex-2hxff.49). So the slices
+ * sum to the gross.
+ *
+ * The rest goes to the organisation's slice (`organization_fee` or
+ * `creator_payout_to_owner`) when it is among the missing: what a creator's
+ * share leaves is the organisation's, as with rounding (Codex-2hxff.12), and
+ * a creator in force only since the first split must not take the owner's
+ * part of it (Codex-2hxff.62). The other missing slices take their computed
+ * amounts first, as far as it goes. With no organisation slice missing, the
+ * last missing slice takes the rest.
+ */
+function completingSlices(
+  inputs: readonly RecordSliceInput[],
+  recorded: ReadonlyArray<{
+    payoutType: string;
+    userId: string | null;
+    amountCents: number;
+  }>,
+  grossCents: number
+): Array<RecordSliceInput | null> {
+  const missing = inputs.map((input) =>
+    recorded.some(
+      (row) =>
+        row.payoutType === input.payoutType &&
+        (input.payoutType !== 'creator_payout' ||
+          row.userId === input.payee?.userId)
+    )
+      ? null
+      : input
+  );
+  let takesRest = -1;
+  for (const [index, input] of missing.entries()) {
+    if (!input) continue;
+    const isOrg = input.payoutType !== 'creator_payout';
+    const restIsOrg =
+      takesRest >= 0 && missing[takesRest]?.payoutType !== 'creator_payout';
+    if (isOrg || !restIsOrg) takesRest = index;
+  }
+  let left =
+    grossCents - recorded.reduce((sum, row) => sum + row.amountCents, 0);
+  const completed = missing.map((input, index) => {
+    if (!input || index === takesRest || left <= 0) return null;
+    const amountCents = Math.min(input.amountCents, left);
+    left -= amountCents;
+    return amountCents > 0 ? { ...input, amountCents } : null;
+  });
+  const rest = missing[takesRest];
+  if (rest && left > 0) completed[takesRest] = { ...rest, amountCents: left };
+  return completed;
 }
 
 /**
  * Reserve one slice's row, pending, before any money moves. `null` for a
  * zero amount; `exists` when the charge already holds this slice (a replay).
+ * `held`: a dispute holds the sale (`saleIsHeld`), so it will not be sent.
  */
 async function reserveSlice(
   db: DatabaseClient | Tx,
-  input: RecordSliceInput
+  input: RecordSliceInput,
+  held: boolean
 ): Promise<Payout | 'exists' | null> {
   if (input.amountCents <= 0) return null;
   if (input.payee === null && input.payoutType === 'creator_payout') {
@@ -353,8 +524,9 @@ async function reserveSlice(
       transferGroup: input.transferGroup,
       creatorOrgAgreementId: input.creatorOrgAgreementId ?? null,
       // About to transfer: this opens the attempt lease, so no drain sends
-      // the row while its first transfer is still in flight.
-      ...(reason === null ? { lastRetryAt: new Date() } : {}),
+      // the row while its first transfer is still in flight. A held row is
+      // not about to transfer, so it records no attempt.
+      ...(reason === null && !held ? { lastRetryAt: new Date() } : {}),
     })
     .onConflictDoNothing(sliceConflictTarget(input.payoutType))
     // Bare `.returning()`: the client union collapses the projected overload.
@@ -363,13 +535,14 @@ async function reserveSlice(
 }
 
 /**
- * Transfer a reserved slice when its payee can be paid; otherwise it stays
- * pending in their name for the drains.
+ * Transfer a reserved slice when its payee can be paid and no dispute holds
+ * its sale (`held`); otherwise it stays pending in their name for the drains.
  */
 async function sendReservedSlice(
   deps: LedgerDeps,
   reserved: Payout,
-  input: RecordSliceInput
+  input: RecordSliceInput,
+  held: boolean
 ): Promise<RecordSliceOutcome> {
   const reason = pendingReasonFor(input);
   if (reason === 'no_owner') {
@@ -393,6 +566,18 @@ async function sendReservedSlice(
       payoutId: reserved.id,
       reason: reason ?? 'connect_not_ready',
     };
+  }
+  if (held) {
+    deps.obs.warn(
+      'A slice was recorded while a dispute holds its sale; it waits until the dispute is won or closed',
+      {
+        payoutId: reserved.id,
+        payoutType: input.payoutType,
+        amountCents: input.amountCents,
+        stripeChargeId: input.stripeChargeId,
+      }
+    );
+    return { kind: 'held', payoutId: reserved.id };
   }
 
   let transfer: Stripe.Transfer;
@@ -610,6 +795,17 @@ export async function settleTransfer(
 /**
  * Record the platform's slice: retained on the platform balance, so no
  * transfer — the charge id proves the money. One row per charge.
+ *
+ * Returns the platform fee ON RECORD for the charge: this amount when it is
+ * the first, or the amount an earlier delivery recorded (0 if none). Fees can
+ * change between deliveries, and a replay must split the rest of the charge
+ * from the fee recorded, so the slices sum to the gross (owner decision
+ * 2026-10-23, "Keep recorded fee"; Codex-2hxff.49).
+ *
+ * `unlessSplit`: record no fee on a charge already split with no fee row.
+ * The fee is written before the split and a 0 fee writes no row, so that
+ * charge's first fee was 0, and a replay must not add one on top of its
+ * split (`feeStillOpen`).
  */
 export async function recordPlatformFee(
   deps: Pick<LedgerDeps, 'db'>,
@@ -619,27 +815,71 @@ export async function recordPlatformFee(
     source: SliceSource;
     stripeChargeId: string;
     transferGroup: string;
+    unlessSplit?: boolean;
   }
-): Promise<void> {
-  if (input.amountCents <= 0) return;
-  await deps.db
-    .insert(payouts)
-    .values({
-      userId: null,
-      organizationId: input.organizationId,
-      ...sourceColumns(input.source),
-      sourceType: input.source.sourceType,
-      amountCents: input.amountCents,
-      payoutType: 'platform_fee',
-      status: 'paid',
-      stripeChargeId: input.stripeChargeId,
-      transferGroup: input.transferGroup,
-      resolvedAt: new Date(),
-    })
-    .onConflictDoNothing({
-      target: payouts.stripeChargeId,
-      where: sql`${payouts.payoutType} = 'platform_fee'`,
-    });
+): Promise<number> {
+  const amountCents =
+    input.unlessSplit && input.amountCents > 0
+      ? (await feeStillOpen(deps.db, input.stripeChargeId))
+        ? input.amountCents
+        : 0
+      : input.amountCents;
+  if (amountCents > 0) {
+    const [inserted] = await deps.db
+      .insert(payouts)
+      .values({
+        userId: null,
+        organizationId: input.organizationId,
+        ...sourceColumns(input.source),
+        sourceType: input.source.sourceType,
+        amountCents,
+        payoutType: 'platform_fee',
+        status: 'paid',
+        stripeChargeId: input.stripeChargeId,
+        transferGroup: input.transferGroup,
+        resolvedAt: new Date(),
+      })
+      .onConflictDoNothing({
+        target: payouts.stripeChargeId,
+        where: sql`${payouts.payoutType} = 'platform_fee'`,
+      })
+      // Bare `.returning()`: the client union collapses the projected overload.
+      .returning();
+    if (inserted) return inserted.amountCents;
+  }
+  const [recorded] = await deps.db
+    .select({ amountCents: payouts.amountCents })
+    .from(payouts)
+    .where(
+      and(
+        eq(payouts.stripeChargeId, input.stripeChargeId),
+        eq(payouts.payoutType, 'platform_fee')
+      )
+    )
+    .limit(1);
+  return recorded?.amountCents ?? 0;
+}
+
+/**
+ * Whether a charge's platform fee can still be recorded: it is not split yet,
+ * or it has a fee row (which then wins through the insert's conflict). A
+ * charge split with no fee row had a fee of 0 (money review LOW-1 and r2 L2,
+ * Codex-2hxff.49).
+ */
+async function feeStillOpen(
+  db: DatabaseClient,
+  stripeChargeId: string
+): Promise<boolean> {
+  const onCharge = await db
+    .select({ payoutType: payouts.payoutType })
+    .from(payouts)
+    .where(eq(payouts.stripeChargeId, stripeChargeId));
+  return (
+    onCharge.some((row) => row.payoutType === 'platform_fee') ||
+    !onCharge.some((row) =>
+      SPLIT_SLICE_TYPES.some((type) => type === row.payoutType)
+    )
+  );
 }
 
 /**
@@ -1010,9 +1250,10 @@ async function handleFailureOnMovedRow(
   let transferId: string | undefined;
   let lookupError: string | undefined;
   try {
+    // The attempt's own destination: the one account it could have reached.
     const found = await findTransfersForPayouts(
       deps.stripe,
-      attempt.destination,
+      { current: attempt.destination, replaced: [] },
       [row],
       deps.obs
     );
@@ -1176,15 +1417,11 @@ export async function cancelUnpaidPayout(
   if (!row.userId) return { kind: 'cancelled', transferId: undefined };
 
   try {
-    const [account] = await deps.db
-      .select({ stripeAccountId: stripeConnectAccounts.stripeAccountId })
-      .from(stripeConnectAccounts)
-      .where(eq(stripeConnectAccounts.userId, row.userId))
-      .limit(1);
-    if (!account) return { kind: 'cancelled', transferId: undefined };
+    // Every account the payee has had: the transfer may have gone to one
+    // they have since replaced (Codex-2hxff.47).
     const found = await findTransfersForPayouts(
       deps.stripe,
-      account.stripeAccountId,
+      await payeeAccountIds(deps.db, row.userId),
       [row],
       deps.obs
     );
@@ -1206,21 +1443,114 @@ export async function cancelUnpaidPayout(
 }
 
 /**
- * The transfers Stripe has already made to `destination` for any of these
- * rows, by row id. A drain calls this BEFORE re-sending: a row whose transfer
- * went through but whose update failed must be settled, not paid twice —
- * Stripe forgets an idempotency key after ~24h, so the key alone cannot
- * prevent it.
+ * Where a payee's transfers can have gone: their Connect account now, if they
+ * have one, and every account they have had and replaced, newest first.
+ */
+export interface PayeeAccounts {
+  current: string | null;
+  replaced: string[];
+}
+
+/**
+ * A payee's Connect accounts, current and replaced (Codex-2hxff.47; owner
+ * decision 2026-10-23, "Keep account history"). The history is written by a
+ * database trigger whenever a `stripe_connect_accounts` row is deleted or
+ * re-keyed, so a manual support edit is in it too. An account re-attached
+ * after its row was deleted is listed once, as current.
+ */
+export async function payeeAccountIds(
+  db: DatabaseClient,
+  userId: string
+): Promise<PayeeAccounts> {
+  const [[account], history] = await Promise.all([
+    db
+      .select({ stripeAccountId: stripeConnectAccounts.stripeAccountId })
+      .from(stripeConnectAccounts)
+      .where(eq(stripeConnectAccounts.userId, userId))
+      .limit(1),
+    db
+      .select({ stripeAccountId: stripeConnectAccountHistory.stripeAccountId })
+      .from(stripeConnectAccountHistory)
+      .where(eq(stripeConnectAccountHistory.userId, userId))
+      .orderBy(desc(stripeConnectAccountHistory.replacedAt)),
+  ]);
+  const current = account?.stripeAccountId ?? null;
+  return {
+    current,
+    replaced: history
+      .map((row) => row.stripeAccountId)
+      .filter((id) => id !== current),
+  };
+}
+
+/**
+ * The transfers Stripe has already made to the payee for any of these rows,
+ * by row id. A drain calls this BEFORE re-sending: a row whose transfer went
+ * through but whose update failed must be settled, not paid twice — Stripe
+ * forgets an idempotency key after ~24h, so the key alone cannot prevent it.
+ *
+ * The current account is searched for every row. An account the payee has
+ * replaced is searched only for the rows that have an attempt on record
+ * (`lastRetryAt`, as it stood BEFORE any claim the caller made): a row never
+ * attempted has no transfer anywhere. So a payee with no history, or no
+ * attempted row, costs the one Stripe search it always did (Codex-2hxff.47).
  *
  * Matches the `payout_id` metadata every writer sets, and `pending_payout_id`
  * from drains before Codex-2hxff.11. A row that matches more than one
- * transfer was paid twice; that is logged (with `log`) for a person to
- * reverse, and the newest is returned.
- *
- * Only the payee's CURRENT account is searched: a transfer to an account
- * they have since replaced is not found (Codex-2hxff.47).
+ * transfer was paid twice, on one account or on two; that is logged (with
+ * `log`) for a person to reverse. On one account the newest is returned; on
+ * two, the one found first (the current account's).
  */
 export async function findTransfersForPayouts(
+  stripe: Stripe,
+  accounts: PayeeAccounts,
+  rows: ReadonlyArray<{
+    id: string;
+    createdAt: Date;
+    lastRetryAt?: Date | null;
+  }>,
+  log?: LedgerLogger
+): Promise<Map<string, string>> {
+  const found = new Map<string, { transferId: string; destination: string }>();
+  const attempted = rows.filter((row) => row.lastRetryAt != null);
+  const searches = [
+    ...(accounts.current ? [{ destination: accounts.current, rows }] : []),
+    ...(attempted.length > 0
+      ? accounts.replaced.map((destination) => ({
+          destination,
+          rows: attempted,
+        }))
+      : []),
+  ];
+  for (const search of searches) {
+    const on = await findTransfersTo(
+      stripe,
+      search.destination,
+      search.rows,
+      log
+    );
+    for (const [id, transferId] of on) {
+      const first = found.get(id);
+      if (!first) {
+        found.set(id, { transferId, destination: search.destination });
+        continue;
+      }
+      log?.error(
+        "A payout matches Stripe transfers on two of the payee's accounts: it was paid twice",
+        {
+          errorId: crypto.randomUUID(),
+          payoutId: id,
+          destinations: [first.destination, search.destination],
+          stripeTransferIds: [first.transferId, transferId],
+        }
+      );
+    }
+  }
+  return new Map([...found].map(([id, { transferId }]) => [id, transferId]));
+}
+
+/** `findTransfersForPayouts` for one destination. */
+async function findTransfersTo(
   stripe: Stripe,
   destination: string,
   rows: ReadonlyArray<{ id: string; createdAt: Date }>,

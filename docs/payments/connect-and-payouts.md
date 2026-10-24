@@ -181,7 +181,7 @@ The `payouts` table holds one row for every slice of every sale and invoice.
 |---|---|
 | `payoutType` | `platform_fee`, `organization_fee`, `creator_payout`, `creator_payout_to_owner` |
 | `status` | `paid`, `pending`, `failed`, `reversed`, `cancelled_by_refund`, `cancelled_by_dispute` |
-| `reason` (when not paid) | `connect_not_ready` (no account), `connect_restricted` (an account that cannot take charges), `transfer_failed`, `min_transfer_floor`, `no_owner` (the organisation had no owner at the sale's time — the row has no payee yet); empty on a pending row while its transfer is in flight |
+| `reason` (when not paid) | `connect_not_ready` (no account), `connect_restricted` (an account that cannot take charges), `transfer_failed`, `min_transfer_floor`, `no_owner` (the organisation had no owner at the sale's time — the row has no payee yet); empty on a pending row while its transfer is in flight, or while a dispute holds its sale ([below](#releasing-pending-money)) |
 | `sourceType` | `purchase` or `subscription` (course subscriptions use `subscription`) |
 | References | the charge (`stripeChargeId`), the transfer once made, the payee, the organisation (empty for orgless sales), the purchase or subscription; on an organisation subscription invoice's creator slice, the agreement it was split by (`creator_org_agreement_id`, `Codex-2hxff.19`) |
 | Failures | `last_error_code` and `last_error_type` (Stripe's, from the last failed transfer), `failure_count` (Stripe refusals only), `needs_review_at` (set when the row waits for support) — see [When Stripe keeps refusing a payout](#when-stripe-keeps-refusing-a-payout) |
@@ -201,14 +201,29 @@ Rules:
   A replayed purchase webhook re-records the purchase's slices from its stored
   split, adding only a slice the first delivery never wrote — unless the
   purchase has been refunded or disputed since.
-- **An organisation subscription invoice is split once** (owner decision
-  2026-10-21, "Keep its first split", `Codex-2hxff.62`). Its slices past the
-  platform fee are reserved together, in one transaction that holds a lock on
-  the charge (`recordSplitOnce`). A redelivery that finds any of them adds
-  nothing. This includes a redelivery after a creator accepts an agreement
-  backdated to before the invoice: the creator is paid from the next invoice,
-  and the owner keeps what the first split gave them. A slice that was
-  reserved but never sent is paid by the drains.
+- **A subscription invoice is split once**, an organisation's or a course
+  plan's (owner decision 2026-10-21, "Keep its first split", `Codex-2hxff.62`;
+  course plans since `Codex-2hxff.49`). Its slices past the platform fee are
+  reserved together, in one transaction that holds a lock on the charge
+  (`recordSplitOnce`). A redelivery that finds any of them keeps every slice
+  recorded, and logs at error each one it would have computed differently.
+  It adds only a slice the split defines that is missing entirely, from what
+  the charge has left (the gross less every row recorded on it); with nothing
+  left, it adds nothing. So a redelivery after a creator accepts an agreement
+  backdated to before the invoice pays that creator nothing: the owner's first
+  split already took the whole charge, and the creator is paid from the next
+  invoice. Only a delivery that died between slices, under the per-slice
+  writers before `Codex-2hxff.49`, leaves a slice missing; its redelivery
+  records it, so nothing owed is left without a row. A slice that was reserved
+  but never sent is paid by the drains.
+- **A replay keeps the platform fee on record** (owner decision 2026-10-23,
+  "Keep recorded fee", `Codex-2hxff.49`). Fees are read when an invoice is
+  processed, so they can change between a delivery and its redelivery. If the
+  first delivery recorded the platform fee and died before the split, the
+  redelivery splits the rest of the charge (the gross minus the fee recorded)
+  by the fees in force now, so the slices still sum exactly to the gross. That
+  is logged at warn. See
+  [fees-and-splits](fees-and-splits.md#a-replayed-invoice).
 - **Nothing is dropped.** A slice that cannot be paid yet is a pending row in
   its payee's name. The organisation's money while it has **no owner** is a
   pending `no_owner` row with no payee (owner decision 2026-10-18, "Hold it for
@@ -227,7 +242,8 @@ Rules:
   its transfer is in flight, and stays so if the transfer landed but the row
   could not be marked paid; a `failed` row's transfer may have landed despite
   the error. So a refund first cancels a pending or failed row — nothing can
-  mark it paid afterwards — then looks for a transfer Stripe made for it, and
+  mark it paid afterwards — then looks for a transfer Stripe made for it, on
+  any account the payee has had ([replaced accounts](#transfers)), and
   reverses that like a paid row's. A transfer that lands after the cancel is
   reversed by whoever sent it: its row is no longer payable, so nothing would
   ever account for the money. That includes a transfer whose call failed
@@ -256,6 +272,24 @@ Rules:
   the drain looks for that transfer in Stripe and settles the row instead.
   Stripe forgets idempotency keys after about 24 hours, so the key alone is
   not enough.
+- **A replaced Connect account is still searched** (owner decision
+  2026-10-23, "Keep account history", `Codex-2hxff.47`). Transfers are looked
+  up by their destination, so a transfer sent to an account the payee no
+  longer has would not be found, and the drain would send the row again. A
+  database trigger records the old account, for its old user, in
+  `stripe_connect_account_history` whenever a `stripe_connect_accounts` row is
+  deleted, its `stripe_account_id` changes, or it is moved to another user
+  (`user_id` changes), so a manual support edit is caught too. The history
+  starts at migration 0113: an account replaced before 0113 is not in it, and
+  cannot be added later. The lookup (`findTransfersForPayouts`) searches the
+  current account for every row, then each replaced account, newest first,
+  for the rows that have an attempt on record (`last_retry_at`). A row never
+  attempted has no transfer anywhere, so a payee with no history, or no
+  attempted row, costs the one Stripe search it always did. A row found on
+  two of the payee's accounts was paid twice: that is logged at error with
+  both transfers, and the current account's settles it. The drain and a
+  refund's cancel both use it (`payeeAccountIds`). The app itself never
+  replaces an account.
 
 | Transfer | Idempotency key |
 |---|---|
@@ -305,14 +339,32 @@ account's metadata.
 **How a drain works.** A payee's pending and failed rows are grouped by
 organisation and source, so each group is paid at its own organisation's fees.
 A group below the minimum transfer waits. Each row is claimed for one attempt;
-a transfer Stripe already made for it is found by its `payout_id` and settles
-it; the rest are transferred with key `payout_${payoutId}_${attempt}` and
-marked `paid`, or `failed` to be retried next time. One group's failure never
-stops the next. Rows held for an open dispute or inquiry are skipped, and so
-are rows waiting for support (`isDrainablePayout`;
-[disputes](purchases.md#disputes)). The payee then gets **one**
-`payout-released` email, with what was actually paid to their creator slices
-in this drain, whatever the number of organisations.
+a transfer Stripe already made for it is found by its `payout_id`, on the
+payee's current account or one they have replaced, and settles it; the rest
+are transferred with key `payout_${payoutId}_${attempt}` and marked `paid`, or
+`failed` to be retried next time. One group's failure never stops the next.
+Rows waiting for support are skipped (`isDrainablePayout`), and so are rows
+held by a dispute ([disputes](purchases.md#disputes)):
+
+- A row is held while its sale has an open dispute or inquiry, or a lost one
+  whose loss is not applied yet. A won or closed one releases it.
+- A re-pay row (a won dispute paying a reversal back) has no charge of its
+  own. It is held through the slice it re-pays, while that slice's charge has
+  such a dispute: a second dispute of the same charge, which Stripe allows
+  (`Codex-2hxff.59`). It is also held while the dispute that re-paid it is
+  `won` but its outcome is not applied yet (`outcome_applied_at`): the win's
+  follow-up, which takes a refund's share off the re-pay row, may have failed
+  and be waiting for the reconcile to retry it. Paid in full first, that
+  share would become a debt for a person to collect.
+- A slice recorded while a dispute holds its sale is not sent at write time
+  either. It is reserved `pending` (no reason, no attempt) and paid by the
+  drains once the dispute is won or closed (owner decision Q1, "the sale's
+  pending slices held"). A payee who cannot be paid yet keeps their own
+  reason, as before.
+
+The payee then gets **one** `payout-released` email, with what was actually
+paid to their creator slices in this drain, whatever the number of
+organisations.
 
 **The sweep.** An ecom-api cron at `0 * * * *`, in production only. Each run
 claims at most 50 payees whose rows have waited more than 15 minutes since

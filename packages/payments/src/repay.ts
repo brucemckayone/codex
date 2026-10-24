@@ -13,15 +13,23 @@
  */
 
 import {
+  disputes,
   type Payout,
   type PayoutReversal,
   payoutReversals,
   payouts,
   refundReviews,
+  refunds,
 } from '@codex/database/schema';
 import { ConflictError, ServiceUnavailableError } from '@codex/service-errors';
 import { and, eq, inArray, isNull, lt, or, type SQL, sql } from 'drizzle-orm';
-import { type ClawbackDeps, settleIfFullyReversed } from './clawback';
+import {
+  type ClawbackDeps,
+  type ClawbackSource,
+  listClawableRefunds,
+  reverseCharge,
+  settleIfFullyReversed,
+} from './clawback';
 import { PAYOUT_ATTEMPT_LEASE_MINUTES } from './payout-ledger';
 
 export interface DisputeRepayResult {
@@ -55,7 +63,10 @@ type Tx = Parameters<Parameters<ClawbackDeps['db']['transaction']>[0]>[0];
  * - a debt is `cancelled` and its open `refund_reviews` row closed as
  *   `dispute_won`; one the payee already settled is paid back instead;
  * - the platform fee's share (`retained_fee`) is cancelled, and a fee slice
- *   that share had marked `reversed` is paid again: the money is back.
+ *   that share had marked `reversed` is paid again: the money is back;
+ * - a refund that settled while the chargeback held the whole slice then
+ *   takes its share off the new re-pay row (`clawBackRefundsUnderDispute`),
+ *   so the payee keeps what the refund alone would have left them.
  *
  * The dispute's status is `won` before this runs, so no clawback can claim one
  * of its steps any more (`reverseCharge`). Rejects with a
@@ -129,6 +140,11 @@ export async function repayDispute(
       }
     }
   }
+  await clawBackRefundsUnderDispute(
+    deps,
+    input.disputeId,
+    steps.map(({ slice }) => slice)
+  );
 
   if (busy > 0) {
     throw new ServiceUnavailableError(
@@ -141,6 +157,71 @@ export async function repayDispute(
     ...result,
   });
   return result;
+}
+
+/** A refund the clawback acts on: settled at Stripe, either way. */
+const SETTLED_REFUND_STATUSES = ['succeeded', 'failed'];
+
+/**
+ * Claw back, from the re-pay rows just written, the refunds a full chargeback
+ * left no slice for (Codex-2hxff.59). A refund created before the dispute can
+ * settle after it opens. The chargeback had already reversed the whole slice,
+ * so the refund's run found nothing left and wrote no step, and the re-pay
+ * returns the refund's share with the chargeback's.
+ *
+ * The charge's clawback runs again for each source: a refund with no step on
+ * a re-paid slice takes its share off the re-pay row, by a step on that row
+ * (`reverseCharge`, the re-paid path), exactly as a refund after the win
+ * would. That step is also what stops a later run of the same refund from
+ * taking it a second time. A refund that already has a step is skipped, so
+ * the usual case pays back the whole reversal.
+ *
+ * Only a charge with a settled refund on record asks Stripe anything. A
+ * failure rejects: the webhook retries, and this runs again.
+ */
+async function clawBackRefundsUnderDispute(
+  deps: ClawbackDeps,
+  disputeId: string,
+  slices: readonly Payout[]
+): Promise<void> {
+  if (slices.length === 0) return;
+  const [dispute] = await deps.db
+    .select({ chargeId: disputes.stripeChargeId })
+    .from(disputes)
+    .where(eq(disputes.stripeDisputeId, disputeId))
+    .limit(1);
+  if (!dispute) return;
+  const [refund] = await deps.db
+    .select({ id: refunds.id })
+    .from(refunds)
+    .where(
+      and(
+        eq(refunds.stripeChargeId, dispute.chargeId),
+        inArray(refunds.status, SETTLED_REFUND_STATUSES)
+      )
+    )
+    .limit(1);
+  if (!refund) return;
+
+  const charge = await deps.stripe.charges.retrieve(dispute.chargeId);
+  const sources = new Map<string, ClawbackSource>();
+  for (const slice of slices) {
+    if (slice.sourceType === 'purchase' && slice.purchaseId) {
+      sources.set(slice.purchaseId, {
+        sourceType: 'purchase',
+        purchaseId: slice.purchaseId,
+      });
+    } else {
+      sources.set('subscription', { sourceType: 'subscription' });
+    }
+  }
+  for (const source of sources.values()) {
+    await reverseCharge(deps, {
+      charge: { id: charge.id, amountCents: charge.amount },
+      source,
+      refunds: () => listClawableRefunds(deps.stripe, charge.id),
+    });
+  }
 }
 
 function leaseStart(now: Date): Date {

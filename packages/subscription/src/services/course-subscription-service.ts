@@ -62,8 +62,9 @@ import {
   isGbpOrUnset,
   issueRefund,
   type LedgerDeps,
+  type RecordSliceInput,
   recordPlatformFee,
-  recordSlice,
+  recordSplitOnce,
   resolveInvoiceCharge,
   resolveOrganisationPayee,
   reverseEarlierRefundsAfterCommit,
@@ -2144,12 +2145,12 @@ export class CourseSubscriptionService extends BaseService {
     const { creatorId, organizationId } = course;
 
     // Idempotency: `invoice.payment_succeeded` can redeliver. Every slice is
-    // reserved by a per-charge unique key before any transfer (recordSlice,
-    // Codex-2hxff.11), so a redelivery re-runs this whole fan-out safely: the
-    // slices already recorded are skipped and only a missing one is added.
-    // (A per-charge SELECT pre-check used to skip the fan-out if ANY row
-    // existed — so a delivery that died after the platform fee lost the
-    // creator and org slices for good.)
+    // reserved by a per-charge unique key before any transfer (Codex-2hxff.11),
+    // and the creator and organisation slices are reserved together, once
+    // (`recordSplitOnce`, Codex-2hxff.49): a slice recorded stands, so a fee
+    // change between deliveries cannot re-size it. A delivery that died after
+    // the platform fee, or between the slices (the per-slice writer before
+    // this), is completed by the redelivery from what the charge has left.
 
     const fees = this.feeConfig
       ? await this.feeConfig.getFeesForCreator(
@@ -2210,25 +2211,49 @@ export class CourseSubscriptionService extends BaseService {
     } as const;
     const transferGroup = `course_sub_${sub.id}`;
 
-    // 1. Platform fee — retained on the platform balance (no transfer).
-    await recordPlatformFee(ledger, {
+    // 1. Platform fee — retained on the platform balance (no transfer). A
+    // replay keeps the fee an earlier delivery recorded, and the pool is the
+    // gross minus it, split by the same organisation share, so the slices sum
+    // to the gross (owner decision 2026-10-23, "Keep recorded fee").
+    const recordedFeeCents = await recordPlatformFee(ledger, {
       amountCents: split.platformFeeCents,
       organizationId,
       source,
       stripeChargeId,
       transferGroup,
+      unlessSplit: true,
     });
+    let pool: { organizationFeeCents: number; creatorPayoutCents: number } =
+      split;
+    if (recordedFeeCents !== split.platformFeeCents) {
+      this.obs.warn(
+        'A replay found a different platform fee on record; the rest of the charge is split from it',
+        {
+          courseSubscriptionId: sub.id,
+          organizationId,
+          stripeChargeId,
+          recordedFeeCents,
+          computedFeeCents: split.platformFeeCents,
+        }
+      );
+      pool = calculateRevenueSplit(
+        Math.max(amountCents - recordedFeeCents, 0),
+        0,
+        effectiveOrgFeePercent
+      );
+    }
 
+    const slices: RecordSliceInput[] = [];
     // 2. Creator payout — to the course creator's single account.
-    if (split.creatorPayoutCents > 0) {
+    if (pool.creatorPayoutCents > 0) {
       const [creatorConnect] = await this.db
         .select()
         .from(stripeConnectAccounts)
         .where(eq(stripeConnectAccounts.userId, creatorId))
         .limit(1);
-      await recordSlice(ledger, {
+      slices.push({
         payoutType: 'creator_payout',
-        amountCents: split.creatorPayoutCents,
+        amountCents: pool.creatorPayoutCents,
         organizationId,
         source,
         stripeChargeId,
@@ -2246,16 +2271,16 @@ export class CourseSubscriptionService extends BaseService {
     // 3. Organization fee — to the owner when the invoice was created; pending
     // in their name until they can be paid, or held as `no_owner` if the
     // organisation had none (Codex-2hxff.37; it used to be logged and dropped).
-    if (split.organizationFeeCents > 0) {
+    if (pool.organizationFeeCents > 0) {
       const orgPayee = await resolveOrganisationPayee(
         this.db,
         organizationId,
         invoiceCreatedAt,
         this.obs
       );
-      await recordSlice(ledger, {
+      slices.push({
         payoutType: 'organization_fee',
-        amountCents: split.organizationFeeCents,
+        amountCents: pool.organizationFeeCents,
         organizationId,
         source,
         stripeChargeId,
@@ -2267,6 +2292,21 @@ export class CourseSubscriptionService extends BaseService {
         idempotencyKey: `${stripeChargeId}_org_fee`,
         metadata: { course_subscription_id: sub.id },
       });
+    }
+
+    if (slices.length === 0) return;
+    const recorded = await recordSplitOnce(
+      ledger,
+      { id: stripeChargeId, grossCents: amountCents },
+      slices
+    );
+    if (recorded.kind !== 'recorded') {
+      this.obs.info(
+        recorded.kind === 'completed'
+          ? 'Course invoice already split by an earlier delivery that died part-way; the replay recorded only the slices it lacked'
+          : 'Course invoice already split by an earlier delivery; the replay keeps that split',
+        { courseSubscriptionId: sub.id, organizationId, stripeChargeId }
+      );
     }
   }
 }

@@ -6847,8 +6847,9 @@ describe('PurchaseService Integration', () => {
   // charge.refunded can arrive BEFORE checkout.session.completed. processRefund
   // used to find no row, WARN + return 200 → refund lost. It now self-heals via
   // ensurePurchaseDataPresent, which rebuilds the row from the Stripe checkout
-  // session. MINIMAL by design: no transfers/payouts fire (no funds ever moved),
-  // so this is independent of the after-transfer clawback policy (Codex-13v21).
+  // session. No transfers/payouts fire here (no funds ever moved): the later
+  // completion records them, from the real split (Codex-2hxff.68; covered in
+  // refund-before-payout.integration.test.ts).
   describe('processRefund — self-heal ordering race #4 (Codex-aa08z)', () => {
     // The self-heal validates session metadata against the SAME
     // checkoutSessionMetadataSchema the production webhook uses, whose
@@ -6935,9 +6936,9 @@ describe('PurchaseService Integration', () => {
       expect(row.status).toBe('refunded');
       expect(row.refundAmountCents).toBe(2999);
       expect(row.stripeRefundId).toBe('re_race_1');
-      // Fee columns carry a balancing default split (satisfies the CHECK
-      // amount = platform + org + creator), but crucially NO transfer executed
-      // and NO payouts ledger rows were written — the money never moved.
+      // Fee columns carry the sale's split (the CHECK amount = platform + org
+      // + creator holds), but crucially NO transfer executed and NO payouts
+      // ledger rows were written — the money never moved.
       expect(
         row.platformFeeCents + row.organizationFeeCents + row.creatorPayoutCents
       ).toBe(2999);

@@ -74,9 +74,16 @@ const COURSE_GRANT_SOURCES: string[] = [
  * invoices is open (`course_subscriptions.disputed_at`). Read here rather than
  * revoking the grant: the subscription's own lifecycle rewrites the grant, and
  * would re-grant it (Codex-2hxff.9, docs/payments/subscription-disputes.md).
+ *
+ * Matched by buyer and course, not by the grant's `source_ref`
+ * (Codex-2hxff.59): a grant that outlived its subscription can be carried on
+ * by the next one without its `source_ref` changing. Only a subscription that
+ * has not ended pauses it, so a re-subscription after a lost dispute (whose
+ * ended row keeps `disputed_at`) is not paused. A duplicate subscription
+ * grants nothing (Codex-2hxff.15), so its dispute pauses nothing either.
  */
 export function grantNotPausedByDispute(): SQL {
-  return sql`NOT EXISTS (SELECT 1 FROM ${courseSubscriptions} WHERE ${entitlements.source} = 'course_subscription' AND ${courseSubscriptions.id} = ${entitlements.sourceRef} AND ${courseSubscriptions.disputedAt} IS NOT NULL)`;
+  return sql`NOT EXISTS (SELECT 1 FROM ${courseSubscriptions} WHERE ${entitlements.source} = 'course_subscription' AND ${courseSubscriptions.userId} = ${entitlements.userId} AND ${courseSubscriptions.courseId} = ${entitlements.courseId} AND ${courseSubscriptions.disputedAt} IS NOT NULL AND ${courseSubscriptions.endedAt} IS NULL AND ${courseSubscriptions.duplicateOfCourseSubscriptionId} IS NULL)`;
 }
 
 /**

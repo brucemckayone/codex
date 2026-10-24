@@ -95,21 +95,41 @@ async function resolveDisputedSubscription(
   return found;
 }
 
-/** A chargeback opened: access paused. No Stripe call (see pauseBilling). */
+/**
+ * A chargeback opened (or lost): access paused. No Stripe call (see
+ * pauseBilling). Undefined, and nothing paused, once the dispute no longer
+ * holds the subscription: a win recorded while this ran (the hourly
+ * reconcile re-runs an open chargeback, Codex-2hxff.58) must not be undone.
+ */
 export async function pauseDisputedSubscription(
   deps: SubscriptionDisputeDeps,
   input: DisputeInput
 ): Promise<DisputedSubscription | undefined> {
   const subscription = await resolveDisputedSubscription(deps, input);
   if (!subscription) return undefined;
-  await setDisputedAt(deps, subscription, new Date());
-  return subscription;
+  const held = await setDisputedAt(
+    deps,
+    subscription,
+    new Date(),
+    input.stripeDisputeId
+  );
+  return held ? subscription : undefined;
 }
 
 /**
  * Billing paused while the chargeback is open (owner decision Q-A): the
  * subscription stays `active` at Stripe and every invoice is voided. Run
  * after the clawback, so a Stripe failure here cannot hold it up.
+ *
+ * Only while the dispute is still an open chargeback. Its idempotency key
+ * lasts 24 hours, so a later re-run would pause again after a win resumed
+ * billing: the row is read just before, and again just after, the Stripe
+ * call. A win recorded while the pause was in flight may have resumed billing
+ * first, so billing is resumed again under a key of its own, unless something
+ * else still holds the subscription.
+ *
+ * A failure after the pause is alerted, not thrown: no retry comes back here,
+ * because a retry finds the dispute no longer holding and pauses nothing.
  */
 export async function pauseBilling(
   deps: SubscriptionDisputeDeps,
@@ -117,12 +137,39 @@ export async function pauseBilling(
   stripeDisputeId: string
 ): Promise<void> {
   const stripeId = subscription.stripeSubscriptionId;
-  if (!stripeId || !(await isLiveAtStripe(deps, stripeId))) return;
+  if (!stripeId || !(await isOpenChargeback(deps, stripeDisputeId))) return;
+  if (!(await isLiveAtStripe(deps, stripeId))) return;
   await deps.stripe.subscriptions.update(
     stripeId,
     { pause_collection: { behavior: 'void' } },
     { idempotencyKey: `${stripeDisputeId}_pause_collection` }
   );
+  try {
+    if (!(await releasedWhilePausing(deps, subscription, stripeDisputeId)))
+      return;
+    deps.obs.warn(
+      'A dispute closed while its billing pause was sent; billing resumed again',
+      {
+        stripeDisputeId,
+        subscriptionId: subscription.id,
+      }
+    );
+    await deps.stripe.subscriptions.update(
+      stripeId,
+      { pause_collection: '' },
+      { idempotencyKey: `${stripeDisputeId}_resume_after_pause` }
+    );
+  } catch (error) {
+    deps.obs.error(
+      'Billing was paused for a dispute, and checking whether the dispute closed meanwhile, or resuming billing, failed. Nothing retries this: if the dispute is won and no other chargeback holds the subscription, every invoice is voided until billing is resumed by hand',
+      {
+        errorId: crypto.randomUUID(),
+        stripeDisputeId,
+        subscriptionId: subscription.id,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+  }
 }
 
 /**
@@ -195,23 +242,92 @@ async function fromStripeInvoice(
   return subscriptionForStripeId(deps, paid.stripeSubscriptionId);
 }
 
-/** Set (pause) or clear (restore) `disputed_at`; a no-op if already so. */
+/**
+ * Set (pause) or clear (restore) `disputed_at`; a no-op if already so.
+ *
+ * A pause is written only while `pausedBy` still holds the subscription (an
+ * open or lost chargeback), under a share lock on its row, in the same
+ * transaction. A win recorded meanwhile is then either seen here, and nothing
+ * is paused, or waits for this commit, so its restore runs after and clears
+ * it. Returns whether the dispute holds. A clear is unconditional.
+ */
 async function setDisputedAt(
   deps: SubscriptionDisputeDeps,
   subscription: DisputedSubscription,
-  at: Date | null
-): Promise<void> {
+  at: Date | null,
+  pausedBy?: string
+): Promise<boolean> {
   const table =
     subscription.kind === 'tier' ? subscriptions : courseSubscriptions;
-  await deps.db
-    .update(table)
-    .set({ disputedAt: at, updatedAt: new Date() })
-    .where(
-      and(
-        eq(table.id, subscription.id),
-        at ? isNull(table.disputedAt) : isNotNull(table.disputedAt)
-      )
-    );
+  return deps.db.transaction(async (tx) => {
+    if (at && pausedBy) {
+      const [dispute] = await tx
+        .select({ status: disputes.status })
+        .from(disputes)
+        .where(eq(disputes.stripeDisputeId, pausedBy))
+        .limit(1)
+        .for('share');
+      if (dispute && !HOLDING_STATUSES.includes(dispute.status)) return false;
+    }
+    await tx
+      .update(table)
+      .set({ disputedAt: at, updatedAt: new Date() })
+      .where(
+        and(
+          eq(table.id, subscription.id),
+          at ? isNull(table.disputedAt) : isNotNull(table.disputedAt)
+        )
+      );
+    return true;
+  });
+}
+
+/** A chargeback that took the money and was not won: open, or lost. */
+const HOLDING_STATUSES: readonly string[] = [
+  ...DISPUTE_CHARGEBACK_OPEN_STATUSES,
+  'lost',
+];
+
+/** Whether the dispute's row still records an open chargeback. */
+async function isOpenChargeback(
+  deps: SubscriptionDisputeDeps,
+  stripeDisputeId: string
+): Promise<boolean> {
+  const [dispute] = await deps.db
+    .select({ status: disputes.status })
+    .from(disputes)
+    .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+    .limit(1);
+  return (
+    dispute !== undefined &&
+    (DISPUTE_CHARGEBACK_OPEN_STATUSES as readonly string[]).includes(
+      dispute.status
+    )
+  );
+}
+
+/**
+ * The dispute stopped holding the subscription while its billing pause was in
+ * flight, and nothing else holds it. Not when it was lost (the lost path
+ * cancels the subscription), and not while another chargeback on it is open
+ * or lost.
+ */
+async function releasedWhilePausing(
+  deps: SubscriptionDisputeDeps,
+  subscription: DisputedSubscription,
+  stripeDisputeId: string
+): Promise<boolean> {
+  const [dispute] = await deps.db
+    .select({ status: disputes.status })
+    .from(disputes)
+    .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+    .limit(1);
+  if (!dispute || HOLDING_STATUSES.includes(dispute.status)) return false;
+  return !(await hasOtherHoldingChargeback(
+    deps,
+    subscription,
+    stripeDisputeId
+  ));
 }
 
 /** Another chargeback on the subscription keeps it paused: open, or lost. */
@@ -231,7 +347,7 @@ async function hasOtherHoldingChargeback(
       and(
         link,
         ne(disputes.stripeDisputeId, stripeDisputeId),
-        inArray(disputes.status, [...DISPUTE_CHARGEBACK_OPEN_STATUSES, 'lost'])
+        inArray(disputes.status, [...HOLDING_STATUSES])
       )
     )
     .limit(1);

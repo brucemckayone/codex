@@ -45,16 +45,18 @@ The clawback engine is used unchanged, with the dispute as one more cause on the
 - **A dispute's share of a slice** is `floor(gross × (refunded + disputed) / charge) − floor(gross × refunded / charge)`. The charge's settled refunds come first, so a dispute on a partly refunded charge takes only what the refunds left.
 - **Paid slices** are reversed (`transfer_reversal`), with the key `${transferId}_reversal_${disputeId}_${attempt}`. Debts go to `refund_reviews` as for refunds. Retries, the lease and the hourly cron all apply.
 - **The platform fee** is `retained_fee`.
-- **Pending slices are not reduced while the dispute is open.** They are **held** (below). A **lost** dispute reduces them by its share, as a refund would. A slice that the refunds and the dispute take whole becomes `cancelled_by_dispute`. What a partial loss leaves of a slice is released to the drain.
+- **Pending slices are not reduced while the dispute is open.** They are **held** (below). A **lost** dispute reduces them by its share, as a refund would. A slice that the refunds and the dispute take whole becomes `cancelled_by_dispute`. What a partial loss leaves of a slice is released to the drain. An unpaid slice whose recorded steps and a new share take all of it is cancelled, not reduced to nothing (Codex-2hxff.59).
 
 ### The hold
 
 The drain skips a pending or failed slice whose charge has a dispute that is either of these:
 
 - **open:** any status but `won`, `lost`, `warning_closed` and `prevented`;
-- **`lost` with no `outcome_applied_at` yet:** a loss keeps holding until its webhook has cut the held slices, so a drain run between the two cannot pay out money the bank took back. If a step of that clawback fails, the webhook does not mark it; the hourly retry does, once none of the dispute's steps is left `pending` or `failed`.
+- **`lost` with no `outcome_applied_at` yet:** a loss keeps holding until its whole handling has run (the held slices cut, the purchase refunded or the subscription cancelled), so a drain run between the two cannot pay out money the bank took back. If any step fails, nothing marks it: the webhook's redelivery or the hourly reconcile re-runs the whole lost path, which is safe to repeat, and marks it only once that succeeds (Codex-2hxff.58). The clawback retry no longer marks a loss on its own steps alone: the chargeback's opening steps would have passed that test.
 
-The match is on the charge id, or on the purchase id, which also catches a purchase's re-pay rows (they have no charge id). There is no new column on `payouts`; the drain's query gains one `NOT EXISTS`.
+The match is on the charge id, or on the purchase id, which also catches a purchase's re-pay rows (they have no charge id). A re-pay row is also held through the charge of the slice it re-pays, so a second dispute holds a subscription's re-pay row too until its loss is applied (Codex-2hxff.59). There is no new column on `payouts`.
+
+The hold applies when a slice is first recorded as well: a payable slice whose sale a dispute or inquiry holds is reserved `pending` and not sent, and the drains pay it after a win or a close (Codex-2hxff.59). Before, an inquiry's slice was paid at once and a chargeback's was sent and then reversed.
 
 ### The re-pay: a new pending payout row per reversed slice
 
@@ -77,7 +79,8 @@ This is the mechanism a won dispute needs. It is also what support's "re-pay the
   | Platform fee's `retained_fee` | `cancelled`; a fee slice it marked `reversed` goes back to `paid` |
 
 - **A step re-checks its dispute when it is claimed.** If the dispute was won after the run began, the claim fails. A step never claimed before is cancelled and never sent. One claimed before (a `failed` attempt) may have landed, so it is left for the re-pay, which asks Stripe.
-- **The clawback never treats a re-pay row as a slice of the charge.** It is excluded from the engine's row scope. A later refund of a slice that was re-paid becomes a `refund_reviews` row for a person, because the cumulative-share rule cannot see the re-pay.
+- **The clawback never treats a re-pay row as a slice of the charge.** It is excluded from the engine's row scope. A later refund, or a second dispute once lost, takes its share of a re-paid slice off the slice's re-pay row while that row is unpaid: a `pending_reduction` step on the re-pay row, or a `cancellation` when the share takes the rest of it. A second dispute still open only holds the row. What an unpaid re-pay row cannot carry (one already paid, or a larger share) is a `slice_repaid` debt on the slice for a person (Codex-2hxff.59).
+- **A refund that settled while a full chargeback held the whole slice** wrote no step: nothing was left of the slice. On a win, the re-pay runs the charge's clawback again, so that refund takes its share off the new re-pay row, and the payee nets what the refund alone would have left (Codex-2hxff.59).
 
 ## 4. How each event runs
 
@@ -90,6 +93,8 @@ The dispute endpoint already takes `charge.dispute.created`, `.updated` and `.cl
 | Won (`won`, funds reinstated) | Restored: `disputedAt` cleared, content access and the entitlement restored | One re-pay row per reversed slice; held slices released; any dispute debt in `refund_reviews` closed |
 | Lost (`lost`) | Ends for good: the purchase becomes `refunded` (Q3), and the streaming block is written, for a dispute that opened already lost and was never paused. A subscription is cancelled | Reversals stand; held slices are cut by the dispute's share, and become `cancelled_by_dispute` when nothing is left (Q3) |
 | Lost after a partial refund | As lost | As lost; Stripe reinstates the refunded part, and the refunds already clawed it back |
+
+**Missed events are settled by the hourly reconcile** (Codex-2hxff.58). Before the payouts drain, the cron reads Stripe's `charge.dispute.*` events from the last 4 days, leaving the last 15 minutes to the webhook. It runs the webhook's own handling (`processDispute`) for any dispute that has no row, or whose unapplied row is final or would move to a later stage (inquiry, then chargeback, then closed). It then re-reads from Stripe every final row of ours whose outcome was never applied, whatever its age, skipping rows touched in the last 15 minutes (the webhook may still be handling them). Each dispute is read live from Stripe before it is acted on. An open chargeback is re-run while its events are in the window, since nothing records that opening it finished; every step is idempotent and the re-run writes no second streaming block. A failure opening a chargeback is alerted at error with an errorId and returned to Stripe for redelivery; after the 4-day window it waits for the dispute's close. A step that keeps failing is retried every hour and alerted at error with an errorId each time (owner decision 2026-10-23, "Retry hourly, alert"; no new state).
 
 ## 5. Subscriptions
 
@@ -119,12 +124,9 @@ The dispute endpoint already takes `charge.dispute.created`, `.updated` and `.cl
 
 ## 9. Known limits (from review, 2026-10-19)
 
-These are accepted for now; each is rare. The second, third and fourth are tracked in Codex-2hxff.59.
+These are accepted for now; each is rare.
 
-- **A dispute whose events were all missed is never settled.** A permanent error is answered 200, and Stripe stops retrying after 3 days. A missed close leaves the held slices waiting for good; a missed win is never re-paid. The same goes for a lost dispute whose webhook failed before its clawback wrote any step. A reconciliation sweep is filed: Codex-2hxff.58.
 - **A debt the payee paid is re-paid in full.** Once partial recoveries are recorded (Codex-2hxff.30), the re-pay must be limited to what was recovered.
-- **A later cause never touches a re-pay row.** If a won charge is refunded later, a `slice_repaid` review goes to support, and the pending re-pay row still drains in full. A second dispute on the same charge holds a purchase's re-pay row only until it closes, and never holds a subscription's.
-- **A refund that settles while a full-amount chargeback is open is not clawed back.** The chargeback has already taken the whole slice, so the refund writes no step; a win then re-pays the full chargeback share. It needs a refund created before the dispute that settles after it opens: Stripe refuses a refund on a disputed charge.
-- **A pending slice cut to nothing by a later refund after a partial loss stays `pending`** rather than being cancelled. Each drain run logs an error for it ("A pending payout was reduced to nothing; not sent") until support clears it.
 - **A win clears the user's streaming block for the organisation.** That can lift a block a subscription event set in the same 20-minute window.
-- **A chargeback that ends `prevented` is treated as a closed inquiry:** nothing is restored or re-paid. Stripe lists the status without saying whether an open chargeback can reach it.
+- **A share larger than a re-paid slice's unpaid re-pay rows** is left to a person (`slice_repaid`), for the part they cannot carry, rather than reversed from the slice's own transfer.
+- **`prevented` is a closed inquiry.** Stripe defines it as a dispute "prevented from becoming a formal chargeback" (Dispute Preventions, 2025-08-27), so nothing is restored or re-paid, and the held slices are released. A `prevented` dispute that has a dispute reversal step anyway is alerted at error with an errorId (Codex-2hxff.59).

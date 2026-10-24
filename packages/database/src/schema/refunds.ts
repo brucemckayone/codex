@@ -75,6 +75,9 @@ export const refunds = pgTable(
   (table) => [
     uniqueIndex('uq_refunds_stripe_refund_id').on(table.stripeRefundId),
     index('idx_refunds_purchase').on(table.purchaseId),
+    // Every clawback and early-refund check reads a charge's refunds
+    // (Codex-2hxff.59); without this each is a sequential scan.
+    index('idx_refunds_charge').on(table.stripeChargeId),
     // Support's open queue, oldest first.
     index('idx_refunds_failed_open')
       .on(table.createdAt)

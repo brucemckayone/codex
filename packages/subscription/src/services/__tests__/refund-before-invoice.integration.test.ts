@@ -785,7 +785,7 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
       expect(await netByType(chargeId)).toEqual(settled);
     });
 
-    it('a chargeback handled first, with no refund: the paid slice is reversed by its share and the unpaid one held, as for the late chargeback', async () => {
+    it('a chargeback handled first, with no refund: nothing is sent, every slice is held (Codex-2hxff.59); a late one reverses the paid slice whole', async () => {
       const { course, tiers } = subscribed();
       const charges = stripeCharges();
       const early = charges.charge(PRICE);
@@ -804,10 +804,25 @@ describe('A refund handled before its invoice (Codex-2hxff.67)', () => {
       );
       await chargeDisputed(tiers, charges, late);
 
+      // Owner decision Q1, "the sale's pending slices held": a slice recorded
+      // while the chargeback is open is not sent at gross only to be taken
+      // back. It waits, like the unpaid one, for the dispute's outcome.
+      const { data: transfers } = await stripe.transfers.list({ limit: 100 });
+      expect(transfers.filter((t) => t.source_transaction === early)).toEqual(
+        []
+      );
+      const earlyRows = await slicesOf(early);
+      expect(statusByType(earlyRows)).toEqual({
+        platform_fee: 'reversed',
+        creator_payout: 'pending',
+        organization_fee: 'pending',
+      });
+      for (const row of earlyRows.filter((r) => r.status === 'pending')) {
+        expect(await drainable(row.id)).toBe(false);
+      }
       // A chargeback of the whole charge takes the paid slice back whole.
-      expect(await netByType(early)).toMatchObject({ creator_payout: 0 });
-      expect(await netByType(early)).toEqual(await netByType(late));
-      for (const chargeId of [early, late]) {
+      expect(await netByType(late)).toMatchObject({ creator_payout: 0 });
+      for (const chargeId of [late]) {
         const rows = await slicesOf(chargeId);
         expect(statusByType(rows)).toEqual({
           platform_fee: 'reversed',

@@ -154,7 +154,9 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
    [the payouts ledger](connect-and-payouts.md#the-payouts-ledger)). A
    redelivered event re-records the purchase's slices from its stored split:
    the ledger skips those already recorded, so only a missing one is added —
-   and none for a purchase refunded or disputed since:
+   and none for a purchase refunded in full or disputed since. A partly
+   refunded purchase is re-recorded, and its refund is then clawed back from
+   the added slices (`Codex-2hxff.68`):
    - a `platform_fee` row, recorded as paid;
    - the creator slice — a transfer to the creator's Connect account with key
      `${chargeId}_creator`;
@@ -166,7 +168,7 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
      charge id and is retried.
 6. Then, without holding up the response: the buyer's library version is
    bumped, a receipt email is sent once per purchase (not once per webhook
-   delivery) — **gap**: `Codex-2hxff.8` — and a creator whose slice went
+   delivery) — **gap**: `Codex-mat01` (a redelivery sends it again) — and a creator whose slice went
    pending is emailed to finish payouts setup — **gap**: `Codex-2hxff.7`.
 
 **Errors.** A transient failure (database connection, Stripe outage) returns
@@ -325,10 +327,11 @@ check the buyer's access.
 
 **A full refund** (the whole charge refunded):
 
-- the purchase becomes `refunded` and access ends — the entitlement is revoked
-  and the streaming block is written so issued stream URLs stop working
-  ([access.md](access.md#streaming-revocation)) — **gap**: `Codex-2hxff.8`
-  (no block written for one-off refunds);
+- the purchase becomes `refunded` and access ends: the entitlement is revoked,
+  so no new stream link is issued. A link already issued plays to its expiry
+  (up to 10 minutes), as for every access cut
+  ([access.md](access.md#streaming-revocation); owner decision 2026-10-23,
+  `Codex-2hxff.61`);
 - every paid creator and organisation slice is reversed in full;
 - every pending or failed slice becomes `cancelled_by_refund` — first, so
   nothing can mark it paid afterwards. Its transfer may have gone out anyway
@@ -385,11 +388,25 @@ far and the newest refund's id and reason.
 
 Stripe does not return its processing fee on a refund; the platform bears it.
 
-A refund that arrives before the purchase it belongs to is recorded (courses as
-well as content) and applied when the purchase completes — **gap**:
-`Codex-2hxff.8` (course refunds are dropped), and `Codex-2hxff.68` (after a
-partial refund, the completed purchase never records the creator's and the
-organisation's remaining share).
+**A refund that arrives before the purchase it belongs to** (`charge.refunded`
+before `checkout.session.completed`), for content or a course
+(`Codex-2hxff.68`):
+
+- The purchase is rebuilt from its Stripe checkout session, as completion would
+  write it: the real split (the configured fees, and the creator's agreement as
+  it stood when the session was created), dated at the charge's payment time.
+  A session in any currency but GBP is refused first, as completion refuses it
+  (PAY-25), and nothing is written. No slice is written yet.
+- **A full refund**: the purchase is rebuilt already `refunded`, with the
+  refund, in one transaction, and access is never granted. When its
+  `checkout.session.completed` arrives, it records nothing more, so no one is
+  paid.
+- **A partial refund**: the purchase is rebuilt `completed` with its access
+  grant, then the refund is recorded on it, and the buyer keeps access (P-1).
+  When `checkout.session.completed` arrives, the slices are recorded from the
+  stored split and the refund is clawed back from them at once, so each payee
+  nets what the same refund after the payout would leave.
+- A redelivery of either event moves no more money.
 
 A refund processed after the purchase exists but before its payouts are
 recorded is applied the moment they are, through the same reversal as a later
@@ -449,9 +466,36 @@ dispute event records it, then acts on the status the record has.
   access the chargeback paused is restored and its streaming block lifted.
 - **Lost.** The purchase becomes `refunded` and held slices
   `cancelled_by_dispute` (Q3).
+- **Prevented.** Stripe defines `prevented` as a dispute "prevented from
+  becoming a formal chargeback", so it closes like an inquiry: nothing to
+  restore or re-pay, and its held slices are released. One that has a
+  clawback step anyway is alerted at error, with an errorId, for a person to
+  settle (`Codex-2hxff.59`): its chargeback handling ran, so the buyer's access
+  and the subscription's billing may still be paused too.
+- **Missed events.** A dispute webhook that fails for good is answered 200, and
+  Stripe stops redelivering after 3 days. So the hourly payouts cron first
+  reconciles disputes (`Codex-2hxff.58`), before its drain. It reads Stripe's
+  `charge.dispute.*` events from the last 4 days, and acts on any dispute that
+  has no row of ours, whose row would move to a later stage (inquiry, then
+  chargeback, then closed), or that is an open chargeback. It also retries
+  every row of ours whose final status was never applied. Each is re-read
+  from Stripe first and handled as it is now.
+  - **An open chargeback is re-run while its events are in that window**,
+    because nothing records that opening it finished: if pausing access, the
+    clawback or the billing pause failed, the re-run completes it. Every step
+    is idempotent, and the re-run writes no second streaming block: the
+    database pause is what refuses access. A failure opening a chargeback is
+    alerted at error with an errorId, and the webhook returns it so a
+    transient one is redelivered.
+  - A step that keeps failing is retried every hour and alerted at error, with
+    an errorId, each time (owner decision 2026-10-23, "Retry hourly, alert").
+    More unapplied final disputes than one run retries (50) is alerted too.
+  - Another environment's disputes are ignored, as by the webhook.
 
-A slice a won dispute paid back is no longer what the share rule describes, so
-a later refund of it is recorded for a person (`slice_repaid`), not reversed.
+A later refund of a slice a won dispute paid back takes its share off the
+slice's re-pay row while that row is unpaid; only what a paid re-pay row
+cannot carry goes to a person (`slice_repaid`) (Codex-2hxff.59; see
+[dispute record](dispute-record.md#the-re-pay-a-new-pending-payout-row-per-reversed-slice)).
 The dispute endpoint needs `charge.dispute.funds_withdrawn` and
 `.funds_reinstated` too, an owner change in Stripe.
 
@@ -466,3 +510,5 @@ The dispute endpoint needs `charge.dispute.funds_withdrawn` and
 | Charge id lookup fails | 500 and retry; never complete without it |
 | Event from the other environment | Logged and acknowledged with 200; nothing written |
 | Two payments for one item | Second payment refunded automatically |
+| Refund before the purchase is recorded | Purchase rebuilt with its real split; the completion pays the unrefunded share |
+| Dispute events missed for good | The hourly reconcile settles the dispute; a step that keeps failing alerts every hour |
