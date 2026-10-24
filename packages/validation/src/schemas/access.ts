@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import { publicContentSlugSchema } from '../content/content-schemas';
 import {
   nonNegativeIntSchema,
   positiveIntSchema,
+  userIdSchema,
   uuidSchema,
 } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
@@ -43,6 +45,21 @@ export const getStreamingUrlSchema = z.object({
 export const streamingUrlQuerySchema = getStreamingUrlSchema
   .pick({ expirySeconds: true })
   .extend({ include: z.literal('body').optional() });
+
+const withdrawnSlugSchema = z.string().min(1).pipe(publicContentSlugSchema);
+
+/**
+ * Query for GET /api/access/content/withdrawn (Codex-ov2ii): the detail URL's
+ * own key, exactly one of an org piece's `(orgId, slug)` or a personal piece's
+ * `(creatorId, slug)`. Both slug keys are unique (per org, and per creator's
+ * personal space). Strict, so a request naming both is a 400, never a guess.
+ */
+export const withdrawnContentQuerySchema = z.union([
+  z.object({ orgId: uuidSchema, slug: withdrawnSlugSchema }).strict(),
+  z.object({ creatorId: userIdSchema, slug: withdrawnSlugSchema }).strict(),
+]);
+
+export type WithdrawnContentQuery = z.infer<typeof withdrawnContentQuerySchema>;
 
 export const savePlaybackProgressSchema = z.object({
   contentId: uuidSchema,

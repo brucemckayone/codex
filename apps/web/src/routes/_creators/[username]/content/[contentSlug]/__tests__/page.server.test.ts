@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockGetPublicProfile = vi.hoisted(() => vi.fn());
 const mockGetPublicContent = vi.hoisted(() => vi.fn());
 const mockGetStreamingUrl = vi.hoisted(() => vi.fn());
+const mockGetWithdrawnContent = vi.hoisted(() => vi.fn());
 const mockGetProgress = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 const mockLogger = vi.hoisted(() => ({
   warn: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('$lib/server/api', () => ({
     access: {
       getStreamingUrl: mockGetStreamingUrl,
       getProgress: mockGetProgress,
+      getWithdrawnContent: mockGetWithdrawnContent,
     },
     content: { getPublicContent: mockGetPublicContent },
   })),
@@ -164,5 +166,144 @@ describe('creator content detail: an entitled reader of a gated piece sees its b
 
     expect(data.contentBodyHtml).toContain('the article text');
     expect(mockGetStreamingUrl).not.toHaveBeenCalled();
+  });
+});
+
+// Withdrawn from sale (Codex-ov2ii): no personal piece on the storefront, so a
+// reader who still has one used to get "Content not found".
+describe('creator content detail: a personal piece withdrawn from sale opens for whoever still has it', () => {
+  const held = { by: 'purchase', until: null };
+  const withdrawnPiece = row({
+    isFree: false,
+    isPurchasable: true,
+    priceCents: 900,
+    contentBody: 'the leaked text',
+  });
+  const orgPiece = row({
+    id: 'o9',
+    organizationId: 'o1',
+    organization: { slug: 'studio-alpha' },
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetPublicProfile.mockResolvedValue({
+      id: 'creator-1',
+      name: 'Alex',
+      image: null,
+    });
+  });
+
+  it('a reader who still has it gets the note, and the body from the access check', async () => {
+    mockGetPublicContent.mockResolvedValue({ items: [] });
+    mockGetWithdrawnContent.mockResolvedValue({
+      content: withdrawnPiece,
+      held,
+    });
+    mockGetStreamingUrl.mockResolvedValue(
+      granted({ body: { contentBody: 'the paid text', contentBodyJson: null } })
+    );
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event({ id: 'u1' }))) as Record<string, unknown>;
+
+    expect(mockGetWithdrawnContent).toHaveBeenCalledWith({
+      creatorId: 'creator-1',
+      slug: 'practice',
+    });
+    expect(data.withdrawnHeld).toEqual(held);
+    expect(data.contentBodyHtml).toContain('the paid text');
+    expect(JSON.stringify(await settled(data))).not.toContain(
+      'the leaked text'
+    );
+  });
+
+  // This URL is the personal piece's: one the reader still has wins over an
+  // org piece that shares its slug.
+  it('a withdrawn personal piece wins over the org redirect', async () => {
+    mockGetPublicContent.mockResolvedValue({ items: [orgPiece] });
+    mockGetWithdrawnContent.mockResolvedValue({
+      content: withdrawnPiece,
+      held,
+    });
+    mockGetStreamingUrl.mockResolvedValue(
+      granted({ body: { contentBody: 'the paid text', contentBodyJson: null } })
+    );
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event({ id: 'u1' }))) as Record<string, unknown>;
+
+    expect(data.withdrawnHeld).toEqual(held);
+  });
+
+  it('with no withdrawn piece, an org piece still redirects', async () => {
+    const { ApiError } = await import('$lib/server/errors');
+    mockGetPublicContent.mockResolvedValue({ items: [orgPiece] });
+    mockGetWithdrawnContent.mockRejectedValue(
+      new ApiError(404, 'Content not found', 'NOT_FOUND')
+    );
+    const { load } = await import('../+page.server');
+
+    await expect(load(event({ id: 'u1' }))).rejects.toMatchObject({
+      status: 302,
+    });
+  });
+
+  // The read is new on the redirect path: its failure must not turn a
+  // working redirect into a 500.
+  it('a failed withdrawn read still redirects to the org piece, and is logged', async () => {
+    const { ApiError } = await import('$lib/server/errors');
+    mockGetPublicContent.mockResolvedValue({ items: [orgPiece] });
+    mockGetWithdrawnContent.mockRejectedValue(
+      new ApiError(503, 'unavailable', 'SERVICE_UNAVAILABLE')
+    );
+    const { load } = await import('../+page.server');
+
+    await expect(load(event({ id: 'u1' }))).rejects.toMatchObject({
+      status: 302,
+    });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Withdrawn read failed; redirecting to the org piece',
+      expect.objectContaining({
+        creatorId: 'creator-1',
+        contentSlug: 'practice',
+      })
+    );
+  });
+
+  // The worker found the reader's piece; only the access check failed. The
+  // 503 is theirs to retry, never a redirect to another item.
+  it('a failed access check on a found withdrawn piece is a 503, never the org redirect', async () => {
+    const { ApiError } = await import('$lib/server/errors');
+    mockGetPublicContent.mockResolvedValue({ items: [orgPiece] });
+    mockGetWithdrawnContent.mockResolvedValue({
+      content: withdrawnPiece,
+      held,
+    });
+    mockGetStreamingUrl.mockRejectedValue(
+      new ApiError(502, 'bad gateway', 'UPSTREAM')
+    );
+    const { load } = await import('../+page.server');
+
+    await expect(load(event({ id: 'u1' }))).rejects.toMatchObject({
+      status: 503,
+    });
+  });
+
+  it('with no org piece, a failed withdrawn read propagates: not a 404', async () => {
+    const outage = new Error('content-api unavailable');
+    mockGetPublicContent.mockResolvedValue({ items: [] });
+    mockGetWithdrawnContent.mockRejectedValue(outage);
+    const { load } = await import('../+page.server');
+
+    await expect(load(event({ id: 'u1' }))).rejects.toBe(outage);
+  });
+
+  it('a visitor gets the 404 with no withdrawn read', async () => {
+    mockGetPublicContent.mockResolvedValue({ items: [] });
+    const { load } = await import('../+page.server');
+
+    await expect(load(event(null))).rejects.toMatchObject({ status: 404 });
+    expect(mockGetWithdrawnContent).not.toHaveBeenCalled();
   });
 });

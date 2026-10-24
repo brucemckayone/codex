@@ -57,6 +57,7 @@ app.get('/content/:id',
 ### Access & Playback (`schemas/access.ts`)
 - `getStreamingUrlSchema` — request signed streaming URL (`contentId`)
 - `streamingUrlQuerySchema` — the `/stream` route's query: `expirySeconds`, and `include: 'body'` to also return the body once access is granted, for a released row (Codex-039vo)
+- `withdrawnContentQuerySchema` — the withdrawn read's query (Codex-ov2ii): `slug` plus exactly one of `orgId` (uuid) or `creatorId` (`userIdSchema`, text); a strict union, so naming both or neither is a 400
 - `savePlaybackProgressSchema` — save position (`contentId`, `positionSeconds`, `durationSeconds`, `completed`)
 - `getPlaybackProgressSchema` — get progress for content
 - `listUserLibrarySchema` — paginated library with filters

@@ -5,6 +5,7 @@
  * Previously in @codex/shared-types — moved here for domain ownership.
  */
 
+import type { ContentWithRelations } from '@codex/content';
 import type { ProgressData } from '@codex/shared-types';
 
 /**
@@ -49,6 +50,40 @@ export interface StreamingUrlResponse {
    * `{ contentBody: null, contentBodyJson: null }`.
    */
   body?: ContentBodySource;
+}
+
+/**
+ * How a reader still holds an item that has left the storefront: it decides
+ * the note the detail page shows them (Codex-ov2ii). Mapped from the arm of
+ * the access decision that granted, so the note can never give a reason the
+ * gate did not use.
+ */
+export type ContentHeld =
+  | { by: 'purchase' | 'entitlement' | 'course'; until: null }
+  | {
+      by: 'subscription';
+      /**
+       * ISO 8601 end of the granting subscription's current period, when the
+       * item stops being covered. Always set: the date is the note's point.
+       */
+      until: string;
+    };
+
+export type ContentHeldBy = ContentHeld['by'];
+
+/**
+ * What `getWithdrawnContent` returns (Codex-ov2ii): an item that was published
+ * once, is not now, and that this reader still has access to. `content` is the
+ * public row's shape with no body (the body comes from `/stream?include=body`,
+ * as for any gated piece). Every other case is a 404.
+ *
+ * NOT the wire shape: the route resolves the media's R2 keys to CDN URLs
+ * before sending, as the public list does. The response is typed where it is
+ * read, in the web's `WithdrawnContentItem`, as `PublicContentListItem` is.
+ */
+export interface WithdrawnContent {
+  content: ContentWithRelations & { categorySlugs: string[] };
+  held: ContentHeld;
 }
 
 /**

@@ -9,6 +9,7 @@
  */
 
 import type {
+  ContentHeld,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
@@ -186,6 +187,17 @@ export type PublicContentListItem = Omit<
   contentType: 'video' | 'audio' | 'written';
   categorySlugs: string[];
 };
+
+/**
+ * `GET /api/access/content/withdrawn` (Codex-ov2ii), typed to what it ACTUALLY
+ * returns, as {@link PublicContentListItem} is: the worker resolves the row's
+ * R2 keys the way the public list does, so the page draws an item withdrawn
+ * from sale exactly as it drew it on the storefront.
+ */
+export interface WithdrawnContentItem {
+  content: PublicContentListItem;
+  held: ContentHeld;
+}
 
 /**
  * Resolve API URL for a worker
@@ -1080,6 +1092,19 @@ export function createServerApi(
         request<StreamingUrlResponse>(
           'access',
           `/api/access/content/${contentId}/stream${options.includeBody ? '?include=body' : ''}`
+        ),
+
+      /**
+       * An item withdrawn from sale that this reader still has, by its detail
+       * URL's key: an org piece's `orgId` or a personal piece's `creatorId`,
+       * plus its slug (Codex-ov2ii). A 404 for anyone without access.
+       */
+      getWithdrawnContent: (
+        key: ({ orgId: string } | { creatorId: string }) & { slug: string }
+      ) =>
+        request<WithdrawnContentItem>(
+          'access',
+          `/api/access/content/withdrawn?${new URLSearchParams(key)}`
         ),
 
       /**

@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { getInitials } from '../format';
+import { formatSentenceDate, getInitials } from '../format';
+
+describe('formatSentenceDate', () => {
+  const now = new Date('2026-10-24T12:00:00.000Z');
+
+  it('drops the year when it is this year', () => {
+    expect(formatSentenceDate('2026-11-12T09:00:00.000Z', now)).toBe(
+      '12 November'
+    );
+  });
+
+  it('keeps the year when it is not', () => {
+    expect(formatSentenceDate('2027-01-03T09:00:00.000Z', now)).toBe(
+      '3 January 2027'
+    );
+  });
+
+  it('reads the day in London, not UTC: 23:30 UTC in summer is tomorrow', () => {
+    expect(formatSentenceDate('2026-07-11T23:30:00.000Z', now)).toBe('12 July');
+  });
+});
 
 describe('getInitials', () => {
   describe('name-only', () => {

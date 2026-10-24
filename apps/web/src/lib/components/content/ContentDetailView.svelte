@@ -42,11 +42,25 @@
   // files, so they're dynamically loaded further down.
   import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
   import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
-  import { formatPrice, formatDurationHuman } from '$lib/utils/format';
+  import {
+    formatPrice,
+    formatDurationHuman,
+    formatSentenceDate,
+  } from '$lib/utils/format';
   import { PriceBadge } from '$lib/components/ui/PriceBadge';
-  import { LockIcon, CheckIcon, XIcon, PlayIcon } from '$lib/components/ui/Icon';
+  import {
+    LockIcon,
+    CheckIcon,
+    XIcon,
+    PlayIcon,
+    LibraryIcon,
+  } from '$lib/components/ui/Icon';
+  import { Alert } from '$lib/components/ui';
   import { AccessRevokedOverlay } from '$lib/components/AccessRevokedOverlay';
-  import type { AccessRevocationReason } from '$lib/server/content-detail';
+  import type {
+    AccessRevocationReason,
+    ContentHeld,
+  } from '$lib/server/content-detail';
   import ProseContent from '$lib/components/editor/ProseContent.svelte';
   import { StructuredData } from '$lib/components/seo';
   import { toast } from '$lib/components/ui/Toast';
@@ -162,6 +176,12 @@
      * the creator content page (which never passes it) is unaffected.
      */
     journeyLink?: { title: string; salesHref: string } | null;
+    /**
+     * Set when this item is no longer on sale but the reader still has it
+     * (Codex-ov2ii): how they hold it. Drives the note above the item, the
+     * badge, and keeps every purchase offer off the page.
+     */
+    withdrawnHeld?: ContentHeld | null;
     creatorAttribution?: Snippet;
     purchaseForm?: Snippet;
   }
@@ -187,6 +207,7 @@
     accessCheckFailed = false,
     onaccessrestored,
     journeyLink = null,
+    withdrawnHeld = null,
     creatorAttribution,
     purchaseForm,
   }: Props = $props();
@@ -315,7 +336,25 @@
   // Buy is offered only when a purchase would open the content
   // (Codex-2hxff.14). A price alone is not enough: course-only, team-only and
   // followers-only content ignore a purchase, so the buyer paid and got nothing.
-  const isSellable = $derived(canBeSold(content));
+  // Nor is an item withdrawn from sale (Codex-ov2ii), even if a later access
+  // refresh comes back denied.
+  const isSellable = $derived(!withdrawnHeld && canBeSold(content));
+
+  /** The second sentence of the withdrawn note: how the reader holds it. */
+  function withdrawnNoteDetail(held: ContentHeld): string {
+    switch (held.by) {
+      case 'purchase':
+        return m.content_detail_withdrawn_purchase();
+      case 'course':
+        return m.content_detail_withdrawn_course();
+      case 'subscription':
+        return m.content_detail_withdrawn_subscription({
+          date: formatSentenceDate(held.until),
+        });
+      case 'entitlement':
+        return m.content_detail_withdrawn_entitlement();
+    }
+  }
   const needsPurchase = $derived(
     !hasAccess && isSellable && !requiresSubscription
   );
@@ -825,6 +864,20 @@
     </nav>
   {/if}
 
+  <!--
+    Withdrawn from sale, still the reader's (Codex-ov2ii): a note, not a lock.
+    Above the player, or above an article's title.
+  -->
+  {#if withdrawnHeld}
+    <Alert variant="info" role="note" class="content-detail__access-note">
+      <LibraryIcon size={16} class="content-detail__access-note-icon" />
+      <p class="content-detail__access-note-text">
+        <strong>{m.content_detail_withdrawn_lead()}</strong>
+        {withdrawnNoteDetail(withdrawnHeld)}
+      </p>
+    </Alert>
+  {/if}
+
   <!-- Video Player / Preview — renders FIRST (hero position) -->
   {#if content.contentType === 'video'}
   <div class="content-detail__player" class:content-detail__player--cinema={cinemaMode} data-content-type="video" tabindex="-1">
@@ -928,7 +981,15 @@
             {m.content_duration()}: {formatDurationHuman(duration)}
           </span>
         {/if}
-        {#if hasAccess && isPaid}
+        {#if withdrawnHeld}
+          <!-- Bought: Purchased. Any other hold (subscription, course, a
+               grant): Included, never "Purchased". -->
+          <PriceBadge
+            amount={priceCents}
+            purchased={withdrawnHeld.by === 'purchase'}
+            included={withdrawnHeld.by !== 'purchase'}
+          />
+        {:else if hasAccess && isPaid}
           <PriceBadge amount={priceCents} purchased={true} />
         {/if}
       </div>
@@ -1762,6 +1823,30 @@
   .content-detail__purchase-error-dismiss:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
+  }
+
+  /* Withdrawn from sale, still the reader's (Codex-ov2ii). The Alert supplies
+     the info surface; this lays the icon and text out on one line. */
+  :global(.content-detail__access-note) {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+    line-height: var(--leading-normal);
+  }
+
+  :global(.content-detail__access-note-icon) {
+    flex-shrink: 0;
+    margin-top: var(--space-0-5);
+  }
+
+  .content-detail__access-note-text {
+    flex: 1 1 auto;
+    margin: 0;
+  }
+
+  .content-detail__access-note-text strong {
+    font-weight: var(--font-semibold);
   }
 
   /* Info banner (409 "already owned" happy-path — Codex-mmju5) */

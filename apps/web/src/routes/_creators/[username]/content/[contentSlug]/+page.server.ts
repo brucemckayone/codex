@@ -10,7 +10,7 @@
  *   a friendly error message instead of a generic 500.
  */
 import { publicContentSlugSchema } from '@codex/validation';
-import { error, redirect } from '@sveltejs/kit';
+import { error, isHttpError, redirect } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
@@ -24,8 +24,10 @@ import {
   loadAccessWithBody,
   loadRelatedContent,
   loadSubscriptionContext,
+  loadWithdrawnDetail,
   withoutRawBody,
 } from '$lib/server/content-detail';
+import { logReadFailure } from '$lib/server/read-failure';
 import type { ContentWithRelations } from '$lib/types';
 import { buildContentUrl } from '$lib/utils/subdomain';
 import { creatorHandle } from '../../creator-handle';
@@ -90,7 +92,36 @@ export const load: PageServerLoad = async ({
 
   const contentResult = await api.content.getPublicContent(contentParams);
   const matches = contentResult.items as ContentWithRelations[];
-  const content = matches.find((item) => item.organizationId == null) ?? null;
+  const personalPiece =
+    matches.find((item) => item.organizationId == null) ?? null;
+
+  // No personal piece on the storefront. For a signed-in reader it may be one
+  // withdrawn from sale that they still have (Codex-ov2ii). Asked before the
+  // org redirect below: this URL is the personal piece's, so a reader who
+  // still has it keeps it even when an org piece shares the slug. If that read
+  // fails while an org piece is there to send them to, the redirect stands,
+  // as it did before this read existed; with none, the failure propagates (an
+  // outage is not "not found"). An HttpError always propagates: it is the
+  // helper's own answer AFTER it found the reader's piece (the 503 of a failed
+  // access check), and redirecting then would send them to another item.
+  const hasOrgPiece = matches.some((item) => item.organization?.slug);
+  const withdrawn =
+    personalPiece || !locals.user
+      ? null
+      : await loadWithdrawnDetail(
+          { creatorId: creatorProfile.id, slug: contentSlug },
+          platform,
+          cookies
+        ).catch((err: unknown) => {
+          if (!hasOrgPiece || isHttpError(err)) throw err;
+          logReadFailure(
+            'Withdrawn read failed; redirecting to the org piece',
+            { creatorId: creatorProfile.id, contentSlug },
+            err
+          );
+          return null;
+        });
+  const content = personalPiece ?? withdrawn?.content ?? null;
 
   if (!content) {
     const orgPiece = matches.find((item) => item.organization?.slug);
@@ -152,6 +183,28 @@ export const load: PageServerLoad = async ({
   const relatedPromise = loadRelatedContent(api, {
     creatorId: creatorProfile.id,
   });
+
+  // Withdrawn from sale: the access check already ran and granted, so the page
+  // renders the body and player that check returned, with the note in place
+  // of any offer (there is nothing left to buy or subscribe to).
+  if (withdrawn) {
+    setHeaders(successCacheHeaders);
+    return {
+      content: pageContent,
+      contentBodyHtml: withdrawn.body
+        ? await renderContentBody(withdrawn.body)
+        : null,
+      hasAccess: null,
+      streamingUrl: null,
+      progress: null,
+      accessAndProgress: Promise.resolve(withdrawn.access),
+      withdrawnHeld: withdrawn.held,
+      subscriptionContext: Promise.resolve(EMPTY_SUB_CONTEXT),
+      creatorProfile,
+      username,
+      relatedContent: relatedPromise,
+    };
+  }
 
   // Subscription context (org-scoped content may have tier gating).
   // Skip the round-trip entirely for content that can't require a

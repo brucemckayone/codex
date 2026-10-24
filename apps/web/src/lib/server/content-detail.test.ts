@@ -16,6 +16,7 @@
  *   - the shared fallback constants keep a stable field set so drift is caught
  *     in one place.
  */
+import { isHttpError } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./api', () => ({ createServerApi: vi.fn() }));
@@ -39,6 +40,7 @@ import {
   loadAccessWithBody,
   loadRelatedContent,
   loadSubscriptionContext,
+  loadWithdrawnDetail,
   resolveAccessGranted,
 } from './content-detail';
 import { ApiError } from './errors';
@@ -496,5 +498,155 @@ describe('loadAccessWithBody (Codex-039vo)', () => {
     await loadAccessAndProgress('c1', undefined, cookies, policy());
 
     expect(getStreamingUrl).toHaveBeenCalledWith('c1', { includeBody: false });
+  });
+});
+
+// The public lookup missed for a signed-in reader (Codex-ov2ii): an item
+// withdrawn from sale opens only through two worker reads, the withdrawn row
+// and the gated path's /stream, and every other answer is the page's 404.
+describe('loadWithdrawnDetail (Codex-ov2ii)', () => {
+  type Cookies = Parameters<typeof loadWithdrawnDetail>[2];
+  const cookies = {} as unknown as Cookies;
+  const key = { orgId: 'o1', slug: 'breathing' };
+  const paidRow = {
+    id: 'c1',
+    slug: 'breathing',
+    isFree: false,
+    isPurchasable: true,
+    priceCents: 900,
+    includedInTierId: null,
+    isFollowerGated: false,
+    isTeamOnly: false,
+    courseOnly: false,
+    contentBody: null,
+    contentBodyJson: null,
+  };
+  const held = { by: 'purchase', until: null };
+  const granted = {
+    streamingUrl: null,
+    waveformUrl: null,
+    expiresAt: '2026-10-23T22:00:00.000Z',
+    contentType: 'written',
+    body: { contentBody: 'the paid text', contentBodyJson: null },
+  };
+
+  beforeEach(() => {
+    mockLogger.error.mockClear();
+    mockLogger.warn.mockClear();
+  });
+
+  function reads(
+    withdrawn: () => Promise<unknown>,
+    stream: () => Promise<unknown> = () => Promise.resolve(granted)
+  ) {
+    const getWithdrawnContent = vi.fn(withdrawn);
+    const getStreamingUrl = vi.fn(stream);
+    vi.mocked(createServerApi).mockReturnValue({
+      access: {
+        getWithdrawnContent,
+        getStreamingUrl,
+        getProgress: () => Promise.resolve(null),
+      },
+    } as unknown as ReturnType<typeof createServerApi>);
+    return { getWithdrawnContent, getStreamingUrl };
+  }
+
+  it('opens the row, then takes its body from the access check', async () => {
+    const { getWithdrawnContent, getStreamingUrl } = reads(() =>
+      Promise.resolve({ content: paidRow, held })
+    );
+
+    const detail = await loadWithdrawnDetail(key, undefined, cookies);
+
+    expect(getWithdrawnContent).toHaveBeenCalledWith(key);
+    expect(getStreamingUrl).toHaveBeenCalledWith('c1', { includeBody: true });
+    expect(detail?.held).toEqual(held);
+    expect(detail?.access.hasAccess).toBe(true);
+    expect(detail?.body).toEqual(granted.body);
+  });
+
+  it('is null on the worker’s 404, with no access check', async () => {
+    const { getStreamingUrl } = reads(() =>
+      Promise.reject(
+        new ApiError(404, 'Content not found', 'NOT_FOUND', {
+          contentId: 'breathing',
+          code: 'CONTENT_NOT_FOUND',
+        })
+      )
+    );
+
+    expect(await loadWithdrawnDetail(key, undefined, cookies)).toBeNull();
+    expect(getStreamingUrl).not.toHaveBeenCalled();
+    expect(mockLogger.error).not.toHaveBeenCalled();
+  });
+
+  // A content-api without this route (behind this web build) 404s too, with
+  // no details. Still the page's 404, but never silent.
+  it('logs a 404 that is not the worker’s content miss', async () => {
+    reads(() => Promise.reject(new ApiError(404, 'Not found', 'NOT_FOUND')));
+
+    expect(await loadWithdrawnDetail(key, undefined, cookies)).toBeNull();
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Withdrawn read 404 without CONTENT_NOT_FOUND',
+      { key, code: 'NOT_FOUND' }
+    );
+  });
+
+  it('lets any other failure of the withdrawn read propagate', async () => {
+    reads(() => Promise.reject(new ApiError(500, 'boom', 'INTERNAL')));
+
+    await expect(loadWithdrawnDetail(key, undefined, cookies)).rejects.toThrow(
+      'boom'
+    );
+  });
+
+  // A public-looking policy forces `hasAccess` open in fetchAccess, so such a
+  // row would render whatever /stream said. No arm that outlives
+  // unpublication grants one, so it is refused, logged, and never rendered.
+  it('refuses a row that passes the public policy, and logs it', async () => {
+    const publicRow = {
+      ...paidRow,
+      isFree: true,
+      isPurchasable: false,
+      priceCents: null,
+    };
+    const { getStreamingUrl } = reads(() =>
+      Promise.resolve({ content: publicRow, held })
+    );
+
+    expect(await loadWithdrawnDetail(key, undefined, cookies)).toBeNull();
+    expect(getStreamingUrl).not.toHaveBeenCalled();
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Withdrawn content passed the public policy',
+      { contentId: 'c1' }
+    );
+  });
+
+  it('is null when /stream denies after the row was found', async () => {
+    reads(
+      () => Promise.resolve({ content: paidRow, held }),
+      () => Promise.reject(new ApiError(403, 'denied', 'ACCESS_DENIED'))
+    );
+
+    expect(await loadWithdrawnDetail(key, undefined, cookies)).toBeNull();
+  });
+
+  it('is a 503, never a 404, when /stream fails without a verdict', async () => {
+    reads(
+      () => Promise.resolve({ content: paidRow, held }),
+      () => Promise.reject(new ApiError(502, 'bad gateway', 'UPSTREAM'))
+    );
+
+    const failure = await loadWithdrawnDetail(key, undefined, cookies).then(
+      () => null,
+      (caught: unknown) => caught
+    );
+
+    expect(isHttpError(failure, 503)).toBe(true);
+    // A 503 is an expected HttpError, which no hook logs: this is its trace.
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      '/stream access check failed',
+      expect.objectContaining({ contentId: 'c1', status: 502 })
+    );
   });
 });

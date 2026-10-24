@@ -2391,6 +2391,46 @@ export const content_price_included = () => `Included`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const content_detail_withdrawn_lead = () => `This is no longer on sale.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_withdrawn_purchase = () => `It stays in your library because you bought it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_withdrawn_entitlement = () => `It stays in your library.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_withdrawn_course = () => `It stays available as part of your course.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_withdrawn_subscription = (params) => `It's included in your subscription until ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const content_detail_purchase_cta = () => `Purchase to watch`
 
 

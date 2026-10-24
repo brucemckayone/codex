@@ -22,10 +22,12 @@ import {
   listUserLibrarySchema,
   savePlaybackProgressSchema,
   streamingUrlQuerySchema,
+  withdrawnContentQuerySchema,
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
+import { resolveR2PublicBases, resolveR2Url } from './r2-public-urls';
 
 const app = new Hono<HonoEnv>();
 
@@ -203,6 +205,40 @@ app.get(
         contentType: result.contentType,
         readyVariants: result.readyVariants,
         body: result.body,
+      };
+    },
+  })
+);
+
+/**
+ * GET /api/access/content/withdrawn?slug=…&(orgId=…|creatorId=…)
+ *
+ * An item that was published once, is not now, and that this reader still
+ * has access to (a buyer, a course owner, a subscriber until their next
+ * renewal), by its detail URL's key (Codex-ov2ii). The detail pages ask for it
+ * when the public lookup misses for a signed-in reader, so an item withdrawn
+ * from sale opens for whoever still has it instead of "Content not found".
+ *
+ * Every other case is a 404, the same one whether or not the item exists.
+ * `private, no-store`: the answer is per reader, and nothing caches it.
+ * @returns `{ content, held }`, the row's media with its R2 keys resolved (typed
+ *   on the web as `WithdrawnContentItem`)
+ */
+app.get(
+  '/content/withdrawn',
+  procedure({
+    policy: { auth: 'required', cache: 'fresh' },
+    input: { query: withdrawnContentQuerySchema },
+    handler: async (ctx) => {
+      const { content, held } = await ctx.services.access.getWithdrawnContent(
+        ctx.user.id,
+        ctx.input.query
+      );
+      // Keys to CDN URLs, as the public list resolves them, so the page
+      // draws the thumbnail and preview it drew on the storefront.
+      return {
+        content: resolveR2Url(content, resolveR2PublicBases(ctx.env)),
+        held,
       };
     },
   })

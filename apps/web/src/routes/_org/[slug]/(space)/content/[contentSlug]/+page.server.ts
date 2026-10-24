@@ -21,6 +21,7 @@ import {
   loadAccessWithBody,
   loadRelatedContent,
   loadSubscriptionContext,
+  loadWithdrawnDetail,
   withoutRawBody,
 } from '$lib/server/content-detail';
 import { logReadFailure } from '$lib/server/read-failure';
@@ -76,8 +77,21 @@ export const load: PageServerLoad = async ({
   contentParams.set('slug', contentSlug);
   contentParams.set('limit', '1');
   const contentResult = await api.content.getPublicContent(contentParams);
+  const publicRow = contentResult.items[0];
 
-  const content = contentResult.items[0];
+  // Not on the storefront. For a signed-in reader it may be an item withdrawn
+  // from sale that they still have: bought, in their course, or in their
+  // subscription until it renews (Codex-ov2ii). Everyone else, with access or
+  // not, gets the same 404 as before.
+  const withdrawn =
+    publicRow || !locals.user
+      ? null
+      : await loadWithdrawnDetail(
+          { orgId: org.id, slug: contentSlug },
+          platform,
+          cookies
+        );
+  const content = publicRow ?? withdrawn?.content;
   if (!content) {
     error(404, 'Content not found');
   }
@@ -115,6 +129,27 @@ export const load: PageServerLoad = async ({
       );
       return null;
     });
+
+  // Withdrawn from sale: the access check already ran and granted, so the page
+  // renders the body and player that check returned, with the note in place
+  // of any offer (there is nothing left to buy or subscribe to).
+  if (withdrawn) {
+    setHeaders(successCacheHeaders);
+    return {
+      content: pageContent,
+      contentBodyHtml: withdrawn.body
+        ? await renderContentBody(withdrawn.body)
+        : null,
+      hasAccess: null,
+      streamingUrl: null,
+      progress: null,
+      accessAndProgress: Promise.resolve(withdrawn.access),
+      withdrawnHeld: withdrawn.held,
+      subscriptionContext: Promise.resolve(EMPTY_SUB_CONTEXT),
+      relatedContent: relatedPromise,
+      parentCourses: parentCoursesPromise,
+    };
+  }
 
   // Only run the subscription-context fetch when content is tier-gated
   // (includedInTierId set — the WP-1 successor of accessType 'subscribers').
