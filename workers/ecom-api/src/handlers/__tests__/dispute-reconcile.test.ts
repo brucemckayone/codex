@@ -3,13 +3,15 @@
  * §9): disputes whose webhook events were missed are settled through the
  * webhook's own `processDispute`.
  *
- * | Source                         | Acted on when                                   |
- * | ------------------------------ | ----------------------------------------------- |
- * | Stripe's events, last 4 days   | no row; or the row would move to a later stage |
- * | Our final, unapplied rows      | always (retrieved from Stripe first)           |
+ * | Source                         | Acted on when                                            |
+ * | ------------------------------ | -------------------------------------------------------- |
+ * | Stripe's events, last 4 days   | no row; final or open chargeback; or a later stage       |
+ * | Our final, unapplied rows      | always                                                   |
  *
- * A chargeback that is still open is never re-run (no second block), and an
- * outcome step that keeps failing is alerted at error on every run.
+ * Each dispute is re-read from Stripe and handled as it is now. An open
+ * chargeback is re-run (its opening may have failed) but writes no second
+ * streaming block, and a step that keeps failing is alerted at error on every
+ * run.
  *
  * Strategy: a stateful fake of the purchase service's dispute record (forward
  * only, as `recordDispute` is), spies for the steps, and a Stripe stub. The
@@ -21,6 +23,8 @@ import type { SubscriptionService } from '@codex/subscription';
 import type Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  DISPUTE_EVENT_MAX_PAGES,
+  DISPUTE_EVENT_PAGE_SIZE,
   DISPUTE_EVENT_WINDOW_MS,
   DISPUTE_RECONCILE_GRACE_MS,
   DISPUTE_RECONCILE_LIMIT,
@@ -102,14 +106,9 @@ function ledger(
         return row ? [{ ...row }] : [];
       })
     ),
-    findDisputesToReconcile: vi.fn(async (limit: number, before: Date) =>
+    findDisputesToReconcile: vi.fn(async (limit: number) =>
       [...rows.values()]
-        .filter(
-          (row) =>
-            FINAL.includes(row.status) &&
-            !row.outcomeAppliedAt &&
-            row.updatedAt < before
-        )
+        .filter((row) => FINAL.includes(row.status) && !row.outcomeAppliedAt)
         .slice(0, limit)
         .map(({ stripeDisputeId, status }) => ({ stripeDisputeId, status }))
     ),
@@ -166,6 +165,10 @@ function subscriptionStub() {
   };
 }
 
+/**
+ * Stripe: the events listed (one page), and each dispute as it is now. A
+ * dispute not given in `disputes` is as its first listed event has it.
+ */
 function stripeStub(
   options: {
     events?: Stripe.Event[];
@@ -173,17 +176,21 @@ function stripeStub(
     chargeMetadata?: Record<string, string>;
   } = {}
 ) {
+  const events = options.events ?? [];
   return {
     events: {
       list: vi.fn().mockResolvedValue({
         object: 'list',
-        data: options.events ?? [],
+        data: events,
         has_more: false,
       }),
     },
     disputes: {
       retrieve: vi.fn(async (id: string) => {
-        const found = options.disputes?.find((d) => d.id === id);
+        const found =
+          options.disputes?.find((d) => d.id === id) ??
+          (events.find((e) => (e.data.object as Stripe.Dispute).id === id)?.data
+            .object as Stripe.Dispute | undefined);
         if (!found) throw new Error(`No such dispute: ${id}`);
         return found;
       }),
@@ -240,9 +247,10 @@ describe('runDisputeReconcile', () => {
       },
       limit: 100,
     });
+    // Every final, unapplied row whatever its age, one more than the limit
+    // to tell a cut-off batch.
     expect(purchase.findDisputesToReconcile).toHaveBeenCalledWith(
-      DISPUTE_RECONCILE_LIMIT,
-      new Date(NOW.getTime() - DISPUTE_EVENT_WINDOW_MS)
+      DISPUTE_RECONCILE_LIMIT + 1
     );
   });
 
@@ -266,6 +274,25 @@ describe('runDisputeReconcile', () => {
     expect(effects.clearRevocation).toHaveBeenCalledWith('user_1', 'org_1');
     expect(rows.get('dp_won')?.outcomeAppliedAt).toBeInstanceOf(Date);
     expect(result).toEqual({ fromEvents: 1, fromRows: 0, acted: 1, failed: 0 });
+  });
+
+  it("a dispute is handled as Stripe has it now, not as an event's snapshot had it", async () => {
+    const { purchase } = ledger();
+    // The open event is in the window; the win is still the webhook's.
+    const stripe = stripeStub({
+      events: [event(dispute('dp_closed', 'needs_response'))],
+      disputes: [dispute('dp_closed', 'won')],
+    });
+    const { run, effects } = reconcile({ purchase, stripe });
+
+    await run();
+
+    expect(stripe.disputes.retrieve).toHaveBeenCalledWith('dp_closed');
+    // No pause and clawback just to be undone: straight to the win.
+    expect(purchase.processDispute).not.toHaveBeenCalled();
+    expect(purchase.clawBackPurchaseCharge).not.toHaveBeenCalled();
+    expect(effects.revokeAccess).not.toHaveBeenCalled();
+    expect(purchase.settleWonDispute).toHaveBeenCalledWith('dp_closed');
   });
 
   it("a chargeback with no row is recorded and acted on: access paused, paid slices clawed back, the sale's slices held", async () => {
@@ -328,7 +355,7 @@ describe('runDisputeReconcile', () => {
     expect(rows.get('dp_lost')?.outcomeAppliedAt).toBeInstanceOf(Date);
   });
 
-  it('a chargeback that is genuinely still open is never re-run, so its buyer is not blocked again', async () => {
+  it('an open chargeback is re-run, since nothing records that its opening finished, but writes no second streaming block', async () => {
     const { purchase } = ledger([
       { stripeDisputeId: 'dp_still', status: 'needs_response' },
     ]);
@@ -336,15 +363,67 @@ describe('runDisputeReconcile', () => {
     const stripe = stripeStub({
       events: [event(dispute('dp_still', 'under_review'))],
     });
-    const { run, effects } = reconcile({ purchase, stripe });
+    const subscription = subscriptionStub();
+    subscription.pauseForDispute.mockResolvedValue({
+      userId: 'user_sub',
+      organizationId: 'org_sub',
+    });
+    const { run, effects } = reconcile({ purchase, stripe, subscription });
 
     const result = await run();
 
-    expect(stripe.charges.retrieve).not.toHaveBeenCalled();
-    expect(purchase.recordDispute).not.toHaveBeenCalled();
-    expect(purchase.processDispute).not.toHaveBeenCalled();
+    // Every step again (each is idempotent)…
+    expect(purchase.processDispute).toHaveBeenCalledOnce();
+    expect(subscription.pauseForDispute).toHaveBeenCalledOnce();
+    expect(purchase.clawBackPurchaseCharge).toHaveBeenCalledOnce();
+    expect(subscription.pauseBillingForDispute).toHaveBeenCalledOnce();
+    expect(effects.invalidateLibrary).toHaveBeenCalled();
+    // …but the buyer and the subscriber are not blocked a second time.
     expect(effects.revokeAccess).not.toHaveBeenCalled();
-    expect(result.acted).toBe(0);
+    expect(result).toMatchObject({ acted: 1, failed: 0 });
+  });
+
+  it('a chargeback whose opening failed after it was recorded is finished by a later run', async () => {
+    const { purchase } = ledger([
+      { stripeDisputeId: 'dp_half', status: 'needs_response' },
+    ]);
+    purchase.clawBackPurchaseCharge.mockRejectedValueOnce(
+      new Error('database unavailable (test)')
+    );
+    const stripe = stripeStub({
+      events: [event(dispute('dp_half', 'needs_response'))],
+    });
+    const { run, obs } = reconcile({ purchase, stripe });
+
+    const first = await run();
+    const second = await run();
+
+    expect(first).toMatchObject({ acted: 0, failed: 1 });
+    expect(obs.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'A chargeback was recorded but opening it failed'
+      ),
+      expect.objectContaining({
+        errorId: expect.any(String),
+        disputeId: 'dp_half',
+      })
+    );
+    expect(second).toMatchObject({ acted: 1, failed: 0 });
+    expect(purchase.clawBackPurchaseCharge).toHaveBeenCalledTimes(2);
+  });
+
+  it('an open inquiry at the same stage has nothing to retry and is left alone', async () => {
+    const { purchase } = ledger([
+      { stripeDisputeId: 'dp_inq_open', status: 'warning_needs_response' },
+    ]);
+    const stripe = stripeStub({
+      events: [event(dispute('dp_inq_open', 'warning_under_review'))],
+    });
+
+    await reconcile({ purchase, stripe }).run();
+
+    expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
+    expect(purchase.recordDispute).not.toHaveBeenCalled();
   });
 
   it('a dispute whose outcome is applied is left alone', async () => {
@@ -363,7 +442,7 @@ describe('runDisputeReconcile', () => {
     expect(purchase.settleWonDispute).not.toHaveBeenCalled();
   });
 
-  it('each dispute is handled once, from its newest event', async () => {
+  it('each dispute is handled once, as Stripe has it now', async () => {
     const { purchase } = ledger();
     // Newest first, as Stripe lists them.
     const stripe = stripeStub({
@@ -375,10 +454,29 @@ describe('runDisputeReconcile', () => {
 
     await reconcile({ purchase, stripe }).run();
 
+    expect(stripe.disputes.retrieve).toHaveBeenCalledOnce();
     expect(purchase.recordDispute).toHaveBeenCalledOnce();
     expect(purchase.recordDispute).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'won' })
     );
+  });
+
+  it('the furthest event decides, though Stripe lists events of the same second in any order', async () => {
+    const { purchase } = ledger([
+      { stripeDisputeId: 'dp_tie', status: 'warning_needs_response' },
+    ]);
+    const stripe = stripeStub({
+      // The close is listed after an earlier-stage event of the same second.
+      events: [
+        event(dispute('dp_tie', 'warning_under_review'), 'evt_a'),
+        event(dispute('dp_tie', 'warning_closed'), 'evt_b'),
+      ],
+      disputes: [dispute('dp_tie', 'warning_closed')],
+    });
+
+    await reconcile({ purchase, stripe }).run();
+
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_tie');
   });
 
   it('a lost dispute whose outcome step failed, older than the window, is applied once; a second run does nothing', async () => {
@@ -514,9 +612,177 @@ describe('runDisputeReconcile', () => {
     await expect(run()).resolves.toMatchObject({ acted: 1 });
 
     expect(obs.error).toHaveBeenCalledWith(
-      expect.stringContaining("could not read Stripe's dispute events"),
-      expect.objectContaining({ errorId: expect.any(String) })
+      expect.stringContaining(
+        "could not read a page of Stripe's dispute events"
+      ),
+      expect.objectContaining({ errorId: expect.any(String), page: 0 })
     );
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_row');
+  });
+
+  it('a final, unapplied row is retried whatever its age, even one written this hour', async () => {
+    const { purchase } = ledger([
+      { stripeDisputeId: 'dp_fresh', status: 'lost', updatedAt: NOW },
+    ]);
+    // Its close event is not listed (say, recorded late by a redelivery).
+    const stripe = stripeStub({ disputes: [dispute('dp_fresh', 'lost')] });
+
+    const result = await reconcile({ purchase, stripe }).run();
+
+    expect(purchase.processLostDispute).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ fromRows: 1, acted: 1 });
+  });
+
+  it('a dispute that cannot be re-read from Stripe is alerted, and the next is still handled', async () => {
+    const { purchase } = ledger();
+    const stripe = stripeStub({
+      events: [
+        event(dispute('dp_gone', 'won')),
+        event(dispute('dp_next', 'warning_closed')),
+      ],
+    });
+    stripe.disputes.retrieve.mockRejectedValueOnce(
+      new Error('Stripe down (test)')
+    );
+    const { run, obs } = reconcile({ purchase, stripe });
+
+    const result = await run();
+
+    expect(obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('could not be read from Stripe'),
+      expect.objectContaining({
+        errorId: expect.any(String),
+        disputeId: 'dp_gone',
+      })
+    );
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_next');
+    expect(result).toMatchObject({ acted: 1, failed: 1 });
+  });
+
+  it('a failure reading our records of the listed disputes is alerted as that, and our unapplied rows are still retried', async () => {
+    const { purchase } = ledger([
+      { stripeDisputeId: 'dp_row2', status: 'warning_closed' },
+    ]);
+    purchase.findDisputeRecords.mockRejectedValueOnce(
+      new Error('database unavailable (test)')
+    );
+    const stripe = stripeStub({
+      events: [event(dispute('dp_listed', 'won'))],
+      disputes: [dispute('dp_row2', 'warning_closed')],
+    });
+    const { run, obs } = reconcile({ purchase, stripe });
+
+    await run();
+
+    expect(obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('could not read our records of the disputes'),
+      expect.objectContaining({
+        errorId: expect.any(String),
+        error: 'database unavailable (test)',
+      })
+    );
+    expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_row2');
+  });
+
+  describe("paging through Stripe's events", () => {
+    function page(ids: string[], hasMore: boolean) {
+      return {
+        object: 'list',
+        data: ids.map((id) =>
+          event(dispute(id, 'warning_closed'), `evt_${id}`)
+        ),
+        has_more: hasMore,
+      };
+    }
+
+    it('reads every page, each after the last event of the one before', async () => {
+      const { purchase } = ledger();
+      const stripe = stripeStub({
+        disputes: [
+          dispute('dp_p1', 'warning_closed'),
+          dispute('dp_p2', 'warning_closed'),
+        ],
+      });
+      stripe.events.list
+        .mockResolvedValueOnce(page(['dp_p1'], true))
+        .mockResolvedValueOnce(page(['dp_p2'], false));
+
+      const result = await reconcile({ purchase, stripe }).run();
+
+      expect(stripe.events.list).toHaveBeenCalledTimes(2);
+      expect(stripe.events.list.mock.calls[1]?.[0]).toMatchObject({
+        starting_after: 'evt_dp_p1',
+      });
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_p1');
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_p2');
+      expect(result.fromEvents).toBe(2);
+    });
+
+    it('stops at its page limit and alerts it', async () => {
+      const { purchase } = ledger();
+      const stripe = stripeStub();
+      let n = 0;
+      stripe.events.list.mockImplementation(async () =>
+        page([`dp_n${n++}`], true)
+      );
+      const { run, obs } = reconcile({ purchase, stripe });
+
+      await run();
+
+      expect(stripe.events.list).toHaveBeenCalledTimes(DISPUTE_EVENT_MAX_PAGES);
+      expect(obs.error).toHaveBeenCalledWith(
+        expect.stringContaining('read its page limit of dispute events'),
+        {
+          errorId: expect.any(String),
+          pages: DISPUTE_EVENT_MAX_PAGES,
+          pageSize: DISPUTE_EVENT_PAGE_SIZE,
+        }
+      );
+    });
+
+    it('a page that fails is alerted, and the disputes on the pages before it are still settled', async () => {
+      const { purchase } = ledger();
+      const stripe = stripeStub({
+        disputes: [dispute('dp_first', 'warning_closed')],
+      });
+      stripe.events.list
+        .mockResolvedValueOnce(page(['dp_first'], true))
+        .mockRejectedValueOnce(new Error('Stripe down (test)'));
+      const { run, obs } = reconcile({ purchase, stripe });
+
+      await run();
+
+      expect(obs.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "could not read a page of Stripe's dispute events"
+        ),
+        expect.objectContaining({ errorId: expect.any(String), page: 1 })
+      );
+      expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith(
+        'dp_first'
+      );
+    });
+  });
+
+  it('more unapplied final rows than one run retries is alerted, and only the limit is retried', async () => {
+    const { purchase } = ledger(
+      Array.from({ length: DISPUTE_RECONCILE_LIMIT + 1 }, (_, i) => ({
+        stripeDisputeId: `dp_many_${i}`,
+        status: 'warning_closed',
+      }))
+    );
+    const stripe = stripeStub();
+    stripe.disputes.retrieve.mockImplementation(async (id: string) =>
+      dispute(id, 'warning_closed')
+    );
+    const { run, obs } = reconcile({ purchase, stripe });
+
+    const result = await run();
+
+    expect(obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('more unapplied final disputes than it retries'),
+      { errorId: expect.any(String), limit: DISPUTE_RECONCILE_LIMIT }
+    );
+    expect(result.fromRows).toBe(DISPUTE_RECONCILE_LIMIT);
   });
 });

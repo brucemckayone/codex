@@ -262,12 +262,16 @@ export async function runScheduledPayoutsSweep(
     return;
   }
 
-  const stripe = deps?.stripe ?? createStripeClient(env.STRIPE_SECRET_KEY);
+  // Inside the try, so a client that cannot be built is logged through obs
+  // and the run ends cleanly: every step below needs it.
+  let stripe: Stripe;
   let webhookServices: WebhookServices;
   try {
+    stripe = deps?.stripe ?? createStripeClient(env.STRIPE_SECRET_KEY);
     webhookServices = await createWebhookServices(env, ctx, { obs, stripe });
   } catch (error) {
     obs.error('payouts-sweep: could not build services, skipping', {
+      errorId: crypto.randomUUID(),
       error: error instanceof Error ? error.message : String(error),
     });
     return;

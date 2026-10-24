@@ -374,9 +374,12 @@ describe('payouts ledger', () => {
       );
       const input = slice();
       void recordSlice(deps, input);
-      await vi.waitFor(async () => {
-        expect(await rowsFor(input.stripeChargeId)).toHaveLength(1);
-      });
+      // The write reads the dispute hold, reserves, then sends: wait for the
+      // send, not a fixed second, so a slow shared database cannot flake it.
+      await vi.waitFor(
+        () => expect(stripe.transfers.create).toHaveBeenCalled(),
+        { timeout: 10_000 }
+      );
       const [row] = await rowsFor(input.stripeChargeId);
       if (!row) throw new Error('row missing');
 
@@ -947,6 +950,30 @@ describe('payouts ledger', () => {
       expect(stripe.transfers.list).toHaveBeenCalledTimes(1);
     });
 
+    it("a row paid on two of the payee's accounts is reported, and settled by the current account's transfer", async () => {
+      const row = await rowOf(movedId, true);
+      const onNew = await landedOn(newAccount, row);
+      const onOld = await landedOn(oldAccount, row);
+
+      const found = await findTransfersForPayouts(
+        stripe,
+        await payeeAccountIds(db, movedId),
+        [row],
+        obs
+      );
+
+      expect(found.get(row.id)).toBe(onNew.id);
+      expect(obs.error).toHaveBeenCalledWith(
+        expect.stringContaining('paid twice'),
+        expect.objectContaining({
+          errorId: expect.any(String),
+          payoutId: row.id,
+          destinations: [newAccount, oldAccount],
+          stripeTransferIds: [onNew.id, onOld.id],
+        })
+      );
+    });
+
     it('a payee with no history asks Stripe once', async () => {
       const row = await rowOf(creatorId, true);
       expect(await payeeAccountIds(db, creatorId)).toEqual({
@@ -989,13 +1016,15 @@ describe('payouts ledger', () => {
       return rows.length === 1;
     }
 
-    it("a second dispute of the charge holds a subscription's re-pay row until its loss is applied", async () => {
-      const stripeChargeId = charge();
+    /**
+     * A paid slice a won dispute reversed and paid back: the re-pay row, which
+     * has no charge id of its own (repay.ts writeRepay). The win's outcome is
+     * not applied yet.
+     */
+    async function repaidByWin(stripeChargeId: string) {
       const paid = await recordSlice(deps, slice({ stripeChargeId }));
       if (paid?.kind !== 'paid') throw new Error('expected paid');
       const won = await dispute(stripeChargeId, 'won');
-      // The won dispute paid its reversal back: a re-pay row, which has no
-      // charge id of its own (repay.ts writeRepay).
       const [repay] = await db
         .insert(payouts)
         .values({
@@ -1022,6 +1051,26 @@ describe('payouts ledger', () => {
         repaidByPayoutId: repay.id,
         resolvedAt: new Date(),
       });
+      return { repay, won };
+    }
+
+    it("a won dispute's re-pay row waits until the win's outcome is applied", async () => {
+      const { repay, won } = await repaidByWin(charge());
+
+      // The win's follow-up (a refund's share off the row) may have failed:
+      // the row is not paid in full meanwhile.
+      expect(await drainable(repay.id)).toBe(false);
+      expect(await claimPayoutAttempt(db, repay.id)).toBeNull();
+
+      await setDispute(won, { outcomeAppliedAt: new Date() });
+
+      expect(await drainable(repay.id)).toBe(true);
+    });
+
+    it("a second dispute of the charge holds a subscription's re-pay row until its loss is applied", async () => {
+      const stripeChargeId = charge();
+      const { repay, won } = await repaidByWin(stripeChargeId);
+      await setDispute(won, { outcomeAppliedAt: new Date() });
       expect(await drainable(repay.id)).toBe(true);
 
       const second = await dispute(stripeChargeId, 'needs_response');
@@ -1204,6 +1253,83 @@ describe('payouts ledger', () => {
       expect(result).toEqual({ kind: 'already_split' });
       expect(await rowsFor(stripeChargeId)).toHaveLength(2);
       expect(stripe.transfers.create).not.toHaveBeenCalled();
+    });
+
+    it("the rest goes to the organisation's missing slice, not the last creator's", async () => {
+      const stripeChargeId = charge();
+      // The first split's agreements, as the per-slice writers left them: the
+      // platform fee and one creator, then the delivery died.
+      await recorded(stripeChargeId, [
+        { payoutType: 'platform_fee', amountCents: 100 },
+        { payoutType: 'creator_payout', amountCents: 300 },
+      ]);
+
+      const result = await recordSplitOnce(
+        deps,
+        { id: stripeChargeId, grossCents: GROSS },
+        [
+          slice({
+            stripeChargeId,
+            payoutType: 'organization_fee',
+            payee: { userId: ownerId, account: payable },
+            amountCents: 120,
+            idempotencyKey: `${stripeChargeId}_org_fee`,
+          }),
+          slice({ stripeChargeId, amountCents: 300 }),
+          slice({
+            stripeChargeId,
+            payee: { userId: movedId, account: payable },
+            amountCents: 380,
+            idempotencyKey: `${stripeChargeId}_creator_${movedId}`,
+          }),
+        ]
+      );
+
+      expect(result.kind).toBe('completed');
+      const rows = await rowsFor(stripeChargeId);
+      const amountOf = (type: string, userId?: string) =>
+        rows.find(
+          (r) =>
+            r.payoutType === type &&
+            (userId === undefined || r.userId === userId)
+        )?.amountCents;
+      // 600 left: the second creator's computed 380, and the 220 rest to the
+      // organisation.
+      expect(amountOf('creator_payout', movedId)).toBe(380);
+      expect(amountOf('organization_fee')).toBe(220);
+      expect(rows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(GROSS);
+    });
+
+    it('a platform fee computed on a replay of a charge split without one is not added on top', async () => {
+      const whole = charge();
+      // The first delivery computed no fee, so wrote no fee row, and split
+      // the whole charge.
+      await recorded(whole, [
+        { payoutType: 'organization_fee', amountCents: GROSS },
+      ]);
+      const fee = {
+        amountCents: 100,
+        organizationId: orgId,
+        source: { sourceType: 'subscription', subscriptionId } as const,
+        transferGroup: `sub_${subscriptionId}`,
+        grossCents: GROSS,
+      };
+
+      expect(
+        await recordPlatformFee(deps, { ...fee, stripeChargeId: whole })
+      ).toBe(0);
+      expect((await rowsFor(whole)).map((r) => r.payoutType)).toEqual([
+        'organization_fee',
+      ]);
+
+      // Split only in part: the fee takes no more than the slices leave.
+      const part = charge();
+      await recorded(part, [
+        { payoutType: 'creator_payout', amountCents: 950 },
+      ]);
+      expect(
+        await recordPlatformFee(deps, { ...fee, stripeChargeId: part })
+      ).toBe(50);
     });
   });
 });

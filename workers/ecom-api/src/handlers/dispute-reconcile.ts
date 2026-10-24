@@ -8,30 +8,37 @@
  * - a missed win is never re-paid, and the buyer stays locked out;
  * - a missed loss never cuts the held slices, so the hold never lifts;
  * - a dispute whose events were ALL missed has no row at all: nothing holds its
- *   unpaid slices, and its paid ones are never reversed.
+ *   unpaid slices, and its paid ones are never reversed;
+ * - a chargeback whose opening failed after it was recorded leaves the buyer
+ *   with access, the subscription billing, and the paid slices unreversed.
  *
- * Two sources, each run through the webhook's own `processDispute`:
+ * Two sources. Each dispute is re-read from Stripe, then run through the
+ * webhook's own `processDispute`:
  * 1. **Stripe's events** (`charge.dispute.*`) of the last 4 days: the 3-day
  *    retry span plus slack, well inside Stripe's 30-day event retention. Each
- *    dispute's newest snapshot is compared with our row. This catches missed
- *    creates, updates and closes, and a dispute we never recorded. The last
- *    15 minutes are left to the webhook, which Stripe is still delivering.
- * 2. **Our rows** with a final status whose outcome was never applied, last
- *    updated before that window: re-read from Stripe and applied. This catches
- *    an outcome step that keeps failing (owner decision 2026-10-23, "Retry
- *    hourly, alert": no new state; it is retried every run and alerted at
- *    error, with an errorId, each time).
+ *    dispute's furthest snapshot is compared with our row. This catches missed
+ *    creates, updates and closes, a dispute we never recorded, and an open
+ *    chargeback whose opening failed. The last 15 minutes are left to the
+ *    webhook, which Stripe is still delivering.
+ * 2. **Our rows** with a final status whose outcome was never applied. This
+ *    catches an outcome step that keeps failing (owner decision 2026-10-23,
+ *    "Retry hourly, alert": no new state; it is retried every run and alerted
+ *    at error, with an errorId, each time).
  *
- * A dispute is acted on only when its record would move to a later stage
- * (inquiry, then chargeback, then closed), or when it is final and not yet
- * applied. A chargeback that is genuinely still open is never re-run, so its
- * buyer is not blocked again. Idempotent by construction: `recordDispute` is
- * forward only, the clawback runs per step, the re-pay keys on
+ * A dispute is acted on when we have no row, when its record would move to a
+ * later stage (inquiry, then chargeback, then closed), when it is final and
+ * not yet applied, or when it is an open chargeback. Nothing records that a
+ * chargeback's opening finished, so an open one is re-run while its events
+ * are in the window. That re-run writes no second streaming block: the
+ * database pause it re-applies is what refuses access, and the block is only a
+ * short-lived stopgap. Idempotent by construction: `recordDispute` is forward
+ * only, the access pauses and the clawback steps are, the re-pay keys on
  * `repaid_by_payout_id`, and `markDisputeOutcomeApplied` stops a rerun.
  * Another environment's dispute is ignored, as by the webhook (production and
  * development share one Stripe sandbox).
  *
- * Never throws: each source and each dispute fails on its own, and is logged.
+ * Never throws: each source, each page of events and each dispute fails on its
+ * own, and is logged at error with an errorId.
  */
 
 import {
@@ -41,7 +48,11 @@ import {
 } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
 import type Stripe from 'stripe';
-import { type DisputeDeps, processDispute } from './payment-webhook';
+import {
+  type AccessEffects,
+  type DisputeDeps,
+  processDispute,
+} from './payment-webhook';
 
 /** Stripe's 3-day webhook retry span, plus a day of slack. */
 export const DISPUTE_EVENT_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
@@ -53,8 +64,8 @@ export const DISPUTE_RECONCILE_GRACE_MS = 15 * 60 * 1000;
 export const DISPUTE_RECONCILE_LIMIT = 50;
 
 /** Events read per page, and the pages read per run. */
-const EVENT_PAGE_SIZE = 100;
-const MAX_EVENT_PAGES = 10;
+export const DISPUTE_EVENT_PAGE_SIZE = 100;
+export const DISPUTE_EVENT_MAX_PAGES = 10;
 
 const TRIGGER = 'dispute reconcile';
 
@@ -78,7 +89,6 @@ export async function runDisputeReconcile(
 ): Promise<DisputeReconcileResult> {
   const { stripe, purchase, obs } = deps;
   const now = deps.now ?? new Date();
-  const windowStart = new Date(now.getTime() - DISPUTE_EVENT_WINDOW_MS);
   const result: DisputeReconcileResult = {
     fromEvents: 0,
     fromRows: 0,
@@ -87,10 +97,41 @@ export async function runDisputeReconcile(
   };
   const handled = new Set<string>();
 
-  const settle = async (dispute: Stripe.Dispute): Promise<void> => {
-    handled.add(dispute.id);
+  /**
+   * Re-read the dispute from Stripe and handle it as it is now, not as an
+   * event's snapshot had it. `recordedStatus` is our row's, if any.
+   */
+  const settle = async (
+    disputeId: string,
+    recordedStatus: string | undefined
+  ): Promise<void> => {
+    handled.add(disputeId);
+    let live: Stripe.Dispute;
     try {
-      if ((await processDispute(dispute, deps, TRIGGER)) === 'acted') {
+      live = await stripe.disputes.retrieve(disputeId);
+    } catch (error) {
+      result.failed++;
+      obs.error(
+        'A dispute could not be read from Stripe by the hourly reconcile; the next run retries it',
+        {
+          errorId: crypto.randomUUID(),
+          disputeId,
+          recordedStatus: recordedStatus ?? null,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      return;
+    }
+    // Re-running a chargeback that was already open writes no second block.
+    const reopening =
+      recordedStatus !== undefined &&
+      stageOf(recordedStatus) === CHARGEBACK_STAGE &&
+      stageOf(live.status) === CHARGEBACK_STAGE;
+    const effects = reopening ? withoutNewBlock(deps.effects) : deps.effects;
+    try {
+      if (
+        (await processDispute(live, { ...deps, effects }, TRIGGER)) === 'acted'
+      ) {
         result.acted++;
       }
     } catch (error) {
@@ -99,8 +140,8 @@ export async function runDisputeReconcile(
         'A dispute could not be settled by the hourly reconcile; the next run retries it',
         {
           errorId: crypto.randomUUID(),
-          disputeId: dispute.id,
-          status: dispute.status,
+          disputeId,
+          status: live.status,
           error: error instanceof Error ? error.message : String(error),
         }
       );
@@ -108,62 +149,54 @@ export async function runDisputeReconcile(
   };
 
   // ── 1. Stripe's events ──────────────────────────────────────────────────
-  try {
-    const latest = await latestDisputeSnapshots(
-      stripe,
-      windowStart,
-      new Date(now.getTime() - DISPUTE_RECONCILE_GRACE_MS),
-      obs
-    );
-    result.fromEvents = latest.size;
-    const recorded = new Map(
-      (await purchase.findDisputeRecords([...latest.keys()])).map((row) => [
-        row.stripeDisputeId,
-        row,
-      ])
-    );
-    for (const dispute of latest.values()) {
-      if (needsSettling(dispute.status, recorded.get(dispute.id))) {
-        await settle(dispute);
+  const snapshots = await furthestDisputeSnapshots(
+    stripe,
+    new Date(now.getTime() - DISPUTE_EVENT_WINDOW_MS),
+    new Date(now.getTime() - DISPUTE_RECONCILE_GRACE_MS),
+    obs
+  );
+  result.fromEvents = snapshots.size;
+  if (snapshots.size > 0) {
+    try {
+      const recorded = new Map(
+        (await purchase.findDisputeRecords([...snapshots.keys()])).map(
+          (row) => [row.stripeDisputeId, row]
+        )
+      );
+      for (const snapshot of snapshots.values()) {
+        const record = recorded.get(snapshot.id);
+        if (needsSettling(snapshot.status, record)) {
+          await settle(snapshot.id, record?.status);
+        }
       }
+    } catch (error) {
+      obs.error(
+        "The hourly dispute reconcile could not read our records of the disputes in Stripe's events; the next run retries",
+        {
+          errorId: crypto.randomUUID(),
+          disputes: snapshots.size,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
     }
-  } catch (error) {
-    obs.error(
-      "The hourly dispute reconcile could not read Stripe's dispute events; the next run retries",
-      {
-        errorId: crypto.randomUUID(),
-        error: error instanceof Error ? error.message : String(error),
-      }
-    );
   }
 
   // ── 2. Our final rows whose outcome was never applied ───────────────────
   try {
+    // One more than the limit, to tell a full batch from a cut-off one.
     const rows = await purchase.findDisputesToReconcile(
-      DISPUTE_RECONCILE_LIMIT,
-      windowStart
+      DISPUTE_RECONCILE_LIMIT + 1
     );
-    for (const row of rows) {
+    if (rows.length > DISPUTE_RECONCILE_LIMIT) {
+      obs.error(
+        'The hourly dispute reconcile found more unapplied final disputes than it retries in one run; the oldest are retried first, and any that keep failing hold the rest back',
+        { errorId: crypto.randomUUID(), limit: DISPUTE_RECONCILE_LIMIT }
+      );
+    }
+    for (const row of rows.slice(0, DISPUTE_RECONCILE_LIMIT)) {
       if (handled.has(row.stripeDisputeId)) continue;
       result.fromRows++;
-      let dispute: Stripe.Dispute;
-      try {
-        dispute = await stripe.disputes.retrieve(row.stripeDisputeId);
-      } catch (error) {
-        result.failed++;
-        handled.add(row.stripeDisputeId);
-        obs.error(
-          'A dispute could not be read from Stripe by the hourly reconcile; the next run retries it',
-          {
-            errorId: crypto.randomUUID(),
-            disputeId: row.stripeDisputeId,
-            status: row.status,
-            error: error instanceof Error ? error.message : String(error),
-          }
-        );
-        continue;
-      }
-      await settle(dispute);
+      await settle(row.stripeDisputeId, row.status);
     }
   } catch (error) {
     obs.error(
@@ -180,36 +213,53 @@ export async function runDisputeReconcile(
 }
 
 /**
- * Each dispute's newest snapshot among the `charge.dispute.*` events created
- * in [from, to]. Stripe lists events newest first, and a dispute's status only
- * moves forward, so the first one seen is its furthest.
+ * Each dispute's furthest snapshot among the `charge.dispute.*` events
+ * created in [from, to]: the one at the latest stage, the newest within a
+ * stage (Stripe lists newest first, and orders events created in the same
+ * second arbitrarily). A page that cannot be read is alerted; the disputes on
+ * the pages before it are still returned.
  */
-async function latestDisputeSnapshots(
+async function furthestDisputeSnapshots(
   stripe: Stripe,
   from: Date,
   to: Date,
   obs: ObservabilityClient
 ): Promise<Map<string, Stripe.Dispute>> {
-  const latest = new Map<string, Stripe.Dispute>();
+  const furthest = new Map<string, Stripe.Dispute>();
   let startingAfter: string | undefined;
-  for (let page = 0; page < MAX_EVENT_PAGES; page++) {
-    const events = await stripe.events.list({
-      type: 'charge.dispute.*',
-      created: {
-        gte: Math.floor(from.getTime() / 1000),
-        lte: Math.floor(to.getTime() / 1000),
-      },
-      limit: EVENT_PAGE_SIZE,
-      ...(startingAfter ? { starting_after: startingAfter } : {}),
-    });
+  for (let page = 0; page < DISPUTE_EVENT_MAX_PAGES; page++) {
+    let events: Stripe.ApiList<Stripe.Event>;
+    try {
+      events = await stripe.events.list({
+        type: 'charge.dispute.*',
+        created: {
+          gte: Math.floor(from.getTime() / 1000),
+          lte: Math.floor(to.getTime() / 1000),
+        },
+        limit: DISPUTE_EVENT_PAGE_SIZE,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+    } catch (error) {
+      obs.error(
+        "The hourly dispute reconcile could not read a page of Stripe's dispute events; the disputes on the pages before it are still settled, the rest next run",
+        {
+          errorId: crypto.randomUUID(),
+          page,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      return furthest;
+    }
     for (const event of events.data) {
       const dispute = event.data.object as Stripe.Dispute;
-      if (dispute.object === 'dispute' && !latest.has(dispute.id)) {
-        latest.set(dispute.id, dispute);
+      if (dispute.object !== 'dispute') continue;
+      const seen = furthest.get(dispute.id);
+      if (!seen || stageOf(dispute.status) > stageOf(seen.status)) {
+        furthest.set(dispute.id, dispute);
       }
     }
     const last = events.data[events.data.length - 1];
-    if (!events.has_more || !last) return latest;
+    if (!events.has_more || !last) return furthest;
     startingAfter = last.id;
   }
   // Volume is near zero; this many in four days means something is wrong.
@@ -217,12 +267,15 @@ async function latestDisputeSnapshots(
     'The hourly dispute reconcile read its page limit of dispute events; older ones in the window were skipped this run',
     {
       errorId: crypto.randomUUID(),
-      pages: MAX_EVENT_PAGES,
-      pageSize: EVENT_PAGE_SIZE,
+      pages: DISPUTE_EVENT_MAX_PAGES,
+      pageSize: DISPUTE_EVENT_PAGE_SIZE,
     }
   );
-  return latest;
+  return furthest;
 }
+
+const CHARGEBACK_STAGE = 1;
+const CLOSED_STAGE = 2;
 
 /** Inquiry, then chargeback, then closed: what a dispute's handling acts on. */
 function stageOf(status: string): number {
@@ -232,23 +285,20 @@ function stageOf(status: string): number {
   if (
     (DISPUTE_CHARGEBACK_OPEN_STATUSES as readonly string[]).includes(status)
   ) {
-    return 1;
+    return CHARGEBACK_STAGE;
   }
   if ((DISPUTE_CLOSED_STATUSES as readonly string[]).includes(status)) {
-    return 2;
+    return CLOSED_STAGE;
   }
   // A status Stripe added since: `recordDispute` logs and skips it.
   return -1;
 }
 
-const CLOSED_STAGE = 2;
-
 /**
- * Whether Stripe's snapshot needs handling: a dispute we never recorded; or
- * one not yet applied whose record is final, or would move to a later stage.
- * A move within a stage (`needs_response` to `under_review`) changes nothing
- * the handling does, so it is left alone: re-running an open chargeback would
- * block its buyer again.
+ * Whether a dispute in Stripe's events needs handling: one we never recorded;
+ * or one not yet applied that is final, is an open chargeback (its opening may
+ * have failed, and nothing records that it finished), or would move to a
+ * later stage. An open inquiry at the same stage has nothing to retry.
  */
 function needsSettling(
   stripeStatus: string,
@@ -258,6 +308,13 @@ function needsSettling(
   if (record.outcomeAppliedAt) return false;
   const recordedStage = stageOf(record.status);
   return (
-    recordedStage === CLOSED_STAGE || stageOf(stripeStatus) > recordedStage
+    recordedStage === CLOSED_STAGE ||
+    recordedStage === CHARGEBACK_STAGE ||
+    stageOf(stripeStatus) > recordedStage
   );
+}
+
+/** The same effects, writing no streaming block. */
+function withoutNewBlock(effects: AccessEffects): AccessEffects {
+  return { ...effects, revokeAccess: () => undefined };
 }

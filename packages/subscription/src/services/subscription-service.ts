@@ -5395,11 +5395,13 @@ export class SubscriptionService extends BaseService {
 
   /**
    * Record an invoice charge's split once (Codex-2hxff.62; owner decision
-   * 2026-10-21, "Keep its first split"): see `recordSplitOnce`. Returns each
-   * slice's outcome, or `null` when an earlier delivery already split the
-   * charge. Then the replay adds nothing, even if an agreement accepted since
-   * is backdated to before the invoice — only a slice missing entirely, from
-   * what is left of the charge's `grossCents` (Codex-2hxff.49).
+   * 2026-10-21, "Keep its first split"): see `recordSplitOnce`. Returns, in
+   * `slices` order, each slice recorded now (its outcome and the amount it
+   * was recorded at) or `null`; `null` for the whole when an earlier delivery
+   * already split the charge. Then the replay adds nothing, even if an
+   * agreement accepted since is backdated to before the invoice — only a
+   * slice missing entirely, from what is left of the charge's `grossCents`
+   * (Codex-2hxff.49).
    */
   private async recordInvoiceSplit(
     subscriptionId: string,
@@ -5407,7 +5409,10 @@ export class SubscriptionService extends BaseService {
     chargeId: string,
     grossCents: number,
     slices: RecordSliceInput[]
-  ): Promise<Array<RecordSliceOutcome | null> | null> {
+  ): Promise<Array<{
+    outcome: RecordSliceOutcome;
+    amountCents: number;
+  } | null> | null> {
     const result = await recordSplitOnce(
       this.ledger(),
       { id: chargeId, grossCents },
@@ -5420,9 +5425,14 @@ export class SubscriptionService extends BaseService {
           : 'Invoice already split by an earlier delivery; the replay keeps that split',
         { subscriptionId, organizationId: orgId, stripeChargeId: chargeId }
       );
-      return null;
+      if (result.kind === 'already_split') return null;
     }
-    return result.outcomes;
+    return result.outcomes.map((outcome, index) => {
+      const slice = result.slices[index];
+      return outcome && slice
+        ? { outcome, amountCents: slice.amountCents }
+        : null;
+    });
   }
 
   /**
@@ -5494,7 +5504,6 @@ export class SubscriptionService extends BaseService {
     charges: number;
     retried: number;
     stillFailing: number;
-    lostDisputesApplied: number;
   }> {
     return retryFailedClawbacks(
       { ...this.ledger(), obs: this.obs },
@@ -5702,14 +5711,15 @@ export class SubscriptionService extends BaseService {
     // no transfer. One paid row per charge (Codex-h69cg, Codex-g9owu). A
     // replay keeps the fee an earlier delivery recorded, and the rest of the
     // charge is split from it (Codex-2hxff.49).
+    const grossCents = platformFeeCents + orgFeeCents + creatorPayoutCents;
     const recordedFeeCents = await recordPlatformFee(ledger, {
       amountCents: platformFeeCents,
       organizationId: orgId,
       source,
       stripeChargeId: chargeId,
       transferGroup,
+      grossCents,
     });
-    const grossCents = platformFeeCents + orgFeeCents + creatorPayoutCents;
     const pool =
       recordedFeeCents === platformFeeCents
         ? { organizationFeeCents: orgFeeCents, creatorPayoutCents }
@@ -5927,29 +5937,37 @@ export class SubscriptionService extends BaseService {
     for (const [index, entry] of creatorSlices.entries()) {
       const { creator, belowFloor, minTransferCents } = entry;
       // The organisation's slice is first, so creator i is outcome i + 1.
-      const outcome = outcomes[index + 1];
+      // None: a replay completing the split found this slice recorded.
+      const recorded = outcomes[index + 1];
+      if (!recorded) continue;
+      const { outcome } = recorded;
       this.obs.info(
         belowFloor ? 'payout_split_skipped' : 'payout_split_computed',
         {
           subscriptionId,
           organizationId: orgId,
           creatorId: creator.creatorId,
-          amountCents: creator.amountCents,
+          amountCents: recorded.amountCents,
           sharePercent: creator.sharePercent,
           totalShareBps,
           postPlatformCents,
           effectiveOrgFeeCents,
           effectiveCreatorPoolCents,
           ...(belowFloor ? { minTransferCents } : {}),
-          outcome: outcome?.kind,
+          ...(recorded.amountCents === creator.amountCents
+            ? {}
+            : { computedAmountCents: creator.amountCents }),
+          outcome: outcome.kind,
           actuallyTransferred:
-            outcome?.kind === 'paid' || outcome?.kind === 'unsettled',
+            outcome.kind === 'paid' || outcome.kind === 'unsettled',
           pendingReason:
-            outcome?.kind === 'pending'
+            outcome.kind === 'pending'
               ? outcome.reason
-              : outcome?.kind === 'failed'
+              : outcome.kind === 'failed'
                 ? 'transfer_failed'
-                : undefined,
+                : outcome.kind === 'held'
+                  ? 'dispute_hold'
+                  : undefined,
         }
       );
     }

@@ -42,7 +42,10 @@ import {
   stripeConnectAccounts,
   users,
 } from '@codex/database/schema';
-import { AfterCommitError } from '@codex/service-errors';
+import {
+  AfterCommitError,
+  UnsupportedCurrencyError,
+} from '@codex/service-errors';
 import {
   createMockStripe,
   createTestConnectAccountInput,
@@ -689,6 +692,7 @@ describe('A refund handled before a purchase is paid out (Codex-2hxff.67)', () =
         sessions.set(paymentIntentId, {
           id: `cs_${tag}`,
           amount_total: PRICE,
+          currency: 'gbp',
           created: sessionCreated,
           metadata: {
             customerId: healBuyerId,
@@ -731,6 +735,7 @@ describe('A refund handled before a purchase is paid out (Codex-2hxff.67)', () =
       sessions.set(paymentIntentId, {
         id: `cs_${tag}`,
         amount_total: PRICE,
+        currency: 'gbp',
         created: sessionCreated,
         metadata: {
           kind: 'course',
@@ -880,13 +885,65 @@ describe('A refund handled before a purchase is paid out (Codex-2hxff.67)', () =
         await refunded(early);
         await early.complete();
 
-        expect(await purchaseOf(early)).toMatchObject({
+        const purchase = await purchaseOf(early);
+        expect(purchase).toMatchObject({
           status: 'refunded',
           refundAmountCents: PRICE,
+          stripeRefundId: expect.stringMatching(/^re_order_/),
         });
         expect(await hasAccess(early)).toBe(false);
+        // Rebuilt already refunded, so access was never granted at all: there
+        // is no grant a failed revoke could leave behind.
+        expect(
+          await db
+            .select()
+            .from(entitlements)
+            .where(eq(entitlements.sourceRef, purchase.id))
+        ).toEqual([]);
+        expect(
+          await db
+            .select()
+            .from(contentAccess)
+            .where(
+              and(
+                eq(contentAccess.userId, healBuyerId),
+                eq(contentAccess.contentId, early.itemId)
+              )
+            )
+        ).toEqual([]);
         expect(await slicesOf(early.chargeId)).toEqual([]);
         expect(moneyCalls()).toEqual({ transfers: 0, reversals: 0 });
+      });
+
+      it(`${kind}: a sale in another currency is refused before anything is written, as completion refuses it (PAY-25)`, async () => {
+        const charges = stripeCharges();
+        const early = await healSale(kind);
+        const session = sessions.get(early.paymentIntentId);
+        if (session) session.currency = 'usd';
+
+        charges.refund(early.chargeId, 300);
+        await expect(refunded(early)).rejects.toBeInstanceOf(
+          UnsupportedCurrencyError
+        );
+
+        expect(
+          await db
+            .select()
+            .from(purchases)
+            .where(eq(purchases.stripePaymentIntentId, early.paymentIntentId))
+        ).toEqual([]);
+        expect(
+          await db
+            .select()
+            .from(entitlements)
+            .where(eq(entitlements.userId, healBuyerId))
+        ).toEqual(
+          expect.not.arrayContaining([
+            expect.objectContaining({
+              [kind === 'content' ? 'contentId' : 'courseId']: early.itemId,
+            }),
+          ])
+        );
       });
 
       it(`${kind}: redeliveries of either event move no more money`, async () => {

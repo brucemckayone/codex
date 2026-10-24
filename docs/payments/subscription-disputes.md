@@ -61,7 +61,9 @@ A subscription that is already cancelled when the event arrives gets no Stripe c
   - each Stripe call carries an idempotency key built from the dispute id;
   - a cancel accepts a subscription that is already cancelled.
 - A failed Stripe call throws, so Stripe redelivers the event.
-- `outcome_applied_at` is set only after the subscription step succeeds, so a lost dispute keeps its hold until then.
+- `outcome_applied_at` is set only after the whole lost path succeeds, the subscription step included, so a lost dispute keeps its hold until then.
+  - Nothing else sets it. The hourly clawback retry finishes failed steps but never marks a loss applied: finished steps cannot show the lost handling ran, because the steps a chargeback wrote when it opened finish too.
+  - A lost path that failed is re-run whole by the hourly dispute reconcile (Codex-2hxff.58), which marks the outcome once it succeeds.
 
 ## 6. Owner checks (no code)
 

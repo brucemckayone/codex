@@ -201,7 +201,10 @@ between. Each slice is recorded once per charge
 ([the payouts ledger](connect-and-payouts.md#the-payouts-ledger)), and:
 
 - **The platform fee on record wins.** A redelivery that computes a different
-  platform fee keeps the one recorded, and logs the difference at warn.
+  platform fee keeps the one recorded, and logs the difference at warn. If
+  the first delivery computed no fee (so recorded none) and split the whole
+  charge, a redelivery's fee may take only what the slices leave of the
+  gross: usually nothing, so no fee is added on top of the split.
 - **The rest is split from it.** If no other slice was recorded yet (the first
   delivery died after the platform fee), the pool is the gross minus the
   recorded fee, divided by the rules above with the fees in force now. So the
@@ -214,8 +217,13 @@ between. Each slice is recorded once per charge
   but the charge has no row for (a delivery that died between slices) is
   recorded from the gross less every row on the charge, so the slices sum to
   the gross. With nothing left, as after a complete first split, it is not
-  added. Several missing slices take their computed amounts in turn, and the
-  last takes the rest.
+  added. The rest goes to the organisation's slice when it is among the
+  missing, as rounding remainders do: the other missing slices take their
+  computed amounts first, as far as it goes. With no organisation slice
+  missing, the last missing slice takes the rest. If a first split died
+  before writing its owner-pool slice and a replay computes a different payee
+  (a backdated agreement), the rest goes to the replay's payee; the first
+  split's full shape cannot be known.
 
 | £10.00 invoice, no agreements | Platform | Organisation | Owner pool |
 |---|---|---|---|

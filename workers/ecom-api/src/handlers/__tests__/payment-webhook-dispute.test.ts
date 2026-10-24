@@ -633,6 +633,66 @@ describe('handlePaymentWebhook — disputes', () => {
     expect(calls).toEqual(['pause', 'clawback', 'pauseBilling']);
   });
 
+  it.each([
+    ['pausing the purchase', 'processDispute'],
+    ['the clawback', 'clawBackPurchaseCharge'],
+  ] as const)('a chargeback whose opening fails at %s is alerted at error with an errorId, then rethrown for Stripe to redeliver', async (_step, method) => {
+    const failure = new Error('database unavailable (test)');
+    purchase[method]?.mockRejectedValueOnce(failure);
+    recordedAs('needs_response', {
+      purchaseId: 'purchase_open',
+      subscriptionId: null,
+      courseSubscriptionId: null,
+    });
+    const bundle = buildContext();
+
+    await expect(
+      handlePaymentWebhook(createDisputeEvent(), mockStripe, bundle.context)
+    ).rejects.toBe(failure);
+
+    expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'A chargeback was recorded but opening it failed'
+      ),
+      {
+        errorId: expect.any(String),
+        disputeId: 'dp_test_dispute',
+        chargeId: 'ch_test',
+        purchaseId: 'purchase_open',
+        subscriptionId: null,
+        courseSubscriptionId: null,
+        error: 'database unavailable (test)',
+      }
+    );
+    expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  it('a chargeback whose subscription billing pause fails at Stripe is alerted and rethrown, after its access pause and clawback', async () => {
+    subscription.pauseForDispute?.mockImplementationOnce(async () => {
+      calls.push('pause');
+      return disputedSubscription;
+    });
+    const refused = new Error('No such subscription (test)');
+    subscription.pauseBillingForDispute?.mockRejectedValueOnce(refused);
+    const bundle = buildContext();
+
+    await expect(
+      handlePaymentWebhook(createDisputeEvent(), mockStripe, bundle.context)
+    ).rejects.toBe(refused);
+
+    expect(calls).toEqual(['pause', 'clawback']);
+    expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'A chargeback was recorded but opening it failed'
+      ),
+      expect.objectContaining({
+        errorId: expect.any(String),
+        disputeId: 'dp_test_dispute',
+        error: 'No such subscription (test)',
+      })
+    );
+  });
+
   it('a chargeback on a purchase pauses no subscription billing', async () => {
     const bundle = buildContext();
 
@@ -751,16 +811,27 @@ describe('handlePaymentWebhook — disputes', () => {
 
   it('a prevented dispute that has a dispute reversal step anyway is alerted at error with an errorId, and still marked applied', async () => {
     purchase.countDisputeReversalSteps = vi.fn().mockResolvedValue(2);
+    recordedAs('prevented', {
+      purchaseId: 'purchase_prev',
+      subscriptionId: null,
+      courseSubscriptionId: null,
+    });
     const bundle = buildContext();
 
     await handlePaymentWebhook(preventedEvent(), mockStripe, bundle.context);
 
+    // The chargeback handling ran too, so access and billing may be paused.
     expect(bundle.mock._obs.error).toHaveBeenCalledExactlyOnceWith(
-      expect.stringContaining("ended 'prevented' after money was clawed back"),
+      expect.stringMatching(
+        /ended 'prevented' after money was clawed back.*access and the subscription's billing may still be paused/
+      ),
       {
         errorId: expect.any(String),
         disputeId: 'dp_test_dispute',
         chargeId: 'ch_test',
+        purchaseId: 'purchase_prev',
+        subscriptionId: null,
+        courseSubscriptionId: null,
         reversalSteps: 2,
       }
     );

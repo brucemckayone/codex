@@ -711,8 +711,8 @@ export async function processDispute(
       await purchase.clawBackPurchaseCharge(paymentIntentId, clawbackCharge);
     }
   };
-
-  if (isOneOf(status, DISPUTE_CHARGEBACK_OPEN_STATUSES)) {
+  // Every step is idempotent, so a redelivery or the reconcile can run it again.
+  const openChargeback = async () => {
     if (paymentIntentId) {
       // Org-scoped purchases revoke access within their org; orgless
       // creator-direct purchases (`purchases.organizationId` nullable,
@@ -737,6 +737,31 @@ export async function processDispute(
     await clawBack();
     if (pausedSubscription) {
       await subscription.pauseBillingForDispute(pausedSubscription, dispute.id);
+    }
+  };
+
+  if (isOneOf(status, DISPUTE_CHARGEBACK_OPEN_STATUSES)) {
+    try {
+      await openChargeback();
+    } catch (error) {
+      // Nothing marks an open chargeback done, so this is the signal: the
+      // buyer may still have access, the subscription may still bill them,
+      // and paid slices may not be reversed. A transient failure is
+      // redelivered by Stripe, and the hourly reconcile re-runs an open
+      // chargeback while its events are in its window (Codex-2hxff.58).
+      obs?.error(
+        'A chargeback was recorded but opening it failed: access may not be paused, billing may not be paused, or paid slices may not be clawed back. It is retried; if this repeats, check them by hand',
+        {
+          errorId: crypto.randomUUID(),
+          disputeId: dispute.id,
+          chargeId,
+          purchaseId: recorded.purchaseId,
+          subscriptionId: recorded.subscriptionId,
+          courseSubscriptionId: recorded.courseSubscriptionId,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      throw error;
     }
     obs?.info('Chargeback opened: access paused, paid slices clawed back', {
       disputeId: dispute.id,
@@ -808,6 +833,9 @@ export async function processDispute(
       await alertPreventedAfterClawback(purchase, obs, {
         disputeId: dispute.id,
         chargeId,
+        purchaseId: recorded.purchaseId,
+        subscriptionId: recorded.subscriptionId,
+        courseSubscriptionId: recorded.courseSubscriptionId,
       });
     }
     await purchase.markDisputeOutcomeApplied(dispute.id);
@@ -823,18 +851,26 @@ export async function processDispute(
 /**
  * A `prevented` dispute never became a chargeback, so nothing should have
  * been clawed back for it, and nothing is paid back (Codex-2hxff.59 item 5).
- * Stripe's own definition rules it out; if it has a reversal step anyway,
- * that money stays with the platform until a person settles it.
+ * Stripe's own definition rules it out. A reversal step means the chargeback
+ * handling ran too, so its money stays with the platform, and the buyer's
+ * access and the subscription's billing may still be paused, until a person
+ * settles them.
  */
 async function alertPreventedAfterClawback(
   purchase: PurchaseService,
   obs: ObservabilityClient | undefined,
-  ids: { disputeId: string; chargeId: string }
+  ids: {
+    disputeId: string;
+    chargeId: string;
+    purchaseId: string | null;
+    subscriptionId: string | null;
+    courseSubscriptionId: string | null;
+  }
 ): Promise<void> {
   const steps = await purchase.countDisputeReversalSteps(ids.disputeId);
   if (steps === 0) return;
   obs?.error(
-    "A dispute ended 'prevented' after money was clawed back for it: its reversals stand and nothing pays them back. Check the charge's payouts and re-pay the creators by hand",
+    "A dispute ended 'prevented' after money was clawed back for it: its reversals stand and nothing pays them back, and the buyer's access and the subscription's billing may still be paused. Re-pay the creators and restore access and billing by hand",
     { errorId: crypto.randomUUID(), ...ids, reversalSteps: steps }
   );
 }

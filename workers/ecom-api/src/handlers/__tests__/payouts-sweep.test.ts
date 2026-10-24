@@ -17,7 +17,7 @@
  * webhook handlers because the cron + the Stripe webhooks share an owner.
  */
 
-import { PurchaseService } from '@codex/purchase';
+import { createStripeClient, PurchaseService } from '@codex/purchase';
 import {
   CourseSubscriptionService,
   SubscriptionService,
@@ -31,6 +31,12 @@ import {
   type MockInstance,
   vi,
 } from 'vitest';
+
+// The real client, unless a test makes building it fail.
+vi.mock('@codex/purchase', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@codex/purchase')>();
+  return { ...actual, createStripeClient: vi.fn(actual.createStripeClient) };
+});
 
 import { COURSE_OFF_SALE_SWEEP_LIMIT } from '../course-off-sale-sweep';
 import {
@@ -120,7 +126,6 @@ describe('ecom-api payouts-sweep handler', () => {
         charges: 0,
         retried: 0,
         stillFailing: 0,
-        lostDisputesApplied: 0,
       });
   });
   afterEach(() => {
@@ -251,6 +256,33 @@ describe('ecom-api payouts-sweep handler', () => {
     );
 
     spy.mockRestore();
+  });
+
+  it('a Stripe client that cannot be built is logged through obs with an errorId, and the run ends cleanly', async () => {
+    const sweep = vi.spyOn(
+      SubscriptionService.prototype,
+      'sweepUnresolvedPayouts'
+    );
+    vi.mocked(createStripeClient).mockImplementationOnce(() => {
+      throw new Error('Stripe client failed (test)');
+    });
+    const { obs } = makeObs();
+
+    await expect(
+      runScheduledPayoutsSweep(makeEnv() as never, fakeCtx(), {
+        obs: obs as never,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(obs.error).toHaveBeenCalledWith(
+      'payouts-sweep: could not build services, skipping',
+      {
+        errorId: expect.any(String),
+        error: 'Stripe client failed (test)',
+      }
+    );
+    expect(sweep).not.toHaveBeenCalled();
+    sweep.mockRestore();
   });
 
   it('runScheduledPayoutsSweep invokes sweepUnresolvedPayouts when env is configured', async () => {
@@ -391,7 +423,9 @@ describe('ecom-api payouts-sweep handler', () => {
 
     expect(ran).toEqual({ drain: 1, offSale: 1, owed: [1, 1, 1], released: 1 });
     expect(obs.error).toHaveBeenCalledWith(
-      expect.stringContaining("could not read Stripe's dispute events"),
+      expect.stringContaining(
+        "could not read a page of Stripe's dispute events"
+      ),
       expect.objectContaining({
         errorId: expect.any(String),
         error: 'Stripe unavailable (test)',
@@ -580,7 +614,6 @@ describe('ecom-api payouts-sweep handler', () => {
       charges: 2,
       retried: 1,
       stillFailing: 1,
-      lostDisputesApplied: 0,
     });
     const { obs } = makeObs();
 

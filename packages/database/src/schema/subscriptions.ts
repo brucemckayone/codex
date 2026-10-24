@@ -314,9 +314,11 @@ export const stripeConnectAccounts = pgTable(
  *
  * A transfer is looked up by its destination, so a payout sent to an account
  * that was later replaced would not be found, and could be sent again. A
- * trigger in migration 0113 writes the old account here whenever a
- * `stripe_connect_accounts` row is deleted or re-keyed, so a manual support
- * edit is caught too; nothing in the app writes this table.
+ * trigger in migration 0113 writes the old (user, account) here whenever a
+ * `stripe_connect_accounts` row is deleted, re-keyed or moved to another
+ * user, so a manual support edit is caught too; nothing in the app writes
+ * this table. It starts at 0113: an account replaced before then is not in
+ * it.
  *
  * `user_id` has no foreign key on purpose: deleting a user cascades to their
  * Connect row, and the trigger's insert would then name a user already

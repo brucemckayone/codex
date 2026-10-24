@@ -276,16 +276,20 @@ Rules:
   2026-10-23, "Keep account history", `Codex-2hxff.47`). Transfers are looked
   up by their destination, so a transfer sent to an account the payee no
   longer has would not be found, and the drain would send the row again. A
-  database trigger records the old account in
+  database trigger records the old account, for its old user, in
   `stripe_connect_account_history` whenever a `stripe_connect_accounts` row is
-  deleted or its `stripe_account_id` changes, so a manual support edit is
-  caught too (migration 0113). The lookup (`findTransfersForPayouts`) searches
-  the current account for every row, then each replaced account, newest
-  first, for the rows still not found that have an attempt on record
-  (`last_retry_at`). A row never attempted has no transfer anywhere, so a
-  payee with no history, or no attempted row, costs the one Stripe search it
-  always did. The drain and a refund's cancel both use it
-  (`payeeAccountIds`). The app itself never replaces an account.
+  deleted, its `stripe_account_id` changes, or it is moved to another user
+  (`user_id` changes), so a manual support edit is caught too. The history
+  starts at migration 0113: an account replaced before 0113 is not in it, and
+  cannot be added later. The lookup (`findTransfersForPayouts`) searches the
+  current account for every row, then each replaced account, newest first,
+  for the rows that have an attempt on record (`last_retry_at`). A row never
+  attempted has no transfer anywhere, so a payee with no history, or no
+  attempted row, costs the one Stripe search it always did. A row found on
+  two of the payee's accounts was paid twice: that is logged at error with
+  both transfers, and the current account's settles it. The drain and a
+  refund's cancel both use it (`payeeAccountIds`). The app itself never
+  replaces an account.
 
 | Transfer | Idempotency key |
 |---|---|
@@ -347,7 +351,11 @@ held by a dispute ([disputes](purchases.md#disputes)):
 - A re-pay row (a won dispute paying a reversal back) has no charge of its
   own. It is held through the slice it re-pays, while that slice's charge has
   such a dispute: a second dispute of the same charge, which Stripe allows
-  (`Codex-2hxff.59`).
+  (`Codex-2hxff.59`). It is also held while the dispute that re-paid it is
+  `won` but its outcome is not applied yet (`outcome_applied_at`): the win's
+  follow-up, which takes a refund's share off the re-pay row, may have failed
+  and be waiting for the reconcile to retry it. Paid in full first, that
+  share would become a debt for a person to collect.
 - A slice recorded while a dispute holds its sale is not sent at write time
   either. It is reserved `pending` (no reason, no attempt) and paid by the
   drains once the dispute is won or closed (owner decision Q1, "the sale's

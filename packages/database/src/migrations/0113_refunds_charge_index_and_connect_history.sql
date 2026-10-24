@@ -13,11 +13,14 @@ CREATE INDEX "idx_refunds_charge" ON "refunds" USING btree ("stripe_charge_id");
 CREATE OR REPLACE FUNCTION record_replaced_connect_account()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- UPDATE OF fires whenever the column is in the SET list, changed or not.
+  -- UPDATE OF fires whenever a column is in the SET list, changed or not.
+  -- A row moved to another user is a replacement too: the old user loses
+  -- the account their transfers went to.
   -- (A trigger's WHEN cannot test TG_OP, nor NEW on a DELETE, so the check
   -- lives here.)
   IF TG_OP = 'UPDATE'
-     AND OLD.stripe_account_id IS NOT DISTINCT FROM NEW.stripe_account_id THEN
+     AND OLD.stripe_account_id IS NOT DISTINCT FROM NEW.stripe_account_id
+     AND OLD.user_id IS NOT DISTINCT FROM NEW.user_id THEN
     RETURN NEW;
   END IF;
   INSERT INTO stripe_connect_account_history (user_id, stripe_account_id)
@@ -33,6 +36,6 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trigger_record_replaced_connect_account ON stripe_connect_accounts;
 --> statement-breakpoint
 CREATE TRIGGER trigger_record_replaced_connect_account
-  AFTER DELETE OR UPDATE OF stripe_account_id ON stripe_connect_accounts
+  AFTER DELETE OR UPDATE OF stripe_account_id, user_id ON stripe_connect_accounts
   FOR EACH ROW
   EXECUTE FUNCTION record_replaced_connect_account();

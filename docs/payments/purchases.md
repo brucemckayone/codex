@@ -394,13 +394,15 @@ before `checkout.session.completed`), for content or a course
 
 - The purchase is rebuilt from its Stripe checkout session, as completion would
   write it: the real split (the configured fees, and the creator's agreement as
-  it stood when the session was created), dated at the charge's payment time,
-  with its access grant. The refund is then recorded on it as on any purchase.
-  No slice is written yet.
-- **A full refund** leaves it `refunded` with access ended. When the purchase's
+  it stood when the session was created), dated at the charge's payment time.
+  A session in any currency but GBP is refused first, as completion refuses it
+  (PAY-25), and nothing is written. No slice is written yet.
+- **A full refund**: the purchase is rebuilt already `refunded`, with the
+  refund, in one transaction, and access is never granted. When its
   `checkout.session.completed` arrives, it records nothing more, so no one is
   paid.
-- **A partial refund** leaves it `completed`, and the buyer keeps access (P-1).
+- **A partial refund**: the purchase is rebuilt `completed` with its access
+  grant, then the refund is recorded on it, and the buyer keeps access (P-1).
   When `checkout.session.completed` arrives, the slices are recorded from the
   stored split and the refund is clawed back from them at once, so each payee
   nets what the same refund after the payout would leave.
@@ -468,18 +470,27 @@ dispute event records it, then acts on the status the record has.
   becoming a formal chargeback", so it closes like an inquiry: nothing to
   restore or re-pay, and its held slices are released. One that has a
   clawback step anyway is alerted at error, with an errorId, for a person to
-  settle (`Codex-2hxff.59`).
+  settle (`Codex-2hxff.59`): its chargeback handling ran, so the buyer's access
+  and the subscription's billing may still be paused too.
 - **Missed events.** A dispute webhook that fails for good is answered 200, and
   Stripe stops redelivering after 3 days. So the hourly payouts cron first
   reconciles disputes (`Codex-2hxff.58`), before its drain. It reads Stripe's
   `charge.dispute.*` events from the last 4 days, and acts on any dispute that
-  has no row of ours, or whose row would move to a later stage (inquiry, then
-  chargeback, then closed). It also re-reads from Stripe any older row of ours
-  whose final status was never applied. A chargeback that is still open is
-  never re-run, so its buyer is not blocked again. A step that keeps failing
-  is retried every hour and alerted at error, with an errorId, each time
-  (owner decision 2026-10-23, "Retry hourly, alert"). Another environment's
-  disputes are ignored, as by the webhook.
+  has no row of ours, whose row would move to a later stage (inquiry, then
+  chargeback, then closed), or that is an open chargeback. It also retries
+  every row of ours whose final status was never applied. Each is re-read
+  from Stripe first and handled as it is now.
+  - **An open chargeback is re-run while its events are in that window**,
+    because nothing records that opening it finished: if pausing access, the
+    clawback or the billing pause failed, the re-run completes it. Every step
+    is idempotent, and the re-run writes no second streaming block: the
+    database pause is what refuses access. A failure opening a chargeback is
+    alerted at error with an errorId, and the webhook returns it so a
+    transient one is redelivered.
+  - A step that keeps failing is retried every hour and alerted at error, with
+    an errorId, each time (owner decision 2026-10-23, "Retry hourly, alert").
+    More unapplied final disputes than one run retries (50) is alerted too.
+  - Another environment's disputes are ignored, as by the webhook.
 
 A later refund of a slice a won dispute paid back takes its share off the
 slice's re-pay row while that row is unpaid; only what a paid re-pay row

@@ -2271,14 +2271,17 @@ export class PurchaseService extends BaseService {
    *
    * The row is the one completion would write (Codex-2hxff.68): the REAL split
    * (`resolvePurchaseSplit`, with the agreement in force when the checkout
-   * session was created, as completion resolves it) and the access grant.
-   * `purchasedAt` is the payment time the caller passes (the charge's
-   * `created`). No slice is written here: the refund is recorded on the row
-   * next, and the later `checkout.session.completed` replays into
-   * `repairPurchasePayouts`. A full refund leaves the purchase `refunded`,
-   * so that replay pays no one; a partial one keeps it `completed` (P-1), so
-   * the replay records the slices and claws the refund back from them, and
-   * each payee nets what a refund after the payout leaves.
+   * session was created, as completion resolves it), after the same GBP check
+   * (PAY-25). `purchasedAt` is the payment time the caller passes (the
+   * charge's `created`). No slice is written here: the later
+   * `checkout.session.completed` replays into `repairPurchasePayouts`.
+   * - **Refunded in full** (`refundedInFull`): the row is written `refunded`,
+   *   with the refund, in the same transaction, and grants nothing. The
+   *   replay then pays no one.
+   * - **Otherwise** it is written `completed` with its access grant, and the
+   *   caller records the partial refund on it (P-1: access is kept). The
+   *   replay records the slices and claws the refund back from them, so each
+   *   payee nets what a refund after the payout leaves.
    *
    * Returns the purchase, or `null` when the session/metadata cannot be resolved
    * (caller then exits cleanly with 200, exactly as the old drop branch did).
@@ -2286,7 +2289,15 @@ export class PurchaseService extends BaseService {
    */
   async ensurePurchaseDataPresent(
     paymentIntentId: string,
-    paidAt?: Date
+    options: {
+      paidAt?: Date;
+      /** The charge is refunded in full: what to record on a rebuilt row. */
+      refundedInFull?: {
+        refundAmountCents: number;
+        stripeRefundId: string | null;
+        refundReason: string | null;
+      };
+    } = {}
   ): Promise<Purchase | null> {
     // Fast path: row already exists (normal delivery order, or a replay).
     const existing = await this.db.query.purchases.findFirst({
@@ -2324,7 +2335,13 @@ export class PurchaseService extends BaseService {
       'contentId' in target
         ? { contentId: target.contentId }
         : { courseId: target.courseId };
-    const purchasedAt = paidAt ?? new Date();
+    // GBP only, before a split is computed (PAY-25), as completion refuses it.
+    assertGbpOnly(session.currency, {
+      stripePaymentIntentId: paymentIntentId,
+      ...itemIds,
+    });
+    const { refundedInFull } = options;
+    const purchasedAt = options.paidAt ?? new Date();
     // The checkout's start, as completion takes it (Codex-2hxff.64 Q1).
     const offerAt = Number.isFinite(session.created)
       ? new Date(session.created * 1000)
@@ -2357,7 +2374,7 @@ export class PurchaseService extends BaseService {
             ...itemIds,
             organizationId: split.organizationId,
             amountPaidCents,
-            currency: CURRENCY.GBP,
+            currency: session.currency || CURRENCY.GBP,
             stripePaymentIntentId: paymentIntentId,
             purchasedAt,
             platformFeeCents: split.revenueSplit.platformFeeCents,
@@ -2366,6 +2383,12 @@ export class PurchaseService extends BaseService {
             platformAgreementId: null,
             creatorOrgAgreementId: split.agreement?.agreementId ?? null,
             ...purchaseOutcomeFields(ownerId),
+            // Refunded already: never granted, so nothing is left to revoke.
+            ...(refundedInFull && {
+              ...refundedInFull,
+              status: PURCHASE_STATUS.REFUNDED,
+              refundedAt: new Date(),
+            }),
           })
           .returning();
         if (!inserted) {
@@ -2373,12 +2396,15 @@ export class PurchaseService extends BaseService {
             stripePaymentIntentId: paymentIntentId,
           });
         }
-        if (ownerId === undefined) await this.grantPurchaseAccess(tx, inserted);
+        if (ownerId === undefined && !refundedInFull) {
+          await this.grantPurchaseAccess(tx, inserted);
+        }
         this.obs.info('Purchase self-heal: rebuilt from its checkout session', {
           purchaseId: inserted.id,
           paymentIntentId,
           ...itemIds,
           duplicatePayment: ownerId !== undefined,
+          refundedInFull: refundedInFull !== undefined,
         });
         return inserted;
       });
@@ -2447,10 +2473,27 @@ export class PurchaseService extends BaseService {
       // checkout.session.completed, the row won't exist yet — rebuild it from
       // the Stripe checkout session so the refund is recorded (no transfers
       // yet: completion records them, Codex-2hxff.68).
-      const purchase = await this.ensurePurchaseDataPresent(
-        paymentIntentId,
-        refundDetails.paidAt
-      );
+      const refundedCents =
+        refundDetails.refundAmountCents ?? refundDetails.charge.amountCents;
+      const isFull = refundedCents >= refundDetails.charge.amountCents;
+      const refundFields = {
+        updatedAt: new Date(),
+        refundAmountCents: refundedCents,
+        stripeRefundId: refundDetails.stripeRefundId ?? null,
+        refundReason: refundDetails.refundReason ?? null,
+      };
+      const purchase = await this.ensurePurchaseDataPresent(paymentIntentId, {
+        paidAt: refundDetails.paidAt,
+        // A purchase rebuilt for a full refund is written refunded, granting
+        // nothing (below, it takes the already-refunded path).
+        refundedInFull: isFull
+          ? {
+              refundAmountCents: refundedCents,
+              stripeRefundId: refundFields.stripeRefundId,
+              refundReason: refundFields.refundReason,
+            }
+          : undefined,
+      });
 
       if (!purchase) {
         this.obs.warn('Refund for unknown purchase', { paymentIntentId });
@@ -2476,16 +2519,6 @@ export class PurchaseService extends BaseService {
           itemTitle: await this.itemTitle(purchase),
         };
       }
-
-      const refundedCents =
-        refundDetails.refundAmountCents ?? refundDetails.charge.amountCents;
-      const isFull = refundedCents >= refundDetails.charge.amountCents;
-      const refundFields = {
-        updatedAt: new Date(),
-        refundAmountCents: refundedCents,
-        stripeRefundId: refundDetails.stripeRefundId ?? null,
-        refundReason: refundDetails.refundReason ?? null,
-      };
 
       if (!isFull) {
         // P-1: the buyer keeps access. The amount only grows, so a stale
@@ -3140,13 +3173,11 @@ export class PurchaseService extends BaseService {
    * The hourly dispute reconcile's second source (Codex-2hxff.58): disputes
    * that reached a final status whose outcome was never applied (a won
    * dispute not re-paid, a lost one whose held slices were never cut, an
-   * inquiry whose close never released them), last updated before
-   * `updatedBefore`. A younger one's events are still in the reconcile's
-   * event window, which handles it. Oldest first.
+   * inquiry whose close never released them). Oldest first. The reconcile
+   * skips any its event source already handled in the same run.
    */
   async findDisputesToReconcile(
-    limit: number,
-    updatedBefore: Date
+    limit: number
   ): Promise<Array<Pick<Dispute, 'stripeDisputeId' | 'status'>>> {
     try {
       return await this.db
@@ -3158,8 +3189,7 @@ export class PurchaseService extends BaseService {
         .where(
           and(
             inArray(disputes.status, [...DISPUTE_CLOSED_STATUSES]),
-            isNull(disputes.outcomeAppliedAt),
-            lt(disputes.updatedAt, updatedBefore)
+            isNull(disputes.outcomeAppliedAt)
           )
         )
         .orderBy(asc(disputes.updatedAt), asc(disputes.stripeDisputeId))

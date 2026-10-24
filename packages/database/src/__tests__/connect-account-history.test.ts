@@ -1,7 +1,8 @@
 /**
  * Every Connect account a user stops having is remembered (Codex-2hxff.47,
  * migration 0113), so a transfer sent to it can still be found and never
- * sent twice. A trigger does it, so a manual support edit is caught too.
+ * sent twice. A trigger does it, so a manual support edit (a delete, a re-key,
+ * or a move to another user) is caught too.
  *
  * Real DB. Skips when DB_METHOD is not configured.
  */
@@ -73,6 +74,46 @@ describe.skipIf(!HAS_DB)('stripe_connect_account_history', () => {
       { account: `acct_${tag}_a` },
       { account: `acct_${tag}_b` },
     ]);
+  });
+
+  it('records the old owner when support moves a Connect row to another user', async () => {
+    const { dbHttp } = await import('../index');
+    const { stripeConnectAccountHistory, stripeConnectAccounts, users } =
+      await import('../schema');
+    const from = `${userId}-from`;
+    const to = `${userId}-to`;
+    for (const id of [from, to]) {
+      await dbHttp
+        .insert(users)
+        .values({ id, name: 'History Move', email: `${id}@example.test` });
+    }
+    await dbHttp
+      .insert(stripeConnectAccounts)
+      .values({ userId: from, stripeAccountId: `acct_${tag}_moved` });
+
+    await dbHttp
+      .update(stripeConnectAccounts)
+      .set({ userId: to })
+      .where(eq(stripeConnectAccounts.userId, from));
+
+    const history = await dbHttp
+      .select({
+        userId: stripeConnectAccountHistory.userId,
+        account: stripeConnectAccountHistory.stripeAccountId,
+      })
+      .from(stripeConnectAccountHistory)
+      .where(eq(stripeConnectAccountHistory.userId, from));
+    expect(history).toEqual([{ userId: from, account: `acct_${tag}_moved` }]);
+
+    await dbHttp
+      .delete(stripeConnectAccounts)
+      .where(eq(stripeConnectAccounts.userId, to));
+    for (const id of [from, to]) {
+      await dbHttp
+        .delete(stripeConnectAccountHistory)
+        .where(eq(stripeConnectAccountHistory.userId, id));
+      await dbHttp.delete(users).where(eq(users.id, id));
+    }
   });
 
   it('a user with a Connect account can still be hard-deleted (the history has no FK to block or break it)', async () => {

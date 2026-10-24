@@ -2221,6 +2221,7 @@ export class CourseSubscriptionService extends BaseService {
       source,
       stripeChargeId,
       transferGroup,
+      grossCents: amountCents,
     });
     let pool: { organizationFeeCents: number; creatorPayoutCents: number } =
       split;
