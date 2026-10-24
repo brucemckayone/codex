@@ -232,8 +232,14 @@ export interface ContentPublicnessPolicy {
  * requires `isFree` AND no gate, and a row in the database with a divergent
  * shape still reads as not public. Fail closed on disagreement.
  *
- * Recognises the same six gates as `decideContentAccess`
- * (`packages/access/src/services/content-access/access-decision.ts`).
+ * It is STRICTER than `decideContentAccess`
+ * (`packages/access/src/services/content-access/access-decision.ts`), never
+ * looser: every row it calls public, the decision grants to anyone. The
+ * decision reads five gates (price, tier, followers, team, course-only); it
+ * reads neither `isPurchasable` nor `isFree`. So it grants two malformed shapes
+ * this rejects: purchasable with no price, and `isFree: false` with no gate.
+ * Those reach a signed-in reader through `/stream` (body included), never an
+ * anonymous one through the public API.
  */
 export function isPublicContent(policy: ContentPublicnessPolicy): boolean {
   if (policy.isFree !== true) return false;

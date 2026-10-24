@@ -171,6 +171,10 @@ app.get(
     policy: {
       auth: 'required',
       rateLimit: 'streaming', // 60 req/min - allows HLS segment refreshes
+      // `private, no-store`, as the HLS playlist routes: the response carries
+      // a per-user HLS token, and with `include=body` a gated piece's body. No
+      // copy may outlive the request on any disk, the viewer's own included.
+      cache: 'fresh',
     },
     input: {
       params: createIdParamsSchema(),

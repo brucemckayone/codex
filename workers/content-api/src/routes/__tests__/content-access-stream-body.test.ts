@@ -100,6 +100,8 @@ describe('GET /api/access/content/:id/stream — the body only on request (Codex
       contentBody: null,
       contentBodyJson: { type: 'doc' },
     });
+    // A gated body (and the per-user HLS token) is never stored on any disk.
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
   });
 
   it('without the flag the service is not asked and the response has no body fields', async () => {
