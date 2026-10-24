@@ -66,14 +66,17 @@ function createStubDb(): StubDb {
   const transaction = vi.fn(async (_fn: unknown) => {
     callLog.push('db.transaction');
     // Return shape matches the happy-path payload the real callback
-    // produces; any fields outside r2Key/mediaType/waveformKey are
+    // produces, `{ target, body }` (no body: these calls never ask for
+    // one); any target fields outside r2Key/mediaType/waveformKey are
     // ignored by getStreamingUrl's post-transaction code.
     return {
-      r2Key: 'hls/abc/master.m3u8',
-      creatorId: 'creator_abc',
-      mediaId: '550e8400-e29b-41d4-a716-446655440000',
-      mediaType: 'video' as const,
-      waveformKey: null,
+      target: {
+        r2Key: 'hls/abc/master.m3u8',
+        creatorId: 'creator_abc',
+        mediaId: '550e8400-e29b-41d4-a716-446655440000',
+        mediaType: 'video' as const,
+        waveformKey: null,
+      },
     };
   });
 
