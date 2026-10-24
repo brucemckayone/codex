@@ -2,8 +2,8 @@
  * The org content detail page never ships a locked piece's raw body to the
  * browser (Codex-osuqt review).
  *
- * The row comes from the public list, which strips the body only when
- * `isFree` is false. A row flagged free that also carries a gate (the course
+ * The row comes from the public list, which used to strip the body only when
+ * `isFree` was false. A row flagged free that also carries a gate (the course
  * service writes isFree + courseOnly on purpose) kept its full body. It reached
  * the browser two ways, and both are pinned here:
  *   - the load returned the row as-is, so the text was in the load payload;
@@ -11,6 +11,10 @@
  *     result SvelteKit serialises into the page for hydration, so the body
  *     shipped whatever the load returned (measured live).
  * The rendered `contentBodyHtml` is the only body the page may send.
+ *
+ * And the other side (Codex-039vo): a gated piece's public row carries no
+ * body, so an entitled reader's body comes from the access check. The page
+ * used to render the stripped row, so every entitled reader got an empty page.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +25,8 @@ const mockRemoteGetPublicContent = vi.hoisted(() =>
   vi.fn(() => Promise.resolve({ items: [] }))
 );
 const mockContentCourses = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
+const mockGetStreamingUrl = vi.hoisted(() => vi.fn());
+const mockGetProgress = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 const mockLogger = vi.hoisted(() => ({
   warn: vi.fn(),
   error: vi.fn(),
@@ -35,7 +41,11 @@ vi.mock('$lib/remote/content.remote', () => ({
 
 vi.mock('$lib/server/api', () => ({
   createServerApi: vi.fn(() => ({
-    access: { contentCourses: mockContentCourses },
+    access: {
+      contentCourses: mockContentCourses,
+      getStreamingUrl: mockGetStreamingUrl,
+      getProgress: mockGetProgress,
+    },
     content: { getPublicContent: mockServerGetPublicContent },
   })),
 }));
@@ -58,11 +68,11 @@ const row = (overrides: Record<string, unknown>) => ({
   ...overrides,
 });
 
-const event = (contentSlug = 'practice') =>
+const event = (contentSlug = 'practice', user: { id: string } | null = null) =>
   ({
     params: { slug: 'studio-alpha', contentSlug },
     parent: () => Promise.resolve({ org: { id: 'o1', slug: 'studio-alpha' } }),
-    locals: { user: null },
+    locals: { user },
     platform: { env: {} },
     cookies: { get: vi.fn() },
     setHeaders: vi.fn(),
@@ -160,6 +170,63 @@ describe('org content detail: the browser never receives a raw body', () => {
       'Content course links not loaded',
       expect.objectContaining({ contentId: 'c9', error: 'access-api down' })
     );
+  });
+});
+
+describe('org content detail: an entitled reader of a gated piece sees its body (Codex-039vo)', () => {
+  // As the public list returns a gated row: no body.
+  const gated = row({
+    isFree: false,
+    isFollowerGated: true,
+    contentBody: null,
+  });
+  const reader = { id: 'u1' };
+  const granted = (body: Record<string, unknown>) => ({
+    streamingUrl: null,
+    waveformUrl: null,
+    expiresAt: '2026-10-23T22:00:00.000Z',
+    contentType: 'written',
+    ...body,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders the body the access check returned', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [gated] });
+    mockGetStreamingUrl.mockResolvedValue(
+      granted({ contentBody: 'the followers-only text', contentBodyJson: null })
+    );
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as {
+      contentBodyHtml: string | null;
+      accessAndProgress: Promise<Record<string, unknown>>;
+    };
+
+    expect(mockGetStreamingUrl).toHaveBeenCalledWith('c9', {
+      includeBody: true,
+    });
+    expect(data.contentBodyHtml).toContain('the followers-only text');
+    // The raw body rides nothing the page returns but the rendered HTML.
+    const access = await data.accessAndProgress;
+    expect(access).not.toHaveProperty('contentBody');
+  });
+
+  it('a reader the access check denies gets no body', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [gated] });
+    const { ApiError } = await import('$lib/server/errors');
+    mockGetStreamingUrl.mockRejectedValue(
+      new ApiError(403, 'denied', 'ACCESS_DENIED')
+    );
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as {
+      contentBodyHtml: string | null;
+    };
+
+    expect(data.contentBodyHtml).toBeNull();
   });
 });
 

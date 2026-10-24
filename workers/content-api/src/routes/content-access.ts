@@ -17,11 +17,11 @@ import {
   canEnterCourseParamsSchema,
   canViewParamsSchema,
   createIdParamsSchema,
-  getStreamingUrlSchema,
   hlsProxyQuerySchema,
   hlsVariantParamsSchema,
   listUserLibrarySchema,
   savePlaybackProgressSchema,
+  streamingUrlQuerySchema,
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
@@ -159,6 +159,10 @@ app.get(
  * - Content's organizationId is fetched from database
  * - User access verified via purchase OR organization membership
  * - Works from both org subdomains and root domain (revelations.studio)
+ *
+ * `?include=body` also returns the content's body once access is granted: the
+ * body source for an entitled reader of a gated piece, whose public row
+ * carries none (Codex-039vo). Only the detail pages send it.
  * @returns {StreamingUrlResponse}
  */
 app.get(
@@ -170,24 +174,30 @@ app.get(
     },
     input: {
       params: createIdParamsSchema(),
-      query: getStreamingUrlSchema.pick({ expirySeconds: true }),
+      query: streamingUrlQuerySchema,
     },
     handler: async (ctx): Promise<StreamingUrlResponse> => {
       const { params, query } = ctx.input;
 
       // Service fetches content's organizationId and verifies access
-      const result = await ctx.services.access.getStreamingUrl(ctx.user.id, {
-        contentId: params.id,
-        expirySeconds: query?.expirySeconds,
-      });
+      const result = await ctx.services.access.getStreamingUrl(
+        ctx.user.id,
+        { contentId: params.id, expirySeconds: query?.expirySeconds },
+        { includeBody: query?.include === 'body' }
+      );
 
-      return {
+      const response: StreamingUrlResponse = {
         streamingUrl: result.streamingUrl,
         waveformUrl: result.waveformUrl,
         expiresAt: result.expiresAt.toISOString(),
         contentType: result.contentType,
         readyVariants: result.readyVariants,
       };
+      if (result.body) {
+        response.contentBody = result.body.contentBody;
+        response.contentBodyJson = result.body.contentBodyJson;
+      }
+      return response;
     },
   })
 );

@@ -640,12 +640,16 @@ export class OrganizationService extends BaseService {
           })
           .from(organizationMemberships)
           .innerJoin(users, eq(organizationMemberships.userId, users.id))
+          // A course-only practice is reachable only inside its course, so a
+          // public listing never counts or shows one (Codex-ot6vj), as
+          // listPublic's catalogue read does not.
           .leftJoin(
             content,
             and(
               eq(content.creatorId, users.id),
               eq(content.organizationId, org.id),
               eq(content.status, 'published'),
+              eq(content.courseOnly, false),
               isNull(content.deletedAt)
             )
           )
@@ -708,6 +712,7 @@ export class OrganizationService extends BaseService {
             WHERE ${inArray(content.creatorId, creatorIdsWithContent)}
               AND ${content.organizationId} = ${org.id}
               AND ${content.status} = 'published'
+              AND ${content.courseOnly} = false
               AND ${content.deletedAt} IS NULL
           ) ranked
           WHERE rn <= 4

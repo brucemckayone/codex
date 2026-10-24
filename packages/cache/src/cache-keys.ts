@@ -79,8 +79,12 @@ export const CacheType = {
   /** Organization public aggregate statistics (content counts, creators, duration) */
   ORG_STATS: 'org:stats:v2',
 
-  /** Organization public creators (paginated, includes content counts + recent content) */
-  ORG_CREATORS: 'org:creators',
+  /**
+   * Organization public creators (paginated, includes content counts + recent
+   * content). v2 (Codex-ot6vj): course-only practices no longer counted or
+   * listed; the bump keeps old slots, which still show them, from being read.
+   */
+  ORG_CREATORS: 'org:creators:v2',
 
   /** Organization member lists */
   ORG_MEMBERS: 'org:members',

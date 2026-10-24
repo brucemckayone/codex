@@ -514,4 +514,63 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       });
     });
   });
+
+  // The detail pages' body source for a gated piece, whose public row carries
+  // none (Codex-039vo). The body is the row the access decision read, returned
+  // only on request and only after that decision granted.
+  describe('includeBody — the body only after a grant, only on request (Codex-039vo)', () => {
+    const rowWithBody = {
+      ...followersContentRow,
+      contentBody: 'the followers-only text',
+      contentBodyJson: null,
+    };
+
+    it('returns the body to a granted reader who asked for it', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(rowWithBody);
+      stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationFollowers.findFirst.mockResolvedValue({
+        id: 'follower_row',
+      });
+
+      const { service } = buildService(stub);
+      const result = await service.getStreamingUrl(userId, streamingInput, {
+        includeBody: true,
+      });
+
+      expect(result.body).toEqual({
+        contentBody: 'the followers-only text',
+        contentBodyJson: null,
+      });
+      // The stream result is unchanged by the option.
+      expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
+    });
+
+    it('returns no body when not asked (the player refresh path)', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(rowWithBody);
+      stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationFollowers.findFirst.mockResolvedValue({
+        id: 'follower_row',
+      });
+
+      const { service } = buildService(stub);
+      const result = await service.getStreamingUrl(userId, streamingInput);
+
+      expect(result).not.toHaveProperty('body');
+    });
+
+    it('a denied reader who asked for the body gets AccessDeniedError, never the body', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(rowWithBody);
+      stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationFollowers.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationMemberships.findFirst.mockResolvedValue(undefined);
+
+      const { service } = buildService(stub);
+      const outcome = await service
+        .getStreamingUrl(userId, streamingInput, { includeBody: true })
+        .catch((e: unknown) => e);
+
+      expect(outcome).toBeInstanceOf(AccessDeniedError);
+      expect(JSON.stringify(outcome)).not.toContain('the followers-only text');
+    });
+  });
 });

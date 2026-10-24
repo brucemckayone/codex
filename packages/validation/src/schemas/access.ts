@@ -33,6 +33,16 @@ export const getStreamingUrlSchema = z.object({
   // window during which a cancelled/revoked user can still stream.
 });
 
+/**
+ * Query for GET /api/access/content/:id/stream. `include=body` also returns the
+ * content's body once access is granted: the body source for an entitled
+ * reader of a gated piece (Codex-039vo). The detail pages send it; the
+ * player's URL refreshes do not, so they never carry a body.
+ */
+export const streamingUrlQuerySchema = getStreamingUrlSchema
+  .pick({ expirySeconds: true })
+  .extend({ include: z.literal('body').optional() });
+
 export const savePlaybackProgressSchema = z.object({
   contentId: uuidSchema,
   positionSeconds: nonNegativeIntSchema,
@@ -95,6 +105,9 @@ export const streamingUrlResponseSchema = z.object({
   expiresAt: z.string(),
   contentType: z.string(),
   readyVariants: z.array(hlsVariantSchema).optional(),
+  // Only with `?include=body`, after access is granted (Codex-039vo).
+  contentBody: z.string().nullable().optional(),
+  contentBodyJson: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
 export type StreamingUrlResponseSchema = z.infer<

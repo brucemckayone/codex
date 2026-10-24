@@ -19,6 +19,7 @@ import {
   CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   CONTENT_TYPES,
+  isPublicContent,
   MEDIA_STATUS,
   MEDIA_TYPES,
   PAGINATION,
@@ -1463,19 +1464,21 @@ export class ContentService extends BaseService {
             },
           }),
         countQuery: { db: this.db, table: content, where },
-        // The body ships only on a by-slug read (a detail page, which renders
-        // it once access allows) of a FREE row. The public endpoint is
-        // unauthenticated and KV-cached, so it must never return the text of
-        // gated articles (followers / subscribers / team / paid). A catalogue
-        // read (no slug: an org's list, /discover, a creator's profile) never
-        // needs a body, so it never carries one whatever the flags: a row
-        // flagged free that also has a gate kept its text there, and every
-        // free article's whole body rode every card grid. A by-slug free row
-        // with a gate still keeps it; that is Codex-039vo. Metadata — title,
-        // description, thumbnail, access-policy flags, priceCents, creator,
-        // org, mediaItem — stays so cards and the detail page shell render.
+        // The body ships only on a by-slug read (a detail page) of a PUBLIC
+        // row, by the whole policy (`isPublicContent`). The public endpoint is
+        // unauthenticated and KV-cached, so it must never return the text of a
+        // gated piece (followers / subscribers / team / paid / course-only).
+        // It used to read `isFree` alone, and a course-only practice is
+        // flagged free on purpose (the course service leaves `isFree` as it
+        // was), so anyone could read one by its slug (Codex-039vo). An
+        // entitled reader gets a gated body from the access check instead
+        // (`/stream?include=body`). A catalogue read (no slug: an org's list,
+        // /discover, a creator's profile) never needs a body, so it never
+        // carries one. Metadata (title, description, thumbnail, access-policy
+        // flags, priceCents, creator, org, mediaItem) stays so cards and the
+        // detail page shell render.
         mapItem: (item) =>
-          params.slug && item.isFree
+          params.slug && isPublicContent(item)
             ? item
             : { ...item, contentBody: null, contentBodyJson: null },
       });

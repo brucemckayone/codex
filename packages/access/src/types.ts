@@ -29,6 +29,15 @@ export interface StreamingUrlResponse {
    * playlist, so this array is purely a menu-population signal.
    */
   readyVariants?: string[];
+  /**
+   * The content's body, present only when the request asked for it
+   * (`?include=body`) and access was granted. It is the body source for an
+   * entitled reader of a gated piece, whose public row carries none
+   * (Codex-039vo). Either may be null: the body is TipTap JSON or legacy
+   * markdown, and a piece may have neither.
+   */
+  contentBody?: string | null;
+  contentBodyJson?: Record<string, unknown> | null;
 }
 
 /**

@@ -35,6 +35,7 @@ import {
   EMPTY_SUB_CONTEXT,
   isPublicContent,
   loadAccessAndProgress,
+  loadAccessWithBody,
   loadRelatedContent,
   loadSubscriptionContext,
   resolveAccessGranted,
@@ -366,5 +367,103 @@ describe('loadAccessAndProgress reads WHY /stream failed (Codex-h3ipg)', () => {
       isFree: true,
     });
     expect(result).toMatchObject({ hasAccess: true, accessCheckFailed: true });
+  });
+});
+
+// A gated piece's public row carries no body, so the gated path takes an
+// entitled reader's body from the access check (Codex-039vo). Before, it
+// rendered the stripped row and every entitled reader got an empty page.
+describe('loadAccessWithBody (Codex-039vo)', () => {
+  type Cookies = Parameters<typeof loadAccessWithBody>[2];
+  const cookies = {} as unknown as Cookies;
+  const followers = { isFree: false, isFollowerGated: true };
+  const bodyJson = { type: 'doc', content: [] };
+
+  function streamReturns(response: unknown) {
+    const getStreamingUrl = vi.fn(() => Promise.resolve(response));
+    vi.mocked(createServerApi).mockReturnValue({
+      access: { getStreamingUrl, getProgress: () => Promise.resolve(null) },
+    } as unknown as ReturnType<typeof createServerApi>);
+    return getStreamingUrl;
+  }
+
+  function streamThrows(error: unknown) {
+    vi.mocked(createServerApi).mockReturnValue({
+      access: {
+        getStreamingUrl: () => Promise.reject(error),
+        getProgress: () => Promise.resolve(null),
+      },
+    } as unknown as ReturnType<typeof createServerApi>);
+  }
+
+  it('asks /stream for the body and returns it once access is granted', async () => {
+    const getStreamingUrl = streamReturns({
+      streamingUrl: null,
+      waveformUrl: null,
+      expiresAt: '2026-10-23T22:00:00.000Z',
+      contentType: 'written',
+      contentBody: null,
+      contentBodyJson: bodyJson,
+    });
+
+    const { access, body } = await loadAccessWithBody(
+      'c1',
+      undefined,
+      cookies,
+      followers
+    );
+
+    expect(getStreamingUrl).toHaveBeenCalledWith('c1', { includeBody: true });
+    expect(access.hasAccess).toBe(true);
+    expect(body).toEqual({ contentBody: null, contentBodyJson: bodyJson });
+  });
+
+  it('never puts the raw body on the access result the page returns', async () => {
+    streamReturns({
+      streamingUrl: null,
+      waveformUrl: null,
+      expiresAt: '2026-10-23T22:00:00.000Z',
+      contentType: 'written',
+      contentBody: '# secret',
+      contentBodyJson: null,
+    });
+
+    const { access } = await loadAccessWithBody(
+      'c1',
+      undefined,
+      cookies,
+      followers
+    );
+
+    expect(access).not.toHaveProperty('contentBody');
+    expect(access).not.toHaveProperty('contentBodyJson');
+    expect(JSON.stringify(access)).not.toContain('secret');
+  });
+
+  it('returns no body when access is denied', async () => {
+    streamThrows(new ApiError(403, 'denied', 'ACCESS_DENIED'));
+
+    const { access, body } = await loadAccessWithBody(
+      'c1',
+      undefined,
+      cookies,
+      followers
+    );
+
+    expect(access.hasAccess).toBe(false);
+    expect(body).toBeNull();
+  });
+
+  it('the fast path (loadAccessAndProgress) never asks for the body', async () => {
+    const getStreamingUrl = streamReturns({
+      streamingUrl: null,
+      waveformUrl: null,
+      expiresAt: '2026-10-23T22:00:00.000Z',
+      contentType: 'written',
+    });
+
+    await loadAccessAndProgress('c1', undefined, cookies, { isFree: true });
+
+    expect(getStreamingUrl).toHaveBeenCalledWith('c1', { includeBody: false });
   });
 });
