@@ -32,6 +32,7 @@
  * This module extracts the shared logic:
  * - `loadAccessAndProgress` — parallel fetch of streaming URL + playback progress
  * - `loadAccessWithBody`    — the same, plus the body once access is granted
+ *                             (for a released row)
  * - `resolveAccessGranted`  — THE access-grant seam (WP-2 swap point)
  * - `handlePurchaseAction`  — Stripe checkout session creation with error handling
  */
@@ -358,14 +359,20 @@ export async function loadAccessAndProgress(
  * (`accessAndProgress`), which needs only the rendered HTML, never the raw
  * body.
  *
- * Two grants come back without a body:
- * - A granted response with no `body` at all. The worker didn't honour the
- *   flag (a content-api rolled back behind this web build drops the unknown
- *   query key), so this would be the empty page again. It is logged as an
- *   error, never read as "the piece has no body" (that is `body` with both
- *   fields null). The reader gets no note, by choice: the only way here is a
- *   worker older than this flag, a window of one deploy after it ships, and
- *   a broken flag on this side fails `api-stream-include.test.ts` first.
+ * Three grants come back without a body:
+ * - A granted response with no `body` at all, which is logged as an error and
+ *   never read as "the piece has no body" (that is `body` with both fields
+ *   null). Two causes:
+ *   - The worker didn't honour the flag (a content-api rolled back behind this
+ *     web build drops the unknown query key), so this would be the empty page
+ *     again. The reader gets no note, by choice: it takes a worker older than
+ *     this flag (a window of one deploy after it ships), and a broken flag on
+ *     either side fails `api-stream-include.test.ts` first.
+ *   - The row was never released (never published), so the worker withholds
+ *     its body and logs a warn saying so, which is what tells this cause from
+ *     the first. These pages can barely reach it: they read published rows
+ *     only, and `publishedAt` is never cleared, so it takes a legacy row
+ *     published without one, then unpublished, read from a stale list slot.
  * - Media not ready (a 422 the worker raises after access passed). The call
  *   threw, so it carried nothing: the page reads as granted, with no body
  *   until the media is ready. Narrow, since publishing needs ready media.

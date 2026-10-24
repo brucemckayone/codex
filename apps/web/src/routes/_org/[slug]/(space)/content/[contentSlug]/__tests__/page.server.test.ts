@@ -216,19 +216,48 @@ describe('org content detail: an entitled reader of a gated piece sees its body 
     expect(access).not.toHaveProperty('body');
   });
 
-  it('a reader the access check denies gets no body', async () => {
-    mockServerGetPublicContent.mockResolvedValue({ items: [gated] });
+  // The gated path must never render from `content`. Seed the gated row WITH
+  // a body (as a stale pre-v3 slot or a strip regression would ship it), so
+  // these cases fail if the page falls back to the public row.
+  const leaky = row({
+    isFree: false,
+    isFollowerGated: true,
+    contentBody: 'the leaked text',
+  });
+
+  it('a reader the access check denies gets no body, even from a leaky row', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [leaky] });
     const { ApiError } = await import('$lib/server/errors');
     mockGetStreamingUrl.mockRejectedValue(
       new ApiError(403, 'denied', 'ACCESS_DENIED')
     );
     const { load } = await import('../+page.server');
 
-    const data = (await load(event('practice', reader))) as {
-      contentBodyHtml: string | null;
-    };
+    const data = (await load(event('practice', reader))) as Record<
+      string,
+      unknown
+    >;
 
     expect(data.contentBodyHtml).toBeNull();
+    expect(JSON.stringify(await settled(data))).not.toContain(
+      'the leaked text'
+    );
+  });
+
+  it('a grant whose /stream carried no body renders none, never the public row', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [leaky] });
+    mockGetStreamingUrl.mockResolvedValue(granted({}));
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as Record<
+      string,
+      unknown
+    >;
+
+    expect(data.contentBodyHtml).toBeNull();
+    expect(JSON.stringify(await settled(data))).not.toContain(
+      'the leaked text'
+    );
   });
 });
 

@@ -42,10 +42,11 @@ export interface StreamingUrlResponse {
   readyVariants?: string[];
   /**
    * The content's body, present only when the request asked for it
-   * (`?include=body`) and access was granted. It is the body source for an
-   * entitled reader of a gated piece, whose public row carries none
-   * (Codex-039vo). Absent means it was not returned; a piece with no body
-   * comes back as `{ contentBody: null, contentBodyJson: null }`.
+   * (`?include=body`), access was granted, and the row is released (published
+   * now, or once). It is the body source for an entitled reader of a gated
+   * piece, whose public row carries none (Codex-039vo). Absent means it was
+   * not returned; a piece with no body comes back as
+   * `{ contentBody: null, contentBodyJson: null }`.
    */
   body?: ContentBodySource;
 }

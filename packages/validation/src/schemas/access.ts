@@ -35,7 +35,8 @@ export const getStreamingUrlSchema = z.object({
 
 /**
  * Query for GET /api/access/content/:id/stream. `include=body` also returns the
- * content's body once access is granted: the body source for an entitled
+ * content's body once access is granted, for a released row (published now,
+ * or once): the body source for an entitled
  * reader of a gated piece (Codex-039vo). The detail pages send it; the
  * player's URL refreshes do not, so they never carry a body.
  */
@@ -105,7 +106,8 @@ export const streamingUrlResponseSchema = z.object({
   expiresAt: z.string(),
   contentType: z.string(),
   readyVariants: z.array(hlsVariantSchema).optional(),
-  // Only with `?include=body`, after access is granted (Codex-039vo). Both or
+  // Only with `?include=body`, after access is granted, for a released row
+  // (Codex-039vo). Both or
   // neither: absent means not returned, never "no body".
   body: z
     .object({

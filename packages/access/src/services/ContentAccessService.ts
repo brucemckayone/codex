@@ -254,9 +254,10 @@ export class ContentAccessService
    *
    * @param userId - Authenticated user ID
    * @param input - Content ID and optional expiry
-   * @param options.includeBody - Also return the body (after access is granted)
+   * @param options.includeBody - Also return the body (after access is granted,
+   *   for a released row)
    * @returns Streaming URL and expiration timestamp
-   * @throws {ContentNotFoundError} Content doesn't exist, is draft, or is deleted
+   * @throws {ContentNotFoundError} Content doesn't exist or is deleted
    * @throws {AccessDeniedError} User hasn't purchased content and isn't org member
    * @throws {R2SigningError} Failed to generate signed URL
    */
@@ -275,7 +276,10 @@ export class ContentAccessService
      * when the media item has no recorded variants, or for written content.
      */
     readyVariants?: string[];
-    /** The content's body. Present only when `options.includeBody` was set. */
+    /**
+     * The content's body. Present only when `options.includeBody` was set,
+     * access was granted, and the row is released (published now, or once).
+     */
     body?: ContentBodySource;
   }> {
     // Resolve the TTL once. The Zod schema already applies a default when
@@ -397,6 +401,16 @@ export class ContentAccessService
           const released =
             contentRecord.status === CONTENT_STATUS.PUBLISHED ||
             contentRecord.publishedAt != null;
+          // Only this side can tell a withheld body from a worker that ignored
+          // the flag, and the web logs a granted response without `body` as a
+          // fault. A warn, not an error: it is policy, not a failure.
+          if (options.includeBody && !released) {
+            this.obs.warn('Body withheld: the granted row was never released', {
+              userId,
+              contentId: input.contentId,
+              status: contentRecord.status,
+            });
+          }
           return {
             target: resolveStreamableMedia(
               this.obs,

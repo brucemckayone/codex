@@ -48,7 +48,7 @@ gate rejects it.
 
 | Method | Path | Policy | Rate Limit | Notes |
 |---|---|---|---|---|
-| GET | `/api/access/content/:id/stream` | `auth: 'required'` | `streaming` (60/min) | Returns signed streaming URL + waveformUrl + contentType; `private, no-store`. `?include=body` also returns `body: { contentBody, contentBodyJson }` once access is granted: the detail pages' body for a gated piece (Codex-039vo). No `body` means not returned; a piece with no body is both fields null. Never pass it from a remote query or the player refresh |
+| GET | `/api/access/content/:id/stream` | `auth: 'required'` | `streaming` (60/min) | Returns signed streaming URL + waveformUrl + contentType; `private, no-store`. `?include=body` also returns `body: { contentBody, contentBodyJson }` once access is granted, for a released row (published now, or once): the detail pages' body for a gated piece (Codex-039vo). No `body` means not returned; a piece with no body is both fields null. Never pass it from a remote query or the player refresh |
 | POST | `/api/access/content/:id/progress` | `auth: 'required'` | `api` | Save playback progress; 204 |
 | GET | `/api/access/content/:id/progress` | `auth: 'required'` | `api` | Get playback progress |
 | GET | `/api/access/user/library` | `auth: 'required'` | `api` | User's purchased content (paginated) |
@@ -74,7 +74,8 @@ GET /api/access/content/:id/stream[?include=body]
   → mint an HLS token + master-playlist proxy URL; presign the waveform
   → return { streamingUrl, waveformUrl, expiresAt, contentType }
     (+ body: { contentBody, contentBodyJson } with include=body, from the row
-    the access decision read, after it granted); Cache-Control private, no-store
+    the access decision read, after it granted, for a released row only);
+    Cache-Control private, no-store
 ```
 
 ### Cache Invalidation on Publish/Unpublish/Delete

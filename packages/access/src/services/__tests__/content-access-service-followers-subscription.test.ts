@@ -590,15 +590,26 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
     it('a buyer of an item never published gets the grant but no body', async () => {
       stub.mocks.content.findFirst.mockResolvedValue(paidRow(null));
 
-      const { service, verifyPurchase } = buildService(stub);
+      const { service, verifyPurchase, logs } = buildService(stub);
       verifyPurchase.mockResolvedValue(true);
       const result = await service.getStreamingUrl(userId, streamingInput, {
         includeBody: true,
       });
 
-      // The calibration: the grant itself stands (the stream is minted).
+      // The calibration: the grant itself stands, so the missing body is the
+      // release gate, not a denial. This is today's decision, NOT the target:
+      // a never-released row should not be granted at all (Codex-nacky).
+      // When that lands, this case becomes an AccessDeniedError.
       expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       expect(result).not.toHaveProperty('body');
+      // The worker says why, so the web's "granted without a body" fault log
+      // is never mistaken for a stale worker.
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          level: 'warn',
+          message: 'Body withheld: the granted row was never released',
+        })
+      );
     });
 
     it('a buyer of an item withdrawn after release keeps the body', async () => {

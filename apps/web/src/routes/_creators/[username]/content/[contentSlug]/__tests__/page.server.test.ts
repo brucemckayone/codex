@@ -56,6 +56,25 @@ const row = (overrides: Record<string, unknown>) => ({
 // As the public list returns a gated personal row: no body.
 const gated = row({ isFree: false, isFollowerGated: true, contentBody: null });
 
+// A gated row WITH a body, as a stale pre-v3 slot or a strip regression would
+// ship it: the gated path must never render from it.
+const leaky = row({
+  isFree: false,
+  isFollowerGated: true,
+  contentBody: 'the leaked text',
+});
+
+/**
+ * A load's data with every streamed promise resolved. JSON.stringify writes a
+ * Promise as `{}`, but SvelteKit serialises each resolved value into the page.
+ */
+const settled = async (data: Record<string, unknown>) =>
+  Object.fromEntries(
+    await Promise.all(
+      Object.entries(data).map(async ([key, value]) => [key, await value])
+    )
+  );
+
 const event = (user: { id: string } | null) =>
   ({
     params: { username: '@alex-creator', contentSlug: 'practice' },
@@ -106,19 +125,33 @@ describe('creator content detail: an entitled reader of a gated piece sees its b
     expect(await data.accessAndProgress).not.toHaveProperty('body');
   });
 
-  it('a reader the access check denies gets no body', async () => {
-    mockGetPublicContent.mockResolvedValue({ items: [gated] });
+  it('a reader the access check denies gets no body, even from a leaky row', async () => {
+    mockGetPublicContent.mockResolvedValue({ items: [leaky] });
     const { ApiError } = await import('$lib/server/errors');
     mockGetStreamingUrl.mockRejectedValue(
       new ApiError(403, 'denied', 'ACCESS_DENIED')
     );
     const { load } = await import('../+page.server');
 
-    const data = (await load(event({ id: 'u1' }))) as {
-      contentBodyHtml: string | null;
-    };
+    const data = (await load(event({ id: 'u1' }))) as Record<string, unknown>;
 
     expect(data.contentBodyHtml).toBeNull();
+    expect(JSON.stringify(await settled(data))).not.toContain(
+      'the leaked text'
+    );
+  });
+
+  it('a grant whose /stream carried no body renders none, never the public row', async () => {
+    mockGetPublicContent.mockResolvedValue({ items: [leaky] });
+    mockGetStreamingUrl.mockResolvedValue(granted({}));
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event({ id: 'u1' }))) as Record<string, unknown>;
+
+    expect(data.contentBodyHtml).toBeNull();
+    expect(JSON.stringify(await settled(data))).not.toContain(
+      'the leaked text'
+    );
   });
 
   it('a public piece renders for a visitor from its own row, with no access call', async () => {

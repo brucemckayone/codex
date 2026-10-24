@@ -160,7 +160,8 @@ app.get(
  * - User access verified via purchase OR organization membership
  * - Works from both org subdomains and root domain (revelations.studio)
  *
- * `?include=body` also returns the content's body once access is granted: the
+ * `?include=body` also returns the content's body once access is granted, for
+ * a released row (published now, or once): the
  * body source for an entitled reader of a gated piece, whose public row
  * carries none (Codex-039vo). Only the detail pages send it.
  * @returns {StreamingUrlResponse}
@@ -192,7 +193,8 @@ app.get(
         { includeBody: query?.include === 'body' }
       );
 
-      // `body` is undefined unless asked for and granted, and JSON drops it.
+      // `body` is undefined unless asked for, granted, and released; JSON
+      // drops it.
       return {
         streamingUrl: result.streamingUrl,
         waveformUrl: result.waveformUrl,

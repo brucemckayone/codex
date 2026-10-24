@@ -157,7 +157,8 @@ async function checkResetSignature(): Promise<number> {
  * It is produced deliberately: `course-journey-service.ts:3188-3230` gates
  * default-policy practices by setting `courseOnly` and leaving `isFree`
  * untouched, reasoning that `isFree` "can no longer grant access once
- * `courseOnly` wins" — true of the resolver, false of the body-render path.
+ * `courseOnly` wins" — true of the resolver, and false of the body-render
+ * path until Codex-039vo (both body paths now read `isPublicContent`).
  *
  * So this now asserts the whole invariant `isPublicContent()` encodes, rather
  * than the one instance of it that happened to get filed.
