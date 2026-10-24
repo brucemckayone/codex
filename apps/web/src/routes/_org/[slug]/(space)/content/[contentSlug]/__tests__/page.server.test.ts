@@ -26,6 +26,7 @@ const mockRemoteGetPublicContent = vi.hoisted(() =>
 );
 const mockContentCourses = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 const mockGetStreamingUrl = vi.hoisted(() => vi.fn());
+const mockGetWithdrawnContent = vi.hoisted(() => vi.fn());
 const mockGetProgress = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 const mockLogger = vi.hoisted(() => ({
   warn: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock('$lib/server/api', () => ({
       contentCourses: mockContentCourses,
       getStreamingUrl: mockGetStreamingUrl,
       getProgress: mockGetProgress,
+      getWithdrawnContent: mockGetWithdrawnContent,
     },
     content: { getPublicContent: mockServerGetPublicContent },
   })),
@@ -298,5 +300,93 @@ describe('org content detail: a 404 means the piece does not exist', () => {
 
     await expect(load(event('a\0b'))).rejects.toMatchObject({ status: 404 });
     expect(mockServerGetPublicContent).not.toHaveBeenCalled();
+  });
+});
+
+// Withdrawn from sale (Codex-ov2ii): the public lookup misses, so a reader who
+// still has the item used to get "Content not found".
+describe('org content detail: an item withdrawn from sale opens for whoever still has it', () => {
+  const reader = { id: 'u1' };
+  const held = { by: 'purchase', until: null };
+  // As the withdrawn read returns it: no body. A LEAKY one is used below, as
+  // a regression back to the row's own body would ship it.
+  const leaky = row({
+    isFree: false,
+    isPurchasable: true,
+    priceCents: 900,
+    contentBody: 'the leaked text',
+  });
+  const granted = {
+    streamingUrl: null,
+    waveformUrl: null,
+    expiresAt: '2026-10-23T22:00:00.000Z',
+    contentType: 'written',
+    body: { contentBody: 'the paid text', contentBodyJson: null },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockServerGetPublicContent.mockResolvedValue({ items: [] });
+  });
+
+  it('a reader who still has it gets the note, and the body from the access check', async () => {
+    mockGetWithdrawnContent.mockResolvedValue({ content: leaky, held });
+    mockGetStreamingUrl.mockResolvedValue(granted);
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as Record<
+      string,
+      unknown
+    >;
+
+    expect(mockGetWithdrawnContent).toHaveBeenCalledWith({
+      orgId: 'o1',
+      slug: 'practice',
+    });
+    expect(mockGetStreamingUrl).toHaveBeenCalledWith('c9', {
+      includeBody: true,
+    });
+    expect(data.withdrawnHeld).toEqual(held);
+    expect(data.contentBodyHtml).toContain('the paid text');
+    expect(JSON.stringify(await settled(data))).not.toContain(
+      'the leaked text'
+    );
+  });
+
+  it('a reader without it gets the same 404', async () => {
+    const { ApiError } = await import('$lib/server/errors');
+    mockGetWithdrawnContent.mockRejectedValue(
+      new ApiError(404, 'Content not found', 'NOT_FOUND')
+    );
+    const { load } = await import('../+page.server');
+
+    await expect(load(event('practice', reader))).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(mockGetStreamingUrl).not.toHaveBeenCalled();
+  });
+
+  it('a visitor gets the 404 with no withdrawn read', async () => {
+    const { load } = await import('../+page.server');
+
+    await expect(load(event('practice', null))).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(mockGetWithdrawnContent).not.toHaveBeenCalled();
+  });
+
+  it('a piece on the storefront never asks the withdrawn read', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [row({})] });
+    mockGetStreamingUrl.mockResolvedValue(granted);
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as Record<
+      string,
+      unknown
+    >;
+    await settled(data);
+
+    expect(mockGetWithdrawnContent).not.toHaveBeenCalled();
+    expect(data).not.toHaveProperty('withdrawnHeld');
   });
 });

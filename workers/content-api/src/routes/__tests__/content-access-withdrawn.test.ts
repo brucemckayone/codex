@@ -40,6 +40,7 @@ import contentAccess from '../content-access';
 const testEnv = {
   ...env,
   ENVIRONMENT: 'development',
+  R2_PUBLIC_URL_BASE: 'https://cdn.test',
 } as unknown as typeof env;
 
 function buildApp() {
@@ -62,7 +63,16 @@ async function withdrawn(query: string): Promise<Response> {
 }
 
 const held = {
-  content: { id: 'content_123', slug: 'breathing', contentBody: null },
+  content: {
+    id: 'content_123',
+    slug: 'breathing',
+    contentBody: null,
+    mediaItem: {
+      id: 'media_1',
+      thumbnailKey: 'creator/thumbs/media_1/md.webp',
+      hlsPreviewKey: 'creator/hls/media_1/preview/preview.m3u8',
+    },
+  },
   held: { by: 'purchase', until: null },
 };
 
@@ -76,7 +86,21 @@ describe('GET /api/access/content/withdrawn (Codex-ov2ii)', () => {
     const res = await withdrawn(`?orgId=${ORG_ID}&slug=breathing`);
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ data: held });
+    // R2 keys resolved to CDN URLs, as the public list resolves them.
+    expect(await res.json()).toEqual({
+      data: {
+        ...held,
+        content: {
+          ...held.content,
+          mediaItem: {
+            ...held.content.mediaItem,
+            thumbnailUrl: 'https://cdn.test/creator/thumbs/media_1/md.webp',
+            hlsPreviewUrl:
+              'https://cdn.test/creator/hls/media_1/preview/preview.m3u8',
+          },
+        },
+      },
+    });
     expect(res.headers.get('Cache-Control')).toBe('private, no-store');
     expect(accessSpies.getWithdrawnContent).toHaveBeenCalledWith(USER.id, {
       orgId: ORG_ID,

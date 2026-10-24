@@ -429,6 +429,65 @@ describe('Buy only when a purchase opens the item (Codex-2hxff.14)', () => {
   });
 });
 
+describe('withdrawn from sale, still the reader’s (Codex-ov2ii)', () => {
+  const note = () => document.querySelector('[role="note"]');
+  const buyGate = () => document.getElementById('purchase-label-buy');
+  const purchaseForm = () => document.querySelector(`.${PURCHASE_FORM}`);
+
+  test('a buyer is told it stays in their library, and sees Purchased', () => {
+    render({
+      content: makeContent(SELLABLE),
+      hasAccess: true,
+      withdrawnHeld: { by: 'purchase', until: null },
+    });
+    expect(note()?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'This is no longer on sale. It stays in your library because you bought it.'
+    );
+    expect(bodyText()).toContain('Purchased');
+  });
+
+  test('a subscriber is told until when, and sees Included, never Purchased', () => {
+    render({
+      content: makeContent({ includedInTierId: 'tier-1' }),
+      hasAccess: true,
+      withdrawnHeld: { by: 'subscription', until: '2026-11-12T09:00:00.000Z' },
+    });
+    expect(note()?.textContent).toContain(
+      "It's included in your subscription until 12 November"
+    );
+    expect(bodyText()).toContain('Included');
+    expect(bodyText()).not.toContain('Purchased');
+  });
+
+  test('a course owner is told it stays in their course', () => {
+    render({
+      content: makeContent({ ...SELLABLE, courseOnly: true }),
+      hasAccess: true,
+      withdrawnHeld: { by: 'course', until: null },
+    });
+    expect(note()?.textContent).toContain(
+      'It stays available as part of your course.'
+    );
+  });
+
+  // An access refresh can come back denied after the page rendered (a refund
+  // landing): the item is off sale, so the page must still offer nothing.
+  test('offers no Buy even when access later reads denied', () => {
+    render({
+      content: makeContent(SELLABLE),
+      hasAccess: false,
+      withdrawnHeld: { by: 'purchase', until: null },
+    });
+    expect(buyGate()).toBeNull();
+    expect(purchaseForm()).toBeNull();
+  });
+
+  test('an item on the storefront shows no note', () => {
+    render({ content: makeContent(SELLABLE), hasAccess: true });
+    expect(note()).toBeNull();
+  });
+});
+
 describe('the picture (Codex-une9r)', () => {
   const CUSTOM = 'https://cdn.example.test/c1/thumbnail/lg.webp';
   const POSTER = 'https://cdn.example.test/u1/media-thumbnails/m1/lg.webp';

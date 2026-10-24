@@ -156,6 +156,7 @@
   streamingExpiresAt={accessState.streamingExpiresAt}
   revocationReason={accessState.revocationReason}
   accessCheckFailed={accessState.accessCheckFailed}
+  withdrawnHeld={data.withdrawnHeld ?? null}
   onaccessrestored={() => {
     accessState.revocationReason = null;
     void invalidate('app:auth');

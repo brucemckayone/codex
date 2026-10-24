@@ -33,18 +33,20 @@
  * - `loadAccessAndProgress` — parallel fetch of streaming URL + playback progress
  * - `loadAccessWithBody`    — the same, plus the body once access is granted
  *                             (for a released row)
+ * - `loadWithdrawnDetail`   — the public lookup missed: an item withdrawn from
+ *                             sale, for a reader who still has it
  * - `resolveAccessGranted`  — THE access-grant seam (WP-2 swap point)
  * - `handlePurchaseAction`  — Stripe checkout session creation with error handling
  */
 
-import type { ContentBodySource } from '@codex/access';
+import type { ContentBodySource, ContentHeld } from '@codex/access';
 import {
   type ContentPublicnessPolicy,
   isPublicContent,
   subscriptionStatusGrantsAccess,
 } from '@codex/constants';
 import type { Cookies } from '@sveltejs/kit';
-import { fail } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
 import { createServerApi, type PublicContentListItem } from './api';
@@ -394,6 +396,78 @@ export async function loadAccessWithBody(
     logger.error('Access granted but /stream returned no body', { contentId });
   }
   return { access, body: stream?.body ?? null };
+}
+
+/**
+ * How a reader holds an item withdrawn from sale (Codex-ov2ii). Type-only, so
+ * the view can name it without `@codex/access` entering the client bundle.
+ */
+export type { ContentHeld };
+
+/** An item withdrawn from sale, opened for a reader who still has it. */
+export interface WithdrawnDetail {
+  content: PublicContentListItem;
+  /** How the reader holds it: the note the page shows them. */
+  held: ContentHeld;
+  access: AccessAndProgress;
+  body: ContentBodySource | null;
+}
+
+/**
+ * Both detail pages' answer when the public lookup misses for a signed-in
+ * reader (Codex-ov2ii). An item leaves the storefront when its creator
+ * unpublishes it or leaves the organisation, but the access decision keeps
+ * granting a buyer, a course owner, and a subscriber until their next renewal,
+ * and they used to get "Content not found".
+ *
+ * Two reads, both the worker's: the withdrawn row (a 404 unless this reader
+ * still has it), then the gated path's `/stream?include=body`, so the body and
+ * the player come from the same access check as any paid piece. Null means
+ * the page's own 404:
+ * - no withdrawn row, or one the reader has no access to (the worker's 404
+ *   never says which);
+ * - a row that passes {@link isPublicContent}, which no arm that outlives
+ *   unpublication can grant. Its policy would force `hasAccess` open
+ *   (`fetchAccess`), so it is refused here and logged, never rendered;
+ * - a `/stream` denial after the row was found (a refund or a renewal landing
+ *   between the two reads). Never the purchase gate: the item is off sale.
+ *
+ * A `/stream` call that FAILED is a 503, not a 404: nothing is known, and
+ * "not found" would tell a buyer their item is gone. Any other failure of the
+ * withdrawn read propagates, as the public lookup's does.
+ */
+export async function loadWithdrawnDetail(
+  key: ({ orgId: string } | { creatorId: string }) & { slug: string },
+  platform: App.Platform | undefined,
+  cookies: Cookies
+): Promise<WithdrawnDetail | null> {
+  const withdrawn = await createServerApi(platform, cookies)
+    .access.getWithdrawnContent(key)
+    .catch((err: unknown) => {
+      if (ApiError.isApiError(err) && err.status === 404) return null;
+      throw err;
+    });
+  if (!withdrawn) return null;
+
+  const { content, held } = withdrawn;
+  if (isPublicContent(content)) {
+    logger.error('Withdrawn content passed the public policy', {
+      contentId: content.id,
+    });
+    return null;
+  }
+
+  const { access, body } = await loadAccessWithBody(
+    content.id,
+    platform,
+    cookies,
+    content
+  );
+  if (access.hasAccess) return { content, held, access, body };
+  if (access.accessCheckFailed) {
+    error(503, 'We could not check your access. Please try again.');
+  }
+  return null;
 }
 
 /**

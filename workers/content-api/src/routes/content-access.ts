@@ -28,6 +28,7 @@ import {
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
+import { resolveR2PublicBases, resolveR2Url } from './r2-public-urls';
 
 const app = new Hono<HonoEnv>();
 
@@ -228,8 +229,18 @@ app.get(
   procedure({
     policy: { auth: 'required', cache: 'fresh' },
     input: { query: withdrawnContentQuerySchema },
-    handler: async (ctx): Promise<WithdrawnContentResponse> =>
-      ctx.services.access.getWithdrawnContent(ctx.user.id, ctx.input.query),
+    handler: async (ctx): Promise<WithdrawnContentResponse> => {
+      const { content, held } = await ctx.services.access.getWithdrawnContent(
+        ctx.user.id,
+        ctx.input.query
+      );
+      // Keys to CDN URLs, as the public list resolves them, so the page
+      // draws the thumbnail and preview it drew on the storefront.
+      return {
+        content: resolveR2Url(content, resolveR2PublicBases(ctx.env)),
+        held,
+      };
+    },
   })
 );
 

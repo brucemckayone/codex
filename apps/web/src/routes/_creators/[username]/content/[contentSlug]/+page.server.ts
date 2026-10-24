@@ -24,6 +24,7 @@ import {
   loadAccessWithBody,
   loadRelatedContent,
   loadSubscriptionContext,
+  loadWithdrawnDetail,
   withoutRawBody,
 } from '$lib/server/content-detail';
 import type { ContentWithRelations } from '$lib/types';
@@ -90,7 +91,22 @@ export const load: PageServerLoad = async ({
 
   const contentResult = await api.content.getPublicContent(contentParams);
   const matches = contentResult.items as ContentWithRelations[];
-  const content = matches.find((item) => item.organizationId == null) ?? null;
+  const personalPiece =
+    matches.find((item) => item.organizationId == null) ?? null;
+
+  // No personal piece on the storefront. For a signed-in reader it may be one
+  // withdrawn from sale that they still have (Codex-ov2ii). Asked before the
+  // org redirect below: this URL is the personal piece's, so a reader who
+  // still has it keeps it even when an org piece shares the slug.
+  const withdrawn =
+    personalPiece || !locals.user
+      ? null
+      : await loadWithdrawnDetail(
+          { creatorId: creatorProfile.id, slug: contentSlug },
+          platform,
+          cookies
+        );
+  const content = personalPiece ?? withdrawn?.content ?? null;
 
   if (!content) {
     const orgPiece = matches.find((item) => item.organization?.slug);
@@ -152,6 +168,28 @@ export const load: PageServerLoad = async ({
   const relatedPromise = loadRelatedContent(api, {
     creatorId: creatorProfile.id,
   });
+
+  // Withdrawn from sale: the access check already ran and granted, so the page
+  // renders the body and player that check returned, with the note in place
+  // of any offer (there is nothing left to buy or subscribe to).
+  if (withdrawn) {
+    setHeaders(successCacheHeaders);
+    return {
+      content: pageContent,
+      contentBodyHtml: withdrawn.body
+        ? await renderContentBody(withdrawn.body)
+        : null,
+      hasAccess: null,
+      streamingUrl: null,
+      progress: null,
+      accessAndProgress: Promise.resolve(withdrawn.access),
+      withdrawnHeld: withdrawn.held,
+      subscriptionContext: Promise.resolve(EMPTY_SUB_CONTEXT),
+      creatorProfile,
+      username,
+      relatedContent: relatedPromise,
+    };
+  }
 
   // Subscription context (org-scoped content may have tier gating).
   // Skip the round-trip entirely for content that can't require a
