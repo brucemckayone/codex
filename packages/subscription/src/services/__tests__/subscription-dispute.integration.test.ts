@@ -266,6 +266,88 @@ describe('SubscriptionService disputes (Codex-2hxff.9)', () => {
     expect(await disputedAt(sub.id)).toEqual(first);
   });
 
+  // ── a win racing a re-run of the opening (Codex-2hxff.58 round 2) ────
+  // The hourly reconcile re-runs an open chargeback. A win can land between
+  // its record of the dispute and its pause; the pause must not undo it.
+
+  it('a win recorded before the re-run pauses access: nothing is paused, and the pause reports no subscription', async () => {
+    const sub = await tierSubscription();
+    const input = await dispute(
+      await invoiceCharge({ subscriptionId: sub.id })
+    );
+    // The webhook's win lands first, and restores.
+    await setStatus(input.stripeDisputeId, 'won');
+    await service.restoreAfterDispute(input);
+    vi.mocked(stripe.subscriptions.update).mockClear();
+
+    const paused = await service.pauseForDispute(input);
+
+    expect(paused).toBeUndefined();
+    expect(await disputedAt(sub.id)).toBeNull();
+  });
+
+  it('a win recorded after the re-run paused access but before its billing pause: billing is not paused again', async () => {
+    const sub = await tierSubscription();
+    const input = await dispute(
+      await invoiceCharge({ subscriptionId: sub.id })
+    );
+    const paused = await service.pauseForDispute(input);
+    // The clawback runs; meanwhile the win lands and the webhook restores.
+    await setStatus(input.stripeDisputeId, 'won');
+    await service.restoreAfterDispute(input);
+    vi.mocked(stripe.subscriptions.update).mockClear();
+
+    await service.pauseBillingForDispute(
+      paused as NonNullable<typeof paused>,
+      input.stripeDisputeId
+    );
+
+    expect(stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(await disputedAt(sub.id)).toBeNull();
+  });
+
+  it('a win recorded while the billing pause is in flight: billing is resumed again, under a key of its own', async () => {
+    const sub = await tierSubscription();
+    const input = await dispute(
+      await invoiceCharge({ subscriptionId: sub.id })
+    );
+    const paused = await service.pauseForDispute(input);
+    vi.mocked(stripe.subscriptions.update).mockImplementationOnce((async () => {
+      // Stripe is pausing; the win is recorded meanwhile.
+      await setStatus(input.stripeDisputeId, 'won');
+      return { id: sub.stripeSubscriptionId };
+    }) as never);
+
+    await service.pauseBillingForDispute(
+      paused as NonNullable<typeof paused>,
+      input.stripeDisputeId
+    );
+
+    expect(vi.mocked(stripe.subscriptions.update).mock.calls).toEqual([
+      [
+        sub.stripeSubscriptionId,
+        { pause_collection: { behavior: 'void' } },
+        { idempotencyKey: `${input.stripeDisputeId}_pause_collection` },
+      ],
+      [
+        sub.stripeSubscriptionId,
+        { pause_collection: '' },
+        { idempotencyKey: `${input.stripeDisputeId}_resume_after_pause` },
+      ],
+    ]);
+  });
+
+  it('a lost dispute still ends access through the same pause', async () => {
+    const sub = await tierSubscription();
+    const input = await dispute(
+      await invoiceCharge({ subscriptionId: sub.id }),
+      'lost'
+    );
+
+    expect(await service.pauseForDispute(input)).toMatchObject({ id: sub.id });
+    expect(await disputedAt(sub.id)).not.toBeNull();
+  });
+
   it('a charge with no payout rows is traced through Stripe: the invoice its payment intent paid names the subscription', async () => {
     const sub = await tierSubscription();
     const input = {

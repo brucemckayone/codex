@@ -27,6 +27,7 @@ import {
   CONTENT_STATUS,
   CURRENCY,
   canBeSold,
+  DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
   FEES,
   PRICE_LIMITS,
@@ -178,6 +179,30 @@ const DISPUTE_STATUS_RANK: ReadonlyMap<string, number> = new Map([
   ['prevented', 4],
 ]);
 const FINAL_DISPUTE_RANK = 4;
+
+/** A chargeback that took the money and was not won: open, or lost. */
+const HOLDING_DISPUTE_STATUSES: readonly string[] = [
+  ...DISPUTE_CHARGEBACK_OPEN_STATUSES,
+  'lost',
+];
+
+/**
+ * Whether the dispute still holds its sale, read under a share lock on its
+ * row (a win's record then waits for the caller's commit). A dispute with no
+ * row holds: nothing has closed it.
+ */
+async function disputeStillHolds(
+  tx: Tx,
+  stripeDisputeId: string
+): Promise<boolean> {
+  const [dispute] = await tx
+    .select({ status: disputes.status })
+    .from(disputes)
+    .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+    .limit(1)
+    .for('share');
+  return !dispute || HOLDING_DISPUTE_STATUSES.includes(dispute.status);
+}
 
 /** `DISPUTE_STATUS_RANK` in SQL, for the upsert's guard. */
 function disputeRank(status: SQL): SQL {
@@ -2848,7 +2873,18 @@ export class PurchaseService extends BaseService {
 
       // Atomically mark the purchase as disputed AND revoke content access.
       let keptElsewhere = false;
-      await this.db.transaction(async (tx) => {
+      const stillHolds = await this.db.transaction(async (tx) => {
+        // Only while the dispute still holds the sale: the hourly reconcile
+        // re-runs an open chargeback (Codex-2hxff.58), and a win recorded
+        // meanwhile must not be undone. Under a share lock on its row, that
+        // win is either seen here, or waits for this commit and its restore
+        // runs after.
+        if (
+          disputeDetails?.stripeDisputeId &&
+          !(await disputeStillHolds(tx, disputeDetails.stripeDisputeId))
+        ) {
+          return false;
+        }
         await tx
           .update(purchases)
           .set({
@@ -2888,7 +2924,20 @@ export class PurchaseService extends BaseService {
               isNull(entitlements.revokedAt)
             )
           );
+        return true;
       });
+      if (!stillHolds) {
+        this.obs.info('Dispute no longer holds the sale; access not paused', {
+          purchaseId: purchase.id,
+          paymentIntentId,
+          stripeDisputeId: disputeDetails?.stripeDisputeId,
+        });
+        return {
+          userId: purchase.customerId,
+          orgId: purchase.organizationId,
+          accessEnded: false,
+        };
+      }
 
       this.obs.info('Dispute processed', {
         purchaseId: purchase.id,
@@ -3173,11 +3222,14 @@ export class PurchaseService extends BaseService {
    * The hourly dispute reconcile's second source (Codex-2hxff.58): disputes
    * that reached a final status whose outcome was never applied (a won
    * dispute not re-paid, a lost one whose held slices were never cut, an
-   * inquiry whose close never released them). Oldest first. The reconcile
-   * skips any its event source already handled in the same run.
+   * inquiry whose close never released them), of any age but last updated
+   * before `updatedBefore`: a row written in the last minutes is still the
+   * webhook's, mid-way through its outcome. Oldest first. The reconcile skips
+   * any its event source already handled in the same run.
    */
   async findDisputesToReconcile(
-    limit: number
+    limit: number,
+    updatedBefore: Date
   ): Promise<Array<Pick<Dispute, 'stripeDisputeId' | 'status'>>> {
     try {
       return await this.db
@@ -3189,7 +3241,8 @@ export class PurchaseService extends BaseService {
         .where(
           and(
             inArray(disputes.status, [...DISPUTE_CLOSED_STATUSES]),
-            isNull(disputes.outcomeAppliedAt)
+            isNull(disputes.outcomeAppliedAt),
+            lt(disputes.updatedAt, updatedBefore)
           )
         )
         .orderBy(asc(disputes.updatedAt), asc(disputes.stripeDisputeId))

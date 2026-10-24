@@ -106,9 +106,14 @@ function ledger(
         return row ? [{ ...row }] : [];
       })
     ),
-    findDisputesToReconcile: vi.fn(async (limit: number) =>
+    findDisputesToReconcile: vi.fn(async (limit: number, before: Date) =>
       [...rows.values()]
-        .filter((row) => FINAL.includes(row.status) && !row.outcomeAppliedAt)
+        .filter(
+          (row) =>
+            FINAL.includes(row.status) &&
+            !row.outcomeAppliedAt &&
+            row.updatedAt < before
+        )
         .slice(0, limit)
         .map(({ stripeDisputeId, status }) => ({ stripeDisputeId, status }))
     ),
@@ -247,10 +252,11 @@ describe('runDisputeReconcile', () => {
       },
       limit: 100,
     });
-    // Every final, unapplied row whatever its age, one more than the limit
-    // to tell a cut-off batch.
+    // Every final, unapplied row whatever its age, but none written in the
+    // grace window; one more than the limit, to tell a cut-off batch.
     expect(purchase.findDisputesToReconcile).toHaveBeenCalledWith(
-      DISPUTE_RECONCILE_LIMIT + 1
+      DISPUTE_RECONCILE_LIMIT + 1,
+      new Date(NOW.getTime() - DISPUTE_RECONCILE_GRACE_MS)
     );
   });
 
@@ -620,9 +626,13 @@ describe('runDisputeReconcile', () => {
     expect(purchase.markDisputeOutcomeApplied).toHaveBeenCalledWith('dp_row');
   });
 
-  it('a final, unapplied row is retried whatever its age, even one written this hour', async () => {
+  it('a final, unapplied row is retried whatever its age, even one written an hour ago', async () => {
     const { purchase } = ledger([
-      { stripeDisputeId: 'dp_fresh', status: 'lost', updatedAt: NOW },
+      {
+        stripeDisputeId: 'dp_fresh',
+        status: 'lost',
+        updatedAt: new Date(NOW.getTime() - 3600_000),
+      },
     ]);
     // Its close event is not listed (say, recorded late by a redelivery).
     const stripe = stripeStub({ disputes: [dispute('dp_fresh', 'lost')] });
@@ -631,6 +641,23 @@ describe('runDisputeReconcile', () => {
 
     expect(purchase.processLostDispute).toHaveBeenCalledOnce();
     expect(result).toMatchObject({ fromRows: 1, acted: 1 });
+  });
+
+  it('a final row written in the last 15 minutes is left to the webhook, which is still on it', async () => {
+    const { purchase } = ledger([
+      {
+        stripeDisputeId: 'dp_webhook',
+        status: 'won',
+        updatedAt: new Date(NOW.getTime() - 60_000),
+      },
+    ]);
+    const stripe = stripeStub({ disputes: [dispute('dp_webhook', 'won')] });
+
+    const result = await reconcile({ purchase, stripe }).run();
+
+    expect(stripe.disputes.retrieve).not.toHaveBeenCalled();
+    expect(purchase.settleWonDispute).not.toHaveBeenCalled();
+    expect(result.fromRows).toBe(0);
   });
 
   it('a dispute that cannot be re-read from Stripe is alerted, and the next is still handled', async () => {

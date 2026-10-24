@@ -680,7 +680,13 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
     expect(await payeeNets(creator.id)).toBe(765);
   });
 
-  it('a refund step Stripe refuses on a slice since reversed whole and re-paid moves to the re-pay row', async () => {
+  /**
+   * A refund's 229 step left `failed` on a slice a full chargeback then
+   * reversed whole and a win paid back (765): the step was recorded while the
+   * slice was still paid, and the chargeback's reversal took the whole
+   * transfer first. Stripe now refuses the step there.
+   */
+  async function stuckRefundOnRepaidSlice() {
     const charge = newCharge(1000);
     const creator = await slice(charge, {
       payoutType: 'creator_payout',
@@ -688,18 +694,21 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
     });
     const disputeId = await dispute(charge, 'needs_response');
     await run(charge);
-    // The refund's step was recorded while the slice was still paid; the
-    // chargeback's reversal then took the whole transfer first.
     const refund = { id: `re_${uid()}`, amountCents: 300, createdAt: 1 };
-    await db.insert(payoutReversals).values({
-      payoutId: creator.id,
-      causeType: 'refund',
-      causeId: refund.id,
-      amountCents: 229,
-      kind: 'transfer_reversal',
-      status: 'failed',
-      lastErrorCode: 'unknown',
-    });
+    const stuck = takeFirst(
+      await db
+        .insert(payoutReversals)
+        .values({
+          payoutId: creator.id,
+          causeType: 'refund',
+          causeId: refund.id,
+          amountCents: 229,
+          kind: 'transfer_reversal',
+          status: 'failed',
+          lastErrorCode: 'unknown',
+        })
+        .returning()
+    );
     await setDisputeStatus(disputeId, 'won');
     await repayDispute(deps, { disputeId });
     const repay = await repayOf(creator.id);
@@ -711,6 +720,46 @@ describe('disputes in the clawback engine (Codex-2hxff.9)', () => {
         statusCode: 400,
       })
     );
+    return { charge, creator, refund, repay, stuck };
+  }
+
+  it('a stuck refund step on a slice reversed whole and re-paid becomes the debt when the re-pay row has been paid', async () => {
+    const { charge, creator, refund, repay, stuck } =
+      await stuckRefundOnRepaidSlice();
+    await db
+      .update(payouts)
+      .set({
+        status: 'paid',
+        stripeTransferId: `tr_repay_${uid()}`,
+        resolvedAt: new Date(),
+      })
+      .where(eq(payouts.id, repay.id));
+
+    await run(charge, [refund]);
+
+    // The cause's one slot on the slice: the stuck step itself, now the debt.
+    expect(
+      (await records(creator.id)).filter((r) => r.causeId === refund.id)
+    ).toMatchObject([
+      {
+        id: stuck.id,
+        status: 'debt',
+        lastErrorCode: 'slice_repaid',
+        amountCents: 229,
+      },
+    ]);
+    expect(await reviewsFor([creator.id])).toMatchObject([
+      { payoutReversalId: stuck.id, errorCode: 'slice_repaid' },
+    ]);
+    expect(await records(repay.id)).toHaveLength(0);
+    expect(obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('recorded for a person'),
+      expect.objectContaining({ payoutReversalId: stuck.id })
+    );
+  });
+
+  it('a refund step Stripe refuses on a slice since reversed whole and re-paid moves to the re-pay row', async () => {
+    const { charge, creator, refund, repay } = await stuckRefundOnRepaidSlice();
 
     await run(charge, [refund]);
     await run(charge, [refund]);

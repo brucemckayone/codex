@@ -201,10 +201,9 @@ between. Each slice is recorded once per charge
 ([the payouts ledger](connect-and-payouts.md#the-payouts-ledger)), and:
 
 - **The platform fee on record wins.** A redelivery that computes a different
-  platform fee keeps the one recorded, and logs the difference at warn. If
-  the first delivery computed no fee (so recorded none) and split the whole
-  charge, a redelivery's fee may take only what the slices leave of the
-  gross: usually nothing, so no fee is added on top of the split.
+  platform fee keeps the one recorded, and logs the difference at warn. A
+  charge split with no fee row had a fee of 0 (the fee is written before the
+  split, and a 0 fee writes no row), so a redelivery records no fee on it.
 - **The rest is split from it.** If no other slice was recorded yet (the first
   delivery died after the platform fee), the pool is the gross minus the
   recorded fee, divided by the rules above with the fees in force now. So the

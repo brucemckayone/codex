@@ -20,7 +20,8 @@
  *    creates, updates and closes, a dispute we never recorded, and an open
  *    chargeback whose opening failed. The last 15 minutes are left to the
  *    webhook, which Stripe is still delivering.
- * 2. **Our rows** with a final status whose outcome was never applied. This
+ * 2. **Our rows** with a final status whose outcome was never applied, of any
+ *    age, but not written in the last 15 minutes (the webhook's). This
  *    catches an outcome step that keeps failing (owner decision 2026-10-23,
  *    "Retry hourly, alert": no new state; it is retried every run and alerted
  *    at error, with an errorId, each time).
@@ -184,8 +185,10 @@ export async function runDisputeReconcile(
   // ── 2. Our final rows whose outcome was never applied ───────────────────
   try {
     // One more than the limit, to tell a full batch from a cut-off one.
+    // Not one written in the grace window: the webhook is still on it.
     const rows = await purchase.findDisputesToReconcile(
-      DISPUTE_RECONCILE_LIMIT + 1
+      DISPUTE_RECONCILE_LIMIT + 1,
+      new Date(now.getTime() - DISPUTE_RECONCILE_GRACE_MS)
     );
     if (rows.length > DISPUTE_RECONCILE_LIMIT) {
       obs.error(

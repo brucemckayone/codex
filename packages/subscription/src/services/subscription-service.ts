@@ -5718,7 +5718,7 @@ export class SubscriptionService extends BaseService {
       source,
       stripeChargeId: chargeId,
       transferGroup,
-      grossCents,
+      unlessSplit: true,
     });
     const pool =
       recordedFeeCents === platformFeeCents

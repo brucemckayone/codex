@@ -802,10 +802,10 @@ export async function settleTransfer(
  * from the fee recorded, so the slices sum to the gross (owner decision
  * 2026-10-23, "Keep recorded fee"; Codex-2hxff.49).
  *
- * Given the charge's `grossCents`, a fee recorded on a charge already split
- * takes only what the slices leave of the gross: a first delivery that
- * computed no fee wrote no row and split the whole charge, and a replay must
- * not add a fee on top of it (`platformFeeRoom`).
+ * `unlessSplit`: record no fee on a charge already split with no fee row.
+ * The fee is written before the split and a 0 fee writes no row, so that
+ * charge's first fee was 0, and a replay must not add one on top of its
+ * split (`feeStillOpen`).
  */
 export async function recordPlatformFee(
   deps: Pick<LedgerDeps, 'db'>,
@@ -815,16 +815,15 @@ export async function recordPlatformFee(
     source: SliceSource;
     stripeChargeId: string;
     transferGroup: string;
-    grossCents?: number;
+    unlessSplit?: boolean;
   }
 ): Promise<number> {
   const amountCents =
-    input.grossCents === undefined
-      ? input.amountCents
-      : await platformFeeRoom(deps.db, {
-          ...input,
-          grossCents: input.grossCents,
-        });
+    input.unlessSplit && input.amountCents > 0
+      ? (await feeStillOpen(deps.db, input.stripeChargeId))
+        ? input.amountCents
+        : 0
+      : input.amountCents;
   if (amountCents > 0) {
     const [inserted] = await deps.db
       .insert(payouts)
@@ -862,32 +861,25 @@ export async function recordPlatformFee(
 }
 
 /**
- * The platform fee a delivery may record now: as computed, unless the charge
- * is already split and has no fee row. Then only what its rows leave of the
- * gross, floored at 0 (money review LOW-1, Codex-2hxff.49). A fee row already
- * there wins through the insert's conflict, as without a gross.
+ * Whether a charge's platform fee can still be recorded: it is not split yet,
+ * or it has a fee row (which then wins through the insert's conflict). A
+ * charge split with no fee row had a fee of 0 (money review LOW-1 and r2 L2,
+ * Codex-2hxff.49).
  */
-async function platformFeeRoom(
+async function feeStillOpen(
   db: DatabaseClient,
-  input: { amountCents: number; stripeChargeId: string; grossCents: number }
-): Promise<number> {
-  if (input.amountCents <= 0) return 0;
+  stripeChargeId: string
+): Promise<boolean> {
   const onCharge = await db
-    .select({
-      payoutType: payouts.payoutType,
-      amountCents: payouts.amountCents,
-    })
+    .select({ payoutType: payouts.payoutType })
     .from(payouts)
-    .where(eq(payouts.stripeChargeId, input.stripeChargeId));
-  const split = onCharge.some((row) =>
-    SPLIT_SLICE_TYPES.some((type) => type === row.payoutType)
+    .where(eq(payouts.stripeChargeId, stripeChargeId));
+  return (
+    onCharge.some((row) => row.payoutType === 'platform_fee') ||
+    !onCharge.some((row) =>
+      SPLIT_SLICE_TYPES.some((type) => type === row.payoutType)
+    )
   );
-  if (!split || onCharge.some((row) => row.payoutType === 'platform_fee')) {
-    return input.amountCents;
-  }
-  const left =
-    input.grossCents - onCharge.reduce((sum, row) => sum + row.amountCents, 0);
-  return Math.max(0, Math.min(input.amountCents, left));
 }
 
 /**

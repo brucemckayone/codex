@@ -1312,7 +1312,7 @@ describe('payouts ledger', () => {
         organizationId: orgId,
         source: { sourceType: 'subscription', subscriptionId } as const,
         transferGroup: `sub_${subscriptionId}`,
-        grossCents: GROSS,
+        unlessSplit: true,
       };
 
       expect(
@@ -1322,14 +1322,25 @@ describe('payouts ledger', () => {
         'organization_fee',
       ]);
 
-      // Split only in part: the fee takes no more than the slices leave.
+      // Split only in part, still with no fee row: the fee was 0, and stays
+      // 0, even with room left in the gross; the sum is unchanged.
       const part = charge();
       await recorded(part, [
         { payoutType: 'creator_payout', amountCents: 950 },
       ]);
       expect(
         await recordPlatformFee(deps, { ...fee, stripeChargeId: part })
-      ).toBe(50);
+      ).toBe(0);
+      const partRows = await rowsFor(part);
+      expect(partRows.map((r) => r.payoutType)).toEqual(['creator_payout']);
+      expect(partRows.reduce((sum, r) => sum + r.amountCents, 0)).toBe(950);
+
+      // Not split yet: the fee is recorded as computed.
+      const fresh = charge();
+      expect(
+        await recordPlatformFee(deps, { ...fee, stripeChargeId: fresh })
+      ).toBe(100);
+      await rowsFor(fresh);
     });
   });
 });
