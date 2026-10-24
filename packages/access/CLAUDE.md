@@ -38,6 +38,7 @@ const { service, cleanup } = createContentAccessService(env);
 | Method | Signature | Notes |
 |---|---|---|
 | `getStreamingUrl` | `(userId: string, input: GetStreamingUrlInput, options?: { includeBody?: boolean })` | Verifies access (KV revocation short-circuit first when wired). For video/audio returns an HLS master-playlist PROXY URL on the content-api origin carrying a signed HLS token; `streamingUrl` is `null` for written content. The waveform is a presigned R2 URL. Returns `{ streamingUrl, waveformUrl, expiresAt, contentType, readyVariants?, body? }`. `body` (`{ contentBody, contentBodyJson }`) only with `includeBody`, taken from the row the access decision read, after it granted, and only for a released row (published now, or once; `publishedAt` is never cleared): the detail pages' body for a gated piece (Codex-039vo). |
+| `getWithdrawnContent` | `(userId: string, query: WithdrawnContentQuery)` | An item withdrawn from sale that this reader still has, by its detail URL's key: `{ orgId, slug }` or a personal piece's `{ creatorId, slug }` (Codex-ov2ii). Only a row released once (`publishedAt` set), not published now, not deleted, in a live org. Same revocation check, read-only snapshot and `decideContentAccess` as `getStreamingUrl`, through `resolveContentGrant`. Returns `{ content, held }`: the public row's shape with NO body (that is `/stream?include=body`'s) and `held: { by: 'purchase' \| 'entitlement' \| 'course' \| 'subscription', until }` from the arm that granted (`until` is the granting subscription's period end). Every miss (no row, deleted org, revoked, denied) is the SAME `ContentNotFoundError`, keyed on the slug the caller sent, so a reader without access never learns the item exists. |
 | `savePlaybackProgress` | `(userId: string, input: SavePlaybackProgressInput)` | Upserts position/duration. Auto-marks `completed = true` at 95% (`VIDEO_PROGRESS` constant). |
 | `getPlaybackProgress` | `(userId: string, input: GetPlaybackProgressInput)` | Returns `{ positionSeconds, durationSeconds, completed, updatedAt }` or null. |
 | `listUserLibrary` | `(userId: string, input: ListUserLibraryInput)` | Paginated library: purchased + membership + subscription + free-relationship + followers-relationship content (five parallel arms). Includes progress data and journey provenance. |
@@ -96,6 +97,19 @@ ordinary draft) is untouched by it. Pinned by
 An anonymous caller is unaffected: every user-scoped arm evaluates to no-grant,
 leaving only `free`, which does not survive — so a draft stays unreadable to the
 public.
+
+**Detail pages (Codex-ov2ii).** The grant at the gate was not enough on its
+own: both web detail pages found rows only through the published-only public
+list, so every reader this table keeps (a buyer, a course owner, a subscriber
+until renewal) got "Content not found". `getWithdrawnContent` is that page's
+lookup for a signed-in reader. It maps the granting arm to `held.by`
+(`HELD_BY`, exhaustive over `GrantVia` like the table above; the arms that do
+not survive map to null and fail closed), so the note a reader sees can never
+give a reason the gate did not use. Staff arms do not survive, so the team keeps
+the 404 on a public URL and previews in the studio. Subscription grants carry
+`periodStart` AND `periodEnd`: the renewal rule reads the start, the note the
+end. Pinned by `content-access-service-withdrawn.test.ts` (decision, identical
+404s) and `content-access-withdrawn.integration.test.ts` (the lookup's WHERE).
 
 ### Access hierarchy (Codex-xybr3)
 
