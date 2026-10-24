@@ -5,7 +5,7 @@ RunPod GPU transcoding pipeline. Manages job dispatch, webhook processing, retry
 ## Key Exports
 
 ```typescript
-import { TranscodingService } from '@codex/transcoding';
+import { TranscodingService, TranscodingMaintenance } from '@codex/transcoding';
 // R2 path utilities (use these everywhere — never hardcode paths)
 import { getHlsMasterKey, getHlsPreviewKey, getOriginalKey, getThumbnailKey, getWaveformKey, getWaveformImageKey, getUserAvatarKey, getOrgLogoKey } from '@codex/transcoding';
 import { TranscodingMediaNotFoundError, InvalidMediaStateError, MaxRetriesExceededError } from '@codex/transcoding';
@@ -26,6 +26,8 @@ const service = new TranscodingService({
   runpodApiBaseUrl?,    // Default: 'https://api.runpod.ai/v2'
   runpodDirectUrl?,     // Override: use this URL as-is (for local dev container)
   runpodTimeout?,       // /run answer timeout. Default: 10000ms
+  runpodWorkersMax?,    // Max workers the endpoint should have. Default: 5
+  runpodApi?,           // RunPodApi override (tests)
 });
 ```
 
@@ -35,7 +37,7 @@ RunPod credentials are required. Storage credentials (R2, B2) are stored in RunP
 
 | Method | Signature | Notes |
 |---|---|---|
-| `claimForDispatch` | `(mediaId, allowedFrom, { creatorId?, priority? })` | THE way into `transcoding`: one guarded UPDATE…RETURNING that checks the state, attempts left and soft delete, counts the attempt and clears the last run. Returns the row or `null`. Two concurrent claims cannot both match. |
+| `claimForDispatch` | `(mediaId, allowedFrom, scope, { priority? })` | THE way into `transcoding`: one guarded UPDATE…RETURNING that checks the state, attempts left and soft delete, counts the attempt and clears the last run. Returns the row or `null`. Two concurrent claims cannot both match. `scope` is `{ creatorId }` for every request path, or `MAINTENANCE_SCOPE` for the cron, which sweeps all creators. That object is not exported from the package and is compared by identity: a look-alike, an empty creator or no creator throws `ValidationError`. |
 | `dispatch` | `(media: TranscodingMediaItem)` | POSTs `/run` (with `input.contract` and a per-job `policy`), classifies the answer (`classifyRunPodAnswer`), records it. **Never throws.** |
 | `triggerJobInternal` | `(mediaId, priority?)` | Upload path (content-api, worker HMAC). Claims from `uploaded`; returns `{ alreadyQueued: true }` or `{ alreadyQueued: false, dispatchPromise }`. |
 | `retryTranscoding` | `(mediaId, creatorId)` | Creator's Retry, from `failed` or waiting `uploaded`. Refuses a non-retryable code (`TranscodingNotRetryableError`) and exhausted attempts (`MaxRetriesExceededError`). Returns `{ dispatchPromise }`. |
@@ -43,7 +45,59 @@ RunPod credentials are required. Storage credentials (R2, B2) are stored in RunP
 | `rejectWebhookOutput` | `({ jobId, mediaId }, detail)` | A signed completion/failure our schema rejected → `failed OUTPUT_REJECTED` now, not after the cron's timeout. |
 | `handleProgressWebhook` | `(payload: RunPodProgressWebhookPayload)` | Progress/step updates, guarded on the held job. |
 | `getTranscodingStatus` | `(mediaId, creatorId)` | Returns `TranscodingStatusResponse`, including `transcodingErrorCode`. |
-| `recoverStuckTranscoding` | `(maxAgeMinutes?: number)` | Cron: `transcoding` rows older than `maxAgeMinutes` (default 120) → `failed TIMED_OUT`. |
+| `ensureEndpointAwake` | `(deadline: number)` | Reads the endpoint's max workers over REST v2 and raises it to `runpodWorkersMax` when RunPod scaled it down (paused = 0). `dispatch` calls it on a 409; the cron calls it every run. A key without access is logged at error as `transcoding.auto_unpause_not_permitted`; any other failure that is not a passing outage (an unreadable answer, a 2xx that did not apply the new value) is an error too. A bad `runpodWorkersMax` logs `transcoding.workers_max_invalid` at error and uses the default. |
+
+## `RunPodApi` (`runpod-api.ts`)
+
+The management and status calls `/run` does not cover: `endpointWorkers`,
+`setWorkersMax` (REST v2 `api.runpod.io/v2/serverless/{id}`; v1 retires
+2026-11-15), `jobStatus` (`/v2/{id}/status/{job}`; 404 → `GONE`) and the
+keep-alive `ping` (a low-priority job with a 10 s ttl, so no worker starts).
+**Never throws**; every call is bounded by a deadline and an 8 s cap (a call
+cut off answers `out_of_time`). All calls answer `unsupported` when
+`runpodDirectUrl` is set: the local container has `/run` only. A job's `error`
+text is never read: RunPod's words never reach a creator.
+
+## `TranscodingMaintenance` (the hourly cron)
+
+`run({ now?, deadline })` never throws; each step runs on its own and a
+failing step is reported in `failedSteps`. Built by the registry
+(`ctx.services.transcodingMaintenance`); media-api's `scheduled()` runs it on
+the existing hourly production cron.
+
+1. `ensureEndpointAwake`, first, so the ping finds the endpoint awake.
+2. Keep-alive `ping` in the 03:00 UTC run (RunPod pauses after 7 idle days).
+   Never alerted: the old handler fails the ping job, and the request reset
+   RunPod's idle clock anyway.
+3. `transcoding` rows past their job's `executionTimeout` (with a job id) or
+   `ttl` (without) plus 15 min: ask RunPod. Still running → leave; COMPLETED
+   or gone (RunPod keeps a result only 30 min) → `failed WEBHOOK_LOST`;
+   FAILED → `INFRA_ERROR`; cancelled or timed out → `TIMED_OUT`; no job id →
+   back to waiting, attempt given back. Anything still unresolved 24 h past
+   due fails `TIMED_OUT` whatever RunPod says, at error: a `transcoding` row
+   cannot be retried by its creator. Reads 100 rows to find 25 due ones, so
+   long videos not yet due never take a due row's slot.
+4. `uploaded` rows idle 10 min (waiting, or stranded by a failed content-api
+   hop): claim with `MAINTENANCE_SCOPE` and dispatch. The first dispatch
+   RunPod does not accept ends the retries for that run. Give up at 24 h
+   since `uploaded_at`, or with no attempts left, keeping the waiting code.
+5. `uploading` rows untouched 24 h: R2 HEAD. There → `uploaded` (the next run
+   dispatches it); definitely absent → `failed UPLOAD_INCOMPLETE`; R2 cannot
+   say → left alone, and the step stops. No R2 bucket → the step fails, at
+   error, every run.
+
+The rules are pure functions in `maintenance-rules.ts`. Every write is guarded
+on the state the run read (deletion included), so a creator's Retry or a
+webhook that got there first is never overwritten; one that matches nothing
+counts in `report.raced`. When RunPod cannot answer at all (down, out of
+time, a key that may not ask) the step stops asking; one unreadable answer is
+that job's alone. 25 rows per step per run; a retry is not started with under
+25 s of budget left. Lost-job failures that mean the pipeline broke
+(`WEBHOOK_LOST`, `INFRA_ERROR`, the 24 h ceiling) log at error.
+
+Its integration suite sweeps EVERY creator's rows, so it runs only in CI or
+with `TRANSCODING_SWEEP_DB=1` against a throwaway database, and refuses
+`neondb`, `main` and `main_test`.
 
 ## RunPod Async Pattern
 
@@ -77,7 +131,8 @@ then failed silently. Use `ctx.background` for any post-response DB work.
 
 `AbortSignal.timeout(runpodTimeout)` is 10 000 ms, well inside Cloudflare's
 30 s `waitUntil` ceiling, so a hung `/run` gives up while the outcome can
-still be written.
+still be written. A 409 then wakes the endpoint, and the whole dispatch stays
+inside `DISPATCH_BUDGET_MS` (22 s).
 
 ### Local development
 
@@ -116,6 +171,11 @@ uploading → uploaded ──claim──▶ transcoding → ready
                ▲                    │ └──▶ failed ──retry (claim)──┐
                └── RunPod refused ──┘                               │
                └────────────────────────────────────────────────────┘
+
+The hourly maintenance run also moves rows:
+  uploading   ──file in R2──▶ uploaded      uploading ──file absent──▶ failed UPLOAD_INCOMPLETE
+  uploaded    ──24 h waiting──▶ failed (keeps the waiting code)
+  transcoding ──no job id──▶ uploaded       transcoding ──lost job──▶ failed
 ```
 
 `uploaded` with a `transcoding_error_code` means "waiting for the transcoder".
@@ -135,7 +195,7 @@ uploading → uploaded ──claim──▶ transcoding → ready
 ## Rules
 
 - **MUST** verify RunPod webhook authenticity — webhook handler in media-api must validate before calling `handleWebhook()`
-- **MUST** use `scopedNotDeleted(mediaItems, creatorId)` — all media queries are creator-scoped
+- **MUST** use `scopedNotDeleted(mediaItems, creatorId)` — all media queries are creator-scoped. The ONE exception is `TranscodingMaintenance` (cron only), which sweeps every creator's rows with `isNull(deletedAt)` on every read and write and claims with `MAINTENANCE_SCOPE`. Never add another unscoped query, and never "fix" the sweep by scoping it to a creator
 - **MUST** use R2 path functions from `paths.ts` — NEVER hardcode path strings
 - **NEVER** expose RunPod API keys in logs or responses
 - **MUST** enter `transcoding` only through `claimForDispatch()` — it is the only place an attempt is counted
@@ -149,5 +209,10 @@ uploading → uploaded ──claim──▶ transcoding → ready
 ## Reference Files
 
 - `packages/transcoding/src/services/transcoding-service.ts`
+- `packages/transcoding/src/services/transcoding-maintenance.ts` — the hourly maintenance run
+- `packages/transcoding/src/services/media-state.ts` — the SETs of the moves to `failed` and back to waiting
+- `packages/transcoding/src/maintenance-rules.ts` — the maintenance run's pure rules
+- `packages/transcoding/src/runpod-api.ts` — RunPod REST v2 and job-status client
+- `packages/transcoding/src/dispatch.ts` — what a `/run` answer means; per-job policy
 - `packages/transcoding/src/paths.ts` — R2 key generation (single source of truth)
 - `packages/transcoding/src/types.ts` — RunPod payload types, status enums

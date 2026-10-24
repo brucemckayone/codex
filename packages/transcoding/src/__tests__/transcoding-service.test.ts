@@ -11,7 +11,9 @@ import { TRANSCODING_ERROR_MAX_LENGTH } from '@codex/constants';
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { EndpointWorkersResult, RunPodApi } from '../runpod-api';
 import {
+  MAINTENANCE_SCOPE,
   TranscodingService,
   type TranscodingServiceFullConfig,
 } from '../services/transcoding-service';
@@ -134,11 +136,9 @@ describe('claimForDispatch', () => {
       media({ status: 'transcoding', transcodingAttempts: 1 }),
     ]);
 
-    const claimed = await service.claimForDispatch(
-      MEDIA_ID,
-      ['uploaded'],
-      CREATOR_ID
-    );
+    const claimed = await service.claimForDispatch(MEDIA_ID, ['uploaded'], {
+      creatorId: CREATOR_ID,
+    });
 
     expect(claimed?.status).toBe('transcoding');
     const [write] = fake.writes;
@@ -158,11 +158,9 @@ describe('claimForDispatch', () => {
   it("claims only the creator's undeleted row, from the allowed states, with attempts left", async () => {
     fake.returning.push([media()]);
 
-    await service.claimForDispatch(
-      MEDIA_ID,
-      ['uploaded', 'failed'],
-      CREATOR_ID
-    );
+    await service.claimForDispatch(MEDIA_ID, ['uploaded', 'failed'], {
+      creatorId: CREATOR_ID,
+    });
 
     const where = fake.writes[0]?.where ?? '';
     expect(where).toContain('"media_items"."creator_id" = $2');
@@ -181,7 +179,9 @@ describe('claimForDispatch', () => {
   it('never claims a row stopped by its file: the WHERE is the whole guard', async () => {
     fake.returning.push([media()]);
 
-    await service.claimForDispatch(MEDIA_ID, ['failed'], CREATOR_ID);
+    await service.claimForDispatch(MEDIA_ID, ['failed'], {
+      creatorId: CREATOR_ID,
+    });
 
     const write = fake.writes[0];
     expect(write?.where).toMatch(
@@ -197,11 +197,9 @@ describe('claimForDispatch', () => {
   it('restarts the 24 h clock only for a resubmission from failed', async () => {
     fake.returning.push([media()]);
 
-    await service.claimForDispatch(
-      MEDIA_ID,
-      ['uploaded', 'failed'],
-      CREATOR_ID
-    );
+    await service.claimForDispatch(MEDIA_ID, ['uploaded', 'failed'], {
+      creatorId: CREATOR_ID,
+    });
 
     expect(render(fake.writes[0]?.set.uploadedAt)).toMatch(
       /CASE WHEN "media_items"\."status" = \$\d+ THEN now\(\) ELSE "media_items"\."uploaded_at" END/
@@ -212,7 +210,9 @@ describe('claimForDispatch', () => {
     fake.returning.push([]);
 
     expect(
-      await service.claimForDispatch(MEDIA_ID, ['uploaded'], CREATOR_ID)
+      await service.claimForDispatch(MEDIA_ID, ['uploaded'], {
+        creatorId: CREATOR_ID,
+      })
     ).toBeNull();
   });
 });
@@ -698,16 +698,197 @@ describe('rejectWebhookOutput', () => {
   });
 });
 
-describe('recoverStuckTranscoding', () => {
-  it('fails stuck rows with a code, so NULL keeps meaning "nothing went wrong"', async () => {
-    fake.returning.push([]);
+describe('claimForDispatch for the maintenance run', () => {
+  it('claims across creators with the package-private scope, never a deleted row', async () => {
+    fake.returning.push([media()]);
 
-    await service.recoverStuckTranscoding(120);
+    await service.claimForDispatch(MEDIA_ID, ['uploaded'], MAINTENANCE_SCOPE);
 
-    expect(fake.writes[0]?.set).toMatchObject({
-      status: 'failed',
-      transcodingErrorCode: 'TIMED_OUT',
+    const where = fake.writes[0]?.where ?? '';
+    expect(where).toContain('"media_items"."deleted_at" is null');
+    expect(where).not.toContain('creator_id');
+  });
+
+  // Fails closed: only the exact object sweeps across creators.
+  it.each([
+    ['a look-alike of the maintenance scope', { trusted: 'maintenance' }],
+    ['an empty creator', { creatorId: '' }],
+    ['no creator at all', {}],
+  ])('refuses %s, writing nothing', async (_case, scope) => {
+    await expect(
+      service.claimForDispatch(MEDIA_ID, ['uploaded'], scope as never)
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(fake.writes).toHaveLength(0);
+  });
+});
+
+/**
+ * A spy on every service's logger at `level`. ObservabilityClient is reached
+ * through an instance: this package does not depend on @codex/observability.
+ */
+function logSpy(level: 'error' | 'warn') {
+  const prototype = Object.getPrototypeOf(
+    (service as unknown as { obs: object }).obs
+  ) as Record<typeof level, (...args: unknown[]) => void>;
+  return vi.spyOn(prototype, level);
+}
+
+/** A RunPodApi stub: only the calls ensureEndpointAwake makes. */
+function stubApi(
+  workers: EndpointWorkersResult,
+  raised: EndpointWorkersResult = { ok: true, max: 5 }
+) {
+  return {
+    endpointWorkers: vi.fn(async () => workers),
+    setWorkersMax: vi.fn(async () => raised),
+  };
+}
+
+function serviceWith(api: ReturnType<typeof stubApi>) {
+  return new TranscodingService({
+    ...config(fake.db),
+    runpodWorkersMax: 5,
+    runpodApi: api as unknown as RunPodApi,
+  });
+}
+
+describe('ensureEndpointAwake', () => {
+  const deadline = () => Date.now() + 20_000;
+
+  // At 0, a paused endpoint (max 0) would read as awake for ever.
+  it.each([
+    0,
+    1.5,
+    101,
+    Number.NaN,
+  ])('falls back to 5 workers from a max of %s, at error', async (max) => {
+    const error = logSpy('error');
+    const api = stubApi({ ok: true, max: 0 });
+
+    const svc = new TranscodingService({
+      ...config(fake.db),
+      runpodWorkersMax: max,
+      runpodApi: api as unknown as RunPodApi,
     });
+    await svc.ensureEndpointAwake(deadline());
+
+    expect(error).toHaveBeenCalledWith(
+      'transcoding.workers_max_invalid',
+      expect.objectContaining({ using: 5 })
+    );
+    expect(api.setWorkersMax).toHaveBeenCalledWith(5, expect.any(Number));
+  });
+
+  it('leaves an endpoint at its max workers alone: one read, no write', async () => {
+    const api = stubApi({ ok: true, max: 5 });
+
+    expect(await serviceWith(api).ensureEndpointAwake(deadline())).toEqual({
+      kind: 'awake',
+      max: 5,
+    });
+    expect(api.setWorkersMax).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [0, 'paused after 7 idle days'],
+    [2, 'scaled down after 3 idle days'],
+  ])('raises an endpoint at %i (%s) back to the configured max', async (max) => {
+    const api = stubApi({ ok: true, max });
+
+    expect(await serviceWith(api).ensureEndpointAwake(deadline())).toEqual({
+      kind: 'raised',
+      from: max,
+      to: 5,
+    });
+    expect(api.setWorkersMax).toHaveBeenCalledWith(5, expect.any(Number));
+  });
+
+  it('reports a key that may not change the endpoint', async () => {
+    const api = stubApi(
+      { ok: true, max: 0 },
+      { ok: false, reason: 'not_permitted', status: 403 }
+    );
+
+    expect(await serviceWith(api).ensureEndpointAwake(deadline())).toEqual({
+      kind: 'not_raised',
+      from: 0,
+      reason: 'not_permitted',
+    });
+  });
+
+  it('writes nothing when the endpoint cannot be read', async () => {
+    const api = stubApi({ ok: false, reason: 'unavailable', status: 502 });
+
+    expect(await serviceWith(api).ensureEndpointAwake(deadline())).toEqual({
+      kind: 'unknown',
+      reason: 'unavailable',
+    });
+    expect(api.setWorkersMax).not.toHaveBeenCalled();
+  });
+
+  // Auto-unpause cannot work in any of these until someone fixes the key or
+  // the setup, so a paused endpoint would stay paused: never just a warning.
+  it.each([
+    ['not_permitted', 'transcoding.auto_unpause_not_permitted'],
+    ['unreadable', 'transcoding.endpoint_workers_unread'],
+    ['not_found', 'transcoding.endpoint_workers_unread'],
+  ] as const)('logs an endpoint it cannot read (%s) at error', async (reason, event) => {
+    const error = logSpy('error');
+    const api = stubApi({ ok: false, reason });
+
+    await serviceWith(api).ensureEndpointAwake(deadline());
+
+    expect(error).toHaveBeenCalledWith(event, expect.anything());
+  });
+
+  it('logs a passing outage only as a warning', async () => {
+    const error = logSpy('error');
+    const api = stubApi({ ok: false, reason: 'unavailable', status: 503 });
+
+    await serviceWith(api).ensureEndpointAwake(deadline());
+
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('calls a raise RunPod did not apply not raised, at error', async () => {
+    const error = logSpy('error');
+    const api = stubApi({ ok: true, max: 0 }, { ok: true, max: 0 });
+
+    expect(await serviceWith(api).ensureEndpointAwake(deadline())).toEqual({
+      kind: 'not_raised',
+      from: 0,
+      reason: 'not_applied',
+    });
+    expect(error).toHaveBeenCalledWith(
+      'transcoding.endpoint_workers_not_raised',
+      expect.objectContaining({ confirmed: 0, wanted: 5 })
+    );
+  });
+});
+
+describe('dispatch wakes a paused endpoint', () => {
+  const claimed = media({ status: 'transcoding', transcodingAttempts: 1 });
+
+  it('a 409 refusal reads the endpoint and raises its max workers', async () => {
+    const api = stubApi({ ok: true, max: 0 });
+    runpodAnswers(409, { code: 'ENDPOINT_PAUSED' });
+
+    const outcome = await serviceWith(api).dispatch(claimed);
+
+    expect(outcome).toMatchObject({
+      kind: 'rejected',
+      code: 'TRANSCODER_PAUSED',
+    });
+    expect(api.setWorkersMax).toHaveBeenCalledWith(5, expect.any(Number));
+  });
+
+  it('any other refusal leaves the endpoint alone', async () => {
+    const api = stubApi({ ok: true, max: 0 });
+    runpodAnswers(429, {});
+
+    await serviceWith(api).dispatch(claimed);
+
+    expect(api.endpointWorkers).not.toHaveBeenCalled();
   });
 });
 

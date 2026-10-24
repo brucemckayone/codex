@@ -46,7 +46,7 @@ const MAYBE_QUEUED_STATUSES: ReadonlySet<number> = new Set([
 ]);
 
 /** The body as a JSON object, or undefined when it is not one. */
-function parseObject(body: string): Record<string, unknown> | undefined {
+export function parseObject(body: string): Record<string, unknown> | undefined {
   try {
     const parsed: unknown = JSON.parse(body);
     return parsed && typeof parsed === 'object'
@@ -118,7 +118,7 @@ export function classifyRunPodAnswer(
 // ============================================================================
 
 const MINUTE_MS = 60 * 1000;
-const MIN_EXECUTION_TIMEOUT_MS = 30 * MINUTE_MS;
+export const MIN_EXECUTION_TIMEOUT_MS = 30 * MINUTE_MS;
 const MAX_EXECUTION_TIMEOUT_MS = 6 * 60 * MINUTE_MS;
 /**
  * The length is unknown exactly when the browser could not read the file

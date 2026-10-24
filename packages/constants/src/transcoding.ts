@@ -223,6 +223,14 @@ export function toJobErrorCode(value: unknown): TranscodingErrorCode {
 export const MAX_TRANSCODING_ATTEMPTS = 3;
 
 /**
+ * The max workers the RunPod endpoint should have, and the most a
+ * RUNPOD_WORKERS_MAX may ask for. RunPod pauses an idle endpoint by setting
+ * its max workers to 0; the maintenance run raises it back to this.
+ */
+export const RUNPOD_WORKERS_MAX_DEFAULT = 5;
+export const RUNPOD_WORKERS_MAX_LIMIT = 100;
+
+/**
  * The job-input contract this build sends the handler (`input.contract`).
  * 2 = posters in the sized image layout. The handler keeps the old layout for
  * any job without it, so a newer image never breaks an older worker.

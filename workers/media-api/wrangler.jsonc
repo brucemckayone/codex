@@ -244,7 +244,10 @@
         // NO worker, so callbacks were black-holed and media never reached
         // `ready`. media-api.revelations.studio has a custom_domain route + DNS
         // (below) and owns the /api/transcoding/webhook handler.
-        "API_URL": "https://media-api.revelations.studio"
+        "API_URL": "https://media-api.revelations.studio",
+        // The endpoint's max workers; RunPod scales an idle endpoint down to
+        // 0 (paused) and media-api raises it back to this (Codex-l2c48.5).
+        "RUNPOD_WORKERS_MAX": "5"
       },
       // Bindings are not inherited into a named env — see the default env.
       "ratelimits": [

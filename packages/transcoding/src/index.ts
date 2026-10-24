@@ -87,6 +87,8 @@ export {
 } from './paths';
 // Services
 export {
+  type MaintenanceReport,
+  TranscodingMaintenance,
   TranscodingService,
   type TranscodingServiceFullConfig,
 } from './services';

@@ -11,7 +11,8 @@
  *
  * Key Principles:
  * - All R2 paths come from paths.ts (SINGLE SOURCE OF TRUTH)
- * - Creator scoping on all queries
+ * - Creator scoping on all queries, except the maintenance run's
+   (MAINTENANCE_SCOPE, cron only), which sweeps every creator's rows
  * - Every state change is ONE guarded UPDATE: its WHERE names the state it
  *   moves from, so two writers can never both apply
  * - Proper error handling with custom error classes
@@ -22,8 +23,9 @@ import {
   MAX_TRANSCODING_ATTEMPTS,
   MEDIA_STATUS,
   MIME_TYPES,
+  RUNPOD_WORKERS_MAX_DEFAULT,
+  RUNPOD_WORKERS_MAX_LIMIT,
   TRANSCODING_ERROR_CODES,
-  TRANSCODING_ERROR_MAX_LENGTH,
   TRANSCODING_JOB_CONTRACT,
   type TranscodingErrorCode,
   transcodingErrorInfo,
@@ -40,8 +42,17 @@ import type {
   RunPodProgressWebhookPayload,
   RunPodWebhookPayload,
 } from '@codex/validation';
-import { and, eq, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
-
+import {
+  and,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  notInArray,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import {
   classifyRunPodAnswer,
   jobFailureFromWebhook,
@@ -55,6 +66,11 @@ import {
   TranscodingMediaNotFoundError,
   TranscodingNotRetryableError,
 } from '../errors';
+import {
+  RUNPOD_SERVERLESS_API_URL,
+  RunPodApi,
+  type RunPodApiFailureReason,
+} from '../runpod-api';
 import type {
   HlsVariant,
   MediaStatus,
@@ -62,6 +78,7 @@ import type {
   TranscodingMediaItem,
   TranscodingStatusResponse,
 } from '../types';
+import { failedFields, waitingFields } from './media-state';
 
 /**
  * The columns both media reads select. `satisfies` makes it name every
@@ -110,11 +127,21 @@ export interface TranscodingServiceConfig {
   runpodApiBaseUrl?: string; // Optional: Override base RunPod API URL
   runpodDirectUrl?: string; // Optional: Use this URL as-is (skips path construction, for local container)
   runpodTimeout?: number; // /run answer timeout, defaults to 10000ms
+  /** The max workers the endpoint should have; a lower value is RunPod scaling it down. Default RUNPOD_WORKERS_MAX_DEFAULT. */
+  runpodWorkersMax?: number;
+  /** Tests inject one; by default it is built from the fields above. */
+  runpodApi?: RunPodApi;
 }
 
 export interface TranscodingServiceFullConfig
   extends ServiceConfig,
     TranscodingServiceConfig {}
+
+/**
+ * The longest one dispatch takes: /run, then waking a paused endpoint. The
+ * maintenance run starts no retry with less than this left.
+ */
+export const DISPATCH_BUDGET_MS = 22_000;
 
 /**
  * A webhook for job `jobId` may change the row only when the row holds that
@@ -123,18 +150,6 @@ export interface TranscodingServiceFullConfig
  */
 function heldJobIs(jobId: string) {
   return or(isNull(mediaItems.runpodJobId), eq(mediaItems.runpodJobId, jobId));
-}
-
-/** The SET of every move to `failed`; the detail is cut to fit the column. */
-function failedFields(code: TranscodingErrorCode, detail: string) {
-  return {
-    status: MEDIA_STATUS.FAILED,
-    transcodingError: detail.slice(0, TRANSCODING_ERROR_MAX_LENGTH),
-    transcodingErrorCode: code,
-    transcodingProgress: null,
-    transcodingStep: null,
-    updatedAt: new Date(),
-  };
 }
 
 /**
@@ -154,6 +169,64 @@ const RETRYABLE_FROM: readonly MediaStatus[] = [
   MEDIA_STATUS.FAILED,
   MEDIA_STATUS.UPLOADED,
 ];
+
+const MAINTENANCE: unique symbol = Symbol('transcoding-maintenance');
+
+/**
+ * The hourly maintenance run's claim scope: every creator's media. NOT
+ * exported from the package, so no route or other worker can pass it, and a
+ * look-alike object is not it (claimForDispatch compares identity).
+ */
+export const MAINTENANCE_SCOPE: Readonly<{ trusted: typeof MAINTENANCE }> =
+  Object.freeze({ trusted: MAINTENANCE });
+
+/**
+ * Whose media a claim may take. A route always names the creator; an omitted
+ * creator must never mean "anyone's", so a scope that is neither throws.
+ */
+export type ClaimScope = { creatorId: string } | typeof MAINTENANCE_SCOPE;
+
+/**
+ * The claim's scope filter. Identity, not shape: only the package's own
+ * MAINTENANCE_SCOPE sweeps across creators, and anything else without a
+ * creator fails closed.
+ */
+function claimScopeFilter(scope: ClaimScope): SQL {
+  if (scope === MAINTENANCE_SCOPE) return isNull(mediaItems.deletedAt);
+  if ('creatorId' in scope && scope.creatorId) {
+    return scopedNotDeleted(mediaItems, scope.creatorId);
+  }
+  throw new ValidationError('claimForDispatch: a creator scope is required');
+}
+
+/**
+ * Where /run is. A direct URL (a local container) is used as-is; otherwise
+ * the base URL plus the endpoint id (RunPod cloud).
+ */
+function runpodRunUrl(config: TranscodingServiceConfig): string {
+  if (config.runpodDirectUrl) return config.runpodDirectUrl;
+  const apiBaseUrl = config.runpodApiBaseUrl || RUNPOD_SERVERLESS_API_URL;
+  return `${apiBaseUrl}/${config.runpodEndpointId}/run`;
+}
+
+/** 0 would read a paused endpoint as awake for ever. */
+function isSaneWorkersMax(value: number): boolean {
+  return (
+    Number.isInteger(value) && value >= 1 && value <= RUNPOD_WORKERS_MAX_LIMIT
+  );
+}
+
+/** A RunPod failure that says nothing about the setup: try again later. */
+function isPassingFailure(reason: RunPodApiFailureReason): boolean {
+  return reason === 'unavailable' || reason === 'out_of_time';
+}
+
+/** What ensureEndpointAwake found and did. */
+export type EndpointWakeOutcome =
+  | { kind: 'awake'; max: number }
+  | { kind: 'raised'; from: number; to: number }
+  | { kind: 'not_raised'; from: number; reason: string }
+  | { kind: 'unknown'; reason: string };
 
 /** What triggerJobInternal did; the route runs `dispatchPromise` after replying. */
 export type InternalTriggerResult =
@@ -182,6 +255,8 @@ export type InternalTriggerResult =
  *   handler POSTs the result to our webhook later.
  */
 export class TranscodingService extends BaseService {
+  private readonly runpodApi: RunPodApi;
+  private readonly runpodWorkersMax: number;
   private readonly runpodApiKey: string;
   private readonly runpodApiUrl: string;
   private readonly webhookUrl: string;
@@ -216,24 +291,38 @@ export class TranscodingService extends BaseService {
     // call must give up well before that budget does.
     this.runpodTimeout = config.runpodTimeout ?? 10000;
 
-    // Pre-construct URLs (won't change during service lifetime)
-    // If a direct URL is provided (local container), use it as-is.
-    // Otherwise construct from base URL + endpoint ID (RunPod cloud API).
-    if (config.runpodDirectUrl) {
-      this.runpodApiUrl = config.runpodDirectUrl;
-    } else {
-      const apiBaseUrl = config.runpodApiBaseUrl || 'https://api.runpod.ai/v2';
-      this.runpodApiUrl = `${apiBaseUrl}/${config.runpodEndpointId}/run`;
-    }
+    this.runpodApiUrl = runpodRunUrl(config);
     this.webhookUrl = `${config.webhookBaseUrl}/api/transcoding/webhook`;
+
+    // A bad value falls back to the default rather than stopping every
+    // upload, and says so.
+    const workersMax = config.runpodWorkersMax ?? RUNPOD_WORKERS_MAX_DEFAULT;
+    if (!isSaneWorkersMax(workersMax)) {
+      this.obs.error('transcoding.workers_max_invalid', {
+        value: String(workersMax),
+        using: RUNPOD_WORKERS_MAX_DEFAULT,
+      });
+    }
+    this.runpodWorkersMax = isSaneWorkersMax(workersMax)
+      ? workersMax
+      : RUNPOD_WORKERS_MAX_DEFAULT;
+    this.runpodApi =
+      config.runpodApi ??
+      new RunPodApi({
+        apiKey: config.runpodApiKey,
+        endpointId: config.runpodEndpointId,
+        serverlessBaseUrl: config.runpodApiBaseUrl,
+        directUrl: config.runpodDirectUrl,
+      });
   }
 
   /**
    * Claim a media item for dispatch: move it to `transcoding` and count the
    * attempt, in ONE statement.
    *
-   * The WHERE is the whole guard: the row must be the creator's, not
-   * deleted, in one of `allowedFrom`, with attempts left, and not stopped by
+   * The WHERE is the whole guard: the row must be in scope (the creator's,
+   * unless the maintenance run says otherwise), not deleted, in one of
+   * `allowedFrom`, with attempts left, and not stopped by
    * a failure a retry cannot fix (the file itself). Two concurrent claims
    * cannot both match, so a job is dispatched once. The claim also clears the
    * last run's error, code, job id and progress, and restarts the upload's
@@ -245,9 +334,10 @@ export class TranscodingService extends BaseService {
   async claimForDispatch(
     mediaId: string,
     allowedFrom: readonly MediaStatus[],
-    creatorId: string,
+    scope: ClaimScope,
     options: { priority?: number } = {}
   ): Promise<TranscodingMediaItem | null> {
+    const inScope = claimScopeFilter(scope);
     const nonRetryableCodes = Object.values(TRANSCODING_ERROR_CODES).filter(
       (code) => !transcodingErrorInfo(code).retryable
     );
@@ -270,7 +360,7 @@ export class TranscodingService extends BaseService {
       .where(
         and(
           eq(mediaItems.id, mediaId),
-          scopedNotDeleted(mediaItems, creatorId),
+          inScope,
           inArray(mediaItems.status, [...allowedFrom]),
           lt(mediaItems.transcodingAttempts, MAX_TRANSCODING_ATTEMPTS),
           or(
@@ -307,6 +397,8 @@ export class TranscodingService extends BaseService {
       policy: transcodingJobPolicy(media.durationSeconds),
     };
 
+    const startedAt = Date.now();
+    let refusedWith409 = false;
     let outcome: RunPodDispatchOutcome;
     try {
       const response = await fetch(this.runpodApiUrl, {
@@ -320,24 +412,9 @@ export class TranscodingService extends BaseService {
       });
       const body = await response.text();
       outcome = classifyRunPodAnswer(response.status, body);
+      refusedWith409 = response.status === 409;
       if (outcome.kind !== 'accepted') {
-        const context = {
-          mediaId: media.id,
-          statusCode: response.status,
-          outcome: outcome.kind,
-          code: outcome.kind === 'rejected' ? outcome.code : undefined,
-          // RunPod's body, for the logs only: the detail the creator sees
-          // names the status and RunPod's code, nothing else.
-          body: body.slice(0, 500),
-        };
-        // A wait (paused, busy, down) clears up by itself. A job we cannot
-        // account for, or a refusal that every upload will hit until the
-        // setup is fixed, needs someone to look.
-        if (needsAttention(outcome)) {
-          this.obs.error('transcoding.dispatch_not_accepted', context);
-        } else {
-          this.obs.warn('transcoding.dispatch_not_accepted', context);
-        }
+        this.logNotAccepted(media.id, response.status, outcome, body);
       }
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'TimeoutError';
@@ -365,7 +442,42 @@ export class TranscodingService extends BaseService {
         error: messageForLog(error),
       });
     }
+
+    // A 409 is how a paused endpoint answers (the body's code is
+    // undocumented, so the endpoint's max workers is read to be sure). The
+    // waiting state is already written; waking RunPod is all that is left,
+    // inside the background budget. The retry comes from the scheduler.
+    if (refusedWith409) {
+      await this.ensureEndpointAwake(startedAt + DISPATCH_BUDGET_MS);
+    }
     return outcome;
+  }
+
+  /**
+   * A wait (paused, busy, down) clears up by itself. A job we cannot account
+   * for, or a refusal that every upload will hit until the setup is fixed,
+   * needs someone to look.
+   */
+  private logNotAccepted(
+    mediaId: string,
+    statusCode: number,
+    outcome: Exclude<RunPodDispatchOutcome, { kind: 'accepted' }>,
+    body: string
+  ): void {
+    const context = {
+      mediaId,
+      statusCode,
+      outcome: outcome.kind,
+      code: outcome.kind === 'rejected' ? outcome.code : undefined,
+      // RunPod's body, for the logs only: the detail the creator sees names
+      // the status and RunPod's code, nothing else.
+      body: body.slice(0, 500),
+    };
+    if (needsAttention(outcome)) {
+      this.obs.error('transcoding.dispatch_not_accepted', context);
+    } else {
+      this.obs.warn('transcoding.dispatch_not_accepted', context);
+    }
   }
 
   /**
@@ -401,15 +513,7 @@ export class TranscodingService extends BaseService {
     if (outcome.kind === 'rejected') {
       const waiting = await this.db
         .update(mediaItems)
-        .set({
-          status: MEDIA_STATUS.UPLOADED,
-          transcodingError: outcome.detail,
-          transcodingErrorCode: outcome.code,
-          transcodingAttempts: sql`GREATEST(${mediaItems.transcodingAttempts} - 1, 0)`,
-          transcodingProgress: null,
-          transcodingStep: null,
-          updatedAt: new Date(),
-        })
+        .set(waitingFields(outcome.code, outcome.detail))
         .where(claimStillHeld)
         .returning();
       const context = {
@@ -424,6 +528,83 @@ export class TranscodingService extends BaseService {
       }
     }
     // ambiguous: nothing to write; the row stays `transcoding`.
+  }
+
+  /**
+   * The RunPod calls the maintenance run makes itself. Changing the endpoint
+   * stays behind ensureEndpointAwake.
+   */
+  get runpodJobs(): Pick<RunPodApi, 'jobStatus' | 'ping'> {
+    return this.runpodApi;
+  }
+
+  /**
+   * Raise the endpoint's max workers when RunPod has scaled it down (paused:
+   * 0; after three idle days: 2). Reads first, so an awake endpoint costs one
+   * GET. NEVER THROWS.
+   *
+   * A key that may not read or change the endpoint (`not_permitted`) is
+   * logged at error as `auto_unpause_not_permitted`: auto-unpause is
+   * unavailable until the owner gives the key Serverless write access, and a
+   * paused endpoint then needs raising by hand. Every other failure that is
+   * not passing (an unreadable answer, a raise RunPod did not apply) is an
+   * error too.
+   */
+  async ensureEndpointAwake(deadline: number): Promise<EndpointWakeOutcome> {
+    const current = await this.runpodApi.endpointWorkers(deadline);
+    if (!current.ok) {
+      // Anything but a passing failure means auto-unpause cannot work until
+      // someone fixes the key or the setup: a paused endpoint would then stay
+      // paused, every upload waiting, so it is an error.
+      const context = { reason: current.reason, statusCode: current.status };
+      if (current.reason === 'not_permitted') {
+        this.obs.error('transcoding.auto_unpause_not_permitted', context);
+      } else if (isPassingFailure(current.reason)) {
+        this.obs.warn('transcoding.endpoint_workers_unread', context);
+      } else {
+        this.obs.error('transcoding.endpoint_workers_unread', context);
+      }
+      return { kind: 'unknown', reason: current.reason };
+    }
+    if (current.max >= this.runpodWorkersMax) {
+      return { kind: 'awake', max: current.max };
+    }
+
+    const raised = await this.runpodApi.setWorkersMax(
+      this.runpodWorkersMax,
+      deadline
+    );
+    if (!raised.ok) {
+      const context = {
+        from: current.max,
+        wanted: this.runpodWorkersMax,
+        reason: raised.reason,
+        statusCode: raised.status,
+      };
+      if (raised.reason === 'not_permitted') {
+        this.obs.error('transcoding.auto_unpause_not_permitted', context);
+      } else if (isPassingFailure(raised.reason)) {
+        this.obs.warn('transcoding.endpoint_workers_not_raised', context);
+      } else {
+        this.obs.error('transcoding.endpoint_workers_not_raised', context);
+      }
+      return { kind: 'not_raised', from: current.max, reason: raised.reason };
+    }
+    // A 2xx is not a raise: RunPod must confirm the new value.
+    if (raised.max < this.runpodWorkersMax) {
+      this.obs.error('transcoding.endpoint_workers_not_raised', {
+        from: current.max,
+        wanted: this.runpodWorkersMax,
+        confirmed: raised.max,
+        reason: 'not_applied',
+      });
+      return { kind: 'not_raised', from: current.max, reason: 'not_applied' };
+    }
+    this.obs.warn('transcoding.endpoint_workers_raised', {
+      from: current.max,
+      to: raised.max,
+    });
+    return { kind: 'raised', from: current.max, to: raised.max };
   }
 
   /**
@@ -737,11 +918,9 @@ export class TranscodingService extends BaseService {
     const media = await this.getMediaForTranscoding(mediaId, creatorId);
     this.assertRetryable(media);
 
-    const claimed = await this.claimForDispatch(
-      mediaId,
-      RETRYABLE_FROM,
-      creatorId
-    );
+    const claimed = await this.claimForDispatch(mediaId, RETRYABLE_FROM, {
+      creatorId,
+    });
     if (!claimed) {
       // Something moved the row between the read and the claim; say what.
       const now = await this.getMediaForTranscoding(mediaId, creatorId);
@@ -809,57 +988,6 @@ export class TranscodingService extends BaseService {
   }
 
   /**
-   * Recover media items stuck in 'transcoding' status.
-   *
-   * If a webhook never arrives (network failure, RunPod outage), media
-   * stays in 'transcoding' indefinitely. This method finds items stuck
-   * longer than `maxAgeMinutes` and marks them as 'failed' (TIMED_OUT) so
-   * they can be retried.
-   *
-   * Intended for scheduled/cron invocation, not user-facing.
-   *
-   * @param maxAgeMinutes - How long to wait before considering stuck (default: 120)
-   * @returns Number of media items recovered
-   *
-   * Reachable only through the media-api hourly cron, which is why dead-code
-   * detection flags it. Proven chain: workers/media-api/wrangler.jsonc
-   * `crons: ["0 * * * *"]` -> src/index.ts:284 `export default { scheduled }`
-   * -> :293 `ctx.waitUntil(runRecoverStuckTranscoding(env, ctx))` -> :261
-   * `service.recoverStuckTranscoding(STUCK_MAX_AGE_MINUTES)`. Verify the chain
-   * before deleting; a cron NAME is not evidence of a wired cron.
-   */
-  // fallow-ignore-next-line unused-class-member
-  async recoverStuckTranscoding(maxAgeMinutes: number = 120): Promise<number> {
-    const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
-
-    const result = await this.db
-      .update(mediaItems)
-      .set(
-        failedFields(
-          TRANSCODING_ERROR_CODES.TIMED_OUT,
-          `Stuck in transcoding for over ${maxAgeMinutes} minutes — no webhook received`
-        )
-      )
-      .where(
-        and(
-          eq(mediaItems.status, MEDIA_STATUS.TRANSCODING),
-          lt(mediaItems.updatedAt, cutoff),
-          isNull(mediaItems.deletedAt)
-        )
-      )
-      .returning();
-
-    if (result.length > 0) {
-      this.obs.warn(`Recovered ${result.length} stuck transcoding jobs`, {
-        maxAgeMinutes,
-        mediaIds: result.map((m) => m.id),
-      });
-    }
-
-    return result.length;
-  }
-
-  /**
    * Internal helper to fetch media for a creator's transcoding operation.
    *
    * One answer for "missing" and "someone else's" (Codex-jxvg8): telling them
@@ -923,7 +1051,7 @@ export class TranscodingService extends BaseService {
     const claimed = await this.claimForDispatch(
       mediaId,
       [MEDIA_STATUS.UPLOADED],
-      creatorId,
+      { creatorId },
       { priority }
     );
 

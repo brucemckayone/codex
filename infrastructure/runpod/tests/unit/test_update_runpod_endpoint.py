@@ -17,6 +17,18 @@ HEALTHY = {
     "idleTimeout": 5,
     "executionTimeoutMs": 2 * 60 * 60 * 1000,
 }
+# The same endpoint as REST v2 returns it (GET /v2/serverless/{id}).
+HEALTHY_V2 = {
+    "id": "ep-1",
+    "workers": {"min": 0, "max": 5, "idleTimeout": 5},
+    "timeout": 2 * 60 * 60 * 1000,
+}
+
+
+def _v2(**workers):
+    return {**HEALTHY_V2, "workers": {**HEALTHY_V2["workers"], **workers}}
+
+
 IMAGE_TAG = "src-0123456789ab"
 NEW_IMAGE = f"ghcr.io/owner/codex-transcoder:{IMAGE_TAG}"
 DEPLOYED = "ghcr.io/owner/codex-transcoder:src-aaaaaaaaaaaa"
@@ -292,6 +304,12 @@ class TestConfigWarnings:
         assert len(warnings) == 1
         assert named in warnings[0]
 
+    def test_a_setting_v2_does_not_report_is_named_as_unchecked(self):
+        unknown = {**HEALTHY, "idleTimeout": None, "executionTimeoutMs": None}
+        warnings = script.config_warnings(unknown)
+        assert len(warnings) == 2
+        assert all("could not be read" in w for w in warnings)
+
 
 class TestCheckEndpointHealth:
     @pytest.fixture(autouse=True)
@@ -306,11 +324,12 @@ class TestCheckEndpointHealth:
         return get
 
     def test_a_healthy_endpoint_passes_and_prints_its_config(self, monkeypatch, capsys):
-        get = self._patch_get(monkeypatch, _response(payload=HEALTHY))
+        get = self._patch_get(monkeypatch, _response(payload=HEALTHY_V2))
 
         assert script.check_endpoint_health() == 0
 
-        assert get.call_args.args[0] == "https://rest.runpod.io/v1/endpoints/ep-1"
+        # v2: REST v1 (rest.runpod.io/v1) is retired on 2026-11-15.
+        assert get.call_args.args[0] == "https://api.runpod.io/v2/serverless/ep-1"
         assert get.call_args.kwargs["headers"] == {"Authorization": "Bearer key"}
         out = capsys.readouterr().out
         assert "workersMax=5" in out
@@ -318,14 +337,14 @@ class TestCheckEndpointHealth:
         assert "::error::" not in out
 
     def test_a_paused_endpoint_fails_the_step(self, monkeypatch, capsys):
-        self._patch_get(monkeypatch, _response(payload={**HEALTHY, "workersMax": 0}))
+        self._patch_get(monkeypatch, _response(payload=_v2(max=0)))
 
         assert script.check_endpoint_health() == 2
 
         assert "::error::Endpoint ep-1 is PAUSED" in capsys.readouterr().out
 
     def test_settings_warnings_do_not_fail_the_step(self, monkeypatch, capsys):
-        self._patch_get(monkeypatch, _response(payload={**HEALTHY, "idleTimeout": 600}))
+        self._patch_get(monkeypatch, _response(payload=_v2(idleTimeout=600)))
 
         assert script.check_endpoint_health() == 0
 
@@ -341,7 +360,9 @@ class TestCheckEndpointHealth:
             ),
             ({"response": _response(payload=None)}, "not an object"),
             ({"response": _response(payload=[])}, "not an object"),
-            ({"response": _response(payload={"error": "nope"})}, "lacks workersMax"),
+            ({"response": _response(payload={"error": "nope"})}, "lacks workers.max"),
+            # A v1-shaped body is not a v2 one.
+            ({"response": _response(payload=HEALTHY)}, "lacks workers.max"),
         ],
     )
     def test_a_config_still_unreadable_after_retries_fails_the_step(
@@ -366,10 +387,25 @@ class TestCheckEndpointHealth:
 
         assert "health NOT checked: not json" in capsys.readouterr().out
 
+    def test_an_endpoint_that_reports_no_idle_timeout_passes_with_a_warning(
+        self, monkeypatch, capsys
+    ):
+        body = {**HEALTHY_V2, "workers": {"min": 0, "max": 5}}
+        self._patch_get(monkeypatch, _response(payload=body))
+
+        assert script.check_endpoint_health() == 0
+
+        out = capsys.readouterr().out
+        assert "idleTimeout=Nones" in out
+        assert "::warning::idleTimeout could not be read" in out
+
     def test_one_failed_read_is_retried(self, monkeypatch, capsys):
         get = self._patch_get(
             monkeypatch,
-            side_effect=[requests.ConnectionError("blip"), _response(payload=HEALTHY)],
+            side_effect=[
+                requests.ConnectionError("blip"),
+                _response(payload=HEALTHY_V2),
+            ],
         )
 
         assert script.check_endpoint_health() == 0

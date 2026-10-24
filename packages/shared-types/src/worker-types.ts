@@ -292,6 +292,13 @@ export type Bindings = {
   RUNPOD_ENDPOINT_ID?: string;
 
   /**
+   * The max workers the RunPod endpoint should have (default 5). RunPod
+   * scales an idle endpoint down (2 after 3 days, 0 = paused after 7);
+   * media-api raises it back to this.
+   */
+  RUNPOD_WORKERS_MAX?: string;
+
+  /**
    * RunPod webhook signing secret (HMAC-SHA256)
    * Used to verify incoming webhook callbacks from RunPod
    */

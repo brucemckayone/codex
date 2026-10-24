@@ -163,9 +163,15 @@ describe.skipIf(!HAS_DB)('dispatch state machine (database)', () => {
       const media = await insertMedia();
 
       const claims = await Promise.all([
-        service.claimForDispatch(media.id, [MEDIA_STATUS.UPLOADED], creatorId),
-        service.claimForDispatch(media.id, [MEDIA_STATUS.UPLOADED], creatorId),
-        service.claimForDispatch(media.id, [MEDIA_STATUS.UPLOADED], creatorId),
+        service.claimForDispatch(media.id, [MEDIA_STATUS.UPLOADED], {
+          creatorId,
+        }),
+        service.claimForDispatch(media.id, [MEDIA_STATUS.UPLOADED], {
+          creatorId,
+        }),
+        service.claimForDispatch(media.id, [MEDIA_STATUS.UPLOADED], {
+          creatorId,
+        }),
       ]);
 
       expect(claims.filter(Boolean)).toHaveLength(1);
@@ -178,11 +184,9 @@ describe.skipIf(!HAS_DB)('dispatch state machine (database)', () => {
       });
 
       expect(
-        await service.claimForDispatch(
-          media.id,
-          [MEDIA_STATUS.UPLOADED],
-          creatorId
-        )
+        await service.claimForDispatch(media.id, [MEDIA_STATUS.UPLOADED], {
+          creatorId,
+        })
       ).toBeNull();
       expect((await read(media.id)).status).toBe('uploaded');
     });
@@ -248,11 +252,9 @@ describe.skipIf(!HAS_DB)('dispatch state machine (database)', () => {
       });
 
       expect(
-        await service.claimForDispatch(
-          media.id,
-          [MEDIA_STATUS.FAILED],
-          creatorId
-        )
+        await service.claimForDispatch(media.id, [MEDIA_STATUS.FAILED], {
+          creatorId,
+        })
       ).toBeNull();
       expect(await read(media.id)).toMatchObject({
         status: 'failed',
@@ -407,7 +409,7 @@ describe.skipIf(!HAS_DB)('dispatch state machine (database)', () => {
       const claimed = await service.claimForDispatch(
         media.id,
         [MEDIA_STATUS.UPLOADED],
-        creatorId
+        { creatorId }
       );
       if (!claimed) throw new Error('claim failed');
 

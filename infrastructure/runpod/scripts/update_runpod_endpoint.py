@@ -14,13 +14,14 @@ import time
 import requests
 
 GRAPHQL_URL = "https://api.runpod.io/graphql"
-REST_URL = "https://rest.runpod.io/v1"
+# REST v1 (rest.runpod.io/v1) is retired on 2026-11-15; v2 nests the worker
+# settings under `workers` and calls the execution timeout `timeout` (ms).
+REST_URL = "https://api.runpod.io/v2"
 
 # An idle worker is billed while it waits for the next job.
 MAX_IDLE_TIMEOUT_S = 60
 # A job is killed at the endpoint's execution timeout, with no webhook.
 MIN_EXECUTION_TIMEOUT_MS = 60 * 60 * 1000
-HEALTH_FIELDS = ("workersMax", "idleTimeout", "executionTimeoutMs")
 HEALTH_READ_ATTEMPTS = 3
 
 
@@ -227,14 +228,24 @@ def update_endpoint():
 def config_warnings(endpoint):
     """Settings worth a warning; none of them stops a job from running."""
     warnings = []
+    # v2 may omit either setting. Say so: a check that silently stops running
+    # is worse than a warning that it could not run.
     idle = endpoint["idleTimeout"]
-    if idle > MAX_IDLE_TIMEOUT_S:
+    if idle is None:
+        warnings.append(
+            "idleTimeout could not be read: the idle-cost check did not run."
+        )
+    elif idle > MAX_IDLE_TIMEOUT_S:
         warnings.append(
             f"idleTimeout is {idle} s: every job is followed by {idle} s of "
             "billed idle worker time (RunPod default 5 s)."
         )
     execution = endpoint["executionTimeoutMs"]
-    if execution < MIN_EXECUTION_TIMEOUT_MS:
+    if execution is None:
+        warnings.append(
+            "executionTimeoutMs could not be read: the check that long videos are not killed mid-encode did not run."
+        )
+    elif execution < MIN_EXECUTION_TIMEOUT_MS:
         warnings.append(
             f"executionTimeoutMs is {execution}: a long video is killed "
             f"mid-encode before {MIN_EXECUTION_TIMEOUT_MS} ms with no webhook."
@@ -242,11 +253,19 @@ def config_warnings(endpoint):
     return warnings
 
 
+def _int_or_none(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def read_endpoint(api_key, endpoint_id):
-    """The endpoint's settings, or (None, why) when they could not be read."""
+    """The endpoint's settings, or (None, why) when they could not be read.
+
+    Flattened from REST v2's shape. Only workers.max is required: it is what
+    says whether the endpoint is paused.
+    """
     try:
         response = requests.get(
-            f"{REST_URL}/endpoints/{endpoint_id}",
+            f"{REST_URL}/serverless/{endpoint_id}",
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=30,
         )
@@ -257,10 +276,17 @@ def read_endpoint(api_key, endpoint_id):
 
     if not isinstance(endpoint, dict):
         return None, f"config is not an object: {endpoint!r}"
-    missing = [f for f in HEALTH_FIELDS if not isinstance(endpoint.get(f), int)]
-    if missing:
-        return None, f"config lacks {', '.join(missing)}: {endpoint!r}"
-    return endpoint, None
+    workers = endpoint.get("workers")
+    workers = workers if isinstance(workers, dict) else {}
+    workers_max = _int_or_none(workers.get("max"))
+    if workers_max is None:
+        return None, f"config lacks workers.max: {endpoint!r}"
+    return {
+        "workersMin": _int_or_none(workers.get("min")),
+        "workersMax": workers_max,
+        "idleTimeout": _int_or_none(workers.get("idleTimeout")),
+        "executionTimeoutMs": _int_or_none(endpoint.get("timeout")),
+    }, None
 
 
 def check_endpoint_health():
@@ -300,6 +326,7 @@ def check_endpoint_health():
         f"workersMax={endpoint['workersMax']} "
         f"idleTimeout={endpoint['idleTimeout']}s "
         f"executionTimeoutMs={endpoint['executionTimeoutMs']}"
+        " (None = not reported for this scaling type)"
     )
     for warning in config_warnings(endpoint):
         print(f"::warning::{warning}")

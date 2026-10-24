@@ -74,7 +74,7 @@ import {
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
-import { TranscodingService } from '@codex/transcoding';
+import { TranscodingMaintenance, TranscodingService } from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
 import { sendEmailToWorker } from '../email/send-email';
 import { followUpMemberDeparture } from './member-departure';
@@ -403,6 +403,7 @@ export async function createServiceRegistry(
   let _purchase: PurchaseService | undefined;
   let _feeConfig: FeeConfigService | undefined;
   let _transcoding: TranscodingService | undefined;
+  let _transcodingMaintenance: TranscodingMaintenance | undefined;
   let _adminAnalytics: AdminAnalyticsService | undefined;
   let _adminContent: AdminContentManagementService | undefined;
   let _adminCustomer: AdminCustomerManagementService | undefined;
@@ -1257,9 +1258,32 @@ export async function createServiceRegistry(
           webhookBaseUrl: transcodingWebhookUrl,
           runpodApiBaseUrl: env.RUNPOD_API_URL,
           runpodDirectUrl: env.RUNPOD_DIRECT_URL,
+          // Unset means the default; a bad value is the service's to
+          // report (it logs at error and uses the default).
+          runpodWorkersMax: env.RUNPOD_WORKERS_MAX
+            ? Number(env.RUNPOD_WORKERS_MAX)
+            : undefined,
         });
       }
       return _transcoding;
+    },
+
+    get transcodingMaintenance() {
+      if (!_transcodingMaintenance) {
+        // Originals live in MEDIA_BUCKET. A HEAD needs no signing config.
+        const originals = env.MEDIA_BUCKET
+          ? new R2Service(env.MEDIA_BUCKET)
+          : undefined;
+        _transcodingMaintenance = new TranscodingMaintenance({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          transcoding: this.transcoding,
+          originalExists: originals
+            ? async (key) => (await originals.head(key)) !== null
+            : undefined,
+        });
+      }
+      return _transcodingMaintenance;
     },
 
     get images() {

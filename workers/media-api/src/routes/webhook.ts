@@ -12,10 +12,11 @@
  * Error handling uses mapErrorToResponse() for consistency.
  */
 
-import { createDbClient, messageForLog } from '@codex/database';
+import { messageForLog } from '@codex/database';
 import { isServiceError, ValidationError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
-import { classifyWebhookPayload, TranscodingService } from '@codex/transcoding';
+import { classifyWebhookPayload } from '@codex/transcoding';
+import { createWebhookServices } from '@codex/worker-utils';
 import { type Context, Hono } from 'hono';
 import { verifyRunpodSignature } from '../middleware/verify-runpod-signature';
 
@@ -75,6 +76,7 @@ app.post(
   }),
   async (c) => {
     const obs = c.get('obs');
+    let release: (() => void) | undefined;
     try {
       // Raw body was stored by verifyRunpodSignature middleware
       // Type assertion: middleware guarantees rawBody is a string
@@ -107,27 +109,13 @@ app.post(
         return c.json({ received: true, ignored: true }, 200);
       }
 
-      // Create database client and TranscodingService
-      // Note: Env vars are validated by global middleware in index.ts
-      // B2 credentials are configured in RunPod's secret manager, not passed here
-      const db = createDbClient(c.env);
-
-      // Guard against missing env vars (should be caught by global middleware)
-      const runpodApiKey = c.env.RUNPOD_API_KEY;
-      const runpodEndpointId = c.env.RUNPOD_ENDPOINT_ID;
-      if (!runpodApiKey || !runpodEndpointId) {
-        throw new ValidationError(
-          'Missing required environment variables: RUNPOD_API_KEY or RUNPOD_ENDPOINT_ID'
-        );
-      }
-
-      const service = new TranscodingService({
-        db,
-        environment: c.env.ENVIRONMENT || 'development',
-        runpodApiKey,
-        runpodEndpointId,
-        webhookBaseUrl: c.env.API_URL || 'http://localhost:4002',
+      // The registry's TranscodingService (the webhook exception: no
+      // procedure(), so createWebhookServices builds it), released in finally.
+      const webhook = await createWebhookServices(c.env, c.executionCtx, {
+        obs,
       });
+      release = webhook.release;
+      const service = webhook.services.transcoding;
 
       if (classified.kind === 'rejected-terminal') {
         // The job is over but its result is unusable. Failing the row now
@@ -162,6 +150,8 @@ app.post(
       return c.json({ received: true }, 200);
     } catch (error) {
       return answerWebhookError(c, error);
+    } finally {
+      release?.();
     }
   }
 );
