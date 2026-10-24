@@ -29,7 +29,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -86,34 +86,34 @@ describe('repayFailedRefund (creators_repaid)', () => {
   });
 
   // Payout rows feed global drains and sweeps: never leave them behind. Re-pay
-  // rows hang off their steps (restrict), a re-pay of a re-pay row's step off
-  // that row, so the closure is followed down before anything is deleted.
+  // rows hang off their steps (restrict), so every link into them is cleared
+  // before any row is deleted.
   afterAll(async () => {
-    const all = new Set(createdPayoutIds);
-    for (let frontier = [...all]; frontier.length > 0; ) {
-      const linked = await db
-        .select({ id: payoutReversals.repaidByPayoutId })
-        .from(payoutReversals)
-        .where(
-          and(
-            inArray(payoutReversals.payoutId, frontier),
-            isNotNull(payoutReversals.repaidByPayoutId)
-          )
-        );
-      frontier = linked.flatMap((row) =>
-        row.id && !all.has(row.id) ? [row.id] : []
-      );
-      for (const id of frontier) all.add(id);
-    }
-    if (all.size > 0) {
-      const ids = [...all];
+    // By the suite's own organisation, not only by following
+    // `repaid_by_payout_id`: every slice here is the org's, and a re-pay row
+    // copies its slice's org. A row whose link was overwritten (a calibration
+    // mutation of the writer re-links steps to new rows) has no link left to
+    // follow, and was left behind on the shared DB once.
+    const ours = await db
+      .select({ id: payouts.id })
+      .from(payouts)
+      .where(eq(payouts.organizationId, orgId));
+    const ids = [
+      ...new Set([...createdPayoutIds, ...ours.map((row) => row.id)]),
+    ];
+    if (ids.length > 0) {
       await db
         .delete(refundReviews)
         .where(inArray(refundReviews.payoutId, ids));
       await db
         .update(payoutReversals)
         .set({ repaidByPayoutId: null })
-        .where(inArray(payoutReversals.payoutId, ids));
+        .where(
+          or(
+            inArray(payoutReversals.payoutId, ids),
+            inArray(payoutReversals.repaidByPayoutId, ids)
+          )
+        );
       await db
         .delete(payoutReversals)
         .where(inArray(payoutReversals.payoutId, ids));
