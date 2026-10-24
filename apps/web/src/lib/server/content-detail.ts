@@ -11,10 +11,11 @@
  *   2. creator content — `routes/_creators/[username]/content/[contentSlug]/+page.server.ts`
  *
  * Each route calls `loadAccessAndProgress(content.id, platform, cookies,
- * content)` in both of its branches — streamed on the free fast-path, awaited
- * on the gated path — so there are four call sites but a single signature.
- * Neither `+page.server.ts` may add its own grant/deny logic; keeping the
- * decision here is what stops the two routes diverging.
+ * content)` on the free fast-path (streamed) and `loadAccessWithBody` with the
+ * same arguments on the gated path (awaited, since the body depends on it).
+ * Both run one fetch and one grant decision. Neither `+page.server.ts` may add
+ * its own grant/deny logic; keeping the decision here is what stops the two
+ * routes diverging.
  *
  * The fourth argument is the whole policy ROW, not a bare `isFree` boolean:
  * passing one derived flag let a priced row read as public and served its body
@@ -30,12 +31,21 @@
  *
  * This module extracts the shared logic:
  * - `loadAccessAndProgress` — parallel fetch of streaming URL + playback progress
+ * - `loadAccessWithBody`    — the same, plus the body once access is granted
+ *                             (for a released row)
  * - `resolveAccessGranted`  — THE access-grant seam (WP-2 swap point)
  * - `handlePurchaseAction`  — Stripe checkout session creation with error handling
  */
-import { subscriptionStatusGrantsAccess } from '@codex/constants';
+
+import type { ContentBodySource } from '@codex/access';
+import {
+  type ContentPublicnessPolicy,
+  isPublicContent,
+  subscriptionStatusGrantsAccess,
+} from '@codex/constants';
 import type { Cookies } from '@sveltejs/kit';
 import { fail } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
 import { createServerApi, type PublicContentListItem } from './api';
 import { ApiError } from './errors';
@@ -167,71 +177,33 @@ export const ACCESS_CHECK_FAILED_RESULT: AccessAndProgress = {
 };
 
 /**
- * The policy fields publicness depends on. Structural subset, every field
- * optional/nullable, so a full `ContentWithRelations` row satisfies it without
- * a cast. Mirrors `ContentAccessPolicyRow` in
- * `packages/access/src/services/content-access/access-decision.ts` — the two
- * MUST recognise the same gates.
+ * Public content is readable by everyone, signed in or not: its body renders
+ * unauthenticated (SEO, first paint). The media stream still needs a signed-in
+ * user, because signed R2 URLs are issued per user, but the page shell is not
+ * gated behind that. Gated content keeps its body behind the authenticated
+ * access check: a visitor sees the paywall teaser, and a signed-in user gets
+ * the body from {@link loadAccessWithBody}, which asks the worker.
+ *
+ * The rule itself is `@codex/constants`' (re-exported here for both detail
+ * routes), shared with the public content API, which returns a body only for
+ * the rows it passes (Codex-039vo). It reads the whole policy, never `isFree`
+ * alone (Codex-al9ft).
  */
-export interface ContentPublicnessPolicy {
-  isFree?: boolean | null;
-  isPurchasable?: boolean | null;
-  priceCents?: number | null;
-  includedInTierId?: string | null;
-  isFollowerGated?: boolean | null;
-  isTeamOnly?: boolean | null;
-  courseOnly?: boolean | null;
-}
-
-/**
- * Free content is publicly readable — the body and metadata render for
- * everyone regardless of auth. The media stream still requires an
- * authenticated user (because signed R2 URLs are issued per-user), but the
- * page shell should not be gated behind that.
- *
- * Gated content keeps the body behind the authenticated access check:
- * anonymous visitors see the paywall teaser, signed-in users fall through to
- * `loadAccessAndProgress` which asks the backend authoritatively.
- *
- * # Why this reads the WHOLE policy and not just `isFree` (Codex-al9ft)
- *
- * This predicate decides whether `renderContentBody()` runs UNAUTHENTICATED, so
- * a false positive puts the full article body in the anonymous SSR payload and
- * in view-source. It used to be `isFree === true` alone, which trusted a single
- * derived boolean to summarise six gates. It did not: `@codex/access`'s paid arm
- * is `(priceCents ?? 0) > 0` and never reads `isFree`, while
- * `ContentService.create`/`update` derived `isFree` from the FLAG gates only —
- * omitting `priceCents`. A price-only row therefore came back `isFree: true`
- * and its body was served publicly while the gate denied every stream request.
- *
- * Those derivations are fixed, but this predicate deliberately does NOT rely on
- * that: it requires `isFree` to be true AND no gate to be present, so a row
- * already in the database with the divergent shape — which a code fix upstream
- * cannot reach — still reads as non-public here. Fail CLOSED on disagreement.
- */
-export function isPublicContent(policy: ContentPublicnessPolicy): boolean {
-  if (policy.isFree !== true) return false;
-  return !(
-    policy.isPurchasable === true ||
-    (policy.priceCents ?? 0) > 0 ||
-    policy.includedInTierId != null ||
-    policy.isFollowerGated === true ||
-    policy.isTeamOnly === true ||
-    policy.courseOnly === true
-  );
-}
+export { type ContentPublicnessPolicy, isPublicContent };
 
 /**
  * The content row a detail page returns to the browser, without its raw body.
  *
  * Both detail pages render the body server-side into `contentBodyHtml`, and
  * only once access is confirmed; nothing on the page reads `contentBody` or
- * `contentBodyJson`. But the row comes from the public list, which strips the
- * body only when `isFree` is false. A row flagged free that also carries a
- * gate (which the course service writes on purpose: `isFree` + `courseOnly`)
- * kept its full body, and returning the row as-is put that body in the load
- * payload, readable through view-source while the page showed it locked. The
- * public API itself still returns it; that is tracked separately (Codex-039vo).
+ * `contentBodyJson`. The row comes from the public list, which used to strip
+ * the body only when `isFree` was false, so a row flagged free that also
+ * carries a gate (which the course service writes on purpose: `isFree` +
+ * `courseOnly`) kept its full body, and returning the row as-is put that body
+ * in the load payload, readable through view-source while the page showed it
+ * locked. The public list now strips by the whole policy (Codex-039vo), so a
+ * public row is the only one that carries a body; this stays as defence in
+ * depth, and a public body still never needs to ride the payload.
  *
  * This only covers what the load RETURNS. Read the row through the server API,
  * never the `getPublicContent` remote query: SvelteKit serialises each remote
@@ -367,8 +339,75 @@ export async function loadAccessAndProgress(
   contentId: string,
   platform: App.Platform | undefined,
   cookies: Cookies,
-  policy?: ContentPublicnessPolicy
+  policy: ContentPublicnessPolicy
 ): Promise<AccessAndProgress> {
+  const { access } = await fetchAccess(contentId, platform, cookies, policy, {
+    includeBody: false,
+  });
+  return access;
+}
+
+/**
+ * {@link loadAccessAndProgress} plus the content's body: the gated path of both
+ * detail pages. A gated piece's public row carries no body, so an entitled
+ * reader's comes from the worker's access check (`/stream?include=body`), and
+ * only once it granted (Codex-039vo). Before that, the gated path rendered the
+ * stripped public row and every entitled reader got an empty page.
+ *
+ * `body` is null unless the worker granted access and returned the body. It is
+ * kept apart from `access` because `access` is returned to the browser
+ * (`accessAndProgress`), which needs only the rendered HTML, never the raw
+ * body.
+ *
+ * Three grants come back without a body:
+ * - A granted response with no `body` at all, which is logged as an error and
+ *   never read as "the piece has no body" (that is `body` with both fields
+ *   null). Two causes:
+ *   - The worker didn't honour the flag (a content-api rolled back behind this
+ *     web build drops the unknown query key), so this would be the empty page
+ *     again. The reader gets no note, by choice: it takes a worker older than
+ *     this flag (a window of one deploy after it ships), and a broken flag on
+ *     either side fails `api-stream-include.test.ts` first.
+ *   - The row was never released (never published), so the worker withholds
+ *     its body and logs a warn saying so, which is what tells this cause from
+ *     the first. These pages can barely reach it: they read published rows
+ *     only, and `publishedAt` is never cleared, so it takes a legacy row
+ *     published without one, then unpublished, read from a stale list slot.
+ * - Media not ready (a 422 the worker raises after access passed). The call
+ *   threw, so it carried nothing: the page reads as granted, with no body
+ *   until the media is ready. Narrow, since publishing needs ready media.
+ */
+export async function loadAccessWithBody(
+  contentId: string,
+  platform: App.Platform | undefined,
+  cookies: Cookies,
+  policy: ContentPublicnessPolicy
+): Promise<{ access: AccessAndProgress; body: ContentBodySource | null }> {
+  const { access, stream } = await fetchAccess(
+    contentId,
+    platform,
+    cookies,
+    policy,
+    { includeBody: true }
+  );
+  if (stream && !stream.body) {
+    logger.error('Access granted but /stream returned no body', { contentId });
+  }
+  return { access, body: stream?.body ?? null };
+}
+
+/**
+ * The fetch both loaders share: the `/stream` access check and the playback
+ * progress, in parallel. `stream` is the resolved `/stream` response, null
+ * when the call threw.
+ */
+async function fetchAccess(
+  contentId: string,
+  platform: App.Platform | undefined,
+  cookies: Cookies,
+  policy: ContentPublicnessPolicy,
+  options: { includeBody: boolean }
+): Promise<{ access: AccessAndProgress; stream: StreamResult | null }> {
   const api = createServerApi(platform, cookies);
 
   // Capture the stream rejection separately so we can extract the
@@ -380,7 +419,7 @@ export async function loadAccessAndProgress(
 
   const [, progressResult] = await Promise.all([
     api.access
-      .getStreamingUrl(contentId)
+      .getStreamingUrl(contentId, options)
       .then((r) => {
         streamResult = r;
       })
@@ -398,7 +437,7 @@ export async function loadAccessAndProgress(
   const accessGranted = resolveAccessGranted(streamResult, streamError);
   const accessCheckFailed =
     !accessGranted && classifyStreamFailure(streamError) === 'unknown';
-  const hasAccess = isPublicContent(policy ?? {}) || accessGranted;
+  const hasAccess = isPublicContent(policy) || accessGranted;
   const streamingUrl =
     (streamResult as StreamResult | null)?.streamingUrl ?? null;
   const waveformUrl =
@@ -423,14 +462,17 @@ export async function loadAccessAndProgress(
     : null;
 
   return {
-    hasAccess,
-    streamingUrl,
-    waveformUrl,
-    readyVariants,
-    expiresAt,
-    revocationReason,
-    accessCheckFailed,
-    progress,
+    access: {
+      hasAccess,
+      streamingUrl,
+      waveformUrl,
+      readyVariants,
+      expiresAt,
+      revocationReason,
+      accessCheckFailed,
+      progress,
+    },
+    stream: streamResult,
   };
 }
 

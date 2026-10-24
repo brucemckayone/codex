@@ -8,6 +8,17 @@
 import type { ProgressData } from '@codex/shared-types';
 
 /**
+ * A content body as it is stored: TipTap JSON, or legacy markdown. Either may
+ * be null, and a piece may have neither. One shape from the service through
+ * the wire to the web, so "the body was not returned" (no `body`) never reads
+ * as "the piece has no body" (both null).
+ */
+export interface ContentBodySource {
+  contentBody: string | null;
+  contentBodyJson: Record<string, unknown> | null;
+}
+
+/**
  * Response for GET /api/access/content/:id/stream
  *
  * `streamingUrl` is null for written content (articles) — access is still
@@ -29,6 +40,15 @@ export interface StreamingUrlResponse {
    * playlist, so this array is purely a menu-population signal.
    */
   readyVariants?: string[];
+  /**
+   * The content's body, present only when the request asked for it
+   * (`?include=body`), access was granted, and the row is released (published
+   * now, or once). It is the body source for an entitled reader of a gated
+   * piece, whose public row carries none (Codex-039vo). Absent means it was
+   * not returned; a piece with no body comes back as
+   * `{ contentBody: null, contentBodyJson: null }`.
+   */
+  body?: ContentBodySource;
 }
 
 /**

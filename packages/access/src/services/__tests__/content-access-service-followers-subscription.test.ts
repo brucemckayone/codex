@@ -514,4 +514,136 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       });
     });
   });
+
+  // The detail pages' body source for a gated piece, whose public row carries
+  // none (Codex-039vo). The body is the row the access decision read, returned
+  // only on request and only after that decision granted.
+  describe('includeBody — the body only after a grant, only on request (Codex-039vo)', () => {
+    const rowWithBody = {
+      ...followersContentRow,
+      contentBody: 'the followers-only text',
+      contentBodyJson: null,
+    };
+
+    // The worker's "withheld by policy" warn. It must fire ONLY for a granted,
+    // never-released row whose body was asked for: anywhere else it would
+    // make the web's "granted without a body" fault read as policy.
+    const withheldWarn = expect.objectContaining({
+      level: 'warn',
+      message: 'Body withheld: the granted row was never released',
+    });
+
+    it('returns the body to a granted reader who asked for it', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(rowWithBody);
+      stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationFollowers.findFirst.mockResolvedValue({
+        id: 'follower_row',
+      });
+
+      const { service, logs } = buildService(stub);
+      const result = await service.getStreamingUrl(userId, streamingInput, {
+        includeBody: true,
+      });
+
+      expect(result.body).toEqual({
+        contentBody: 'the followers-only text',
+        contentBodyJson: null,
+      });
+      // The stream result is unchanged by the option.
+      expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
+      expect(logs).not.toContainEqual(withheldWarn);
+    });
+
+    it('returns no body when not asked (the player refresh path)', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(rowWithBody);
+      stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationFollowers.findFirst.mockResolvedValue({
+        id: 'follower_row',
+      });
+
+      const { service } = buildService(stub);
+      const result = await service.getStreamingUrl(userId, streamingInput);
+
+      expect(result).not.toHaveProperty('body');
+    });
+
+    it('a denied reader who asked for the body gets AccessDeniedError, never the body', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(rowWithBody);
+      stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationFollowers.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationMemberships.findFirst.mockResolvedValue(undefined);
+
+      const { service } = buildService(stub);
+      const outcome = await service
+        .getStreamingUrl(userId, streamingInput, { includeBody: true })
+        .catch((e: unknown) => e);
+
+      expect(outcome).toBeInstanceOf(AccessDeniedError);
+      expect(JSON.stringify(outcome)).not.toContain('the followers-only text');
+    });
+
+    // A purchase grant outlives unpublication (an item withdrawn after it was
+    // sold), but a row never published was never offered: no body, as the
+    // course player's released-only rule (Codex-039vo review, cycle 3).
+    const paidRow = (publishedAt: Date | null) => ({
+      ...followersContentRow,
+      isFollowerGated: false,
+      isPurchasable: true,
+      priceCents: 900,
+      status: 'draft',
+      publishedAt,
+      contentBody: 'the paid text',
+      contentBodyJson: null,
+    });
+
+    it('a buyer of an item never published gets the grant but no body', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(paidRow(null));
+
+      const { service, verifyPurchase, logs } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+      const result = await service.getStreamingUrl(userId, streamingInput, {
+        includeBody: true,
+      });
+
+      // The calibration: the grant itself stands, so the missing body is the
+      // release gate, not a denial. This is today's decision, NOT the target:
+      // a never-released row should not be granted at all (Codex-nacky).
+      // When that lands, this case becomes an AccessDeniedError.
+      expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
+      expect(result).not.toHaveProperty('body');
+      // The worker says why, so the web's "granted without a body" fault log
+      // is never mistaken for a stale worker.
+      expect(logs).toContainEqual(withheldWarn);
+    });
+
+    it('a never-published item whose body was not asked for logs no warn', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(paidRow(null));
+
+      const { service, verifyPurchase, logs } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+      const result = await service.getStreamingUrl(userId, streamingInput);
+
+      // The player refresh path: nothing was withheld, so nothing is said.
+      expect(result).not.toHaveProperty('body');
+      expect(logs).not.toContainEqual(withheldWarn);
+    });
+
+    it('a buyer of an item withdrawn after release keeps the body', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(
+        paidRow(new Date('2026-01-01T00:00:00.000Z'))
+      );
+
+      const { service, verifyPurchase, logs } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+      const result = await service.getStreamingUrl(userId, streamingInput, {
+        includeBody: true,
+      });
+
+      expect(result.body).toEqual({
+        contentBody: 'the paid text',
+        contentBodyJson: null,
+      });
+      expect(logs).not.toContainEqual(withheldWarn);
+    });
+  });
 });

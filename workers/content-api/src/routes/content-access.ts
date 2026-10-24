@@ -17,11 +17,11 @@ import {
   canEnterCourseParamsSchema,
   canViewParamsSchema,
   createIdParamsSchema,
-  getStreamingUrlSchema,
   hlsProxyQuerySchema,
   hlsVariantParamsSchema,
   listUserLibrarySchema,
   savePlaybackProgressSchema,
+  streamingUrlQuerySchema,
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
@@ -157,8 +157,14 @@ app.get(
  *
  * Access verification done at service layer:
  * - Content's organizationId is fetched from database
- * - User access verified via purchase OR organization membership
+ * - Access is decided by `decideContentAccess` (price, tier, followers, team,
+ *   course-only), as for every other content read
  * - Works from both org subdomains and root domain (revelations.studio)
+ *
+ * `?include=body` also returns the content's body once access is granted, for
+ * a released row (published now, or once): the body source for an entitled
+ * reader of a gated piece, whose public row carries none (Codex-039vo). Only
+ * the detail pages send it.
  * @returns {StreamingUrlResponse}
  */
 app.get(
@@ -167,26 +173,36 @@ app.get(
     policy: {
       auth: 'required',
       rateLimit: 'streaming', // 60 req/min - allows HLS segment refreshes
+      // `private, no-store`, as the HLS playlist routes: this response carries
+      // a per-user HLS token, and with `include=body` a gated piece's body, so
+      // no copy of IT may outlive the request on any disk. That covers this
+      // response only: the detail page that renders the body sends its own
+      // header (`CACHE_HEADERS.PRIVATE`), which keeps it out of shared caches.
+      cache: 'fresh',
     },
     input: {
       params: createIdParamsSchema(),
-      query: getStreamingUrlSchema.pick({ expirySeconds: true }),
+      query: streamingUrlQuerySchema,
     },
     handler: async (ctx): Promise<StreamingUrlResponse> => {
       const { params, query } = ctx.input;
 
       // Service fetches content's organizationId and verifies access
-      const result = await ctx.services.access.getStreamingUrl(ctx.user.id, {
-        contentId: params.id,
-        expirySeconds: query?.expirySeconds,
-      });
+      const result = await ctx.services.access.getStreamingUrl(
+        ctx.user.id,
+        { contentId: params.id, expirySeconds: query?.expirySeconds },
+        { includeBody: query?.include === 'body' }
+      );
 
+      // `body` is undefined unless asked for, granted, and released; JSON
+      // drops it.
       return {
         streamingUrl: result.streamingUrl,
         waveformUrl: result.waveformUrl,
         expiresAt: result.expiresAt.toISOString(),
         contentType: result.contentType,
         readyVariants: result.readyVariants,
+        body: result.body,
       };
     },
   })

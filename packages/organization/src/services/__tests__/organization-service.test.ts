@@ -1583,7 +1583,31 @@ describe('OrganizationService', () => {
           contentType: 'video',
           status: 'draft',
         },
+        // A published course-only practice must neither count nor show
+        // (Codex-ot6vj): it lives only inside its course. The owner's count
+        // below stays 2 only while the filter holds.
+        {
+          creatorId: creatorsTestUserIds[0]!,
+          organizationId: creatorsTestOrgId,
+          title: 'Course-only Practice',
+          slug: `course-only-${Date.now()}`,
+          contentType: 'written',
+          status: 'published',
+          courseOnly: true,
+        },
       ]);
+    });
+
+    it('never counts or lists a course-only practice (Codex-ot6vj)', async () => {
+      const result = await service.getPublicCreators(creatorsTestOrgSlug);
+
+      const owner = result.items.find((m) => m.role === 'owner');
+      expect(owner?.contentCount).toBe(2);
+      // The calibration: the owner's recent content is listed at all.
+      expect(owner?.recentContent.length).toBe(2);
+      expect(
+        owner?.recentContent.some((c) => c.title === 'Course-only Practice')
+      ).toBe(false);
     });
 
     it('should return paginated creators for organization', async () => {

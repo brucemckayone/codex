@@ -1,6 +1,6 @@
 import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
-import { ENV_NAMES, type Env } from '@codex/constants';
+import { CONTENT_STATUS, ENV_NAMES, type Env } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
 import { content } from '@codex/database/schema';
 import {
@@ -24,6 +24,7 @@ import type {
 import { and, eq, isNull } from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY } from '../constants';
 import { AccessDeniedError, ContentNotFoundError } from '../errors';
+import type { ContentBodySource } from '../types';
 import { AccessRevocation } from './access-revocation';
 import {
   assertStreamingAccess,
@@ -242,16 +243,28 @@ export class ContentAccessService
    * Transaction safety: access verification + media resolution share one
    * read-committed, read-only snapshot.
    *
+   * With `options.includeBody`, the result also carries the content's body,
+   * taken from the row the access decision just read, only once that decision
+   * granted, and only for a released row (published now, or once): a draft
+   * never published carries none even to a grant that outlives
+   * unpublication. It is how an entitled reader gets a gated piece's body:
+   * the public content API returns a body only for fully public rows
+   * (Codex-039vo). The detail pages ask for it; the player's URL refreshes do
+   * not, so they never carry it.
+   *
    * @param userId - Authenticated user ID
    * @param input - Content ID and optional expiry
+   * @param options.includeBody - Also return the body (after access is granted,
+   *   for a released row)
    * @returns Streaming URL and expiration timestamp
-   * @throws {ContentNotFoundError} Content doesn't exist, is draft, or is deleted
+   * @throws {ContentNotFoundError} Content doesn't exist or is deleted
    * @throws {AccessDeniedError} User hasn't purchased content and isn't org member
    * @throws {R2SigningError} Failed to generate signed URL
    */
   async getStreamingUrl(
     userId: string,
-    input: GetStreamingUrlInput
+    input: GetStreamingUrlInput,
+    options: { includeBody?: boolean } = {}
   ): Promise<{
     streamingUrl: string | null;
     waveformUrl: string | null;
@@ -263,6 +276,11 @@ export class ContentAccessService
      * when the media item has no recorded variants, or for written content.
      */
     readyVariants?: string[];
+    /**
+     * The content's body. Present only when `options.includeBody` was set,
+     * access was granted, and the row is released (published now, or once).
+     */
+    body?: ContentBodySource;
   }> {
     // Resolve the TTL once. The Zod schema already applies a default when
     // input flows through `procedure()`, but programmatic callers that
@@ -329,7 +347,7 @@ export class ContentAccessService
 
       // Step 1 & 2: Verify access and fetch content/media data within a
       // read-only transaction (consistent snapshot for access verification).
-      const target = await this.db.transaction(
+      const { target, body } = await this.db.transaction(
         async (tx) => {
           // Get content with media details (any organization)
           // No `status` predicate (Codex-p3m5j). `assertStreamingAccess` runs
@@ -371,12 +389,42 @@ export class ContentAccessService
           );
 
           // Access check passed — resolve the streamable media target
-          // (written article → null-URL, else validated HLS descriptor).
-          return resolveStreamableMedia(
-            this.obs,
-            input.contentId,
-            contentRecord
-          );
+          // (written article → null-URL, else validated HLS descriptor). The
+          // body, when asked for, is this same row's: read under the snapshot
+          // that granted access, after the decision, never before it.
+          //
+          // And only for a RELEASED row (published now, or once). Purchase and
+          // course grants outlive unpublication, for an item withdrawn after
+          // it was sold. A practice never published (a draft an editor put in a
+          // curriculum) was never offered, so its text stays out, as the
+          // course player's released-only rule keeps it (Codex-039vo review).
+          const released =
+            contentRecord.status === CONTENT_STATUS.PUBLISHED ||
+            contentRecord.publishedAt != null;
+          // Only this side can tell a withheld body from a worker that ignored
+          // the flag, and the web logs a granted response without `body` as a
+          // fault. A warn, not an error: it is policy, not a failure.
+          if (options.includeBody && !released) {
+            this.obs.warn('Body withheld: the granted row was never released', {
+              userId,
+              contentId: input.contentId,
+              status: contentRecord.status,
+            });
+          }
+          return {
+            target: resolveStreamableMedia(
+              this.obs,
+              input.contentId,
+              contentRecord
+            ),
+            body:
+              options.includeBody && released
+                ? {
+                    contentBody: contentRecord.contentBody,
+                    contentBodyJson: contentRecord.contentBodyJson,
+                  }
+                : undefined,
+          };
         },
         {
           isolationLevel: 'read committed', // Consistent snapshot for access verification
@@ -386,7 +434,7 @@ export class ContentAccessService
 
       // Step 3: Build the streaming response (written null-URL, or mint the
       // HLS token + master-playlist proxy URL and presign the waveform).
-      return await buildStreamingResponse(
+      const response = await buildStreamingResponse(
         target,
         {
           r2: this.r2,
@@ -398,6 +446,7 @@ export class ContentAccessService
         input.contentId,
         expirySeconds
       );
+      return body ? { ...response, body } : response;
     } catch (error) {
       this.handleError(error, 'getStreamingUrl');
     }

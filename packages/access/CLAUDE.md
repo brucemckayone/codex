@@ -37,7 +37,7 @@ const { service, cleanup } = createContentAccessService(env);
 
 | Method | Signature | Notes |
 |---|---|---|
-| `getStreamingUrl` | `(userId: string, input: GetStreamingUrlInput)` | Verifies access (KV revocation short-circuit first when wired). For video/audio returns an HLS master-playlist PROXY URL on the content-api origin carrying a signed HLS token; `streamingUrl` is `null` for written content. The waveform is a presigned R2 URL. Returns `{ streamingUrl, waveformUrl, expiresAt, contentType, readyVariants? }`. |
+| `getStreamingUrl` | `(userId: string, input: GetStreamingUrlInput, options?: { includeBody?: boolean })` | Verifies access (KV revocation short-circuit first when wired). For video/audio returns an HLS master-playlist PROXY URL on the content-api origin carrying a signed HLS token; `streamingUrl` is `null` for written content. The waveform is a presigned R2 URL. Returns `{ streamingUrl, waveformUrl, expiresAt, contentType, readyVariants?, body? }`. `body` (`{ contentBody, contentBodyJson }`) only with `includeBody`, taken from the row the access decision read, after it granted, and only for a released row (published now, or once; `publishedAt` is never cleared): the detail pages' body for a gated piece (Codex-039vo). |
 | `savePlaybackProgress` | `(userId: string, input: SavePlaybackProgressInput)` | Upserts position/duration. Auto-marks `completed = true` at 95% (`VIDEO_PROGRESS` constant). |
 | `getPlaybackProgress` | `(userId: string, input: GetPlaybackProgressInput)` | Returns `{ positionSeconds, durationSeconds, completed, updatedAt }` or null. |
 | `listUserLibrary` | `(userId: string, input: ListUserLibraryInput)` | Paginated library: purchased + membership + subscription + free-relationship + followers-relationship content (five parallel arms). Includes progress data and journey provenance. |
@@ -125,7 +125,7 @@ Results are merged, deduplicated, and enriched with progress data.
 | Error | HTTP | When |
 |---|---|---|
 | `AccessDeniedError` | 403 | User has no valid access path to paid content |
-| `ContentNotFoundError` | 404 | Content doesn't exist, is draft, or deleted |
+| `ContentNotFoundError` | 404 | Content doesn't exist or is deleted (a draft is not a 404: see Access Decision Logic) |
 | `MediaNotReadyForStreamingError` | 422 | Content has no associated media item |
 | `R2SigningError` | 500 | Failed to generate signed URL |
 | `InvalidContentTypeError` | 422 | Unexpected media type |

@@ -1068,12 +1068,18 @@ export function createServerApi(
      */
     access: {
       /**
-       * Get streaming URL for content
+       * Get streaming URL for content. `includeBody` also returns the body
+       * once access is granted, for a released row: the detail pages' body
+       * source for a gated piece (Codex-039vo). Never set it from a remote
+       * query, whose result SvelteKit ships to the browser.
        */
-      getStreamingUrl: (contentId: string) =>
+      getStreamingUrl: (
+        contentId: string,
+        options: { includeBody?: boolean } = {}
+      ) =>
         request<StreamingUrlResponse>(
           'access',
-          `/api/access/content/${contentId}/stream`
+          `/api/access/content/${contentId}/stream${options.includeBody ? '?include=body' : ''}`
         ),
 
       /**

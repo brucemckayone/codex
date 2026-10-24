@@ -174,6 +174,7 @@ VISIBILITY           // { PUBLIC, MEMBERS, PURCHASERS, PRIVATE }
 ACCESS_TYPES         // { FREE, PAID, MEMBERS_ONLY, ... }
 CONTENT_ACCESS_TYPE  // content access type constants
 isGrantableContent(c) // can a support grant open it? paid or tier only — mirrors decideContentAccess (Codex-2hxff.21)
+isPublicContent(p)    // may its body go out unchecked? isFree AND no gate (all six) — the public API and the detail pages share it (Codex-039vo)
 
 ORGANIZATION_ROLES   // { OWNER, ADMIN, CREATOR, SUBSCRIBER, MEMBER }
 ORGANIZATION_STATUS  // org status constants

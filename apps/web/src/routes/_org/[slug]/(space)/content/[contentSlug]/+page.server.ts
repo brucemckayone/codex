@@ -18,6 +18,7 @@ import {
   handlePurchaseAction,
   isPublicContent,
   loadAccessAndProgress,
+  loadAccessWithBody,
   loadRelatedContent,
   loadSubscriptionContext,
   withoutRawBody,
@@ -82,8 +83,9 @@ export const load: PageServerLoad = async ({
   }
 
   // What the browser receives: the row without its raw body. The body is
-  // rendered below from `content` into contentBodyHtml, and only once access
-  // allows it.
+  // rendered below into contentBodyHtml, only once access allows it: from
+  // `content` when the piece is public, from the access check's body when it
+  // is gated (a gated public row carries none, Codex-039vo).
   const pageContent = withoutRawBody(content);
 
   // Body gating: only render `contentBodyHtml` once access is confirmed.
@@ -176,16 +178,17 @@ export const load: PageServerLoad = async ({
   // render the body conditionally. No SEO cost — non-followers can't see
   // this content anyway, so there's no win in streaming. The security win
   // (body never lands in the payload for denied users) is worth the ~100ms.
-  const accessResult = await loadAccessAndProgress(
+  // The body comes from that check, not from `content`, whose public row
+  // carries none for a gated piece (Codex-039vo).
+  const { access: accessResult, body } = await loadAccessWithBody(
     content.id,
     platform,
     cookies,
     content
-  ).catch(() => ACCESS_CHECK_FAILED_RESULT);
+  ).catch(() => ({ access: ACCESS_CHECK_FAILED_RESULT, body: null }));
 
-  const gatedBodyHtml = accessResult.hasAccess
-    ? await renderContentBody(content)
-    : null;
+  const gatedBodyHtml =
+    accessResult.hasAccess && body ? await renderContentBody(body) : null;
 
   setHeaders(successCacheHeaders);
   return {

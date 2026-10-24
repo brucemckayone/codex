@@ -200,6 +200,62 @@ export function canBeSold(
 }
 
 /**
+ * The policy fields publicness depends on. Every field is REQUIRED but nullable,
+ * so a full content row or a public list item satisfies it without a cast, and
+ * a projection that leaves a gate out fails to type-check. Optional fields
+ * would read a missing gate as "no gate" and ship a gated body publicly (fail
+ * open); `decideContentAccess`'s row type requires every gate for the same
+ * reason.
+ */
+export interface ContentPublicnessPolicy {
+  isFree: boolean | null;
+  isPurchasable: boolean | null;
+  priceCents: number | null;
+  includedInTierId: string | null;
+  isFollowerGated: boolean | null;
+  isTeamOnly: boolean | null;
+  courseOnly: boolean | null;
+}
+
+/**
+ * Can anyone, signed in or not, read this content's body? The one rule for
+ * where a body may go without an access check: the public content API returns
+ * a body only for these rows (`ContentService.listPublic`), and the web's
+ * detail pages render one unauthenticated only for these (Codex-039vo).
+ *
+ * It reads the WHOLE policy, not `isFree` alone (Codex-al9ft). `isFree` is a
+ * derived flag that has disagreed with the gates: `ContentService.create` and
+ * `update` once derived it from the flag gates and omitted `priceCents`, so a
+ * price-only row came back free; and the course service sets `courseOnly` on
+ * purpose while leaving `isFree` as it was, so a course-only practice can be
+ * flagged free. Either way the access decision denies the row, so this
+ * requires `isFree` AND no gate, and a row in the database with a divergent
+ * shape still reads as not public. Fail closed on disagreement.
+ *
+ * For a PUBLISHED row it is STRICTER than `decideContentAccess`
+ * (`packages/access/src/services/content-access/access-decision.ts`), never
+ * looser: every published row it calls public, the decision grants to anyone.
+ * It has no status input, and the decision denies an unpublished free row, so
+ * a caller must only ever pass published rows (`listPublic`'s are). The
+ * decision reads five gates (price, tier, followers, team, course-only); it
+ * reads neither `isPurchasable` nor `isFree`. So it grants two malformed shapes
+ * this rejects: purchasable with no price, and `isFree: false` with no gate.
+ * Those reach a signed-in reader through `/stream` (body included), never an
+ * anonymous one through the public API.
+ */
+export function isPublicContent(policy: ContentPublicnessPolicy): boolean {
+  if (policy.isFree !== true) return false;
+  return !(
+    policy.isPurchasable === true ||
+    (policy.priceCents ?? 0) > 0 ||
+    policy.includedInTierId != null ||
+    policy.isFollowerGated === true ||
+    policy.isTeamOnly === true ||
+    policy.courseOnly === true
+  );
+}
+
+/**
  * Does publishing this content need the creator's payouts set up? Any price,
  * or inclusion in a tier, earns money, whether or not the item is marked
  * purchasable (owner decision, Codex-2hxff.14: "any priced item needs payouts

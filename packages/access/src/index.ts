@@ -96,6 +96,7 @@ export { CourseInsightsService } from './services/course-insights-service';
 export { CourseJourneyService } from './services/course-journey-service';
 export { EntitlementsService } from './services/entitlements-service';
 export type {
+  ContentBodySource,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
