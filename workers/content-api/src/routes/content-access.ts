@@ -4,6 +4,7 @@ import {
   type StreamingUrlResponse,
   type UpdatePlaybackProgressResponse,
   verifyHlsToken,
+  type WithdrawnContentResponse,
 } from '@codex/access';
 import { CACHE_PRESETS } from '@codex/constants';
 import {
@@ -22,6 +23,7 @@ import {
   listUserLibrarySchema,
   savePlaybackProgressSchema,
   streamingUrlQuerySchema,
+  withdrawnContentQuerySchema,
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
@@ -205,6 +207,29 @@ app.get(
         body: result.body,
       };
     },
+  })
+);
+
+/**
+ * GET /api/access/content/withdrawn?slug=…&(orgId=…|creatorId=…)
+ *
+ * An item that was published once, is not now, and that this reader still
+ * has access to (a buyer, a course owner, a subscriber until their next
+ * renewal), by its detail URL's key (Codex-ov2ii). The detail pages ask for it
+ * when the public lookup misses for a signed-in reader, so an item withdrawn
+ * from sale opens for whoever still has it instead of "Content not found".
+ *
+ * Every other case is a 404, the same one whether or not the item exists.
+ * `private, no-store`: the answer is per reader, and nothing caches it.
+ * @returns {WithdrawnContentResponse}
+ */
+app.get(
+  '/content/withdrawn',
+  procedure({
+    policy: { auth: 'required', cache: 'fresh' },
+    input: { query: withdrawnContentQuerySchema },
+    handler: async (ctx): Promise<WithdrawnContentResponse> =>
+      ctx.services.access.getWithdrawnContent(ctx.user.id, ctx.input.query),
   })
 );
 

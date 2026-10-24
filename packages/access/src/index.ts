@@ -97,8 +97,11 @@ export { CourseJourneyService } from './services/course-journey-service';
 export { EntitlementsService } from './services/entitlements-service';
 export type {
   ContentBodySource,
+  ContentHeld,
+  ContentHeldBy,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
   UserLibraryResponse,
+  WithdrawnContentResponse,
 } from './types';

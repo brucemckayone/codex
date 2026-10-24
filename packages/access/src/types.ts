@@ -5,6 +5,7 @@
  * Previously in @codex/shared-types — moved here for domain ownership.
  */
 
+import type { ContentWithRelations } from '@codex/content';
 import type { ProgressData } from '@codex/shared-types';
 
 /**
@@ -49,6 +50,38 @@ export interface StreamingUrlResponse {
    * `{ contentBody: null, contentBodyJson: null }`.
    */
   body?: ContentBodySource;
+}
+
+/**
+ * How a reader still holds an item that has left the storefront: it decides
+ * the note the detail page shows them (Codex-ov2ii). Mapped from the arm of
+ * the access decision that granted, so the note can never give a reason the
+ * gate did not use.
+ */
+export type ContentHeldBy =
+  | 'purchase'
+  | 'entitlement'
+  | 'course'
+  | 'subscription';
+
+export interface ContentHeld {
+  by: ContentHeldBy;
+  /**
+   * ISO 8601 end of the granting subscription's current period, when the item
+   * stops being covered. Set only for `subscription`.
+   */
+  until: string | null;
+}
+
+/**
+ * Response for GET /api/access/content/withdrawn (Codex-ov2ii): an item that
+ * was published once, is not now, and that this reader still has access to.
+ * `content` is the public row's shape with no body (the body comes from
+ * `/stream?include=body`, as for any gated piece). Every other case is a 404.
+ */
+export interface WithdrawnContentResponse {
+  content: ContentWithRelations & { categorySlugs: string[] };
+  held: ContentHeld;
 }
 
 /**

@@ -116,7 +116,7 @@ export interface ContentAccessPolicyRow {
 export type StreamingAccessContent = ContentAccessPolicyRow;
 
 /** Reason codes for a denial — logged, and threaded into `AccessDeniedError`. */
-type DenyReason =
+export type DenyReason =
   | 'orgless_tier_gate'
   | 'course_only'
   | 'team_only'
@@ -133,9 +133,10 @@ type DenyReason =
 /**
  * Which arm granted — the streaming adapter maps this to the WP-1 grant log
  * (preserved because the observability suite pins the follower grant messages;
- * see content-access-service-followers-subscription.test.ts).
+ * see content-access-service-followers-subscription.test.ts), and the
+ * withdrawn read to how its reader holds the item (Codex-ov2ii).
  */
-type GrantVia =
+export type GrantVia =
   | 'free'
   | 'course'
   | 'management'
@@ -159,15 +160,24 @@ type SubscriptionGrantVia =
   | 'subscribers_subscription';
 
 /**
- * A subscription grant carries the granting subscription's
- * `currentPeriodStart` — the renewal rule in `decideContentAccess` compares it
- * with the item's `offSaleAt`. Typed as its own variant so a subscription arm
- * cannot be granted without it.
+ * A subscription grant carries the granting subscription's period. The
+ * renewal rule in `decideContentAccess` compares its start with the item's
+ * `offSaleAt`; its end is when a withdrawn item stops being covered, which the
+ * detail page tells the reader (Codex-ov2ii). Typed as its own variant so a
+ * subscription arm cannot be granted without them.
  */
 type AccessDecision =
   | { granted: true; via: Exclude<GrantVia, SubscriptionGrantVia> }
-  | { granted: true; via: SubscriptionGrantVia; periodStart: Date }
+  | {
+      granted: true;
+      via: SubscriptionGrantVia;
+      periodStart: Date;
+      periodEnd: Date;
+    }
   | { granted: false; reason: DenyReason };
+
+/** A granted decision: the arm that granted, and a subscription's period. */
+export type AccessGrant = Extract<AccessDecision, { granted: true }>;
 
 const grant = (
   via: Exclude<GrantVia, SubscriptionGrantVia>
@@ -177,8 +187,13 @@ const grant = (
 });
 const grantBySubscription = (
   via: SubscriptionGrantVia,
-  periodStart: Date
-): AccessDecision => ({ granted: true, via, periodStart });
+  period: { currentPeriodStart: Date; currentPeriodEnd: Date }
+): AccessDecision => ({
+  granted: true,
+  via,
+  periodStart: period.currentPeriodStart,
+  periodEnd: period.currentPeriodEnd,
+});
 const deny = (reason: DenyReason): AccessDecision => ({
   granted: false,
   reason,
@@ -241,10 +256,11 @@ async function decidePolicyAccess(
   // Active subscription meeting the content's minimum tier (by sortOrder).
   // `minimumTierId === null` → any active subscription grants (community gate).
   // Returns the GRANTING subscription, or `null` when none grants: the renewal
-  // rule in `decideContentAccess` reads its `currentPeriodStart`.
+  // rule in `decideContentAccess` reads its `currentPeriodStart`, and a
+  // withdrawn item's note its `currentPeriodEnd`.
   const grantingSubscription = async (
     minimumTierId: string | null
-  ): Promise<{ currentPeriodStart: Date } | null> => {
+  ): Promise<{ currentPeriodStart: Date; currentPeriodEnd: Date } | null> => {
     if (userId == null || orgId == null) return null;
     const userSub = await db.query.subscriptions.findFirst({
       where: and(
@@ -311,11 +327,7 @@ async function decidePolicyAccess(
   if (policy.isFollowerGated) {
     if (!orgId) return deny('followers_only_requires_org');
     const sub = await grantingSubscription(null);
-    if (sub)
-      return grantBySubscription(
-        'followers_subscription',
-        sub.currentPeriodStart
-      );
+    if (sub) return grantBySubscription('followers_subscription', sub);
     if (await hasFollower()) return grant('followers_follower');
     return (await hasManagementMembership())
       ? grant('followers_management')
@@ -340,18 +352,11 @@ async function decidePolicyAccess(
     // subscription still answers first, as before.
     const onOffer = policy.status === CONTENT_STATUS.PUBLISHED;
     if (sub && onOffer)
-      return grantBySubscription(
-        'subscribers_subscription',
-        sub.currentPeriodStart
-      );
+      return grantBySubscription('subscribers_subscription', sub);
     if (purchased) return grant('subscribers_purchase');
     if (await viaContentEntitlement()) return grant('subscribers_entitlement');
     if (await viaOwnedCourse()) return grant('subscribers_course');
-    if (sub)
-      return grantBySubscription(
-        'subscribers_subscription',
-        sub.currentPeriodStart
-      );
+    if (sub) return grantBySubscription('subscribers_subscription', sub);
     return (await hasManagementMembership())
       ? grant('subscribers_management')
       : deny('subscribers_only');
@@ -590,6 +595,40 @@ export async function resolveHasContentAccess(
   }
 
   return decision.granted;
+}
+
+/**
+ * GRANT adapter — backs `getWithdrawnContent` (Codex-ov2ii). Runs the SAME
+ * decision core against the read-only transaction snapshot and returns the
+ * grant itself, so the caller can say how the reader holds the item, or `null`
+ * on denial. It logs the grant as the streaming adapter does, and leaves the
+ * denial to the caller: a reader opening an old link to an item withdrawn
+ * from sale is not a security event.
+ */
+export async function resolveContentGrant(
+  tx: Tx,
+  deps: { purchaseService: PurchaseService; obs: ObservabilityClient },
+  userId: string,
+  contentId: string,
+  contentRecord: StreamingAccessContent
+): Promise<{ grant: AccessGrant } | { reason: DenyReason }> {
+  const { purchaseService, obs } = deps;
+
+  const decision = await decideContentAccess(
+    { db: tx, purchaseService },
+    userId,
+    contentId,
+    contentRecord
+  );
+
+  if (!decision.granted) return { reason: decision.reason };
+
+  logGrant(obs, decision.via, {
+    userId,
+    contentId,
+    organizationId: contentRecord.organizationId,
+  });
+  return { grant: decision };
 }
 
 /**

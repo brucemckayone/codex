@@ -20,14 +20,21 @@ import type {
   GetStreamingUrlInput,
   ListUserLibraryInput,
   SavePlaybackProgressInput,
+  WithdrawnContentQuery,
 } from '@codex/validation';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY } from '../constants';
 import { AccessDeniedError, ContentNotFoundError } from '../errors';
-import type { ContentBodySource } from '../types';
+import type {
+  ContentBodySource,
+  ContentHeldBy,
+  WithdrawnContentResponse,
+} from '../types';
 import { AccessRevocation } from './access-revocation';
 import {
   assertStreamingAccess,
+  type GrantVia,
+  resolveContentGrant,
   resolveHasContentAccess,
 } from './content-access/access-decision';
 import {
@@ -112,6 +119,35 @@ export interface ContentAccessServiceConfig extends ServiceConfig {
    */
   r2PublicUrlBase?: string;
 }
+
+/**
+ * How the arm that granted a withdrawn item holds it, for the note the detail
+ * page shows (Codex-ov2ii). Exhaustive, so a new arm cannot ship without one.
+ *
+ * The nulls are the arms the decision never grants an unpublished row
+ * (`GRANT_SURVIVES_UNPUBLICATION`): `free`, a follow, and every staff arm.
+ * Staff preview their own drafts in the studio, so the team keeps the 404 on
+ * a public URL. The two subscription arms reach here only through the
+ * departed-creator rule, until the subscriber's next renewal.
+ */
+const HELD_BY: Record<GrantVia, ContentHeldBy | null> = {
+  paid_purchase: 'purchase',
+  subscribers_purchase: 'purchase',
+  paid_entitlement: 'entitlement',
+  subscribers_entitlement: 'entitlement',
+  course: 'course',
+  paid_course: 'course',
+  subscribers_course: 'course',
+  followers_subscription: 'subscription',
+  subscribers_subscription: 'subscription',
+  free: null,
+  followers_follower: null,
+  management: null,
+  team_management: null,
+  followers_management: null,
+  subscribers_management: null,
+  paid_management: null,
+};
 
 /**
  * Content Access Service
@@ -449,6 +485,130 @@ export class ContentAccessService
       return body ? { ...response, body } : response;
     } catch (error) {
       this.handleError(error, 'getStreamingUrl');
+    }
+  }
+
+  /**
+   * An item that was published once, is not now, and that this reader still
+   * has access to, by its detail URL's key (Codex-ov2ii).
+   *
+   * An item leaves the storefront when its creator unpublishes it, or when the
+   * creator leaves the organisation (archived, stamped `offSaleAt`). The access
+   * decision keeps granting some readers (a buyer, a subscriber until their
+   * next renewal, the team), but the detail pages found rows only through the
+   * published-only public list, so those readers got "Content not found".
+   *
+   * Narrow on purpose: a published row is the public list's, and a row never
+   * released (`publishedAt` null) is a draft that was never offered. The
+   * decision is the streaming path's (same revocation check, same read-only
+   * snapshot, same `decideContentAccess`), so this is not a second access rule.
+   *
+   * Every miss is the SAME 404, keyed on the slug the caller sent: no row,
+   * deleted, a deleted org, revoked, or denied. A reader without access must
+   * not learn that a withdrawn item exists, and `ContentNotFoundError`'s
+   * context is serialised to the client.
+   *
+   * @returns The public row's shape with no body, and how the reader holds it
+   * @throws {ContentNotFoundError} In every case but a grant
+   */
+  async getWithdrawnContent(
+    userId: string,
+    query: WithdrawnContentQuery
+  ): Promise<WithdrawnContentResponse> {
+    const notFound = () => new ContentNotFoundError(query.slug);
+
+    try {
+      if (this.revocation && 'orgId' in query) {
+        const revocation = await this.revocation.isRevoked(userId, query.orgId);
+        if (revocation) {
+          this.obs.info('Withdrawn content: access revoked', {
+            userId,
+            organizationId: query.orgId,
+            reason: revocation.reason,
+          });
+          throw notFound();
+        }
+      }
+
+      const conditions = [
+        eq(content.slug, query.slug),
+        ne(content.status, CONTENT_STATUS.PUBLISHED),
+        isNotNull(content.publishedAt),
+        isNull(content.deletedAt),
+      ];
+      if ('orgId' in query) {
+        conditions.push(eq(content.organizationId, query.orgId));
+      } else {
+        conditions.push(
+          eq(content.creatorId, query.creatorId),
+          isNull(content.organizationId)
+        );
+      }
+
+      const { row, grant } = await this.db.transaction(
+        async (tx) => {
+          const found = await tx.query.content.findFirst({
+            where: and(...conditions),
+            with: {
+              mediaItem: true,
+              // The public list's creator projection: no email.
+              creator: { columns: { id: true, name: true } },
+              organization: true,
+            },
+          });
+          // A deleted org's pieces are gone with it, as on the public list.
+          if (!found || found.organization?.deletedAt != null) {
+            throw notFound();
+          }
+
+          const decision = await resolveContentGrant(
+            tx,
+            { purchaseService: this.purchaseService, obs: this.obs },
+            userId,
+            found.id,
+            found
+          );
+          if ('reason' in decision) {
+            this.obs.info('Withdrawn content: no access', {
+              userId,
+              contentId: found.id,
+              reason: decision.reason,
+            });
+            throw notFound();
+          }
+          return { row: found, grant: decision.grant };
+        },
+        { isolationLevel: 'read committed', accessMode: 'read only' }
+      );
+
+      const by = HELD_BY[grant.via];
+      // The decision never grants these arms an unpublished row; if it ever
+      // does, say so and fail closed rather than invent a reason for the note.
+      if (by == null) {
+        this.obs.error('Withdrawn content granted by an arm with no note', {
+          userId,
+          contentId: row.id,
+          via: grant.via,
+        });
+        throw notFound();
+      }
+
+      return {
+        // No body: it comes from `/stream?include=body`, as for any gated
+        // piece. No topic slugs: only the org landing reads them.
+        content: {
+          ...row,
+          contentBody: null,
+          contentBodyJson: null,
+          categorySlugs: [],
+        },
+        held: {
+          by,
+          until: 'periodEnd' in grant ? grant.periodEnd.toISOString() : null,
+        },
+      };
+    } catch (error) {
+      this.handleError(error, 'getWithdrawnContent');
     }
   }
 
