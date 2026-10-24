@@ -29,6 +29,7 @@ import type {
   ContentBodySource,
   ContentHeld,
   ContentHeldBy,
+  CourseEntryResponse,
   WithdrawnContent,
 } from '../types';
 import { AccessRevocation } from './access-revocation';
@@ -37,6 +38,7 @@ import {
   assertStreamingAccess,
   type GrantVia,
   resolveContentGrant,
+  resolveCourseDisputePauses,
   resolveHasContentAccess,
   type SubscriptionGrantVia,
 } from './content-access/access-decision';
@@ -256,6 +258,37 @@ export class ContentAccessService
   ): Promise<boolean> {
     if (userId == null) return false;
     return hasCourseEntitlement(this.db, userId, courseId);
+  }
+
+  /**
+   * The course page's can-enter answer (Codex-2hxff.60): {@link canEnterCourse},
+   * unchanged, and on a refusal the dispute that holds the user's grant back,
+   * by the course shelf's predicate (`resolveCourseDisputePauses`), so the
+   * page shows the dispute notice instead of Buy or Join. A granted call costs
+   * nothing more.
+   *
+   * The hold only picks the copy: if its lookup fails, the failure is logged
+   * at error and the refusal stands with no hold, never a 500.
+   */
+  async getCourseEntry(
+    userId: string,
+    courseId: string
+  ): Promise<CourseEntryResponse> {
+    const canEnter = await this.canEnterCourse(userId, courseId);
+    if (canEnter) return { canEnter, disputeHold: null };
+    try {
+      const pauses = await resolveCourseDisputePauses(this.db, userId, [
+        courseId,
+      ]);
+      return { canEnter, disputeHold: pauses.get(courseId) ?? null };
+    } catch (error) {
+      this.obs.error('Course entry: the dispute lookup failed; no hold shown', {
+        userId,
+        courseId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { canEnter, disputeHold: null };
+    }
   }
 
   /**

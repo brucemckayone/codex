@@ -95,26 +95,25 @@ export function createAccessEffects(deps: {
 }): AccessEffects {
   const { kv, waitUntil, obs } = deps;
 
-  /** Errors are swallowed inside the promise, and around `waitUntil` too. */
+  /**
+   * Errors are swallowed inside the promise, and around `waitUntil` too, and
+   * logged at `level`.
+   */
   function inBackground(
     run: () => Promise<unknown>,
     failure: string,
-    fields: Record<string, unknown>
+    fields: Record<string, unknown>,
+    level: 'warn' | 'error'
   ): void {
-    try {
-      waitUntil(
-        run().catch((error: unknown) => {
-          obs?.warn(failure, {
-            ...fields,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        })
-      );
-    } catch (error) {
-      obs?.warn(`${failure}: waitUntil threw synchronously`, {
+    const log = (message: string, error: unknown) =>
+      obs?.[level](message, {
         ...fields,
         error: error instanceof Error ? error.message : String(error),
       });
+    try {
+      waitUntil(run().catch((error: unknown) => log(failure, error)));
+    } catch (error) {
+      log(`${failure}: waitUntil threw synchronously`, error);
     }
   }
 
@@ -141,22 +140,29 @@ export function createAccessEffects(deps: {
         });
       }
     },
+    // A failed revoke is a warning: the database mark still refuses the
+    // stream, and `disputeHold` rebuilds the same reason from it.
     revokeAccess(userId, orgId, reason) {
       if (!kv) return;
       const revocation = new AccessRevocation(kv, obs);
       inBackground(
         () => revocation.revoke(userId, orgId, reason),
         'payment-webhook: AccessRevocation.revoke failed',
-        { userId, orgId, reason }
+        { userId, orgId, reason },
+        'warn'
       );
     },
+    // A failed clear is an error: the key keeps refusing a buyer whose
+    // dispute was won, for up to its TTL, while the library and the database
+    // say it is settled.
     clearRevocation(userId, orgId) {
       if (!kv) return;
       const revocation = new AccessRevocation(kv, obs);
       inBackground(
         () => revocation.clear(userId, orgId),
         'payment-webhook: AccessRevocation.clear failed',
-        { userId, orgId }
+        { userId, orgId },
+        'error'
       );
     },
   };

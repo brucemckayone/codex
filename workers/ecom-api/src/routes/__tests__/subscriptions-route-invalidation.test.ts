@@ -232,6 +232,8 @@ interface BuildAppArgs {
   user?: { id: string } | null;
   services?: Record<string, unknown>;
   kv?: KVMock | null;
+  /** The handler's `ctx.obs`; absent by default, as before. */
+  obs?: { warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
 }
 
 interface AppBundle {
@@ -270,7 +272,7 @@ function buildApp(args: BuildAppArgs = {}): AppBundle {
   type TestVars = {
     __testUser: { id: string } | null | undefined;
     __testServices: Record<string, unknown>;
-    __testObs: undefined;
+    __testObs: BuildAppArgs['obs'];
     __testEnv: { CACHE_KV: KVMock | null };
     __testExecCtx: { waitUntil: typeof waitUntil };
   };
@@ -282,7 +284,7 @@ function buildApp(args: BuildAppArgs = {}): AppBundle {
     // and let the mocked `procedure` read them out.
     c.set('__testUser', args.user === undefined ? { id: 'user_1' } : args.user);
     c.set('__testServices', services);
-    c.set('__testObs', undefined);
+    c.set('__testObs', args.obs);
     c.set('__testEnv', { CACHE_KV: kv });
     c.set('__testExecCtx', { waitUntil });
     await next();
@@ -538,14 +540,28 @@ describe('POST /subscriptions/reactivate — access clearing', () => {
     expect(mockClear).not.toHaveBeenCalled();
   });
 
-  it('fire-and-forget: KV clear failure does not surface on the route response', async () => {
+  it('fire-and-forget: KV clear failure does not surface on the route response, and is logged at error', async () => {
     mockClear.mockRejectedValueOnce(new Error('KV unreachable'));
-    const bundle = buildApp({ user: { id: 'user_clear_fail' } });
+    const obs = { warn: vi.fn(), error: vi.fn() };
+    const bundle = buildApp({ user: { id: 'user_clear_fail' }, obs });
     const res = await bundle.app.request(
       postJson('/subscriptions/reactivate', { organizationId: VALID_ORG_ID })
     );
     expect(res.status).toBe(200);
     expect(mockClear).toHaveBeenCalledTimes(1);
+
+    await Promise.allSettled(
+      bundle.waitUntil.mock.calls.map(([promise]) => promise)
+    );
+    // An error: the key keeps refusing a subscriber whose access was restored.
+    expect(obs.error).toHaveBeenCalledWith(
+      'subscriptions-route: AccessRevocation.clear failed',
+      {
+        userId: 'user_clear_fail',
+        orgId: VALID_ORG_ID,
+        error: 'KV unreachable',
+      }
+    );
   });
 
   it('not called on /subscriptions/cancel (access-reducing, not restoring)', async () => {

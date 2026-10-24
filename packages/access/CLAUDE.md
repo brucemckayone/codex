@@ -62,14 +62,57 @@ granted-but-unauthorized paths map to `AccessDeniedError` (403).
 
 The KV block answers first and carries its own `RevocationReason`. Otherwise
 the reason is the decision's `DenyReason`, unless `disputeHold` (deny path only)
-finds an open payment dispute behind the refusal (Codex-2hxff.60):
-`'purchase_dispute'` for a completed purchase with `disputed_at` set, where the
-branch reads a purchase (tier-gated or paid); `'subscription_dispute'` for a
-tier-gated or followers-only item that a subscription would grant but for its
-`disputed_at`. The web shows "Access paused" with no Buy button for either. The
-context is client-facing: it names the kind of dispute only, never a date,
-amount or reason. Chargeback writers use the same two values in the KV block;
-a lost dispute writes `'refund'`.
+finds an open payment dispute behind the refusal (Codex-2hxff.60). It names
+only a grant the decision's branch reads and a win would give back:
+- `'purchase_dispute'`: a completed purchase of the item with `disputed_at`
+  set, where the branch reads a purchase (tier-gated or paid); or a completed
+  course purchase with `disputed_at` set, for a course holding the item, where
+  the branch reads the course arm (course-only, tier-gated or paid).
+- `'subscription_dispute'`: a tier-gated or followers-only item that a
+  subscription would grant but for its `disputed_at` (publication rule
+  included); or, through the course arm, a course grant held back by a
+  disputed course subscription (`grantNotPausedByDispute`) or by a disputed
+  tier subscription's `course_tier_access`.
+- Team-only, an orgless tier gate, a follow and a subscription below the
+  item's tier explain nothing. A won course dispute plays; a lost one shows
+  the course gate.
+
+The web shows "Access paused" with no Buy button for either. The context is
+client-facing: it names the kind of dispute only, never a date, amount or
+reason. Chargeback writers use the same two values in the KV block; a lost
+dispute writes `'refund'`. If `disputeHold` throws, the refusal keeps the
+decision's own reason and the failure is logged at error: the lookup only
+picks the copy.
+
+**One predicate for the card and the page.** `resolveDisputePause(deps,
+userId, contentId)` runs the decision and, on a denial, `disputeHold`. The
+library keeps a disputed purchase's paused mark only when it returns a hold,
+so the card is dimmed exactly when the page shows the notice. If it throws,
+the row keeps its mark and the failure is logged at error.
+
+The course shelf has the same guarantee. `listEnrolledCourses` sets each
+entry's `disputeHold` from `resolveCourseDisputePauses`, which reads the
+same held course grants (`courseGrantsHeldByDispute`) the lesson's course arm
+reads, and pauses a course only while the user holds no live grant to it and
+no staff role in the organisation. That is exactly when its course-only
+lessons show the notice. A lesson in two courses can still open through the
+other one; the card speaks for its own course. If the read fails, the shelf
+loads unpaused and the failure is logged at error.
+
+The course page asks the same predicate: `getCourseEntry` (GET
+`/api/access/courses/:courseId/can-enter`, `CourseEntryResponse`) returns
+`canEnterCourse` unchanged plus `disputeHold`, computed only when entry is
+refused, so a granted call costs nothing more. A failed lookup logs at error
+and returns `disputeHold: null`. `canEnterCourse` itself has no staff bypass;
+a staff role only means the course is never shown paused.
+
+**The 20-minute block (owner decision Q2).** The KV block is written for the
+buyer's whole organisation, and for every disputed content purchase, because
+`accessEnded` only asks whether another completed purchase keeps the item.
+So for up to 20 minutes the stream refuses, with the dispute reason, an item
+the decision would still grant, a disputed item that a subscription, a support
+grant or a staff role covers included, while the library shows that item
+playable. After the block expires, the decision answers and plays it.
 
 ### Publication vs entitlement (Codex-p3m5j)
 
@@ -140,7 +183,7 @@ Inside the followers branch, checks run in this order:
 ## Library Query
 
 `listUserLibrary()` runs five independent query arms in parallel:
-- `queryPurchased` — content with completed purchases, unioned with live support grants (`entitlements.source = 'grant'`); an item both bought and granted is one row. A purchase with an open chargeback stays listed, paused, with `purchase.disputedAt` set (Codex-2hxff.60); a lost one is `refunded` and leaves. `purchase.disputedAt` is `null` for a grant. No second-copy check: `uq_purchases_completed_customer_content` allows one completed purchase per item
+- `queryPurchased` — content with completed purchases, unioned with live support grants (`entitlements.source = 'grant'`); an item both bought and granted is one row. A purchase with an open chargeback stays listed with `purchase.disputedAt` set (Codex-2hxff.60), paused, only while `resolveDisputePause` names a hold: the mark is cleared when the item still opens (a covering subscription, a support grant, a staff role, an owned course) or is refused for a reason no dispute explains (say it became course-only). That costs one access decision per disputed row. The undim is decided at fetch time, so it stays cached on the client until the next library version bump: a covering grant that lapses by its `expiresAt` bumps nothing, and the card stays undimmed while the stream refuses. A lost dispute is `refunded` and leaves. `purchase.disputedAt` is `null` for a grant. No second-copy check: `uq_purchases_completed_customer_content` allows one completed purchase per item
 - `queryMembership` — content accessible via org membership
 - `querySubscription` — content accessible via subscription tier
 - `queryFreeRelationship` — `isFree` content of followed/subscribed orgs

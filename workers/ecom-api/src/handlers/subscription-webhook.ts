@@ -153,7 +153,9 @@ function revokeAccess(
  *     without both identifiers there is no key to clear
  *
  * Errors are swallowed inside the `waitUntil` promise so a KV hiccup never
- * surfaces as a webhook 500 (Stripe would retry unnecessarily).
+ * surfaces as a webhook 500 (Stripe would retry unnecessarily). They are
+ * logged at error, not warn: the key keeps refusing a subscriber whose
+ * access was restored, for up to its TTL (Codex-2hxff.60).
  *
  * See bead Codex-13ml3 and docs/payments/access.md ("Streaming revocation").
  */
@@ -172,7 +174,7 @@ function clearAccess(
   try {
     c.executionCtx.waitUntil(
       revocation.clear(userId, orgId).catch((error) => {
-        obs?.warn('subscription-webhook: AccessRevocation.clear failed', {
+        obs?.error('subscription-webhook: AccessRevocation.clear failed', {
           userId,
           orgId,
           error: error instanceof Error ? error.message : String(error),
@@ -182,7 +184,7 @@ function clearAccess(
   } catch (error) {
     // Defensive: waitUntil itself throwing synchronously (e.g. mock harness
     // or a future runtime change) must not crash the webhook.
-    obs?.warn('subscription-webhook: waitUntil threw synchronously (clear)', {
+    obs?.error('subscription-webhook: waitUntil threw synchronously (clear)', {
       userId,
       orgId,
       error: error instanceof Error ? error.message : String(error),

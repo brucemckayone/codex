@@ -46,7 +46,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import { resolvePracticeThumbnail } from '../practice-thumbnail';
-import { resolveHasContentAccess } from './access-decision';
+import { resolveDisputePause } from './access-decision';
 
 /**
  * Is this content on offer to a subscription whose current period began at
@@ -108,12 +108,15 @@ export type UserLibraryItem = {
     purchasedAt: string;
     priceCents: number;
     /**
-     * When a chargeback on this purchase opened; set while it is open AND
-     * nothing else opens the item (Codex-2hxff.60). The item stays on the
-     * shelf, paused: a win clears the mark, and a loss refunds the purchase,
-     * which then leaves the shelf. `null` for a support grant, and while a
-     * subscription, a grant or a staff role still opens the item (the
-     * stream's own decision says which).
+     * When a chargeback on this purchase opened; set while it is open AND a
+     * dispute is why the item is refused (`resolveDisputePause`,
+     * Codex-2hxff.60), so the content page shows the dispute notice. The
+     * item stays on the shelf, paused: a win clears the mark, and a loss
+     * refunds the purchase, which then leaves the shelf. `null` for a
+     * support grant, while a subscription, a grant or a staff role still
+     * opens the item, and while it is refused for a reason no dispute
+     * explains. Decided at fetch time: the client keeps the row until the
+     * next library version bump.
      */
     disputedAt: string | null;
   } | null;
@@ -368,24 +371,30 @@ export async function listUserLibrary(
   };
 
   /**
-   * Does the item still open for the user while its purchase is disputed?
-   * The stream's own decision answers, so the card cannot disagree with the
-   * stream. If the decision fails, the row keeps its mark (the purchase IS
-   * disputed) and the page still loads; the failure is logged.
+   * Is the item paused by a payment dispute? The predicate the stream names
+   * its refusal with answers, so the card is dimmed exactly when the content
+   * page shows the dispute notice. If it fails, the row keeps its mark (the
+   * purchase IS disputed) and the page still loads; the failure is logged.
    */
-  const playsDespiteDispute = async (contentId: string): Promise<boolean> => {
+  const pausedByDispute = async (contentId: string): Promise<boolean> => {
     try {
-      return await resolveHasContentAccess(
-        { db, purchaseService, obs },
-        userId,
-        contentId
+      return (
+        (await resolveDisputePause(
+          { db, purchaseService },
+          userId,
+          contentId
+        )) != null
       );
-    } catch {
-      obs.warn(
+    } catch (error) {
+      obs.error(
         'Library: access check failed for a disputed purchase; shown paused',
-        { contentId }
+        {
+          userId,
+          contentId,
+          error: error instanceof Error ? error.message : String(error),
+        }
       );
-      return false;
+      return true;
     }
   };
 
@@ -548,13 +557,14 @@ export async function listUserLibrary(
       journeys: [],
     }));
 
-    // A disputed purchase is paused only while nothing else opens the item
-    // (Codex-2hxff.60): a covering subscription, a support grant or a staff
-    // role keeps it playing, and its card must not say otherwise. Disputed
-    // rows only, in parallel.
+    // A disputed purchase is paused only while a dispute is why the item is
+    // refused (Codex-2hxff.60): a covering subscription, a support grant or a
+    // staff role keeps it playing, and a refusal no dispute explains (say the
+    // item became course-only) shows its own gate, so neither card may say
+    // "paused". Disputed rows only, in parallel.
     await Promise.all(
       items.map(async ({ content: item, purchase }) => {
-        if (purchase?.disputedAt && (await playsDespiteDispute(item.id))) {
+        if (purchase?.disputedAt && !(await pausedByDispute(item.id))) {
           purchase.disputedAt = null;
         }
       })

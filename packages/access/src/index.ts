@@ -99,6 +99,7 @@ export type {
   ContentBodySource,
   ContentHeld,
   ContentHeldBy,
+  CourseEntryResponse,
   PlaybackProgressResponse,
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,

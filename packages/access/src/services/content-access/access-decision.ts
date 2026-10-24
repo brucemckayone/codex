@@ -50,6 +50,7 @@ import {
 import type { DatabaseClient } from '@codex/database';
 import {
   content,
+  courses,
   organizationFollowers,
   organizationMemberships,
   purchases,
@@ -65,7 +66,11 @@ import type { RevocationReason } from '../access-revocation';
 import {
   type AccessQueryClient,
   contentReachableViaOwnedCourse,
+  courseGrantHeldByDispute,
+  courseGrantsHeldByDispute,
+  type HeldCourseGrant,
   hasStoredContentEntitlement,
+  resolveCourseEntitlementsBatch,
 } from './entitlements-resolver';
 
 /**
@@ -519,7 +524,7 @@ function applyPublicationRule(
 }
 
 /** A refusal that a payment dispute explains (a {@link RevocationReason}). */
-type DisputeHold = Extract<
+export type DisputeHold = Extract<
   RevocationReason,
   'purchase_dispute' | 'subscription_dispute'
 >;
@@ -532,15 +537,19 @@ type DisputeHold = Extract<
  * reconcile writes no block at all, so the content page's "Access is paused"
  * notice has to come from the database too.
  *
- * - `'purchase_dispute'`: a `completed` purchase of this item that carries
- *   `disputed_at`, the purchase `verifyPurchase` refuses because of the mark.
- *   Only where the policy branch reads a purchase (tier-gated or paid): a
- *   course-only, team-only or followers-only item would stay refused after a
- *   win, so a dispute does not explain it.
+ * Only a grant the policy branch reads, and that a win would give back:
+ * - `'purchase_dispute'`: a `completed` purchase of this item carrying
+ *   `disputed_at` (the one `verifyPurchase` refuses because of the mark),
+ *   where the branch reads a purchase (tier-gated or paid); or a disputed
+ *   purchase of a course holding the item, where it reads the course arm
+ *   (course-only, tier-gated or paid).
  * - `'subscription_dispute'`: a tier-gated or followers-only item that a
  *   subscription would grant but for its `disputed_at`, publication rule
- *   included.
- * - `null` otherwise.
+ *   included; or, through the course arm, a course grant a disputed course
+ *   or tier subscription holds back.
+ * - `null` otherwise: team-only, an orgless tier gate, a follow, or a
+ *   subscription below the item's tier. A course grant survives
+ *   unpublication, so the course arm needs no publication rule.
  *
  * Mirrors the branch order of `decidePolicyAccess`. It only picks the copy
  * the page shows; the refusal itself stands either way.
@@ -552,8 +561,9 @@ async function disputeHold(
   policy: ContentAccessPolicyRow
 ): Promise<DisputeHold | null> {
   const orgId = policy.organizationId;
-  if (policy.courseOnly || policy.isTeamOnly) return null;
   if (orgId == null && policy.includedInTierId != null) return null;
+  if (policy.courseOnly) return courseDisputeHold(db, userId, contentId);
+  if (policy.isTeamOnly) return null;
 
   // The branch `decidePolicyAccess` takes: followers-only before tier-gated.
   const followersOnly = policy.isFollowerGated;
@@ -573,22 +583,103 @@ async function disputeHold(
     if (disputed) return 'purchase_dispute';
   }
 
-  if (orgId == null || !(followersOnly || tierGated)) return null;
-  const held = await findGrantingSubscription(
-    db,
-    userId,
-    orgId,
-    followersOnly ? null : policy.includedInTierId,
-    true
-  );
-  if (!held) return null;
-  const heldGrant = grantBySubscription(
-    followersOnly ? 'followers_subscription' : 'subscribers_subscription',
-    held
-  );
-  return applyPublicationRule(heldGrant, policy).granted
-    ? 'subscription_dispute'
-    : null;
+  if (orgId != null && (followersOnly || tierGated)) {
+    const held = await findGrantingSubscription(
+      db,
+      userId,
+      orgId,
+      followersOnly ? null : policy.includedInTierId,
+      true
+    );
+    if (held) {
+      const heldGrant = grantBySubscription(
+        followersOnly ? 'followers_subscription' : 'subscribers_subscription',
+        held
+      );
+      if (applyPublicationRule(heldGrant, policy).granted) {
+        return 'subscription_dispute';
+      }
+    }
+  }
+
+  return tierGated || paid ? courseDisputeHold(db, userId, contentId) : null;
+}
+
+/** The course arm's hold: the kind of dispute behind a held course grant. */
+async function courseDisputeHold(
+  db: AccessQueryClient,
+  userId: string,
+  contentId: string
+): Promise<DisputeHold | null> {
+  const held = await courseGrantHeldByDispute(db, userId, contentId);
+  return held == null ? null : holdOfCourseGrant(held);
+}
+
+function holdOfCourseGrant(held: HeldCourseGrant): DisputeHold {
+  return held === 'course_purchase'
+    ? 'purchase_dispute'
+    : 'subscription_dispute';
+}
+
+/**
+ * The course twin of {@link resolveDisputePause} (Codex-2hxff.60), for the
+ * course shelf and the course page's can-enter answer: for each course, the
+ * dispute that holds back the user's grant to it, while nothing else opens
+ * it: no live grant to the course, and no staff role in its organisation.
+ * That is exactly when the course arm of the decision refuses the course's
+ * course-only lessons and {@link disputeHold} names this hold, so a paused
+ * course matches its lessons' notice.
+ *
+ * Keyed by course id; a course absent from the map is not paused. Three
+ * reads, plus three more only when a dispute holds something back.
+ */
+export async function resolveCourseDisputePauses(
+  db: AccessQueryClient,
+  userId: string,
+  courseIds: readonly string[]
+): Promise<ReadonlyMap<string, DisputeHold>> {
+  const paused = new Map<string, DisputeHold>();
+  const held = await courseGrantsHeldByDispute(db, userId, courseIds);
+  if (held.size === 0) return paused;
+
+  const heldIds = [...held.keys()];
+  const [entitled, staffed] = await Promise.all([
+    resolveCourseEntitlementsBatch(db, userId, heldIds),
+    coursesUserManages(db, userId, heldIds),
+  ]);
+  for (const [courseId, grant] of held) {
+    if (!entitled.has(courseId) && !staffed.has(courseId)) {
+      paused.set(courseId, holdOfCourseGrant(grant));
+    }
+  }
+  return paused;
+}
+
+/**
+ * Of `courseIds`, the courses in whose organisation the user holds an active
+ * owner, admin or creator role: the decision's management bypass, per course.
+ */
+async function coursesUserManages(
+  db: AccessQueryClient,
+  userId: string,
+  courseIds: readonly string[]
+): Promise<ReadonlySet<string>> {
+  const rows = await db
+    .select({ courseId: courses.id })
+    .from(courses)
+    .innerJoin(
+      organizationMemberships,
+      eq(organizationMemberships.organizationId, courses.organizationId)
+    )
+    .where(
+      and(
+        inArray(courses.id, [...courseIds]),
+        eq(organizationMemberships.userId, userId),
+        eq(organizationMemberships.status, 'active'),
+        inArray(organizationMemberships.role, MANAGEMENT_ROLES)
+      )
+    );
+  return new Set(rows.map((row) => row.courseId));
 }
 
 /**
@@ -662,17 +753,7 @@ export async function resolveHasContentAccess(
 ): Promise<boolean> {
   const { db, purchaseService, obs } = deps;
 
-  // No `status` predicate (Codex-p3m5j). Unpublished content is fetched and
-  // then adjudicated by the publication rule inside `decideContentAccess`,
-  // which grants it only to a purchase-derived arm. Filtering here instead
-  // would deny a buyer before their purchase was ever considered.
-  //
-  // `deletedAt` STAYS: a soft-deleted item is gone, not withdrawn from sale.
-  const contentRecord = await db.query.content.findFirst({
-    where: and(eq(content.id, contentId), isNull(content.deletedAt)),
-    columns: POLICY_COLUMNS,
-  });
-
+  const contentRecord = await findPolicyRow(db, contentId);
   if (!contentRecord) return false;
 
   const decision = await decideContentAccess(
@@ -698,6 +779,54 @@ export async function resolveHasContentAccess(
   }
 
   return decision.granted;
+}
+
+/**
+ * The policy row the boolean adapters read, or `undefined` for missing or
+ * soft-deleted content.
+ *
+ * No `status` predicate (Codex-p3m5j). Unpublished content is fetched and
+ * then adjudicated by the publication rule inside `decideContentAccess`,
+ * which grants it only to a purchase-derived arm. Filtering here instead
+ * would deny a buyer before their purchase was ever considered.
+ *
+ * `deletedAt` STAYS: a soft-deleted item is gone, not withdrawn from sale.
+ */
+function findPolicyRow(db: DatabaseClient, contentId: string) {
+  return db.query.content.findFirst({
+    where: and(eq(content.id, contentId), isNull(content.deletedAt)),
+    columns: POLICY_COLUMNS,
+  });
+}
+
+/**
+ * DISPUTE adapter — is this item paused for this user by an open payment
+ * dispute? (Codex-2hxff.60.) The SAME decision core, then, on a denial, the
+ * same {@link disputeHold} the streaming adapter names its refusal with. So
+ * the library dims a disputed purchase exactly when the content page shows
+ * the dispute notice.
+ *
+ * `null` when the item opens, is gone, or is refused for a reason no dispute
+ * explains. A failed read throws: the caller decides what a failure shows.
+ */
+export async function resolveDisputePause(
+  deps: { db: DatabaseClient; purchaseService: PurchaseService },
+  userId: string,
+  contentId: string
+): Promise<DisputeHold | null> {
+  const { db, purchaseService } = deps;
+
+  const contentRecord = await findPolicyRow(db, contentId);
+  if (!contentRecord) return null;
+
+  const decision = await decideContentAccess(
+    { db, purchaseService },
+    userId,
+    contentId,
+    contentRecord
+  );
+  if (decision.granted) return null;
+  return disputeHold(db, userId, contentId, contentRecord);
 }
 
 /**
@@ -742,7 +871,9 @@ export async function resolveContentGrant(
  * `subscribers ⊇ followers ⊇ public` hierarchy (Codex-xybr3).
  *
  * A denial that an open payment dispute explains carries that as its `reason`
- * ({@link disputeHold}); any other keeps the decision's own.
+ * ({@link disputeHold}); any other keeps the decision's own. So does one whose
+ * dispute lookup fails: that lookup only picks the copy, so its failure is
+ * logged and never turns a refusal into a 500.
  */
 export async function assertStreamingAccess(
   tx: Tx,
@@ -769,7 +900,16 @@ export async function assertStreamingAccess(
     return;
   }
 
-  const hold = await disputeHold(tx, userId, contentId, contentRecord);
+  let hold: DisputeHold | null = null;
+  try {
+    hold = await disputeHold(tx, userId, contentId, contentRecord);
+  } catch (error) {
+    obs.error('Access denied: the dispute lookup failed; own reason kept', {
+      userId,
+      contentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   obs.warn('Access denied', {
     userId,

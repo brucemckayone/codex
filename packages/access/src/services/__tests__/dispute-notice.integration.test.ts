@@ -14,6 +14,10 @@
  *     the hourly reconcile opened the chargeback and wrote no block at all.
  *     The KV block still answers first.
  *
+ * Both read one predicate, `resolveDisputePause`, so the card is dimmed
+ * exactly when the page shows the notice, course lessons included (owner
+ * decision 2026-10-24).
+ *
  * Real DB and a real `PurchaseService`, so `verifyPurchase` reads the mark.
  * Every row hangs off this file's own users and organisation, and is deleted
  * in afterAll.
@@ -26,12 +30,19 @@ import { ContentService, MediaItemService } from '@codex/content';
 import { isUniqueViolation } from '@codex/database';
 import {
   content,
+  courseEnrollments,
+  courseStages,
+  courseSubscriptionPlans,
+  courseSubscriptions,
+  courses,
+  courseTierAccess,
   entitlements,
   mediaItems,
   organizationFollowers,
   organizationMemberships,
   organizations,
   purchases,
+  stagePractices,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
@@ -57,9 +68,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AccessDeniedError } from '../../errors';
 import { AccessRevocation } from '../access-revocation';
 import { ContentAccessService } from '../ContentAccessService';
+import { resolveDisputePause } from '../content-access/access-decision';
+import { CourseJourneyService } from '../course-journey-service';
 
 describe('paused by a payment dispute (Codex-2hxff.60)', () => {
   let db: Database;
+  let purchaseService: PurchaseService;
   let accessService: ContentAccessService;
   let contentService: ContentService;
   let mediaService: MediaItemService;
@@ -70,6 +84,7 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
   /** sortOrder 2 */
   let upperTierId: string;
   const userIds: string[] = [];
+  const courseIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -77,7 +92,7 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
     contentService = new ContentService(config);
     mediaService = new MediaItemService(config);
 
-    const purchaseService = new PurchaseService(
+    purchaseService = new PurchaseService(
       { db, environment: 'test' },
       {} as never
     );
@@ -136,6 +151,31 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
       );
     await db.delete(purchases).where(inArray(purchases.customerId, userIds));
     await db.delete(entitlements).where(inArray(entitlements.userId, userIds));
+    if (courseIds.length > 0) {
+      await db
+        .delete(courseEnrollments)
+        .where(inArray(courseEnrollments.courseId, courseIds));
+      await db
+        .delete(courseSubscriptions)
+        .where(inArray(courseSubscriptions.courseId, courseIds));
+      await db
+        .delete(courseSubscriptionPlans)
+        .where(inArray(courseSubscriptionPlans.courseId, courseIds));
+      await db
+        .delete(courseTierAccess)
+        .where(inArray(courseTierAccess.courseId, courseIds));
+      const stageIds = db
+        .select({ id: courseStages.id })
+        .from(courseStages)
+        .where(inArray(courseStages.courseId, courseIds));
+      await db
+        .delete(stagePractices)
+        .where(inArray(stagePractices.stageId, stageIds));
+      await db
+        .delete(courseStages)
+        .where(inArray(courseStages.courseId, courseIds));
+      await db.delete(courses).where(inArray(courses.id, courseIds));
+    }
     await db
       .delete(subscriptions)
       .where(inArray(subscriptions.userId, userIds));
@@ -220,10 +260,13 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
     return item;
   }
 
-  /** A completed purchase, as the checkout webhook records it. */
+  /**
+   * A completed purchase, as the checkout webhook records it. A course
+   * purchase passes `null` and its `courseId` in the overrides.
+   */
   async function buy(
     customerId: string,
-    contentId: string,
+    contentId: string | null,
     overrides: Partial<typeof purchases.$inferInsert> = {}
   ) {
     return takeFirst(
@@ -250,11 +293,13 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
   async function subscribe(
     userId: string,
     tier: string,
-    disputed: boolean
+    disputed: boolean,
+    overrides: Partial<typeof subscriptions.$inferInsert> = {}
   ): Promise<void> {
     await db.insert(subscriptions).values(
       createTestSubscriptionInput(userId, organizationId, tier, {
         disputedAt: disputed ? new Date() : null,
+        ...overrides,
       })
     );
   }
@@ -473,7 +518,7 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
       expect(rows[0]?.purchase?.disputedAt).toBeNull();
     });
 
-    it('a decision that throws keeps the row dimmed, loads the page, and warns with the content id only', async () => {
+    it('a decision that throws keeps the row dimmed, loads the page, and logs the cause at error', async () => {
       const buyer = await newUser();
       const item = await createItem('dim-decision-throws');
       await buy(buyer, item.id, { disputedAt: new Date() });
@@ -487,7 +532,7 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
           },
         } as unknown as PurchaseService,
       });
-      const warn = vi.spyOn(ObservabilityClient.prototype, 'warn');
+      const error = vi.spyOn(ObservabilityClient.prototype, 'error');
 
       try {
         const shelf = await library(buyer, failing);
@@ -495,12 +540,16 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
         expect(shelf.items[0]?.purchase?.disputedAt).toEqual(
           expect.any(String)
         );
-        expect(warn).toHaveBeenCalledWith(
+        expect(error).toHaveBeenCalledWith(
           'Library: access check failed for a disputed purchase; shown paused',
-          { contentId: item.id }
+          expect.objectContaining({
+            userId: buyer,
+            contentId: item.id,
+            error: 'decision failed (test)',
+          })
         );
       } finally {
-        warn.mockRestore();
+        error.mockRestore();
       }
     });
   });
@@ -576,6 +625,563 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
       expect(deniedReason(await stream(subscriber, item.id))).toBe(
         'subscribers_only'
       );
+    });
+  });
+
+  // One predicate, `resolveDisputePause`, names the stream's refusal and
+  // decides the library's dim. Each case reads the stream and the predicate
+  // (`verdict` checks they agree), and the library where it lists the item.
+  describe('the library and the stream agree, through resolveDisputePause', () => {
+    const day = 24 * 60 * 60 * 1000;
+
+    /** The stream's refusal reason, or `'granted'`; checked against the predicate. */
+    async function verdict(userId: string, contentId: string) {
+      const outcome = await stream(userId, contentId);
+      const reason =
+        outcome instanceof AccessDeniedError
+          ? outcome.context?.reason
+          : outcome instanceof Error
+            ? outcome.message
+            : 'granted';
+      const pause = await resolveDisputePause(
+        { db, purchaseService },
+        userId,
+        contentId
+      );
+      if (pause == null) {
+        expect(['purchase_dispute', 'subscription_dispute']).not.toContain(
+          reason
+        );
+      } else {
+        expect(reason).toBe(pause);
+      }
+      return reason;
+    }
+
+    /** Whether the library dims the item's one row (`undefined`: no row). */
+    async function dimmed(userId: string, contentId: string) {
+      const rows = (await library(userId)).items.filter(
+        (i) => i.content.id === contentId
+      );
+      expect(rows.length).toBeLessThanOrEqual(1);
+      return rows[0] && rows[0].purchase?.disputedAt != null;
+    }
+
+    /** A course in this org whose one stage holds `contentId`. */
+    async function courseHolding(contentId: string): Promise<string> {
+      const course = takeFirst(
+        await db
+          .insert(courses)
+          .values({
+            organizationId,
+            creatorId,
+            slug: createUniqueSlug('dispute-course'),
+            title: 'Dispute Course',
+            status: 'published',
+          })
+          .returning({ id: courses.id })
+      );
+      courseIds.push(course.id);
+      const stage = takeFirst(
+        await db
+          .insert(courseStages)
+          .values({ courseId: course.id, name: 'Stage One', sortOrder: 1 })
+          .returning({ id: courseStages.id })
+      );
+      await db
+        .insert(stagePractices)
+        .values({ stageId: stage.id, contentId, sortOrder: 0 });
+      return course.id;
+    }
+
+    /** A lesson reachable only through its course. */
+    async function courseOnlyLesson(slugSuffix: string) {
+      const item = await createItem(slugSuffix);
+      await db
+        .update(content)
+        .set({ courseOnly: true })
+        .where(eq(content.id, item.id));
+      return { item, courseId: await courseHolding(item.id) };
+    }
+
+    /**
+     * A completed course purchase with a chargeback open, and the grant the
+     * chargeback revoked (what `processDispute` writes).
+     */
+    async function disputedCoursePurchase(buyerId: string, courseId: string) {
+      const purchase = await buy(buyerId, null, {
+        courseId,
+        disputedAt: new Date(),
+      });
+      const grant = takeFirst(
+        await db
+          .insert(entitlements)
+          .values({
+            userId: buyerId,
+            organizationId,
+            courseId,
+            source: 'course_purchase',
+            sourceRef: purchase.id,
+            revokedAt: new Date(),
+          })
+          .returning({ id: entitlements.id })
+      );
+      return { purchaseId: purchase.id, grantId: grant.id };
+    }
+
+    /** A live course subscription, with its plan and its stored grant. */
+    async function courseSubscriber(
+      userId: string,
+      courseId: string,
+      disputed: boolean
+    ): Promise<string> {
+      const plan = takeFirst(
+        await db
+          .insert(courseSubscriptionPlans)
+          .values({
+            courseId,
+            priceMonthly: 5000,
+            priceAnnual: 50000,
+            stripeProductId: `prod_${randomUUID()}`,
+            stripePriceMonthlyId: `price_m_${randomUUID()}`,
+            stripePriceAnnualId: `price_a_${randomUUID()}`,
+          })
+          .returning({ id: courseSubscriptionPlans.id })
+      );
+      const periodEnd = new Date(Date.now() + 30 * day);
+      const subscription = takeFirst(
+        await db
+          .insert(courseSubscriptions)
+          .values({
+            userId,
+            courseId,
+            planId: plan.id,
+            organizationId,
+            stripeSubscriptionId: `sub_course_${randomUUID()}`,
+            stripeCustomerId: `cus_${randomUUID()}`,
+            status: 'active',
+            billingInterval: 'month',
+            currentPeriodStart: new Date(),
+            currentPeriodEnd: periodEnd,
+            disputedAt: disputed ? new Date() : null,
+          })
+          .returning({ id: courseSubscriptions.id })
+      );
+      await db.insert(entitlements).values({
+        userId,
+        organizationId,
+        courseId,
+        source: 'course_subscription',
+        sourceRef: subscription.id,
+        expiresAt: periodEnd,
+      });
+      return subscription.id;
+    }
+
+    it('an orgless disputed purchase (no KV block can exist): paused in both', async () => {
+      const buyer = await newUser();
+      const item = await createItem('agree-orgless');
+      await db
+        .update(content)
+        .set({ organizationId: null })
+        .where(eq(content.id, item.id));
+      await buy(buyer, item.id, {
+        organizationId: null,
+        disputedAt: new Date(),
+      });
+
+      expect(await verdict(buyer, item.id)).toBe('purchase_dispute');
+      expect(await dimmed(buyer, item.id)).toBe(true);
+    });
+
+    it("an item taken off sale within a held subscription's period is explained by its dispute; one taken off before the period is not", async () => {
+      const within = await createItem('agree-off-sale-within', 'tier');
+      const before = await createItem('agree-off-sale-before', 'tier');
+      await db
+        .update(content)
+        .set({ status: 'archived', offSaleAt: new Date(Date.now() - day) })
+        .where(eq(content.id, within.id));
+      await db
+        .update(content)
+        .set({ status: 'archived', offSaleAt: new Date(Date.now() - 20 * day) })
+        .where(eq(content.id, before.id));
+      const subscriber = await newUser();
+      await subscribe(subscriber, tierId, true, {
+        currentPeriodStart: new Date(Date.now() - 10 * day),
+      });
+
+      expect(await verdict(subscriber, within.id)).toBe('subscription_dispute');
+      expect(await verdict(subscriber, before.id)).toBe('subscribers_only');
+    });
+
+    it('a course-only lesson of a disputed course purchase is paused; after a win it plays', async () => {
+      const buyer = await newUser();
+      const { item, courseId } = await courseOnlyLesson('agree-course-won');
+      const { purchaseId, grantId } = await disputedCoursePurchase(
+        buyer,
+        courseId
+      );
+
+      expect(await verdict(buyer, item.id)).toBe('purchase_dispute');
+
+      // What `restoreDisputedPurchase` writes on a win.
+      await db
+        .update(purchases)
+        .set({ disputedAt: null })
+        .where(eq(purchases.id, purchaseId));
+      await db
+        .update(entitlements)
+        .set({ revokedAt: null })
+        .where(eq(entitlements.id, grantId));
+      expect(await verdict(buyer, item.id)).toBe('granted');
+    });
+
+    it('a course-only lesson of a LOST course purchase (refunded, the mark kept) shows the course gate', async () => {
+      const buyer = await newUser();
+      const { item, courseId } = await courseOnlyLesson('agree-course-lost');
+      const { purchaseId } = await disputedCoursePurchase(buyer, courseId);
+      await db
+        .update(purchases)
+        .set({ status: 'refunded' })
+        .where(eq(purchases.id, purchaseId));
+
+      expect(await verdict(buyer, item.id)).toBe('course_only');
+    });
+
+    it('a course-only lesson of a disputed course subscription is paused; after a win it plays', async () => {
+      const subscriber = await newUser();
+      const { item, courseId } = await courseOnlyLesson('agree-course-sub');
+      const subscriptionId = await courseSubscriber(subscriber, courseId, true);
+
+      expect(await verdict(subscriber, item.id)).toBe('subscription_dispute');
+
+      await db
+        .update(courseSubscriptions)
+        .set({ disputedAt: null })
+        .where(eq(courseSubscriptions.id, subscriptionId));
+      expect(await verdict(subscriber, item.id)).toBe('granted');
+    });
+
+    it("a course-only lesson that a disputed tier subscription's course access would open is paused", async () => {
+      const subscriber = await newUser();
+      const { item, courseId } = await courseOnlyLesson('agree-course-tier');
+      await db
+        .insert(courseTierAccess)
+        .values({ courseId, tierId, organizationId });
+      await subscribe(subscriber, tierId, true);
+
+      expect(await verdict(subscriber, item.id)).toBe('subscription_dispute');
+    });
+
+    it('a course-only lesson with no course grant held back keeps its own gate', async () => {
+      const stranger = await newUser();
+      const { item } = await courseOnlyLesson('agree-course-stranger');
+
+      expect(await verdict(stranger, item.id)).toBe('course_only');
+    });
+
+    it('a paid lesson the buyer holds only through a disputed course purchase is paused', async () => {
+      const buyer = await newUser();
+      const item = await createItem('agree-paid-lesson');
+      await disputedCoursePurchase(buyer, await courseHolding(item.id));
+
+      expect(await verdict(buyer, item.id)).toBe('purchase_dispute');
+    });
+
+    // The course shelf (`listEnrolledCourses`) reads paused exactly when the
+    // course's course-only lessons show the notice.
+    describe('the course shelf', () => {
+      async function enrol(userId: string, courseId: string, source: string) {
+        await db.insert(courseEnrollments).values({ userId, courseId, source });
+      }
+
+      /** The shelf entry's hold, checked against the lesson's verdict. */
+      async function shelfAgrees(
+        userId: string,
+        courseId: string,
+        lessonId: string
+      ) {
+        const shelf = await new CourseJourneyService({
+          db,
+          environment: 'test',
+        }).listEnrolledCourses(userId, organizationId);
+        const entry = shelf.find((e) => e.course.id === courseId);
+        expect(entry).toBeDefined();
+        const hold = entry?.disputeHold;
+        const reason = await verdict(userId, lessonId);
+        if (hold == null) {
+          expect(['purchase_dispute', 'subscription_dispute']).not.toContain(
+            reason
+          );
+        } else {
+          expect(reason).toBe(hold);
+        }
+        return hold;
+      }
+
+      it('a disputed course purchase reads paused; after a win it does not', async () => {
+        const buyer = await newUser();
+        const { item, courseId } = await courseOnlyLesson('shelf-purchase');
+        await enrol(buyer, courseId, 'course_purchase');
+        const { purchaseId, grantId } = await disputedCoursePurchase(
+          buyer,
+          courseId
+        );
+
+        expect(await shelfAgrees(buyer, courseId, item.id)).toBe(
+          'purchase_dispute'
+        );
+
+        await db
+          .update(purchases)
+          .set({ disputedAt: null })
+          .where(eq(purchases.id, purchaseId));
+        await db
+          .update(entitlements)
+          .set({ revokedAt: null })
+          .where(eq(entitlements.id, grantId));
+        expect(await shelfAgrees(buyer, courseId, item.id)).toBeNull();
+      });
+
+      it('a disputed course subscription, and a disputed tier subscription with course access, read paused', async () => {
+        const subscriber = await newUser();
+        const bySub = await courseOnlyLesson('shelf-course-sub');
+        await enrol(subscriber, bySub.courseId, 'course_subscription');
+        await courseSubscriber(subscriber, bySub.courseId, true);
+
+        const tierSubscriber = await newUser();
+        const byTier = await courseOnlyLesson('shelf-tier');
+        await enrol(tierSubscriber, byTier.courseId, 'tier_subscription');
+        await db
+          .insert(courseTierAccess)
+          .values({ courseId: byTier.courseId, tierId, organizationId });
+        await subscribe(tierSubscriber, tierId, true);
+
+        expect(
+          await shelfAgrees(subscriber, bySub.courseId, bySub.item.id)
+        ).toBe('subscription_dispute');
+        expect(
+          await shelfAgrees(tierSubscriber, byTier.courseId, byTier.item.id)
+        ).toBe('subscription_dispute');
+      });
+
+      it('a disputed course that a live support grant still opens does not read paused', async () => {
+        const buyer = await newUser();
+        const support = await newUser();
+        const { item, courseId } = await courseOnlyLesson('shelf-granted');
+        await enrol(buyer, courseId, 'course_purchase');
+        await disputedCoursePurchase(buyer, courseId);
+        await db.insert(entitlements).values({
+          userId: buyer,
+          organizationId,
+          courseId,
+          source: 'grant',
+          grantedByUserId: support,
+        });
+
+        expect(await shelfAgrees(buyer, courseId, item.id)).toBeNull();
+      });
+
+      it('a disputed course of a staff member does not read paused', async () => {
+        const buyer = await newUser();
+        const { item, courseId } = await courseOnlyLesson('shelf-staff');
+        await enrol(buyer, courseId, 'course_purchase');
+        await disputedCoursePurchase(buyer, courseId);
+        await db.insert(organizationMemberships).values({
+          userId: buyer,
+          organizationId,
+          role: 'creator',
+          status: 'active',
+        });
+
+        expect(await shelfAgrees(buyer, courseId, item.id)).toBeNull();
+      });
+
+      it('an undisputed course, and a lost one, do not read paused', async () => {
+        const owner = await newUser();
+        const owned = await courseOnlyLesson('shelf-owned');
+        await enrol(owner, owned.courseId, 'course_purchase');
+        const purchase = await buy(owner, null, { courseId: owned.courseId });
+        await db.insert(entitlements).values({
+          userId: owner,
+          organizationId,
+          courseId: owned.courseId,
+          source: 'course_purchase',
+          sourceRef: purchase.id,
+        });
+
+        const loser = await newUser();
+        const lost = await courseOnlyLesson('shelf-lost');
+        await enrol(loser, lost.courseId, 'course_purchase');
+        const { purchaseId } = await disputedCoursePurchase(
+          loser,
+          lost.courseId
+        );
+        await db
+          .update(purchases)
+          .set({ status: 'refunded' })
+          .where(eq(purchases.id, purchaseId));
+
+        expect(
+          await shelfAgrees(owner, owned.courseId, owned.item.id)
+        ).toBeNull();
+        expect(
+          await shelfAgrees(loser, lost.courseId, lost.item.id)
+        ).toBeNull();
+      });
+    });
+
+    // GET /courses/:courseId/can-enter (`getCourseEntry`): the shelf's
+    // predicate, asked only when the course is refused.
+    describe("the course page's can-enter answer", () => {
+      /**
+       * An access service over a `db` whose `select` calls are counted, and
+       * handed to `onSelect` first (which may throw). The test `db` is a
+       * proxy, so `vi.spyOn(db, 'select')` cannot reach it.
+       */
+      function serviceOverSelects(
+        onSelect: (fields: unknown) => void = () => {}
+      ) {
+        let selects = 0;
+        const counted = new Proxy(db, {
+          get(target, prop) {
+            const value = Reflect.get(target, prop);
+            if (prop === 'select') {
+              return (fields?: unknown) => {
+                selects += 1;
+                onSelect(fields);
+                return (value as (f?: unknown) => unknown).call(target, fields);
+              };
+            }
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+        const service = new ContentAccessService({
+          db: counted,
+          environment: 'test',
+          r2: createR2SigningClientFromEnv(),
+          purchaseService,
+        });
+        return { service, selects: () => selects };
+      }
+
+      it('granted: no hold, and not one query more than canEnterCourse', async () => {
+        const owner = await newUser();
+        const { courseId } = await courseOnlyLesson('entry-granted');
+        const purchase = await buy(owner, null, { courseId });
+        await db.insert(entitlements).values({
+          userId: owner,
+          organizationId,
+          courseId,
+          source: 'course_purchase',
+          sourceRef: purchase.id,
+        });
+
+        const gate = serviceOverSelects();
+        const entry = serviceOverSelects();
+        expect(await gate.service.canEnterCourse(owner, courseId)).toBe(true);
+        expect(await entry.service.getCourseEntry(owner, courseId)).toEqual({
+          canEnter: true,
+          disputeHold: null,
+        });
+        // The counter sees the gate's own reads, and nothing more is read.
+        expect(gate.selects()).toBeGreaterThan(0);
+        expect(entry.selects()).toBe(gate.selects());
+      });
+
+      it('a disputed course purchase: refused, with purchase_dispute', async () => {
+        const buyer = await newUser();
+        const { courseId } = await courseOnlyLesson('entry-purchase');
+        await disputedCoursePurchase(buyer, courseId);
+
+        expect(await accessService.getCourseEntry(buyer, courseId)).toEqual({
+          canEnter: false,
+          disputeHold: 'purchase_dispute',
+        });
+      });
+
+      it('a disputed course subscription: refused, with subscription_dispute', async () => {
+        const subscriber = await newUser();
+        const { courseId } = await courseOnlyLesson('entry-course-sub');
+        await courseSubscriber(subscriber, courseId, true);
+
+        expect(
+          await accessService.getCourseEntry(subscriber, courseId)
+        ).toEqual({ canEnter: false, disputeHold: 'subscription_dispute' });
+      });
+
+      it('a staff member with a disputed course purchase is never shown paused (canEnter is unchanged: no staff bypass)', async () => {
+        const buyer = await newUser();
+        const { courseId } = await courseOnlyLesson('entry-staff');
+        await disputedCoursePurchase(buyer, courseId);
+        await db.insert(organizationMemberships).values({
+          userId: buyer,
+          organizationId,
+          role: 'creator',
+          status: 'active',
+        });
+
+        expect(await accessService.getCourseEntry(buyer, courseId)).toEqual({
+          canEnter: await accessService.canEnterCourse(buyer, courseId),
+          disputeHold: null,
+        });
+      });
+
+      it('a lookup that throws: the refusal stands with no hold, and the failure is logged at error', async () => {
+        const buyer = await newUser();
+        const { courseId } = await courseOnlyLesson('entry-throws');
+        await disputedCoursePurchase(buyer, courseId);
+        // Fail only the held-purchase read, so canEnterCourse still answers.
+        const { service } = serviceOverSelects((fields) => {
+          if (
+            (fields as Record<string, unknown> | undefined)?.courseId ===
+            purchases.courseId
+          ) {
+            throw new Error('hold lookup failed (test)');
+          }
+        });
+        const error = vi.spyOn(ObservabilityClient.prototype, 'error');
+
+        try {
+          expect(await service.getCourseEntry(buyer, courseId)).toEqual({
+            canEnter: false,
+            disputeHold: null,
+          });
+          expect(error).toHaveBeenCalledWith(
+            'Course entry: the dispute lookup failed; no hold shown',
+            { userId: buyer, courseId, error: 'hold lookup failed (test)' }
+          );
+        } finally {
+          error.mockRestore();
+        }
+      });
+    });
+
+    it('an item bought on its own and since made course-only is dimmed only while a dispute on its course holds it back', async () => {
+      const buyer = await newUser();
+      const { item, courseId } = await courseOnlyLesson('agree-lib-course');
+      await buy(buyer, item.id, { disputedAt: new Date() });
+
+      // Its own purchase opens nothing now, so its own dispute explains nothing.
+      expect(await verdict(buyer, item.id)).toBe('course_only');
+      expect(await dimmed(buyer, item.id)).toBe(false);
+
+      await disputedCoursePurchase(buyer, courseId);
+      expect(await verdict(buyer, item.id)).toBe('purchase_dispute');
+      expect(await dimmed(buyer, item.id)).toBe(true);
+    });
+
+    it('an item bought on its own and since made team-only: not dimmed, and its own gate', async () => {
+      const buyer = await newUser();
+      const item = await createItem('agree-team-only');
+      await db
+        .update(content)
+        .set({ isTeamOnly: true })
+        .where(eq(content.id, item.id));
+      await buy(buyer, item.id, { disputedAt: new Date() });
+
+      expect(await verdict(buyer, item.id)).toBe('team_only');
+      expect(await dimmed(buyer, item.id)).toBe(false);
     });
   });
 
