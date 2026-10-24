@@ -337,6 +337,93 @@ describe('SubscriptionService disputes (Codex-2hxff.9)', () => {
     ]);
   });
 
+  it('a win while the billing pause is in flight, with another chargeback on the subscription still open: billing stays paused', async () => {
+    const sub = await tierSubscription();
+    // The other chargeback is linked to the subscription by its own pause.
+    await service.pauseForDispute(
+      await dispute(await invoiceCharge({ subscriptionId: sub.id }))
+    );
+    const input = await dispute(
+      await invoiceCharge({ subscriptionId: sub.id })
+    );
+    const paused = await service.pauseForDispute(input);
+    vi.mocked(stripe.subscriptions.update).mockClear();
+    vi.mocked(stripe.subscriptions.update).mockImplementationOnce((async () => {
+      await setStatus(input.stripeDisputeId, 'won');
+      return { id: sub.stripeSubscriptionId };
+    }) as never);
+
+    await service.pauseBillingForDispute(
+      paused as NonNullable<typeof paused>,
+      input.stripeDisputeId
+    );
+
+    expect(vi.mocked(stripe.subscriptions.update).mock.calls).toEqual([
+      [
+        sub.stripeSubscriptionId,
+        { pause_collection: { behavior: 'void' } },
+        { idempotencyKey: `${input.stripeDisputeId}_pause_collection` },
+      ],
+    ]);
+  });
+
+  it('a loss while the billing pause is in flight: billing is not resumed (the loss cancels the subscription)', async () => {
+    const sub = await tierSubscription();
+    const input = await dispute(
+      await invoiceCharge({ subscriptionId: sub.id })
+    );
+    const paused = await service.pauseForDispute(input);
+    vi.mocked(stripe.subscriptions.update).mockImplementationOnce((async () => {
+      await setStatus(input.stripeDisputeId, 'lost');
+      return { id: sub.stripeSubscriptionId };
+    }) as never);
+
+    await service.pauseBillingForDispute(
+      paused as NonNullable<typeof paused>,
+      input.stripeDisputeId
+    );
+
+    expect(stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('resuming billing after an in-flight win fails: an error with an errorId, not a throw (no retry would come back to it)', async () => {
+    const sub = await tierSubscription();
+    const input = await dispute(
+      await invoiceCharge({ subscriptionId: sub.id })
+    );
+    const paused = await service.pauseForDispute(input);
+    vi.mocked(stripe.subscriptions.update)
+      .mockImplementationOnce((async () => {
+        await setStatus(input.stripeDisputeId, 'won');
+        return { id: sub.stripeSubscriptionId };
+      }) as never)
+      .mockRejectedValueOnce(new Error('Stripe is down'));
+    const obs = (
+      service as unknown as {
+        obs: { error: (message: string, meta?: unknown) => void };
+      }
+    ).obs;
+    const logged = vi.spyOn(obs, 'error');
+
+    await expect(
+      service.pauseBillingForDispute(
+        paused as NonNullable<typeof paused>,
+        input.stripeDisputeId
+      )
+    ).resolves.toBeUndefined();
+
+    expect(stripe.subscriptions.update).toHaveBeenCalledTimes(2);
+    expect(logged).toHaveBeenCalledWith(
+      expect.stringContaining('resumed by hand'),
+      expect.objectContaining({
+        errorId: expect.any(String),
+        stripeDisputeId: input.stripeDisputeId,
+        subscriptionId: sub.id,
+        error: 'Stripe is down',
+      })
+    );
+  });
+
   it('a lost dispute still ends access through the same pause', async () => {
     const sub = await tierSubscription();
     const input = await dispute(

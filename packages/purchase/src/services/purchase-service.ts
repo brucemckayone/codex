@@ -2807,8 +2807,11 @@ export class PurchaseService extends BaseService {
    *   until the dispute resolves — this keeps the purchase_status CHECK
    *   constraint happy and matches Stripe's semantics where a disputed
    *   charge is still a completed payment until it is evaluated)
-   * - Soft-delete matching `contentAccess` rows (the content disappears
-   *   from the user's library on the next fetch — same as refund)
+   * - Soft-delete matching `contentAccess` rows. Unlike a refund, the
+   *   purchase stays in the library while the dispute is open: the
+   *   library's purchased arm reads `status = 'completed'`. Opening it is
+   *   refused, because every access check reads `disputedAt`
+   *   (Codex-2hxff.60 owns the subscriber-facing notice)
    *
    * Idempotent: if the purchase already has `disputedAt` set, this is a
    * near-no-op — we still return `{ userId, orgId }` so the webhook
@@ -2816,13 +2819,12 @@ export class PurchaseService extends BaseService {
    * AccessRevocation KV key (both are monotonic / idempotent at their
    * respective layers).
    *
-   * Purchases are org-scoped (`organizationId` is NOT NULL on the
-   * `purchases` table), so unlike `processRefund` we can always return
-   * `orgId`. The webhook handler then writes
-   * `AccessRevocation.revoke(userId, orgId, 'refund')` — the revocation
-   * reason enum intentionally doesn't include 'dispute' because it's
-   * observability-only and disputes are the same access-reducing class
-   * as refunds.
+   * `orgId` is null for an orgless creator-direct purchase
+   * (`purchases.organizationId` is nullable, Codex-69t7c), and the webhook
+   * then skips the org-scoped revocation. Otherwise it writes
+   * `AccessRevocation.revoke(userId, orgId, 'refund')`: the revocation
+   * reason enum has no 'dispute', so the content page shows the refund
+   * copy for the block's 20 minutes (Codex-2hxff.60).
    *
    * @param paymentIntentId - The payment intent ID from the disputed charge
    * @param disputeDetails - Optional Stripe dispute metadata

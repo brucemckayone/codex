@@ -61,6 +61,10 @@ A subscription that is already cancelled when the event arrives gets no Stripe c
   - each Stripe call carries an idempotency key built from the dispute id;
   - a cancel accepts a subscription that is already cancelled.
 - A failed Stripe call throws, so Stripe redelivers the event.
+- **A re-run that races a win.** The hourly dispute reconcile re-runs an open chargeback (Codex-2hxff.58), so a win can land while it pauses.
+  - **Access:** the pause is written only while the dispute still holds, under a share lock on its row. The win's record then waits for the pause, and its restore clears it after. The same applies to a disputed purchase.
+  - **Billing:** the dispute is read again after the pause is sent. If it was won meanwhile, and no other chargeback holds the subscription, billing is resumed under a key of its own (`_resume_after_pause`).
+  - **A failure there is not thrown:** a retry finds the dispute won and pauses nothing, so it never comes back to resume. It alerts at error instead, and support resumes billing by hand.
 - `outcome_applied_at` is set only after the whole lost path succeeds, the subscription step included, so a lost dispute keeps its hold until then.
   - Nothing else sets it. The hourly clawback retry finishes failed steps but never marks a loss applied: finished steps cannot show the lost handling ran, because the steps a chargeback wrote when it opened finish too.
   - A lost path that failed is re-run whole by the hourly dispute reconcile (Codex-2hxff.58), which marks the outcome once it succeeds.

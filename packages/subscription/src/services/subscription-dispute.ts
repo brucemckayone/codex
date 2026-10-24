@@ -125,7 +125,11 @@ export async function pauseDisputedSubscription(
  * lasts 24 hours, so a later re-run would pause again after a win resumed
  * billing: the row is read just before, and again just after, the Stripe
  * call. A win recorded while the pause was in flight may have resumed billing
- * first, so billing is resumed again under a key of its own.
+ * first, so billing is resumed again under a key of its own, unless something
+ * else still holds the subscription.
+ *
+ * A failure after the pause is alerted, not thrown: no retry comes back here,
+ * because a retry finds the dispute no longer holding and pauses nothing.
  */
 export async function pauseBilling(
   deps: SubscriptionDisputeDeps,
@@ -140,19 +144,32 @@ export async function pauseBilling(
     { pause_collection: { behavior: 'void' } },
     { idempotencyKey: `${stripeDisputeId}_pause_collection` }
   );
-  if (await isOpenChargeback(deps, stripeDisputeId)) return;
-  deps.obs.warn(
-    'A dispute closed while its billing pause was sent; billing resumed again',
-    {
-      stripeDisputeId,
-      subscriptionId: subscription.id,
-    }
-  );
-  await deps.stripe.subscriptions.update(
-    stripeId,
-    { pause_collection: '' },
-    { idempotencyKey: `${stripeDisputeId}_resume_after_pause` }
-  );
+  try {
+    if (!(await releasedWhilePausing(deps, subscription, stripeDisputeId)))
+      return;
+    deps.obs.warn(
+      'A dispute closed while its billing pause was sent; billing resumed again',
+      {
+        stripeDisputeId,
+        subscriptionId: subscription.id,
+      }
+    );
+    await deps.stripe.subscriptions.update(
+      stripeId,
+      { pause_collection: '' },
+      { idempotencyKey: `${stripeDisputeId}_resume_after_pause` }
+    );
+  } catch (error) {
+    deps.obs.error(
+      'Billing was paused for a dispute, and checking whether the dispute closed meanwhile, or resuming billing, failed. Nothing retries this: if the dispute is won and no other chargeback holds the subscription, every invoice is voided until billing is resumed by hand',
+      {
+        errorId: crypto.randomUUID(),
+        stripeDisputeId,
+        subscriptionId: subscription.id,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+  }
 }
 
 /**
@@ -287,6 +304,30 @@ async function isOpenChargeback(
       dispute.status
     )
   );
+}
+
+/**
+ * The dispute stopped holding the subscription while its billing pause was in
+ * flight, and nothing else holds it. Not when it was lost (the lost path
+ * cancels the subscription), and not while another chargeback on it is open
+ * or lost.
+ */
+async function releasedWhilePausing(
+  deps: SubscriptionDisputeDeps,
+  subscription: DisputedSubscription,
+  stripeDisputeId: string
+): Promise<boolean> {
+  const [dispute] = await deps.db
+    .select({ status: disputes.status })
+    .from(disputes)
+    .where(eq(disputes.stripeDisputeId, stripeDisputeId))
+    .limit(1);
+  if (!dispute || HOLDING_STATUSES.includes(dispute.status)) return false;
+  return !(await hasOtherHoldingChargeback(
+    deps,
+    subscription,
+    stripeDisputeId
+  ));
 }
 
 /** Another chargeback on the subscription keeps it paused: open, or lost. */
