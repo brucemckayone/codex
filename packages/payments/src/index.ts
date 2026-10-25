@@ -19,12 +19,15 @@ export {
   type ClawbackPlanMethod,
   type ClawbackRefund,
   type ClawbackSource,
+  failedRefundRepayBlock,
   listChargeRefunds,
   listClawableRefunds,
+  loadClawbackCauses,
   loadClawbackPlanInput,
   MAX_CLAWBACK_ATTEMPTS,
   pendingReductionsFor,
   planClawback,
+  type RepayBlockReason,
   refundShare,
   retryFailedClawbacks,
   reverseCharge,
@@ -81,8 +84,11 @@ export {
 export {
   type DisputeRepayResult,
   type FailedRefundRepay,
+  repayBlockedError,
   repayDispute,
   repayFailedRefund,
+  settleUnfinishedRefundSteps,
+  type UnfinishedRefundSteps,
 } from './repay';
 // Who is paid the organisation's part of a sale (Codex-2hxff.2)
 export {

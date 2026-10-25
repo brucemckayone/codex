@@ -27,25 +27,18 @@ import {
 import {
   BusinessLogicError,
   ConflictError,
+  InternalServiceError,
   ServiceUnavailableError,
 } from '@codex/service-errors';
-import {
-  and,
-  eq,
-  gte,
-  inArray,
-  isNull,
-  lt,
-  or,
-  type SQL,
-  sql,
-} from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt, or, type SQL, sql } from 'drizzle-orm';
 import {
   type ClawbackDeps,
   type ClawbackSource,
   cancelUnclaimedStep,
+  chargebacksFor,
   listClawableRefunds,
   MAX_CLAWBACK_ATTEMPTS,
+  type RepayBlockReason,
   reverseCharge,
   settleIfFullyReversed,
 } from './clawback';
@@ -265,6 +258,24 @@ const PAYEE_STEP_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The typed refusal of a `creators_repaid` settlement that a later cause was
+ * shared against (`failedRefundRepayBlock`; owner decision 2026-10-25). A 422
+ * whose context is the code and the reason only. Support's route throws it
+ * before the transaction, and `repayFailedRefund` throws it inside, so both
+ * read the same.
+ */
+export function repayBlockedError(
+  reason: RepayBlockReason
+): BusinessLogicError {
+  return new BusinessLogicError(
+    reason === 'chargeback'
+      ? 'This charge has a chargeback, which was shared against this refund. Settle it by hand, or mark it refunded elsewhere.'
+      : 'A later refund of this charge was shared against this one. Settle it by hand, or mark it refunded elsewhere.',
+    { code: 'REPAY_BLOCKED_BY_LATER_CAUSE', reason }
+  );
+}
+
+/**
  * Pay back what a FAILED refund's clawback took, when support settles it as
  * `creators_repaid`: the customer is not to be refunded some other way, so
  * the payees keep their part (Codex-2hxff.28 §8; owner decisions Q5a, Q5b).
@@ -276,27 +287,33 @@ const PAYEE_STEP_KINDS: ReadonlySet<string> = new Set([
  *   `repaid_by_payout_id`. That column is unique, so a second run writes
  *   nothing.
  *
- * Three rules the owner chose on 2026-10-24:
+ * The caller runs, in this order: `failedRefundRepayBlock`, then
+ * `settleUnfinishedRefundSteps` (it asks Stripe, so it is outside the
+ * transaction), then this, inside the transaction that locks the `refunds`
+ * row and records the resolution. The settlement commits whole or not at all.
+ * Once it has, the clawback leaves the refund out (`withoutRepaidRefunds`).
  *
- * 1. A step that can never move money is cancelled: one never claimed (it
- *    never reached Stripe), and one Stripe refused on every try (`failed` at
- *    `MAX_CLAWBACK_ATTEMPTS`, which only definitive refusals advance) that no
- *    delivery holds. A step still retrying, or held by a delivery, may yet
- *    reach Stripe, so this throws `REFUND_CLAWBACK_UNFINISHED` and the
- *    caller's transaction rolls back: the clawback is still running, and
+ * Owner rules (2026-10-24, 2026-10-25):
+ *
+ * 1. A step that can never move money is cancelled. One never claimed (it
+ *    never reached Stripe) is cancelled here. One no retry will ever run (a
+ *    lease that ran out, or out of attempts) is settled first by
+ *    `settleUnfinishedRefundSteps`: done if Stripe made its reversal, else
+ *    cancelled. Any step still pending or failed here is still running (a
+ *    retry is due, or a delivery holds it), so this throws
+ *    `REFUND_CLAWBACK_UNFINISHED` and the caller's transaction rolls back:
  *    support tries again later.
  * 2. A debt the payee already settled (`creator_absorbed`,
  *    `manually_reversed`) gets a re-pay row too; one the platform wrote off
  *    (`platform_absorbed`) gets nothing. The refund's open debts close as
- *    `refund_failed`, with who settled them and the note.
+ *    `refund_failed`, with who settled them and the note. A debt with no
+ *    review (a slice with no payee) is cancelled, as `settleDebt` does.
  * 3. The platform fee's share (`retained_fee`) is cancelled, and a fee slice
  *    it had marked `reversed` is `paid` again, with no re-pay row: the money is
  *    back in the platform's balance.
- *
- * It runs INSIDE the caller's transaction, which locks the `refunds` row and
- * records the resolution, so the settlement commits whole or not at all. Once
- * it has, the clawback leaves the refund out (`withoutRepaidRefunds`): nothing
- * claws it back again, and a later refund's share comes off the re-pay rows.
+ * 4. A chargeback open or lost on the charge refuses the settlement
+ *    (`repayBlockedError('chargeback')`), re-read here because one can open
+ *    after the caller's check.
  */
 export async function repayFailedRefund(
   tx: Tx,
@@ -307,6 +324,20 @@ export async function repayFailedRefund(
     now: Date;
   }
 ): Promise<FailedRefundRepay[]> {
+  const [refund] = await tx
+    .select({ chargeId: refunds.stripeChargeId })
+    .from(refunds)
+    .where(eq(refunds.stripeRefundId, input.stripeRefundId))
+    .limit(1);
+  if (!refund) {
+    throw new InternalServiceError('The refund to re-pay is not recorded', {
+      stripeRefundId: input.stripeRefundId,
+    });
+  }
+  if ((await chargebacksFor(tx, refund.chargeId)).length > 0) {
+    throw repayBlockedError('chargeback');
+  }
+
   const steps = await tx
     .select({ record: payoutReversals, payout: payouts })
     .from(payoutReversals)
@@ -321,7 +352,7 @@ export async function repayFailedRefund(
   let unfinished = 0;
   for (const { record } of steps) {
     if (record.status !== 'pending' && record.status !== 'failed') continue;
-    if (!(await cancelDeadStep(tx, record))) unfinished++;
+    if (!(await cancelUnclaimedStep(tx, record.id))) unfinished++;
   }
   if (unfinished > 0) {
     throw new BusinessLogicError(
@@ -369,7 +400,12 @@ export async function repayFailedRefund(
           .for('update');
   for (const { record, payout } of debts) {
     const review = reviews.find((row) => row.payoutReversalId === record.id);
-    if (!review) continue;
+    if (!review) {
+      // A slice with no payee, so no one owes it. Left `debt`, it would read
+      // "owed" for ever.
+      await cancelIn(tx, record, ['debt']);
+      continue;
+    }
     if (!review.resolvedAt) {
       await tx
         .update(refundReviews)
@@ -393,30 +429,106 @@ export async function repayFailedRefund(
   return repaid;
 }
 
+/** What `settleUnfinishedRefundSteps` did. */
+export interface UnfinishedRefundSteps {
+  /** Steps whose reversal Stripe had made: recorded `done`, so they are re-paid. */
+  landed: number;
+  /** Steps no retry will run, which took nothing: cancelled. */
+  cancelled: number;
+  /** Steps the ledger cannot read, logged for a person: the settlement still refuses. */
+  forPerson: number;
+}
+
 /**
- * Cancel a step of a failed refund that can never move money (rule 1 of
- * `repayFailedRefund`): never claimed, or refused by Stripe on every try and
- * held by no delivery. True if it cancelled it.
+ * Settle the steps of a failed refund that no retry will ever run, before its
+ * `creators_repaid` settlement (Codex-2hxff.28, silent F3 and money LOW-4). It
+ * asks Stripe, so the caller runs it BEFORE the settlement's transaction. It
+ * is safe to repeat.
+ *
+ * Such a step is either `pending` with a lease that ran out (the delivery
+ * that claimed it died), or `failed` and out of attempts, so the cron no
+ * longer selects it. Its last try may have landed at Stripe, so, as for a won
+ * dispute (`repayDispute`):
+ *
+ * - a transfer reversal Stripe made for it is recorded `done`, and the
+ *   settlement then re-pays it;
+ * - one Stripe has no reversal for, and a reduction or a fee share (database
+ *   only, so an unfinished one did nothing), is cancelled;
+ * - a cancellation whose slice is already `cancelled_by_refund` is left
+ *   alone and logged for a person. The ledger cannot tell whether this step's
+ *   cancel took the slice, or whether a transfer it then reversed went out.
+ *
+ * A step never claimed, a step due another retry, and a step a delivery holds
+ * are left as they are. The settlement cancels the first and refuses the
+ * other two.
+ *
+ * Stripe: `transfers.listReversals`, for each such transfer reversal.
  */
-async function cancelDeadStep(
-  tx: Tx,
-  record: PayoutReversal
-): Promise<boolean> {
-  if (record.status === 'pending') return cancelUnclaimedStep(tx, record.id);
-  const now = new Date();
-  const [cancelled] = await tx
-    .update(payoutReversals)
-    .set({ status: 'cancelled', attemptedAt: null, resolvedAt: now })
+export async function settleUnfinishedRefundSteps(
+  deps: ClawbackDeps,
+  input: { stripeRefundId: string }
+): Promise<UnfinishedRefundSteps> {
+  const steps = await deps.db
+    .select({ record: payoutReversals, payout: payouts })
+    .from(payoutReversals)
+    .innerJoin(payouts, eq(payoutReversals.payoutId, payouts.id))
     .where(
       and(
-        eq(payoutReversals.id, record.id),
-        eq(payoutReversals.status, 'failed'),
-        gte(payoutReversals.attempt, MAX_CLAWBACK_ATTEMPTS),
-        unleased(now)
+        eq(payoutReversals.causeType, 'refund'),
+        eq(payoutReversals.causeId, input.stripeRefundId),
+        inArray(payoutReversals.status, ['pending', 'failed'])
       )
-    )
-    .returning();
-  return cancelled !== undefined;
+    );
+  const result: UnfinishedRefundSteps = {
+    landed: 0,
+    cancelled: 0,
+    forPerson: 0,
+  };
+  for (const { record, payout } of steps) {
+    if (!isStranded(record)) continue;
+    if (record.kind === 'transfer_reversal' && payout.stripeTransferId) {
+      const landed = await findLandedReversal(
+        deps,
+        payout.stripeTransferId,
+        record.id
+      );
+      if (landed) {
+        if (await recordLanded(deps, record, landed)) {
+          await settleIfFullyReversed(deps, payout.id);
+          result.landed++;
+        }
+        continue;
+      }
+    } else if (
+      record.kind === 'cancellation' &&
+      payout.status === 'cancelled_by_refund'
+    ) {
+      result.forPerson++;
+      deps.obs.error(
+        "A failed refund's cancellation step never finished, and its slice is cancelled: a person must decide whether it took the slice before the refund is re-paid",
+        {
+          errorId: crypto.randomUUID(),
+          stripeRefundId: input.stripeRefundId,
+          payoutReversalId: record.id,
+          payoutId: payout.id,
+        }
+      );
+      continue;
+    }
+    if (await cancelUnfinished(deps, record)) result.cancelled++;
+  }
+  return result;
+}
+
+/**
+ * A step no retry will ever run: claimed with a lease that ran out (`pending`,
+ * which the cron never selects), or `failed` and out of attempts. A step never
+ * claimed, one due another retry, or one a delivery holds is not.
+ */
+function isStranded(record: PayoutReversal): boolean {
+  if (isLeased(record)) return false;
+  if (record.status === 'pending') return record.attemptedAt !== null;
+  return record.attempt >= MAX_CLAWBACK_ATTEMPTS;
 }
 
 function leaseStart(now: Date): Date {
@@ -490,7 +602,7 @@ async function recordLanded(
     .returning();
   if (recorded) {
     deps.obs.warn(
-      'A won dispute found a reversal the clawback never recorded; paying it back',
+      'Stripe made a reversal the clawback never recorded: recorded now, and paid back',
       { payoutReversalId: record.id, stripeReversalId: landed.id }
     );
     return recorded;
@@ -535,7 +647,11 @@ async function writeRepay(
           reason: slice.userId ? null : 'no_owner',
         })
         .returning();
-      if (!repay) throw new ConflictError('The re-pay row was not written');
+      if (!repay) {
+        throw new InternalServiceError('The re-pay row was not written', {
+          payoutReversalId: record.id,
+        });
+      }
       const [linked] = await tx
         .update(payoutReversals)
         .set({ repaidByPayoutId: repay.id })
@@ -554,6 +670,12 @@ async function writeRepay(
       return repay;
     });
   } catch (error) {
+    // The one ConflictError above is the lost link: a concurrent run set this
+    // step's repaid_by_payout_id between the caller's read and this write, so
+    // the step IS re-paid, by that run's row, and this row rolls back with its
+    // savepoint. It is the expected repeat of a won dispute's concurrent
+    // deliveries. A failed refund's re-pay holds its refunds row FOR UPDATE, so
+    // it never meets it.
     if (error instanceof ConflictError) return undefined;
     throw error;
   }

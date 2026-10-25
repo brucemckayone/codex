@@ -140,10 +140,11 @@ const CHARGEBACK_CLAWED_STATUSES = [
 
 /**
  * The charge's chargebacks to claw back, oldest first: open or lost. Read from
- * `disputes`, which the dispute webhook keeps.
+ * `disputes`, which the dispute webhook keeps. A failed refund's re-pay reads
+ * it too, inside its transaction (`repayFailedRefund`).
  */
-async function chargebacksFor(
-  db: LedgerDeps['db'],
+export async function chargebacksFor(
+  db: Client,
   chargeId: string
 ): Promise<ClawbackDispute[]> {
   const rows = await db
@@ -276,10 +277,11 @@ interface CauseInOrder {
  * (oldest first), then the chargebacks, on one cumulative share. So a
  * chargeback on a partly refunded charge takes only what the refunds left,
  * and a new refund, last among the refunds, is shared before every
- * chargeback. `reverseCharge` and `planClawback` both walk this.
+ * chargeback. `reverseCharge`, `planClawback` and `failedRefundRepayBlock`
+ * all walk this.
  */
 function inClawbackOrder(
-  charge: ClawbackCharge,
+  chargeAmountCents: number,
   refunds: readonly ClawbackRefund[],
   chargebacks: readonly ClawbackDispute[]
 ): CauseInOrder[] {
@@ -294,7 +296,7 @@ function inClawbackOrder(
       cause,
       before,
       after,
-      isFinal: after >= charge.amountCents,
+      isFinal: after >= chargeAmountCents,
     };
     before = after;
     return inOrder;
@@ -304,10 +306,16 @@ function inClawbackOrder(
 /**
  * The refunds, less any support settled as `creators_repaid` (Codex-2hxff.28,
  * Q5c). Such a refund failed, and what it took was paid back to its payees
- * (`repayFailedRefund`), so it leaves the running total: a later refund or
- * chargeback of the charge is shared as if it had never been made, and on a
- * re-paid slice it takes its share off the new re-pay rows. Left in, it would
- * keep counting as refunded, and a later refund's share would floor to zero.
+ * (`repayFailedRefund`), so it leaves the running total. A cause clawed back
+ * AFTER the settlement is shared as if the refund had never been made, and on
+ * a re-paid slice it takes its share off the new re-pay rows. Left in, the
+ * refund would keep counting as refunded, and that cause's share would floor
+ * to zero.
+ *
+ * It is not retroactive. A cause recorded while the refund still counted keeps
+ * the share it got then, and nothing re-shares it. That is why the settlement
+ * refuses when such a cause was shared against the refund
+ * (`failedRefundRepayBlock`; owner decision 2026-10-25).
  */
 async function withoutRepaidRefunds(
   db: Client,
@@ -483,7 +491,7 @@ export async function reverseCharge(
 
   const failures: unknown[] = [];
   for (const { cause, before, after, isFinal } of inClawbackOrder(
-    charge,
+    charge.amountCents,
     refunds,
     chargebacks
   )) {
@@ -595,7 +603,7 @@ export function planClawback(input: ClawbackPlanInput): ClawbackPlan {
   const { charge, slices, steps, repayRows, causes, newRefundCents } = input;
   assertChargeAmount(charge);
   const planned = inClawbackOrder(
-    charge,
+    charge.amountCents,
     [
       ...causes.refunds,
       // After every refund listed: Stripe orders a charge's refunds by it.
@@ -716,17 +724,78 @@ export async function loadClawbackPlanInput(
           .select()
           .from(payoutReversals)
           .where(inArray(payoutReversals.payoutId, payoutIds));
-  const refunds = await withoutRepaidRefunds(
-    db,
-    typeof input.refunds === 'function' ? await input.refunds() : input.refunds
-  );
   return {
     charge,
     slices,
     steps,
     repayRows,
-    causes: { refunds, chargebacks: await chargebacksFor(db, charge.id) },
+    causes: await loadClawbackCauses(db, {
+      chargeId: charge.id,
+      refunds: input.refunds,
+    }),
   };
+}
+
+/**
+ * The charge's causes as `reverseCharge` reads them: the refunds less those
+ * support re-paid (`withoutRepaidRefunds`), oldest first, and the chargebacks
+ * open or lost. `failedRefundRepayBlock` and the preview read them here.
+ */
+export async function loadClawbackCauses(
+  db: LedgerDeps['db'],
+  input: {
+    chargeId: string;
+    refunds:
+      | readonly ClawbackRefund[]
+      | (() => Promise<readonly ClawbackRefund[]>);
+  }
+): Promise<ClawbackPlanInput['causes']> {
+  return {
+    refunds: await withoutRepaidRefunds(
+      db,
+      typeof input.refunds === 'function'
+        ? await input.refunds()
+        : input.refunds
+    ),
+    chargebacks: await chargebacksFor(db, input.chargeId),
+  };
+}
+
+/** Why a failed refund cannot be settled `creators_repaid`. */
+export type RepayBlockReason = 'chargeback' | 'later_refunds';
+
+/**
+ * Why a failed refund cannot be settled `creators_repaid`, or null (owner
+ * decision 2026-10-25). The re-pay drops the refund from the running total,
+ * but a cause shared while it still counted keeps the share it got then
+ * (`withoutRepaidRefunds` is not retroactive). Re-paying the refund would then
+ * pay the payees for money a later cause should have taken:
+ *
+ * - `'chargeback'`: the charge has a chargeback open or lost. Every chargeback
+ *   is shared after the refunds (`inClawbackOrder`), so with this one counted.
+ * - `'later_refunds'`: a refund after this one in the engine's order brings
+ *   the running total over the charge. Its share was capped (`refundShare`)
+ *   because this refund still counted.
+ *
+ * `refunds` and `chargebacks` are the engine's own causes
+ * (`loadClawbackCauses`). A refund it no longer counts (already re-paid)
+ * blocks nothing: there is nothing left to re-pay.
+ */
+export function failedRefundRepayBlock(input: {
+  chargeAmountCents: number;
+  refunds: readonly ClawbackRefund[];
+  chargebacks: readonly ClawbackDispute[];
+  stripeRefundId: string;
+}): RepayBlockReason | null {
+  const order = inClawbackOrder(input.chargeAmountCents, input.refunds, []);
+  const at = order.findIndex(({ cause }) => cause.id === input.stripeRefundId);
+  if (at === -1) return null;
+  if (input.chargebacks.length > 0) return 'chargeback';
+  return order
+    .slice(at + 1)
+    .some(({ after }) => after > input.chargeAmountCents)
+    ? 'later_refunds'
+    : null;
 }
 
 /**
@@ -971,10 +1040,25 @@ async function runRecord(
   const { deps, cause } = ctx;
   // A dispute's step is claimed only while the dispute is still clawed back
   // (open or lost): once it is won, its re-pay owns every step, and a step
-  // this delivery read before the win must not reach Stripe after it.
-  const guard =
-    cause.type === 'dispute' ? disputeStillClawed(cause.id) : undefined;
-  const claimed = await claimRecord(deps, record.id, guard);
+  // this delivery read before the win must not reach Stripe after it. A
+  // refund's, likewise, only until support settles it `creators_repaid`.
+  let claimed: PayoutReversal | undefined;
+  if (cause.type === 'refund') {
+    const outcome = await claimRefundStep(deps, record.id, cause.id);
+    if (outcome === 'repaid') {
+      // Settled since this delivery read the refund. A step never claimed is
+      // cancelled. The settlement refused while any other was unfinished.
+      await cancelUnclaimedStep(deps.db, record.id);
+      return {};
+    }
+    claimed = outcome;
+  } else {
+    claimed = await claimRecord(
+      deps.db,
+      record.id,
+      disputeStillClawed(cause.id)
+    );
+  }
   if (!claimed) {
     if (cause.type === 'dispute' && !(await isStillClawed(deps, cause.id))) {
       // A step never claimed is cancelled. One claimed before may have
@@ -1944,11 +2028,40 @@ export async function cancelUnclaimedStep(
 }
 
 /**
+ * Claim a refund's step, unless support has settled the refund
+ * `creators_repaid` (Codex-2hxff.28, money MED-1). Its re-pay read the steps
+ * once, so a step claimed after it would reach Stripe with nothing to re-pay
+ * it, and the clawback then skips the refund for good.
+ *
+ * The refund's row is read FOR SHARE in the claim's transaction, and the
+ * settlement holds it FOR UPDATE, so the two are ordered. A claim that waits
+ * sees the resolution once the settlement commits. A claim made first leaves
+ * the step leased, and the settlement then refuses
+ * (`REFUND_CLAWBACK_UNFINISHED`).
+ */
+async function claimRefundStep(
+  deps: ClawbackDeps,
+  recordId: string,
+  stripeRefundId: string
+): Promise<PayoutReversal | 'repaid' | undefined> {
+  return deps.db.transaction(async (tx) => {
+    const [refund] = await tx
+      .select({ resolution: refunds.resolution })
+      .from(refunds)
+      .where(eq(refunds.stripeRefundId, stripeRefundId))
+      .limit(1)
+      .for('share');
+    if (refund?.resolution === 'creators_repaid') return 'repaid' as const;
+    return claimRecord(tx, recordId);
+  });
+}
+
+/**
  * Take the step's lease, so one delivery works on it at a time. `guard`, when
  * given, must also hold at the moment of the claim.
  */
 async function claimRecord(
-  deps: ClawbackDeps,
+  db: Client,
   recordId: string,
   guard?: SQL
 ): Promise<PayoutReversal | undefined> {
@@ -1956,7 +2069,7 @@ async function claimRecord(
   const leaseStart = new Date(
     now.getTime() - PAYOUT_ATTEMPT_LEASE_MINUTES * 60_000
   );
-  const [claimed] = await deps.db
+  const [claimed] = await db
     .update(payoutReversals)
     .set({ attemptedAt: now })
     .where(

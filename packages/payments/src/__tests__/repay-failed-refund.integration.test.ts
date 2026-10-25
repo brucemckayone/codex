@@ -10,6 +10,7 @@
  * resolved beside the re-pay).
  */
 
+import { createPerRequestDbClient } from '@codex/database';
 import {
   disputes,
   organizations,
@@ -29,7 +30,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { and, eq, inArray, or } from 'drizzle-orm';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -44,12 +45,18 @@ import {
   type ClawbackCharge,
   type ClawbackDeps,
   type ClawbackRefund,
+  failedRefundRepayBlock,
+  loadClawbackCauses,
   loadClawbackPlanInput,
   MAX_CLAWBACK_ATTEMPTS,
   planClawback,
   reverseCharge,
 } from '../clawback';
-import { repayDispute, repayFailedRefund } from '../repay';
+import {
+  repayDispute,
+  repayFailedRefund,
+  settleUnfinishedRefundSteps,
+} from '../repay';
 
 const uid = () => crypto.randomUUID().slice(0, 8);
 const SOURCE = { sourceType: 'subscription' } as const;
@@ -78,11 +85,18 @@ describe('repayFailedRefund (creators_repaid)', () => {
     ).id;
   });
 
+  /** The mock's own reversal: it records the reversal, as Stripe would. */
+  type CreateReversal = Stripe['transfers']['createReversal'];
+  let makeReversal: CreateReversal;
+
   beforeEach(() => {
     stripe = createMockStripe();
     obs.error.mockClear();
     obs.warn.mockClear();
     deps = { db, stripe, obs, environment: 'test' };
+    makeReversal = vi
+      .mocked(stripe.transfers.createReversal)
+      .getMockImplementation() as CreateReversal;
   });
 
   // Payout rows feed global drains and sweeps: never leave them behind. Re-pay
@@ -140,10 +154,16 @@ describe('repayFailedRefund (creators_repaid)', () => {
 
   async function slice(
     charge: ClawbackCharge,
-    payoutType: 'platform_fee' | 'organization_fee' | 'creator_payout',
-    amountCents: number
+    payoutType:
+      | 'platform_fee'
+      | 'organization_fee'
+      | 'creator_payout'
+      | 'creator_payout_to_owner',
+    amountCents: number,
+    status: 'paid' | 'cancelled_by_refund' = 'paid'
   ): Promise<Payout> {
     const isFee = payoutType === 'platform_fee';
+    const paid = status === 'paid';
     const row = takeFirst(
       await db
         .insert(payouts)
@@ -152,10 +172,11 @@ describe('repayFailedRefund (creators_repaid)', () => {
           userId: isFee ? null : creatorId,
           payoutType,
           amountCents,
-          status: 'paid',
+          status,
           sourceType: 'subscription',
           stripeChargeId: charge.id,
-          stripeTransferId: isFee ? null : `tr_repay_${uid()}`,
+          stripeTransferId: isFee || !paid ? null : `tr_repay_${uid()}`,
+          reason: paid ? null : 'connect_not_ready',
           resolvedAt: new Date(),
         })
         .returning()
@@ -426,6 +447,10 @@ describe('repayFailedRefund (creators_repaid)', () => {
     );
     expect(stuck?.status).toBe('failed');
 
+    // The cron retries it within the hour: the pre-step leaves it alone.
+    expect(
+      await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
+    ).toEqual({ landed: 0, cancelled: 0, forPerson: 0 });
     const error = await settle(refund.id).catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(BusinessLogicError);
@@ -466,14 +491,18 @@ describe('repayFailedRefund (creators_repaid)', () => {
       attempt: MAX_CLAWBACK_ATTEMPTS,
     });
     if (!step) throw new Error("The creator's step was not recorded");
-    return { org, refund, step };
+    return { charge, org, refund, step };
   }
 
-  it('a step Stripe refused on every try is cancelled, and the rest is re-paid', async () => {
+  it('a step Stripe refused on every try, with no reversal at Stripe, is cancelled by the pre-step, and the rest is re-paid', async () => {
     const { org, refund, step } = await exhaustedStep();
 
+    expect(
+      await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
+    ).toEqual({ landed: 0, cancelled: 1, forPerson: 0 });
     const repaid = await settle(refund.id);
 
+    expect(stripe.transfers.listReversals).toHaveBeenCalled();
     expect(
       (await stepsOf(refund.id)).find((s) => s.id === step.id)
     ).toMatchObject({ status: 'cancelled', repaidByPayoutId: null });
@@ -482,13 +511,38 @@ describe('repayFailedRefund (creators_repaid)', () => {
     ]);
   });
 
-  it('a step out of attempts that a delivery holds right now still refuses the settlement', async () => {
-    const { refund, step } = await exhaustedStep();
-    // A redelivered event is trying it once more, this minute.
-    await db
-      .update(payoutReversals)
-      .set({ attemptedAt: new Date() })
-      .where(eq(payoutReversals.id, step.id));
+  it('a step out of attempts whose last, unconfirmed try landed at Stripe is recorded done by the pre-step, and re-paid', async () => {
+    const { charge, refund, step } = await exhaustedStep();
+    // A redelivered event tries it once more: Stripe makes the reversal, but
+    // the answer is lost (a 500), so the attempt stays at the maximum.
+    vi.mocked(stripe.transfers.createReversal).mockImplementationOnce((async (
+      ...args: Parameters<CreateReversal>
+    ) => {
+      await makeReversal(...args);
+      throw Object.assign(new Error('connection reset'), { statusCode: 500 });
+    }) as never);
+    await expect(
+      reverseCharge(deps, { charge, source: SOURCE, refunds: [refund] })
+    ).rejects.toThrow();
+    expect(
+      (await stepsOf(refund.id)).find((s) => s.id === step.id)
+    ).toMatchObject({ status: 'failed', attempt: MAX_CLAWBACK_ATTEMPTS });
+
+    expect(
+      await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
+    ).toEqual({ landed: 1, cancelled: 0, forPerson: 0 });
+    const repaid = await settle(refund.id);
+
+    expect(
+      (await stepsOf(refund.id)).find((s) => s.id === step.id)
+    ).toMatchObject({ status: 'done' });
+    expect(repaid).toContainEqual(
+      expect.objectContaining({ amountCents: 765, payeeUserId: creatorId })
+    );
+  });
+
+  it('without the pre-step, a step out of attempts refuses the settlement: it is never cancelled unchecked', async () => {
+    const { refund } = await exhaustedStep();
 
     const error = await settle(refund.id).catch((e: unknown) => e);
 
@@ -496,6 +550,129 @@ describe('repayFailedRefund (creators_repaid)', () => {
       code: 'REFUND_CLAWBACK_UNFINISHED',
       unfinishedSteps: 1,
     });
+  });
+
+  it('a step out of attempts that a delivery holds right now is left by the pre-step, and still refuses the settlement', async () => {
+    const { refund, step } = await exhaustedStep();
+    // A redelivered event is trying it once more, this minute.
+    await db
+      .update(payoutReversals)
+      .set({ attemptedAt: new Date() })
+      .where(eq(payoutReversals.id, step.id));
+
+    expect(
+      await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
+    ).toEqual({ landed: 0, cancelled: 0, forPerson: 0 });
+    const error = await settle(refund.id).catch((e: unknown) => e);
+
+    expect((error as BusinessLogicError).context).toEqual({
+      code: 'REFUND_CLAWBACK_UNFINISHED',
+      unfinishedSteps: 1,
+    });
+  });
+
+  /** A step on a slice added after the refund's run, claimed an hour ago. */
+  async function claimedLongAgo(
+    refund: ClawbackRefund,
+    slice: Payout,
+    kind: 'transfer_reversal' | 'cancellation'
+  ) {
+    return takeFirst(
+      await db
+        .insert(payoutReversals)
+        .values({
+          payoutId: slice.id,
+          causeType: 'refund',
+          causeId: refund.id,
+          amountCents: slice.amountCents,
+          kind,
+          status: 'pending',
+          attemptedAt: new Date(Date.now() - 60 * 60_000),
+        })
+        .returning()
+    );
+  }
+
+  it('a step whose lease ran out (its delivery died): done if Stripe made its reversal, cancelled if not, and then re-paid', async () => {
+    const charge = newCharge();
+    await slice(charge, 'organization_fee', 135);
+    const refund = await failedRefund(charge, 1000);
+    const landedSlice = await slice(charge, 'creator_payout', 765);
+    const lostSlice = await slice(charge, 'creator_payout_to_owner', 100);
+    const landed = await claimedLongAgo(
+      refund,
+      landedSlice,
+      'transfer_reversal'
+    );
+    const lost = await claimedLongAgo(refund, lostSlice, 'transfer_reversal');
+    // The dead delivery's reversal, as Stripe holds it.
+    await stripe.transfers.createReversal(landedSlice.stripeTransferId ?? '', {
+      amount: 765,
+      metadata: { payout_reversal_id: landed.id },
+    });
+
+    expect(
+      await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
+    ).toEqual({ landed: 1, cancelled: 1, forPerson: 0 });
+    const repaid = await settle(refund.id);
+
+    const steps = await stepsOf(refund.id);
+    expect(steps.find((s) => s.id === landed.id)?.status).toBe('done');
+    expect(steps.find((s) => s.id === lost.id)?.status).toBe('cancelled');
+    expect(repaid.map((r) => r.amountCents).sort()).toEqual([135, 765]);
+  });
+
+  it('an unfinished cancellation on a slice already cancelled is left for a person, logged, and the settlement still refuses', async () => {
+    const charge = newCharge();
+    await slice(charge, 'organization_fee', 135);
+    const refund = await failedRefund(charge, 1000);
+    const cancelled = await slice(
+      charge,
+      'creator_payout',
+      765,
+      'cancelled_by_refund'
+    );
+    const step = await claimedLongAgo(refund, cancelled, 'cancellation');
+
+    expect(
+      await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
+    ).toEqual({ landed: 0, cancelled: 0, forPerson: 1 });
+    const error = await settle(refund.id).catch((e: unknown) => e);
+
+    expect(obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('a person must decide'),
+      expect.objectContaining({ payoutReversalId: step.id })
+    );
+    expect((error as BusinessLogicError).context).toMatchObject({
+      code: 'REFUND_CLAWBACK_UNFINISHED',
+    });
+  });
+
+  it('a debt with no review (a slice with no payee) is cancelled, so it never reads "owed"', async () => {
+    const charge = newCharge();
+    await slice(charge, 'organization_fee', 135);
+    const refund = await failedRefund(charge, 1000);
+    const late = await slice(charge, 'creator_payout', 765);
+    const debt = takeFirst(
+      await db
+        .insert(payoutReversals)
+        .values({
+          payoutId: late.id,
+          causeType: 'refund',
+          causeId: refund.id,
+          amountCents: 765,
+          kind: 'transfer_reversal',
+          status: 'debt',
+          lastErrorCode: 'insufficient_funds',
+        })
+        .returning()
+    );
+
+    await settle(refund.id);
+
+    expect(
+      (await stepsOf(refund.id)).find((s) => s.id === debt.id)
+    ).toMatchObject({ status: 'cancelled', repaidByPayoutId: null });
   });
 
   it('a step never claimed (it never reached Stripe) is cancelled, and the rest is re-paid', async () => {
@@ -567,5 +744,237 @@ describe('repayFailedRefund (creators_repaid)', () => {
       amountCents: 382,
       method: 'from_repay_payout',
     });
+  });
+
+  // ── a later cause shared against the failed refund (money HIGH-1) ─────
+
+  it('a chargeback after the failed refund blocks the re-pay: the rule says so, and the settlement re-checks it inside its transaction', async () => {
+    // Scenario A: the buyer, never refunded, charges back the whole charge.
+    // It is shared after the failed refund, so it took nothing.
+    const charge = newCharge();
+    const creator = await slice(charge, 'creator_payout', 900);
+    const refund = await failedRefund(charge, 1000);
+    const disputeId = `dp_repay_${uid()}`;
+    createdDisputeIds.push(disputeId);
+    await db.insert(disputes).values({
+      stripeDisputeId: disputeId,
+      stripeChargeId: charge.id,
+      amountCents: 1000,
+      currency: 'gbp',
+      status: 'lost',
+      stripeCreatedAt: new Date(),
+    });
+    await reverseCharge(deps, { charge, source: SOURCE, refunds: [refund] });
+    expect(
+      (
+        await db
+          .select()
+          .from(payoutReversals)
+          .where(eq(payoutReversals.causeId, disputeId))
+      ).length
+    ).toBe(0);
+
+    const causes = await loadClawbackCauses(db, {
+      chargeId: charge.id,
+      refunds: [refund],
+    });
+    expect(
+      failedRefundRepayBlock({
+        chargeAmountCents: charge.amountCents,
+        ...causes,
+        stripeRefundId: refund.id,
+      })
+    ).toBe('chargeback');
+    // The caller's check passed before the chargeback opened: the
+    // transaction's own read refuses.
+    const error = await settle(refund.id).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(BusinessLogicError);
+    expect((error as BusinessLogicError).context).toEqual({
+      code: 'REPAY_BLOCKED_BY_LATER_CAUSE',
+      reason: 'chargeback',
+    });
+    const [step] = await stepsOf(refund.id);
+    expect(step).toMatchObject({
+      payoutId: creator.id,
+      repaidByPayoutId: null,
+    });
+  });
+
+  it('a later refund shared against the failed one, over the charge, blocks the re-pay', async () => {
+    // Scenario B: R1 = 1000 failed, then support refunds R2 = 1000. R2 is
+    // shared with R1 counted, so it took nothing.
+    const charge = newCharge();
+    await slice(charge, 'creator_payout', 900);
+    const failed = await failedRefund(charge, 1000);
+    const later = { id: `re_repay_${uid()}`, amountCents: 1000, createdAt: 2 };
+    await reverseCharge(deps, {
+      charge,
+      source: SOURCE,
+      refunds: [failed, later],
+    });
+    expect(await stepsOf(later.id)).toHaveLength(0);
+
+    const causes = await loadClawbackCauses(db, {
+      chargeId: charge.id,
+      refunds: [failed, later],
+    });
+
+    expect(
+      failedRefundRepayBlock({
+        chargeAmountCents: charge.amountCents,
+        ...causes,
+        stripeRefundId: failed.id,
+      })
+    ).toBe('later_refunds');
+  });
+
+  // ── a claim racing the settlement (money MED-1) ───────────────────────
+
+  /**
+   * A connection of the test's own, as the dispute-pause-race suite opens
+   * one: a lock wait on it gives up after 10s, so a regression cannot hang.
+   */
+  async function ownConnection() {
+    const { db: conn, cleanup } = createPerRequestDbClient({
+      DB_METHOD: process.env.DB_METHOD,
+      DATABASE_URL: process.env.DATABASE_URL,
+      DATABASE_URL_LOCAL_PROXY: process.env.DATABASE_URL_LOCAL_PROXY,
+      NODE_ENV: process.env.NODE_ENV,
+    });
+    await conn.execute(sql`set lock_timeout = '10s'`);
+    return { db: conn, pid: await backendPid(conn), cleanup };
+  }
+
+  async function backendPid(conn: Pick<Database, 'execute'>): Promise<number> {
+    const { rows } = await conn.execute(sql`select pg_backend_pid() as pid`);
+    return Number((rows[0] as { pid: unknown } | undefined)?.pid);
+  }
+
+  /** Resolve once backend `waiter` waits on a lock backend `holder` holds. */
+  async function untilWaiting(
+    waiter: number,
+    holder: number,
+    work: { settled: () => boolean }
+  ): Promise<void> {
+    for (let attempt = 0; attempt < 250; attempt++) {
+      if (work.settled()) throw new Error('settled before it waited');
+      const { rows } = await db.execute(
+        sql`select 1 from pg_stat_activity
+            where pid = ${waiter}::int
+              and ${holder}::int = any(pg_blocking_pids(pid))
+              and query ilike ${'%"refunds"%'}`
+      );
+      if (rows.length > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error('never waited on refunds');
+  }
+
+  it('a claim made while the settlement holds the refund waits for it, then sees creators_repaid: the step never reaches Stripe', async () => {
+    const charge = newCharge();
+    const creator = await slice(charge, 'creator_payout', 765);
+    // The refund failed; its clawback has recorded no step yet.
+    const refund = { id: `re_repay_${uid()}`, amountCents: 1000, createdAt: 1 };
+    createdRefundIds.push(refund.id);
+    await db.insert(refunds).values({
+      stripeRefundId: refund.id,
+      stripeChargeId: charge.id,
+      amountCents: 1000,
+      currency: 'gbp',
+      status: 'failed',
+      stripeCreatedAt: new Date(),
+    });
+    const claimer = await ownConnection();
+    let done = false;
+    let run: Promise<unknown> = Promise.resolve();
+    try {
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`set local lock_timeout = '10s'`);
+        await tx
+          .select({ id: refunds.id })
+          .from(refunds)
+          .where(eq(refunds.stripeRefundId, refund.id))
+          .for('update');
+        const holder = await backendPid(tx);
+        await repayFailedRefund(tx, {
+          stripeRefundId: refund.id,
+          resolvedByUserId: supportId,
+          note: NOTE,
+          now: new Date(),
+        });
+        await tx
+          .update(refunds)
+          .set({
+            resolution: 'creators_repaid',
+            resolvedAt: new Date(),
+            resolvedByUserId: supportId,
+            resolutionNote: NOTE,
+          })
+          .where(eq(refunds.stripeRefundId, refund.id));
+        // A delivery that read the refund unsettled reaches the claim.
+        run = reverseCharge(
+          { ...deps, db: claimer.db },
+          { charge, source: SOURCE, refunds: [refund] }
+        ).finally(() => {
+          done = true;
+        });
+        await untilWaiting(claimer.pid, holder, { settled: () => done });
+      });
+      await run;
+    } finally {
+      await run.catch(() => undefined);
+      await claimer.cleanup();
+    }
+
+    expect(stripe.transfers.createReversal).not.toHaveBeenCalled();
+    expect(await stepsOf(refund.id)).toMatchObject([
+      { payoutId: creator.id, status: 'cancelled', attemptedAt: null },
+    ]);
+  });
+
+  it('a claim made first leaves the step leased, and the settlement refuses until it finishes', async () => {
+    const charge = newCharge();
+    await slice(charge, 'creator_payout', 765);
+    const refund = { id: `re_repay_${uid()}`, amountCents: 1000, createdAt: 1 };
+    createdRefundIds.push(refund.id);
+    await db.insert(refunds).values({
+      stripeRefundId: refund.id,
+      stripeChargeId: charge.id,
+      amountCents: 1000,
+      currency: 'gbp',
+      status: 'failed',
+      stripeCreatedAt: new Date(),
+    });
+    // Stripe answers only when the test says so.
+    let answer: () => void = () => undefined;
+    vi.mocked(stripe.transfers.createReversal).mockImplementationOnce((async (
+      ...args: Parameters<CreateReversal>
+    ) => {
+      await new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      return makeReversal(...args);
+    }) as never);
+    const run = reverseCharge(deps, {
+      charge,
+      source: SOURCE,
+      refunds: [refund],
+    });
+    while (vi.mocked(stripe.transfers.createReversal).mock.calls.length === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const error = await settle(refund.id).catch((e: unknown) => e);
+    answer();
+    await run;
+
+    expect((error as BusinessLogicError).context).toEqual({
+      code: 'REFUND_CLAWBACK_UNFINISHED',
+      unfinishedSteps: 1,
+    });
+    expect(await settle(refund.id)).toEqual([
+      expect.objectContaining({ amountCents: 765 }),
+    ]);
   });
 });
