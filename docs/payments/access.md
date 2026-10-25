@@ -67,8 +67,9 @@ draft and clears `published_at`, so it reads as never released.
 When an organisation is deleted, nobody keeps its content, buyers included
 (owner decision, 2026-10-25: "Nobody"; `Codex-7ncbh`). Its pages are already
 gone (the org's site no longer resolves), and the stream and access checks
-treat its content as deleted. What a deletion owes those buyers is an open
-question (`Codex-ltbml`).
+treat its content as deleted. Its items leave the cross-organisation library,
+and its courses no longer open (dashboard or player). What a deletion owes
+those buyers is an open question (`Codex-ltbml`).
 
 A tier subscription does **not** keep an unpublished item for good. It is a
 licence, not a sale. When a removed creator's items come off sale

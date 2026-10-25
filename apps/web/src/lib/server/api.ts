@@ -121,6 +121,8 @@ import type { JourneyInsightsData } from '$lib/components/studio/journey-insight
 // Journey member-surface view shapes (Codex-2pryk Round-D). Structurally
 // identical to @codex/shared-types' cross-worker mirror the content-api routes
 // serialise; imported from the FE $lib bag so callers get the exact FE types.
+// One exception: InCoursePracticeData is the PAGE shape, whose wire form is
+// InCoursePracticeResponse below (Codex-woj7k).
 import type {
   CompletionSource,
   ContentCourseLinks,
@@ -220,12 +222,19 @@ export interface WithdrawnContentItem {
  * {@link InCoursePracticeData} with a written practice's body AS STORED in
  * place of its HTML. `fetchInCoursePractice` renders it (Codex-woj7k), so the
  * page only ever sees `bodyHtml`.
+ *
+ * `body` is optional on the wire because a content-api older than this web
+ * (a rollback) sends only `bodyHtml`, the markdown column, which the seam
+ * then renders and logs. Drop both halves with the worker's legacy field
+ * (Codex-sb3sr).
  */
 export type InCoursePracticeResponse = Omit<
   InCoursePracticeData,
-  'bodyHtml'
+  'bodyHtml' | 'bodyUnavailable'
 > & {
-  body: ContentBodySource | null;
+  body?: ContentBodySource | null;
+  /** @deprecated The pre-Codex-woj7k markdown column; read `body`. */
+  bodyHtml?: string | null;
 };
 
 /**

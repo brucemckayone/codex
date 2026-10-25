@@ -17,16 +17,16 @@ import { getRenderExtensions } from './extensions.js';
  * failure is soft-degraded to `null` (no body) rather than allowed to throw:
  * the loaders that call this treat a null body as "no body to show", so a
  * single malformed doc can never take down the whole content page with a 500.
- * The failure is logged with `context.contentId`, so a render failure is
- * findable rather than looking exactly like a piece with no body
- * (Codex-uuz1g).
+ * The failure is logged with `context`, so a render failure is findable
+ * rather than looking exactly like a piece with no body (Codex-uuz1g). The
+ * content id is required for that reason; `surface` says which page failed.
  */
 export async function renderContentBody(
   content: {
     contentBodyJson?: Record<string, unknown> | null;
     contentBody?: string | null;
   },
-  context: { contentId?: string } = {}
+  context: { contentId: string; surface?: 'content-detail' | 'course-player' }
 ): Promise<string | null> {
   try {
     if (content.contentBodyJson) {
@@ -59,6 +59,7 @@ export async function renderContentBody(
     // Defense-in-depth: never let a body-render failure crash the page.
     logger.error('Failed to render content body', {
       contentId: context.contentId,
+      surface: context.surface,
       error: error instanceof Error ? error.message : String(error),
     });
     return null;

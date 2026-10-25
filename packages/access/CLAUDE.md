@@ -142,11 +142,19 @@ row reads as never released.
 
 A **deleted organisation's** content is gone to every arm, like a deleted item
 (owner decision, 2026-10-25: "Nobody"; Codex-7ncbh). Soft-deleting an org leaves
-its content published, so both self-fetches read the org's `deletedAt`
-(`findPolicyRow` and `getStreamingUrl`'s transaction read, via
-`isOfDeletedOrg`): false on the boolean path, a `null` library pause, and a
-`ContentNotFoundError` on the stream, each before the decision and any
-dispute lookup.
+its content, courses and entitlements in place, so every read that opens or
+lists content asks the org itself:
+- the content self-fetches (`findPolicyRow`, `getStreamingUrl`'s transaction
+  read and its KV revocation pre-check, `getWithdrawnContent`), via
+  `isOfDeletedOrg`: false on the boolean path, a `null` library pause, and a
+  `ContentNotFoundError` on the stream, each before the decision, any dispute
+  lookup and any revocation answer;
+- the library listing (`buildContentFilters`, an `orgIsLive`-style
+  anti-join), so the item leaves the shelf rather than linger as a card that
+  404s;
+- `CourseJourneyService.loadCourseSummaryById`, so a deleted org's course
+  dashboard and in-course player both answer `null`: a written practice
+  reaches its reader through that read alone, with no stream to refuse it.
 
 | Grant arm | Survives unpublication |
 |---|---|

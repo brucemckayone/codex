@@ -30,6 +30,7 @@ const MOCK_PRACTICE = {
   streamingUrl: null,
   waveformUrl: null,
   bodyHtml: '<p>Lesson</p>',
+  bodyUnavailable: false,
   initialProgressSeconds: 0,
   playlist: [],
   completions: [],
@@ -61,11 +62,14 @@ vi.mock('$lib/server/journeys/round-d-seam', () => ({
 
 type LoadInput = Parameters<typeof import('../+page.server').load>[0];
 
+const setHeadersMock = vi.fn();
+
 function makeEvent(user: { id: string } | null) {
   return {
     params: { slug: 'acme', journeySlug: 'rootwork', contentSlug: 'grounding' },
     parent: async () => ({ org: { id: 'org-1', slug: 'acme' }, user }),
     depends: vi.fn(),
+    setHeaders: setHeadersMock,
     url: new URL(
       'http://acme.lvh.me:3000/journeys/rootwork/practice/grounding'
     ),
@@ -139,5 +143,9 @@ describe('in-course player +page.server load: a payment dispute', () => {
       practice: typeof MOCK_PRACTICE;
     };
     expect(data.practice.practice.contentId).toBe('content-1');
+    // A paid lesson is stored nowhere (Codex-hyz1c).
+    expect(setHeadersMock).toHaveBeenCalledWith({
+      'Cache-Control': 'private, no-store',
+    });
   });
 });

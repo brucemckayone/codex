@@ -39,7 +39,11 @@
  * - `handlePurchaseAction`  — Stripe checkout session creation with error handling
  */
 
-import type { ContentBodySource, ContentHeld } from '@codex/access';
+import type {
+  ContentBodySource,
+  ContentHeld,
+  PlaybackProgressResponse,
+} from '@codex/access';
 import {
   type ContentPublicnessPolicy,
   isPublicContent,
@@ -224,17 +228,33 @@ export function withoutRawBody<
 }
 
 /**
- * A detail page's cache headers once it knows the body it renders. Always
- * private: the page varies by viewer. And stored nowhere when it carries a
- * GATED body, so a reader who later loses access (a refund, a lapsed
- * subscription, an unfollow) keeps no copy on their own disk or in the
- * back/forward cache (owner decision, 2026-10-25: "Yes, don't store paid
- * pages"; Codex-hyz1c). `null` (a public body, or none) keeps `private,
- * no-cache`, so Back still restores a free page. `setHeaders` covers the
- * page's `__data.json` too: the same load answers both.
+ * A detail page's cache headers once it knows whether it carries a GATED
+ * grant. Always private: the page varies by viewer. And stored nowhere when
+ * access to a gated piece was granted, so a reader who later loses it (a
+ * refund, a lapsed subscription, an unfollow) keeps no copy on their own disk
+ * or in the back/forward cache (owner decision, 2026-10-25: "Yes, don't store
+ * paid pages"; Codex-hyz1c). Keyed on the grant, not the text: a paid video
+ * page carries no body but a signed stream URL whose token outlives a refund.
+ * A free, denied or failed page keeps `private, no-cache`, so Back still
+ * restores it. `setHeaders` covers the page's `__data.json` too: the same load
+ * answers both.
  */
-export function detailPageCacheHeaders(gatedBodyHtml: string | null) {
-  return gatedBodyHtml == null ? CACHE_HEADERS.PRIVATE : CACHE_HEADERS.FRESH;
+export function detailPageCacheHeaders(gatedAccessGranted: boolean) {
+  return gatedAccessGranted ? CACHE_HEADERS.FRESH : CACHE_HEADERS.PRIVATE;
+}
+
+/**
+ * The detail pages' page-level catch on their access load. `fetchAccess`
+ * catches a failed request itself, so what reaches here is a fault in our own
+ * code: logged at error with its stack, never at the warn an outage gets, or
+ * a code bug would read as a flaky worker (Codex-uuz1g).
+ */
+export function logAccessCheckFault(contentId: string, error: unknown): void {
+  logger.error('Content access check threw', {
+    contentId,
+    error: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  });
 }
 
 /** The server-side API surface returned by `createServerApi`. */
@@ -381,20 +401,15 @@ export async function loadAccessAndProgress(
  * (`accessAndProgress`), which needs only the rendered HTML, never the raw
  * body.
  *
- * Three grants come back without a body:
+ * Two grants come back without a body:
  * - A granted response with no `body` at all, which is logged as an error and
  *   never read as "the piece has no body" (that is `body` with both fields
- *   null). Two causes:
- *   - The worker didn't honour the flag (a content-api rolled back behind this
- *     web build drops the unknown query key), so this would be the empty page
- *     again. The reader gets no note, by choice: it takes a worker older than
- *     this flag (a window of one deploy after it ships), and a broken flag on
- *     either side fails `api-stream-include.test.ts` first.
- *   - The row was never released (never published), so the worker withholds
- *     its body and logs a warn saying so, which is what tells this cause from
- *     the first. These pages can barely reach it: they read published rows
- *     only, and `publishedAt` is never cleared, so it takes a legacy row
- *     published without one, then unpublished, read from a stale list slot.
+ *   null). One cause: the worker didn't honour the flag (a content-api rolled
+ *   back behind this web build drops the unknown query key), so this would be
+ *   the empty page again. The reader gets no note, by choice: it takes a
+ *   worker older than this flag (a window of one deploy after it ships), and a
+ *   broken flag on either side fails `api-stream-include.test.ts` first. A row
+ *   never released is no longer a cause: no one is granted it (Codex-nacky).
  * - Media not ready (a 422 the worker raises after access passed). The call
  *   threw, so it carried nothing: the page reads as granted, with no body
  *   until the media is ready. Narrow, since publishing needs ready media.
@@ -522,6 +537,18 @@ async function fetchAccess(
   let streamResult: StreamResult | null = null;
   let streamError: unknown = null;
 
+  // Typed explicitly: inside the tuple below this read came back as `any`, so
+  // the mapping that read `positionSeconds` off the ENVELOPE, not off its
+  // `progress`, compiled, and every reader resumed at 0.
+  const progressRead: Promise<PlaybackProgressResponse | null> = api.access
+    .getProgress(contentId)
+    // No progress is `{ progress: null }`, not a rejection, so a rejection is
+    // a failed read: the player starts at 0, which must not pass unlogged
+    // (Codex-uuz1g).
+    .catch((err: unknown) => {
+      logReadFailure('Playback progress not loaded', { contentId }, err);
+      return null;
+    });
   const [, progressResult] = await Promise.all([
     api.access
       .getStreamingUrl(contentId, options)
@@ -531,15 +558,7 @@ async function fetchAccess(
       .catch((err: unknown) => {
         streamError = err;
       }),
-    // No progress is `{ progress: null }`, not a rejection, so a rejection is
-    // a failed read: the player starts at 0, which must not pass unlogged
-    // (Codex-uuz1g).
-    api.access
-      .getProgress(contentId)
-      .catch((err: unknown) => {
-        logReadFailure('Playback progress not loaded', { contentId }, err);
-        return null;
-      }),
+    progressRead,
   ]);
 
   // A successful response from /stream means the access check passed,
@@ -577,11 +596,12 @@ async function fetchAccess(
   const revocationReason = accessGranted
     ? null
     : extractRevocationReason(streamError);
-  const progress = progressResult
+  const saved = progressResult?.progress ?? null;
+  const progress = saved
     ? {
-        positionSeconds: progressResult.positionSeconds,
-        durationSeconds: progressResult.durationSeconds,
-        completed: progressResult.completed,
+        positionSeconds: saved.positionSeconds,
+        durationSeconds: saved.durationSeconds,
+        completed: saved.completed,
       }
     : null;
 

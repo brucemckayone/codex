@@ -20,6 +20,7 @@
  */
 import { error, redirect } from '@sveltejs/kit';
 import { evaluateCourseGate } from '$lib/journeys/gate';
+import { CACHE_HEADERS } from '$lib/server/cache';
 import {
   fetchCourseDashboard,
   fetchInCoursePractice,
@@ -101,6 +102,13 @@ export const load: PageServerLoad = async (event) => {
   // it — surfaced as the working pane's "why". Absent → the line just doesn't render.
   const stageGloss =
     dashboard?.stages.find((s) => s.id === practice.stage.id)?.gloss ?? null;
+
+  // A course lesson is a paid page: its text, or a signed stream URL whose
+  // token outlives a refund, is stored nowhere (owner decision, 2026-10-25:
+  // "Yes, don't store paid pages"; Codex-hyz1c). SvelteKit already sends this
+  // ssr=false page's __data.json `private, no-store`; said here so a layout's
+  // setHeaders can never weaken it.
+  event.setHeaders(CACHE_HEADERS.FRESH);
 
   return {
     practice: {

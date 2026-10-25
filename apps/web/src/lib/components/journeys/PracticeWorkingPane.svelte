@@ -25,6 +25,8 @@
   @prop {string | null} streamingUrl - Signed HLS URL (media); null → degraded.
   @prop {string | null} waveformUrl - Signed waveform URL (audio).
   @prop {string | null} bodyHtml - Rendered body (written); server-sanitised.
+  @prop {boolean} [bodyUnavailable=false] - Stored text failed to render: say
+    it did not load, and offer no Mark complete for text never seen.
   @prop {number} initialProgressSeconds - Resume position (media).
   @prop {boolean} isComplete - Reactive completion (parent live query).
   @prop {number} playbackPercent - Reactive watch % (parent live query).
@@ -56,6 +58,7 @@
     streamingUrl: string | null;
     waveformUrl: string | null;
     bodyHtml: string | null;
+    bodyUnavailable?: boolean;
     initialProgressSeconds: number;
     isComplete: boolean;
     playbackPercent: number;
@@ -74,6 +77,7 @@
     streamingUrl,
     waveformUrl,
     bodyHtml,
+    bodyUnavailable = false,
     initialProgressSeconds,
     isComplete,
     playbackPercent,
@@ -174,6 +178,10 @@
       <div class="pane__body">
         {@html bodyHtml}
       </div>
+    {:else if bodyUnavailable}
+      <div class="pane__placeholder pane__placeholder--body" role="alert">
+        <p>This practice's text didn't load. Refresh the page to try again.</p>
+      </div>
     {:else}
       <div class="pane__placeholder pane__placeholder--body">
         <p>This reflection has no written guidance yet.</p>
@@ -196,7 +204,7 @@
       <span class="pane__done-pill">
         <CheckIcon size={16} /> Completed
       </span>
-    {:else}
+    {:else if !bodyUnavailable}
       <button type="button" class="pane__mark" onclick={handleMarkComplete}>
         <CheckIcon size={16} /> Mark complete
       </button>

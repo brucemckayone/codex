@@ -24,18 +24,24 @@ const paragraphDoc = {
 
 describe('renderContentBody', () => {
   it('renders a TipTap JSON body to sanitized HTML', async () => {
-    const html = await renderContentBody({ contentBodyJson: paragraphDoc });
+    const html = await renderContentBody(
+      { contentBodyJson: paragraphDoc },
+      { contentId: 'c1' }
+    );
     expect(html).toContain('Liberty body');
     expect(html).toContain('<p>');
   });
 
   it('renders legacy markdown when there is no JSON body', async () => {
-    const html = await renderContentBody({ contentBody: '# Heading' });
+    const html = await renderContentBody(
+      { contentBody: '# Heading' },
+      { contentId: 'c1' }
+    );
     expect(html).toContain('Heading');
   });
 
   it('returns null when there is no body at all', async () => {
-    expect(await renderContentBody({})).toBeNull();
+    expect(await renderContentBody({}, { contentId: 'c1' })).toBeNull();
   });
 
   it('soft-degrades to null instead of throwing when the doc cannot render', async () => {
@@ -43,7 +49,7 @@ describe('renderContentBody', () => {
     // never 500 because of one malformed body.
     const bad = { type: 'doc', content: [{ type: '__no_such_node__' }] };
     await expect(
-      renderContentBody({ contentBodyJson: bad })
+      renderContentBody({ contentBodyJson: bad }, { contentId: 'c1' })
     ).resolves.toBeNull();
   });
 
@@ -55,7 +61,10 @@ describe('renderContentBody', () => {
     const saved = g.window;
     g.window = undefined;
     try {
-      const html = await renderContentBody({ contentBodyJson: paragraphDoc });
+      const html = await renderContentBody(
+        { contentBodyJson: paragraphDoc },
+        { contentId: 'c1' }
+      );
       expect(html).toContain('Liberty body');
     } finally {
       g.window = saved;
@@ -68,23 +77,28 @@ describe('renderContentBody', () => {
 // through `marked`, so the sanitize pass is the only guard.
 describe('renderContentBody sanitises what it renders', () => {
   it('strips a <script> payload from a markdown body', async () => {
-    const html = await renderContentBody({
-      contentBody: 'ok\n\n<script>alert(1)</script>',
-    });
+    const html = await renderContentBody(
+      { contentBody: 'ok\n\n<script>alert(1)</script>' },
+      { contentId: 'c1' }
+    );
     // Falsifiable: without the sanitize pass the <script> tag survives.
     expect(html).not.toContain('<script');
     expect(html).toContain('ok');
   });
 
   it('strips an onerror handler from an <img> payload', async () => {
-    const html = await renderContentBody({
-      contentBody: '<img src="x" onerror="alert(1)">',
-    });
+    const html = await renderContentBody(
+      { contentBody: '<img src="x" onerror="alert(1)">' },
+      { contentId: 'c1' }
+    );
     expect(html).not.toContain('onerror');
   });
 
   it('preserves benign formatting markup', async () => {
-    const html = await renderContentBody({ contentBody: 'hello **world**' });
+    const html = await renderContentBody(
+      { contentBody: 'hello **world**' },
+      { contentId: 'c1' }
+    );
     expect(html).toContain('<strong>world</strong>');
   });
 });
@@ -92,11 +106,14 @@ describe('renderContentBody sanitises what it renders', () => {
 describe('renderContentBody failure log (Codex-uuz1g)', () => {
   it('names the content it failed to render', async () => {
     const bad = { type: 'doc', content: [{ type: '__no_such_node__' }] };
-    await renderContentBody({ contentBodyJson: bad }, { contentId: 'c_123' });
+    await renderContentBody(
+      { contentBodyJson: bad },
+      { contentId: 'c_123', surface: 'course-player' }
+    );
 
     expect(logger.error).toHaveBeenCalledWith(
       'Failed to render content body',
-      expect.objectContaining({ contentId: 'c_123' })
+      expect.objectContaining({ contentId: 'c_123', surface: 'course-player' })
     );
   });
 });

@@ -384,15 +384,57 @@ describe('loadAccessAndProgress reads WHY /stream failed (Codex-h3ipg)', () => {
       })
     );
   });
+
+  // The worker answers `{ progress: {...} }` (PlaybackProgressResponse). The
+  // mapping read the fields off the envelope, so every reader resumed at 0.
+  it('reads the saved position from the response’s `progress`', async () => {
+    vi.mocked(createServerApi).mockReturnValue({
+      access: {
+        getStreamingUrl: () =>
+          Promise.resolve({ streamingUrl: null, contentType: 'written' }),
+        getProgress: () =>
+          Promise.resolve({
+            progress: {
+              positionSeconds: 312,
+              durationSeconds: 900,
+              completed: false,
+              updatedAt: '2026-10-25T10:00:00.000Z',
+            },
+          }),
+      },
+    } as unknown as ReturnType<typeof createServerApi>);
+
+    const result = await loadAccessAndProgress('c1', undefined, cookies, paid);
+
+    expect(result.progress).toEqual({
+      positionSeconds: 312,
+      durationSeconds: 900,
+      completed: false,
+    });
+  });
+
+  it('no saved position is no progress', async () => {
+    vi.mocked(createServerApi).mockReturnValue({
+      access: {
+        getStreamingUrl: () =>
+          Promise.resolve({ streamingUrl: null, contentType: 'written' }),
+        getProgress: () => Promise.resolve({ progress: null }),
+      },
+    } as unknown as ReturnType<typeof createServerApi>);
+
+    const result = await loadAccessAndProgress('c1', undefined, cookies, paid);
+
+    expect(result.progress).toBeNull();
+  });
 });
 
 describe('detailPageCacheHeaders (Codex-hyz1c)', () => {
-  it('stores a page carrying a gated body nowhere', () => {
-    expect(detailPageCacheHeaders('<p>paid</p>')).toEqual(CACHE_HEADERS.FRESH);
+  it('stores a page carrying a gated grant nowhere', () => {
+    expect(detailPageCacheHeaders(true)).toEqual(CACHE_HEADERS.FRESH);
   });
 
-  it('keeps a page with no gated body private, no-cache', () => {
-    expect(detailPageCacheHeaders(null)).toEqual(CACHE_HEADERS.PRIVATE);
+  it('keeps a page with no gated grant private, no-cache', () => {
+    expect(detailPageCacheHeaders(false)).toEqual(CACHE_HEADERS.PRIVATE);
   });
 
   // Pins the presets this rule leans on: if either changed meaning, the

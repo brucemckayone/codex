@@ -23,6 +23,7 @@ import {
   loadRelatedContent,
   loadSubscriptionContext,
   loadWithdrawnDetail,
+  logAccessCheckFault,
   withoutRawBody,
 } from '$lib/server/content-detail';
 import { logReadFailure } from '$lib/server/read-failure';
@@ -110,7 +111,10 @@ export const load: PageServerLoad = async ({
   // access check below — this is what prevents a non-follower from reading
   // the article text through view-source or the SvelteKit load payload.
   const isPublic = isPublicContent(content);
-  const renderContext = { contentId: content.id };
+  const renderContext = {
+    contentId: content.id,
+    surface: 'content-detail' as const,
+  };
   const publicBodyHtml = isPublic
     ? await renderContentBody(content, renderContext)
     : null;
@@ -139,11 +143,12 @@ export const load: PageServerLoad = async ({
   // renders the body and player that check returned, with the note in place
   // of any offer (there is nothing left to buy or subscribe to).
   if (withdrawn) {
-    // Always gated: a public piece never takes this path.
+    // Always a gated grant: a public piece never takes this path, and the
+    // withdrawn read answered only because access was granted.
     const withdrawnBodyHtml = withdrawn.body
       ? await renderContentBody(withdrawn.body, renderContext)
       : null;
-    setHeaders(detailPageCacheHeaders(withdrawnBodyHtml));
+    setHeaders(detailPageCacheHeaders(true));
     return {
       content: pageContent,
       contentBodyHtml: withdrawnBodyHtml,
@@ -212,11 +217,7 @@ export const load: PageServerLoad = async ({
         cookies,
         content
       ).catch((error: unknown) => {
-        logReadFailure(
-          'Content access check threw',
-          { contentId: content.id },
-          error
-        );
+        logAccessCheckFault(content.id, error);
         return { ...ACCESS_CHECK_FAILED_RESULT, hasAccess: isPublic };
       }),
       subscriptionContext,
@@ -237,11 +238,7 @@ export const load: PageServerLoad = async ({
     cookies,
     content
   ).catch((error: unknown) => {
-    logReadFailure(
-      'Content access check threw',
-      { contentId: content.id },
-      error
-    );
+    logAccessCheckFault(content.id, error);
     return { access: ACCESS_CHECK_FAILED_RESULT, body: null };
   });
 
@@ -250,7 +247,7 @@ export const load: PageServerLoad = async ({
       ? await renderContentBody(body, renderContext)
       : null;
 
-  setHeaders(detailPageCacheHeaders(gatedBodyHtml));
+  setHeaders(detailPageCacheHeaders(accessResult.hasAccess));
   return {
     content: pageContent,
     contentBodyHtml: gatedBodyHtml,

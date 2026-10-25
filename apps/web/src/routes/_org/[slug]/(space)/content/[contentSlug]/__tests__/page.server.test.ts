@@ -427,6 +427,34 @@ describe('org content detail: a page carrying a gated body is stored nowhere', (
     expect(sentHeaders()).toEqual([CACHE_HEADERS.FRESH]);
   });
 
+  // Keyed on the grant, not the text: a paid video has no body, but its
+  // signed stream URL's token outlives a refund.
+  it('a granted paid video (no body, a signed stream): private, no-store', async () => {
+    const { CACHE_HEADERS } = await import('$lib/server/cache');
+    mockServerGetPublicContent.mockResolvedValue({
+      items: [
+        row({
+          isFree: false,
+          isPurchasable: true,
+          priceCents: 900,
+          contentType: 'video',
+          contentBody: null,
+        }),
+      ],
+    });
+    mockGetStreamingUrl.mockResolvedValue({
+      ...grantedWithBody,
+      contentType: 'video',
+      streamingUrl: 'https://content-api.test/hls/master.m3u8?token=t',
+      body: { contentBody: null, contentBodyJson: null },
+    });
+    const { load } = await import('../+page.server');
+
+    await load(event('practice', reader));
+
+    expect(sentHeaders()).toEqual([CACHE_HEADERS.FRESH]);
+  });
+
   it('a denied gated piece (no body sent): private, no-cache', async () => {
     const { CACHE_HEADERS } = await import('$lib/server/cache');
     const { ApiError } = await import('$lib/server/errors');
@@ -492,9 +520,9 @@ describe('org content detail: a thrown access check fails closed and is logged',
 
     expect(data.contentBodyHtml).toBeNull();
     expect((await data.accessAndProgress).hasAccess).toBe(false);
-    expect(mockLogger.warn).toHaveBeenCalledWith(
+    expect(mockLogger.error).toHaveBeenCalledWith(
       'Content access check threw',
-      expect.objectContaining({ contentId: 'c9' })
+      expect.objectContaining({ contentId: 'c9', stack: expect.any(String) })
     );
   });
 
@@ -507,9 +535,9 @@ describe('org content detail: a thrown access check fails closed and is logged',
     };
 
     expect((await data.accessAndProgress).accessCheckFailed).toBe(true);
-    expect(mockLogger.warn).toHaveBeenCalledWith(
+    expect(mockLogger.error).toHaveBeenCalledWith(
       'Content access check threw',
-      expect.objectContaining({ contentId: 'c9' })
+      expect.objectContaining({ contentId: 'c9', stack: expect.any(String) })
     );
   });
 });

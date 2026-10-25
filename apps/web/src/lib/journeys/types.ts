@@ -153,6 +153,10 @@ export interface PlaylistEntry {
  * Everything the in-course player needs after `canEnterCourse` (+ `canView` for
  * the stream) pass. `streamingUrl` / `waveformUrl` are signed R2 URLs for media;
  * `null` for `written` practices (their body renders from `bodyHtml`).
+ *
+ * The PAGE shape, not the wire shape: the worker sends the body as stored and
+ * `fetchInCoursePractice` renders it (Codex-woj7k). The wire form is
+ * `InCoursePracticeResponse` in `$lib/server/api`.
  */
 export interface InCoursePracticeData {
   course: JourneyCourseSummary;
@@ -163,6 +167,12 @@ export interface InCoursePracticeData {
   waveformUrl: string | null;
   /** Rendered body HTML for `written` practices; null for media. */
   bodyHtml: string | null;
+  /**
+   * The practice has stored text that did not render (the render failed and
+   * logged why). The pane says so, rather than "no written guidance", and
+   * offers no Mark complete for text the learner never saw.
+   */
+  bodyUnavailable: boolean;
   /** Resume position for media (seconds). */
   initialProgressSeconds: number;
   /** The whole course sequence, for the playlist rail + prev/next. */

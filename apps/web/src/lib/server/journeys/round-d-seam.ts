@@ -21,7 +21,8 @@
  *   resolveCanView        → api.access.canView(contentId)                   [WP-2]
  *   fetchCourseDashboard  → api.access.courseDashboard(courseId)
  *   fetchInCoursePractice → api.access.inCoursePractice(courseId, contentSlug)
- *                           (+ server-side sanitise of written bodyHtml)
+ *                           (+ server-side render + sanitise of the stored
+ *                           written body)
  *   persistPracticeCompletion → api.access.persistCompletion(input)
  *
  * The worker derives the user from the FORWARDED SESSION COOKIE, so the
@@ -42,6 +43,7 @@ import type {
   JourneyCourseSummary,
   PracticeCompletionRecord,
 } from '$lib/journeys/types';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { getSubdomainContext } from '$lib/utils/subdomain';
 
@@ -136,6 +138,12 @@ export async function fetchCourseDashboard(
  * isomorphic-dompurify pass, so the player's `{@html}` gets exactly the page's
  * safe HTML, and an editor-written practice is no longer empty (Codex-woj7k).
  * Server-only, so the stored body never reaches the browser.
+ *
+ * Two failures are said out loud rather than shown as "no written guidance":
+ * - a content-api older than this web (a rollback) sends only the markdown
+ *   column, as `bodyHtml`: rendered as markdown, and logged as deploy skew;
+ * - stored text that rendered to nothing (renderContentBody failed and logged
+ *   why): `bodyUnavailable`, so the pane says it did not load.
  */
 export async function fetchInCoursePractice(
   ctx: SeamContext,
@@ -146,7 +154,20 @@ export async function fetchInCoursePractice(
   const data = await apiFor(ctx).access.inCoursePractice(courseId, contentSlug);
   if (!data) return null;
 
-  const { body, ...rest } = data;
+  const { body, bodyHtml: legacyBodyHtml, ...rest } = data;
+  const contentId = data.practice.contentId;
+
+  let stored = body ?? null;
+  if (body === undefined && data.practice.contentType === 'written') {
+    logger.error('In-course practice arrived without its stored body', {
+      courseId,
+      contentId,
+    });
+    stored = legacyBodyHtml
+      ? { contentBody: legacyBodyHtml, contentBodyJson: null }
+      : null;
+  }
+
   // Imported LAZILY so this seam's module-eval doesn't eagerly pull the heavy
   // editor render chain ($lib/editor/render → ./extensions), which is
   // CJS-interop-hostile to vitest's SSR eval and — via progress.ts →
@@ -154,13 +175,21 @@ export async function fetchInCoursePractice(
   // unit suites. The real build is unaffected (SvelteKit strips the remote body
   // from the client bundle). [[feedback_vite_ssr_module_load_cascade]]
   let bodyHtml: string | null = null;
-  if (body) {
+  if (stored) {
     const { renderContentBody } = await import('$lib/editor/render');
-    bodyHtml = await renderContentBody(body, {
-      contentId: data.practice.contentId,
+    bodyHtml = await renderContentBody(stored, {
+      contentId,
+      surface: 'course-player',
     });
   }
-  return { ...rest, bodyHtml };
+  const hasStoredText =
+    stored != null &&
+    (stored.contentBodyJson != null || Boolean(stored.contentBody));
+  return {
+    ...rest,
+    bodyHtml,
+    bodyUnavailable: hasStoredText && bodyHtml == null,
+  };
 }
 
 /**
