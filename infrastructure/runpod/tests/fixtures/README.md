@@ -1,5 +1,26 @@
 # Transcoding Test Fixtures
 
+## `contract/`: the webhook bodies the handler sends
+
+`contract/*.json` are the exact bodies the handler POSTs for a set of mocked
+jobs (sized and flat posters, audio, two failures, a progress tick). Two tests
+read them, so neither side can change the contract alone:
+
+- `tests/unit/test_contract_fixtures.py` fails when the handler's output
+  drifts from them;
+- `packages/validation/src/schemas/__tests__/transcoding-contract.test.ts`
+  parses them with the service's `runpodWebhookUnionSchema`.
+
+After an intended change, regenerate with
+`UPDATE_CONTRACT_FIXTURES=1 pytest tests/unit` (from `infrastructure/runpod`),
+then run the validation package's tests. Its turbo `test` task lists this
+directory as an input, so a changed fixture re-runs it.
+
+## Media files
+
+Only `unparseable.bin` is committed; `.gitignore` keeps `*.mp4`/`*.m4a` out,
+so regenerate the others locally with the commands below when you need them.
+
 Small synthetic media files for unit + integration tests. Checked in because
 real media uploads are too large for the repo and mocking ffmpeg at the
 subprocess level produces brittle tests that don't catch real-world corruption.

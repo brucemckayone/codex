@@ -696,8 +696,10 @@ export class TranscodingService extends BaseService {
         status: MEDIA_STATUS.READY,
         hlsMasterPlaylistKey: output.hlsMasterKey,
         hlsPreviewKey: output.hlsPreviewKey,
-        // Store 'lg' variant as canonical thumbnailKey
-        // (sm/md variants reconstructed via getMediaThumbnailKey helper)
+        // The 'lg' poster. Every other size sits beside it in the same
+        // folder (the web derives each from this key): sm/md/lg/xl in the
+        // sized layout `{w}x{h}-{nonce}/` a contract-2 job writes, sm/md/lg in
+        // the flat layout an older handler writes.
         thumbnailKey: output.thumbnailKey,
         waveformKey: output.waveformKey,
         waveformImageKey: output.waveformImageKey,
@@ -720,10 +722,8 @@ export class TranscodingService extends BaseService {
     );
     if (!applied) return;
 
-    // NOTE: thumbnailVariants (sm/md/lg) are NOT stored in DB - by design.
-    // Only thumbnailKey ('lg' variant) is persisted. The sm/md variants are
-    // reconstructed on-demand using getMediaThumbnailKey(creatorId, mediaId, size).
-    // This avoids schema changes and keeps the DB lean since paths are deterministic.
+    // thumbnailVariants is logged, not stored: every size is beside
+    // thumbnailKey, in the folder it names.
     this.obs.info('Transcoding completed successfully', {
       mediaId: media.id,
       jobId,

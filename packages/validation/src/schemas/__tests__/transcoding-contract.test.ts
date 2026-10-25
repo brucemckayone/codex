@@ -1,0 +1,86 @@
+/**
+ * The transcoding handler's webhook bodies, parsed with the schemas the
+ * service uses (Codex-l2c48.8).
+ *
+ * infrastructure/runpod/tests/fixtures/contract/*.json is what the Python
+ * handler POSTs; its own test (tests/unit/test_contract_fixtures.py) fails when
+ * the handler drifts from them. A body this side would refuse fails here, so
+ * neither side can change the contract alone.
+ */
+
+import { readdirSync, readFileSync } from 'node:fs';
+import { toJobErrorCode } from '@codex/constants';
+import { describe, expect, it } from 'vitest';
+import { readStillFolderName } from '../../image';
+import { runpodWebhookUnionSchema } from '../transcoding';
+
+const FIXTURES = new URL(
+  '../../../../../infrastructure/runpod/tests/fixtures/contract/',
+  import.meta.url
+);
+
+const NAMES = [
+  'completed-audio',
+  'completed-video-flat',
+  'completed-video-sized',
+  'failed-corrupt-input',
+  'failed-no-media-id',
+  'progress',
+] as const;
+
+function parse(name: (typeof NAMES)[number]) {
+  const body: unknown = JSON.parse(
+    readFileSync(new URL(`${name}.json`, FIXTURES), 'utf8')
+  );
+  return runpodWebhookUnionSchema.parse(body);
+}
+
+describe('transcoding handler contract fixtures', () => {
+  it('lists every fixture the handler writes', () => {
+    const files = readdirSync(FIXTURES)
+      .filter((file) => file.endsWith('.json'))
+      .map((file) => file.replace(/\.json$/, ''))
+      .sort();
+    expect(files).toEqual([...NAMES].sort());
+  });
+
+  it.each(NAMES)('%s parses', (name) => {
+    expect(() => parse(name)).not.toThrow();
+  });
+
+  it('names a sized poster folder by the picture as shown, with all four sizes', () => {
+    const body = parse('completed-video-sized');
+    if (body.status !== 'completed') throw new Error(body.status);
+    const key = body.output.thumbnailKey ?? '';
+    const folder = key.slice(0, key.lastIndexOf('/'));
+    const size = readStillFolderName(folder.slice(folder.lastIndexOf('/') + 1));
+    expect(size).toEqual({
+      width: body.output.width,
+      height: body.output.height,
+    });
+    expect(Object.keys(body.output.thumbnailVariants ?? {}).sort()).toEqual([
+      'lg',
+      'md',
+      'sm',
+      'xl',
+    ]);
+  });
+
+  it('keeps the flat layout without the sized folder or xl', () => {
+    const body = parse('completed-video-flat');
+    if (body.status !== 'completed') throw new Error(body.status);
+    expect(body.output.thumbnailVariants?.xl).toBeUndefined();
+    expect(body.output.thumbnailKey).toMatch(
+      /\/media-thumbnails\/[^/]+\/lg\.webp$/
+    );
+  });
+
+  it.each([
+    'failed-corrupt-input',
+    'failed-no-media-id',
+  ] as const)('%s carries a code the service keeps', (name) => {
+    const body = parse(name);
+    if (body.status !== 'failed') throw new Error(body.status);
+    expect(toJobErrorCode(body.errorCode)).toBe(body.errorCode);
+  });
+});

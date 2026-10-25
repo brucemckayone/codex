@@ -28,6 +28,7 @@ import json
 import math
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -59,7 +60,6 @@ FEATURES = {
     "mezzanine": _env_flag("ENABLE_MEZZANINE", default=False),
     "loudness_analysis": _env_flag("ENABLE_LOUDNESS_ANALYSIS", default=True),
     "waveform_image": _env_flag("ENABLE_WAVEFORM_IMAGE", default=True),
-    "thumbnail_variants": _env_flag("ENABLE_THUMBNAIL_VARIANTS", default=True),
     "video_preview": _env_flag("ENABLE_VIDEO_PREVIEW", default=True),
 }
 
@@ -181,8 +181,9 @@ class WebhookOutput(TypedDict):
     type: str  # 'video' | 'audio'
     hlsMasterKey: str | None
     hlsPreviewKey: str | None
-    thumbnailKey: str | None  # Points to 'lg' variant
-    thumbnailVariants: dict[str, str] | None  # {'sm': key, 'md': key, 'lg': key}
+    thumbnailKey: str | None  # The 'lg' poster
+    # sm/md/lg/xl in the sized layout (contract >= 2); sm/md/lg in the flat one
+    thumbnailVariants: dict[str, str] | None
     waveformKey: str | None
     waveformImageKey: str | None
     mezzanineKey: str | None
@@ -1297,47 +1298,55 @@ def extract_thumbnail(input_path: str, output_path: str, duration: int) -> None:
     run_ffmpeg(cmd, timeout=60, description="thumbnail extraction")
 
 
-# Allowed thumbnail sizes - must match THUMBNAIL_SIZES in @codex/validation
-# Canonical source: packages/validation/src/schemas/transcoding.ts
-ALLOWED_THUMBNAIL_SIZES: frozenset[str] = frozenset({"sm", "md", "lg"})
+# Poster sizes, by width: lossy libwebp, each at min(width, the picture's
+# width), so a small source is never upscaled. sm/md/lg/xl and their widths
+# match the web's still sizes (packages/validation THUMBNAIL_SIZES plus xl,
+# apps/web/src/lib/utils/image.ts).
+POSTER_SIZES: dict[str, dict[str, int]] = {
+    "sm": {"width": 200, "quality": 75, "compression": 6},
+    "md": {"width": 400, "quality": 80, "compression": 5},
+    "lg": {"width": 800, "quality": 82, "compression": 4},
+    "xl": {"width": 1600, "quality": 82, "compression": 4},
+}
+
+# The job-input contract from which posters go in the sized image layout
+# (TRANSCODING_JOB_CONTRACT in packages/constants/src/transcoding.ts). A job
+# without it comes from a service that reads only the flat layout
+# `media-thumbnails/{mediaId}/{sm,md,lg}.webp`, so it gets that.
+SIZED_POSTERS_CONTRACT = 2
+FLAT_POSTER_SIZES = ("sm", "md", "lg")
+
+
+def poster_folder_name(width: int, height: int) -> str:
+    """`{width}x{height}-{8 hex}`: the picture's upright size, which the web
+    reads from the name (STILL_FOLDER_NAME, packages/validation/src/image.ts),
+    and a nonce that keeps two uploads apart so every file caches forever."""
+    return f"{width}x{height}-{secrets.token_hex(4)}"
 
 
 def extract_thumbnail_variants(
     input_path: str,
     output_dir: str,
     duration: int,
-    requested_sizes: list[str] | None = None,
+    sizes: tuple[str, ...] | list[str],
 ) -> dict[str, str]:
-    """Extract thumbnail at 10% mark and generate WebP size variants.
+    """Extract a poster at the 10% mark in each of `sizes` (POSTER_SIZES keys).
 
-    When requested_sizes is None, produces all three (sm/md/lg). Pass
-    ['lg'] to produce only the canonical size — the others are unused
-    on the frontend today so callers can skip them via feature flag.
+    Pixels are squared first, as in every rung, so the poster has the shape
+    the picture is shown at.
     """
-    all_sizes = {
-        "sm": {"width": 200, "quality": 75, "compression": 6},
-        "md": {"width": 400, "quality": 80, "compression": 5},
-        "lg": {"width": 800, "quality": 82, "compression": 4},
-    }
+    unknown = [size for size in sizes if size not in POSTER_SIZES]
+    if unknown or not sizes:
+        raise ValueError(f"Invalid thumbnail sizes: {list(sizes)}")
 
-    if requested_sizes is None:
-        sizes = all_sizes
-    else:
-        sizes = {k: all_sizes[k] for k in requested_sizes if k in all_sizes}
-        if not sizes:
-            raise ValueError(f"No valid sizes in {requested_sizes}")
-
-    print(f"Extracting thumbnail variants ({'/'.join(sizes.keys())})...")
+    print(f"Extracting thumbnail variants ({'/'.join(sizes)})...")
 
     timestamp = max(1, int(duration * 0.1))
 
-    for size_name in sizes:
-        if size_name not in ALLOWED_THUMBNAIL_SIZES:
-            raise ValueError(f"Invalid thumbnail size: {size_name}")
-
     variants = {}
 
-    for size_name, config in sizes.items():
+    for size_name in sizes:
+        config = POSTER_SIZES[size_name]
         output_path = os.path.join(output_dir, f"thumbnail-{size_name}.webp")
 
         cmd = [
@@ -1350,7 +1359,8 @@ def extract_thumbnail_variants(
             "-vframes",
             "1",
             "-vf",
-            f"scale={config['width']}:-1",
+            "scale='trunc(iw*sar/2)*2':ih,setsar=1,"
+            f"scale='min({config['width']},iw)':-1",
             "-c:v",
             "libwebp",
             "-quality",
@@ -1685,14 +1695,28 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         thumbnail_key = None
         thumbnail_variants = None
         if media_type == "video" and duration > 0:
-            requested_sizes = None if FEATURES["thumbnail_variants"] else ["lg"]
+            # A job without a contract, or a picture whose size is unknown,
+            # keeps the flat layout an older service reads.
+            contract = job_input.get("contract")
+            sized = (
+                isinstance(contract, int)
+                and contract >= SIZED_POSTERS_CONTRACT
+                and bool(width)
+                and bool(height)
+            )
+            poster_prefix = f"{creator_id}/media-thumbnails/{media_id}/"
+            if sized:
+                poster_prefix += f"{poster_folder_name(width, height)}/"
             thumbnail_files = extract_thumbnail_variants(
-                input_path, work_dir, duration, requested_sizes=requested_sizes
+                input_path,
+                work_dir,
+                duration,
+                list(POSTER_SIZES) if sized else FLAT_POSTER_SIZES,
             )
 
             thumbnail_variants = {}
             for size_name, local_path in thumbnail_files.items():
-                r2_key = f"{creator_id}/media-thumbnails/{media_id}/{size_name}.webp"
+                r2_key = f"{poster_prefix}{size_name}.webp"
                 upload_file(
                     assets_client, assets_bucket_name, r2_key, local_path, "image/webp"
                 )

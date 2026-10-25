@@ -1,0 +1,71 @@
+"""Run the whole handler with every external effect mocked.
+
+ffprobe answers `probe`; every other command succeeds and writes nothing (the
+handler's output checks see a 5000-byte file); storage calls are mocks; each
+webhook POST is captured as parsed JSON.
+"""
+
+import json
+import subprocess
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+from handler import main as handler_module
+
+STORAGE_ENV = {
+    "WEBHOOK_SECRET": "secret-123",
+    "B2_ENDPOINT": "https://b2.example.com",
+    "B2_ACCESS_KEY_ID": "test-key",
+    "B2_SECRET_ACCESS_KEY": "test-secret",
+    "B2_BUCKET_NAME": "archive-bucket",
+    "R2_ENDPOINT": "https://r2.example.com",
+    "R2_ACCESS_KEY_ID": "r2-key",
+    "R2_SECRET_ACCESS_KEY": "r2-secret",
+    "R2_BUCKET_NAME": "media-bucket",
+    "ASSETS_BUCKET_NAME": "assets-bucket",
+}
+
+LOUDNESS_STDERR = '{"input_i": "-14.0", "input_tp": "-0.5", "input_lra": "5.0"}'
+
+
+def run_job(
+    job_input: dict[str, Any],
+    probe: dict[str, Any],
+    job_id: str = "job-1",
+    fail_on: str | None = None,
+    stderr: str = "",
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """(the handler's return value, every webhook body it POSTed in order).
+
+    A command containing `fail_on` exits 1 with `stderr`.
+    """
+
+    def run(cmd, **kwargs):
+        if fail_on is not None and fail_on in " ".join(cmd):
+            raise subprocess.CalledProcessError(1, cmd, stderr=stderr)
+        done = MagicMock(returncode=0, stdout="", stderr="")
+        if "ffprobe" in cmd:
+            done.stdout = json.dumps(probe)
+        elif "print_format=json" in " ".join(cmd):
+            done.stderr = LOUDNESS_STDERR
+        return done
+
+    posts: list[dict[str, Any]] = []
+
+    def post(url, data, **kwargs):
+        posts.append(json.loads(data))
+        return MagicMock(status_code=200)
+
+    with (
+        patch.dict("os.environ", STORAGE_ENV, clear=True),
+        patch("handler.main.create_s3_client"),
+        patch("handler.main.download_file"),
+        patch("handler.main.upload_file"),
+        patch("handler.main.upload_directory_tracked", return_value=[]),
+        patch("handler.main.check_gpu_available", return_value=False),
+        patch("subprocess.run", side_effect=run),
+        patch("os.path.getsize", return_value=5000),
+        patch("requests.post", side_effect=post),
+    ):
+        result = handler_module.handler({"id": job_id, "input": job_input})
+    return result, posts
