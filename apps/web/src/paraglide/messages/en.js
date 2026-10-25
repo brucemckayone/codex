@@ -17648,3 +17648,3075 @@ export const team_remove_preview_error_body_unnamed = () => `You can still remov
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const team_remove_preview_retry = () => `Try again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_nav_label = () => `Support`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_nav_refunds = () => `Refunds`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_nav_queue = () => `Queue`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_nav_queue_waiting = (params) => `${params.count} waiting`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refunds_title = () => `Refunds`
+
+
+/**
+ * @param {{ days: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refunds_description = (params) => `Find a charge to see how it was split and to refund it. Refunds can be made up to ${params.days} days after the payment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_placeholder = () => `Email, purchase or subscription ID, or Stripe ID`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_button = () => `Search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_clear = () => `Clear search`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_hint = () => `Buyer email, purchase or subscription ID, or a Stripe ID`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_too_short = () => `Type at least 3 characters.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_loading = () => `Searching…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_error_lead = () => `The search didn't run.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_error_body = () => `Try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_count_one = () => `1 charge`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_count_many = (params) => `${params.count} charges`
+
+
+/**
+ * @param {{ charges: NonNullable<unknown>, name: NonNullable<unknown>, matched: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_summary_for = (params) => `${params.charges} for ${params.name} · matched by ${params.matched} · newest first`
+
+
+/**
+ * @param {{ charges: NonNullable<unknown>, matched: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_search_summary = (params) => `${params.charges} · matched by ${params.matched} · newest first`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_matched_email = () => `buyer email`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_matched_uuid = () => `purchase or subscription ID`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_matched_subscription = () => `subscription ID`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_matched_payment = () => `payment ID`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_matched_charge = () => `charge ID`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_empty_title = () => `No charge found`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_empty_id = () => `Nothing on this platform matches that payment ID. Check it was copied in full, or search by the buyer's email.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_empty_email = () => `Nothing on this platform matches that email. Check the spelling, or search by a payment ID.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_empty_other = () => `Search by the buyer's exact email, a purchase or subscription ID, or a Stripe ID.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_results_label = () => `Charges found`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_no_charge_id = () => `Stripe names no charge for this payment, so it can't be refunded here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_pagination_label = () => `Pages of results`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_pagination_previous = () => `Previous`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_pagination_next = () => `Next`
+
+
+/**
+ * @param {{ page: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_pagination_status = (params) => `Page ${params.page} of ${params.total}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_paid = () => `Paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_charge = () => `Charge`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_buyer = () => `Buyer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_amount = () => `Amount`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_status = () => `Status`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_window = () => `Refund window`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_payee = () => `Payee`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_share = () => `Share`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_payout = () => `Payout`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_taken = () => `Taken back so far`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_made = () => `Made`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_reason = () => `Reason`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_by = () => `By`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_emailed = () => `Emailed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_opened = () => `Opened`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_bank_reason = () => `Bank's reason`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_failed = () => `Failed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_buyer_charge = () => `Buyer and charge`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_refund = () => `Refund`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_why_failed = () => `Why it failed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_taken_from_payees = () => `Taken from payees`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_actions = () => `Actions`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_recorded = () => `Recorded`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_who_owes = () => `Who owes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_owes = () => `Owes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_from = () => `From`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_col_why = () => `Why`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kind_purchase = () => `Purchase`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kind_subscription_invoice = () => `Subscription invoice`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kind_course_plan_invoice = () => `Course plan invoice`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_interval_month = () => `monthly`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_interval_year = () => `yearly`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_plan_interval_month = () => `monthly plan`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_plan_interval_year = () => `yearly plan`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_status_paid = () => `Paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_status_refunded = () => `Refunded`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refunded_note = (params) => `−${params.amount} refunded`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_inquiry = () => `Inquiry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_open = () => `Chargeback open`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_won = () => `Chargeback won`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_lost = () => `Chargeback lost`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_open = () => `Open`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_closed = () => `Closed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_open_long = () => `Window open`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_closed_long = (params) => `Window closed ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, left: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_closes = (params) => `Closes ${params.date} · ${params.left}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_closed_on = (params) => `Closed ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_days_left_one = () => `1 day left`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_days_left = (params) => `${params.count} days left`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_days_left_less = () => `less than a day left`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_deleted = () => `Deleted`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_back_to_results = () => `Back to results`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_charge_title = (params) => `${params.title} · ${params.amount}`
+
+
+/**
+ * @param {{ left: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_badge_open = (params) => `Refund window open · ${params.left}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_badge_closed = (params) => `Refund window closed ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_paid_at = (params) => `Paid ${params.date}`
+
+
+/**
+ * @param {{ brand: NonNullable<unknown>, last4: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_card = (params) => `${params.brand} ending ${params.last4}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_charge_card_title = () => `The charge`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kv_buyer = () => `Buyer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kv_subscriber = () => `Subscriber`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kv_item = () => `Item`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kv_plan = () => `Plan`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kv_period = () => `Period paid for`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kv_subscription = () => `Subscription`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kv_paid = () => `Paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kv_amount = () => `Amount`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kv_window = () => `Refund window`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_kv_stripe = () => `Stripe`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, refunded: NonNullable<unknown>, left: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_partial = (params) => `${params.amount} · ${params.refunded} refunded · ${params.left} left to refund`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_none = (params) => `${params.amount} · nothing refunded`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_amount_full = (params) => `${params.amount} · refunded in full`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, left: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_open_until = (params) => `Open until ${params.date} (${params.left})`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_window_closed_at = (params) => `Closed on ${params.date}`
+
+
+/**
+ * @param {{ start: NonNullable<unknown>, end: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_period_current = (params) => `${params.start} – ${params.end} · the current period's payment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_period_earlier = () => `An earlier period's payment`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_subscription_renews = (params) => `renews ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_subscription_active = () => `Active`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_subscription_cancelled = () => `Cancelled`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_subscription_past_due = () => `Past due`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_subscription_paused = () => `Paused`
+
+
+/**
+ * @param {{ status: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_subscription_other = (params) => `${params.status}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_copy_charge_id = () => `Copy the charge ID`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_copied = () => `Copied`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_item_unknown = () => `No item recorded`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_not_found_title = () => `No record of this charge`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_not_found_body = () => `This platform holds no record of that charge. It may belong to another environment, or not be ours at all.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_load_error_lead = () => `We couldn't load this charge.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_reload_error_lead = () => `We couldn't reload this charge.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_reload_error_body = () => `What's shown may be out of date. Try again before you refund it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_try_again = () => `Try again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_loading_charge = () => `Loading the charge…`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_split_title = (params) => `How the ${params.amount} was split`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_split_desc_purchase = () => `As recorded for this charge, one row per payee. Payouts reach a bank only after the 14-day window, so a refund in the window takes money back from the payee's Stripe balance or from a payout not yet made.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_split_desc_invoice = () => `Recorded for this invoice's charge. The subscription itself holds only the current price's split, so these rows are the record.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payee_platform_fee = () => `Platform fee`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payee_creator = () => `Creator`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payee_org_fee = (params) => `Organisation fee · paid to ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payee_org_fee_no_owner = () => `Organisation fee · no owner yet`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payee_creator_to_owner = (params) => `Creator's share · paid to ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payee_unknown = () => `Unknown payee`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_kept = () => `Kept by the platform`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_paid = () => `Paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_pending = () => `Pending`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_failed = () => `Failed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_reversed = () => `Reversed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_cancelled_by_refund = () => `Cancelled by a refund`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_cancelled_by_dispute = () => `Cancelled by a chargeback`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_reason_connect_not_ready = () => `Payout setup not finished`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_reason_connect_restricted = () => `Payout account restricted`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_reason_transfer_failed = () => `The transfer failed and is retried`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_reason_min_transfer_floor = () => `Waits until it reaches the smallest transfer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payout_reason_no_owner = () => `No owner to pay yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_taken_nothing = () => `Nothing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_taken_platform = () => `The platform bore its share`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_taken_reversed = () => `Transfer reversed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_taken_reduced = () => `Payout reduced before it's paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_taken_cancelled = () => `Payout cancelled before it's paid`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_owed = (params) => `${params.amount} owed`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, how: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_taken_line = (params) => `Taken back so far: ${params.amount} · ${params.how}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_taken_line_nothing = () => `Nothing taken back so far`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_total = () => `Total`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_show = () => `Show history`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_hide = () => `Hide history`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refunds_card_title = () => `Refunds on this charge`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refunds_none = () => `None yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refund_pending = () => `Pending`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refund_requires_action = () => `Waiting on the customer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refund_succeeded = () => `Succeeded`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refund_failed = () => `Failed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refund_canceled = () => `Cancelled`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_taking_back = () => `Taking back shares…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_emailed_not_yet = () => `Not yet`
+
+
+/**
+ * @param {{ by: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refund_by_emailed = (params) => `By ${params.by} · emailed ${params.date}`
+
+
+/**
+ * @param {{ by: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refund_by_not_emailed = (params) => `By ${params.by} · not emailed yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_by_dashboard = () => `Stripe Dashboard`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_by_platform = () => `The platform`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_reason_requested_by_customer = () => `Requested by customer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_reason_duplicate = () => `Duplicate`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_reason_fraudulent = () => `Fraudulent`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_reason_none = () => `No reason given`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_refresh = () => `Refresh`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargebacks_title = () => `Chargebacks`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargebacks_none = () => `None on this charge.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_dispute_needs_response = () => `Needs response`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_dispute_under_review = () => `Under review`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_dispute_warning_needs_response = () => `Inquiry: needs response`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_dispute_warning_under_review = () => `Inquiry under review`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_dispute_warning_closed = () => `Inquiry closed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_dispute_won = () => `Won`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_dispute_lost = () => `Lost`
+
+
+/**
+ * @param {{ status: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_dispute_other = (params) => `${params.status}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_respond_by = (params) => `Respond by ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_opened_on = (params) => `Opened ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_title = () => `Refund this charge`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, date: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_left = (params) => `${params.amount} is left to refund. The window closes on ${params.date} at ${params.time}.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, date: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_can = (params) => `${params.amount} can be refunded. The window closes on ${params.date} at ${params.time}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_how_much = () => `How much`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_part = () => `Part of it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_amount_label = () => `Amount to refund, in pounds`
+
+
+/**
+ * @param {{ max: NonNullable<unknown>, buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_part_hint_keeps = (params) => `Up to ${params.max}. ${params.buyer} keeps access.`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_part_hint_runs = (params) => `Up to ${params.max}. The subscription keeps running.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_part_keeps = (params) => `${params.buyer} keeps access.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_part_runs = () => `The subscription keeps running.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_all_left = (params) => `All that's left · ${params.amount}`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_all = (params) => `All of it · ${params.amount}`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_all_hint_loses = (params) => `Completes the refund of the charge. ${params.buyer} loses access.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_all_hint_cancels = () => `Cancels the subscription now.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_all_hint_runs = () => `The subscription keeps running: this isn't the current period's payment.`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_amount_invalid = (params) => `Enter an amount from £0.01 up to ${params.max}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_reason = () => `Reason`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_reason_help = () => `Stripe's reasons: requested by customer, duplicate, or fraudulent. Fraudulent also adds the card and email to Stripe's block lists.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_inquiry = () => `The buyer's bank has asked about this charge (an inquiry). A full refund resolves it; after a part refund it can still become a chargeback.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_review = (params) => `Review refund of ${params.amount}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_review_idle = () => `Review refund`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_heading = (params) => `What ${params.amount} takes back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_choose = () => `Choose how much to refund to see what it takes back.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_loading = (params) => `Working out what ${params.amount} takes back…`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_error = (params) => `We couldn't work out what ${params.amount} takes back. Reload the charge, then try again.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, payees: NonNullable<unknown>, platform: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_announce = (params) => `Refund ${params.amount}: payees give back ${params.payees}, the platform bears ${params.platform}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_rounding = () => `Rounding`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_total = () => `Refund`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_payees = () => `Payees give back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_platform = () => `The platform bears`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_fee = () => `Stripe's fee, not returned`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_fee_unknown = () => `Not known`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_debt_one = (params) => `If ${params.name}'s Stripe balance is too low, the reversal goes to the support queue as a creator debt.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_debt_many = () => `If a payee's Stripe balance is too low, their reversal goes to the support queue as a creator debt.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_keeps_lead = (params) => `${params.buyer} keeps access`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_keeps_body = (params) => `to ${params.title}. A part refund doesn't end access.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_loses_lead = (params) => `${params.buyer} loses access`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_loses_body = (params) => `to ${params.title}. A full refund ends access.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_cancelled_lead = (params) => `${params.buyer} loses access.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_cancelled_body = (params) => `This is the payment for the current period, so a full refund cancels ${params.buyer}'s ${params.title} subscription now. A part refund, or a full refund of an earlier period's payment, leaves it running.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_runs_lead = (params) => `${params.buyer}'s subscription keeps running.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_runs_body = (params) => `A part refund, or a full refund of an earlier period's payment, doesn't cancel ${params.title}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_lead = () => `This charge can't be refunded here.`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_window = (params) => `The 14-day refund window closed on ${params.date} at ${params.time}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_window_unknown = () => `The 14-day refund window has closed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_chargeback_open_lead = () => `This charge has an open chargeback, so it can't be refunded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_chargeback_lost_lead = () => `This charge has a lost chargeback, so it can't be refunded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_chargeback_body = () => `Stripe doesn't refund a charged-back payment. The chargeback decides the money; answer it in the Stripe Dashboard.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_blocked_nothing = () => `Nothing is left to refund on this charge.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_title = (params) => `Refund ${params.amount} to ${params.buyer}?`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_line_reversal = (params) => `${params.name} gives back, by transfer reversal`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_line_reduce = (params) => `${params.name}'s unpaid payout drops by`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_line_cancel = (params) => `${params.name}'s unpaid payout is cancelled`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_line_repay = (params) => `${params.name}'s re-pay payout drops by`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_line_person = (params) => `${params.name}'s share needs a person`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_line_platform = () => `The platform bears`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_keeps = (params) => `${params.buyer} keeps access and is emailed once Stripe confirms the refund. A refund can't be undone.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_loses = (params) => `${params.buyer} loses access to ${params.title} and is emailed once Stripe confirms the refund. A refund can't be undone.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_cancelled = (params) => `${params.buyer}'s ${params.title} subscription is cancelled now, and ${params.buyer} is emailed once Stripe confirms the refund. A refund can't be undone.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_runs = (params) => `${params.buyer}'s ${params.title} subscription keeps running, and ${params.buyer} is emailed once Stripe confirms the refund. A refund can't be undone.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_cancel = () => `Cancel`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_confirm_submit = (params) => `Refund ${params.amount}`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_pending_lead = (params) => `Refund of ${params.amount} requested.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_pending_body = (params) => `Stripe is still processing it (pending). The clawback, ${params.buyer}'s email and any change to access happen when Stripe confirms it.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_succeeded_lead = (params) => `Refunded ${params.amount} to ${params.buyer}.`
+
+
+/**
+ * @param {{ names: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_succeeded_named = (params) => `Stripe confirmed it. ${params.names} shares are taken back when Stripe's refund event arrives, usually within a minute.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_succeeded_body = () => `Stripe confirmed it. The payees' shares are taken back when Stripe's refund event arrives, usually within a minute.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_access_keeps = (params) => `${params.buyer} keeps access.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_access_loses = (params) => `${params.buyer} loses access to ${params.title}.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_access_cancelled = (params) => `${params.buyer}'s ${params.title} subscription is cancelled.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_access_runs = (params) => `${params.buyer}'s ${params.title} subscription keeps running.`
+
+
+/**
+ * @param {{ status: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_stopped_lead = (params) => `Stripe recorded the refund as ${params.status}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_stopped_body = () => `Nothing was refunded. A failed refund waits in the Queue for a person to decide.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_replayed_lead = () => `This refund was already made.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, date: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_replayed_by = (params) => `${params.amount} was refunded on ${params.date} by ${params.name}. Nothing new was refunded.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_replayed = (params) => `${params.amount} was refunded on ${params.date}. Nothing new was refunded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_changed_lead = () => `This charge changed since you opened it.`
+
+
+/**
+ * @param {{ who: NonNullable<unknown>, amount: NonNullable<unknown>, time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_changed_who = (params) => `${params.who} refunded ${params.amount} at ${params.time}.`
+
+
+/**
+ * @param {{ left: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_changed_left = (params) => `${params.left} is now left to refund. Check the new amounts, then try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_changed_loading = () => `Reloading it now. Check the new amounts, then try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_refused_lead = () => `Stripe refused the refund.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_refused_disputed = (params) => `${params.buyer} has disputed this charge with their bank since you opened it, and Stripe doesn't refund a charged-back payment. Nothing was refunded and nothing changed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_refused_other = () => `Nothing was refunded and nothing changed. Stripe's code is below.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_submitted_lead = () => `This refund was already submitted.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_submitted_body = () => `The same amount went to Stripe a moment ago, perhaps with another reason, and is still being answered. Reload the charge to see it before you try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_chargeback_lead = () => `This charge has a chargeback, so it can't be refunded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_nothing_body = () => `Someone refunded the rest since you opened it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_too_large_lead = () => `That's more than is left to refund.`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_too_large_body = (params) => `${params.max} is left. Check the new amounts, then try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_too_large_unknown = () => `Check the new amounts, then try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_failed_lead = () => `The refund couldn't be sent.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_failed_body = () => `Something went wrong before Stripe answered. Reload the charge before you try again: trying again never makes a second refund of the same amount.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_reload_charge = () => `Reload the charge`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_title = () => `Queue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_description = () => `Money the automatic refund path couldn't settle. Oldest first. Each one needs a person to decide.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_tabs_label = () => `Queue sections`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_tab_failed = () => `Failed refunds`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_tab_debts = () => `Creator debts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_failed_intro = () => `The buyer's bank sent these refunds back, so the money is in the platform's Stripe balance again. The payees' shares stay taken back until you decide.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_debts_intro = () => `A refund or chargeback that couldn't take a payee's share back automatically. The buyer has their money; the platform paid it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_failed_empty_title = () => `No failed refunds`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_failed_empty_body = () => `When a buyer's bank sends a refund back, it waits here for a person to decide.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_debts_empty_title = () => `No creator debts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_debts_empty_body = () => `When a refund or chargeback can't take a payee's share back, it waits here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_load_error_lead = () => `We couldn't load this list.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_queue_loading = () => `Loading the queue…`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_charge_purchase = (params) => `${params.title} · ${params.amount}`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_charge_invoice = (params) => `${params.title} invoice · ${params.amount}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_part = (params) => `Part · made ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_part_by = (params) => `Part · made ${params.date} by ${params.name}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_full = (params) => `Full · made ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_full_by = (params) => `Full · made ${params.date} by ${params.name}`
+
+
+/**
+ * @param {{ made: NonNullable<unknown>, failed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_phone_part = (params) => `Part refund made ${params.made} · failed ${params.failed}`
+
+
+/**
+ * @param {{ made: NonNullable<unknown>, failed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_phone_full = (params) => `Full refund made ${params.made} · failed ${params.failed}`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_taken_line = (params) => `Taken from payees: ${params.amount}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_unknown_buyer = () => `Unknown buyer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_unknown_item = () => `Unknown item`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_action_elsewhere = () => `Refunded another way`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_action_repay = () => `Re-pay payees`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_action_settle = () => `Settle`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_role_creator = () => `Creator`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_role_owner = () => `Organisation owner`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_from_refund = (params) => `${params.buyer} · refund of ${params.amount}`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_from_refund_plain = (params) => `${params.buyer} · a refund`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown>, status: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_from_chargeback = (params) => `${params.buyer} · chargeback, ${params.status}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_closes_if_won = () => `Closes by itself if the chargeback is won`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_owes = (params) => `${params.name} owes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_unnamed = () => `An organisation with no owner yet`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_title = (params) => `How ${params.name}'s share of ${params.title} was taken back`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_title_plain = (params) => `How ${params.name}'s share was taken back`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_cause_refund = (params) => `Refund of ${params.amount}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_cause_refund_plain = () => `Refund`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_cause_dispute = (params) => `Chargeback of ${params.amount}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_cause_dispute_plain = () => `Chargeback`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_taken = () => `Taken`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_taken_from_repay = () => `Taken from the re-pay payout`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_owed = () => `Owed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_this_debt = () => `Owed · this debt`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_paid_back = () => `Paid back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_not_taken = () => `Not taken`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_in_progress = () => `In progress`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_retrying = () => `Retrying`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_refused = () => `Refused`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_taken_refund = () => `Taken back from this share.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_taken_dispute = () => `Taken back while the chargeback was open.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_taken_from_repay = () => `Taken from the payout that paid this share back, before it went out.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_owed = () => `There was nothing left to take it from, so it is owed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_paid_back = () => `Taken back, then paid back by a new payout.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_not_taken = () => `Never taken: the chargeback was won before it ran.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_in_progress = () => `Recorded, and not taken yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_retrying = () => `Stripe refused it; it is tried again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_what_refused = () => `Stripe refused it on every try. A person decides.`
+
+
+/**
+ * @param {{ resolution: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_settled = (params) => `Settled: ${params.resolution}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_resolution_creator_absorbed = () => `the payee paid it back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_resolution_platform_absorbed = () => `the platform absorbed it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_resolution_manually_reversed = () => `reversed by hand in Stripe`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_resolution_dispute_won = () => `the chargeback was won`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_resolution_refund_failed = () => `the refund failed`
+
+
+/**
+ * @param {{ resolution: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_resolution_other = (params) => `${params.resolution}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_note_label = () => `Note for the record`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_note_required = () => `Required.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_note_optional = () => `Optional.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_note_missing = () => `Write a note for the record first.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_elsewhere_title = (params) => `Mark ${params.buyer}'s refund as made another way?`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown>, title: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_elsewhere_description = (params) => `Refund of ${params.amount} for ${params.title}, failed ${params.date}`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown>, amount: NonNullable<unknown>, taken: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_elsewhere_body = (params) => `Use this once ${params.buyer} has the ${params.amount} back outside Stripe, for example by bank transfer. The payees' ${params.taken} stays taken back. ${params.buyer} isn't emailed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_elsewhere_submit = () => `Mark as refunded`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_title = (params) => `Re-pay the payees for ${params.buyer}'s refund?`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_description = (params) => `${params.buyer} won't be refunded. The payees get back what this refund took.`
+
+
+/**
+ * @param {{ taken: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_body = (params) => `The payees get back the ${params.taken} this refund took from them, as new payouts. The next payout run pays them, like any other. The platform fee's share stays with the platform.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_access_lead = (params) => `${params.buyer} gets access back`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_access_body = (params) => `to ${params.title}, which the full refund had ended.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_subscription = () => `A subscription this refund cancelled stays cancelled.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_submit = (params) => `Re-pay ${params.amount}`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_title = (params) => `Settle ${params.name}'s ${params.amount} debt`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_what_happened = () => `What happened`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_option_creator_absorbed = (params) => `${params.name} has paid it back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_option_creator_absorbed_hint = () => `For example from a later payout, or by bank transfer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_option_platform_absorbed = () => `The platform absorbs it`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_option_platform_absorbed_hint = (params) => `${params.name} keeps the ${params.amount}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_option_platform_absorbed_dispute = (params) => `If the chargeback is won, nothing is paid back to ${params.name} for this.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_option_manually_reversed = () => `Reversed by hand in Stripe`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_option_manually_reversed_hint = () => `You reversed the transfer yourself in the Stripe Dashboard.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_choose = () => `Choose what happened first.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_debt_submit = () => `Settle debt`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_already = () => `This was already settled another way. The list is up to date now.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_gone = () => `This is no longer in the queue. The list is up to date now.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_clawback_running = () => `This refund's clawback is still running. Try again later.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_failed = () => `It couldn't be settled, and nothing changed. Try again.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_elsewhere = (params) => `${params.buyer}'s refund is marked as made another way.`
+
+
+/**
+ * @param {{ list: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_repaid = (params) => `The payees are re-paid: ${params.list}. The next payout run pays them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_repaid_none = () => `Settled. Nothing was left to re-pay.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_access = (params) => `${params.buyer} has access to ${params.title} again.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, resolution: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_debt = (params) => `${params.name}'s debt is settled: ${params.resolution}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_word_open = () => `open`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_word_won = () => `won`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_word_lost = () => `lost`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_chargeback_word_inquiry = () => `an inquiry`

@@ -84,7 +84,8 @@ export type RailIcon =
   | 'tag'
   | 'library'
   | 'search'
-  | 'users';
+  | 'users'
+  | 'life-buoy';
 
 interface RailNavLink extends NavLink {
   icon: RailIcon;

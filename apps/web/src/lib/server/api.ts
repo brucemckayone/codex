@@ -18,14 +18,23 @@ import type {
 } from '@codex/access';
 import type {
   ActivityFeedResponse,
+  ChargeDetail,
+  ChargeSummary,
   ContentPerformanceItem,
+  CreatorDebtItem,
   CreatorRevenueSplitItem,
   CustomerDetails,
   CustomerListItem,
   DashboardStats,
+  FailedRefundItem,
   FollowerStats,
+  RefundPreview,
+  ResolvedCreatorDebt,
+  ResolvedFailedRefund,
   RevenueStats,
   SubscriberStats,
+  SupportQueueCounts,
+  SupportRefundResult,
   TopContentItem,
 } from '@codex/admin';
 import type {
@@ -87,6 +96,11 @@ import type {
   CreateTierInput,
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
+  SupportChargeSearchQuery,
+  SupportIssueRefundInput,
+  SupportQueueQuery,
+  SupportResolveCreatorDebtInput,
+  SupportResolveFailedRefundInput,
   UpdateBrandingInput,
   UpdateCategoryInput,
   UpdateContactInput,
@@ -2796,6 +2810,102 @@ export function createServerApi(
             organizationId
           ),
           { method: 'DELETE' }
+        ),
+    },
+
+    /**
+     * Support refunds (admin-api, `platform_owner` only; Codex-2hxff.28).
+     * The /admin pages: find a charge, refund it, settle the queue. Nothing
+     * here is cached on either side: every number moves with a refund, a
+     * webhook or a payout run. Amounts are pence; the currency is GBP.
+     */
+    support: {
+      /**
+       * Charges found by an exact key: an email, a purchase or subscription
+       * id, or a Stripe `sub_`, `pi_`, `ch_` or `py_` id. `q` travels in the
+       * query string; `request()` logs the path without it.
+       */
+      searchCharges: ({ q, page, limit }: SupportChargeSearchQuery) =>
+        request<PaginatedListResponse<ChargeSummary>>(
+          'admin',
+          `/api/admin/support/charges?${new URLSearchParams({
+            q,
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** The charge, its split and history, its refunds and chargebacks: one answer. */
+      getCharge: (chargeId: string) =>
+        request<ChargeDetail>(
+          'admin',
+          `/api/admin/support/charges/${encodeURIComponent(chargeId)}`
+        ),
+
+      /** What refunding `amountCents` would take from each slice. Writes nothing. */
+      previewRefund: (chargeId: string, amountCents: number) =>
+        request<RefundPreview>(
+          'admin',
+          `/api/admin/support/charges/${encodeURIComponent(chargeId)}/refund-preview?${new URLSearchParams(
+            { amountCents: String(amountCents) }
+          )}`
+        ),
+
+      /**
+       * Refund the charge. A repeat of the same decision answers
+       * `replayed: true` and makes no second refund.
+       */
+      issueRefund: (chargeId: string, body: SupportIssueRefundInput) =>
+        request<SupportRefundResult>(
+          'admin',
+          `/api/admin/support/charges/${encodeURIComponent(chargeId)}/refunds`,
+          { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /** The queue's two counts, for the nav badge. */
+      getQueueCounts: () =>
+        request<SupportQueueCounts>('admin', '/api/admin/support/queue/counts'),
+
+      /** Failed refunds waiting for a person, oldest first. */
+      listFailedRefunds: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<FailedRefundItem>>(
+          'admin',
+          `/api/admin/support/queue/failed-refunds?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** Creator debts waiting for a person, oldest first. */
+      listCreatorDebts: ({ page, limit }: SupportQueueQuery) =>
+        request<PaginatedListResponse<CreatorDebtItem>>(
+          'admin',
+          `/api/admin/support/queue/creator-debts?${new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          })}`
+        ),
+
+      /** Settle a failed refund (`refundId` is our row's uuid, not Stripe's `re_`). */
+      resolveFailedRefund: (
+        refundId: string,
+        body: SupportResolveFailedRefundInput
+      ) =>
+        request<ResolvedFailedRefund>(
+          'admin',
+          `/api/admin/support/refunds/${encodeURIComponent(refundId)}/resolve`,
+          { method: 'POST', body: JSON.stringify(body) }
+        ),
+
+      /** Settle a creator debt. `dispute_won` is never accepted. */
+      resolveCreatorDebt: (
+        reviewId: string,
+        body: SupportResolveCreatorDebtInput
+      ) =>
+        request<ResolvedCreatorDebt>(
+          'admin',
+          `/api/admin/support/creator-debts/${encodeURIComponent(reviewId)}/resolve`,
+          { method: 'POST', body: JSON.stringify(body) }
         ),
     },
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { AUTH_ROLES } from '@codex/constants';
 	import type { LayoutUser } from '$lib/types';
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
@@ -9,6 +10,7 @@
 	import { getInitials } from '$lib/utils/format';
 	import { submitFormPost } from '$lib/utils/navigation';
 	import {
+		LifeBuoyIcon,
 		LogInIcon,
 		TagIcon,
 		UsersIcon,
@@ -46,6 +48,9 @@
 	});
 
 	const studioAccess = useStudioAccess(() => ({ user, url: page.url }));
+	const showSupport = $derived(
+		variant === 'platform' && user?.role === AUTH_ROLES.PLATFORM_OWNER
+	);
 
 	// ── Close on route change ─────────────────────────────────
 	// Track pathname separately to avoid closing when `open` toggles
@@ -187,6 +192,15 @@
 					<UserIcon size={20} />
 					<span>{m.nav_account()}</span>
 				</a>
+				<!-- Platform support (/admin), for the platform owner only: the
+				     phone's place for the rail's Support item, so the bottom
+				     bar doesn't change. -->
+				{#if showSupport}
+					<a href="/admin" class="sheet__link">
+						<LifeBuoyIcon size={20} />
+						<span>{m.support_nav_label()}</span>
+					</a>
+				{/if}
 				<button class="sheet__link sheet__link--danger" onclick={() => submitFormPost('/logout')}>
 					<LogInIcon size={20} />
 					<span>{m.nav_log_out()}</span>
