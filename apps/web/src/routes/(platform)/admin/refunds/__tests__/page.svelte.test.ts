@@ -69,7 +69,7 @@ const EMAIL = 'ellie.marsh@example.com';
 
 describe('searching', () => {
   test('a rejected search shows the error, not "No charge found"', () => {
-    mountAt(`/admin/refunds?q=${encodeURIComponent(EMAIL)}`);
+    mountAt(`/admin/refunds?lookup=${encodeURIComponent(EMAIL)}`);
     searchSlot(EMAIL).error = httpError(500, 'An unexpected error occurred');
     flushSync();
 
@@ -84,7 +84,7 @@ describe('searching', () => {
   });
 
   test('a search the guard refused (a 404, no code) says the session ended', () => {
-    mountAt(`/admin/refunds?q=${encodeURIComponent(EMAIL)}`);
+    mountAt(`/admin/refunds?lookup=${encodeURIComponent(EMAIL)}`);
     searchSlot(EMAIL).error = httpError(404, 'Not Found');
     flushSync();
     expect(
@@ -95,14 +95,14 @@ describe('searching', () => {
   });
 
   test('while it runs: skeleton rows, and neither an error nor the empty state', () => {
-    mountAt(`/admin/refunds?q=${encodeURIComponent(EMAIL)}`);
+    mountAt(`/admin/refunds?lookup=${encodeURIComponent(EMAIL)}`);
     expect(document.querySelector('[aria-busy="true"]')).not.toBeNull();
     expect(text()).not.toContain(m.support_empty_title());
     expect(document.querySelector('[data-testid="search-error"]')).toBeNull();
   });
 
   test('a search that found nothing: "No charge found", in words for an email', () => {
-    mountAt(`/admin/refunds?q=${encodeURIComponent(EMAIL)}`);
+    mountAt(`/admin/refunds?lookup=${encodeURIComponent(EMAIL)}`);
     searchSlot(EMAIL).current = list([]);
     flushSync();
     expect(text()).toContain(m.support_empty_title());
@@ -110,11 +110,11 @@ describe('searching', () => {
   });
 
   test('results: the charges, and who they are for', () => {
-    mountAt(`/admin/refunds?q=${encodeURIComponent(EMAIL)}`);
+    mountAt(`/admin/refunds?lookup=${encodeURIComponent(EMAIL)}`);
     searchSlot(EMAIL).current = list([chargeSummary()]);
     flushSync();
     expect(searchSupportCharges).toHaveBeenCalledWith({
-      q: EMAIL,
+      lookup: EMAIL,
       page: 1,
       limit: 20,
     });
@@ -131,7 +131,7 @@ describe('searching', () => {
   });
 
   test('no search before 3 characters, and no query at all without one', () => {
-    mountAt('/admin/refunds?q=el');
+    mountAt('/admin/refunds?lookup=el');
     expect(searchSupportCharges).not.toHaveBeenCalled();
     expect(text()).toContain(m.support_search_too_short());
     unmount(component as ReturnType<typeof mount>);
@@ -154,7 +154,7 @@ describe('searching', () => {
       .find((b) => b.textContent?.includes(m.support_search_button()))
       ?.click();
     expect(navigation.goto).toHaveBeenCalledWith(
-      '/admin/refunds?q=pi_3QzZ9KQ2eZvKYlo21x',
+      '/admin/refunds?lookup=pi_3QzZ9KQ2eZvKYlo21x',
       {
         keepFocus: true,
       }

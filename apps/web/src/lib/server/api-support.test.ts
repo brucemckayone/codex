@@ -62,12 +62,12 @@ describe('api.support', () => {
       pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
     });
     const result = await support().searchCharges({
-      q: 'ellie@example.com',
+      lookup: 'ellie@example.com',
       page: 2,
       limit: 20,
     });
     expect(path(calls[0])).toBe(
-      '/api/admin/support/charges?q=ellie%40example.com&page=2&limit=20'
+      '/api/admin/support/charges?lookup=ellie%40example.com&page=2&limit=20'
     );
     expect(calls[0].method).toBe('GET');
     expect(result).toEqual({

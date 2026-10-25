@@ -136,11 +136,18 @@ export class ChargeChangedError extends PreconditionFailedError {
  * for this charge, count and amount (silent F1). No refund was made: the
  * charge's list was read again and holds none with this key. Another amount
  * makes another key.
+ *
+ * The text says to reload the charge FIRST (review round 3 LOW-G). Stripe
+ * doesn't document whether a request with other parameters (another
+ * `reason`, another person), sent while the first is still running, gets a
+ * 409 or a 400 `idempotency_error`. If it is a 400, the first refund may
+ * still land, and a new amount or the Dashboard would then refund the buyer
+ * twice. A reload shows it if it did.
  */
 export class RefundKeySpentError extends ConflictError {
   constructor() {
     super(
-      'This exact refund was refused or failed in the last 24 hours. Change the amount, or use the Stripe Dashboard.',
+      'Reload the charge first: a refund for this amount may still be landing. If none shows, this exact refund was refused or failed in the last 24 hours: change the amount, or use the Stripe Dashboard.',
       { code: 'REFUND_KEY_SPENT' }
     );
   }

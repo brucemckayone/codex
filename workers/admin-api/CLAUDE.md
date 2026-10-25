@@ -19,7 +19,7 @@ Platform support's refund screen and queue (the `/admin` pages in apps/web). Des
 
 | # | Method | Path | Input (`@codex/validation`) | Response |
 |---|---|---|---|---|
-| 1 | GET | `/api/admin/support/charges` | query `supportChargeSearchQuerySchema` (`q` matched exactly: email, purchase or subscription id, `sub_`/`pi_`/`ch_`/`py_`; limit ≤ 50) | `{ items: ChargeSummary[], pagination }` |
+| 1 | GET | `/api/admin/support/charges` | query `supportChargeSearchQuerySchema` (`lookup` matched exactly, never free text: email, purchase or subscription id, `sub_`/`pi_`/`ch_`/`py_`; limit ≤ 50) | `{ items: ChargeSummary[], pagination }` |
 | 2 | GET | `/api/admin/support/charges/:chargeId` | params `supportChargeParamsSchema` | `{ data: ChargeDetail }` |
 | 3 | GET | `/api/admin/support/charges/:chargeId/refund-preview` | + query `supportRefundPreviewQuerySchema` (`amountCents`) | `{ data: RefundPreview }` |
 | 4 | POST | `/api/admin/support/charges/:chargeId/refunds` | body `supportIssueRefundSchema` (`amountCents`, `reason`, `expectedRefundCount`) | **200** `{ data: { refund, replayed } }` |

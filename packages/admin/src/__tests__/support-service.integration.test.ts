@@ -888,6 +888,10 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         stripeCode: 'charge_disputed',
       });
       expect(again.context).toEqual({ code: 'REFUND_KEY_SPENT' });
+      // The first refund may still be landing (LOW-G): reload before anything else.
+      expect(again.message).toMatch(
+        /^Reload the charge first: a refund for this amount may still be landing\./
+      );
     });
 
     it('the same submit after a Stripe 500 gets that 500 replayed: REFUND_KEY_SPENT, not "try again" (F1)', async () => {
@@ -1340,7 +1344,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       });
 
       const result = await service.searchCharges({
-        q: buyerEmail.toUpperCase(),
+        lookup: buyerEmail.toUpperCase(),
         page: 1,
         limit: 50,
       });
@@ -1375,17 +1379,17 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       const invoice = await invoiceCharge();
 
       const byPurchase = await service.searchCharges({
-        q: bought.purchase.id,
+        lookup: bought.purchase.id,
         page: 1,
         limit: 20,
       });
       const byCharge = await service.searchCharges({
-        q: invoice.chargeId,
+        lookup: invoice.chargeId,
         page: 1,
         limit: 20,
       });
       const bySubscription = await service.searchCharges({
-        q: invoice.subscription.stripeSubscriptionId,
+        lookup: invoice.subscription.stripeSubscriptionId,
         page: 1,
         limit: 20,
       });
@@ -1403,7 +1407,7 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
 
     it('anything else finds nothing, and asks Stripe nothing', async () => {
       const result = await service.searchCharges({
-        q: 'no such thing',
+        lookup: 'no such thing',
         page: 1,
         limit: 20,
       });
@@ -1989,6 +1993,126 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         isFull: true,
       });
       expect(settled.settled.accessRestored).toBe(true);
+    });
+
+    it("predicts by the settle's own routes: a refund naming no purchase, on a charge only Stripe ties to one (D8), would give access back, and does (LOW-H)", async () => {
+      const charge = await purchaseCharge();
+      // No slice, refund or dispute of ours names the charge's purchase, so
+      // only its PaymentIntent does: the slices were never recorded, and the
+      // refund was recorded before its purchase.
+      await db
+        .delete(payouts)
+        .where(eq(payouts.purchaseId, charge.purchase.id));
+      const failed = takeFirst(
+        await db
+          .insert(refunds)
+          .values({
+            stripeRefundId: `re_sup${uid()}`,
+            stripeChargeId: charge.chargeId,
+            amountCents: 1000,
+            currency: 'gbp',
+            status: 'failed',
+            failureReason: 'expired_or_canceled_card',
+            stripeCreatedAt: new Date(),
+          })
+          .returning()
+      );
+      created.stripeRefundIds.push(failed.stripeRefundId);
+      fake.refundsByCharge.set(charge.chargeId, [
+        {
+          id: failed.stripeRefundId,
+          object: 'refund',
+          amount: 1000,
+          charge: charge.chargeId,
+          currency: 'gbp',
+          status: 'failed',
+          reason: 'requested_by_customer',
+          failure_reason: 'expired_or_canceled_card',
+          created: nowSeconds() - 120,
+          metadata: {},
+        } as unknown as Stripe.Refund,
+      ]);
+      await endAccess(charge);
+
+      const list = await service.listFailedRefunds({ page: 1, limit: 50 });
+      const settled = await service.resolveFailedRefund(
+        failed.id,
+        { resolution: 'creators_repaid', note: 'Buyer keeps the item' },
+        supportId
+      );
+      for (const row of settled.settled.repaid) {
+        created.payoutIds.push(row.payoutId);
+      }
+
+      expect(
+        list.items.find((row) => row.refundId === failed.id)
+      ).toMatchObject({
+        kind: 'purchase',
+        isFull: true,
+        accessRestoreBlockedReason: null,
+      });
+      expect(settled.settled.accessRestored).toBe(true);
+    });
+
+    it("a charge Stripe can't serve makes that row's prediction unknown, never a promise; the page and the other rows are intact", async () => {
+      const intact = await purchaseCharge();
+      const onIntact = await failedRefund(intact, 1000);
+      await endAccess(intact);
+      // Only Stripe ties this charge to its purchase, and Stripe is failing.
+      const broken = await purchaseCharge();
+      await db
+        .delete(payouts)
+        .where(eq(payouts.purchaseId, broken.purchase.id));
+      const onBroken = takeFirst(
+        await db
+          .insert(refunds)
+          .values({
+            stripeRefundId: `re_sup${uid()}`,
+            stripeChargeId: broken.chargeId,
+            amountCents: 1000,
+            currency: 'gbp',
+            status: 'failed',
+            failureReason: 'expired_or_canceled_card',
+            stripeCreatedAt: new Date(),
+          })
+          .returning()
+      );
+      created.stripeRefundIds.push(onBroken.stripeRefundId);
+      await endAccess(broken);
+      const retrieve = vi.mocked(fake.stripe.charges.retrieve);
+      const served = retrieve.getMockImplementation();
+      retrieve.mockImplementation((async (id: string, ...rest: unknown[]) => {
+        if (id === broken.chargeId) {
+          throw Object.assign(new Error('Stripe is unavailable'), {
+            type: 'StripeAPIError',
+            statusCode: 500,
+            requestId: 'req_supdown',
+          });
+        }
+        return (served as (...a: unknown[]) => unknown)(id, ...rest);
+      }) as never);
+
+      const list = await service.listFailedRefunds({ page: 1, limit: 50 });
+      const itemOf = (refundId: string) =>
+        list.items.find((row) => row.refundId === refundId);
+
+      expect(itemOf(onBroken.id)).toMatchObject({
+        accessRestoreBlockedReason: 'unknown',
+        isFull: null,
+      });
+      expect(itemOf(onIntact.id)).toMatchObject({
+        kind: 'purchase',
+        isFull: true,
+        accessRestoreBlockedReason: null,
+      });
+      expect(serviceLog().warn).toHaveBeenCalledWith(
+        "A failed refund's charge could not be read: its access prediction is unknown",
+        {
+          chargeId: broken.chargeId,
+          stripeRequestId: 'req_supdown',
+          statusCode: 500,
+        }
+      );
     });
 
     it('a note is required to re-pay the payees', () => {

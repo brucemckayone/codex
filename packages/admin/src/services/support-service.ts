@@ -128,7 +128,7 @@ import {
   StripeRefusedRefundError,
 } from '../errors';
 import type {
-  AccessNotRestoredReason,
+  AccessRestorePrediction,
   ChargebackRow,
   ChargeDetail,
   ChargeDetailSource,
@@ -425,7 +425,7 @@ export class SupportService extends BaseService {
   ): Promise<PaginatedListResponse<ChargeSummary>> {
     try {
       const { page, limit } = query;
-      const scope = await this.searchScope(query.q);
+      const scope = await this.searchScope(query.lookup);
       if (!scope) return pageOf([], 0, page, limit);
 
       const charges = this.purchaseCharges(scope.purchases)
@@ -482,18 +482,18 @@ export class SupportService extends BaseService {
   }
 
   /**
-   * Which purchases and which invoice charges `q` names; null for nothing.
+   * Which purchases and which invoice charges `lookup` names; null for nothing.
    * Each is a point lookup on an indexed key.
    */
   private async searchScope(
-    q: string
+    lookup: string
   ): Promise<{ purchases: SQL; invoices: SQL } | null> {
     const none = sql`false`;
-    if (q.includes('@')) {
+    if (lookup.includes('@')) {
       const [user] = await this.db
         .select({ id: users.id })
         .from(users)
-        .where(eq(users.email, q.toLowerCase()))
+        .where(eq(users.email, lookup.toLowerCase()))
         .limit(1);
       if (!user) return null;
       return {
@@ -516,16 +516,16 @@ export class SupportService extends BaseService {
         ),
       };
     }
-    if (uuidSchema.safeParse(q).success) {
+    if (uuidSchema.safeParse(lookup).success) {
       return {
-        purchases: eq(purchases.id, q),
+        purchases: eq(purchases.id, lookup),
         invoices: either(
-          eq(payouts.subscriptionId, q),
-          eq(payouts.courseSubscriptionId, q)
+          eq(payouts.subscriptionId, lookup),
+          eq(payouts.courseSubscriptionId, lookup)
         ),
       };
     }
-    if (q.startsWith('sub_')) {
+    if (lookup.startsWith('sub_')) {
       return {
         purchases: none,
         invoices: either(
@@ -534,33 +534,33 @@ export class SupportService extends BaseService {
             this.db
               .select({ id: subscriptions.id })
               .from(subscriptions)
-              .where(eq(subscriptions.stripeSubscriptionId, q))
+              .where(eq(subscriptions.stripeSubscriptionId, lookup))
           ),
           inArray(
             payouts.courseSubscriptionId,
             this.db
               .select({ id: courseSubscriptions.id })
               .from(courseSubscriptions)
-              .where(eq(courseSubscriptions.stripeSubscriptionId, q))
+              .where(eq(courseSubscriptions.stripeSubscriptionId, lookup))
           )
         ),
       };
     }
-    if (q.startsWith('pi_')) {
+    if (lookup.startsWith('pi_')) {
       const [purchase] = await this.db
         .select({ id: purchases.id })
         .from(purchases)
-        .where(eq(purchases.stripePaymentIntentId, q))
+        .where(eq(purchases.stripePaymentIntentId, lookup))
         .limit(1);
       if (purchase) {
         return { purchases: eq(purchases.id, purchase.id), invoices: none };
       }
       // An invoice's payment, or a purchase we hold under its charge only.
-      const chargeId = await this.latestChargeOf(q);
+      const chargeId = await this.latestChargeOf(lookup);
       return chargeId ? this.chargeScope(chargeId) : null;
     }
-    if (q.startsWith('ch_') || q.startsWith('py_')) {
-      return this.chargeScope(q);
+    if (lookup.startsWith('ch_') || lookup.startsWith('py_')) {
+      return this.chargeScope(lookup);
     }
     return null;
   }
@@ -1337,10 +1337,17 @@ export class SupportService extends BaseService {
         this.db.select({ total: count() }).from(refunds).where(open),
       ]);
 
-      const charges = await this.chargeFacts(
+      const { purchaseOf, unread } = await this.purchasesOfRefunds(
         rows.map(({ refund }) => ({
           chargeId: refund.stripeChargeId,
           purchaseId: refund.purchaseId,
+        })),
+        'predict'
+      );
+      const charges = await this.chargeFacts(
+        rows.map(({ refund }) => ({
+          chargeId: refund.stripeChargeId,
+          purchaseId: purchaseOf.get(refund.stripeChargeId) ?? null,
         }))
       );
       const [taken, restoreBlocks] = await Promise.all([
@@ -1348,8 +1355,9 @@ export class SupportService extends BaseService {
         // What the settle's restore would answer, by its own rule (read only).
         Promise.all(
           rows.map(
-            async ({ refund }): Promise<AccessNotRestoredReason | null> => {
-              const purchaseId = charges.get(refund.stripeChargeId)?.purchaseId;
+            async ({ refund }): Promise<AccessRestorePrediction | null> => {
+              if (unread.has(refund.stripeChargeId)) return 'unknown';
+              const purchaseId = purchaseOf.get(refund.stripeChargeId);
               if (!purchaseId) return 'no_purchase';
               const block = await this.purchase.failedRefundRestoreBlock(
                 purchaseId,
@@ -1606,7 +1614,11 @@ export class SupportService extends BaseService {
         found.stripeRefundId,
         found.stripeChargeId
       );
-      purchaseId ??= await this.purchaseOfCharge(found.stripeChargeId);
+      const { purchaseOf } = await this.purchasesOfRefunds(
+        [{ chargeId: found.stripeChargeId, purchaseId }],
+        'decide'
+      );
+      purchaseId = purchaseOf.get(found.stripeChargeId) ?? null;
     }
 
     const outcome = await this.db.transaction(async (tx) => {
@@ -1759,21 +1771,60 @@ export class SupportService extends BaseService {
   }
 
   /**
-   * The purchase a failed refund recorded without one is for, from its
-   * charge (silent F4): null for an invoice's charge, or one we hold no
-   * record of.
+   * The purchase each failed refund is for, by charge: the one it names, else
+   * its charge's, by `sourcesOfCharges`' routes (a refund recorded before its
+   * purchase names none, Codex-aa08z; silent F4). Null for an invoice's
+   * charge, or one we hold no purchase for, Stripe's missing charge included.
+   * The settle's restore and the queue's prediction of it both read this, so
+   * the prediction never says "no purchase" where the settle restores (review
+   * round 3 LOW-H). Stripe is read only for a charge none of our records
+   * name, which is rare.
+   *
+   * To `decide` (the settle), any other Stripe failure propagates. To
+   * `predict` (the queue), it is logged and the charge is listed `unread`,
+   * so one charge Stripe can't serve never fails the page, and its
+   * prediction is `unknown`, never a guess.
    */
-  private async purchaseOfCharge(chargeId: string): Promise<string | null> {
-    try {
-      const source = await this.sourceOfCharge(
-        chargeId,
-        this.chargeReader(chargeId, false)
+  private async purchasesOfRefunds(
+    refs: ReadonlyArray<{ chargeId: string; purchaseId: string | null }>,
+    mode: 'decide' | 'predict'
+  ): Promise<{
+    purchaseOf: Map<string, string | null>;
+    unread: ReadonlySet<string>;
+  }> {
+    const unread = new Set<string>();
+    const sources = await this.sourcesOfCharges(
+      refs.filter((ref) => !ref.purchaseId).map((ref) => ref.chargeId),
+      (chargeId) =>
+        this.retrieveCharge(chargeId, false).catch((error: unknown) => {
+          if (error instanceof NotFoundError) return null;
+          if (mode === 'decide') throw error;
+          const e = error as StripeErrorFields | null;
+          this.obs.warn(
+            "A failed refund's charge could not be read: its access prediction is unknown",
+            {
+              chargeId,
+              stripeRequestId:
+                typeof e?.requestId === 'string' ? e.requestId : null,
+              statusCode:
+                typeof e?.statusCode === 'number' ? e.statusCode : null,
+            }
+          );
+          unread.add(chargeId);
+          return null;
+        })
+    );
+    const purchaseOf = new Map<string, string | null>();
+    for (const ref of refs) {
+      const source = sources.get(ref.chargeId);
+      purchaseOf.set(
+        ref.chargeId,
+        purchaseOf.get(ref.chargeId) ??
+          ref.purchaseId ??
+          (source?.type === 'purchase' ? source.purchaseId : null)
       );
-      return source.type === 'purchase' ? source.purchaseId : null;
-    } catch (error) {
-      if (error instanceof NotFoundError) return null;
-      throw error;
     }
+    return { purchaseOf, unread };
   }
 
   /**
@@ -1881,18 +1932,53 @@ export class SupportService extends BaseService {
   // ==========================================================================
 
   /**
-   * What a charge paid for, from our records: its platform-fee slice (every
-   * charge has one), else a refund or dispute recorded on it, else, for a
-   * purchase recorded before charge ids were (D8), Stripe's PaymentIntent.
-   * None is a 404: support never refunds a charge we hold no record of (the
-   * Stripe sandbox is shared with other environments).
+   * What a charge paid for (`sourcesOfCharges`). None is a 404: support never
+   * refunds a charge we hold no record of (the Stripe sandbox is shared with
+   * other environments).
    */
   private async sourceOfCharge(
     chargeId: string,
     readCharge: () => Promise<Stripe.Charge>
   ): Promise<ChargeSource> {
-    const [fee] = await this.db
+    const source = (await this.sourcesOfCharges([chargeId], readCharge)).get(
+      chargeId
+    );
+    if (!source) {
+      throw new NotFoundError('No record of this charge', { chargeId });
+    }
+    return source;
+  }
+
+  /**
+   * What each charge paid for, from our records, in this order: its
+   * platform-fee slice (every charge has one), else a refund recorded on it
+   * that names a purchase, else a dispute, else, for a purchase recorded
+   * before charge ids were (D8), Stripe's PaymentIntent. A charge with none
+   * is absent from the map. Each step reads only the charges the steps
+   * before it left, so one charge costs what it always did, and a page of
+   * them costs at most four queries. `readCharge` answers null for a charge
+   * Stripe doesn't hold; its other errors propagate.
+   */
+  private async sourcesOfCharges(
+    chargeIds: readonly string[],
+    readCharge: (chargeId: string) => Promise<Stripe.Charge | null>
+  ): Promise<Map<string, ChargeSource>> {
+    const found = new Map<string, ChargeSource>();
+    const take = (
+      chargeId: string | null,
+      source: ChargeSource | undefined
+    ) => {
+      if (chargeId && source && !found.has(chargeId)) {
+        found.set(chargeId, source);
+      }
+    };
+    const left = () => unique(chargeIds).filter((id) => !found.has(id));
+
+    let remaining = left();
+    if (remaining.length === 0) return found;
+    const fees = await this.db
       .select({
+        chargeId: payouts.stripeChargeId,
         purchaseId: payouts.purchaseId,
         subscriptionId: payouts.subscriptionId,
         courseSubscriptionId: payouts.courseSubscriptionId,
@@ -1900,46 +1986,80 @@ export class SupportService extends BaseService {
       .from(payouts)
       .where(
         and(
-          eq(payouts.stripeChargeId, chargeId),
+          inArray(payouts.stripeChargeId, remaining),
           eq(payouts.payoutType, 'platform_fee')
         )
-      )
-      .limit(1);
-    const fromFee = sourceFromIds(fee);
-    if (fromFee) return fromFee;
+      );
+    for (const row of fees) take(row.chargeId, sourceFromIds(row));
 
-    const [refund] = await this.db
-      .select({ purchaseId: refunds.purchaseId })
+    remaining = left();
+    if (remaining.length === 0) return found;
+    const named = await this.db
+      .select({
+        chargeId: refunds.stripeChargeId,
+        purchaseId: refunds.purchaseId,
+      })
       .from(refunds)
       .where(
-        and(eq(refunds.stripeChargeId, chargeId), isNotNull(refunds.purchaseId))
-      )
-      .limit(1);
-    if (refund?.purchaseId) {
-      return { type: 'purchase', purchaseId: refund.purchaseId };
+        and(
+          inArray(refunds.stripeChargeId, remaining),
+          isNotNull(refunds.purchaseId)
+        )
+      );
+    for (const row of named) {
+      take(
+        row.chargeId,
+        row.purchaseId
+          ? { type: 'purchase', purchaseId: row.purchaseId }
+          : undefined
+      );
     }
-    const [dispute] = await this.db
+
+    remaining = left();
+    if (remaining.length === 0) return found;
+    const disputed = await this.db
       .select({
+        chargeId: disputes.stripeChargeId,
         purchaseId: disputes.purchaseId,
         subscriptionId: disputes.subscriptionId,
         courseSubscriptionId: disputes.courseSubscriptionId,
       })
       .from(disputes)
-      .where(eq(disputes.stripeChargeId, chargeId))
-      .limit(1);
-    const fromDispute = sourceFromIds(dispute);
-    if (fromDispute) return fromDispute;
+      .where(inArray(disputes.stripeChargeId, remaining));
+    for (const row of disputed) take(row.chargeId, sourceFromIds(row));
 
-    const paymentIntentId = paymentIntentIdOf(await readCharge());
-    if (paymentIntentId) {
-      const [purchase] = await this.db
-        .select({ id: purchases.id })
-        .from(purchases)
-        .where(eq(purchases.stripePaymentIntentId, paymentIntentId))
-        .limit(1);
-      if (purchase) return { type: 'purchase', purchaseId: purchase.id };
+    remaining = left();
+    if (remaining.length === 0) return found;
+    const chargeByIntent = new Map<string, string>();
+    const read = await Promise.all(
+      remaining.map(async (chargeId) => ({
+        chargeId,
+        charge: await readCharge(chargeId),
+      }))
+    );
+    for (const { chargeId, charge } of read) {
+      const paymentIntentId = charge ? paymentIntentIdOf(charge) : null;
+      if (paymentIntentId) chargeByIntent.set(paymentIntentId, chargeId);
     }
-    throw new NotFoundError('No record of this charge', { chargeId });
+    if (chargeByIntent.size === 0) return found;
+    const bought = await this.db
+      .select({
+        id: purchases.id,
+        paymentIntentId: purchases.stripePaymentIntentId,
+      })
+      .from(purchases)
+      .where(
+        inArray(purchases.stripePaymentIntentId, [...chargeByIntent.keys()])
+      );
+    for (const row of bought) {
+      take(
+        row.paymentIntentId
+          ? (chargeByIntent.get(row.paymentIntentId) ?? null)
+          : null,
+        { type: 'purchase', purchaseId: row.id }
+      );
+    }
+    return found;
   }
 
   /** A charge, read from Stripe once per call (`expand` for the fee). */
@@ -2146,6 +2266,8 @@ export class SupportService extends BaseService {
   /**
    * Title, buyer and amount for the queue's charges: a purchase's from its
    * row, an invoice's from its platform-fee slice and the charge's slices.
+   * Each ref names its purchase: a failed refund's comes from
+   * `purchasesOfRefunds`, a debt's from its slice.
    */
   private async chargeFacts(
     refs: ReadonlyArray<{ chargeId: string; purchaseId: string | null }>
@@ -2158,8 +2280,6 @@ export class SupportService extends BaseService {
         buyer: SupportBuyer;
         amountCents: number;
         paidAt: Date;
-        /** The purchase, for a purchase's charge. */
-        purchaseId: string | null;
       }
     >
   > {
@@ -2171,40 +2291,9 @@ export class SupportService extends BaseService {
         buyer: SupportBuyer;
         amountCents: number;
         paidAt: Date;
-        /** The purchase, for a purchase's charge. */
-        purchaseId: string | null;
       }
     >();
-    // A refund recorded before its purchase existed names none (Codex-aa08z):
-    // its charge's purchase slices do (silent F4).
-    const unnamed = unique(
-      refs.filter((ref) => !ref.purchaseId).map((ref) => ref.chargeId)
-    );
-    const purchaseByCharge = new Map<string, string>();
-    if (unnamed.length > 0) {
-      const rows = await this.db
-        .selectDistinct({
-          chargeId: payouts.stripeChargeId,
-          purchaseId: payouts.purchaseId,
-        })
-        .from(payouts)
-        .where(
-          and(
-            inArray(payouts.stripeChargeId, unnamed),
-            isNotNull(payouts.purchaseId)
-          )
-        );
-      for (const row of rows) {
-        if (row.chargeId && row.purchaseId) {
-          purchaseByCharge.set(row.chargeId, row.purchaseId);
-        }
-      }
-    }
-    const purchaseIdOf = (ref: {
-      chargeId: string;
-      purchaseId: string | null;
-    }) => ref.purchaseId ?? purchaseByCharge.get(ref.chargeId) ?? null;
-    const purchaseIds = unique(refs.map(purchaseIdOf));
+    const purchaseIds = unique(refs.map((ref) => ref.purchaseId));
     if (purchaseIds.length > 0) {
       const rows = await this.db
         .select({
@@ -2228,8 +2317,7 @@ export class SupportService extends BaseService {
         .where(inArray(purchases.id, purchaseIds));
       const byId = new Map(rows.map((row) => [row.id, row]));
       for (const ref of refs) {
-        const purchaseId = purchaseIdOf(ref);
-        const row = purchaseId ? byId.get(purchaseId) : undefined;
+        const row = ref.purchaseId ? byId.get(ref.purchaseId) : undefined;
         if (!row) continue;
         facts.set(ref.chargeId, {
           kind: 'purchase',
@@ -2237,7 +2325,6 @@ export class SupportService extends BaseService {
           buyer: buyerOf(row.buyer),
           amountCents: row.amountCents,
           paidAt: new Date(row.paidAt),
-          purchaseId: row.id,
         });
       }
     }
@@ -2262,7 +2349,6 @@ export class SupportService extends BaseService {
           },
           amountCents: row.amountCents,
           paidAt: new Date(row.paidAt),
-          purchaseId: null,
         });
       }
     }

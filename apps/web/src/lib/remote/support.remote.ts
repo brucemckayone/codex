@@ -80,7 +80,7 @@ function ownerOnly<S extends StandardSchema>(schema: S): Pick<S, '~standard'> {
 // Reads
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Charges found by an exact key (`q`), newest first. */
+/** Charges found by an exact key (`lookup`), newest first. */
 export const searchSupportCharges = query(
   ownerOnly(supportChargeSearchQuerySchema),
   async (input) => {

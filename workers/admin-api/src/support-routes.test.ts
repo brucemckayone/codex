@@ -254,7 +254,7 @@ const routes: Route[] = [
   {
     name: 'search',
     method: 'GET',
-    path: '/api/admin/support/charges?q=buyer@example.com',
+    path: '/api/admin/support/charges?lookup=buyer@example.com',
     service: 'searchCharges',
     writes: false,
   },
@@ -358,7 +358,7 @@ describe('the routes', () => {
   it('search passes the validated query and answers the list envelope', async () => {
     const res = await call(
       'GET',
-      '/api/admin/support/charges?q=%20buyer@example.com%20&page=2&limit=10'
+      '/api/admin/support/charges?lookup=%20buyer@example.com%20&page=2&limit=10'
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
@@ -366,14 +366,14 @@ describe('the routes', () => {
       pagination: PAGE,
     });
     expect(support.searchCharges).toHaveBeenCalledWith({
-      q: 'buyer@example.com',
+      lookup: 'buyer@example.com',
       page: 2,
       limit: 10,
     });
   });
 
   it.each([
-    ['a two-character search', '/api/admin/support/charges?q=ab'],
+    ['a two-character search', '/api/admin/support/charges?lookup=ab'],
     [
       'a page of more than 50',
       '/api/admin/support/queue/failed-refunds?limit=51',

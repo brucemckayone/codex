@@ -27,7 +27,7 @@ new SupportService({ db, environment, stripe, purchase }); // registry: ctx.serv
 
 | Method | Notes |
 |---|---|
-| `searchCharges({ q, page, limit })` | `q` matched exactly: email (lower-cased), purchase or subscription id, `sub_`, `pi_`, `ch_`, `py_`. A purchase's rows and an invoice's (its platform-fee slice) in one `UNION ALL`, newest first |
+| `searchCharges({ lookup, page, limit })` | `lookup` matched exactly (never `q`: not a free-text search): email (lower-cased), purchase or subscription id, `sub_`, `pi_`, `ch_`, `py_`. A purchase's rows and an invoice's (its platform-fee slice) in one `UNION ALL`, newest first |
 | `getChargeDetail(chargeId)` | One answer: the charge (Stripe), its slices (the engine's own `sourceScope`, via `loadClawbackPlanInput`) with each slice's history, refunds, chargebacks, window, `refundable`, `refundCount` |
 | `previewRefund(chargeId, amountCents)` | `planClawback`, never a copy of its rules. Writes nothing |
 | `issueRefund(chargeId, input, requestedByUserId)` | §5's order: list, replay, `CHARGE_CHANGED`, window, chargeback, cap, `refunds.create`. Writes nothing: `charge.refunded` records it. When Stripe makes no refund: a held key is re-listed (a refund carrying it is a replay, none is `REFUND_KEY_SPENT`, 409), as is an answer Stripe replayed for the key; a documented refusal is `STRIPE_REFUSED`; any other invalid request is our defect, a 500 alerted at error. Every one is logged with Stripe's code and request id, never its message |

@@ -114,7 +114,7 @@ const UUID = '11111111-1111-4111-8111-111111111111';
 const MALFORMED = 42;
 /** Each function, with an input its schema accepts. */
 const CALLS: [string, unknown][] = [
-  ['searchSupportCharges', { q: 'e@x.com', page: 1, limit: 20 }],
+  ['searchSupportCharges', { lookup: 'e@x.com', page: 1, limit: 20 }],
   ['getSupportCharge', CHARGE],
   ['getRefundPreview', { chargeId: CHARGE, amountCents: 750, refundCount: 1 }],
   ['getSupportQueueCounts', undefined],
@@ -403,7 +403,7 @@ describe('the queries', () => {
     const outage = new ApiError(503, 'upstream', 'SERVICE_UNAVAILABLE');
     api.searchCharges.mockRejectedValue(outage);
     await expect(
-      remote.searchSupportCharges({ q: 'e@x.com', page: 1, limit: 20 })
+      remote.searchSupportCharges({ lookup: 'e@x.com', page: 1, limit: 20 })
     ).rejects.toBe(outage);
   });
 

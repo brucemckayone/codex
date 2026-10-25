@@ -262,9 +262,10 @@ const PAYEE_STEP_KINDS: ReadonlySet<string> = new Set([
 /**
  * The codes a refused `creators_repaid` settlement carries: the context
  * `code` of its `BusinessLogicError` (422). Each tells support something
- * different to do.
+ * different to do. Not exported: admin passes the errors through as they
+ * are, and the web matches the strings (review round 3 LOW-I).
  */
-export const REFUND_REPAY_CODES = {
+const REFUND_REPAY_CODES = {
   /** A later cause was shared against the refund: settle by hand, or mark it refunded elsewhere. */
   BLOCKED_BY_LATER_CAUSE: 'REPAY_BLOCKED_BY_LATER_CAUSE',
   /** A step of its clawback is still running: try again later. */

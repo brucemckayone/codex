@@ -32,13 +32,14 @@ export const stripeChargeIdSchema = z
   .regex(/^(ch|py)_[A-Za-z0-9]{8,64}$/, { message: 'Invalid charge ID' });
 
 /**
- * GET /api/admin/support/charges. `q` is matched exactly, never as free text:
+ * GET /api/admin/support/charges. `lookup` is matched exactly, never as free
+ * text (so not a search field: `createSearchQuerySchema` is for those):
  * an email (lower-cased), a purchase or subscription id, or a Stripe `sub_`,
  * `pi_`, `ch_` or `py_` id. Anything else finds nothing. So a NUL is refused,
  * not dropped: a rewritten identifier names a different row.
  */
 export const supportChargeSearchQuerySchema = supportPaginationSchema.extend({
-  q: z
+  lookup: z
     .string()
     .trim()
     .min(3, { message: 'Must be at least 3 characters' })

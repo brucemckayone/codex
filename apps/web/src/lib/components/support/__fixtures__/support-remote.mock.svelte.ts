@@ -82,8 +82,8 @@ export const getSupportCharge = vi.fn((chargeId: string) =>
   slotFor(charges, chargeId)
 );
 export const searchSupportCharges = vi.fn(
-  (args: { q: string; page?: number; limit?: number }) =>
-    slotFor(searches, `${args.q}:${args.page ?? 1}`)
+  (args: { lookup: string; page?: number; limit?: number }) =>
+    slotFor(searches, `${args.lookup}:${args.page ?? 1}`)
 );
 export const getRefundPreview = vi.fn((args: PreviewArgs) =>
   slotFor(previews, previewKey(args))

@@ -1,8 +1,10 @@
 <!--
   /admin/refunds — find a charge (Codex-2hxff.28, mockup A1 and A2).
 
-  `?q=` is the search, so a result can be linked and Back returns to it. The
-  query runs only for a `q` of 3 characters or more (the route's own floor).
+  `?lookup=` is the search, so a result can be linked and Back returns to it.
+  The query runs only for a `lookup` of 3 characters or more (the route's own
+  floor). Never `?q=`: that name means a free-text search, which must pass the
+  search floor's gate, and this is an exact key (an email or an id).
 
   The order of the states matters. A REJECTED remote query leaves `current`
   undefined and `loading` false, which a naive gate reads as "no results":
@@ -30,22 +32,22 @@
   const LIMIT = 20;
   const MIN_QUERY = 3;
 
-  const q = $derived((page.url.searchParams.get('q') ?? '').trim());
+  const lookup = $derived((page.url.searchParams.get('lookup') ?? '').trim());
   const currentPage = $derived(
     Math.max(1, Number.parseInt(page.url.searchParams.get('page') ?? '1', 10) || 1)
   );
 
   // The box's text before it is searched. Seeded from the URL, and re-seeded
-  // when the URL's `q` changes (Back to an earlier search).
+  // when the URL's `lookup` changes (Back to an earlier search).
   let draft = $state('');
   $effect(() => {
-    draft = q;
+    draft = lookup;
   });
 
-  const tooShort = $derived(q.length > 0 && q.length < MIN_QUERY);
+  const tooShort = $derived(lookup.length > 0 && lookup.length < MIN_QUERY);
   const searchQuery = $derived(
-    q.length >= MIN_QUERY
-      ? searchSupportCharges({ q, page: currentPage, limit: LIMIT })
+    lookup.length >= MIN_QUERY
+      ? searchSupportCharges({ lookup, page: currentPage, limit: LIMIT })
       : null
   );
   const results = $derived(searchQuery?.current);
@@ -69,21 +71,21 @@
       pagination.total === 1
         ? m.support_search_count_one()
         : m.support_search_count_many({ count: String(pagination.total) });
-    const matched = matchedBy(q) ?? '';
+    const matched = matchedBy(lookup) ?? '';
     return soleBuyer
       ? m.support_search_summary_for({ charges, name: soleBuyer, matched })
       : m.support_search_summary({ charges, matched });
   });
 
   const emptyDescription = $derived.by(() => {
-    if (q.includes('@')) return m.support_empty_email();
-    return matchedBy(q) ? m.support_empty_id() : m.support_empty_other();
+    if (lookup.includes('@')) return m.support_empty_email();
+    return matchedBy(lookup) ? m.support_empty_id() : m.support_empty_other();
   });
 
   function search(value: string) {
     const next = value.trim();
     const target = next
-      ? `/admin/refunds?${new URLSearchParams({ q: next })}`
+      ? `/admin/refunds?${new URLSearchParams({ lookup: next })}`
       : '/admin/refunds';
     if (target === `${page.url.pathname}${page.url.search}`) {
       searchQuery?.refresh().catch(() => {});
@@ -112,7 +114,7 @@
 <div class="search">
   <div class="search__row">
     <SearchPill
-      value={q}
+      value={lookup}
       placeholder={m.support_search_placeholder()}
       clearLabel={m.support_search_clear()}
       onChange={(value) => (draft = value)}

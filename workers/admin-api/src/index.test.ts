@@ -188,7 +188,7 @@ describe('Admin API Worker', () => {
     const ID = '00000000-0000-0000-0000-000000000003';
 
     it.each([
-      { method: 'GET', path: '/api/admin/support/charges?q=a@b.com' },
+      { method: 'GET', path: '/api/admin/support/charges?lookup=a@b.com' },
       { method: 'GET', path: `/api/admin/support/charges/${CHARGE}` },
       {
         method: 'GET',

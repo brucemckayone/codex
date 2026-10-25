@@ -863,7 +863,7 @@ app.post(
 // ============================================================================
 
 /**
- * GET /api/admin/support/charges?q=
+ * GET /api/admin/support/charges?lookup=
  * Charges found by an exact key: an email, a purchase or subscription id, or
  * a Stripe `sub_`, `pi_`, `ch_` or `py_` id. Anything else finds nothing.
  */

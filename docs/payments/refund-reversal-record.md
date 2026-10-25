@@ -109,7 +109,7 @@ What stays the same:
   - **The settlement runs in three steps.**
     1. `failedRefundRepayBlock`, on the engine's own causes (`loadClawbackCauses`).
     2. `settleUnfinishedRefundSteps`, which asks Stripe, so it runs before the transaction. It writes only what is true whatever the settlement decides: a reversal Stripe made, recorded `done`.
-    3. `repayFailedRefund`, inside the support route's transaction, which locks the `refunds` row and records the resolution. It is given the charge's amount and the pre-step's `unlanded` steps. The refusal codes are `REFUND_REPAY_CODES`.
+    3. `repayFailedRefund`, inside the support route's transaction, which locks the `refunds` row and records the resolution. It is given the charge's amount and the pre-step's `unlanded` steps. The refusal codes are `REFUND_REPAY_CODES` (repay.ts only, not exported: consumers match the strings).
 - **Four rules (owner decisions 2026-10-24 and 2026-10-25, all as recommended):**
   1. **A later cause shared against the failed refund refuses the re-pay** (`REPAY_BLOCKED_BY_LATER_CAUSE`, 422, built by `repayBlockedError`).
      - **The two cases.** A chargeback open or lost on the charge: every chargeback is shared after the refunds. Or a refund after it in the engine's order whose running total exceeds the charge: its share was capped.

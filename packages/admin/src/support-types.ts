@@ -369,10 +369,11 @@ export interface FailedRefundItem {
   /**
    * What settling it `creators_repaid` would do to the buyer's access,
    * worked out read only by the restore's own rule: null means access would
-   * come back; otherwise why it would not. A prediction: nothing is locked,
-   * so the settle's `accessNotRestoredReason` is the final word.
+   * come back; otherwise why it would not, or `unknown`. A prediction:
+   * nothing is locked, so the settle's `accessNotRestoredReason` is the
+   * final word.
    */
-  accessRestoreBlockedReason: AccessNotRestoredReason | null;
+  accessRestoreBlockedReason: AccessRestorePrediction | null;
 }
 
 /** A creator debt waiting for support (`refund_reviews`, unresolved). */
@@ -445,6 +446,16 @@ export type AccessNotRestoredReason =
   | 'rebought'
   | 'still_refunded'
   | 'no_purchase';
+
+/**
+ * The queue's prediction of why access would not come back
+ * (`FailedRefundItem.accessRestoreBlockedReason`): a reason, or `unknown`
+ * when it couldn't be worked out, because Stripe couldn't be read for a
+ * charge none of our records name. `unknown` promises nothing either way:
+ * the settle reads Stripe again and decides. The settle itself never answers
+ * `unknown`.
+ */
+export type AccessRestorePrediction = AccessNotRestoredReason | 'unknown';
 
 /** The resolutions support may choose. `dispute_won` is only ever automatic. */
 export type CreatorDebtResolution =

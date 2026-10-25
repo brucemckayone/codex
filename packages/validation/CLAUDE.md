@@ -73,7 +73,7 @@ app.get('/content/:id',
 
 ### Support refunds (`schemas/support.ts`)
 admin-api's `/api/admin/support/*` routes (Codex-2hxff.28), all platform-owner only.
-- `supportChargeSearchQuerySchema` — `q` is an exact identifier (email, purchase/subscription id, `sub_`/`pi_`/`ch_`/`py_`), never free text, so a NUL is REFUSED, not dropped; limit capped at `SUPPORT_LIST_MAX_LIMIT` (50)
+- `supportChargeSearchQuerySchema` — `lookup` (never `q`: it is not a free-text search) is an exact identifier (email, purchase/subscription id, `sub_`/`pi_`/`ch_`/`py_`), never free text, so a NUL is REFUSED, not dropped; limit capped at `SUPPORT_LIST_MAX_LIMIT` (50)
 - `stripeChargeIdSchema`, `supportChargeParamsSchema` — `ch_…` or `py_…`
 - `supportRefundPreviewQuerySchema`, `supportIssueRefundSchema` — whole pence ≥ 1; `expectedRefundCount` is the count the page showed, part of the refund's idempotency key
 - `supportResolveFailedRefundSchema`, `supportResolveCreatorDebtSchema` — the note is free text (NUL dropped, trimmed, ≤ `SUPPORT_NOTE_MAX_LENGTH`), REQUIRED for `creators_repaid` and `manually_reversed`; `dispute_won` is never accepted (only the won-chargeback code writes it)

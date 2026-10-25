@@ -52,6 +52,7 @@ export {
 // Support refunds: the platform-owner refund screen and queue (Codex-2hxff.28)
 export type {
   AccessNotRestoredReason,
+  AccessRestorePrediction,
   ChargebackRow,
   ChargebackState,
   ChargeDetail,

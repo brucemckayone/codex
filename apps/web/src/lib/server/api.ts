@@ -2822,14 +2822,14 @@ export function createServerApi(
     support: {
       /**
        * Charges found by an exact key: an email, a purchase or subscription
-       * id, or a Stripe `sub_`, `pi_`, `ch_` or `py_` id. `q` travels in the
-       * query string; `request()` logs the path without it.
+       * id, or a Stripe `sub_`, `pi_`, `ch_` or `py_` id. `lookup` travels in
+       * the query string; `request()` logs the path without it.
        */
-      searchCharges: ({ q, page, limit }: SupportChargeSearchQuery) =>
+      searchCharges: ({ lookup, page, limit }: SupportChargeSearchQuery) =>
         request<PaginatedListResponse<ChargeSummary>>(
           'admin',
           `/api/admin/support/charges?${new URLSearchParams({
-            q,
+            lookup,
             page: String(page),
             limit: String(limit),
           })}`
