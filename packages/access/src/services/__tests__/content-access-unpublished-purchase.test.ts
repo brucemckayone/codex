@@ -86,8 +86,11 @@ function createStubDb() {
 
 function buildService(
   stub: ReturnType<typeof createStubDb>,
-  /** Wire the KV revocation check, reporting this block (Codex-7ncbh case). */
-  options: { revokedFor?: string } = {}
+  /**
+   * Wire the KV revocation check (Codex-7ncbh cases): reporting the
+   * `revokedFor` block, or none when only `kvWired`.
+   */
+  options: { revokedFor?: string; kvWired?: boolean } = {}
 ) {
   const { obs } = createMockObservability();
   const dbForService = {
@@ -110,7 +113,7 @@ function buildService(
     purchaseService: { verifyPurchase } as unknown as PurchaseService,
     contentApiBaseUrl: 'https://api.revelations.studio',
     hlsTokenSecret: 'test-worker-shared-secret',
-    ...(options.revokedFor
+    ...(options.revokedFor || options.kvWired
       ? { revocation: { isRevoked } as unknown as AccessRevocation }
       : {}),
   });
@@ -388,29 +391,37 @@ describe('Codex-p3m5j: a one-off purchase outlives unpublication', () => {
       expect(stub.mocks.purchases.findFirst).not.toHaveBeenCalled();
     });
 
-    // The stub returns whatever row it is given, so the three cases above
-    // pass whether or not the fetch asks for the org. This pins that it does.
+    // The stub returns whatever row it is given, so the cases above pass
+    // whether or not a fetch asks for the org. This pins that EVERY content
+    // read does: with KV wired, getStreamingUrl reads twice (the revocation
+    // pre-check, then the transaction).
     it.each([
-      ['getStreamingUrl', 'stream'],
-      ['hasContentAccess', 'boolean'],
-    ])("%s's fetch asks for the organisation's deletedAt", async (_name, path) => {
+      ['getStreamingUrl', 'stream', 1],
+      ['getStreamingUrl with the KV pre-check', 'stream-kv', 2],
+      ['hasContentAccess', 'boolean', 1],
+    ])("%s's content reads ask for the organisation's deletedAt", async (_name, path, reads) => {
       stub.mocks.content.findFirst.mockResolvedValue(paidRow('published'));
       noRelationships(stub);
-      const { service, verifyPurchase } = buildService(stub);
+      const { service, verifyPurchase } = buildService(stub, {
+        kvWired: path === 'stream-kv',
+      });
       verifyPurchase.mockResolvedValue(true);
 
-      if (path === 'stream') {
-        await service.getStreamingUrl(userId, streamingInput);
-      } else {
+      if (path === 'boolean') {
         await service.hasContentAccess(userId, contentId);
+      } else {
+        await service.getStreamingUrl(userId, streamingInput);
       }
 
-      const call = stub.mocks.content.findFirst.mock.calls[0]?.[0] as {
-        with?: unknown;
-      };
-      expect(call.with).toMatchObject({
-        organization: { columns: { deletedAt: true } },
-      });
+      const calls = stub.mocks.content.findFirst.mock.calls.map(
+        ([arg]) => arg as { with?: unknown }
+      );
+      expect(calls).toHaveLength(reads);
+      for (const call of calls) {
+        expect(call.with).toMatchObject({
+          organization: { columns: { deletedAt: true } },
+        });
+      }
     });
   });
 

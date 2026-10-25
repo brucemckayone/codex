@@ -262,6 +262,46 @@ describe('org content detail: an entitled reader of a gated piece sees its body 
       'the leaked text'
     );
   });
+
+  // A failed render used to leave a granted reader a blank page (Codex-uuz1g).
+  it('a granted body that fails to render is flagged, so the page says so', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [gated] });
+    mockGetStreamingUrl.mockResolvedValue(
+      granted({
+        body: {
+          contentBody: null,
+          contentBodyJson: {
+            type: 'doc',
+            content: [{ type: '__no_such_node__' }],
+          },
+        },
+      })
+    );
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as Record<
+      string,
+      unknown
+    >;
+
+    expect(data.contentBodyHtml).toBeNull();
+    expect(data.contentBodyUnavailable).toBe(true);
+  });
+
+  it('a granted piece with no text at all is not flagged', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [gated] });
+    mockGetStreamingUrl.mockResolvedValue(
+      granted({ body: { contentBody: null, contentBodyJson: null } })
+    );
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as Record<
+      string,
+      unknown
+    >;
+
+    expect(data.contentBodyUnavailable).toBe(false);
+  });
 });
 
 // The read used to end in `.catch(() => null)`, so every content-api outage

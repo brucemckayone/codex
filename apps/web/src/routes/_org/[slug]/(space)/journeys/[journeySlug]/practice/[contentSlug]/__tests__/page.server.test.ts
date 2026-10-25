@@ -52,6 +52,13 @@ const {
   fetchInCoursePracticeMock: vi.fn(),
 }));
 
+const mockLogger = vi.hoisted(() => ({
+  warn: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+}));
+vi.mock('$lib/observability', () => ({ logger: mockLogger }));
+
 vi.mock('$lib/server/journeys/round-d-seam', () => ({
   resolveCourseBySlug: resolveCourseBySlugMock,
   resolveCourseEntry: resolveCourseEntryMock,
@@ -147,5 +154,27 @@ describe('in-course player +page.server load: a payment dispute', () => {
     expect(setHeadersMock).toHaveBeenCalledWith({
       'Cache-Control': 'private, no-store',
     });
+  });
+
+  it('a failed dashboard read still plays the lesson, and is logged', async () => {
+    resolveCourseEntryMock.mockResolvedValueOnce({
+      canEnter: true,
+      disputeHold: null,
+    });
+    fetchCourseDashboardMock.mockRejectedValueOnce(new Error('dashboard down'));
+    const { load } = await import('../+page.server');
+
+    const data = (await load(makeEvent({ id: 'user-1' }))) as {
+      stageGloss: string | null;
+    };
+
+    expect(data.stageGloss).toBeNull();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Course dashboard not loaded',
+      expect.objectContaining({
+        courseId: MOCK_COURSE.id,
+        error: 'dashboard down',
+      })
+    );
   });
 });

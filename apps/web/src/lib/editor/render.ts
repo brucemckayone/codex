@@ -61,9 +61,25 @@ export async function renderContentBody(
       contentId: context.contentId,
       surface: context.surface,
       error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
     });
     return null;
   }
 
   return null;
+}
+
+/**
+ * Does this stored body hold any text to render? `renderContentBody` answers
+ * null both for "nothing stored" and for a render that FAILED, so a caller
+ * holding a null result asks this to tell them apart: stored text with no
+ * HTML is a failure the reader must be told about, never "no body"
+ * (Codex-uuz1g). The rule is renderContentBody's own: JSON first, then
+ * markdown.
+ */
+export function hasStoredText(content: {
+  contentBodyJson?: Record<string, unknown> | null;
+  contentBody?: string | null;
+}): boolean {
+  return content.contentBodyJson != null || Boolean(content.contentBody);
 }

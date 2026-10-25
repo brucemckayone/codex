@@ -279,7 +279,7 @@ export async function listUserLibrary(
     // than linger as a card that 404s. An anti-join, as content-service's
     // orgIsLive, so it holds whatever each union branch joins; orgless
     // content has no org row to match and stays.
-    const conditions: ReturnType<typeof eq>[] = [
+    const conditions: SQL[] = [
       notExists(
         db
           .select({ one: sql`1` })
@@ -307,7 +307,7 @@ export async function listUserLibrary(
   };
 
   const buildProgressFilters = () => {
-    const conditions: ReturnType<typeof eq>[] = [];
+    const conditions: SQL[] = [];
     if (input.filter === 'completed') {
       conditions.push(eq(videoPlayback.completed, true));
     } else if (input.filter === 'in_progress') {

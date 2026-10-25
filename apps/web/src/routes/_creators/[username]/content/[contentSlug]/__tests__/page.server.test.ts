@@ -157,6 +157,28 @@ describe('creator content detail: an entitled reader of a gated piece sees its b
     );
   });
 
+  // A failed render used to leave a granted reader a blank page (Codex-uuz1g).
+  it('a granted body that fails to render is flagged, so the page says so', async () => {
+    mockGetPublicContent.mockResolvedValue({ items: [gated] });
+    mockGetStreamingUrl.mockResolvedValue(
+      granted({
+        body: {
+          contentBody: null,
+          contentBodyJson: {
+            type: 'doc',
+            content: [{ type: '__no_such_node__' }],
+          },
+        },
+      })
+    );
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event({ id: 'u1' }))) as Record<string, unknown>;
+
+    expect(data.contentBodyHtml).toBeNull();
+    expect(data.contentBodyUnavailable).toBe(true);
+  });
+
   it('a public piece renders for a visitor from its own row, with no access call', async () => {
     mockGetPublicContent.mockResolvedValue({ items: [row({})] });
     const { load } = await import('../+page.server');

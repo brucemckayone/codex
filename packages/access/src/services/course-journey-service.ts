@@ -1024,6 +1024,11 @@ export class CourseJourneyService extends BaseService {
           ? this.loadContentBody(practiceMatch.contentId)
           : Promise.resolve(null),
       ]);
+      // A written practice's row deleted between the curriculum read and this
+      // one is gone, not "a practice with no text": the player 404s.
+      if (practiceMatch.contentType === 'written' && body === null) {
+        return null;
+      }
 
       return {
         course,

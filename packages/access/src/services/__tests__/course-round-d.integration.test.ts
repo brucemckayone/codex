@@ -742,6 +742,9 @@ describe('Round-D read services (Codex-776gg)', () => {
         contentBody: null,
         contentBodyJson: doc,
       });
+      // The one-release legacy field (Codex-sb3sr): the markdown column only,
+      // as an older web read it. Remove these with the field.
+      expect(fromEditor?.bodyHtml).toBeNull();
 
       const fromMarkdown = await journey.getInCoursePractice(
         u1,
@@ -752,6 +755,7 @@ describe('Round-D read services (Codex-776gg)', () => {
         contentBody: '# Breathe',
         contentBodyJson: null,
       });
+      expect(fromMarkdown?.bodyHtml).toBe('# Breathe');
 
       const fromMedia = await journey.getInCoursePractice(
         u1,

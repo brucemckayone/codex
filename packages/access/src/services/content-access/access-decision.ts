@@ -835,9 +835,15 @@ async function findPolicyRow(db: DatabaseClient, contentId: string) {
   return isOfDeletedOrg(row) ? undefined : row;
 }
 
-/** Is this content row's organisation soft-deleted? (Codex-7ncbh) */
+/**
+ * Is this content row's organisation soft-deleted? (Codex-7ncbh)
+ *
+ * `organization` is a REQUIRED key: a fetch that forgot
+ * `with: { organization: { columns: { deletedAt: true } } }` must fail to
+ * compile, not quietly read every org as live. `null` is an orgless piece.
+ */
 export function isOfDeletedOrg(
-  row: { organization?: { deletedAt: Date | null } | null } | undefined
+  row: { organization: { deletedAt: Date | null } | null } | undefined
 ): boolean {
   return row?.organization?.deletedAt != null;
 }

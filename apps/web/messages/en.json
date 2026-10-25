@@ -298,6 +298,7 @@
   "content_price_purchased": "Purchased",
   "content_price_included": "Included",
   "content_detail_withdrawn_lead": "This is no longer on sale.",
+  "content_detail_body_unavailable": "This text didn't load. Refresh the page to try again.",
   "content_detail_withdrawn_purchase": "It stays in your library because you bought it.",
   "content_detail_withdrawn_entitlement": "It stays in your library.",
   "content_detail_withdrawn_course": "It stays available as part of your course.",

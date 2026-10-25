@@ -9,7 +9,7 @@
  */
 import { publicContentSlugSchema } from '@codex/validation';
 import { error } from '@sveltejs/kit';
-import { renderContentBody } from '$lib/editor/render';
+import { hasStoredText, renderContentBody } from '$lib/editor/render';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
@@ -118,6 +118,10 @@ export const load: PageServerLoad = async ({
   const publicBodyHtml = isPublic
     ? await renderContentBody(content, renderContext)
     : null;
+  // Stored text that rendered to nothing is a failure the reader is told
+  // about, never "no body" (Codex-uuz1g); the view shows a note.
+  const publicBodyUnavailable =
+    isPublic && hasStoredText(content) && publicBodyHtml == null;
 
   // Fetch related content — returned as a bare promise (streamed, below fold)
   const relatedPromise = loadRelatedContent(api, { orgId: org.id });
@@ -148,10 +152,15 @@ export const load: PageServerLoad = async ({
     const withdrawnBodyHtml = withdrawn.body
       ? await renderContentBody(withdrawn.body, renderContext)
       : null;
+    const withdrawnBodyUnavailable =
+      withdrawn.body != null &&
+      hasStoredText(withdrawn.body) &&
+      withdrawnBodyHtml == null;
     setHeaders(detailPageCacheHeaders(true));
     return {
       content: pageContent,
       contentBodyHtml: withdrawnBodyHtml,
+      contentBodyUnavailable: withdrawnBodyUnavailable,
       hasAccess: null,
       streamingUrl: null,
       progress: null,
@@ -189,6 +198,7 @@ export const load: PageServerLoad = async ({
     return {
       content: pageContent,
       contentBodyHtml: publicBodyHtml,
+      contentBodyUnavailable: publicBodyUnavailable,
       hasAccess: isPublic,
       streamingUrl: null,
       progress: null,
@@ -206,6 +216,7 @@ export const load: PageServerLoad = async ({
     return {
       content: pageContent,
       contentBodyHtml: publicBodyHtml,
+      contentBodyUnavailable: publicBodyUnavailable,
       hasAccess: null,
       streamingUrl: null,
       progress: null,
@@ -246,11 +257,17 @@ export const load: PageServerLoad = async ({
     accessResult.hasAccess && body
       ? await renderContentBody(body, renderContext)
       : null;
+  const gatedBodyUnavailable =
+    accessResult.hasAccess &&
+    body != null &&
+    hasStoredText(body) &&
+    gatedBodyHtml == null;
 
   setHeaders(detailPageCacheHeaders(accessResult.hasAccess));
   return {
     content: pageContent,
     contentBodyHtml: gatedBodyHtml,
+    contentBodyUnavailable: gatedBodyUnavailable,
     hasAccess: null,
     streamingUrl: null,
     progress: null,

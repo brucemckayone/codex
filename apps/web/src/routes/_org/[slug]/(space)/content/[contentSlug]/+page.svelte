@@ -197,6 +197,7 @@
   revocationReason={accessState.revocationReason}
   accessCheckFailed={accessState.accessCheckFailed}
   withdrawnHeld={data.withdrawnHeld ?? null}
+  contentBodyUnavailable={data.contentBodyUnavailable ?? false}
   onaccessrestored={() => {
     // Clear the reason optimistically, then force a server-load re-run
     // so the next streaming URL request can succeed. `app:auth` is the

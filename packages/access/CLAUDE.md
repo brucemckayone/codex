@@ -156,6 +156,15 @@ lists content asks the org itself:
   dashboard and in-course player both answer `null`: a written practice
   reaches its reader through that read alone, with no stream to refuse it.
 
+Not yet covered, and tracked by Codex-62chf: the course-level public and shelf
+reads (`getCoursePage`, `getCourseBySlug`, `getCourseSellPreview`,
+`getContentCourses`, the published and enrolled lists) and
+`hasCourseEntitlement`. They expose no body and no signed stream, and the web
+never reaches them for a deleted org (its site no longer resolves).
+
+`isOfDeletedOrg` takes `organization` as a REQUIRED key, so a self-fetch that
+forgets the `with` fails to compile rather than reading every org as live.
+
 | Grant arm | Survives unpublication |
 |---|---|
 | `paid_purchase`, `paid_entitlement`, `subscribers_purchase`, `subscribers_entitlement` | **yes** — they paid for this item |

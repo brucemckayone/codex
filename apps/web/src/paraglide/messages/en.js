@@ -2407,6 +2407,14 @@ export const content_detail_withdrawn_lead = () => `This is no longer on sale.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const content_detail_body_unavailable = () => `This text didn't load. Refresh the page to try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const content_detail_withdrawn_purchase = () => `It stays in your library because you bought it.`
 
 

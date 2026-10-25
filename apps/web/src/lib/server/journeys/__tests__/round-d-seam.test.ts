@@ -189,6 +189,19 @@ describe('fetchInCoursePractice', () => {
     );
   });
 
+  // The older worker's markdown column is empty for an editor-written
+  // practice: its text is JSON this web cannot see, so "no written guidance"
+  // would be false.
+  it('a worker without `body` and an empty markdown column says the text did not load', async () => {
+    const { body: _omitted, ...olderWorker } = basePractice;
+    inCoursePractice.mockResolvedValue({ ...olderWorker, bodyHtml: null });
+
+    const result = await fetchFieldNotes();
+
+    expect(result?.bodyHtml).toBeNull();
+    expect(result?.bodyUnavailable).toBe(true);
+  });
+
   it('passes through a null payload (no such practice)', async () => {
     inCoursePractice.mockResolvedValue(null);
 

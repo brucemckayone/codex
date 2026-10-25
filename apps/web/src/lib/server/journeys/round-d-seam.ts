@@ -141,7 +141,8 @@ export async function fetchCourseDashboard(
  *
  * Two failures are said out loud rather than shown as "no written guidance":
  * - a content-api older than this web (a rollback) sends only the markdown
- *   column, as `bodyHtml`: rendered as markdown, and logged as deploy skew;
+ *   column, as `bodyHtml`: rendered as markdown, and logged as deploy skew
+ *   (an empty column is `bodyUnavailable`: the text may be editor JSON);
  * - stored text that rendered to nothing (renderContentBody failed and logged
  *   why): `bodyUnavailable`, so the pane says it did not load.
  */
@@ -158,14 +159,20 @@ export async function fetchInCoursePractice(
   const contentId = data.practice.contentId;
 
   let stored = body ?? null;
+  let bodyUnavailable = false;
   if (body === undefined && data.practice.contentType === 'written') {
     logger.error('In-course practice arrived without its stored body', {
       courseId,
       contentId,
     });
-    stored = legacyBodyHtml
-      ? { contentBody: legacyBodyHtml, contentBodyJson: null }
-      : null;
+    if (legacyBodyHtml) {
+      stored = { contentBody: legacyBodyHtml, contentBodyJson: null };
+    } else {
+      // The older worker sent only the markdown column, and it is empty: the
+      // text may well be editor JSON this web cannot see. "Didn't load" is the
+      // honest copy, never "no written guidance".
+      bodyUnavailable = true;
+    }
   }
 
   // Imported LAZILY so this seam's module-eval doesn't eagerly pull the heavy
@@ -176,20 +183,16 @@ export async function fetchInCoursePractice(
   // from the client bundle). [[feedback_vite_ssr_module_load_cascade]]
   let bodyHtml: string | null = null;
   if (stored) {
-    const { renderContentBody } = await import('$lib/editor/render');
+    const { hasStoredText, renderContentBody } = await import(
+      '$lib/editor/render'
+    );
     bodyHtml = await renderContentBody(stored, {
       contentId,
       surface: 'course-player',
     });
+    bodyUnavailable = hasStoredText(stored) && bodyHtml == null;
   }
-  const hasStoredText =
-    stored != null &&
-    (stored.contentBodyJson != null || Boolean(stored.contentBody));
-  return {
-    ...rest,
-    bodyHtml,
-    bodyUnavailable: hasStoredText && bodyHtml == null,
-  };
+  return { ...rest, bodyHtml, bodyUnavailable };
 }
 
 /**

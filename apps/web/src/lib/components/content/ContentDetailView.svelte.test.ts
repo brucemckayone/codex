@@ -489,6 +489,35 @@ describe('withdrawn from sale, still the reader’s (Codex-ov2ii)', () => {
   });
 });
 
+// Stored text that failed to render used to leave a granted reader a page
+// with no article and nothing said (Codex-uuz1g).
+describe('a body that did not render', () => {
+  const unavailable = () =>
+    document.querySelector('.content-detail__body-unavailable');
+
+  test('says it did not load, in the body’s place', () => {
+    render({
+      content: makeContent({ ...SELLABLE, contentType: 'written' }),
+      hasAccess: true,
+      contentBodyUnavailable: true,
+    });
+    expect(unavailable()?.textContent).toContain(
+      "This text didn't load. Refresh the page to try again."
+    );
+  });
+
+  test('a rendered body shows no such note', () => {
+    render({
+      content: makeContent({ ...SELLABLE, contentType: 'written' }),
+      hasAccess: true,
+      contentBodyHtml: '<p>The article.</p>',
+      contentBodyUnavailable: false,
+    });
+    expect(unavailable()).toBeNull();
+    expect(bodyText()).toContain('The article.');
+  });
+});
+
 describe('paused by a payment dispute (Codex-2hxff.60)', () => {
   const anyGate = () => document.querySelector('.content-detail__purchase');
   const purchaseForm = () => document.querySelector(`.${PURCHASE_FORM}`);
