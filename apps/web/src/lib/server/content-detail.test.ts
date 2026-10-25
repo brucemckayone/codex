@@ -30,10 +30,12 @@ const mockLogger = vi.hoisted(() => ({
 vi.mock('$lib/observability', () => ({ logger: mockLogger }));
 
 import { createServerApi } from './api';
+import { CACHE_HEADERS } from './cache';
 import {
   ACCESS_CHECK_FAILED_RESULT,
   type ContentPublicnessPolicy,
   classifyStreamFailure,
+  detailPageCacheHeaders,
   EMPTY_SUB_CONTEXT,
   isPublicContent,
   loadAccessAndProgress,
@@ -358,6 +360,50 @@ describe('loadAccessAndProgress reads WHY /stream failed (Codex-h3ipg)', () => {
       policy()
     );
     expect(result).toMatchObject({ hasAccess: true, accessCheckFailed: true });
+  });
+
+  // A lost progress read resets the resume position to 0 (Codex-uuz1g).
+  it('logs a failed progress read, and still answers access', async () => {
+    mockLogger.warn.mockClear();
+    vi.mocked(createServerApi).mockReturnValue({
+      access: {
+        getStreamingUrl: () =>
+          Promise.resolve({ streamingUrl: null, contentType: 'written' }),
+        getProgress: () => Promise.reject(new Error('progress read timed out')),
+      },
+    } as unknown as ReturnType<typeof createServerApi>);
+
+    const result = await loadAccessAndProgress('c1', undefined, cookies, paid);
+
+    expect(result).toMatchObject({ hasAccess: true, progress: null });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Playback progress not loaded',
+      expect.objectContaining({
+        contentId: 'c1',
+        error: 'progress read timed out',
+      })
+    );
+  });
+});
+
+describe('detailPageCacheHeaders (Codex-hyz1c)', () => {
+  it('stores a page carrying a gated body nowhere', () => {
+    expect(detailPageCacheHeaders('<p>paid</p>')).toEqual(CACHE_HEADERS.FRESH);
+  });
+
+  it('keeps a page with no gated body private, no-cache', () => {
+    expect(detailPageCacheHeaders(null)).toEqual(CACHE_HEADERS.PRIVATE);
+  });
+
+  // Pins the presets this rule leans on: if either changed meaning, the
+  // detail pages would silently send the wrong header.
+  it('the two presets mean what the rule says', () => {
+    expect(CACHE_HEADERS.FRESH).toEqual({
+      'Cache-Control': 'private, no-store',
+    });
+    expect(CACHE_HEADERS.PRIVATE).toEqual({
+      'Cache-Control': 'private, no-cache',
+    });
   });
 });
 

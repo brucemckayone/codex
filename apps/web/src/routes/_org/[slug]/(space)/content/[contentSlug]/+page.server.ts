@@ -14,6 +14,7 @@ import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
   ACCESS_CHECK_FAILED_RESULT,
+  detailPageCacheHeaders,
   EMPTY_SUB_CONTEXT,
   handlePurchaseAction,
   isPublicContent,
@@ -49,7 +50,8 @@ export const load: PageServerLoad = async ({
   // for owners. PRIVATE keeps every auth-varying page out of shared caches. The
   // DB stays shielded: the public content list (incl. this slug lookup) is
   // KV-cached in content-api, so PRIVATE costs an SSR render, not a query.
-  // See docs/caching-strategy.md §HTTP/CDN caching.
+  // See docs/caching-strategy.md §HTTP/CDN caching. A response carrying a
+  // gated body is stored nowhere at all (`detailPageCacheHeaders`).
   const successCacheHeaders = CACHE_HEADERS.PRIVATE;
 
   // Fetch content via public endpoint with org.id + slug — 1 API call.
@@ -108,7 +110,10 @@ export const load: PageServerLoad = async ({
   // access check below — this is what prevents a non-follower from reading
   // the article text through view-source or the SvelteKit load payload.
   const isPublic = isPublicContent(content);
-  const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
+  const renderContext = { contentId: content.id };
+  const publicBodyHtml = isPublic
+    ? await renderContentBody(content, renderContext)
+    : null;
 
   // Fetch related content — returned as a bare promise (streamed, below fold)
   const relatedPromise = loadRelatedContent(api, { orgId: org.id });
@@ -134,12 +139,14 @@ export const load: PageServerLoad = async ({
   // renders the body and player that check returned, with the note in place
   // of any offer (there is nothing left to buy or subscribe to).
   if (withdrawn) {
-    setHeaders(successCacheHeaders);
+    // Always gated: a public piece never takes this path.
+    const withdrawnBodyHtml = withdrawn.body
+      ? await renderContentBody(withdrawn.body, renderContext)
+      : null;
+    setHeaders(detailPageCacheHeaders(withdrawnBodyHtml));
     return {
       content: pageContent,
-      contentBodyHtml: withdrawn.body
-        ? await renderContentBody(withdrawn.body)
-        : null,
+      contentBodyHtml: withdrawnBodyHtml,
       hasAccess: null,
       streamingUrl: null,
       progress: null,
@@ -197,12 +204,21 @@ export const load: PageServerLoad = async ({
       hasAccess: null,
       streamingUrl: null,
       progress: null,
+      // fetchAccess catches a failed request itself, so this sees only a
+      // fault in our own code; it fails closed, and logs (Codex-uuz1g).
       accessAndProgress: loadAccessAndProgress(
         content.id,
         platform,
         cookies,
         content
-      ).catch(() => ({ ...ACCESS_CHECK_FAILED_RESULT, hasAccess: isPublic })),
+      ).catch((error: unknown) => {
+        logReadFailure(
+          'Content access check threw',
+          { contentId: content.id },
+          error
+        );
+        return { ...ACCESS_CHECK_FAILED_RESULT, hasAccess: isPublic };
+      }),
       subscriptionContext,
       relatedContent: relatedPromise,
       parentCourses: parentCoursesPromise,
@@ -220,12 +236,21 @@ export const load: PageServerLoad = async ({
     platform,
     cookies,
     content
-  ).catch(() => ({ access: ACCESS_CHECK_FAILED_RESULT, body: null }));
+  ).catch((error: unknown) => {
+    logReadFailure(
+      'Content access check threw',
+      { contentId: content.id },
+      error
+    );
+    return { access: ACCESS_CHECK_FAILED_RESULT, body: null };
+  });
 
   const gatedBodyHtml =
-    accessResult.hasAccess && body ? await renderContentBody(body) : null;
+    accessResult.hasAccess && body
+      ? await renderContentBody(body, renderContext)
+      : null;
 
-  setHeaders(successCacheHeaders);
+  setHeaders(detailPageCacheHeaders(gatedBodyHtml));
   return {
     content: pageContent,
     contentBodyHtml: gatedBodyHtml,

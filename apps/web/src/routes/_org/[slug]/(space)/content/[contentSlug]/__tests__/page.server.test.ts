@@ -28,6 +28,7 @@ const mockContentCourses = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 const mockGetStreamingUrl = vi.hoisted(() => vi.fn());
 const mockGetWithdrawnContent = vi.hoisted(() => vi.fn());
 const mockGetProgress = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
+const mockSetHeaders = vi.hoisted(() => vi.fn());
 const mockLogger = vi.hoisted(() => ({
   warn: vi.fn(),
   error: vi.fn(),
@@ -77,7 +78,7 @@ const event = (contentSlug = 'practice', user: { id: string } | null = null) =>
     locals: { user },
     platform: { env: {} },
     cookies: { get: vi.fn() },
-    setHeaders: vi.fn(),
+    setHeaders: mockSetHeaders,
     depends: vi.fn(),
   }) as never;
 
@@ -388,5 +389,127 @@ describe('org content detail: an item withdrawn from sale opens for whoever stil
 
     expect(mockGetWithdrawnContent).not.toHaveBeenCalled();
     expect(data).not.toHaveProperty('withdrawnHeld');
+  });
+});
+
+// Owner decision, 2026-10-25: "Yes, don't store paid pages" (Codex-hyz1c). A
+// reader who later loses access must keep no copy on their own device.
+describe('org content detail: a page carrying a gated body is stored nowhere', () => {
+  const reader = { id: 'u1' };
+  const gated = row({
+    isFree: false,
+    isFollowerGated: true,
+    contentBody: null,
+  });
+  const grantedWithBody = {
+    streamingUrl: null,
+    waveformUrl: null,
+    expiresAt: '2026-10-23T22:00:00.000Z',
+    contentType: 'written',
+    body: { contentBody: 'the paid text', contentBodyJson: null },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const sentHeaders = () =>
+    mockSetHeaders.mock.calls.map(([headers]) => headers);
+
+  it('a granted gated body: private, no-store', async () => {
+    const { CACHE_HEADERS } = await import('$lib/server/cache');
+    mockServerGetPublicContent.mockResolvedValue({ items: [gated] });
+    mockGetStreamingUrl.mockResolvedValue(grantedWithBody);
+    const { load } = await import('../+page.server');
+
+    await load(event('practice', reader));
+
+    expect(sentHeaders()).toEqual([CACHE_HEADERS.FRESH]);
+  });
+
+  it('a denied gated piece (no body sent): private, no-cache', async () => {
+    const { CACHE_HEADERS } = await import('$lib/server/cache');
+    const { ApiError } = await import('$lib/server/errors');
+    mockServerGetPublicContent.mockResolvedValue({ items: [gated] });
+    mockGetStreamingUrl.mockRejectedValue(
+      new ApiError(403, 'denied', 'ACCESS_DENIED')
+    );
+    const { load } = await import('../+page.server');
+
+    await load(event('practice', reader));
+
+    expect(sentHeaders()).toEqual([CACHE_HEADERS.PRIVATE]);
+  });
+
+  it('a public piece, signed in: private, no-cache, so Back restores it', async () => {
+    const { CACHE_HEADERS } = await import('$lib/server/cache');
+    mockServerGetPublicContent.mockResolvedValue({ items: [row({})] });
+    mockGetStreamingUrl.mockResolvedValue(grantedWithBody);
+    const { load } = await import('../+page.server');
+
+    await load(event('practice', reader));
+
+    expect(sentHeaders()).toEqual([CACHE_HEADERS.PRIVATE]);
+  });
+
+  it('a withdrawn item with its body: private, no-store', async () => {
+    const { CACHE_HEADERS } = await import('$lib/server/cache');
+    mockServerGetPublicContent.mockResolvedValue({ items: [] });
+    mockGetWithdrawnContent.mockResolvedValue({
+      content: row({ isFree: false, isPurchasable: true, priceCents: 900 }),
+      held: { by: 'purchase', until: null },
+    });
+    mockGetStreamingUrl.mockResolvedValue(grantedWithBody);
+    const { load } = await import('../+page.server');
+
+    await load(event('practice', reader));
+
+    expect(sentHeaders()).toEqual([CACHE_HEADERS.FRESH]);
+  });
+});
+
+// The outer `.catch` sees only a fault in our own code (fetchAccess catches a
+// failed request itself). It failed closed silently, so a code bug looked like
+// an outage (Codex-uuz1g). A /stream that returns no promise is such a fault.
+describe('org content detail: a thrown access check fails closed and is logged', () => {
+  const reader = { id: 'u1' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetStreamingUrl.mockImplementation(() => undefined);
+  });
+
+  it('on a gated piece', async () => {
+    mockServerGetPublicContent.mockResolvedValue({
+      items: [row({ isFree: false, isFollowerGated: true, contentBody: null })],
+    });
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as {
+      contentBodyHtml: string | null;
+      accessAndProgress: Promise<{ hasAccess: boolean }>;
+    };
+
+    expect(data.contentBodyHtml).toBeNull();
+    expect((await data.accessAndProgress).hasAccess).toBe(false);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Content access check threw',
+      expect.objectContaining({ contentId: 'c9' })
+    );
+  });
+
+  it('on a public piece, signed in', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [row({})] });
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as {
+      accessAndProgress: Promise<{ accessCheckFailed?: boolean }>;
+    };
+
+    expect((await data.accessAndProgress).accessCheckFailed).toBe(true);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Content access check threw',
+      expect.objectContaining({ contentId: 'c9' })
+    );
   });
 });

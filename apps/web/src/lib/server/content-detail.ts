@@ -50,6 +50,7 @@ import { error, fail } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
 import { createServerApi, type PublicContentListItem } from './api';
+import { CACHE_HEADERS } from './cache';
 import { ApiError } from './errors';
 import { logReadFailure } from './read-failure';
 
@@ -220,6 +221,20 @@ export function withoutRawBody<
   T extends { contentBody?: string | null; contentBodyJson?: unknown },
 >(content: T): T {
   return { ...content, contentBody: null, contentBodyJson: null };
+}
+
+/**
+ * A detail page's cache headers once it knows the body it renders. Always
+ * private: the page varies by viewer. And stored nowhere when it carries a
+ * GATED body, so a reader who later loses access (a refund, a lapsed
+ * subscription, an unfollow) keeps no copy on their own disk or in the
+ * back/forward cache (owner decision, 2026-10-25: "Yes, don't store paid
+ * pages"; Codex-hyz1c). `null` (a public body, or none) keeps `private,
+ * no-cache`, so Back still restores a free page. `setHeaders` covers the
+ * page's `__data.json` too: the same load answers both.
+ */
+export function detailPageCacheHeaders(gatedBodyHtml: string | null) {
+  return gatedBodyHtml == null ? CACHE_HEADERS.PRIVATE : CACHE_HEADERS.FRESH;
 }
 
 /** The server-side API surface returned by `createServerApi`. */
@@ -516,7 +531,15 @@ async function fetchAccess(
       .catch((err: unknown) => {
         streamError = err;
       }),
-    api.access.getProgress(contentId).catch(() => null),
+    // No progress is `{ progress: null }`, not a rejection, so a rejection is
+    // a failed read: the player starts at 0, which must not pass unlogged
+    // (Codex-uuz1g).
+    api.access
+      .getProgress(contentId)
+      .catch((err: unknown) => {
+        logReadFailure('Playback progress not loaded', { contentId }, err);
+        return null;
+      }),
   ]);
 
   // A successful response from /stream means the access check passed,
