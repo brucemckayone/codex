@@ -27,6 +27,7 @@ import {
   loadSubscriptionContext,
   loadWithdrawnDetail,
   logAccessCheckFault,
+  subscriptionContextFault,
   withoutRawBody,
 } from '$lib/server/content-detail';
 import { logReadFailure } from '$lib/server/read-failure';
@@ -242,11 +243,9 @@ export const load: PageServerLoad = async ({
         gatingOrgId,
         content.includedInTierId ?? null,
         platform,
-        cookies
-      ).catch(() => ({
-        ...EMPTY_SUB_CONTEXT,
-        requiresSubscription: content.includedInTierId != null,
-      }))
+        cookies,
+        locals.user != null
+      ).catch((error) => subscriptionContextFault(content.id, error))
     : Promise.resolve(EMPTY_SUB_CONTEXT);
 
   // For unauthenticated visitors — body unlocks for public (free) content

@@ -149,9 +149,9 @@ function extractRevocationReason(
  * shape can only drift in one place. Truth-source for the field set is
  * `SubscriptionContext` in `$lib/types`.
  *
- * The `.catch` branch of the gated `loadSubscriptionContext()` call computes
- * `requiresSubscription` from content state, so it stays inline rather than
- * sharing this constant.
+ * The `.catch` on the gated `loadSubscriptionContext()` call is
+ * `subscriptionContextFault`: this shape with `requiresSubscription` true,
+ * since only tier-gated content makes that call.
  *
  * Shape pinned by `content-detail.test.ts` so the field set can only drift in
  * one place (originally the removed iter-027 F3 denoise proof).
@@ -252,9 +252,32 @@ export function detailPageCacheHeaders(gatedAccessGranted: boolean) {
 export function logAccessCheckFault(contentId: string, error: unknown): void {
   logger.error('Content access check threw', {
     contentId,
+    ...faultFields(error),
+  });
+}
+
+/**
+ * The detail pages' catch on `loadSubscriptionContext`. Its two reads catch
+ * and log their own failures, so what reaches here is a fault in our own
+ * code: logged at error with its stack (Codex-7ms7h). The page still offers
+ * the tier, as it did before.
+ */
+export function subscriptionContextFault(
+  contentId: string,
+  error: unknown
+): SubscriptionContext {
+  logger.error('Subscription context threw', {
+    contentId,
+    ...faultFields(error),
+  });
+  return { ...EMPTY_SUB_CONTEXT, requiresSubscription: true };
+}
+
+function faultFields(error: unknown): { error: string; stack?: string } {
+  return {
     error: error instanceof Error ? error.message : String(error),
     stack: error instanceof Error ? error.stack : undefined,
-  });
+  };
 }
 
 /** The server-side API surface returned by `createServerApi`. */
@@ -625,12 +648,19 @@ async function fetchAccess(
  *
  * Fetches the user's current subscription + org tiers in parallel.
  * Compares tier sortOrder to determine if subscription covers the content.
+ *
+ * A visitor who is not signed in has no subscription, so it is not asked for:
+ * the route is auth-required, and its certain 401 was a wasted round-trip that
+ * would now be logged. With that gone, a failed read is a real failure, logged
+ * (Codex-7ms7h): without the log, a subscriber below the tier saw Subscribe
+ * instead of Upgrade and nobody knew why.
  */
 export async function loadSubscriptionContext(
   orgId: string,
   includedInTierId: string | null,
   platform: App.Platform | undefined,
-  cookies: Cookies
+  cookies: Cookies,
+  signedIn: boolean
 ): Promise<SubscriptionContext> {
   // Content requires a subscription when it is tier-gated — the WP-1
   // successor of accessType 'subscribers' is a non-null includedInTierId.
@@ -650,8 +680,16 @@ export async function loadSubscriptionContext(
   const api = createServerApi(platform, cookies);
 
   const [currentSubscription, tiers] = await Promise.all([
-    api.subscription.getCurrent(orgId).catch(() => null),
-    api.tiers.list(orgId).catch(() => [] as SubscriptionTier[]),
+    signedIn
+      ? api.subscription.getCurrent(orgId).catch((error) => {
+          logReadFailure('Current subscription not loaded', { orgId }, error);
+          return null;
+        })
+      : null,
+    api.tiers.list(orgId).catch((error) => {
+      logReadFailure('Subscription tiers not loaded', { orgId }, error);
+      return [] as SubscriptionTier[];
+    }),
   ]);
 
   // hasSubscription must mirror the backend access filter: the @codex/access

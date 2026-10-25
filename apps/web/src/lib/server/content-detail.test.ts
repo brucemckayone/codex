@@ -44,6 +44,7 @@ import {
   loadSubscriptionContext,
   loadWithdrawnDetail,
   resolveAccessGranted,
+  subscriptionContextFault,
 } from './content-detail';
 import { ApiError } from './errors';
 
@@ -278,9 +279,137 @@ describe('loadSubscriptionContext (non-subscriber early return)', () => {
       'org-1',
       null,
       undefined,
-      unusedCookies
+      unusedCookies,
+      true
     );
     expect(ctx).toEqual(EMPTY_SUB_CONTEXT);
+  });
+});
+
+// A tier-gated piece's reads (Codex-7ms7h): a failure is logged, never dropped,
+// and a visitor who is not signed in is never asked for a subscription, whose
+// route is auth-required (its certain 401 would log as our own bad request).
+describe('loadSubscriptionContext (tier-gated)', () => {
+  type Cookies = Parameters<typeof loadSubscriptionContext>[3];
+  const cookies = {} as unknown as Cookies;
+  const tier = { id: 'tier-2', sortOrder: 2 };
+
+  function apiReturns(
+    getCurrent: () => Promise<unknown>,
+    list: () => Promise<unknown> = () => Promise.resolve([tier])
+  ) {
+    const current = vi.fn(getCurrent);
+    vi.mocked(createServerApi).mockReturnValue({
+      subscription: { getCurrent: current },
+      tiers: { list },
+    } as unknown as ReturnType<typeof createServerApi>);
+    return current;
+  }
+
+  beforeEach(() => {
+    mockLogger.error.mockClear();
+    mockLogger.warn.mockClear();
+  });
+
+  it('a covering subscription opens the piece to a signed-in reader', async () => {
+    apiReturns(() =>
+      Promise.resolve({ status: 'active', tier: { sortOrder: 2 } })
+    );
+
+    const ctx = await loadSubscriptionContext(
+      'org-1',
+      'tier-2',
+      undefined,
+      cookies,
+      true
+    );
+
+    expect(ctx).toMatchObject({
+      requiresSubscription: true,
+      hasSubscription: true,
+      subscriptionCoversContent: true,
+    });
+  });
+
+  it('never asks for the subscription of a visitor who is not signed in', async () => {
+    const getCurrent = apiReturns(() =>
+      Promise.reject(new ApiError(401, 'Unauthorized'))
+    );
+
+    const ctx = await loadSubscriptionContext(
+      'org-1',
+      'tier-2',
+      undefined,
+      cookies,
+      false
+    );
+
+    expect(getCurrent).not.toHaveBeenCalled();
+    expect(ctx).toMatchObject({
+      requiresSubscription: true,
+      hasSubscription: false,
+      tiers: [tier],
+    });
+    expect(mockLogger.error).not.toHaveBeenCalled();
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+
+  it('logs a failed subscription read and offers the tier', async () => {
+    apiReturns(() => Promise.reject(new ApiError(503, 'unavailable')));
+
+    const ctx = await loadSubscriptionContext(
+      'org-1',
+      'tier-2',
+      undefined,
+      cookies,
+      true
+    );
+
+    expect(ctx).toMatchObject({ hasSubscription: false, tiers: [tier] });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Current subscription not loaded',
+      expect.objectContaining({ orgId: 'org-1', status: 503 })
+    );
+  });
+
+  it('logs a failed tier read', async () => {
+    apiReturns(
+      () => Promise.resolve(null),
+      () => Promise.reject(new ApiError(503, 'unavailable'))
+    );
+
+    const ctx = await loadSubscriptionContext(
+      'org-1',
+      'tier-2',
+      undefined,
+      cookies,
+      true
+    );
+
+    expect(ctx.tiers).toEqual([]);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Subscription tiers not loaded',
+      expect.objectContaining({ orgId: 'org-1', status: 503 })
+    );
+  });
+
+  it('the page-level fault logs at error with its stack and still offers the tier', () => {
+    const fault = new TypeError(
+      "Cannot read properties of undefined (reading 'sortOrder')"
+    );
+
+    expect(subscriptionContextFault('content-1', fault)).toEqual({
+      ...EMPTY_SUB_CONTEXT,
+      requiresSubscription: true,
+    });
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Subscription context threw',
+      expect.objectContaining({
+        contentId: 'content-1',
+        error: fault.message,
+        stack: fault.stack,
+      })
+    );
   });
 });
 

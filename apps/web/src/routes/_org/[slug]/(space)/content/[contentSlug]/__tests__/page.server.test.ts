@@ -29,6 +29,8 @@ const mockGetStreamingUrl = vi.hoisted(() => vi.fn());
 const mockGetWithdrawnContent = vi.hoisted(() => vi.fn());
 const mockGetProgress = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 const mockSetHeaders = vi.hoisted(() => vi.fn());
+const mockGetCurrentSubscription = vi.hoisted(() => vi.fn());
+const mockListTiers = vi.hoisted(() => vi.fn());
 const mockLogger = vi.hoisted(() => ({
   warn: vi.fn(),
   error: vi.fn(),
@@ -50,6 +52,8 @@ vi.mock('$lib/server/api', () => ({
       getWithdrawnContent: mockGetWithdrawnContent,
     },
     content: { getPublicContent: mockServerGetPublicContent },
+    subscription: { getCurrent: mockGetCurrentSubscription },
+    tiers: { list: mockListTiers },
   })),
 }));
 
@@ -621,6 +625,75 @@ describe('org content detail: a thrown access check fails closed and is logged',
     expect((await data.accessAndProgress).accessCheckFailed).toBe(true);
     expect(mockLogger.error).toHaveBeenCalledWith(
       'Content access check threw',
+      expect.objectContaining({ contentId: 'c9', stack: expect.any(String) })
+    );
+  });
+});
+
+describe("org content detail: a tier-gated piece's subscription context (Codex-7ms7h)", () => {
+  const reader = { id: 'u1' };
+  const tier = { id: 'tier-2', sortOrder: 2 };
+  const tierGated = row({
+    isFree: false,
+    includedInTierId: 'tier-2',
+    contentBody: null,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockServerGetPublicContent.mockResolvedValue({ items: [tierGated] });
+    mockGetCurrentSubscription.mockResolvedValue(null);
+    mockListTiers.mockResolvedValue([tier]);
+  });
+
+  it('a visitor who is not signed in is never asked for a subscription', async () => {
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', null))) as {
+      subscriptionContext: Promise<unknown>;
+    };
+
+    expect(await data.subscriptionContext).toMatchObject({
+      requiresSubscription: true,
+      hasSubscription: false,
+      tiers: [tier],
+    });
+    expect(mockGetCurrentSubscription).not.toHaveBeenCalled();
+  });
+
+  it("a signed-in reader's subscription is read", async () => {
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as {
+      subscriptionContext: Promise<unknown>;
+    };
+    await data.subscriptionContext;
+
+    expect(mockGetCurrentSubscription).toHaveBeenCalledWith('o1');
+  });
+
+  it.each([
+    ['signed in', reader],
+    ['not signed in', null],
+  ])('%s: a fault is logged at error with its stack, and the tier still offered', async (_label, user) => {
+    // A tiers read that returns no promise: a fault in our own code, which
+    // the read's own catch never sees.
+    mockListTiers.mockImplementation(() => undefined);
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', user))) as {
+      subscriptionContext: Promise<unknown>;
+    };
+
+    expect(await data.subscriptionContext).toEqual({
+      requiresSubscription: true,
+      hasSubscription: false,
+      subscriptionCoversContent: false,
+      currentSubscription: null,
+      tiers: [],
+    });
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Subscription context threw',
       expect.objectContaining({ contentId: 'c9', stack: expect.any(String) })
     );
   });
