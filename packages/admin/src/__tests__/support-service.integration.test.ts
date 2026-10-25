@@ -11,8 +11,10 @@
 
 import { CONTENT_TYPES, PURCHASE_STATUS } from '@codex/constants';
 import {
+  agreementProposals,
   contentAccess,
   content as contentTable,
+  creatorOrganizationAgreements,
   disputes,
   entitlements,
   organizations,
@@ -238,6 +240,8 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
     subscriptionIds: [] as string[],
     stripeRefundIds: [] as string[],
     stripeDisputeIds: [] as string[],
+    agreementIds: [] as string[],
+    proposalIds: [] as string[],
   };
 
   beforeAll(async () => {
@@ -338,6 +342,17 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       await db
         .delete(subscriptions)
         .where(inArray(subscriptions.id, created.subscriptionIds));
+    }
+    // After the purchases and slices that name them.
+    if (created.agreementIds.length > 0) {
+      await db
+        .delete(creatorOrganizationAgreements)
+        .where(inArray(creatorOrganizationAgreements.id, created.agreementIds));
+    }
+    if (created.proposalIds.length > 0) {
+      await db
+        .delete(agreementProposals)
+        .where(inArray(agreementProposals.id, created.proposalIds));
     }
     await db.delete(subscriptionTiers).where(eq(subscriptionTiers.id, tierId));
     await teardownTestDatabase();
@@ -594,6 +609,49 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       stripeCreatedAt: new Date(),
     });
     return id;
+  }
+
+  /**
+   * The creator's accepted agreement at `shareBps`. Ended, so a second one
+   * of the same type never meets the one-active-agreement index.
+   */
+  async function agreement(
+    revenueType: 'subscription' | 'content_purchase',
+    shareBps: number
+  ) {
+    const proposal = takeFirst(
+      await db
+        .insert(agreementProposals)
+        .values({
+          organizationId: orgId,
+          creatorId,
+          revenueType,
+          roundNumber: 1,
+          proposedByUserId: ownerId,
+          proposedByRole: 'owner',
+          proposedCreatorSharePercent: shareBps,
+          proposedEffectiveFrom: new Date(),
+          status: 'accepted',
+        })
+        .returning()
+    );
+    created.proposalIds.push(proposal.id);
+    const row = takeFirst(
+      await db
+        .insert(creatorOrganizationAgreements)
+        .values({
+          creatorId,
+          organizationId: orgId,
+          organizationFeePercentage: 10_000 - shareBps,
+          revenueType,
+          status: 'terminated',
+          terminatedAt: new Date(),
+          currentProposalId: proposal.id,
+        })
+        .returning()
+    );
+    created.agreementIds.push(row.id);
+    return row.id;
   }
 
   const refundInput = (amountCents: number, expectedRefundCount = 0) => ({
@@ -879,11 +937,105 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(detail.source).toMatchObject({
         type: 'subscription',
         subscriptionId: subscription.id,
+        stripeSubscriptionId: subscription.stripeSubscriptionId,
         planName: 'Inner Circle',
         interval: 'month',
         isCurrentPeriodPayment: true,
       });
       expect(detail.slices).toHaveLength(3);
+    });
+  });
+
+  describe('getChargeDetail: what the approved page shows besides', () => {
+    it('a creator slice carries the share of the agreement that split it; no other slice does', async () => {
+      const bought = await purchaseCharge();
+      await db
+        .update(purchases)
+        .set({
+          creatorOrgAgreementId: await agreement('content_purchase', 6000),
+        })
+        .where(eq(purchases.id, bought.purchase.id));
+      const invoice = await invoiceCharge();
+      await db
+        .update(payouts)
+        .set({ creatorOrgAgreementId: await agreement('subscription', 4500) })
+        .where(
+          and(
+            eq(payouts.stripeChargeId, invoice.chargeId),
+            eq(payouts.payoutType, 'creator_payout')
+          )
+        );
+      const sharesOf = async (chargeId: string) =>
+        Object.fromEntries(
+          (await service.getChargeDetail(chargeId)).slices.map((row) => [
+            row.payoutType,
+            row.agreementShareBps,
+          ])
+        );
+
+      expect(await sharesOf(bought.chargeId)).toEqual({
+        creator_payout: 6000,
+        organization_fee: null,
+        platform_fee: null,
+      });
+      expect(await sharesOf(invoice.chargeId)).toEqual({
+        creator_payout: 4500,
+        organization_fee: null,
+        platform_fee: null,
+      });
+    });
+
+    it('a dispute line says when its dispute opened, and when its win was applied; a lost one has no win date', async () => {
+      const bought = await purchaseCharge();
+      const won = await dispute(bought.chargeId, 'won', bought.purchase.id);
+      const wonAt = new Date(Date.now() - 60_000);
+      await db
+        .update(disputes)
+        .set({ outcomeAppliedAt: wonAt })
+        .where(eq(disputes.stripeDisputeId, won));
+      const open = await dispute(bought.chargeId, 'needs_response');
+      const lost = await dispute(bought.chargeId, 'lost');
+      await db
+        .update(disputes)
+        .set({ outcomeAppliedAt: wonAt })
+        .where(eq(disputes.stripeDisputeId, lost));
+      for (const causeId of [won, open, lost]) {
+        await db.insert(payoutReversals).values({
+          payoutId: bought.creator.id,
+          causeType: 'dispute',
+          causeId,
+          amountCents: 300,
+          kind: 'transfer_reversal',
+          status: 'done',
+        });
+      }
+      const openedAt = new Map(
+        (
+          await db
+            .select({
+              id: disputes.stripeDisputeId,
+              at: disputes.stripeCreatedAt,
+            })
+            .from(disputes)
+            .where(inArray(disputes.stripeDisputeId, [won, open, lost]))
+        ).map((row) => [row.id, row.at.toISOString()])
+      );
+
+      const detail = await service.getChargeDetail(bought.chargeId);
+      const lines = detail.slices.find(
+        (row) => row.payoutId === bought.creator.id
+      )?.history;
+
+      expect(lines?.find((line) => line.causeId === won)).toMatchObject({
+        disputeOpenedAt: openedAt.get(won),
+        disputeWonAt: wonAt.toISOString(),
+      });
+      for (const id of [open, lost]) {
+        expect(lines?.find((line) => line.causeId === id)).toMatchObject({
+          disputeOpenedAt: openedAt.get(id),
+          disputeWonAt: null,
+        });
+      }
     });
   });
 
@@ -1121,6 +1273,45 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       );
 
   describe('the queue', () => {
+    it("dates a failed refund's charge from our record: a purchase's payment, an invoice's first slice", async () => {
+      const bought = await purchaseCharge(2 * DAY);
+      const onPurchase = await failedRefund(bought, 300);
+      const invoice = await invoiceCharge();
+      const onInvoice = takeFirst(
+        await db
+          .insert(refunds)
+          .values({
+            stripeRefundId: `re_sup${uid()}`,
+            stripeChargeId: invoice.chargeId,
+            amountCents: 300,
+            currency: 'gbp',
+            status: 'failed',
+            failureReason: 'expired_or_canceled_card',
+            stripeCreatedAt: new Date(),
+          })
+          .returning()
+      );
+      created.stripeRefundIds.push(onInvoice.stripeRefundId);
+      const [firstSlice] = await db
+        .select({ at: payouts.createdAt })
+        .from(payouts)
+        .where(
+          and(
+            eq(payouts.stripeChargeId, invoice.chargeId),
+            eq(payouts.payoutType, 'platform_fee')
+          )
+        );
+
+      const list = await service.listFailedRefunds({ page: 1, limit: 50 });
+      const paidAtOf = (refundId: string) =>
+        list.items.find((row) => row.refundId === refundId)?.chargePaidAt;
+
+      expect(paidAtOf(onPurchase.id)).toBe(
+        bought.purchase.purchasedAt?.toISOString()
+      );
+      expect(paidAtOf(onInvoice.id)).toBe(firstSlice?.at.toISOString());
+    });
+
     it("counts and lists a failed refund, with what its clawback took from payees but not the fee's share", async () => {
       const charge = await purchaseCharge();
       const failed = await failedRefund(charge, 1000);

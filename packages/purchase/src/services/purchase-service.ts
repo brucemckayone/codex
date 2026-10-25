@@ -3036,9 +3036,13 @@ export class PurchaseService extends BaseService {
    *
    * Forward only, because Stripe does not deliver events in order: an inquiry
    * may become a chargeback, and a final status (`won`, `lost`,
-   * `warning_closed`, `prevented`) never changes. Returns the row as it now
-   * stands, which is what the caller acts on, not the event's snapshot. A
-   * status Stripe adds later is logged and not written.
+   * `warning_closed`, `prevented`) never changes. Stripe can turn `lost`
+   * into `won` (a late win): that event is only alerted, once per event, and
+   * the row stays `lost` (owner decision 2026-10-25, "alert only"), so the
+   * loss's refund, reversals and ended access stand until a person undoes
+   * them. Codex-2hxff.70 will record the win together with the undo. Returns
+   * the row as it now stands, which is what the caller acts on, not the
+   * event's snapshot. A status Stripe adds later is logged and not written.
    */
   async recordDispute(dispute: {
     stripeDisputeId: string;
@@ -3066,6 +3070,11 @@ export class PurchaseService extends BaseService {
             .where(eq(purchases.stripePaymentIntentId, dispute.paymentIntentId))
             .limit(1)
         : [];
+      const [prior] = await this.db
+        .select({ status: disputes.status })
+        .from(disputes)
+        .where(eq(disputes.stripeDisputeId, dispute.stripeDisputeId))
+        .limit(1);
       await this.db
         .insert(disputes)
         .values({
@@ -3089,6 +3098,20 @@ export class PurchaseService extends BaseService {
         .from(disputes)
         .where(eq(disputes.stripeDisputeId, dispute.stripeDisputeId))
         .limit(1);
+      // A late win: the upsert above refused it, so the row is still lost.
+      if (prior?.status === 'lost' && status === 'won' && current) {
+        this.obs.error(
+          'late win on a lost dispute: re-pay creators and restore the buyer by hand',
+          {
+            errorId: crypto.randomUUID(),
+            disputeId: current.stripeDisputeId,
+            chargeId: current.stripeChargeId,
+            purchaseId: current.purchaseId,
+            subscriptionId: current.subscriptionId,
+            courseSubscriptionId: current.courseSubscriptionId,
+          }
+        );
+      }
       return current;
     } catch (error) {
       this.handleError(error, 'recordDispute');
@@ -3280,8 +3303,9 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * A refund that FAILED returned nothing to the buyer (Codex-2hxff.28,
-   * owner decision 2026-10-24). A purchase it refunded in part is still
+   * A refund that FAILED or was CANCELED returned nothing to the buyer
+   * (Codex-2hxff.28, owner decisions 2026-10-24 and, for canceled,
+   * 2026-10-25, "same as failed"). A purchase it refunded in part is still
    * `completed` (P-1), and `processRefund` only ever raises its refunded
    * amount, so the amount is restated here from the refunds that still stand,
    * with the newest one's id and reason: the restatement support's settlement
@@ -3306,10 +3330,13 @@ export class PurchaseService extends BaseService {
         return { purchaseId: purchase.id, ...standing };
       });
       if (restated) {
-        this.obs.info('Failed refund: purchase refund amount restated', {
-          purchaseId: restated.purchaseId,
-          refundAmountCents: restated.refundAmountCents,
-        });
+        this.obs.info(
+          'A refund returned nothing: purchase refund amount restated',
+          {
+            purchaseId: restated.purchaseId,
+            refundAmountCents: restated.refundAmountCents,
+          }
+        );
       }
     } catch (error) {
       this.handleError(error, 'restateStandingRefunds');

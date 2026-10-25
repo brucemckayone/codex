@@ -95,6 +95,8 @@ export type ChargeDetailSource =
   | {
       type: 'subscription' | 'course_subscription';
       subscriptionId: string;
+      /** Stripe's `sub_` id for the subscription. */
+      stripeSubscriptionId: string;
       /** The tier's name; a course plan's course title. */
       planName: string;
       planDeleted: boolean;
@@ -158,6 +160,14 @@ export interface Slice {
   payee: SupportPerson | null;
   organizationName: string | null;
   amountCents: number;
+  /**
+   * A creator slice's share of the pool after the platform fee, in basis
+   * points (6000 = 60%), from the agreement that split it: an invoice slice's
+   * own agreement, a purchase's creator slice's purchase's. An accepted
+   * agreement's share never changes. Null on every other slice, one split
+   * without an agreement, and rows written before the agreement was recorded.
+   */
+  agreementShareBps: number | null;
   /** `paid`, `pending`, `failed`, `reversed`, `cancelled_by_refund`, `cancelled_by_dispute`. */
   status: string;
   /** Why an unpaid slice waits (`connect_not_ready`, …). */
@@ -213,6 +223,13 @@ export interface HistoryLine {
    * null while it is open.
    */
   debtResolution: string | null;
+  /** A dispute line's dispute: Stripe's `created`. Null on a refund line. */
+  disputeOpenedAt: string | null;
+  /**
+   * A dispute line's dispute, once won: when we applied the win (its re-pay),
+   * which Stripe's close precedes by moments. Null otherwise.
+   */
+  disputeWonAt: string | null;
 }
 
 /** Whoever issued a refund: support, the Stripe Dashboard, or the platform (null). */
@@ -317,6 +334,12 @@ export interface FailedRefundItem {
   title: string | null;
   buyer: SupportBuyer | null;
   chargeAmountCents: number | null;
+  /**
+   * When the charge was paid, from our record (as search's `paidAt`): a
+   * purchase's payment time, an invoice's first slice. Null when we hold no
+   * record of the charge.
+   */
+  chargePaidAt: string | null;
   amountCents: number;
   /** The refund was for the whole charge. */
   isFull: boolean;

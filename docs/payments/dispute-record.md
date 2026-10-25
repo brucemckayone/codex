@@ -35,7 +35,7 @@ It is shaped like `refunds`.
 | `stripe_dispute_id` | unique; `dp_…` |
 | `stripe_charge_id`, `purchase_id` (nullable) | as `refunds`; null for a subscription invoice |
 | `amount_cents`, `currency`, `reason` | the disputed amount |
-| `status` | Stripe's, forward only (`warning_*`, `needs_response`, `under_review`, `won`, `lost`, `prevented`). It also says whether money moved: a chargeback status means Stripe took it, an inquiry's means it did not |
+| `status` | Stripe's, forward only (`warning_*`, `needs_response`, `under_review`, `won`, `lost`, `prevented`); a late win, `lost` → `won`, is alerted and not written (§4). It also says whether money moved: a chargeback status means Stripe took it, an inquiry's means it did not |
 | `outcome_applied_at` | when won or lost handling finished. A redelivery finds it and stops |
 
 ### The reversal: `payout_reversals` with `cause_type = 'dispute'`
@@ -93,6 +93,8 @@ The dispute endpoint already takes `charge.dispute.created`, `.updated` and `.cl
 | Won (`won`, funds reinstated) | Restored: `disputedAt` cleared, content access and the entitlement restored | One re-pay row per reversed slice; held slices released; any dispute debt in `refund_reviews` closed |
 | Lost (`lost`) | Ends for good: the purchase becomes `refunded` (Q3) and leaves the library, and the streaming block is written with reason `'refund'`, for a dispute that opened already lost and was never paused. A subscription is cancelled | Reversals stand; held slices are cut by the dispute's share, and become `cancelled_by_dispute` when nothing is left (Q3) |
 | Lost after a partial refund | As lost | As lost; Stripe reinstates the refunded part, and the refunds already clawed it back |
+
+**A late win** (Stripe turns `lost` into `won`; owner decision 2026-10-25, "alert only") is only alerted: each such event logs at error with an `errorId` and ids only ("late win on a lost dispute: re-pay creators and restore the buyer by hand"). The record stays `lost`, its `outcome_applied_at` untouched, so nothing reads a win: the loss's refund, reversals, ended access and support's refund block all stand until a person acts. `Codex-2hxff.70` will later record `won` together with the undo.
 
 **Missed events are settled by the hourly reconcile** (Codex-2hxff.58). Before the payouts drain, the cron reads Stripe's `charge.dispute.*` events from the last 4 days, leaving the last 15 minutes to the webhook. It runs the webhook's own handling (`processDispute`) for any dispute that has no row, or whose unapplied row is final or would move to a later stage (inquiry, then chargeback, then closed). It then re-reads from Stripe every final row of ours whose outcome was never applied, whatever its age, skipping rows touched in the last 15 minutes (the webhook may still be handling them). Each dispute is read live from Stripe before it is acted on. An open chargeback is re-run while its events are in the window, since nothing records that opening it finished; every step is idempotent and the re-run writes no second streaming block. A failure opening a chargeback is alerted at error with an errorId and returned to Stripe for redelivery; after the 4-day window it waits for the dispute's close. A step that keeps failing is retried every hour and alerted at error with an errorId each time (owner decision 2026-10-23, "Retry hourly, alert"; no new state).
 

@@ -762,6 +762,111 @@ describe('PurchaseService refund clawback (Codex-2hxff.8)', () => {
     ).toBeUndefined();
   });
 
+  // ── a late win (owner decision 2026-10-25, "alert only") ──────────────
+
+  /** The service, with its error log watched. */
+  function watchedService() {
+    const service = makeService();
+    const alert = vi.spyOn(
+      (service as unknown as { obs: { error: (...args: unknown[]) => void } })
+        .obs,
+      'error'
+    );
+    const lateWinAlerts = () =>
+      alert.mock.calls.filter(([message]) =>
+        String(message).startsWith('late win on a lost dispute')
+      );
+    return { service, alert, lateWinAlerts };
+  }
+
+  it('a late win (lost → won) is only alerted, with ids only: the record stays lost and applied, nothing is re-paid and nothing restored', async () => {
+    const seeded = await seedPurchase(1000);
+    const access = await grantAccess(seeded);
+    const disputeId = `dp_late_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const { service, alert, lateWinAlerts } = watchedService();
+    const record = (status: string) =>
+      service.recordDispute(disputeFor(seeded, disputeId, status));
+    await record('needs_response');
+    await record('lost');
+    await service.processLostDispute(seeded.paymentIntentId, 1000);
+    await service.markDisputeOutcomeApplied(disputeId);
+    const applied = (await record('lost'))?.outcomeAppliedAt;
+    expect(applied).not.toBeNull();
+    const payoutsBefore = await db
+      .select({ id: payouts.id })
+      .from(payouts)
+      .where(eq(payouts.purchaseId, seeded.purchase.id));
+
+    const after = await record('won');
+
+    expect(after?.status).toBe('lost');
+    expect(after?.outcomeAppliedAt).toEqual(applied);
+    expect(alert).toHaveBeenCalledWith(
+      'late win on a lost dispute: re-pay creators and restore the buyer by hand',
+      {
+        errorId: expect.any(String),
+        disputeId,
+        chargeId: seeded.charge.id,
+        purchaseId: seeded.purchase.id,
+        subscriptionId: null,
+        courseSubscriptionId: null,
+      }
+    );
+    expect(lateWinAlerts()).toHaveLength(1);
+    // The loss stands: still refunded, access still ended, no re-pay rows.
+    expect(
+      takeFirst(
+        await db
+          .select({ status: purchases.status })
+          .from(purchases)
+          .where(eq(purchases.id, seeded.purchase.id))
+      ).status
+    ).toBe('refunded');
+    expect((await access()).deletedAt).not.toBeNull();
+    expect(
+      await db
+        .select({ id: payouts.id })
+        .from(payouts)
+        .where(eq(payouts.purchaseId, seeded.purchase.id))
+    ).toEqual(payoutsBefore);
+  });
+
+  it('a late win on a loss whose handling never finished leaves it unapplied, for the loss to finish', async () => {
+    const seeded = await seedPurchase(1000);
+    const disputeId = `dp_late_unapplied_${seeded.tag}`;
+    createdDisputeIds.push(disputeId);
+    const { service, lateWinAlerts } = watchedService();
+    const record = (status: string) =>
+      service.recordDispute(disputeFor(seeded, disputeId, status));
+    await record('lost');
+
+    const after = await record('won');
+
+    expect(after).toMatchObject({ status: 'lost', outcomeAppliedAt: null });
+    expect(lateWinAlerts()).toHaveLength(1);
+  });
+
+  it('every other move out of a final status is still refused, and a plain win alerts nothing', async () => {
+    const seeded = await seedPurchase(1000);
+    const wonId = `dp_won_${seeded.tag}`;
+    const closedId = `dp_closed_${seeded.tag}`;
+    createdDisputeIds.push(wonId, closedId);
+    const { service, lateWinAlerts } = watchedService();
+    const record = (disputeId: string, status: string) =>
+      service.recordDispute(disputeFor(seeded, disputeId, status));
+
+    await record(wonId, 'needs_response');
+    expect((await record(wonId, 'won'))?.status).toBe('won');
+    expect((await record(wonId, 'lost'))?.status).toBe('won');
+    expect((await record(wonId, 'prevented'))?.status).toBe('won');
+    // Only `lost` may become `won`: a closed inquiry may not.
+    await record(closedId, 'warning_closed');
+    expect((await record(closedId, 'won'))?.status).toBe('warning_closed');
+    expect((await record(closedId, 'lost'))?.status).toBe('warning_closed');
+    expect(lateWinAlerts()).toHaveLength(0);
+  });
+
   it('an open dispute holds a purchase row recorded before charge ids, by its purchase', async () => {
     const seeded = await seedPurchase(1000);
     const legacy = takeFirst(

@@ -509,7 +509,8 @@ async function endSubscriptionForFullRefund(
  *   support's to settle: they refund the customer elsewhere or re-pay the
  *   creators (owner decision 2026-10-19, "Hold it for support"). A purchase
  *   it refunded in part no longer counts it as refunded (2026-10-24).
- * - `canceled`: nothing was paid out and nothing is clawed back.
+ * - `canceled`: nothing was paid out and nothing is clawed back. A purchase
+ *   it refunded in part no longer counts it, as for `failed` (2026-10-25).
  */
 async function handleRefundUpdated(
   event: Stripe.Event,
@@ -566,6 +567,9 @@ async function handleRefundUpdated(
         { errorId: crypto.randomUUID(), refundId: refund.id, chargeId }
       );
     }
+    // It returned nothing, as a failed one (owner decision 2026-10-25): a
+    // purchase it refunded in part counts only the refunds that still stand.
+    if (paymentIntentId) await service.restateStandingRefunds(paymentIntentId);
     return;
   }
   if (refund.status === 'failed' && changed) {

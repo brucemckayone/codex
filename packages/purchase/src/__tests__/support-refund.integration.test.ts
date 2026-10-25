@@ -405,7 +405,7 @@ describe('support refunds: the purchase side', () => {
 
   // ── a failed part refund (owner decision 2026-10-24) ─────────────────
 
-  describe('restateStandingRefunds: a refund that failed returned nothing', () => {
+  describe('restateStandingRefunds: a refund that failed or was canceled returned nothing', () => {
     /** A refund as `recordRefund` writes it from the refund's events. */
     async function recordRefund(
       row: Purchase,
@@ -454,6 +454,42 @@ describe('support refunds: the purchase side', () => {
       const before = await refundedInSales();
 
       await recordRefund(bought, id, 300, 'failed', 'duplicate', new Date());
+      await service.restateStandingRefunds(bought.stripePaymentIntentId);
+
+      expect((await readState(bought)).purchase).toMatchObject({
+        status: PURCHASE_STATUS.COMPLETED,
+        refundAmountCents: null,
+        stripeRefundId: null,
+        refundReason: null,
+      });
+      expect(await refundedInSales()).toBe(before - 300);
+    });
+
+    it('a £3 refund of £10 that is canceled leaves nothing refunded, as a failed one (owner decision 2026-10-25)', async () => {
+      const [buyer] = await seedTestUsers(db, 1);
+      const bought = await purchase(buyer ?? '', (await item()).id);
+      const id = `re_spr${uid()}`;
+      created.stripeRefundIds.push(id);
+      // Waiting on the customer, then canceled: it never paid out.
+      await recordRefund(
+        bought,
+        id,
+        300,
+        'requires_action',
+        'requested_by_customer',
+        new Date()
+      );
+      await partRefunded(bought, 300, id, 'requested_by_customer');
+      const before = await refundedInSales();
+
+      await recordRefund(
+        bought,
+        id,
+        300,
+        'canceled',
+        'requested_by_customer',
+        new Date()
+      );
       await service.restateStandingRefunds(bought.stripePaymentIntentId);
 
       expect((await readState(bought)).purchase).toMatchObject({

@@ -479,6 +479,25 @@ describe('handlePaymentWebhook — disputes', () => {
     expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
   });
 
+  it('a late win (a won event on a lost record) acts on the record: nothing is restored or re-paid', async () => {
+    // Owner decision 2026-10-25, "alert only": recordDispute keeps the row
+    // lost and alerts; Codex-2hxff.70 will record the win with the undo.
+    recordedAs('lost', { outcomeAppliedAt: new Date() });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createDisputeEvent({ status: 'won' }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.restoreDisputedPurchase).not.toHaveBeenCalled();
+    expect(subscription.restoreAfterDispute).not.toHaveBeenCalled();
+    expect(purchase.settleWonDispute).not.toHaveBeenCalled();
+    expect(mockClear).not.toHaveBeenCalled();
+    expect(purchase.processLostDispute).not.toHaveBeenCalled();
+  });
+
   it("a subscription invoice's chargeback (no purchase for the PaymentIntent) still claws back the subscription's slices", async () => {
     purchase.processDispute?.mockResolvedValueOnce(undefined);
     const bundle = buildContext();

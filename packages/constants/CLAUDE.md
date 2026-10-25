@@ -66,7 +66,12 @@ SUBSCRIPTION_STATUS      // { ACTIVE, PAST_DUE, CANCELLING, CANCELLED, INCOMPLET
 BILLING_INTERVAL         // { MONTH, YEAR }
 CONNECT_ACCOUNT_STATUS   // { ONBOARDING, ACTIVE, RESTRICTED, DISABLED }
 REFUND_WINDOW_DAYS       // 14: support's refund window, from Stripe's charge.created
+STRIPE_ENV_METADATA_KEY            // 'codex_env': the environment tag on every Stripe object
+STRIPE_SUPPORT_KEY_METADATA_KEY    // 'codex_support_key': a support refund's idempotency key
+STRIPE_REQUESTED_BY_METADATA_KEY   // 'codex_requested_by': who in support issued a refund
 ```
+
+**Support refund metadata** (Codex-2hxff.28): a support refund carries `codex_support_key`, so a retried submission finds the refund it already made, and `codex_requested_by`, which `supportRequesterOf` (`@codex/purchase`) reads into `refunds.requested_by_user_id`. Use these constants on both sides, never the literals.
 
 **Default currency is GBP (£)**, not USD.
 

@@ -60,6 +60,8 @@ export interface HistoryContext {
   wonDisputeIds: ReadonlySet<string>;
   /** A debt step's review resolution (null while open), by step id. */
   debtResolutions: ReadonlyMap<string, string | null>;
+  /** A dispute's dates, by dispute id: opened, and won (null unless won). */
+  disputeDates: ReadonlyMap<string, { openedAt: string; wonAt: string | null }>;
 }
 
 export interface SliceHistory {
@@ -102,6 +104,10 @@ export function sliceHistory(
     outcome: HistoryOutcome,
     repayPayoutId: string | null
   ) => {
+    const dates =
+      step.causeType === 'dispute'
+        ? context.disputeDates.get(step.causeId)
+        : undefined;
     placed.push({
       step,
       line: {
@@ -117,6 +123,8 @@ export function sliceHistory(
           outcome === 'owed'
             ? (context.debtResolutions.get(step.id) ?? null)
             : null,
+        disputeOpenedAt: dates?.openedAt ?? null,
+        disputeWonAt: dates?.wonAt ?? null,
       },
     });
   };

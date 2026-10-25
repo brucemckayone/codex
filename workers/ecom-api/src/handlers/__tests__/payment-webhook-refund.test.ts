@@ -935,6 +935,30 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     );
     expect(mockReverseSubscription).not.toHaveBeenCalled();
     expect(mockProcessRefund).not.toHaveBeenCalled();
+    expect(mockRestateStandingRefunds).not.toHaveBeenCalled();
+  });
+
+  it('refund.updated canceled: alerted for a person, nothing clawed back, and a part-refunded purchase stops counting it', async () => {
+    // Owner decision 2026-10-25, "same as failed": it returned nothing.
+    const bundle = buildContext();
+    const { stripe } = stripeWithCharge();
+
+    await handlePaymentWebhook(
+      refundUpdatedEvent({ status: 'canceled' }),
+      stripe,
+      bundle.context
+    );
+
+    expect(mockRecordRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'canceled' })
+    );
+    expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('A refund was canceled'),
+      expect.objectContaining({ refundId: 're_pending_then_paid' })
+    );
+    expect(mockRestateStandingRefunds).toHaveBeenCalledWith('pi_updated');
+    expect(mockReverseSubscription).not.toHaveBeenCalled();
+    expect(mockProcessRefund).not.toHaveBeenCalled();
   });
 
   it('refund.updated failed: recorded for support, alerted once, and the clawback stands', async () => {

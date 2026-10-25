@@ -41,9 +41,11 @@ import {
 } from '@codex/constants';
 import { type DatabaseClient, toIso, withPagination } from '@codex/database';
 import {
+  agreementProposals,
   content,
   courseSubscriptions,
   courses,
+  creatorOrganizationAgreements,
   disputes,
   organizations,
   type Payout,
@@ -795,10 +797,11 @@ export class SupportService extends BaseService {
     slices: readonly Payout[],
     steps: readonly PayoutReversal[]
   ): Promise<Slice[]> {
-    const [people, orgs, context] = await Promise.all([
+    const [people, orgs, context, shares] = await Promise.all([
       this.peopleById(slices.map((slice) => slice.userId)),
       this.organizationNames(slices.map((slice) => slice.organizationId)),
       this.historyContext(steps),
+      this.agreementShares(slices.map((slice) => slice.id)),
     ]);
     return [...slices]
       .sort(
@@ -820,6 +823,7 @@ export class SupportService extends BaseService {
             ? (orgs.get(slice.organizationId) ?? null)
             : null,
           amountCents: slice.amountCents,
+          agreementShareBps: shares.get(slice.id) ?? null,
           status: slice.status,
           reason: slice.reason,
           paidAt:
@@ -832,6 +836,39 @@ export class SupportService extends BaseService {
           history,
         };
       });
+  }
+
+  /**
+   * Each creator slice's agreement share, by payout id: an invoice slice
+   * names its agreement, a purchase's creator slice takes its purchase's. An
+   * accepted agreement's proposal never changes, so its share is the one the
+   * slice was split by.
+   */
+  private async agreementShares(
+    payoutIds: readonly string[]
+  ): Promise<Map<string, number>> {
+    if (payoutIds.length === 0) return new Map();
+    const agreementId = sql`COALESCE(${payouts.creatorOrgAgreementId}, CASE WHEN ${payouts.payoutType} = 'creator_payout' THEN ${purchases.creatorOrgAgreementId} END)`;
+    const rows = await this.db
+      .select({
+        payoutId: payouts.id,
+        shareBps: agreementProposals.proposedCreatorSharePercent,
+      })
+      .from(payouts)
+      .leftJoin(purchases, eq(purchases.id, payouts.purchaseId))
+      .innerJoin(
+        creatorOrganizationAgreements,
+        eq(creatorOrganizationAgreements.id, agreementId)
+      )
+      .innerJoin(
+        agreementProposals,
+        eq(
+          agreementProposals.id,
+          creatorOrganizationAgreements.currentProposalId
+        )
+      )
+      .where(inArray(payouts.id, [...payoutIds]));
+    return new Map(rows.map((row) => [row.payoutId, row.shareBps]));
   }
 
   /** The charge's refunds as Stripe lists them, oldest first. */
@@ -1176,6 +1213,7 @@ export class SupportService extends BaseService {
             title: facts?.title ?? null,
             buyer: facts?.buyer ?? null,
             chargeAmountCents: facts?.amountCents ?? null,
+            chargePaidAt: facts ? facts.paidAt.toISOString() : null,
             amountCents: refund.amountCents,
             isFull:
               facts !== undefined && refund.amountCents >= facts.amountCents,
@@ -1738,6 +1776,7 @@ export class SupportService extends BaseService {
     const [row] = await this.db
       .select({
         id: table.id,
+        stripeSubscriptionId: table.stripeSubscriptionId,
         status: table.status,
         interval: table.billingInterval,
         periodStart: table.currentPeriodStart,
@@ -1808,6 +1847,7 @@ export class SupportService extends BaseService {
       source: {
         type: source.type,
         subscriptionId: row.id,
+        stripeSubscriptionId: row.stripeSubscriptionId,
         planName: plan?.name ?? '',
         planDeleted: plan?.deletedAt != null,
         interval: billingInterval(row.interval) ?? 'month',
@@ -1842,6 +1882,7 @@ export class SupportService extends BaseService {
         title: string;
         buyer: SupportBuyer;
         amountCents: number;
+        paidAt: Date;
       }
     >
   > {
@@ -1852,6 +1893,7 @@ export class SupportService extends BaseService {
         title: string;
         buyer: SupportBuyer;
         amountCents: number;
+        paidAt: Date;
       }
     >();
     const purchaseIds = unique(refs.map((ref) => ref.purchaseId));
@@ -1860,6 +1902,8 @@ export class SupportService extends BaseService {
         .select({
           id: purchases.id,
           amountCents: purchases.amountPaidCents,
+          // As search's purchase branch.
+          paidAt: sql<Date>`COALESCE(${purchases.purchasedAt}, ${purchases.createdAt})`,
           contentTitle: content.title,
           courseTitle: courses.title,
           buyer: {
@@ -1883,6 +1927,7 @@ export class SupportService extends BaseService {
           title: row.contentTitle ?? row.courseTitle ?? '',
           buyer: buyerOf(row.buyer),
           amountCents: row.amountCents,
+          paidAt: new Date(row.paidAt),
         });
       }
     }
@@ -1906,6 +1951,7 @@ export class SupportService extends BaseService {
             deleted: row.buyerDeleted,
           },
           amountCents: row.amountCents,
+          paidAt: new Date(row.paidAt),
         });
       }
     }
@@ -1987,6 +2033,21 @@ export class SupportService extends BaseService {
           .filter((cause) => cause.disputeStatus === 'won')
           .map((cause) => cause.id)
       ),
+      disputeDates: new Map(
+        [...causes.values()].flatMap((cause) =>
+          cause.openedAt === null
+            ? []
+            : [
+                [
+                  cause.id,
+                  {
+                    openedAt: cause.openedAt,
+                    wonAt: cause.disputeStatus === 'won' ? cause.wonAt : null,
+                  },
+                ],
+              ]
+        )
+      ),
       debtResolutions: new Map(
         reviews.flatMap((review) =>
           review.payoutReversalId
@@ -1997,13 +2058,22 @@ export class SupportService extends BaseService {
     };
   }
 
-  /** Each refund's and dispute's own amount, and a dispute's current status. */
+  /**
+   * Each refund's and dispute's own amount, and a dispute's current status,
+   * when it opened (Stripe's `created`) and when its outcome was applied.
+   */
   private async causeFacts(
     refs: ReadonlyArray<{ causeType: string; causeId: string }>
   ): Promise<
     Map<
       string,
-      { id: string; amountCents: number | null; disputeStatus: string | null }
+      {
+        id: string;
+        amountCents: number | null;
+        disputeStatus: string | null;
+        openedAt: string | null;
+        wonAt: string | null;
+      }
     >
   > {
     const refundIds = unique(
@@ -2031,19 +2101,29 @@ export class SupportService extends BaseService {
               id: disputes.stripeDisputeId,
               amountCents: disputes.amountCents,
               status: disputes.status,
+              openedAt: disputes.stripeCreatedAt,
+              outcomeAppliedAt: disputes.outcomeAppliedAt,
             })
             .from(disputes)
             .where(inArray(disputes.stripeDisputeId, disputeIds)),
     ]);
     const facts = new Map<
       string,
-      { id: string; amountCents: number | null; disputeStatus: string | null }
+      {
+        id: string;
+        amountCents: number | null;
+        disputeStatus: string | null;
+        openedAt: string | null;
+        wonAt: string | null;
+      }
     >();
     for (const row of refundRows) {
       facts.set(causeKey('refund', row.id), {
         id: row.id,
         amountCents: row.amountCents,
         disputeStatus: null,
+        openedAt: null,
+        wonAt: null,
       });
     }
     for (const row of disputeRows) {
@@ -2051,6 +2131,8 @@ export class SupportService extends BaseService {
         id: row.id,
         amountCents: row.amountCents,
         disputeStatus: row.status,
+        openedAt: row.openedAt.toISOString(),
+        wonAt: toIso(row.outcomeAppliedAt),
       });
     }
     return facts;

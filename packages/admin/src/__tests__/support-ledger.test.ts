@@ -51,6 +51,7 @@ function context(overrides: Partial<HistoryContext> = {}): HistoryContext {
     ]),
     wonDisputeIds: new Set(),
     debtResolutions: new Map(),
+    disputeDates: new Map(),
     ...overrides,
   };
 }
@@ -71,10 +72,43 @@ describe('sliceHistory', () => {
         outcome: 'taken',
         repayPayoutId: null,
         debtResolution: null,
+        disputeOpenedAt: null,
+        disputeWonAt: null,
       },
     ]);
     expect(takenCents).toBe(540);
     expect(owedCents).toBe(0);
+  });
+
+  it('dates a dispute line from its dispute (opened, and won once won); a refund line has no dates', () => {
+    const { history } = sliceHistory(
+      SLICE,
+      [
+        step({ amountCents: 540 }),
+        step({ causeType: 'dispute', causeId: 'du_1', amountCents: 300 }),
+      ],
+      context({
+        disputeDates: new Map([
+          [
+            'du_1',
+            {
+              openedAt: '2026-10-01T09:00:00.000Z',
+              wonAt: '2026-10-20T09:00:00.000Z',
+            },
+          ],
+        ]),
+      })
+    );
+    expect(
+      history.map((line) => [
+        line.causeType,
+        line.disputeOpenedAt,
+        line.disputeWonAt,
+      ])
+    ).toEqual([
+      ['refund', null, null],
+      ['dispute', '2026-10-01T09:00:00.000Z', '2026-10-20T09:00:00.000Z'],
+    ]);
   });
 
   it('reads a moved_to_repay step as taken_from_repay, from its re-pay row, never not_taken', () => {

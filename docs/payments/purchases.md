@@ -352,11 +352,18 @@ Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
   3. **The platform fee's share is cancelled** and the fee slice is `paid`
      again, with no re-pay row: the money is back in the platform's balance.
 
+A purchase it refunded in part stops counting it: `refund.updated` restates
+the purchase's refunded amount, id and reason from the refunds still standing
+(`restateStandingRefunds`, owner decision 2026-10-24), so Sales and its stats
+count only money the buyer got back. A failed full refund keeps the purchase
+`refunded` until support settles it.
+
 The screen and its two actions are **gap**: `Codex-2hxff.28`; until it ships, a
 person settles a failed refund by hand. A
-`canceled` refund paid nothing out and is never clawed back, but the purchase
-`charge.refunded` recorded stays refunded, so it is logged for a person to
-check the buyer's access.
+`canceled` refund paid nothing out and is never clawed back. A purchase it
+refunded in part stops counting it, restated as for a failed refund (owner
+decision 2026-10-25, "same as failed"); one it refunded in full stays
+refunded, so it is logged for a person to check the buyer's access.
 
 **A full refund** (the whole charge refunded):
 
