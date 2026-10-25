@@ -6,7 +6,7 @@
  * session management, and database integration.
  */
 
-import { AUTH_ROLES, COOKIES, DOMAINS, ENV_NAMES } from '@codex/constants';
+import { COOKIES, DOMAINS, ENV_NAMES } from '@codex/constants';
 import { createDbClient, schema } from '@codex/database';
 import { createKVSecondaryStorage } from '@codex/security';
 import { cookieDomainFor, corsOriginsFor, type EnvName } from '@codex/urls';
@@ -21,6 +21,7 @@ import {
 } from './email';
 import { handlePasswordChangedHook } from './password-changed-hook';
 import type { AuthBindings } from './types';
+import { USER_ADDITIONAL_FIELDS } from './user-fields';
 
 interface AuthConfigOptions {
   env: AuthBindings;
@@ -221,15 +222,8 @@ export function createAuthInstance(options: AuthConfigOptions) {
         );
       },
     },
-    user: {
-      additionalFields: {
-        role: {
-          type: 'string',
-          required: true,
-          defaultValue: AUTH_ROLES.USER,
-        },
-      },
-    },
+    // `role` is never client-settable (Codex-cslai): see user-fields.ts.
+    user: { additionalFields: USER_ADDITIONAL_FIELDS },
     // Top-level after-hook fires once per successful auth endpoint. The handler
     // path-matches /change-password (excludes /reset-password and all other
     // routes) and sends the password-changed confirmation email. See
