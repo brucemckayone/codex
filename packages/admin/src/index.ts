@@ -141,6 +141,7 @@ export {
   NotFoundError,
   NothingLeftToRefundError,
   RefundAmountTooLargeError,
+  RefundInFlightError,
   RefundKeySpentError,
   RefundWindowClosedError,
   StripeRefusedRefundError,

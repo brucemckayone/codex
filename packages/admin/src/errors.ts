@@ -146,6 +146,22 @@ export class RefundKeySpentError extends ConflictError {
   }
 }
 
+/**
+ * Another request with this refund's key is still running at Stripe (409,
+ * `idempotency_key_in_use`; review round 2 MED-A): two tabs, or two people,
+ * sent the same decision. It may still succeed, so nothing else may be tried
+ * until the charge is reloaded: a new amount or the Dashboard would refund
+ * the buyer twice.
+ */
+export class RefundInFlightError extends ConflictError {
+  constructor() {
+    super(
+      'A refund for this exact amount is still being processed. Reload the charge in a minute.',
+      { code: 'REFUND_IN_FLIGHT' }
+    );
+  }
+}
+
 /** Stripe answered and refused (`charge_disputed`, `amount_too_large`, …). */
 export class StripeRefusedRefundError extends BusinessLogicError {
   constructor(stripeCode: string) {

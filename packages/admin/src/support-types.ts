@@ -354,8 +354,8 @@ export interface FailedRefundItem {
    */
   chargePaidAt: string | null;
   amountCents: number;
-  /** The refund was for the whole charge. */
-  isFull: boolean;
+  /** The refund was for the whole charge; null when we hold no record of the charge. */
+  isFull: boolean | null;
   /** Who in support made it; null for the Stripe Dashboard or the platform. */
   requestedBy: SupportPerson | null;
   /** When Stripe made the refund. */
@@ -366,6 +366,13 @@ export interface FailedRefundItem {
   failureLabel: string;
   /** What its clawback took from payees (done steps, not the fee's share). */
   takenFromPayeesCents: number;
+  /**
+   * What settling it `creators_repaid` would do to the buyer's access,
+   * worked out read only by the restore's own rule: null means access would
+   * come back; otherwise why it would not. A prediction: nothing is locked,
+   * so the settle's `accessNotRestoredReason` is the final word.
+   */
+  accessRestoreBlockedReason: AccessNotRestoredReason | null;
 }
 
 /** A creator debt waiting for support (`refund_reviews`, unresolved). */

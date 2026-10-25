@@ -148,6 +148,15 @@ function fakeStripe() {
     const key = options?.idempotencyKey;
     const seen = key ? keys.get(key) : undefined;
     if (seen) {
+      // Still running under another request, nothing saved yet: Stripe's
+      // 409 `idempotency_key_in_use`, whatever the parameters.
+      if (!seen.refund && !seen.error) {
+        throw Object.assign(new Error('Another request is using this key'), {
+          type: 'StripeIdempotencyError',
+          statusCode: 409,
+          code: 'idempotency_key_in_use',
+        });
+      }
       if (seen.fingerprint !== fingerprint) {
         throw Object.assign(
           new Error(
@@ -165,12 +174,7 @@ function fakeStripe() {
           headers: { 'idempotent-replayed': 'true' },
         });
       }
-      if (seen.refund) return seen.refund;
-      // Still in flight under another request: Stripe's concurrent 409.
-      throw Object.assign(new Error('Another request is using this key'), {
-        type: 'StripeIdempotencyError',
-        statusCode: 409,
-      });
+      return seen.refund;
     }
     const refusal = refusals.shift();
     if (refusal) {
@@ -780,10 +784,10 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
     });
 
-    it('a key held by a request still in flight, with no refund listed, is REFUND_KEY_SPENT (409), never "submitted"', async () => {
+    it('a key held by a request still in flight, with no refund listed, is REFUND_IN_FLIGHT (409): it may still land, so nothing else is advised (MED-A)', async () => {
       const { chargeId } = await purchaseCharge();
       // Another tab's request with this key is still in flight: Stripe holds
-      // the key, and no refund is listed.
+      // the key, saved nothing yet, and no refund is listed.
       const key = `support_refund_${chargeId}_0_500`;
       fake.keys.set(key, { fingerprint: 'another request' });
 
@@ -792,7 +796,46 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       );
 
       expect(error.statusCode).toBe(409);
-      expect(error.context).toEqual({ code: 'REFUND_KEY_SPENT' });
+      expect(error.context).toEqual({ code: 'REFUND_IN_FLIGHT' });
+    });
+
+    it('a refusal Stripe replays for the same submit keeps its code (LOW-E)', async () => {
+      const { chargeId } = await purchaseCharge();
+      fake.refusals.push({
+        type: 'StripeInvalidRequestError',
+        statusCode: 400,
+        code: 'amount_too_large',
+      });
+
+      await failureOf(
+        service.issueRefund(chargeId, refundInput(500), supportId)
+      );
+      const replayed = await failureOf(
+        service.issueRefund(chargeId, refundInput(500), supportId)
+      );
+
+      expect(replayed.context).toEqual({
+        code: 'STRIPE_REFUSED',
+        stripeCode: 'amount_too_large',
+      });
+    });
+
+    it("an approval rule blocking refunds is Stripe's refusal, not our defect (action_blocked, LOW-E)", async () => {
+      const { chargeId } = await purchaseCharge();
+      fake.refusals.push({
+        type: 'StripeInvalidRequestError',
+        statusCode: 400,
+        code: 'action_blocked',
+      });
+
+      const error = await failureOf(
+        service.issueRefund(chargeId, refundInput(500), supportId)
+      );
+
+      expect(error.context).toEqual({
+        code: 'STRIPE_REFUSED',
+        stripeCode: 'action_blocked',
+      });
     });
 
     it('a held key whose refund is listed by the time it is read again is a replay', async () => {
@@ -1526,6 +1569,75 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       });
     });
 
+    it('says isFull is unknown (null), never "partial", for a charge we hold no record of (LOW-F)', async () => {
+      const unknown = takeFirst(
+        await db
+          .insert(refunds)
+          .values({
+            stripeRefundId: `re_sup${uid()}`,
+            stripeChargeId: `ch_sup${uid()}${uid()}`,
+            amountCents: 300,
+            currency: 'gbp',
+            status: 'failed',
+            failureReason: 'expired_or_canceled_card',
+            stripeCreatedAt: new Date(),
+          })
+          .returning()
+      );
+      created.stripeRefundIds.push(unknown.stripeRefundId);
+
+      const list = await service.listFailedRefunds({ page: 1, limit: 50 });
+
+      expect(
+        list.items.find((row) => row.refundId === unknown.id)
+      ).toMatchObject({ kind: null, isFull: null });
+    });
+
+    it('predicts, read only, whether settling it would give access back: null for a failed full refund, else why not', async () => {
+      const full = await purchaseCharge();
+      const onFull = await failedRefund(full, 1000);
+      await endAccess(full);
+      const part = await purchaseCharge();
+      const onPart = await failedRefund(part, 400);
+      const rebought = await purchaseCharge();
+      const onRebought = await failedRefund(rebought, 1000);
+      await endAccess(rebought);
+      // The buyer bought the same item again after it was refunded.
+      const again = takeFirst(
+        await db
+          .insert(purchases)
+          .values({
+            customerId: buyerId,
+            contentId: rebought.item.id,
+            organizationId: orgId,
+            status: PURCHASE_STATUS.COMPLETED,
+            amountPaidCents: 1000,
+            platformFeeCents: 100,
+            organizationFeeCents: 135,
+            creatorPayoutCents: 765,
+            stripePaymentIntentId: `pi_sup${uid()}`,
+            purchasedAt: new Date(),
+          })
+          .returning()
+      );
+      created.purchaseIds.push(again.id);
+
+      const list = await service.listFailedRefunds({ page: 1, limit: 50 });
+      const predicted = (refundId: string) =>
+        list.items.find((row) => row.refundId === refundId)
+          ?.accessRestoreBlockedReason;
+
+      expect(predicted(onFull.id)).toBeNull();
+      expect(predicted(onPart.id)).toBe('partial');
+      expect(predicted(onRebought.id)).toBe('rebought');
+      // Read only: the restore would restate a re-bought purchase; this did not.
+      const [old] = await db
+        .select({ refundAmountCents: purchases.refundAmountCents })
+        .from(purchases)
+        .where(eq(purchases.id, rebought.purchase.id));
+      expect(old?.refundAmountCents).toBe(1000);
+    });
+
     it('settling refunded_elsewhere twice writes once; another resolution is a 409; a refund that did not fail is a 404', async () => {
       const charge = await purchaseCharge();
       const failed = await failedRefund(charge, 400);
@@ -1811,6 +1923,42 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         135,
       ]);
       expect(await statusOf()).toBe('cancelled');
+    });
+
+    it('a cancellation step only a person can read refuses with its own 422, REFUND_CLAWBACK_NEEDS_PERSON, not "try again" (round 2 LOW-C)', async () => {
+      const charge = await purchaseCharge();
+      const failed = await failedRefund(charge, 1000);
+      // The organisation's unpaid slice was cancelled by the refund; its step
+      // was left pending by a delivery that died, so the ledger cannot tell
+      // whether that step's cancel took the slice.
+      await db
+        .update(payoutReversals)
+        .set({
+          status: 'pending',
+          attemptedAt: new Date(Date.now() - 2 * DAY * 1000),
+        })
+        .where(
+          and(
+            eq(payoutReversals.causeId, failed.stripeRefundId),
+            eq(payoutReversals.payoutId, charge.org.id)
+          )
+        );
+
+      const error = await failureOf(
+        service.resolveFailedRefund(
+          failed.id,
+          { resolution: 'creators_repaid', note: 'Re-pay' },
+          supportId
+        )
+      );
+
+      expect(error.statusCode).toBe(422);
+      expect(error.context).toEqual({
+        code: 'REFUND_CLAWBACK_NEEDS_PERSON',
+        steps: 1,
+      });
+      expect(error.message).not.toContain('Try again later');
+      expect(await repayRowsOf(failed.stripeRefundId)).toEqual([]);
     });
 
     it('a failed refund recorded without its purchase finds it from the charge, and still gives access back (F4)', async () => {

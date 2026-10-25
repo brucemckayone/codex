@@ -75,6 +75,7 @@ import {
   refundWindow,
   repayBlockedError,
   repayFailedRefund,
+  type StrandedStep,
   settleUnfinishedRefundSteps,
 } from '@codex/payments';
 import {
@@ -121,11 +122,13 @@ import {
   ChargeHasChargebackError,
   NothingLeftToRefundError,
   RefundAmountTooLargeError,
+  RefundInFlightError,
   RefundKeySpentError,
   RefundWindowClosedError,
   StripeRefusedRefundError,
 } from '../errors';
 import type {
+  AccessNotRestoredReason,
   ChargebackRow,
   ChargeDetail,
   ChargeDetailSource,
@@ -156,11 +159,25 @@ import {
   sliceHistory,
 } from './support-ledger';
 
+/** What the settlement's transaction needs from the Stripe pre-step. */
+interface PreparedRepay {
+  /** The Stripe charge's amount: the guard's denominator. */
+  chargeAmountCents: number;
+  /** Steps no retry will run whose reversal never landed: cancelled in the transaction. */
+  unlanded: StrandedStep[];
+}
+
 export interface SupportServiceConfig extends ServiceConfig {
   /** The registry's shared client, on admin-api's own restricted key (Q4). */
   stripe: Stripe;
-  /** Gives a purchase its access back when support re-pays a failed full refund (Q5d). */
-  purchase: Pick<PurchaseService, 'restoreAfterFailedRefund'>;
+  /**
+   * Gives a purchase its access back when support re-pays a failed full
+   * refund (Q5d), and predicts it for the queue by the same rule.
+   */
+  purchase: Pick<
+    PurchaseService,
+    'restoreAfterFailedRefund' | 'failedRefundRestoreBlock'
+  >;
 }
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
@@ -231,6 +248,7 @@ function isStripeMissing(error: unknown): boolean {
  * error is a defect in our request, never a refusal (silent F2).
  */
 const STRIPE_REFUND_REFUSALS: ReadonlySet<string> = new Set([
+  'action_blocked',
   'amount_too_large',
   'amount_too_small',
   'balance_insufficient',
@@ -1186,12 +1204,14 @@ export class SupportService extends BaseService {
    * answer is logged with ids and Stripe's code and request id, never its
    * message:
    *
-   * - the key is held with other parameters, or by a request still running
-   *   (`idempotency_error`, 409): the charge's refunds are read again, and one
-   *   carrying the key is a replay; none means the key is spent;
-   * - Stripe repeated an answer saved under the key (a refusal or a 500,
-   *   held 24 h): the key is spent (`REFUND_KEY_SPENT`), so retrying this
-   *   amount cannot work;
+   * - the key is held: the charge's refunds are read again, and one carrying
+   *   the key is a replay. None, while a request with it is still running
+   *   (409), is `REFUND_IN_FLIGHT`: it may still succeed, so nothing else
+   *   may be tried yet. None, for an answer saved to other parameters (400
+   *   `idempotency_error`), means the key is spent (`REFUND_KEY_SPENT`);
+   * - Stripe repeated an answer saved under the key: a documented refusal is
+   *   `STRIPE_REFUSED` with its code; a 500 or anything else is
+   *   `REFUND_KEY_SPENT`, since retrying this amount cannot work;
    * - a refusal Stripe documents is `STRIPE_REFUSED` with its code;
    * - any other invalid-request or card error is our defect: a 500, alerted;
    * - anything else (an outage, a rate limit, a key without the permission)
@@ -1213,13 +1233,21 @@ export class SupportService extends BaseService {
       statusCode: typeof e?.statusCode === 'number' ? e.statusCode : null,
       requestedByUserId: attempt.requestedByUserId,
     };
-    if (e?.type === 'StripeIdempotencyError' || e?.statusCode === 409) {
+    // A 409 is a request with this key still running (nothing saved yet);
+    // a 400 `idempotency_error` is a saved answer to other parameters.
+    const inFlight =
+      e?.statusCode === 409 || stripeCode === 'idempotency_key_in_use';
+    if (inFlight || e?.type === 'StripeIdempotencyError') {
       const listed = await listChargeRefunds(this.stripe, attempt.chargeId);
       const made = listed.find(
         (refund) =>
           refund.metadata?.[STRIPE_SUPPORT_KEY_METADATA_KEY] === attempt.key
       );
       if (made) return replayOf(made);
+      if (inFlight) {
+        this.obs.warn('A support refund with this key is still running', facts);
+        throw new RefundInFlightError();
+      }
       this.obs.warn(
         'A support refund key is held, and no refund carries it',
         facts
@@ -1231,6 +1259,11 @@ export class SupportService extends BaseService {
         'Stripe repeated an earlier failure of this support refund',
         facts
       );
+      // A refusal keeps its code (LOW-E); a replayed outage or defect cannot
+      // be retried for this amount.
+      if (STRIPE_REFUND_REFUSALS.has(stripeCode)) {
+        throw new StripeRefusedRefundError(stripeCode);
+      }
       throw new RefundKeySpentError();
     }
     if (
@@ -1310,11 +1343,28 @@ export class SupportService extends BaseService {
           purchaseId: refund.purchaseId,
         }))
       );
-      const taken = await this.takenFromPayees(
-        rows.map(({ refund }) => refund.stripeRefundId)
-      );
+      const [taken, restoreBlocks] = await Promise.all([
+        this.takenFromPayees(rows.map(({ refund }) => refund.stripeRefundId)),
+        // What the settle's restore would answer, by its own rule (read only).
+        Promise.all(
+          rows.map(
+            async ({ refund }): Promise<AccessNotRestoredReason | null> => {
+              const purchaseId = charges.get(refund.stripeChargeId)?.purchaseId;
+              if (!purchaseId) return 'no_purchase';
+              const block = await this.purchase.failedRefundRestoreBlock(
+                purchaseId,
+                refund.stripeChargeId
+              );
+              return block === undefined ? 'no_purchase' : block;
+            }
+          )
+        ),
+      ]);
       const items = rows.map(
-        ({ refund, requesterName, requesterDeletedAt }): FailedRefundItem => {
+        (
+          { refund, requesterName, requesterDeletedAt },
+          index
+        ): FailedRefundItem => {
           const facts = charges.get(refund.stripeChargeId);
           return {
             refundId: refund.id,
@@ -1326,8 +1376,8 @@ export class SupportService extends BaseService {
             chargeAmountCents: facts?.amountCents ?? null,
             chargePaidAt: facts ? facts.paidAt.toISOString() : null,
             amountCents: refund.amountCents,
-            isFull:
-              facts !== undefined && refund.amountCents >= facts.amountCents,
+            // Unknown, never "partial", with no record of the charge (LOW-F).
+            isFull: facts ? refund.amountCents >= facts.amountCents : null,
             requestedBy:
               refund.requestedByUserId && requesterName !== null
                 ? {
@@ -1342,6 +1392,7 @@ export class SupportService extends BaseService {
             failureReason: refund.failureReason,
             failureLabel: refundFailureLabel(refund.failureReason),
             takenFromPayeesCents: taken.get(refund.stripeRefundId) ?? 0,
+            accessRestoreBlockedReason: restoreBlocks[index] ?? null,
           };
         }
       );
@@ -1549,8 +1600,12 @@ export class SupportService extends BaseService {
     }
     // A repeat returns what the first settlement did: no guard, no Stripe.
     let purchaseId = found.purchaseId;
+    let prepared: PreparedRepay | undefined;
     if (!found.resolvedAt) {
-      await this.prepareRepay(found.stripeRefundId, found.stripeChargeId);
+      prepared = await this.prepareRepay(
+        found.stripeRefundId,
+        found.stripeChargeId
+      );
       purchaseId ??= await this.purchaseOfCharge(found.stripeChargeId);
     }
 
@@ -1571,12 +1626,24 @@ export class SupportService extends BaseService {
         );
         return { row: settled, repaid: null, access: undefined };
       }
+      // Unresolved here means it was unresolved before: a settlement is
+      // never undone.
+      if (!prepared) {
+        throw new InternalServiceError(
+          'The failed refund was not prepared for its settlement'
+        );
+      }
       const now = new Date();
+      // Re-checks the whole later-cause guard under the lock, and cancels the
+      // pre-step's unlanded steps here, so a refusal leaves them as they were
+      // (round 2 LOW-B, LOW-D).
       const repaid = await repayFailedRefund(tx, {
         stripeRefundId: row.stripeRefundId,
         resolvedByUserId,
         note,
         now,
+        chargeAmountCents: prepared.chargeAmountCents,
+        unlanded: prepared.unlanded,
       });
       const access = purchaseId
         ? await this.purchase.restoreAfterFailedRefund(
@@ -1649,14 +1716,17 @@ export class SupportService extends BaseService {
    * Before a `creators_repaid` settlement's transaction (owner decision
    * 2026-10-25; money HIGH-1, silent F3): refuse it when a later cause was
    * shared against this refund (`REPAY_BLOCKED_BY_LATER_CAUSE`, 422), then
-   * settle the steps no retry will ever run. Both read Stripe, so neither can
-   * run inside the transaction; `repayFailedRefund` re-checks the chargebacks
-   * under the lock.
+   * look up at Stripe the steps no retry will ever run: one whose reversal
+   * landed is recorded done, the rest come back as `unlanded`. Both read
+   * Stripe, so neither can run inside the transaction. `repayFailedRefund`
+   * re-checks the whole guard under the lock and cancels the unlanded steps
+   * there; a step only a person can read is `REFUND_CLAWBACK_NEEDS_PERSON`
+   * (422, no retry), passed through as it is.
    */
   private async prepareRepay(
     stripeRefundId: string,
     chargeId: string
-  ): Promise<void> {
+  ): Promise<PreparedRepay> {
     const charge = await this.retrieveCharge(chargeId, false);
     const causes = await loadClawbackCauses(this.db, {
       chargeId,
@@ -1676,7 +1746,7 @@ export class SupportService extends BaseService {
       });
       throw repayBlockedError(block);
     }
-    await settleUnfinishedRefundSteps(
+    const unfinished = await settleUnfinishedRefundSteps(
       {
         db: this.db,
         stripe: this.stripe,
@@ -1685,6 +1755,7 @@ export class SupportService extends BaseService {
       },
       { stripeRefundId }
     );
+    return { chargeAmountCents: charge.amount, unlanded: unfinished.unlanded };
   }
 
   /**
@@ -2087,6 +2158,8 @@ export class SupportService extends BaseService {
         buyer: SupportBuyer;
         amountCents: number;
         paidAt: Date;
+        /** The purchase, for a purchase's charge. */
+        purchaseId: string | null;
       }
     >
   > {
@@ -2098,6 +2171,8 @@ export class SupportService extends BaseService {
         buyer: SupportBuyer;
         amountCents: number;
         paidAt: Date;
+        /** The purchase, for a purchase's charge. */
+        purchaseId: string | null;
       }
     >();
     // A refund recorded before its purchase existed names none (Codex-aa08z):
@@ -2162,6 +2237,7 @@ export class SupportService extends BaseService {
           buyer: buyerOf(row.buyer),
           amountCents: row.amountCents,
           paidAt: new Date(row.paidAt),
+          purchaseId: row.id,
         });
       }
     }
@@ -2186,6 +2262,7 @@ export class SupportService extends BaseService {
           },
           amountCents: row.amountCents,
           paidAt: new Date(row.paidAt),
+          purchaseId: null,
         });
       }
     }

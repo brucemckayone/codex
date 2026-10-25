@@ -3305,44 +3305,21 @@ export class PurchaseService extends BaseService {
         });
         return { ...scope, restored: false, reason };
       };
-      if (purchase.status === PURCHASE_STATUS.COMPLETED) return kept('partial');
-      if (purchase.status !== PURCHASE_STATUS.REFUNDED) {
-        return kept('not_refunded');
-      }
-      if (purchase.disputedAt) return kept('dispute_holds');
-      if (isDuplicatePayment(purchase)) return kept('duplicate');
-      const [holding] = await tx
-        .select({ id: disputes.id })
-        .from(disputes)
-        .where(
-          and(
-            either(
-              eq(disputes.purchaseId, purchase.id),
-              eq(disputes.stripeChargeId, chargeId)
-            ),
-            inArray(disputes.status, HOLDING_DISPUTE_STATUSES)
-          )
-        )
-        .limit(1);
-      if (holding) return kept('dispute_holds');
-
       const now = new Date();
-      const standing = await this.standingRefundFields(
+      const { reason, standing } = await this.accessKeptReason(
         tx,
-        purchase.id,
+        purchase,
         chargeId
       );
-      const rebought = await this.keepsItemElsewhere(tx, purchase);
-      if (
-        rebought ||
-        (standing.refundAmountCents ?? 0) >= purchase.amountPaidCents
-      ) {
-        // Still refunded, but the failed refund no longer counts (LOW-2).
-        await tx
-          .update(purchases)
-          .set({ ...standing, updatedAt: now })
-          .where(eq(purchases.id, purchase.id));
-        return kept(rebought ? 'rebought' : 'still_refunded');
+      if (reason) {
+        if (reason === 'rebought' || reason === 'still_refunded') {
+          // Still refunded, but the failed refund no longer counts (LOW-2).
+          await tx
+            .update(purchases)
+            .set({ ...standing, updatedAt: now })
+            .where(eq(purchases.id, purchase.id));
+        }
+        return kept(reason);
       }
 
       await tx
@@ -3383,6 +3360,87 @@ export class PurchaseService extends BaseService {
     } catch (error) {
       this.handleError(error, 'restoreAfterFailedRefund');
     }
+  }
+
+  /**
+   * Would settling this purchase's failed refund `creators_repaid` give the
+   * buyer access back? Read only, by the restore's own rule
+   * (`accessKeptReason`): the reason it would not, or null when it would;
+   * undefined for no such purchase. Support's queue shows it before the
+   * settle. Nothing is locked, so the settle can still answer otherwise.
+   */
+  async failedRefundRestoreBlock(
+    purchaseId: string,
+    chargeId: string
+  ): Promise<RefundAccessKept | null | undefined> {
+    try {
+      const [purchase] = await this.db
+        .select()
+        .from(purchases)
+        .where(eq(purchases.id, purchaseId))
+        .limit(1);
+      if (!purchase) return undefined;
+      return (await this.accessKeptReason(this.db, purchase, chargeId)).reason;
+    } catch (error) {
+      this.handleError(error, 'failedRefundRestoreBlock');
+    }
+  }
+
+  /**
+   * The restore's rule, shared by the restore and the queue's prediction:
+   * why access would stay as it is (see `restoreAfterFailedRefund`), or null,
+   * with the refund fields the refunds still standing make whenever those
+   * are read (from `rebought` on). It writes nothing.
+   */
+  private async accessKeptReason(
+    db: Tx | DatabaseClient,
+    purchase: Purchase,
+    chargeId: string
+  ): Promise<{
+    reason: RefundAccessKept | null;
+    standing: Pick<
+      Purchase,
+      'refundAmountCents' | 'stripeRefundId' | 'refundReason'
+    >;
+  }> {
+    const none = {
+      refundAmountCents: purchase.refundAmountCents,
+      stripeRefundId: purchase.stripeRefundId,
+      refundReason: purchase.refundReason,
+    };
+    if (purchase.status === PURCHASE_STATUS.COMPLETED) {
+      return { reason: 'partial', standing: none };
+    }
+    if (purchase.status !== PURCHASE_STATUS.REFUNDED) {
+      return { reason: 'not_refunded', standing: none };
+    }
+    if (purchase.disputedAt) return { reason: 'dispute_holds', standing: none };
+    if (isDuplicatePayment(purchase)) {
+      return { reason: 'duplicate', standing: none };
+    }
+    const [holding] = await db
+      .select({ id: disputes.id })
+      .from(disputes)
+      .where(
+        and(
+          either(
+            eq(disputes.purchaseId, purchase.id),
+            eq(disputes.stripeChargeId, chargeId)
+          ),
+          inArray(disputes.status, HOLDING_DISPUTE_STATUSES)
+        )
+      )
+      .limit(1);
+    if (holding) return { reason: 'dispute_holds', standing: none };
+
+    const standing = await this.standingRefundFields(db, purchase.id, chargeId);
+    if (await this.keepsItemElsewhere(db, purchase)) {
+      return { reason: 'rebought', standing };
+    }
+    if ((standing.refundAmountCents ?? 0) >= purchase.amountPaidCents) {
+      return { reason: 'still_refunded', standing };
+    }
+    return { reason: null, standing };
   }
 
   /**

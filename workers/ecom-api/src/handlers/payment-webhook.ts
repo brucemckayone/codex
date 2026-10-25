@@ -356,7 +356,9 @@ async function handleChargeRefunded(
   // event's snapshot `amount_refunded`: a late or retried event must not
   // re-apply a refund that failed and was settled since (MED-2). Newest
   // first. The subscription's full-refund cancel below still reads Stripe's
-  // snapshot, as before.
+  // snapshot, safely: a late or retried event can only cancel what its own
+  // on-time delivery, with the same snapshot, would have cancelled, and a
+  // settlement never un-cancels a subscription (owner, 2026-10-24).
   const standing = listed.filter((refund) =>
     (STANDING_REFUND_STATUSES as readonly string[]).includes(
       refund.status ?? ''
