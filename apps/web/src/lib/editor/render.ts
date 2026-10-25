@@ -14,12 +14,13 @@ import { getRenderExtensions } from './extensions.js';
  * Works for any content type — not restricted to written content.
  *
  * Runs during SSR on the Cloudflare Workers runtime (workerd). A render
- * failure is soft-degraded to `null` (no body) rather than allowed to throw:
- * the loaders that call this treat a null body as "no body to show", so a
+ * failure is soft-degraded to `null` rather than allowed to throw, so a
  * single malformed doc can never take down the whole content page with a 500.
- * The failure is logged with `context`, so a render failure is findable
- * rather than looking exactly like a piece with no body (Codex-uuz1g). The
- * content id is required for that reason; `surface` says which page failed.
+ * But `null` also means "nothing stored": a caller holding one asks
+ * {@link hasStoredText} and, for stored text, tells the reader it did not
+ * load, never shows nothing (Codex-uuz1g; every current caller does). The
+ * failure is logged with `context`; the content id is required for that
+ * reason, and `surface` says which page failed.
  */
 export async function renderContentBody(
   content: {

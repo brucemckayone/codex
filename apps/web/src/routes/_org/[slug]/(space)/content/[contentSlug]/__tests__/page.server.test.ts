@@ -302,6 +302,50 @@ describe('org content detail: an entitled reader of a gated piece sees its body 
 
     expect(data.contentBodyUnavailable).toBe(false);
   });
+
+  // The same flag on every branch that renders a body: the free path is the
+  // busiest, and the withdrawn path renders /stream's body too.
+  const unrenderable = {
+    contentBody: null,
+    contentBodyJson: { type: 'doc', content: [{ type: '__no_such_node__' }] },
+  };
+
+  it.each([
+    ['a visitor', null],
+    ['a signed-in reader', reader],
+  ])('a public piece whose text fails to render is flagged, for %s', async (_who, user) => {
+    mockServerGetPublicContent.mockResolvedValue({
+      items: [row(unrenderable)],
+    });
+    mockGetStreamingUrl.mockResolvedValue(granted({}));
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', user))) as Record<
+      string,
+      unknown
+    >;
+
+    expect(data.contentBodyHtml).toBeNull();
+    expect(data.contentBodyUnavailable).toBe(true);
+  });
+
+  it('a withdrawn item whose text fails to render is flagged', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [] });
+    mockGetWithdrawnContent.mockResolvedValue({
+      content: row({ isFree: false, isPurchasable: true, priceCents: 900 }),
+      held: { by: 'purchase', until: null },
+    });
+    mockGetStreamingUrl.mockResolvedValue(granted({ body: unrenderable }));
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event('practice', reader))) as Record<
+      string,
+      unknown
+    >;
+
+    expect(data.contentBodyHtml).toBeNull();
+    expect(data.contentBodyUnavailable).toBe(true);
+  });
 });
 
 // The read used to end in `.catch(() => null)`, so every content-api outage

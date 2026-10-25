@@ -142,7 +142,10 @@ export async function fetchCourseDashboard(
  * Two failures are said out loud rather than shown as "no written guidance":
  * - a content-api older than this web (a rollback) sends only the markdown
  *   column, as `bodyHtml`: rendered as markdown, and logged as deploy skew
- *   (an empty column is `bodyUnavailable`: the text may be editor JSON);
+ *   (an empty column is `bodyUnavailable`: the text may be editor JSON). So
+ *   during a rollback a reflection with no text at all also reads as "didn't
+ *   load" and offers no Mark complete; accepted for that logged window, since
+ *   this web cannot tell it from JSON it was not sent;
  * - stored text that rendered to nothing (renderContentBody failed and logged
  *   why): `bodyUnavailable`, so the pane says it did not load.
  */

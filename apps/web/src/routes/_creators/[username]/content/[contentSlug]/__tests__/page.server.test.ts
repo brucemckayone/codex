@@ -179,6 +179,41 @@ describe('creator content detail: an entitled reader of a gated piece sees its b
     expect(data.contentBodyUnavailable).toBe(true);
   });
 
+  // The same flag on every branch that renders a body.
+  const unrenderable = {
+    contentBody: null,
+    contentBodyJson: { type: 'doc', content: [{ type: '__no_such_node__' }] },
+  };
+
+  it.each([
+    ['a visitor', null],
+    ['a signed-in reader', { id: 'u1' }],
+  ])('a public piece whose text fails to render is flagged, for %s', async (_who, user) => {
+    mockGetPublicContent.mockResolvedValue({ items: [row(unrenderable)] });
+    mockGetStreamingUrl.mockResolvedValue(granted({}));
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event(user))) as Record<string, unknown>;
+
+    expect(data.contentBodyHtml).toBeNull();
+    expect(data.contentBodyUnavailable).toBe(true);
+  });
+
+  it('a withdrawn personal piece whose text fails to render is flagged', async () => {
+    mockGetPublicContent.mockResolvedValue({ items: [] });
+    mockGetWithdrawnContent.mockResolvedValue({
+      content: row({ isFree: false, isPurchasable: true, priceCents: 900 }),
+      held: { by: 'purchase', until: null },
+    });
+    mockGetStreamingUrl.mockResolvedValue(granted({ body: unrenderable }));
+    const { load } = await import('../+page.server');
+
+    const data = (await load(event({ id: 'u1' }))) as Record<string, unknown>;
+
+    expect(data.contentBodyHtml).toBeNull();
+    expect(data.contentBodyUnavailable).toBe(true);
+  });
+
   it('a public piece renders for a visitor from its own row, with no access call', async () => {
     mockGetPublicContent.mockResolvedValue({ items: [row({})] });
     const { load } = await import('../+page.server');

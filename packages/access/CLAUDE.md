@@ -144,11 +144,12 @@ A **deleted organisation's** content is gone to every arm, like a deleted item
 (owner decision, 2026-10-25: "Nobody"; Codex-7ncbh). Soft-deleting an org leaves
 its content, courses and entitlements in place, so every read that opens or
 lists content asks the org itself:
-- the content self-fetches (`findPolicyRow`, `getStreamingUrl`'s transaction
-  read and its KV revocation pre-check, `getWithdrawnContent`), via
-  `isOfDeletedOrg`: false on the boolean path, a `null` library pause, and a
-  `ContentNotFoundError` on the stream, each before the decision, any dispute
-  lookup and any revocation answer;
+- the content self-fetches, via `isOfDeletedOrg`: `findPolicyRow` (false on
+  the boolean path, a `null` library pause) and `getStreamingUrl`'s KV
+  revocation pre-check and transaction read (a `ContentNotFoundError`), each
+  before the decision, any dispute lookup and any revocation answer.
+  `getWithdrawnContent` answers its revocation check first, but with the same
+  uniform 404, so the order is not observable there;
 - the library listing (`buildContentFilters`, an `orgIsLive`-style
   anti-join), so the item leaves the shelf rather than linger as a card that
   404s;

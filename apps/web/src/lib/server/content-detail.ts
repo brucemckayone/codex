@@ -32,7 +32,7 @@
  * This module extracts the shared logic:
  * - `loadAccessAndProgress` — parallel fetch of streaming URL + playback progress
  * - `loadAccessWithBody`    — the same, plus the body once access is granted
- *                             (for a released row)
+ *                             (a row never released is granted to no one)
  * - `loadWithdrawnDetail`   — the public lookup missed: an item withdrawn from
  *                             sale, for a reader who still has it
  * - `resolveAccessGranted`  — THE access-grant seam (WP-2 swap point)
