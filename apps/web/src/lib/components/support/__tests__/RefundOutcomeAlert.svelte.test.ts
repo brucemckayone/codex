@@ -157,11 +157,7 @@ describe('the other answers', () => {
   });
 
   test.each([
-    [
-      { kind: 'already_submitted' },
-      'warning',
-      m.support_outcome_submitted_lead(),
-    ],
+    [{ kind: 'key_spent' }, 'warning', m.support_outcome_key_spent_lead()],
     [
       { kind: 'window_closed', closesAt: '2026-10-17T07:15:00.000Z' },
       'warning',
@@ -183,5 +179,44 @@ describe('the other answers', () => {
     const alert = render(outcome as RefundOutcome);
     expect(alert.getAttribute('data-variant')).toBe(variant);
     expect(text(alert)).toContain(expected);
+  });
+
+  test.each([
+    [
+      'signed_out',
+      m.support_outcome_signed_out_lead(),
+      m.support_outcome_signed_out_body(),
+    ],
+    [
+      'rate_limited',
+      m.support_outcome_rate_limited_lead(),
+      m.support_outcome_rate_limited_body(),
+    ],
+  ] as const)('%s: says so, says nothing was refunded, and offers no reload', (kind, lead, body) => {
+    const alert = render({ kind }, chargeDetail(), { onReload: () => {} });
+    expect(text(alert)).toContain(lead);
+    expect(text(alert)).toContain(body);
+    expect(text(alert)).not.toContain(m.support_outcome_failed_lead());
+    expect(alert.querySelector('button')).toBeNull();
+  });
+});
+
+describe('the same refund refused earlier', () => {
+  test('key_spent: nothing was made, change the amount or use the Dashboard, and no reload', () => {
+    const alert = render({ kind: 'key_spent' }, chargeDetail(), {
+      onReload: () => {},
+    });
+    expect(alert.getAttribute('data-variant')).toBe('warning');
+    expect(text(alert)).toContain(m.support_outcome_key_spent_lead());
+    expect(text(alert)).toContain(m.support_outcome_key_spent_body());
+    expect(alert.querySelector('button')).toBeNull();
+  });
+});
+
+describe('focus', () => {
+  test('the alert can take focus, for the page to move it there', () => {
+    const alert = render({ kind: 'nothing_left' });
+    expect(alert.getAttribute('tabindex')).toBe('-1');
+    expect(alert.hasAttribute('data-refund-outcome')).toBe(true);
   });
 });

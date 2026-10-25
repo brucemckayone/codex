@@ -17,9 +17,14 @@
   @prop {CreatorDebtItem | null} item
   @prop {boolean} open - Bindable.
   @prop {(notice: SettleNotice) => void} onFinished
+  @prop {() => HTMLElement | null} [closeFocus] - Where focus goes on close.
+
+  While its request runs the dialog can't be dismissed, and the answer names
+  the payee that was sent, captured then.
 -->
 <script lang="ts">
   import type { CreatorDebtItem, CreatorDebtResolution } from '@codex/admin';
+  import type { CreateDialogProps } from '@melt-ui/svelte';
   import { SUPPORT_NOTE_MAX_LENGTH } from '@codex/validation';
   import * as m from '$paraglide/messages';
   import { Alert, Button, Label } from '$lib/components/ui';
@@ -34,9 +39,10 @@
     item: CreatorDebtItem | null;
     open: boolean;
     onFinished: (notice: SettleNotice) => void;
+    closeFocus?: CreateDialogProps['closeFocus'];
   }
 
-  let { item, open = $bindable(false), onFinished }: Props = $props();
+  let { item, open = $bindable(false), onFinished, closeFocus }: Props = $props();
 
   /** The choices support may make. Deliberately not `dispute_won`. */
   const CHOICES: CreatorDebtResolution[] = [
@@ -97,7 +103,10 @@
     if (value === 'platform_absorbed') {
       const keeps = m.support_debt_option_platform_absorbed_hint({ name, amount: owed });
       return fromDispute
-        ? `${keeps} ${m.support_debt_option_platform_absorbed_dispute({ name })}`
+        ? m.support_sentences_two({
+            first: keeps,
+            second: m.support_debt_option_platform_absorbed_dispute({ name }),
+          })
         : keeps;
     }
     return m.support_debt_option_manually_reversed_hint();
@@ -116,6 +125,8 @@
     busy = true;
     problem = null;
     const resolution = choice;
+    // The payee the answer's text names, as sent.
+    const settlingName = name;
     try {
       const answer = await resolveCreatorDebt({
         reviewId: item.reviewId,
@@ -125,7 +136,10 @@
         open = false;
         onFinished({
           variant: 'success',
-          text: m.support_settled_debt({ name, resolution: resolutionLabel(resolution) }),
+          text: m.support_settled_debt({
+            name: settlingName,
+            resolution: resolutionLabel(resolution),
+          }),
         });
       } else if (answer.detailsCode === 'ALREADY_SETTLED' || answer.status === 409) {
         open = false;
@@ -147,7 +161,7 @@
 </script>
 
 {#if item}
-  <Dialog.Root bind:open>
+  <Dialog.Root bind:open dismissible={!busy} {closeFocus}>
     <Dialog.Content size="sm">
       <Dialog.Header>
         <Dialog.Title>{m.support_debt_title({ name, amount: owed })}</Dialog.Title>

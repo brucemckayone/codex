@@ -11,6 +11,7 @@
 -->
 <script lang="ts">
   import type { ChargeDetail, Slice } from '@codex/admin';
+  import { formatShareBps } from '$lib/components/studio/ownership/ownership-view';
   import * as m from '$paraglide/messages';
   import { Badge, Button } from '$lib/components/ui';
   import * as Card from '$lib/components/ui/Card';
@@ -34,11 +35,16 @@
 
   const amount = $derived(formatPrice(detail.charge.amountCents));
   const isInvoice = $derived(detail.source.type !== 'purchase');
-  const takenTotal = $derived(
-    detail.slices.reduce((sum, slice) => sum + slice.takenCents, 0)
-  );
+  // The server's totals: the card does no money arithmetic of its own.
+  const takenTotal = $derived(detail.split.takenTotalCents);
 
   let open = $state<Record<string, boolean>>({});
+
+  const uid = $props.id();
+  /** The table and the phone list each have their own copy of a history. */
+  function historyId(slice: Slice, where: 'table' | 'list'): string {
+    return `${uid}-${slice.payoutId}-${where}`;
+  }
 
   function toggle(payoutId: string) {
     open = { ...open, [payoutId]: !open[payoutId] };
@@ -50,11 +56,11 @@
     return payoutReasonLabel(slice.reason);
   }
 
+  /** The fee's rate as charged (10.5% stays 10.5%), from the server. */
   function platformShare(slice: Slice): string | null {
-    if (slice.payoutType !== 'platform_fee' || detail.charge.amountCents <= 0) {
-      return null;
-    }
-    return `${Math.round((slice.amountCents / detail.charge.amountCents) * 100)}%`;
+    const bps = detail.split.platformFeeShareBps;
+    if (slice.payoutType !== 'platform_fee' || bps === null) return null;
+    return formatShareBps(bps);
   }
 
   function historyTitle(slice: Slice): string {
@@ -86,12 +92,13 @@
   {/if}
 {/snippet}
 
-{#snippet historyToggle(slice: Slice)}
+{#snippet historyToggle(slice: Slice, where: 'table' | 'list')}
   {#if slice.history.length > 0}
     <Button
       variant="ghost"
       size="xs"
       aria-expanded={open[slice.payoutId] === true}
+      aria-controls={historyId(slice, where)}
       onclick={() => toggle(slice.payoutId)}
     >
       {open[slice.payoutId] ? m.support_history_hide() : m.support_history_show()}
@@ -124,7 +131,7 @@
           <Table.Row data-testid="slice-row">
             <Table.Cell>
               {@render payee(slice)}
-              {@render historyToggle(slice)}
+              {@render historyToggle(slice, 'table')}
             </Table.Cell>
             <Table.Cell class="support-amount">{formatPrice(slice.amountCents)}</Table.Cell>
             <Table.Cell><span class="cell-stack">{@render payout(slice)}</span></Table.Cell>
@@ -145,7 +152,11 @@
           {#if open[slice.payoutId]}
             <Table.Row class="support-expand">
               <Table.Cell colspan={4}>
-                <SliceHistory title={historyTitle(slice)} lines={slice.history} />
+                <SliceHistory
+                  id={historyId(slice, 'table')}
+                  title={historyTitle(slice)}
+                  lines={slice.history}
+                />
               </Table.Cell>
             </Table.Row>
           {/if}
@@ -177,9 +188,13 @@
         {#if slice.owedCents > 0}
           <span class="owed">{m.support_owed({ amount: formatPrice(slice.owedCents) })}</span>
         {/if}
-        <div>{@render historyToggle(slice)}</div>
+        <div>{@render historyToggle(slice, 'list')}</div>
         {#if open[slice.payoutId]}
-          <SliceHistory title={historyTitle(slice)} lines={slice.history} />
+          <SliceHistory
+            id={historyId(slice, 'list')}
+            title={historyTitle(slice)}
+            lines={slice.history}
+          />
         {/if}
       </li>
     {/each}

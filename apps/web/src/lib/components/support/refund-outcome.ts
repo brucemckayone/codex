@@ -32,7 +32,18 @@ export type RefundOutcome =
   | { kind: 'chargeback'; disputeStatus: string | null }
   | { kind: 'nothing_left' }
   | { kind: 'too_large'; maxCents: number | null }
-  | { kind: 'already_submitted' }
+  /**
+   * Stripe holds an earlier refusal or failure for this exact charge, refund
+   * count and amount (24 h), so it answered that again: nothing was made.
+   */
+  | { kind: 'key_spent' }
+  /**
+   * Refused before the route ran (401, 403, or the remote's own 404 for a
+   * session that is no longer the platform owner's): nothing was refunded.
+   */
+  | { kind: 'signed_out' }
+  /** Rate-limited (429) before the route ran: nothing was refunded. */
+  | { kind: 'rate_limited' }
   /** Anything else, a 5xx included: Stripe may not have answered. */
   | { kind: 'failed' };
 
@@ -64,11 +75,28 @@ export function refundOutcomeOf(
       return { kind: 'nothing_left' };
     case 'REFUND_AMOUNT_TOO_LARGE':
       return { kind: 'too_large', maxCents: answer.maxCents };
-    case 'REFUND_ALREADY_SUBMITTED':
-      return { kind: 'already_submitted' };
+    case 'REFUND_KEY_SPENT':
+      return { kind: 'key_spent' };
     default:
-      return { kind: 'failed' };
+      return outcomeOfStatus(answer.status);
   }
+}
+
+/** A status the route never reached, or anything else. */
+function outcomeOfStatus(status: number | null | undefined): RefundOutcome {
+  if (status === 401 || status === 403) return { kind: 'signed_out' };
+  if (status === 429) return { kind: 'rate_limited' };
+  return { kind: 'failed' };
+}
+
+/**
+ * The command threw instead of answering: the remote's guard (a 404 for a
+ * session that is no longer the platform owner's), or the transport.
+ */
+export function rejectedOutcome(error: unknown): RefundOutcome {
+  const status = (error as { status?: unknown } | null)?.status;
+  if (status === 404) return { kind: 'signed_out' };
+  return outcomeOfStatus(typeof status === 'number' ? status : null);
 }
 
 /**
@@ -77,7 +105,13 @@ export function refundOutcomeOf(
  * Stripe refused, or never answered, and nothing changed.
  */
 export function reloadsCharge(outcome: RefundOutcome): boolean {
-  return !['refused', 'already_submitted', 'failed'].includes(outcome.kind);
+  return ![
+    'refused',
+    'key_spent',
+    'signed_out',
+    'rate_limited',
+    'failed',
+  ].includes(outcome.kind);
 }
 
 /** A refund exists, so the queue's counts may have moved with it. */
@@ -88,12 +122,13 @@ export function refreshesCounts(outcome: RefundOutcome): boolean {
 /**
  * Pounds as typed (`7.50`, `£7.5`, `1,000`) to pence, or null when it is not
  * an amount. String arithmetic, not `parseFloat`, so `7.29` is 729p exactly.
+ * A comma is only a thousands separator: `1,50` is not £150.
  */
 export function parsePounds(text: string): number | null {
-  const value = text.replace(/[£,\s]/g, '');
-  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value);
+  const value = text.replace(/[£\s]/g, '');
+  const match = /^(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?$/.exec(value);
   if (!match) return null;
-  const pence =
-    Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0'));
+  const pounds = Number(match[1].replaceAll(',', ''));
+  const pence = pounds * 100 + Number((match[2] ?? '').padEnd(2, '0'));
   return Number.isSafeInteger(pence) ? pence : null;
 }

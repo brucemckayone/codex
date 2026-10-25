@@ -165,6 +165,31 @@ describe('How it was split', () => {
     expect(maya).not.toContain('agreement');
   });
 
+  test('the footer and the fee’s rate are the server’s: nothing summed or rounded here', () => {
+    render(SplitCard, {
+      detail: chargeDetail({
+        split: { takenTotalCents: 999, platformFeeShareBps: 1050 },
+      }),
+    });
+    expect(document.querySelector('tfoot')?.textContent).toContain('£9.99');
+    const fee = [
+      ...document.querySelectorAll('[data-testid="slice-row"]'),
+    ].find((row) => row.textContent?.includes(m.support_payee_platform_fee()));
+    expect(fee?.textContent).toContain('10.5%');
+  });
+
+  test('no fee share from the server: no rate is shown', () => {
+    render(SplitCard, {
+      detail: chargeDetail({
+        split: { takenTotalCents: 400, platformFeeShareBps: null },
+      }),
+    });
+    const fee = [
+      ...document.querySelectorAll('[data-testid="slice-row"]'),
+    ].find((row) => row.textContent?.includes(m.support_payee_platform_fee()));
+    expect(fee?.textContent).not.toContain('%');
+  });
+
   test('a slice with history opens it underneath', () => {
     const detail = chargeDetail({
       slices: [
@@ -182,6 +207,12 @@ describe('How it was split', () => {
     toggle?.click();
     flushSync();
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    // The toggle names the history it opens.
+    const controls = toggle?.getAttribute('aria-controls') ?? '';
+    expect(controls).not.toBe('');
+    const panel = document.getElementById(controls);
+    expect(panel).not.toBeNull();
+    expect(panel?.querySelector('[data-testid="history-line"]')).not.toBeNull();
     expect(
       document.querySelector('[data-testid="history-line"]')
     ).not.toBeNull();

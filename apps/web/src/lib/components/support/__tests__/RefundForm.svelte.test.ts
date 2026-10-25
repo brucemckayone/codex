@@ -102,7 +102,7 @@ describe('how much', () => {
   test('the amount field opens with "Part of it", and closes with "All"', () => {
     const amount = () => document.querySelector('input[inputmode="decimal"]');
     const partHint = () =>
-      document.getElementById('refund-part-hint')?.textContent?.trim();
+      document.querySelector('[data-part-hint]')?.textContent?.trim();
     mountForm();
     expect(amount()).toBeNull();
     expect(partHint()).toBe(
@@ -162,7 +162,7 @@ describe('the preview', () => {
     expect(
       document.querySelector('[data-testid="preview-access"]')?.textContent
     ).toContain(m.support_access_keeps_lead({ buyer: 'Ellie Marsh' }));
-    const live = document.querySelector('[aria-live="polite"]');
+    const live = document.querySelector('[data-preview-announce]');
     expect(live?.textContent).toContain(
       m.support_preview_announce({
         amount: '£7.50',
@@ -236,6 +236,126 @@ describe('Review', () => {
   });
 });
 
+describe('Review asks for the preview again', () => {
+  async function readyAt750() {
+    mountForm();
+    choosePart('7.50');
+    await wait(300);
+    const slot = previewSlot(ARGS_750);
+    slot.current = preview();
+    flushSync();
+    return slot;
+  }
+  const confirmShown = () =>
+    document.querySelector('[data-testid="confirm-refund"]') !== null;
+
+  test('the confirm opens only once the fresh preview lands, and says what it says', async () => {
+    const slot = await readyAt750();
+    let land = () => {};
+    slot.refresh.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          land = () => {
+            // Since the page loaded, Rowan's payout went out: a person decides.
+            slot.current = preview({
+              lines: [
+                {
+                  payoutId: 'payout-rowan',
+                  repayPayoutId: null,
+                  label: 'Needs a person',
+                  amountCents: 607,
+                  method: 'needs_person',
+                },
+              ],
+            });
+            resolve();
+          };
+        })
+    );
+    review()?.click();
+    await wait(0);
+    expect(slot.refresh).toHaveBeenCalledTimes(1);
+    expect(confirmShown()).toBe(false);
+    expect(review()?.disabled).toBe(true);
+
+    land();
+    await wait(0);
+    expect(confirmShown()).toBe(true);
+    expect(document.body.textContent).toContain(
+      m.support_confirm_line_person({ name: 'Rowan Ellis' })
+    );
+    expect(document.body.textContent).not.toContain(
+      m.support_confirm_line_reversal({ name: 'Rowan Ellis' })
+    );
+  });
+
+  test('a refresh that fails opens nothing, and Try again asks once more', async () => {
+    const slot = await readyAt750();
+    slot.refresh.mockImplementation(async () => {
+      slot.error = { status: 500, body: { message: 'boom' } };
+      throw new Error('boom');
+    });
+    review()?.click();
+    await wait(0);
+    expect(confirmShown()).toBe(false);
+    const alert = document.querySelector('[data-testid="preview-error"]');
+    expect(alert).not.toBeNull();
+    [...(alert?.querySelectorAll('button') ?? [])]
+      .find((button) => button.textContent?.includes(m.support_try_again()))
+      ?.click();
+    expect(slot.refresh).toHaveBeenCalledTimes(2);
+  });
+
+  test('an amount changed while it asks opens nothing, even once the new amount’s preview lands', async () => {
+    const slot = await readyAt750();
+    let land = () => {};
+    slot.refresh.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        })
+    );
+    review()?.click();
+    await wait(0);
+    // While the £7.50 refresh is out, support types £8.00 and its preview lands.
+    choosePart('8.00');
+    await wait(300);
+    previewSlot({ ...ARGS_750, amountCents: 800 }).current = preview({
+      amountCents: 800,
+    });
+    flushSync();
+    land();
+    await wait(0);
+    expect(confirmShown()).toBe(false);
+  });
+});
+
+describe('the amount field', () => {
+  test('sits outside the radio’s label; its error is tied to it and read out', () => {
+    mountForm();
+    choosePart('20.01');
+    const radio = document.querySelector<HTMLInputElement>(
+      'input[value="part"]'
+    );
+    const input = document.querySelector<HTMLInputElement>(
+      'input[inputmode="decimal"]'
+    );
+    expect(radio?.labels?.length).toBe(1);
+    expect(radio?.labels?.[0]?.contains(input)).toBe(false);
+
+    const described = (input?.getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .map((id) => document.getElementById(id));
+    const error = described.find(
+      (el) => el?.getAttribute('aria-live') === 'polite'
+    );
+    expect(error?.textContent).toContain(
+      m.support_form_amount_invalid({ max: '£20.00' })
+    );
+    expect(input?.getAttribute('aria-invalid')).toBe('true');
+  });
+});
+
 describe('submitting', () => {
   async function openReview() {
     mountForm();
@@ -244,7 +364,8 @@ describe('submitting', () => {
     previewSlot(ARGS_750).current = preview();
     flushSync();
     review()?.click();
-    flushSync();
+    // Review asks for the preview again; the confirm opens on its answer.
+    await wait(0);
     const confirm = document.querySelector<HTMLButtonElement>(
       '[data-testid="confirm-refund"]'
     );
@@ -316,6 +437,17 @@ describe('submitting', () => {
     confirm.click();
     await wait(0);
     expect(outcomes.map((o) => o.kind)).toEqual(['changed']);
+  });
+
+  test('a command the remote’s guard refuses (404) reads as a lost session', async () => {
+    issueSupportRefund.mockRejectedValue({
+      status: 404,
+      body: { message: 'Not Found' },
+    });
+    const confirm = await openReview();
+    confirm.click();
+    await wait(0);
+    expect(outcomes.map((o) => o.kind)).toEqual(['signed_out']);
   });
 });
 

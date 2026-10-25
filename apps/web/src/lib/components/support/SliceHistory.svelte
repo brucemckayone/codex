@@ -23,9 +23,11 @@
     title: string;
     lines: HistoryLine[];
     debtCause?: { type: string; id: string } | null;
+    /** For the toggle's `aria-controls`. */
+    id?: string;
   }
 
-  const { title, lines, debtCause = null }: Props = $props();
+  const { title, lines, debtCause = null, id }: Props = $props();
 
   const titleId = $props.id();
 
@@ -86,7 +88,7 @@
   }
 </script>
 
-<div class="slice-history">
+<div class="slice-history" {id}>
   <p class="slice-history__title" id={titleId}>{title}</p>
   <ul class="history" aria-labelledby={titleId}>
     {#each lines as line, i (`${line.causeType}:${line.causeId}:${line.outcome}:${i}`)}

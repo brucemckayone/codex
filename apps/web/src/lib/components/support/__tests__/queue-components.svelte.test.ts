@@ -134,8 +134,16 @@ describe('Creator debts table', () => {
     );
     expect(rowText).toContain('slice_repaid');
     expect(document.querySelector('[data-testid="history-line"]')).toBeNull();
-    button(m.support_history_show())?.click();
+    const toggle = button(m.support_history_show());
+    toggle?.click();
     flushSync();
+    // The toggle names the history it opens.
+    const controls = toggle?.getAttribute('aria-controls') ?? '';
+    expect(
+      document
+        .getElementById(controls)
+        ?.querySelectorAll('[data-testid="history-line"]')
+    ).toHaveLength(3);
     // The table's copy (jsdom applies no media query, so the phone list's
     // copy renders too).
     expect(
@@ -202,6 +210,7 @@ describe('Settling a failed refund', () => {
           { payoutId: 'p1', payeeName: 'Rowan Ellis', amountCents: 1944 },
         ],
         accessRestored: true,
+        accessNotRestoredReason: null,
       },
     });
     typeNote('Daniel asked to keep the programme instead.');
@@ -231,6 +240,7 @@ describe('Settling a failed refund', () => {
           { payoutId: 'p1', payeeName: 'Rowan Ellis', amountCents: 1944 },
         ],
         accessRestored: true,
+        accessNotRestoredReason: null,
       },
     });
     typeNote('Kept the programme.');
@@ -257,6 +267,7 @@ describe('Settling a failed refund', () => {
         resolvedAt: NOW.toISOString(),
         repaid: [],
         accessRestored: false,
+        accessNotRestoredReason: null,
       },
     });
     const notices = renderDialog('refunded_elsewhere');
@@ -270,6 +281,63 @@ describe('Settling a failed refund', () => {
       variant: 'success',
       text: m.support_settled_elsewhere({ buyer: 'Daniel Price' }),
     });
+  });
+
+  test.each([
+    ['chargeback', 'blocked_chargeback', m.support_repay_blocked_chargeback()],
+    [
+      'later_refunds',
+      'blocked_later_refunds',
+      m.support_repay_blocked_later_refunds(),
+    ],
+  ] as const)('a later cause (%s) that took the shares too refuses re-paying, and the dialog stays', async (reason, problemKind, body) => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'REPAY_BLOCKED_BY_LATER_CAUSE', reason })
+    );
+    const notices = renderDialog('creators_repaid');
+    typeNote('Re-pay.');
+    submit()?.click();
+    await settled();
+    const problem = document.querySelector('[data-testid="settle-problem"]');
+    expect(problem?.getAttribute('data-problem')).toBe(problemKind);
+    expect(problem?.getAttribute('data-variant')).toBe('warning');
+    expect(problem?.textContent).toContain(m.support_repay_blocked_lead());
+    expect(problem?.textContent).toContain(body);
+    expect(notices).toHaveLength(0);
+  });
+
+  test.each([
+    ['dispute_holds', m.support_access_kept_dispute({ buyer: 'Daniel Price' })],
+    ['rebought', m.support_access_kept_rebought({ buyer: 'Daniel Price' })],
+    ['duplicate', m.support_access_kept_duplicate()],
+  ] as const)('re-paid without access back (%s): the notice says why', async (accessNotRestoredReason, why) => {
+    resolveFailedRefund.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        refundId: failedRefund().refundId,
+        resolution: 'creators_repaid',
+        resolvedAt: NOW.toISOString(),
+        repaid: [
+          { payoutId: 'p1', payeeName: 'Rowan Ellis', amountCents: 1944 },
+        ],
+        accessRestored: false,
+        accessNotRestoredReason,
+      },
+    });
+    const notices = renderDialog('creators_repaid');
+    typeNote('Kept the programme.');
+    submit()?.click();
+    await settled();
+    expect(notices[0].text).toContain(
+      m.support_settled_repaid({ list: 'Rowan Ellis £19.44' })
+    );
+    expect(notices[0].text).toContain(why);
+    expect(notices[0].text).not.toContain(
+      m.support_settled_access({
+        buyer: 'Daniel Price',
+        title: 'Sleep Reset Programme',
+      })
+    );
   });
 
   test('a clawback still running is a calm "try again later", and the dialog stays', async () => {

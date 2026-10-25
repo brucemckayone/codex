@@ -11,15 +11,29 @@
 
   The dialog says the total the refund took; what each payee gets back is
   the server's to work out, and the confirmation lists the payouts it wrote.
-  A clawback still running refuses calmly: try again later.
+  A clawback still running refuses calmly: try again later. A later
+  chargeback or refund that took the payees' shares too refuses re-paying
+  for good, since it would pay them twice: support settles it by hand, or as
+  refunded another way. When re-paying doesn't give access back, the
+  confirmation says why.
 
   @prop {FailedRefundItem | null} item
   @prop {FailedRefundResolution | null} resolution
   @prop {boolean} open - Bindable.
   @prop {(notice: SettleNotice) => void} onFinished - Settled, or already gone.
+  @prop {() => HTMLElement | null} [closeFocus] - Where focus goes on close.
+
+  While its request runs the dialog can't be dismissed (Escape, outside
+  click, the close button), and the answer's text names the item that was
+  sent, captured then.
 -->
 <script lang="ts">
-  import type { FailedRefundItem, FailedRefundResolution } from '@codex/admin';
+  import type {
+    AccessNotRestoredReason,
+    FailedRefundItem,
+    FailedRefundResolution,
+  } from '@codex/admin';
+  import type { CreateDialogProps } from '@melt-ui/svelte';
   import { SUPPORT_NOTE_MAX_LENGTH } from '@codex/validation';
   import * as m from '$paraglide/messages';
   import { Alert, Button, Label } from '$lib/components/ui';
@@ -35,14 +49,23 @@
     resolution: FailedRefundResolution | null;
     open: boolean;
     onFinished: (notice: SettleNotice) => void;
+    closeFocus?: CreateDialogProps['closeFocus'];
   }
 
-  let { item, resolution, open = $bindable(false), onFinished }: Props = $props();
+  let {
+    item,
+    resolution,
+    open = $bindable(false),
+    onFinished,
+    closeFocus,
+  }: Props = $props();
 
   let note = $state('');
   let busy = $state(false);
-  /** A refusal the dialog stays open for: try again later, or try again. */
-  let problem = $state<'clawback_running' | 'failed' | null>(null);
+  /** A refusal the dialog stays open for: later, another way, or again. */
+  let problem = $state<
+    'clawback_running' | 'blocked_chargeback' | 'blocked_later_refunds' | 'failed' | null
+  >(null);
   let noteMissing = $state(false);
 
   const noteId = $props.id();
@@ -73,6 +96,28 @@
     resolution === 'creators_repaid' && item?.isFull === true && item.kind !== 'purchase'
   );
 
+  /** Why the buyer's access stayed as it was, when re-paying didn't give it back. */
+  function accessKept(reason: AccessNotRestoredReason, name: string): string {
+    switch (reason) {
+      case 'partial':
+        return m.support_access_kept_partial({ buyer: name });
+      case 'not_refunded':
+        return m.support_access_kept_not_refunded({ buyer: name });
+      case 'dispute_holds':
+        return m.support_access_kept_dispute({ buyer: name });
+      case 'duplicate':
+        return m.support_access_kept_duplicate();
+      case 'rebought':
+        return m.support_access_kept_rebought({ buyer: name });
+      case 'still_refunded':
+        return m.support_access_kept_still_refunded({ buyer: name });
+      case 'no_purchase':
+        return m.support_access_kept_no_purchase();
+      default:
+        return m.support_access_kept_other({ buyer: name });
+    }
+  }
+
   async function handleSubmit() {
     if (busy || !item || !resolution) return;
     if (noteRequired && note.trim() === '') {
@@ -81,7 +126,8 @@
     }
     busy = true;
     problem = null;
-    const settling = item;
+    // The names the answer's text uses, as sent.
+    const settling = { refundId: item.refundId, buyer, title };
     try {
       const answer = await resolveFailedRefund({
         refundId: settling.refundId,
@@ -89,26 +135,32 @@
       });
       if (answer.outcome === 'done') {
         const result = answer.result;
-        const texts: string[] = [];
+        let text: string;
         if (result.resolution === 'refunded_elsewhere') {
-          texts.push(m.support_settled_elsewhere({ buyer }));
+          text = m.support_settled_elsewhere({ buyer: settling.buyer });
         } else {
-          texts.push(
+          const repaid =
             result.repaid.length > 0
               ? m.support_settled_repaid({
                   list: formatList(
-                    result.repaid.map(
-                      (row) =>
-                        `${row.payeeName ?? m.support_debt_unnamed()} ${formatPrice(row.amountCents)}`
+                    result.repaid.map((row) =>
+                      m.support_settled_repaid_row({
+                        name: row.payeeName ?? m.support_debt_unnamed(),
+                        amount: formatPrice(row.amountCents),
+                      })
                     )
                   ),
                 })
-              : m.support_settled_repaid_none()
-          );
-          if (result.accessRestored) texts.push(m.support_settled_access({ buyer, title }));
+              : m.support_settled_repaid_none();
+          const access = result.accessRestored
+            ? m.support_settled_access({ buyer: settling.buyer, title: settling.title })
+            : result.accessNotRestoredReason
+              ? accessKept(result.accessNotRestoredReason, settling.buyer)
+              : null;
+          text = access ? m.support_sentences_two({ first: repaid, second: access }) : repaid;
         }
         open = false;
-        onFinished({ variant: 'success', text: texts.join(' ') });
+        onFinished({ variant: 'success', text });
       } else if (answer.detailsCode === 'ALREADY_SETTLED' || answer.status === 409) {
         open = false;
         onFinished({ variant: 'info', text: m.support_settle_already() });
@@ -117,6 +169,8 @@
         onFinished({ variant: 'info', text: m.support_settle_gone() });
       } else if (answer.detailsCode === 'REFUND_CLAWBACK_UNFINISHED') {
         problem = 'clawback_running';
+      } else if (answer.detailsCode === 'REPAY_BLOCKED_BY_LATER_CAUSE') {
+        problem = answer.reason === 'chargeback' ? 'blocked_chargeback' : 'blocked_later_refunds';
       } else if (answer.status === 400 && noteRequired) {
         noteMissing = true;
       } else {
@@ -131,7 +185,7 @@
 </script>
 
 {#if item && resolution}
-  <Dialog.Root bind:open>
+  <Dialog.Root bind:open dismissible={!busy} {closeFocus}>
     <Dialog.Content size="sm">
       <Dialog.Header>
         <Dialog.Title>
@@ -182,15 +236,29 @@
         </div>
         {#if problem}
           <Alert
-            variant={problem === 'clawback_running' ? 'info' : 'error'}
+            variant={problem === 'clawback_running'
+              ? 'info'
+              : problem === 'failed'
+                ? 'error'
+                : 'warning'}
             data-testid="settle-problem"
             data-problem={problem}
           >
-            <p>
-              {problem === 'clawback_running'
-                ? m.support_settle_clawback_running()
-                : m.support_settle_failed()}
-            </p>
+            {#if problem === 'clawback_running'}
+              <p>{m.support_settle_clawback_running()}</p>
+            {:else if problem === 'blocked_chargeback'}
+              <p>
+                <strong>{m.support_repay_blocked_lead()}</strong>
+                {m.support_repay_blocked_chargeback()}
+              </p>
+            {:else if problem === 'blocked_later_refunds'}
+              <p>
+                <strong>{m.support_repay_blocked_lead()}</strong>
+                {m.support_repay_blocked_later_refunds()}
+              </p>
+            {:else}
+              <p>{m.support_settle_failed()}</p>
+            {/if}
           </Alert>
         {/if}
       </Dialog.Body>

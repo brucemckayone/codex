@@ -69,8 +69,9 @@ function mountAt(href: string) {
 }
 
 const text = () => document.body.textContent?.replace(/\s+/g, ' ') ?? '';
+// The tabs are a list within the page: aria-current="true", not "page".
 const current = () =>
-  [...document.querySelectorAll('a[aria-current="page"]')].map((a) =>
+  [...document.querySelectorAll('a[aria-current="true"]')].map((a) =>
     a.textContent?.trim()
   );
 
@@ -123,6 +124,23 @@ describe('the list', () => {
       document.querySelector('[data-testid="queue-error"]')
     ).not.toBeNull();
     expect(text()).not.toContain(m.support_queue_failed_empty_title());
+    // Our own words, not the server's pasted into the sentence.
+    expect(text()).toContain(m.support_try_again_soon());
+    expect(text()).not.toContain('An unexpected error occurred');
+  });
+
+  test('a later page left empty goes back a page, never "nothing waiting"', () => {
+    mountAt('/admin/queue?page=2');
+    failedSlot(2).current = {
+      items: [],
+      pagination: { page: 2, limit: 20, total: 20, totalPages: 1 },
+    };
+    flushSync();
+    expect(navigation.goto).toHaveBeenCalledWith('/admin/queue?page=1', {
+      keepFocus: true,
+      replaceState: true,
+    });
+    expect(text()).not.toContain(m.support_queue_failed_empty_title());
   });
 
   test('an empty queue says so', () => {
@@ -130,6 +148,84 @@ describe('the list', () => {
     failedSlot().current = list([]);
     flushSync();
     expect(text()).toContain(m.support_queue_failed_empty_title());
+  });
+});
+
+/** Melt restores focus a tick and a millisecond after the dialog closes. */
+const afterFocus = () => new Promise((resolve) => setTimeout(resolve, 20));
+const rowButton = (label: string) =>
+  [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[data-testid="failed-refund-row"] button'
+    ),
+  ].find((b) => b.textContent?.includes(label));
+
+// Melt ignores a keydown whose target isn't an element: press it in the dialog.
+const pressEscape = () =>
+  document
+    .querySelector('[role="dialog"]')
+    ?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+
+describe('the settle dialog', () => {
+  test('Cancel puts focus back on the row’s button', async () => {
+    mountAt('/admin/queue');
+    failedSlot().current = list([failedRefund()]);
+    flushSync();
+    const button = rowButton(m.support_action_elsewhere());
+    button?.focus();
+    button?.click();
+    flushSync();
+    // A keyboard user moves to Cancel and presses it; it leaves with the dialog.
+    const cancel = [
+      ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+    ].find((b) => b.textContent?.trim() === m.support_confirm_cancel());
+    cancel?.focus();
+    cancel?.click();
+    flushSync();
+    await afterFocus();
+    expect(document.activeElement).toBe(button);
+  });
+
+  test('while its request runs, Escape and the close button do nothing', async () => {
+    let answer: (value: unknown) => void = () => {};
+    resolveFailedRefund.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }) as never
+    );
+    mountAt('/admin/queue');
+    failedSlot().current = list([failedRefund()]);
+    flushSync();
+    rowButton(m.support_action_elsewhere())?.click();
+    flushSync();
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="settle-submit"]')
+      ?.click();
+    flushSync();
+
+    pressEscape();
+    flushSync();
+    await afterFocus();
+    expect(
+      document.querySelector('[data-testid="settle-submit"]')
+    ).not.toBeNull();
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        '[role="dialog"] [aria-label="Close"]'
+      )?.disabled
+    ).toBe(true);
+
+    answer({ outcome: 'failed', status: 500, code: null, detailsCode: null });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    flushSync();
+    // Idle again: Escape closes it.
+    pressEscape();
+    flushSync();
+    await afterFocus();
+    expect(document.querySelector('[data-testid="settle-submit"]')).toBeNull();
   });
 });
 
@@ -143,6 +239,7 @@ describe('settling', () => {
         resolvedAt: NOW.toISOString(),
         repaid: [],
         accessRestored: false,
+        accessNotRestoredReason: null,
       },
     });
     mountAt('/admin/queue');
@@ -169,5 +266,11 @@ describe('settling', () => {
     expect(
       document.querySelector('[data-testid="settle-notice"]')?.textContent
     ).toContain(m.support_settled_elsewhere({ buyer: 'Daniel Price' }));
+
+    // The notice takes focus, so it is read out.
+    await afterFocus();
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="settle-notice"]')
+    );
   });
 });

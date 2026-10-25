@@ -32,6 +32,12 @@
 
   let open = $state<Record<string, boolean>>({});
 
+  const uid = $props.id();
+  /** The table and the phone list each have their own copy of a history. */
+  function historyId(item: CreatorDebtItem, where: 'table' | 'list'): string {
+    return `${uid}-${item.reviewId}-${where}`;
+  }
+
   function toggle(reviewId: string) {
     open = { ...open, [reviewId]: !open[reviewId] };
   }
@@ -98,12 +104,13 @@
   {/if}
 {/snippet}
 
-{#snippet historyToggle(item: CreatorDebtItem)}
+{#snippet historyToggle(item: CreatorDebtItem, where: 'table' | 'list')}
   {#if item.history.length > 0}
     <Button
       variant="ghost"
       size="sm"
       aria-expanded={open[item.reviewId] === true}
+      aria-controls={historyId(item, where)}
       onclick={() => toggle(item.reviewId)}
     >
       {open[item.reviewId] ? m.support_history_hide() : m.support_history_show()}
@@ -114,8 +121,9 @@
   {/if}
 {/snippet}
 
-{#snippet history(item: CreatorDebtItem)}
+{#snippet history(item: CreatorDebtItem, where: 'table' | 'list')}
   <SliceHistory
+    id={historyId(item, where)}
     title={historyTitle(item)}
     lines={item.history}
     debtCause={item.cause ? { type: item.cause.type, id: item.cause.id } : null}
@@ -152,7 +160,7 @@
           <Table.Cell><span class="cell-stack">{@render why(item)}</span></Table.Cell>
           <Table.Cell class="support-right">
             <span class="table-actions">
-              {@render historyToggle(item)}
+              {@render historyToggle(item, 'table')}
               <Button variant="secondary" size="sm" onclick={() => onSettle(item)}>
                 {m.support_action_settle()}
               </Button>
@@ -161,7 +169,7 @@
         </Table.Row>
         {#if open[item.reviewId]}
           <Table.Row class="support-expand">
-            <Table.Cell colspan={6}>{@render history(item)}</Table.Cell>
+            <Table.Cell colspan={6}>{@render history(item, 'table')}</Table.Cell>
           </Table.Row>
         {/if}
       {/each}
@@ -178,9 +186,9 @@
       </div>
       <span class="cell-sub">{@render from(item, false)} · {fromLine(item)}</span>
       <span class="cell-stack">{@render why(item)}</span>
-      {#if open[item.reviewId]}{@render history(item)}{/if}
+      {#if open[item.reviewId]}{@render history(item, 'list')}{/if}
       <div class="row-item__actions">
-        {@render historyToggle(item)}
+        {@render historyToggle(item, 'list')}
         <Button variant="secondary" size="sm" onclick={() => onSettle(item)}>
           {m.support_action_settle()}
         </Button>

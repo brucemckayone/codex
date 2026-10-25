@@ -122,6 +122,8 @@ export function chargeDetail(
     refundable: { maxCents: 2000, blocked: null },
     refundCount: 1,
     slices: SLICES,
+    // What the server works out for SLICES: £3.24 + £0.36 + £0.40, and 10%.
+    split: { takenTotalCents: 400, platformFeeShareBps: 1000 },
     refunds: [refundRow()],
     chargebacks: [],
     ...overrides,

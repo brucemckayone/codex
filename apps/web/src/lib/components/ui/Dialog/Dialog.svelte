@@ -30,6 +30,13 @@
      * below, which reproduces Melt's own default branch.
      */
     closeFocus?: CreateDialogProps['closeFocus'];
+    /**
+     * False while a request the dialog started is running: Escape, a click
+     * outside and the close button do nothing, so the answer always lands in
+     * the dialog that asked. Closing from code (`open = false`) still works.
+     * Defaults to true, so every existing dialog is unchanged.
+     */
+    dismissible?: boolean;
     children: Snippet;
   }
 
@@ -37,6 +44,7 @@
     open = $bindable(false),
     onOpenChange,
     closeFocus,
+    dismissible = true,
     children
   }: Props = $props();
 
@@ -76,7 +84,18 @@
     meltOpen.set(open);
   });
 
+  $effect(() => {
+    dialog.options.closeOnOutsideClick.set(dismissible);
+    dialog.options.escapeBehavior.set(dismissible ? 'close' : 'ignore');
+  });
+
   setContext('DIALOG', dialog);
+  // DialogContent disables its close button with it.
+  setContext('DIALOG_DISMISSIBLE', {
+    get current() {
+      return dismissible;
+    }
+  });
 </script>
 
 {@render children()}

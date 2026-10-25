@@ -11,8 +11,13 @@
   refunds card moves to the top of the record so the two sit together. The
   charge is reloaded once when what it shows is known to be out of date, and
   the counts with it when a refund exists; then Refresh (Q10). No polling.
+  Each reload also asks the form's preview again (RefundForm). The outcome
+  takes focus as it arrives, so a screen reader reads it out.
+
+  The not-found, error and loading states still name the page with an h1.
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import { afterNavigate } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
@@ -37,8 +42,9 @@
     formatDayTime,
     formatShortDay,
   } from '$lib/components/support/support-format';
+  import { useQueueCounts } from '$lib/components/support/queue-counts';
   import { queryErrorMessage } from '$lib/remote/query-result';
-  import { getSupportCharge, getSupportQueueCounts } from '$lib/remote/support.remote';
+  import { getSupportCharge } from '$lib/remote/support.remote';
 
   /** The route's own pattern: anything else is not a charge, so not found. */
   const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{8,64}$/;
@@ -55,6 +61,7 @@
         (chargeQuery?.error as { status?: unknown } | undefined)?.status === 404)
   );
   const reloading = $derived(detail !== undefined && chargeQuery?.loading === true);
+  const countsQuery = useQueueCounts();
 
   let outcome = $state<RefundOutcome | null>(null);
   let refreshingByHand = $state(false);
@@ -81,15 +88,17 @@
     refreshingByHand = true;
     await Promise.all([
       reloadCharge(),
-      getSupportQueueCounts().refresh().catch(() => {}),
+      countsQuery.refresh().catch(() => {}),
     ]);
     refreshingByHand = false;
   }
 
-  function handleOutcome(next: RefundOutcome) {
+  async function handleOutcome(next: RefundOutcome) {
     outcome = next;
     if (reloadsCharge(next)) void reloadCharge();
-    if (refreshesCounts(next)) void getSupportQueueCounts().refresh().catch(() => {});
+    if (refreshesCounts(next)) void countsQuery.refresh().catch(() => {});
+    await tick();
+    document.querySelector<HTMLElement>('[data-refund-outcome]')?.focus();
   }
 
   const header = $derived.by(() => {
@@ -131,6 +140,7 @@
 </a>
 
 {#if notFound}
+  <h1 class="sr-only">{m.support_charge_heading()}</h1>
   <Card.Root>
     <EmptyState
       title={m.support_not_found_title()}
@@ -140,8 +150,9 @@
     />
   </Card.Root>
 {:else if detail === undefined && loadError !== null}
+  <h1 class="sr-only">{m.support_charge_heading()}</h1>
   <Alert variant="error" data-testid="charge-load-error">
-    <p><strong>{m.support_load_error_lead()}</strong> {loadError}</p>
+    <p><strong>{m.support_load_error_lead()}</strong> {m.support_try_again_soon()}</p>
     <div class="alert-actions">
       <Button variant="secondary" size="sm" onclick={() => void reloadCharge()}>
         {m.support_try_again()}
@@ -149,6 +160,7 @@
     </div>
   </Alert>
 {:else if detail === undefined}
+  <h1 class="sr-only">{m.support_charge_heading()}</h1>
   <div class="charge-skeleton" aria-busy="true" data-testid="charge-loading">
     <span class="sr-only" role="status">{m.support_loading_charge()}</span>
     <Skeleton width="40%" height="var(--space-8)" />

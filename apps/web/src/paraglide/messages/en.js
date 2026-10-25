@@ -17759,7 +17759,15 @@ export const support_search_error_lead = () => `The search didn't run.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_search_error_body = () => `Try again in a moment.`
+export const support_try_again_soon = () => `Try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_charge_heading = () => `Charge`
 
 
 /**
@@ -19343,7 +19351,7 @@ export const support_preview_loading = (params) => `Working out what ${params.am
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_preview_error = (params) => `We couldn't work out what ${params.amount} takes back. Reload the charge, then try again.`
+export const support_preview_error = (params) => `We couldn't work out what ${params.amount} takes back. Try again in a moment.`
 
 
 /**
@@ -19815,22 +19823,6 @@ export const support_outcome_refused_other = () => `Nothing was refunded and not
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_outcome_submitted_lead = () => `This refund was already submitted.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const support_outcome_submitted_body = () => `The same amount went to Stripe a moment ago, perhaps with another reason, and is still being answered. Reload the charge to see it before you try again.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const support_outcome_chargeback_lead = () => `This charge has a chargeback, so it can't be refunded.`
 
 
@@ -19864,6 +19856,70 @@ export const support_outcome_too_large_body = (params) => `${params.max} is left
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_outcome_too_large_unknown = () => `Check the new amounts, then try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_signed_out_lead = () => `Your session has ended.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_signed_out_body = () => `Nothing was refunded. Sign in again, then reload this charge.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_rate_limited_lead = () => `Too many requests.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_rate_limited_body = () => `Nothing was refunded. Wait a minute, then try again.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_share_of = (params) => `${params.name}'s`
+
+
+/**
+ * @param {{ first: NonNullable<unknown>, second: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_sentences_two = (params) => `${params.first} ${params.second}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_key_spent_lead = () => `Stripe already refused this exact refund.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_key_spent_body = () => `Nothing was refunded. Stripe keeps its answer to the same refund of this charge for 24 hours. Change the amount, or use the Stripe Dashboard.`
 
 
 /**
@@ -20680,6 +20736,102 @@ export const support_settled_elsewhere = (params) => `${params.buyer}'s refund i
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_settled_repaid = (params) => `The payees are re-paid: ${params.list}. The next payout run pays them.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settled_repaid_row = (params) => `${params.name} ${params.amount}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_blocked_lead = () => `Re-paying would pay the payees twice.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_blocked_chargeback = () => `This charge has a chargeback, and the payees' shares were taken for it too. Settle it by hand, or mark it refunded another way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_blocked_later_refunds = () => `A later refund of this charge took the payees' shares too. Settle it by hand, or mark it refunded another way.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_kept_partial = (params) => `${params.buyer}'s access didn't change: a part refund never ended it.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_kept_not_refunded = (params) => `${params.buyer}'s access didn't change: the purchase isn't marked refunded.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_kept_dispute = (params) => `${params.buyer} doesn't get access back: a chargeback on the payment holds it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_kept_duplicate = () => `There was no access to give back: a duplicate payment never granted any.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_kept_rebought = (params) => `${params.buyer} has access already, through a newer purchase.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_kept_still_refunded = (params) => `${params.buyer} doesn't get access back: other refunds still cover the payment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_kept_no_purchase = () => `Access didn't change: this charge paid an invoice, not a purchase.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_kept_other = (params) => `${params.buyer}'s access didn't change.`
 
 
 /**

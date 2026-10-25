@@ -39,6 +39,8 @@ export interface SupportCommandFailure {
   maxCents: number | null;
   /** `CHARGE_HAS_CHARGEBACK`: the dispute's current status. */
   disputeStatus: string | null;
+  /** `REPAY_BLOCKED_BY_LATER_CAUSE`: `chargeback` or `later_refunds`. */
+  reason: string | null;
 }
 
 function field<T extends 'string' | 'number'>(
@@ -68,6 +70,7 @@ export function toSupportFailure(error: unknown): SupportCommandFailure {
       refundCount: field(details, 'refundCount', 'number'),
       maxCents: field(details, 'maxCents', 'number'),
       disputeStatus: field(details, 'disputeStatus', 'string'),
+      reason: field(details, 'reason', 'string'),
     };
   }
   return {
@@ -81,5 +84,6 @@ export function toSupportFailure(error: unknown): SupportCommandFailure {
     refundCount: null,
     maxCents: null,
     disputeStatus: null,
+    reason: null,
   };
 }

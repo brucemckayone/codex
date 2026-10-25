@@ -8,7 +8,14 @@
   after the last keystroke, one query per amount, and keyed to the charge's
   refund count so a preview worked out before someone else's refund is never
   reused after it. Review stays disabled until the preview on screen is the
-  preview of the amount on screen: never a stale one, never none.
+  preview of the amount on screen: never a stale one, never none. Pressing
+  Review asks for it once more, since the one on screen may be minutes old
+  and a payout paid since changes how a share is taken back: the confirm
+  opens only on that fresh answer. A reload of the charge asks again too.
+
+  When the confirm closes on an answer, the page focuses its outcome alert,
+  so it is read out: the form may unmount the dialog with its reset, so the
+  dialog can't do it. On Cancel, focus goes back to Review.
 
   Submitting sends the refund count the page showed (the route refuses with
   CHARGE_CHANGED if it moved) and is guarded against a double click: one call
@@ -23,6 +30,7 @@
 -->
 <script lang="ts">
   import type { ChargeDetail, RefundPreviewLine } from '@codex/admin';
+  import { untrack } from 'svelte';
   import {
     DISPUTE_CHARGEBACK_OPEN_STATUSES,
     DISPUTE_INQUIRY_STATUSES,
@@ -41,6 +49,7 @@
     parsePounds,
     type RefundOutcome,
     refundOutcomeOf,
+    rejectedOutcome,
   } from './refund-outcome';
   import {
     formatDay,
@@ -123,12 +132,34 @@
       : null
   );
 
+  // A reload of the same charge can still have moved a payout (paid since,
+  // say): ask for the preview again with it. A new refund count is a new
+  // query, fetched anyway.
+  let lastDetail: ChargeDetail | null = null;
+  $effect(() => {
+    const next = detail;
+    const previous = lastDetail;
+    lastDetail = next;
+    if (!previous || previous === next || previous.refundCount !== next.refundCount) return;
+    untrack(() => previewQuery)
+      ?.refresh()
+      .catch(() => {});
+  });
+
   let submitting = $state(false);
+  let reviewing = $state(false);
   let dialogOpen = $state(false);
+  /** The confirm closed on an answer: the page focuses it, not Review. */
+  let focusOutcome = false;
 
   const canReview = $derived(
-    preview !== null && previewError === null && !stale && !submitting
+    preview !== null && previewError === null && !stale && !submitting && !reviewing
   );
+
+  const uid = $props.id();
+  const partId = `${uid}-part`;
+  const partHintId = `${uid}-part-hint`;
+  const amountErrorId = `${uid}-amount-error`;
 
   // ── What the preview says, in words ────────────────────────────────────
   const PAYEE_METHODS = new Set([
@@ -264,8 +295,32 @@
   }
 
   // ── Submit ─────────────────────────────────────────────────────────────
-  function openReview() {
-    if (canReview) dialogOpen = true;
+  async function openReview() {
+    if (!canReview || !previewQuery) return;
+    const query = previewQuery;
+    const cents = shownCents;
+    reviewing = true;
+    try {
+      await query.refresh();
+    } catch {
+      // Shown as the preview error, with Try again: no confirm.
+    } finally {
+      reviewing = false;
+    }
+    // `preview` is only ever the preview of the amount on screen, so this is
+    // also "the amount is still the one Review was pressed for".
+    const fresh =
+      preview !== null &&
+      preview.amountCents === cents &&
+      previewError === null &&
+      !stale;
+    if (!fresh) return;
+    focusOutcome = false;
+    dialogOpen = true;
+  }
+
+  function focusAfterConfirm(): HTMLElement | null {
+    return focusOutcome ? null : document.querySelector<HTMLElement>('[data-refund-review]');
   }
 
   async function handleConfirm() {
@@ -284,11 +339,12 @@
         expectedRefundCount: detail.refundCount,
       });
       outcome = refundOutcomeOf(answer, { preview: reviewed, seenRefundIds });
-    } catch {
-      outcome = { kind: 'failed' };
+    } catch (error) {
+      outcome = rejectedOutcome(error);
     } finally {
       submitting = false;
     }
+    focusOutcome = true;
     dialogOpen = false;
     // The form closes once a refund exists; otherwise support keeps what
     // they entered, to check against the reloaded charge.
@@ -343,16 +399,21 @@
       <div class="refund-form">
         <fieldset class="radio-group">
           <legend class="legend">{m.support_form_how_much()}</legend>
-          <label class="radio-row">
+          <!-- The amount field sits beside the radio's label, not in it, so the
+               radio's name is "Part of it" alone; the hint and the error
+               describe the field (and the hint the radio). -->
+          <div class="radio-row radio-row--field">
             <input
               type="radio"
+              id={partId}
               name="refund-amount"
               value="part"
               checked={mode === 'part'}
+              aria-describedby={partHintId}
               onchange={() => (mode = 'part')}
             />
             <span class="radio-row__text">
-              <span class="radio-row__title">{m.support_form_part()}</span>
+              <label class="radio-row__title" for={partId}>{m.support_form_part()}</label>
               <!-- The amount opens with its choice, as drawn (B1, C1). -->
               {#if mode === 'part'}
                 <span class="money-input">
@@ -362,17 +423,22 @@
                     inputmode="decimal"
                     autocomplete="off"
                     aria-label={m.support_form_amount_label()}
-                    aria-describedby="refund-part-hint"
-                    error={amountInvalid
-                      ? m.support_form_amount_invalid({ max: formatPrice(maxCents) })
-                      : undefined}
+                    aria-describedby="{amountErrorId} {partHintId}"
+                    aria-invalid={amountInvalid ? 'true' : undefined}
+                    data-error={amountInvalid}
                     onkeydown={(event: KeyboardEvent) => {
-                      if (event.key === 'Enter') openReview();
+                      if (event.key === 'Enter') void openReview();
                     }}
                   />
+                  <!-- Always mounted with the field, so text arriving is read out. -->
+                  <span class="amount-error" id={amountErrorId} aria-live="polite">
+                    {amountInvalid
+                      ? m.support_form_amount_invalid({ max: formatPrice(maxCents) })
+                      : ''}
+                  </span>
                 </span>
               {/if}
-              <span class="radio-row__hint" id="refund-part-hint">
+              <span class="radio-row__hint" id={partHintId} data-part-hint>
                 {#if mode !== 'part'}
                   {isPurchase ? m.support_form_part_keeps({ buyer }) : m.support_form_part_runs()}
                 {:else if isPurchase}
@@ -382,7 +448,7 @@
                 {/if}
               </span>
             </span>
-          </label>
+          </div>
           <label class="radio-row">
             <input
               type="radio"
@@ -427,7 +493,13 @@
         </div>
 
         <div class="preview" aria-busy={shownCents !== null && preview === null && previewError === null}>
-          <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          <p
+            class="sr-only"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            data-preview-announce
+          >
             {announcement}
           </p>
           {#if shownCents === null}
@@ -439,6 +511,16 @@
             {#if previewError}
               <Alert variant="error" data-testid="preview-error">
                 <p>{m.support_preview_error({ amount: formatPrice(shownCents) })}</p>
+                <div class="alert-actions">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={previewQuery?.loading === true}
+                    onclick={() => void previewQuery?.refresh().catch(() => {})}
+                  >
+                    {m.support_try_again()}
+                  </Button>
+                </div>
               </Alert>
             {:else if !preview}
               <div class="preview__skeleton" data-testid="preview-pending">
@@ -496,9 +578,10 @@
           variant="primary"
           class="refund-form__review"
           disabled={!canReview}
+          loading={reviewing}
           data-testid="review-refund"
           data-refund-review
-          onclick={openReview}
+          onclick={() => void openReview()}
         >
           {shownCents === null
             ? m.support_form_review_idle()
@@ -512,7 +595,7 @@
 {#if preview}
   <Dialog.Root
     bind:open={dialogOpen}
-    closeFocus={() => document.querySelector<HTMLElement>('[data-refund-review]')}
+    closeFocus={focusAfterConfirm}
   >
     <Dialog.Content size="sm">
       <Dialog.Header>
@@ -620,6 +703,33 @@
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     color: var(--color-text);
+  }
+
+  /* The part row holds a field, so only its label selects it. */
+  .radio-row--field {
+    cursor: default;
+  }
+
+  .radio-row--field .radio-row__title {
+    cursor: pointer;
+  }
+
+  .amount-error {
+    display: block;
+    margin-top: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--color-error);
+  }
+
+  .amount-error:empty {
+    margin-top: 0;
+  }
+
+  .alert-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
   }
 
   .radio-row__hint,

@@ -78,6 +78,9 @@ describe('searching', () => {
     ).not.toBeNull();
     expect(text()).toContain(m.support_search_error_lead());
     expect(text()).not.toContain(m.support_empty_title());
+    // Our own words, not the server's pasted into the sentence.
+    expect(text()).toContain(m.support_try_again_soon());
+    expect(text()).not.toContain('An unexpected error occurred');
   });
 
   test('while it runs: skeleton rows, and neither an error nor the empty state', () => {

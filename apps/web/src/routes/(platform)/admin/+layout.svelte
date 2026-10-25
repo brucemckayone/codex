@@ -3,19 +3,20 @@
 
   The Queue link's count is streamed: the nav renders at once, without a
   number, and a count that fails to load shows no Badge rather than holding
-  the nav up (data design §7). The count query is shared with the queue page,
-  so settling an item and refreshing it updates both.
+  the nav up (data design §7). The layout holds the one counts query and
+  provides it (`queue-counts.ts`): the pages refresh this instance, so a
+  settle or a refund updates the badge, even after a failed first load.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import TabLinks from '$lib/components/support/TabLinks.svelte';
-  import { getSupportQueueCounts } from '$lib/remote/support.remote';
+  import { provideQueueCounts } from '$lib/components/support/queue-counts';
 
   const { children }: { children: Snippet } = $props();
 
-  const countsQuery = getSupportQueueCounts();
+  const countsQuery = provideQueueCounts();
   const waiting = $derived(
     countsQuery.current
       ? countsQuery.current.failedRefunds + countsQuery.current.creatorDebts

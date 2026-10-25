@@ -10,6 +10,9 @@
   @prop {string} label - The nav landmark's name.
   @prop {string} [kicker] - A small caps label before the links ("Support").
   @prop {TabLink[]} items - The links; `count` shows a warning Badge when > 0.
+  @prop {'page' | 'true'} [currentAs='page'] - `aria-current` on the current
+    link: `page` for pages, `true` for a list within the page (the queue's
+    tabs), so only one link on the page says "current page".
 -->
 <script lang="ts">
   import { Badge } from '$lib/components/ui';
@@ -28,9 +31,10 @@
     label: string;
     kicker?: string;
     items: TabLink[];
+    currentAs?: 'page' | 'true';
   }
 
-  const { label, kicker, items }: Props = $props();
+  const { label, kicker, items, currentAs = 'page' }: Props = $props();
 </script>
 
 <nav class="tab-links" aria-label={label}>
@@ -41,7 +45,7 @@
     <a
       class="tab-links__link"
       href={item.href}
-      aria-current={item.current ? 'page' : undefined}
+      aria-current={item.current ? currentAs : undefined}
     >
       {item.label}
       {#if item.count}
@@ -89,7 +93,7 @@
     color: var(--color-text);
   }
 
-  .tab-links__link[aria-current='page'] {
+  .tab-links__link[aria-current] {
     color: var(--color-interactive);
     border-bottom-color: var(--color-interactive);
   }

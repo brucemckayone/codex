@@ -9,7 +9,11 @@
   time it opens, so there is no charge to refresh here.
 
   As on the search page, a list whose query was rejected shows an error,
-  never the empty state.
+  never the empty state. Settling the last row of a later page goes back to
+  the last page with rows, rather than saying nothing is waiting.
+
+  When a settle dialog closes on an answer, focus moves to the notice
+  (`tabindex="-1"`) so it is read out; on Cancel, back to the row's button.
 -->
 <script lang="ts">
   import type {
@@ -29,12 +33,9 @@
   import SettleRefundDialog from '$lib/components/support/SettleRefundDialog.svelte';
   import type { SettleNotice } from '$lib/components/support/settle-notice';
   import TabLinks from '$lib/components/support/TabLinks.svelte';
+  import { useQueueCounts } from '$lib/components/support/queue-counts';
   import { queryErrorMessage } from '$lib/remote/query-result';
-  import {
-    getSupportQueueCounts,
-    listCreatorDebts,
-    listFailedRefunds,
-  } from '$lib/remote/support.remote';
+  import { listCreatorDebts, listFailedRefunds } from '$lib/remote/support.remote';
 
   const LIMIT = 20;
 
@@ -43,7 +44,7 @@
     Math.max(1, Number.parseInt(page.url.searchParams.get('page') ?? '1', 10) || 1)
   );
 
-  const countsQuery = getSupportQueueCounts();
+  const countsQuery = useQueueCounts();
   const counts = $derived(countsQuery.current);
 
   const failedQuery = $derived(
@@ -58,6 +59,16 @@
   const debts = $derived(debtsQuery?.current);
   const active = $derived(tab === 'failed' ? failed : debts);
   const pagination = $derived(active?.pagination);
+  /** A later page left empty (its last row settled): on its way back. */
+  const emptyLaterPage = $derived(active !== undefined && active.items.length === 0 && currentPage > 1);
+
+  $effect(() => {
+    if (!emptyLaterPage || !pagination) return;
+    const target = Math.max(1, Math.min(currentPage - 1, pagination.totalPages));
+    const params = new URLSearchParams(page.url.searchParams);
+    params.set('page', String(target));
+    void goto(`/admin/queue?${params}`, { keepFocus: true, replaceState: true });
+  });
 
   let notice = $state<SettleNotice | null>(null);
   // A notice belongs to the list it was settled from.
@@ -72,18 +83,35 @@
   let debtItem = $state<CreatorDebtItem | null>(null);
   let debtOpen = $state(false);
 
+  // Where focus goes when a settle dialog closes.
+  let returnFocus: HTMLElement | null = null;
+  let focusNotice = false;
+
+  function rememberFocus() {
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    focusNotice = false;
+  }
+
+  function focusAfterSettle(): HTMLElement | null {
+    if (focusNotice) return document.querySelector<HTMLElement>('[data-settle-notice]');
+    return returnFocus?.isConnected ? returnFocus : null;
+  }
+
   function openRefund(item: FailedRefundItem, resolution: FailedRefundResolution) {
+    rememberFocus();
     refundItem = item;
     refundResolution = resolution;
     refundOpen = true;
   }
 
   function openDebt(item: CreatorDebtItem) {
+    rememberFocus();
     debtItem = item;
     debtOpen = true;
   }
 
   function handleFinished(next: SettleNotice) {
+    focusNotice = true;
     notice = next;
     void activeQuery?.refresh().catch(() => {});
     void countsQuery.refresh().catch(() => {});
@@ -108,6 +136,7 @@
 
 <TabLinks
   label={m.support_queue_tabs_label()}
+  currentAs="true"
   items={[
     {
       href: '/admin/queue',
@@ -135,14 +164,14 @@
 </p>
 
 {#if notice}
-  <Alert variant={notice.variant} data-testid="settle-notice">
+  <Alert variant={notice.variant} tabindex={-1} data-settle-notice data-testid="settle-notice">
     <p>{notice.text}</p>
   </Alert>
 {/if}
 
 {#if listError && !active}
   <Alert variant="error" data-testid="queue-error">
-    <p><strong>{m.support_queue_load_error_lead()}</strong> {listError}</p>
+    <p><strong>{m.support_queue_load_error_lead()}</strong> {m.support_try_again_soon()}</p>
     <div class="alert-actions">
       <Button
         variant="secondary"
@@ -153,7 +182,7 @@
       </Button>
     </div>
   </Alert>
-{:else if !active}
+{:else if !active || emptyLaterPage}
   <Card.Root>
     <div class="skeleton" aria-busy="true" data-testid="queue-loading">
       <span class="sr-only" role="status">{m.support_queue_loading()}</span>
@@ -221,8 +250,14 @@
   resolution={refundResolution}
   bind:open={refundOpen}
   onFinished={handleFinished}
+  closeFocus={focusAfterSettle}
 />
-<SettleDebtDialog item={debtItem} bind:open={debtOpen} onFinished={handleFinished} />
+<SettleDebtDialog
+  item={debtItem}
+  bind:open={debtOpen}
+  onFinished={handleFinished}
+  closeFocus={focusAfterSettle}
+/>
 
 <style>
   .intro {

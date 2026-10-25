@@ -149,6 +149,7 @@ export function failure(
     refundCount: null,
     maxCents: null,
     disputeStatus: null,
+    reason: null,
     ...overrides,
   };
 }

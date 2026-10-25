@@ -12,6 +12,7 @@ import {
   parsePounds,
   refreshesCounts,
   refundOutcomeOf,
+  rejectedOutcome,
   reloadsCharge,
 } from '../refund-outcome';
 
@@ -72,9 +73,9 @@ describe('refundOutcomeOf', () => {
       { kind: 'too_large', maxCents: 1500 },
     ],
     [
-      'REFUND_ALREADY_SUBMITTED',
+      'REFUND_KEY_SPENT',
       { status: 409, code: 'CONFLICT' },
-      { kind: 'already_submitted' },
+      { kind: 'key_spent' },
     ],
   ] as const)('details.code %s', (detailsCode, fields, expected) => {
     expect(
@@ -92,6 +93,30 @@ describe('refundOutcomeOf', () => {
     expect(
       refundOutcomeOf(failure({ status: 500, code: null }), context)
     ).toEqual({
+      kind: 'failed',
+    });
+  });
+
+  test.each([
+    [401, 'signed_out'],
+    [403, 'signed_out'],
+    [429, 'rate_limited'],
+    [400, 'failed'],
+    [503, 'failed'],
+  ] as const)('a %i before the route ran is "%s"', (status, kind) => {
+    expect(refundOutcomeOf(failure({ status, code: null }), context)).toEqual({
+      kind,
+    });
+  });
+
+  test('a rejected command: the guard’s 404 is a lost session, the transport a failure', () => {
+    expect(
+      rejectedOutcome({ status: 404, body: { message: 'Not Found' } })
+    ).toEqual({
+      kind: 'signed_out',
+    });
+    expect(rejectedOutcome({ status: 429 })).toEqual({ kind: 'rate_limited' });
+    expect(rejectedOutcome(new TypeError('fetch failed'))).toEqual({
       kind: 'failed',
     });
   });
@@ -120,7 +145,13 @@ describe('what reloads after an outcome', () => {
     for (const kind of kinds) {
       expect(reloadsCharge({ kind } as never), kind).toBe(true);
     }
-    for (const kind of ['refused', 'already_submitted', 'failed'] as const) {
+    for (const kind of [
+      'refused',
+      'key_spent',
+      'signed_out',
+      'rate_limited',
+      'failed',
+    ] as const) {
       expect(reloadsCharge({ kind } as never), kind).toBe(false);
     }
   });
@@ -145,6 +176,24 @@ describe('parsePounds', () => {
     [' 0.01 ', 1],
   ])('%s is %ip', (text, pence) => {
     expect(parsePounds(text)).toBe(pence);
+  });
+
+  test.each([
+    ['12,345.67', 1234567],
+    ['1,000,000', 100000000],
+  ])('%s is %ip: commas between thousands', (text, pence) => {
+    expect(parsePounds(text)).toBe(pence);
+  });
+
+  // A comma anywhere else is not dropped: "1,50" is not £150.
+  test.each([
+    '1,50',
+    '1,0000',
+    ',100',
+    '10,00.50',
+    '1,000,',
+  ])('%s is not an amount: a comma only separates thousands', (text) => {
+    expect(parsePounds(text)).toBeNull();
   });
 
   test.each([

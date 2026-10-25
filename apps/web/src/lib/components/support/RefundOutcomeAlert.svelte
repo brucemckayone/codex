@@ -4,11 +4,16 @@
   Stripe's answer, above the refunds list (Codex-2hxff.28, mockup B3): made
   (pending or succeeded), already made (a replay of the same decision),
   changed under the open page, refused (Stripe's code under a plain
-  sentence), already submitted, blocked since the page loaded, or not sent.
+  sentence), refused earlier for this exact refund (Stripe's 24-hour answer),
+  blocked since the page loaded, or not sent.
 
   "Succeeded" is not "clawed back": the shares are taken when Stripe's
   `charge.refunded` event arrives, and the page reloads once and offers
   Refresh rather than polling (Q10).
+
+  The alert takes focus when the confirm closes (`tabindex="-1"`, found by
+  `data-refund-outcome`): a live region that arrives already filled is often
+  not read out, so focus is what makes the answer heard.
 
   @prop {RefundOutcome} outcome
   @prop {ChargeDetail} detail - The charge as now loaded.
@@ -79,7 +84,11 @@
               ...new Set(
                 outcome.preview.lines
                   .filter((line) => PAYEE_METHODS.has(line.method) && line.payoutId)
-                  .map((line) => `${payeeName(sliceById.get(line.payoutId ?? ''))}'s`)
+                  .map((line) =>
+                    m.support_outcome_share_of({
+                      name: payeeName(sliceById.get(line.payoutId ?? '')),
+                    })
+                  )
               ),
             ];
             const shares = names.length
@@ -88,7 +97,10 @@
             return {
               variant: 'success',
               lead: m.support_outcome_succeeded_lead({ amount, buyer }),
-              body: `${shares} ${accessSentence(outcome.preview.access.kind, outcome.preview.access.title)}`,
+              body: m.support_sentences_two({
+                first: shares,
+                second: accessSentence(outcome.preview.access.kind, outcome.preview.access.title),
+              }),
               mono: outcome.refund.id,
               reload: false,
             };
@@ -131,11 +143,14 @@
           });
           let body: string;
           if (latest) {
-            body = `${m.support_outcome_changed_who({
-              who: requesterLabel(latest.requestedBy),
-              amount: formatPrice(latest.amountCents),
-              time: formatTime(latest.createdAt),
-            })} ${left}`;
+            body = m.support_sentences_two({
+              first: m.support_outcome_changed_who({
+                who: requesterLabel(latest.requestedBy),
+                amount: formatPrice(latest.amountCents),
+                time: formatTime(latest.createdAt),
+              }),
+              second: left,
+            });
           } else {
             body = reloading ? m.support_outcome_changed_loading() : left;
           }
@@ -158,13 +173,13 @@
             mono: outcome.stripeCode,
             reload: true,
           };
-        case 'already_submitted':
+        case 'key_spent':
           return {
             variant: 'warning',
-            lead: m.support_outcome_submitted_lead(),
-            body: m.support_outcome_submitted_body(),
+            lead: m.support_outcome_key_spent_lead(),
+            body: m.support_outcome_key_spent_body(),
             mono: null,
-            reload: true,
+            reload: false,
           };
         case 'window_closed':
           return {
@@ -206,6 +221,22 @@
             mono: null,
             reload: false,
           };
+        case 'signed_out':
+          return {
+            variant: 'warning',
+            lead: m.support_outcome_signed_out_lead(),
+            body: m.support_outcome_signed_out_body(),
+            mono: null,
+            reload: false,
+          };
+        case 'rate_limited':
+          return {
+            variant: 'warning',
+            lead: m.support_outcome_rate_limited_lead(),
+            body: m.support_outcome_rate_limited_body(),
+            mono: null,
+            reload: false,
+          };
         case 'failed':
           return {
             variant: 'error',
@@ -232,7 +263,13 @@
   }
 </script>
 
-<Alert variant={view.variant} data-testid="refund-outcome" data-kind={outcome.kind}>
+<Alert
+  variant={view.variant}
+  tabindex={-1}
+  data-refund-outcome
+  data-testid="refund-outcome"
+  data-kind={outcome.kind}
+>
   <p><strong>{view.lead}</strong> {view.body}</p>
   {#if view.mono}
     <p class="mono">{view.mono}</p>

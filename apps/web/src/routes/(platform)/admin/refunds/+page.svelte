@@ -132,7 +132,7 @@
     <Alert variant="error" data-testid="search-error">
       <p>
         <strong>{m.support_search_error_lead()}</strong>
-        {m.support_search_error_body()}
+        {m.support_try_again_soon()}
       </p>
     </Alert>
   {:else if !results}

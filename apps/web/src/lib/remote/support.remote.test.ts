@@ -10,6 +10,9 @@
  * - Queries forward a 4xx with its status and code (a 404 is "no record of
  *   this charge"); a 5xx propagates for `handleError` to sanitise.
  * - The preview's `refundCount` keys the query only; it is never sent.
+ * - Anyone but the platform owner gets a 404 before any worker call: a remote
+ *   function is reachable without its page, so it repeats the layout's guard.
+ * - Each function's input schema refuses what the route would.
  *
  * Set up like `admin-grant-forwarding.test.ts`: `@sveltejs/kit` is real.
  */
@@ -34,23 +37,34 @@ vi.mock('$lib/server/api', () => ({
   serverApiUrl: vi.fn(() => 'http://localhost:42073'),
 }));
 
-const makeRemote = (type: string, fn: (...args: unknown[]) => unknown) =>
-  Object.assign((...args: unknown[]) => fn(...args), {
-    __: { type, id: '', name: '' },
-  });
-const lastArg = (args: unknown[]) =>
-  args[args.length - 1] as (...args: unknown[]) => unknown;
+// The request's user, which each test can change.
+const event = vi.hoisted(() => ({
+  locals: { user: { role: 'platform_owner' } as { role: string } | null },
+}));
+
+// The handler is the last argument; a schema, when there is one, the first.
+const makeRemote = (type: string, args: unknown[]) =>
+  Object.assign(
+    (...input: unknown[]) =>
+      (args[args.length - 1] as (...a: unknown[]) => unknown)(...input),
+    {
+      __: { type, id: '', name: '' },
+      schema: args.length > 1 ? args[0] : null,
+    }
+  );
 vi.mock('$app/server', () => ({
-  command: vi.fn((...args: unknown[]) => makeRemote('command', lastArg(args))),
-  form: vi.fn((...args: unknown[]) => makeRemote('form', lastArg(args))),
-  query: vi.fn((...args: unknown[]) => makeRemote('query', lastArg(args))),
+  command: vi.fn((...args: unknown[]) => makeRemote('command', args)),
+  form: vi.fn((...args: unknown[]) => makeRemote('form', args)),
+  query: vi.fn((...args: unknown[]) => makeRemote('query', args)),
   getRequestEvent: vi.fn(() => ({
     platform: { env: {} },
     cookies: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    locals: event.locals,
   })),
 }));
 
-type Fn = (input?: unknown) => Promise<unknown>;
+type Schema = { safeParse: (input: unknown) => { success: boolean } };
+type Fn = ((input?: unknown) => Promise<unknown>) & { schema: Schema | null };
 const remote = (await import('./support.remote')) as unknown as Record<
   string,
   Fn
@@ -66,6 +80,122 @@ const REFUND_INPUT = {
 
 beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset();
+  event.locals.user = { role: 'platform_owner' };
+});
+
+const UUID = '11111111-1111-4111-8111-111111111111';
+/** Each function, with an input its schema accepts. */
+const CALLS: [string, unknown][] = [
+  ['searchSupportCharges', { q: 'e@x.com', page: 1, limit: 20 }],
+  ['getSupportCharge', CHARGE],
+  ['getRefundPreview', { chargeId: CHARGE, amountCents: 750, refundCount: 1 }],
+  ['getSupportQueueCounts', undefined],
+  ['listFailedRefunds', { page: 1, limit: 20 }],
+  ['listCreatorDebts', { page: 1, limit: 20 }],
+  ['issueSupportRefund', REFUND_INPUT],
+  [
+    'resolveFailedRefund',
+    { refundId: UUID, body: { resolution: 'refunded_elsewhere', note: '' } },
+  ],
+  [
+    'resolveCreatorDebt',
+    { reviewId: UUID, body: { resolution: 'platform_absorbed', note: '' } },
+  ],
+];
+
+describe('the owner guard', () => {
+  it.each([
+    ['a customer', { role: 'customer' }],
+    ['a creator', { role: 'creator' }],
+    ['no one signed in', null],
+  ])('%s gets a 404 from every function, and no worker call', async (_who, user) => {
+    event.locals.user = user;
+    for (const [name, input] of CALLS) {
+      await expect(remote[name](input), name).rejects.toMatchObject({
+        status: 404,
+      });
+    }
+    for (const fn of Object.values(api)) expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('the platform owner reaches the worker', async () => {
+    api.getQueueCounts.mockResolvedValue({ failedRefunds: 0, creatorDebts: 0 });
+    await expect(remote.getSupportQueueCounts()).resolves.toEqual({
+      failedRefunds: 0,
+      creatorDebts: 0,
+    });
+  });
+});
+
+describe('the input schemas', () => {
+  const accepts = (name: string, input: unknown) =>
+    remote[name].schema?.safeParse(input).success;
+
+  it('every function but the counts takes a schema, and accepts its good input', () => {
+    for (const [name, input] of CALLS) {
+      if (name === 'getSupportQueueCounts') {
+        expect(remote[name].schema).toBeNull();
+      } else {
+        expect(accepts(name, input), name).toBe(true);
+      }
+    }
+  });
+
+  it('a refund needs a charge id that is a charge, and a whole number of pence', () => {
+    const { chargeId: _omit, ...noCharge } = REFUND_INPUT;
+    expect(accepts('issueSupportRefund', noCharge)).toBe(false);
+    expect(
+      accepts('issueSupportRefund', {
+        ...REFUND_INPUT,
+        chargeId: 'pi_3QeT8xLk2v',
+      })
+    ).toBe(false);
+    expect(
+      accepts('issueSupportRefund', { ...REFUND_INPUT, amountCents: 7.5 })
+    ).toBe(false);
+  });
+
+  it('the preview’s refund count is a whole number, zero allowed', () => {
+    const preview = { chargeId: CHARGE, amountCents: 750 };
+    expect(accepts('getRefundPreview', { ...preview, refundCount: 0 })).toBe(
+      true
+    );
+    expect(accepts('getRefundPreview', { ...preview, refundCount: -1 })).toBe(
+      false
+    );
+    expect(accepts('getRefundPreview', { ...preview, refundCount: 1.5 })).toBe(
+      false
+    );
+    expect(
+      accepts('getRefundPreview', {
+        ...preview,
+        amountCents: 0,
+        refundCount: 0,
+      })
+    ).toBe(false);
+  });
+
+  it('the settle routes take uuids, never a Stripe id', () => {
+    const body = { resolution: 'refunded_elsewhere', note: '' };
+    expect(
+      accepts('resolveFailedRefund', { refundId: 're_3QgB1aLk2v', body })
+    ).toBe(false);
+    expect(
+      accepts('resolveCreatorDebt', {
+        reviewId: 'not-a-uuid',
+        body: { resolution: 'platform_absorbed', note: '' },
+      })
+    ).toBe(false);
+  });
+
+  it('a debt is never settled as dispute_won from here', () => {
+    expect(
+      accepts('resolveCreatorDebt', {
+        reviewId: UUID,
+        body: { resolution: 'dispute_won', note: 'x' },
+      })
+    ).toBe(false);
+  });
 });
 
 describe('issueSupportRefund', () => {
@@ -171,6 +301,26 @@ describe('the settle commands', () => {
         body: { resolution: 'creators_repaid', note: 'Re-pay.' },
       })
     ).resolves.toMatchObject({ detailsCode: 'REFUND_CLAWBACK_UNFINISHED' });
+  });
+
+  it('a re-pay a later cause blocks reaches the dialog with its reason', async () => {
+    api.resolveFailedRefund.mockRejectedValue(
+      new ApiError(
+        422,
+        'This charge has a chargeback, which was shared against this refund.',
+        'BUSINESS_LOGIC_ERROR',
+        { code: 'REPAY_BLOCKED_BY_LATER_CAUSE', reason: 'chargeback' }
+      )
+    );
+    await expect(
+      remote.resolveFailedRefund({
+        refundId: '11111111-1111-4111-8111-111111111111',
+        body: { resolution: 'creators_repaid', note: 'Re-pay.' },
+      })
+    ).resolves.toMatchObject({
+      detailsCode: 'REPAY_BLOCKED_BY_LATER_CAUSE',
+      reason: 'chargeback',
+    });
   });
 
   it('a creator debt settles through its own route', async () => {

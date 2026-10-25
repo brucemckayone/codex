@@ -101,7 +101,8 @@ async function refund750() {
   }).current = preview();
   flushSync();
   review()?.click();
-  flushSync();
+  // Review asks for the preview again; the confirm opens on its answer.
+  await tick(0);
   document
     .querySelector<HTMLButtonElement>('[data-testid="confirm-refund"]')
     ?.click();
@@ -157,12 +158,130 @@ describe('loading the charge', () => {
       document.querySelector('[data-testid="charge-load-error"]')
     ).not.toBeNull();
     expect(text()).not.toContain(m.support_not_found_title());
+    // Our own words, not the server's pasted into the sentence.
+    expect(text()).toContain(m.support_try_again_soon());
+    expect(text()).not.toContain('An unexpected error occurred');
   });
 
   test('an id that is not a charge is not found, and nothing is asked for', () => {
     mountCharge('not-a-charge');
     expect(getSupportCharge).not.toHaveBeenCalled();
     expect(text()).toContain(m.support_not_found_title());
+  });
+});
+
+describe('the page heading', () => {
+  test.each([
+    ['loading', () => {}],
+    [
+      'not found',
+      () => {
+        chargeSlot(CHARGE_ID).error = httpError(404, 'Not Found');
+      },
+    ],
+    [
+      'failed',
+      () => {
+        chargeSlot(CHARGE_ID).error = httpError(
+          500,
+          'An unexpected error occurred'
+        );
+      },
+    ],
+  ])('while %s, the page still has an h1', (_state, land) => {
+    mountCharge();
+    land();
+    flushSync();
+    expect(document.querySelectorAll('h1')).toHaveLength(1);
+    expect(document.querySelector('h1')?.textContent).toContain(
+      m.support_charge_heading()
+    );
+  });
+});
+
+describe('a reload of the same charge', () => {
+  test('asks for the preview on screen again: a payout may have moved', async () => {
+    mountCharge();
+    const charge = chargeSlot(CHARGE_ID);
+    charge.current = chargeDetail();
+    flushSync();
+    document.querySelector<HTMLInputElement>('input[value="part"]')?.click();
+    flushSync();
+    const input = document.querySelector<HTMLInputElement>(
+      'input[inputmode="decimal"]'
+    );
+    if (!input) throw new Error('no amount input');
+    input.value = '7.50';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await tick(300);
+    const slot = previewSlot({
+      chargeId: CHARGE_ID,
+      amountCents: 750,
+      refundCount: 1,
+    });
+    slot.current = preview();
+    flushSync();
+    expect(slot.refresh).not.toHaveBeenCalled();
+
+    // Refresh lands: a new answer, the same refund count.
+    charge.current = chargeDetail();
+    flushSync();
+    expect(slot.refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('focus', () => {
+  test('after Refund, focus moves to the outcome, so it is read out', async () => {
+    issueSupportRefund.mockResolvedValue({
+      outcome: 'done',
+      result: {
+        refund: {
+          id: 're_new',
+          amountCents: 750,
+          status: 'succeeded',
+          createdAt: '2026-10-24T09:41:00.000Z',
+        },
+        replayed: false,
+      },
+    });
+    mountCharge();
+    chargeSlot(CHARGE_ID).current = chargeDetail();
+    flushSync();
+    await refund750();
+    await tick(10);
+    const outcome = document.querySelector('[data-testid="refund-outcome"]');
+    expect(outcome?.getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(outcome);
+  });
+
+  test('Cancel on the confirm puts focus back on Review', async () => {
+    mountCharge();
+    chargeSlot(CHARGE_ID).current = chargeDetail();
+    flushSync();
+    document.querySelector<HTMLInputElement>('input[value="part"]')?.click();
+    flushSync();
+    const input = document.querySelector<HTMLInputElement>(
+      'input[inputmode="decimal"]'
+    );
+    if (!input) throw new Error('no amount input');
+    input.value = '7.50';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await tick(300);
+    previewSlot({
+      chargeId: CHARGE_ID,
+      amountCents: 750,
+      refundCount: 1,
+    }).current = preview();
+    flushSync();
+    review()?.click();
+    await tick(0);
+    [...document.querySelectorAll('button')]
+      .find((b) => b.textContent?.trim() === m.support_confirm_cancel())
+      ?.click();
+    await tick(10);
+    expect(document.activeElement).toBe(review());
   });
 });
 

@@ -2,6 +2,7 @@
  * The /admin shell (Codex-2hxff.28): the Support sub-nav. The Queue count is
  * streamed: the nav renders at once without a number, shows it when the
  * counts land, and shows no Badge at all if they fail (data design §7).
+ * The layout holds the one counts query its pages refresh.
  */
 
 import { createRawSnippet } from 'svelte';
@@ -26,10 +27,12 @@ vi.mock(
 import { setPage } from '$lib/components/support/__fixtures__/app-state.mock.svelte';
 import {
   countsSlot,
+  getSupportQueueCounts,
   httpError,
   reset,
 } from '$lib/components/support/__fixtures__/support-remote.mock.svelte';
 import AdminLayout from '../+layout.svelte';
+import AdminLayoutWithProbe from './AdminLayoutWithProbe.svelte';
 
 let component: ReturnType<typeof mount> | null = null;
 
@@ -77,6 +80,24 @@ describe('the Support nav', () => {
     expect(queueLink()?.textContent).toContain(
       m.support_nav_queue_waiting({ count: '5' })
     );
+  });
+
+  test('a page gets the layout’s own counts query, never a second one', () => {
+    // kit drops a query whose first load failed: a second call would be a
+    // new instance the badge never reads. Here the first call's is unique.
+    getSupportQueueCounts.mockImplementationOnce(
+      () => ({ current: undefined, error: undefined, loading: false }) as never
+    );
+    const seen: unknown[] = [];
+    setPage('/admin/queue');
+    component = mount(AdminLayoutWithProbe, {
+      target: document.body,
+      props: { onCounts: (query: unknown) => seen.push(query) },
+    });
+    flushSync();
+    expect(getSupportQueueCounts).toHaveBeenCalledTimes(1);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBe(getSupportQueueCounts.mock.results[0]?.value);
   });
 
   test('a failed count shows no badge, and the nav still works', () => {
