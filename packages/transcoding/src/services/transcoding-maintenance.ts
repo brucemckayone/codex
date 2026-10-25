@@ -15,6 +15,10 @@
  * 5. Check `uploading` rows untouched for 24 h against R2: the file arrived
  *    (upload-complete was lost) or it never did.
  *
+ * A row the run fails emails its creator and the owner (TranscodingAlerts),
+ * once: only when the guarded write returned it. A setup fault a step finds
+ * is reported every run; the alerts mail it once per UTC day.
+ *
  * Every write is guarded on the state the run saw, so a creator's Retry or a
  * webhook that got there first is never overwritten. When RunPod or R2
  * cannot answer for one row it cannot for the next, so the step stops asking
@@ -44,10 +48,12 @@ import {
   reconcileDueAt,
   STALLED_UPLOAD_MS,
   WAITING_IDLE_MS,
+  type WaitingAction,
   waitingAction,
 } from '../maintenance-rules';
 import type { RunPodApiFailureReason } from '../runpod-api';
 import { failedFields, waitingFields } from './media-state';
+import type { TranscodingAlerts } from './transcoding-alerts';
 import {
   DISPATCH_BUDGET_MS,
   type EndpointWakeOutcome,
@@ -82,6 +88,8 @@ interface TranscodingMaintenanceConfig extends ServiceConfig {
    * run, at error.
    */
   originalExists?: (r2Key: string) => Promise<boolean>;
+  /** Failure and setup-fault emails (Codex-l2c48.6). Absent: none sent. */
+  alerts?: TranscodingAlerts;
 }
 
 export interface MaintenanceReport {
@@ -106,11 +114,13 @@ export interface MaintenanceReport {
 export class TranscodingMaintenance extends BaseService {
   private readonly transcoding: TranscodingService;
   private readonly originalExists?: (r2Key: string) => Promise<boolean>;
+  private readonly alerts?: TranscodingAlerts;
 
   constructor(config: TranscodingMaintenanceConfig) {
     super(config);
     this.transcoding = config.transcoding;
     this.originalExists = config.originalExists;
+    this.alerts = config.alerts;
   }
 
   /** One run. NEVER THROWS: a failing step is logged and reported. */
@@ -143,10 +153,12 @@ export class TranscodingMaintenance extends BaseService {
       }
     };
 
+    // A setup fault is reported every run; the alerts mail it once a day.
     await step('endpoint', async () => {
       report.endpoint = await this.transcoding.ensureEndpointAwake(
         Math.min(deadline, Date.now() + 20_000)
       );
+      this.alerts?.endpointStuck(report.endpoint);
     });
     await step('ping', () => this.ping(now, deadline, report));
     await step('reconcile', () => this.reconcile(now, deadline, report));
@@ -168,13 +180,15 @@ export class TranscodingMaintenance extends BaseService {
       Math.min(deadline, Date.now() + 10_000)
     );
     report.ping = answer.ok ? 'accepted' : answer.reason;
-    // Never alerted: an old handler fails the ping job, and the request
-    // reset RunPod's idle clock all the same.
+    // What the ping job does after does not matter (an old handler fails
+    // it), only whether RunPod took the request: that reset its idle clock.
+    // A refusal for a reason that will not pass is mailed.
     if (!answer.ok) {
       this.obs.warn('transcoding.keepalive_ping_not_accepted', {
         reason: answer.reason,
         statusCode: answer.status,
       });
+      this.alerts?.pingRefused(answer.reason);
     }
   }
 
@@ -279,7 +293,7 @@ export class TranscodingMaintenance extends BaseService {
         : isNull(mediaItems.runpodJobId),
       lt(mediaItems.updatedAt, new Date(dueAt))
     );
-    const written = await this.db
+    const [written] = await this.db
       .update(mediaItems)
       .set(
         action.kind === 'fail'
@@ -291,7 +305,7 @@ export class TranscodingMaintenance extends BaseService {
       )
       .where(sameRow)
       .returning();
-    if (written.length === 0) {
+    if (!written) {
       report.raced++;
       return;
     }
@@ -307,6 +321,7 @@ export class TranscodingMaintenance extends BaseService {
       return;
     }
     report.reconciled.failed++;
+    this.alerts?.mediaFailed(written);
     // A lost webhook, a failed job that never reported, or a job nobody
     // could account for in a day: the pipeline itself broke.
     const broke =
@@ -344,28 +359,7 @@ export class TranscodingMaintenance extends BaseService {
     for (const row of rows) {
       const action = waitingAction(row, now);
       if (action.kind === 'give_up') {
-        const written = await this.db
-          .update(mediaItems)
-          .set(failedFields(action.code, action.detail))
-          .where(
-            and(
-              eq(mediaItems.id, row.id),
-              eq(mediaItems.status, MEDIA_STATUS.UPLOADED),
-              isNull(mediaItems.deletedAt),
-              lt(mediaItems.updatedAt, idleSince)
-            )
-          )
-          .returning();
-        if (written.length === 0) {
-          report.raced++;
-          continue;
-        }
-        report.waiting.gaveUp++;
-        this.obs.warn('transcoding.waiting_given_up', {
-          mediaId: row.id,
-          code: action.code,
-          reason: action.detail,
-        });
+        await this.giveUp(row.id, action, idleSince, report);
         continue;
       }
 
@@ -392,6 +386,38 @@ export class TranscodingMaintenance extends BaseService {
         runpodRefused = true;
       }
     }
+  }
+
+  /** Fail a row that waited too long, unless something moved it since. */
+  private async giveUp(
+    mediaId: string,
+    action: Extract<WaitingAction, { kind: 'give_up' }>,
+    idleSince: Date,
+    report: MaintenanceReport
+  ): Promise<void> {
+    const [failed] = await this.db
+      .update(mediaItems)
+      .set(failedFields(action.code, action.detail))
+      .where(
+        and(
+          eq(mediaItems.id, mediaId),
+          eq(mediaItems.status, MEDIA_STATUS.UPLOADED),
+          isNull(mediaItems.deletedAt),
+          lt(mediaItems.updatedAt, idleSince)
+        )
+      )
+      .returning();
+    if (!failed) {
+      report.raced++;
+      return;
+    }
+    report.waiting.gaveUp++;
+    this.alerts?.mediaFailed(failed);
+    this.obs.warn('transcoding.waiting_given_up', {
+      mediaId,
+      code: action.code,
+      reason: action.detail,
+    });
   }
 
   private async checkStalledUploads(
@@ -486,6 +512,7 @@ export class TranscodingMaintenance extends BaseService {
       this.obs.error('transcoding.upload_incomplete_burst', {
         count: report.uploads.incomplete,
       });
+      this.alerts?.uploadsIncomplete(report.uploads.incomplete);
     }
   }
 }

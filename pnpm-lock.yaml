@@ -1196,6 +1196,9 @@ importers:
       '@codex/service-errors':
         specifier: workspace:*
         version: link:../service-errors
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation

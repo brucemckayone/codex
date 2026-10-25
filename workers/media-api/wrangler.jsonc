@@ -88,6 +88,12 @@
     {
       "binding": "AUTH_SESSION_KV",
       "id": "82d04a4236df4aac8e9d87793344f0ed"
+    },
+    // Codex-l2c48.6: one setup-fault email per fault per UTC day. The same
+    // namespace the other workers cache in, under transcoding-alert:*.
+    {
+      "binding": "CACHE_KV",
+      "id": "8bde7d718cff4bfa99e29cd8e0aa7353"
     }
   ],
 
@@ -173,6 +179,10 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
+        },
+        {
+          "binding": "CACHE_KV",
+          "id": "8bde7d718cff4bfa99e29cd8e0aa7353"
         }
       ],
       "r2_buckets": [
@@ -273,6 +283,10 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "aab4025dcb5c44ad8d1156bcfda055d2"
+        },
+        {
+          "binding": "CACHE_KV",
+          "id": "499d67770dc2405ab80cba5629b16511"
         }
       ],
       "r2_buckets": [

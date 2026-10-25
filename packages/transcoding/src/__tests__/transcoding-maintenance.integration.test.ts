@@ -30,6 +30,7 @@ import {
   vi,
 } from 'vitest';
 import type { JobStatusResult, RunPodApi } from '../runpod-api';
+import type { TranscodingAlerts } from '../services/transcoding-alerts';
 import { TranscodingMaintenance } from '../services/transcoding-maintenance';
 import {
   TranscodingService,
@@ -61,6 +62,13 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
       ping: ReturnType<typeof vi.fn>;
     };
     let originalExists: Mock<(r2Key: string) => Promise<boolean>>;
+    let alerts: {
+      mediaFailed: Mock;
+      dispatchRefused: Mock;
+      endpointStuck: Mock;
+      pingRefused: Mock;
+      uploadsIncomplete: Mock;
+    };
     let maintenance: TranscodingMaintenance;
 
     beforeAll(async () => {
@@ -97,6 +105,13 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
         ping: vi.fn(async () => ({ ok: true })),
       };
       originalExists = vi.fn(async (_r2Key: string) => true);
+      alerts = {
+        mediaFailed: vi.fn(),
+        dispatchRefused: vi.fn(),
+        endpointStuck: vi.fn(),
+        pingRefused: vi.fn(),
+        uploadsIncomplete: vi.fn(),
+      };
       const transcoding = new TranscodingService({
         db,
         environment: 'test',
@@ -106,12 +121,14 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
         runpodApiBaseUrl: 'https://runpod.test/v2',
         runpodWorkersMax: 5,
         runpodApi: api as unknown as RunPodApi,
+        alerts: alerts as unknown as TranscodingAlerts,
       } as TranscodingServiceFullConfig);
       maintenance = new TranscodingMaintenance({
         db,
         environment: 'test',
         transcoding,
         originalExists,
+        alerts: alerts as unknown as TranscodingAlerts,
       });
       // The retry step's dispatch: RunPod accepts.
       vi.spyOn(globalThis, 'fetch').mockImplementation(
@@ -146,6 +163,10 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
         'inserted media'
       );
     }
+
+    /** The failure emails asked for one row: other suites' rows may share the db. */
+    const failureAlertsFor = (id: string) =>
+      alerts.mediaFailed.mock.calls.filter(([media]) => media.id === id);
 
     async function read(id: string) {
       return takeFirst(
@@ -568,6 +589,140 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
       }).run({ deadline: Date.now() + 60_000 });
 
       expect(report.failedSteps).toContain('uploads');
+    });
+
+    describe('emails', () => {
+      it('emails once for a lost job it fails, whatever later runs find', async () => {
+        const media = await insert({
+          status: MEDIA_STATUS.TRANSCODING,
+          runpodJobId: 'job-lost-mailed',
+          transcodingAttempts: 1,
+          updatedAt: ago(5 * HOUR),
+        });
+        api.jobStatus.mockResolvedValue({ ok: true, state: 'COMPLETED' });
+
+        await run();
+        await run();
+
+        const calls = failureAlertsFor(media.id);
+        expect(calls).toHaveLength(1);
+        expect(calls[0]?.[0]).toMatchObject({
+          title: media.title,
+          creatorId,
+          transcodingAttempts: 1,
+          transcodingErrorCode: 'WEBHOOK_LOST',
+        });
+      });
+
+      it('emails when it gives up on a waiting upload, keeping its code', async () => {
+        const media = await insert({
+          status: MEDIA_STATUS.UPLOADED,
+          transcodingErrorCode: 'TRANSCODER_PAUSED',
+          uploadedAt: ago(25 * HOUR),
+          updatedAt: ago(30 * MINUTE),
+        });
+
+        await run();
+
+        expect(failureAlertsFor(media.id)).toEqual([
+          [
+            expect.objectContaining({
+              id: media.id,
+              transcodingErrorCode: 'TRANSCODER_PAUSED',
+            }),
+          ],
+        ]);
+      });
+
+      it('sends nothing for an upload it only retries, or one abandoned', async () => {
+        const retried = await insert({
+          status: MEDIA_STATUS.UPLOADED,
+          transcodingErrorCode: 'TRANSCODER_PAUSED',
+          uploadedAt: ago(1 * HOUR),
+          updatedAt: ago(30 * MINUTE),
+        });
+        originalExists.mockResolvedValue(false);
+        const abandoned = await insert({
+          status: MEDIA_STATUS.UPLOADING,
+          uploadedAt: null,
+          updatedAt: ago(25 * HOUR),
+        });
+
+        await run();
+
+        expect(failureAlertsFor(retried.id)).toHaveLength(0);
+        expect(failureAlertsFor(abandoned.id)).toHaveLength(0);
+        expect((await read(abandoned.id)).status).toBe('failed');
+      });
+
+      it('tells the owner about a burst of uploads that never finished', async () => {
+        originalExists.mockResolvedValue(false);
+        for (let i = 0; i < 5; i++) {
+          await insert({
+            status: MEDIA_STATUS.UPLOADING,
+            uploadedAt: null,
+            updatedAt: ago(25 * HOUR),
+          });
+        }
+
+        await run();
+
+        expect(
+          alerts.uploadsIncomplete.mock.calls[0]?.[0]
+        ).toBeGreaterThanOrEqual(5);
+      });
+
+      // Any run may report a fault; the alerts mail it once a UTC day.
+      it('hands an endpoint it cannot wake to the alerts, every run', async () => {
+        api.endpointWorkers.mockResolvedValue({
+          ok: false,
+          reason: 'not_permitted',
+          status: 403,
+        });
+
+        await run(new Date('2026-10-24T04:00:00Z'));
+        await run(new Date('2026-10-24T05:00:00Z'));
+
+        expect(alerts.endpointStuck).toHaveBeenCalledTimes(2);
+        expect(alerts.endpointStuck).toHaveBeenCalledWith({
+          kind: 'unknown',
+          reason: 'not_permitted',
+        });
+      });
+
+      // The run is on a fixed clock, so the row is idle relative to it;
+      // real-time rows from elsewhere in the db are newer and stay out.
+      it('hands a retry RunPod refused as misconfigured to the alerts, any hour', async () => {
+        vi.spyOn(globalThis, 'fetch').mockImplementation(
+          async () => new Response('{}', { status: 401 })
+        );
+        const media = await insert({
+          status: MEDIA_STATUS.UPLOADED,
+          transcodingErrorCode: 'TRANSCODER_MISCONFIGURED',
+          uploadedAt: new Date('2026-10-24T01:00:00Z'),
+          updatedAt: new Date('2026-10-24T02:30:00Z'),
+        });
+
+        await run(new Date('2026-10-24T04:00:00Z'));
+
+        expect(alerts.dispatchRefused).toHaveBeenCalledWith(media.id, {
+          kind: 'rejected',
+          code: 'TRANSCODER_MISCONFIGURED',
+          detail: 'RunPod answered 401',
+        });
+      });
+
+      it('hands a refused keep-alive ping to the alerts', async () => {
+        api.ping.mockResolvedValue({
+          ok: false,
+          reason: 'not_permitted',
+          status: 403,
+        });
+
+        await run(new Date('2026-10-24T03:00:00Z'));
+
+        expect(alerts.pingRefused).toHaveBeenCalledWith('not_permitted');
+      });
     });
 
     describe('the endpoint', () => {

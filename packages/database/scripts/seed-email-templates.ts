@@ -327,6 +327,16 @@ If you have any questions, please contact our support team at {{supportEmail}}.
     status: 'active' as const,
     description: 'Sent to creator when video transcoding fails',
   },
+  {
+    name: 'transcoding-owner-alert',
+    scope: 'global' as const,
+    subject: '[Transcoding] {{headline}}',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#f6f6f6;padding:16px;border-radius:6px;white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>{{headline}}</h1><p>{{summary}}</p><pre class="details">{{details}}</pre><div class="footer"><p>{{platformName}}</p></div></div></body></html>`,
+    textBody: `{{headline}}\n\n{{summary}}\n\n{{details}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to every platform owner when a transcode fails for good, or a setup fault stops every upload (Codex-l2c48.6)',
+  },
   // ============ Creator (P2) ============
   {
     name: 'new-sale',

@@ -138,12 +138,9 @@ app.post(
       if (classified.payload.status === 'progress') {
         await service.handleProgressWebhook(classified.payload);
       } else {
+        // A failure emails the creator and the owner from inside the service,
+        // once, after the write that failed the row (Codex-l2c48.6).
         await service.handleWebhook(classified.payload);
-
-        // TODO: Send transcoding status email to creator
-        // Requires DB join (mediaItems → content → users) to resolve creator email.
-        // Templates transcoding-complete and transcoding-failed are seeded and ready.
-        // Wire up when TranscodingService returns creator context from handleWebhook().
       }
 
       // Return success - RunPod expects 200 OK to acknowledge receipt

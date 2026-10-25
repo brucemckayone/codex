@@ -30,6 +30,7 @@ import {
   it,
   vi,
 } from 'vitest';
+import type { TranscodingAlerts } from '../services/transcoding-alerts';
 import {
   TranscodingService,
   type TranscodingServiceFullConfig,
@@ -356,6 +357,50 @@ describe.skipIf(!HAS_DB)('dispatch state machine (database)', () => {
       const row = await read(media.id);
       expect(row.status).toBe('ready');
       expect(row.transcodingErrorCode).toBeNull();
+    });
+
+    // The handler delivers a webhook up to 3 times; the creator and the
+    // owner hear once, from the delivery whose guarded write applied.
+    it('emails once however many times a failure webhook is delivered', async () => {
+      const alerts = {
+        mediaFailed: vi.fn(),
+        dispatchRefused: vi.fn(),
+        endpointStuck: vi.fn(),
+      };
+      const alerting = new TranscodingService({
+        db,
+        environment: 'test',
+        runpodApiKey: 'test-key',
+        runpodEndpointId: 'test-endpoint',
+        webhookBaseUrl: 'https://media-api.test',
+        alerts: alerts as unknown as TranscodingAlerts,
+      } as TranscodingServiceFullConfig);
+      const media = await insertMedia({
+        status: MEDIA_STATUS.TRANSCODING,
+        transcodingAttempts: 1,
+        runpodJobId: 'job-mailed',
+      });
+      const failed = {
+        jobId: 'job-mailed',
+        status: 'failed' as const,
+        error: 'moov atom not found',
+        errorCode: 'CORRUPT_INPUT',
+      };
+
+      for (let delivery = 0; delivery < 3; delivery++) {
+        await alerting.handleWebhook(failed);
+      }
+
+      expect(alerts.mediaFailed).toHaveBeenCalledTimes(1);
+      expect(alerts.mediaFailed).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: media.id,
+          title: media.title,
+          creatorId,
+          transcodingErrorCode: 'CORRUPT_INPUT',
+          transcodingError: 'moov atom not found',
+        })
+      );
     });
 
     it("records a failed job's code without counting another attempt", async () => {

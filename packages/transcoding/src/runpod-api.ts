@@ -33,6 +33,11 @@ export type RunPodApiFailureReason =
   | 'out_of_time' // the deadline passed, before or during the call
   | 'unsupported'; // a local container: no management API
 
+/** A failure that says nothing about the setup: try again later. */
+export function isPassingFailure(reason: string): boolean {
+  return reason === 'unavailable' || reason === 'out_of_time';
+}
+
 interface RunPodApiFailure {
   ok: false;
   reason: RunPodApiFailureReason;

@@ -12,6 +12,7 @@ import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EndpointWorkersResult, RunPodApi } from '../runpod-api';
+import type { TranscodingAlerts } from '../services/transcoding-alerts';
 import {
   MAINTENANCE_SCOPE,
   TranscodingService,
@@ -889,6 +890,160 @@ describe('dispatch wakes a paused endpoint', () => {
     await serviceWith(api).dispatch(claimed);
 
     expect(api.endpointWorkers).not.toHaveBeenCalled();
+  });
+});
+
+/** A TranscodingAlerts stub: what the service told it, nothing sent. */
+function stubAlerts() {
+  return {
+    mediaFailed: vi.fn(),
+    dispatchRefused: vi.fn(),
+    endpointStuck: vi.fn(),
+  };
+}
+
+function serviceAlerting(
+  alerts: ReturnType<typeof stubAlerts>,
+  api?: ReturnType<typeof stubApi>
+) {
+  return new TranscodingService({
+    ...config(fake.db),
+    alerts: alerts as unknown as TranscodingAlerts,
+    ...(api && { runpodApi: api as unknown as RunPodApi }),
+  });
+}
+
+describe('failure emails', () => {
+  const failedWebhook = {
+    jobId: JOB_ID,
+    status: 'failed' as const,
+    error: 'moov atom not found',
+    errorCode: 'CORRUPT_INPUT',
+  };
+
+  it('alerts once, with the row the failure webhook failed', async () => {
+    const alerts = stubAlerts();
+    const failedRow = media({ status: 'failed' });
+    fake.findFirst.mockResolvedValue(media({ status: 'transcoding' }));
+    fake.returning.push([failedRow]);
+
+    await serviceAlerting(alerts).handleWebhook(failedWebhook);
+
+    expect(alerts.mediaFailed).toHaveBeenCalledTimes(1);
+    expect(alerts.mediaFailed).toHaveBeenCalledWith(failedRow);
+  });
+
+  // The read before it skips a deleted row; the write must too, or a row
+  // deleted in between is failed and its creator emailed.
+  it('writes the failure only to a row still undeleted', async () => {
+    fake.findFirst.mockResolvedValue(media({ status: 'transcoding' }));
+    fake.returning.push([media({ status: 'failed' })]);
+
+    await serviceAlerting(stubAlerts()).handleWebhook(failedWebhook);
+
+    expect(fake.writes[0]?.where).toContain(
+      '"media_items"."deleted_at" is null'
+    );
+  });
+
+  // Python delivers a webhook up to 3 times; only the first write applies.
+  it('alerts nothing for a delivery whose write did not apply', async () => {
+    const alerts = stubAlerts();
+    fake.findFirst.mockResolvedValue(media({ status: 'failed' }));
+    fake.returning.push([]);
+
+    await serviceAlerting(alerts).handleWebhook(failedWebhook);
+
+    expect(alerts.mediaFailed).not.toHaveBeenCalled();
+  });
+
+  it('alerts each row a rejected webhook output failed', async () => {
+    const alerts = stubAlerts();
+    const failedRow = media({ status: 'failed' });
+    fake.returning.push([failedRow]);
+
+    await serviceAlerting(alerts).rejectWebhookOutput(
+      { jobId: JOB_ID, mediaId: MEDIA_ID },
+      'unreadable output'
+    );
+
+    expect(alerts.mediaFailed).toHaveBeenCalledWith(failedRow);
+  });
+});
+
+// Whether an outcome is a setup fault, and whether it was already mailed
+// today, is the alerts' call (tested there). The service reports every
+// dispatch's outcome, whoever started it: a fault found by the hourly retry
+// alone must still reach the owner.
+describe('setup-fault emails', () => {
+  const claimed = media({ status: 'transcoding', transcodingAttempts: 1 });
+
+  it('a dispatch hands its refusal to the alerts', async () => {
+    const alerts = stubAlerts();
+    runpodAnswers(401, { error: 'Unauthorized' });
+
+    await serviceAlerting(alerts).dispatch(claimed);
+
+    expect(alerts.dispatchRefused).toHaveBeenCalledWith(MEDIA_ID, {
+      kind: 'rejected',
+      code: 'TRANSCODER_MISCONFIGURED',
+      detail: 'RunPod answered 401',
+    });
+    expect(alerts.endpointStuck).not.toHaveBeenCalled();
+  });
+
+  it('a 409 hands what waking the endpoint found to the alerts', async () => {
+    const alerts = stubAlerts();
+    const api = stubApi(
+      { ok: true, max: 0 },
+      { ok: false, reason: 'not_permitted', status: 403 }
+    );
+    runpodAnswers(409, { code: 'ENDPOINT_PAUSED' });
+
+    await serviceAlerting(alerts, api).dispatch(claimed);
+
+    expect(alerts.endpointStuck).toHaveBeenCalledWith({
+      kind: 'not_raised',
+      from: 0,
+      reason: 'not_permitted',
+    });
+    expect(alerts.dispatchRefused).toHaveBeenCalledWith(
+      MEDIA_ID,
+      expect.objectContaining({ code: 'TRANSCODER_PAUSED' })
+    );
+  });
+
+  it('wakes nothing, so reports no endpoint, for an accepted dispatch', async () => {
+    const alerts = stubAlerts();
+    fake.returning.push([claimed]);
+    runpodAnswers(200, { id: JOB_ID, status: 'IN_QUEUE' });
+
+    await serviceAlerting(alerts).dispatch(claimed);
+
+    expect(alerts.endpointStuck).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'the upload trigger',
+      (svc: TranscodingService) => svc.triggerJobInternal(MEDIA_ID, CREATOR_ID),
+    ],
+    [
+      'a creator Retry',
+      (svc: TranscodingService) => svc.retryTranscoding(MEDIA_ID, CREATOR_ID),
+    ],
+  ])('%s reports its dispatch', async (_case, start) => {
+    const alerts = stubAlerts();
+    fake.findFirst.mockResolvedValue(
+      media({ status: 'failed', transcodingErrorCode: 'TIMED_OUT' })
+    );
+    fake.returning.push([claimed]);
+    runpodAnswers(401, {});
+
+    const started = await start(serviceAlerting(alerts));
+    if ('dispatchPromise' in started) await started.dispatchPromise;
+
+    expect(alerts.dispatchRefused).toHaveBeenCalledTimes(1);
   });
 });
 

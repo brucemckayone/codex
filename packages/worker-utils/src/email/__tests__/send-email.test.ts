@@ -90,6 +90,49 @@ describe('sendEmailToWorker', () => {
     expect(workerFetch).toHaveBeenCalled();
   });
 
+  it('logs a refusal from notifications-api, by template and user only', async () => {
+    vi.mocked(workerFetch).mockResolvedValueOnce(
+      new Response('{"error":{"code":"NOT_FOUND"}}', { status: 404 })
+    );
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      sendEmailToWorker(mockEnv, mockExecutionCtx, {
+        ...validParams,
+        userId: 'user_abc123',
+      });
+      await waitUntilPromise();
+
+      expect(errorSpy).toHaveBeenCalledWith('[sendEmailToWorker] refused', {
+        templateName: validParams.templateName,
+        userId: 'user_abc123',
+        status: 404,
+      });
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(
+        'user@example.com'
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('logs nothing for an accepted send', async () => {
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      sendEmailToWorker(mockEnv, mockExecutionCtx, validParams);
+      await waitUntilPromise();
+
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it('returns void synchronously', () => {
     const result = sendEmailToWorker(mockEnv, mockExecutionCtx, validParams);
     expect(result).toBeUndefined();

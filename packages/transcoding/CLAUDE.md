@@ -67,8 +67,10 @@ the existing hourly production cron.
 
 1. `ensureEndpointAwake`, first, so the ping finds the endpoint awake.
 2. Keep-alive `ping` in the 03:00 UTC run (RunPod pauses after 7 idle days).
-   Never alerted: the old handler fails the ping job, and the request reset
-   RunPod's idle clock anyway.
+   A FAILED ping job is never alerted: the old handler fails it, and the
+   request reset RunPod's idle clock anyway. A ping RunPod REFUSES for a
+   reason that will not pass (`not_permitted`, `not_found`) is
+   (`pingRefused`, once a day).
 3. `transcoding` rows past their job's `executionTimeout` (with a job id) or
    `ttl` (without) plus 15 min: ask RunPod. Still running → leave; COMPLETED
    or gone (RunPod keeps a result only 30 min) → `failed WEBHOOK_LOST`;
@@ -98,6 +100,43 @@ that job's alone. 25 rows per step per run; a retry is not started with under
 Its integration suite sweeps EVERY creator's rows, so it runs only in CI or
 with `TRANSCODING_SWEEP_DB=1` against a throwaway database, and refuses
 `neondb`, `main` and `main_test`.
+
+## `TranscodingAlerts` (emails)
+
+Built once per request by the registry and shared by `transcoding` and
+`transcodingMaintenance`; none without an execution context. **Never throws**:
+the lookups and sends run after the response on the registry's `dbWaitUntil`,
+which a webhook's DB pool waits for before closing.
+
+- `mediaFailed(row)`: the creator (existing `transcoding-failed` template:
+  per-category `errorSummary`, `retryUrl` = the creator studio's media page
+  built from `WEB_APP_URL` with `buildCreatorsUrl`) and every platform owner
+  (`transcoding-owner-alert`, with the creator, code, attempts and the
+  handler's own text), read from the row. Called ONLY with the row a guarded
+  write just failed, so a webhook delivered 3 times emails once; never
+  deduped beyond that. Nothing for a category with `notify: false` (an
+  abandoned upload), and nothing while an upload is only waiting. The two
+  sends are independent: a failed creator lookup still mails the owners
+  (`(lookup failed)`), and one recipient's throw never stops the next.
+- Setup faults, owners only: `dispatchRefused(mediaId, outcome)` (a refusal
+  whose code is `alertOwnerOnEntry`), `endpointStuck(outcome)` (paused and
+  cannot be raised, or its settings cannot be read), `pingRefused(reason)`
+  and `uploadsIncomplete(count)`. Callers report EVERY outcome (every
+  dispatch, every maintenance run); the alerts decide whether it is a fault
+  (a passing outage or a local container's `unsupported` is not) and mail
+  each fault at most **once per UTC day** through an `AlertLedger`: a
+  `CACHE_KV` key `transcoding-alert:<event>:<yyyy-mm-dd>` (36 h TTL). The
+  ledger fails OPEN (a KV error or no `CACHE_KV` mails, and warns): a
+  duplicate beats a lost alert.
+- Subjects: a creator's title is stripped of `<`, `>` and line breaks, since
+  the renderer refuses a subject holding `<` or `>` (the email is lost).
+- Owners are looked up once per request (the drizzle query is materialised
+  with `.then`, since awaiting the builder runs it again). No owner at all
+  logs `transcoding.owner_alert_no_recipient` at error.
+
+Creator copy is fixed and owner-approved; RunPod's or the handler's raw text
+never reaches a creator. `transcoding-failed` itself cannot be edited in place
+(the deploy seed only inserts missing templates).
 
 ## RunPod Async Pattern
 
@@ -210,6 +249,7 @@ The hourly maintenance run also moves rows:
 
 - `packages/transcoding/src/services/transcoding-service.ts`
 - `packages/transcoding/src/services/transcoding-maintenance.ts` — the hourly maintenance run
+- `packages/transcoding/src/services/transcoding-alerts.ts` — failure and setup-fault emails
 - `packages/transcoding/src/services/media-state.ts` — the SETs of the moves to `failed` and back to waiting
 - `packages/transcoding/src/maintenance-rules.ts` — the maintenance run's pure rules
 - `packages/transcoding/src/runpod-api.ts` — RunPod REST v2 and job-status client

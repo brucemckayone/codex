@@ -74,7 +74,12 @@ import {
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
-import { TranscodingMaintenance, TranscodingService } from '@codex/transcoding';
+import {
+  type AlertLedger,
+  TranscodingAlerts,
+  TranscodingMaintenance,
+  TranscodingService,
+} from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
 import { sendEmailToWorker } from '../email/send-email';
 import { followUpMemberDeparture } from './member-departure';
@@ -265,6 +270,21 @@ export interface ServiceRegistryOverrides {
   skipHyperdrive?: boolean;
 }
 
+/**
+ * Setup-fault alerts go once per fault per UTC day (Codex-l2c48.6): a KV key
+ * that outlives its day. Not atomic, so two first reports racing may both
+ * mail, which beats losing one.
+ */
+function kvAlertLedger(kv: NonNullable<Bindings['CACHE_KV']>): AlertLedger {
+  return {
+    async claim(key) {
+      if ((await kv.get(key)) !== null) return false;
+      await kv.put(key, '1', { expirationTtl: 36 * 60 * 60 });
+      return true;
+    },
+  };
+}
+
 export async function createServiceRegistry(
   env: Bindings,
   _obs?: ObservabilityClient,
@@ -440,6 +460,32 @@ export async function createServiceRegistry(
       cleanupFns.push(_sharedDbClient.cleanup);
     }
     return _sharedDbClient.db;
+  }
+
+  // Not a `ctx.services` entry: shared by the two transcoding getters.
+  let _transcodingAlerts: TranscodingAlerts | undefined;
+  /**
+   * Transcoding's failure and setup-fault emails (Codex-l2c48.6), one shared
+   * by the transcoding and transcodingMaintenance getters. None without an
+   * execution context to send from. The lookups run after the response on
+   * dbWaitUntil, which a webhook's pool waits for before closing.
+   */
+  function getTranscodingAlerts(): TranscodingAlerts | undefined {
+    const ctx = executionCtx;
+    if (!ctx || !dbWaitUntil) return undefined;
+    if (!_transcodingAlerts) {
+      _transcodingAlerts = new TranscodingAlerts({
+        db: getSharedDb(),
+        environment: getEnvironment(),
+        mailer: (params) => {
+          sendEmailToWorker(env, ctx, params);
+        },
+        webAppUrl: env.WEB_APP_URL,
+        waitUntil: dbWaitUntil,
+        ledger: env.CACHE_KV ? kvAlertLedger(env.CACHE_KV) : undefined,
+      });
+    }
+    return _transcodingAlerts;
   }
 
   /**
@@ -1263,6 +1309,7 @@ export async function createServiceRegistry(
           runpodWorkersMax: env.RUNPOD_WORKERS_MAX
             ? Number(env.RUNPOD_WORKERS_MAX)
             : undefined,
+          alerts: getTranscodingAlerts(),
         });
       }
       return _transcoding;
@@ -1281,6 +1328,7 @@ export async function createServiceRegistry(
           originalExists: originals
             ? async (key) => (await originals.head(key)) !== null
             : undefined,
+          alerts: getTranscodingAlerts(),
         });
       }
       return _transcodingMaintenance;

@@ -67,9 +67,9 @@ import {
   TranscodingNotRetryableError,
 } from '../errors';
 import {
+  isPassingFailure,
   RUNPOD_SERVERLESS_API_URL,
   RunPodApi,
-  type RunPodApiFailureReason,
 } from '../runpod-api';
 import type {
   HlsVariant,
@@ -79,6 +79,7 @@ import type {
   TranscodingStatusResponse,
 } from '../types';
 import { failedFields, waitingFields } from './media-state';
+import type { TranscodingAlerts } from './transcoding-alerts';
 
 /**
  * The columns both media reads select. `satisfies` makes it name every
@@ -131,6 +132,8 @@ export interface TranscodingServiceConfig {
   runpodWorkersMax?: number;
   /** Tests inject one; by default it is built from the fields above. */
   runpodApi?: RunPodApi;
+  /** Failure and setup-fault emails (Codex-l2c48.6). Absent: none sent. */
+  alerts?: TranscodingAlerts;
 }
 
 export interface TranscodingServiceFullConfig
@@ -160,7 +163,7 @@ function needsAttention(outcome: RunPodDispatchOutcome): boolean {
   return (
     outcome.kind === 'ambiguous' ||
     (outcome.kind === 'rejected' &&
-      transcodingErrorInfo(outcome.code).category === 'config')
+      transcodingErrorInfo(outcome.code).alertOwnerOnEntry)
   );
 }
 
@@ -216,11 +219,6 @@ function isSaneWorkersMax(value: number): boolean {
   );
 }
 
-/** A RunPod failure that says nothing about the setup: try again later. */
-function isPassingFailure(reason: RunPodApiFailureReason): boolean {
-  return reason === 'unavailable' || reason === 'out_of_time';
-}
-
 /** What ensureEndpointAwake found and did. */
 export type EndpointWakeOutcome =
   | { kind: 'awake'; max: number }
@@ -256,6 +254,7 @@ export type InternalTriggerResult =
  */
 export class TranscodingService extends BaseService {
   private readonly runpodApi: RunPodApi;
+  private readonly alerts?: TranscodingAlerts;
   private readonly runpodWorkersMax: number;
   private readonly runpodApiKey: string;
   private readonly runpodApiUrl: string;
@@ -306,6 +305,7 @@ export class TranscodingService extends BaseService {
     this.runpodWorkersMax = isSaneWorkersMax(workersMax)
       ? workersMax
       : RUNPOD_WORKERS_MAX_DEFAULT;
+    this.alerts = config.alerts;
     this.runpodApi =
       config.runpodApi ??
       new RunPodApi({
@@ -381,7 +381,8 @@ export class TranscodingService extends BaseService {
    * creator's budget.
    *
    * NEVER THROWS: it runs after the HTTP response (ctx.background), where a
-   * rejection would only be lost. Every outcome is logged and returned.
+   * rejection would only be lost. Every outcome is logged and returned. A
+   * setup fault it reveals goes to the alerts, which mail it once a day.
    */
   async dispatch(media: TranscodingMediaItem): Promise<RunPodDispatchOutcome> {
     const request: RunPodJobRequest = {
@@ -447,9 +448,11 @@ export class TranscodingService extends BaseService {
     // undocumented, so the endpoint's max workers is read to be sure). The
     // waiting state is already written; waking RunPod is all that is left,
     // inside the background budget. The retry comes from the scheduler.
-    if (refusedWith409) {
-      await this.ensureEndpointAwake(startedAt + DISPATCH_BUDGET_MS);
-    }
+    const woke = refusedWith409
+      ? await this.ensureEndpointAwake(startedAt + DISPATCH_BUDGET_MS)
+      : undefined;
+    this.alerts?.dispatchRefused(media.id, outcome);
+    if (woke) this.alerts?.endpointStuck(woke);
     return outcome;
   }
 
@@ -768,14 +771,15 @@ export class TranscodingService extends BaseService {
 
   /**
    * A webhook's write: it applies only while the row is `transcoding` and
-   * holds this job (heldJobIs). False = not applied, which is logged.
+   * holds this job (heldJobIs). Returns the row written, or undefined when
+   * nothing was (which is logged).
    */
   private async writeIfJobHeld(
     mediaId: string,
     jobId: string,
     set: Partial<typeof mediaItems.$inferInsert>,
     logContext: Record<string, unknown>
-  ): Promise<boolean> {
+  ): Promise<typeof mediaItems.$inferSelect | undefined> {
     const result = await this.db
       .update(mediaItems)
       .set(set)
@@ -783,6 +787,7 @@ export class TranscodingService extends BaseService {
         and(
           eq(mediaItems.id, mediaId),
           eq(mediaItems.status, MEDIA_STATUS.TRANSCODING),
+          isNull(mediaItems.deletedAt),
           heldJobIs(jobId)
         )
       )
@@ -793,22 +798,31 @@ export class TranscodingService extends BaseService {
         jobId,
         mediaId,
         ...logContext,
-        reason: 'row not transcoding, or holds another job',
+        reason: 'row not transcoding, deleted, or holds another job',
       });
-      return false;
+      return undefined;
     }
-    return true;
+    return result[0];
   }
 
-  private failFromWebhook(
+  /**
+   * Fail the row from a webhook. The emails go only when this delivery's
+   * write applied: a retried delivery finds the row already failed.
+   */
+  private async failFromWebhook(
     mediaId: string,
     jobId: string,
     code: TranscodingErrorCode,
     detail: string
   ): Promise<boolean> {
-    return this.writeIfJobHeld(mediaId, jobId, failedFields(code, detail), {
-      code,
-    });
+    const failed = await this.writeIfJobHeld(
+      mediaId,
+      jobId,
+      failedFields(code, detail),
+      { code }
+    );
+    if (failed) this.alerts?.mediaFailed(failed);
+    return failed !== undefined;
   }
 
   /**
@@ -857,6 +871,7 @@ export class TranscodingService extends BaseService {
       mediaId,
       failedRows: result.length,
     });
+    for (const failed of result) this.alerts?.mediaFailed(failed);
     return result.length > 0;
   }
 

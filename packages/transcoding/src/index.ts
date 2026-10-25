@@ -87,7 +87,10 @@ export {
 } from './paths';
 // Services
 export {
+  type AlertLedger,
   type MaintenanceReport,
+  TranscodingAlerts,
+  type TranscodingMailer,
   TranscodingMaintenance,
   TranscodingService,
   type TranscodingServiceFullConfig,
