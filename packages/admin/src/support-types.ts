@@ -147,6 +147,19 @@ export interface ChargeDetail {
    */
   refundCount: number;
   slices: Slice[];
+  /** The split card's totals, so the page does no money arithmetic. */
+  split: {
+    /**
+     * Taken back so far: every slice's `takenCents` together, the platform
+     * fee's own share included (the card's footer).
+     */
+    takenTotalCents: number;
+    /**
+     * The platform fee slice's share of the charge, in basis points
+     * (1050 = 10.5%), as charged; null with no fee slice.
+     */
+    platformFeeShareBps: number | null;
+  };
   refunds: RefundRow[];
   chargebacks: ChargebackRow[];
 }
@@ -398,7 +411,33 @@ export interface ResolvedFailedRefund {
   }>;
   /** A failed full purchase refund gave the buyer access back (Q5d). */
   accessRestored: boolean;
+  /**
+   * `creators_repaid` only: why access was NOT given back (silent F5); null
+   * when it was, for `refunded_elsewhere`, and for a repeat of a settlement.
+   */
+  accessNotRestoredReason: AccessNotRestoredReason | null;
 }
+
+/**
+ * Why settling a failed refund `creators_repaid` left the buyer's access as
+ * it was:
+ *
+ * - `partial`: a part refund, which never ended the access (P-1);
+ * - `not_refunded`: the purchase is in another status;
+ * - `dispute_holds`: a chargeback is open or was lost on it;
+ * - `duplicate`: a duplicate payment, which never granted anything;
+ * - `rebought`: the buyer bought the item again, and that purchase grants it;
+ * - `still_refunded`: the refunds that still stand cover the payment;
+ * - `no_purchase`: an invoice's charge, or one we hold no purchase for.
+ */
+export type AccessNotRestoredReason =
+  | 'partial'
+  | 'not_refunded'
+  | 'dispute_holds'
+  | 'duplicate'
+  | 'rebought'
+  | 'still_refunded'
+  | 'no_purchase';
 
 /** The resolutions support may choose. `dispute_won` is only ever automatic. */
 export type CreatorDebtResolution =

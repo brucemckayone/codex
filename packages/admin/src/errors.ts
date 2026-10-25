@@ -131,14 +131,18 @@ export class ChargeChangedError extends PreconditionFailedError {
 }
 
 /**
- * Stripe holds a refund for this idempotency key with other parameters (409):
- * the same decision was submitted with another reason, or is still in flight.
+ * Stripe holds an earlier answer for this exact refund (409): the same key
+ * was refused or failed in the last 24 hours, and Stripe repeats that answer
+ * for this charge, count and amount (silent F1). No refund was made: the
+ * charge's list was read again and holds none with this key. Another amount
+ * makes another key.
  */
-export class RefundAlreadySubmittedError extends ConflictError {
+export class RefundKeySpentError extends ConflictError {
   constructor() {
-    super('This refund was already submitted.', {
-      code: 'REFUND_ALREADY_SUBMITTED',
-    });
+    super(
+      'This exact refund was refused or failed in the last 24 hours. Change the amount, or use the Stripe Dashboard.',
+      { code: 'REFUND_KEY_SPENT' }
+    );
   }
 }
 

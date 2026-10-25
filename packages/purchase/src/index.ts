@@ -107,6 +107,7 @@ export {
   isDuplicatePayment,
   type PurchaseMailer,
   PurchaseService,
+  type RefundAccessKept,
   type RestoredRefundAccess,
   STANDING_REFUND_STATUSES,
   supportRequesterOf,

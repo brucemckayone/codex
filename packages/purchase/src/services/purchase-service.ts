@@ -72,6 +72,7 @@ import {
 import {
   AfterCommitError,
   BaseService,
+  InternalServiceError,
   type ServiceConfig,
   ServiceUnavailableError,
   StripeNotConfiguredError,
@@ -197,6 +198,18 @@ const HOLDING_DISPUTE_STATUSES: readonly string[] = [
   ...DISPUTE_CHARGEBACK_OPEN_STATUSES,
   'lost',
 ];
+
+/**
+ * `or()` of two conditions, never undefined: `and()` drops an undefined
+ * argument without a word, which here would widen a scope.
+ */
+function either(first: SQL, second: SQL | undefined): SQL {
+  const condition = or(first, second);
+  if (!condition) {
+    throw new InternalServiceError('A refund scope could not be built');
+  }
+  return condition;
+}
 
 /**
  * Whether the dispute still holds its sale, read under a share lock on its
@@ -386,9 +399,23 @@ export function supportRequesterOf(
 }
 
 /** What `restoreAfterFailedRefund` did, and whose caches it touches. */
+/**
+ * Why settling a failed refund as `creators_repaid` left the buyer's access
+ * as it was (`restoreAfterFailedRefund`).
+ */
+export type RefundAccessKept =
+  | 'partial'
+  | 'not_refunded'
+  | 'dispute_holds'
+  | 'duplicate'
+  | 'rebought'
+  | 'still_refunded';
+
 export interface RestoredRefundAccess {
   /** Access came back: the caller bumps the buyer's library. */
   restored: boolean;
+  /** Why not, when `restored` is false; null when it came back. */
+  reason: RefundAccessKept | null;
   userId: string;
   organizationId: string | null;
 }
@@ -2565,6 +2592,18 @@ export class PurchaseService extends BaseService {
         return;
       }
 
+      // The charge's refunds recorded before this purchase existed
+      // (Codex-aa08z) are its own: link them, so what stands is counted.
+      await this.db
+        .update(refunds)
+        .set({ purchaseId: purchase.id })
+        .where(
+          and(
+            eq(refunds.stripeChargeId, refundDetails.charge.id),
+            isNull(refunds.purchaseId)
+          )
+        );
+
       // Idempotent: already refunded — still return the userId so the caller
       // can re-bump the library cache (KV version increments are monotonic
       // and cheap; idempotent at the Stripe layer, not the cache layer).
@@ -2585,9 +2624,10 @@ export class PurchaseService extends BaseService {
         };
       }
 
-      if (!isFull) {
+      if (!isFull && refundedCents > 0) {
         // P-1: the buyer keeps access. The amount only grows, so a stale
-        // redelivery never lowers it.
+        // redelivery never lowers it. Nothing standing writes nothing: the
+        // restatement owns a refund that failed (MED-2).
         await this.db
           .update(purchases)
           .set(refundFields)
@@ -2785,6 +2825,19 @@ export class PurchaseService extends BaseService {
             and(
               eq(refunds.stripeRefundId, refund.stripeRefundId),
               isNull(refunds.requestedByUserId)
+            )
+          );
+      }
+      // The same for the purchase: an event that beat the purchase's own
+      // (Codex-aa08z) recorded it without one (LOW-3, F4).
+      if (purchase && !written[0]?.purchaseId) {
+        await this.db
+          .update(refunds)
+          .set({ purchaseId: purchase.id })
+          .where(
+            and(
+              eq(refunds.stripeRefundId, refund.stripeRefundId),
+              isNull(refunds.purchaseId)
             )
           );
       }
@@ -3209,21 +3262,29 @@ export class PurchaseService extends BaseService {
    *
    * It runs INSIDE the caller's transaction, which locks the refund row and
    * records the settlement, so all of it commits or none does. The purchase
-   * row is locked here. Nothing changes, and `restored` is false, when:
+   * row is locked here. Access is not given back, and `reason` says why
+   * (logged at info, ids only), when:
    *
-   * - the purchase is not `refunded`: a partial refund kept its access (P-1);
-   * - the refunds that still stand cover what was paid: another refund ended
-   *   the access;
-   * - a chargeback is open or was lost on it (`disputedAt` stays set after a
-   *   loss, which also makes it `refunded`): the dispute decides the access;
-   * - it is a duplicate payment, which never granted anything;
-   * - the buyer bought the item again since: that purchase grants it, and a
-   *   buyer holds one completed purchase per item
-   *   (`uq_purchases_completed_customer_content`).
+   * - `partial`: the purchase is still `completed`, so a part refund never
+   *   ended its access (P-1); `not_refunded`: it is in another status;
+   * - `dispute_holds`: a chargeback is open or was lost on it, found by the
+   *   purchase or by the charge (`disputedAt` stays set after a loss, which
+   *   also makes it `refunded`): the dispute decides the access;
+   * - `duplicate`: a duplicate payment, which never granted anything;
+   * - `rebought`: the buyer bought the item again since, and that purchase
+   *   grants it: a buyer holds one completed purchase per item
+   *   (`uq_purchases_completed_customer_content`);
+   * - `still_refunded`: the refunds that still stand cover what was paid.
+   *
+   * After `rebought` and `still_refunded` the purchase stays `refunded`, but
+   * its refund fields are restated, so Sales stops counting the failed one.
+   * `chargeId` is the failed refund's charge: it finds a dispute, and a
+   * standing refund, recorded before the purchase existed.
    */
   async restoreAfterFailedRefund(
     tx: Tx,
-    purchaseId: string
+    purchaseId: string,
+    chargeId: string
   ): Promise<RestoredRefundAccess | undefined> {
     try {
       const [purchase] = await tx
@@ -3236,32 +3297,54 @@ export class PurchaseService extends BaseService {
         userId: purchase.customerId,
         organizationId: purchase.organizationId,
       };
-      if (
-        purchase.status !== PURCHASE_STATUS.REFUNDED ||
-        purchase.disputedAt ||
-        isDuplicatePayment(purchase) ||
-        (await this.keepsItemElsewhere(tx, purchase))
-      ) {
-        return { ...scope, restored: false };
+      const kept = (reason: RefundAccessKept): RestoredRefundAccess => {
+        this.obs.info('Failed refund settled: access not given back', {
+          purchaseId: purchase.id,
+          chargeId,
+          reason,
+        });
+        return { ...scope, restored: false, reason };
+      };
+      if (purchase.status === PURCHASE_STATUS.COMPLETED) return kept('partial');
+      if (purchase.status !== PURCHASE_STATUS.REFUNDED) {
+        return kept('not_refunded');
       }
+      if (purchase.disputedAt) return kept('dispute_holds');
+      if (isDuplicatePayment(purchase)) return kept('duplicate');
       const [holding] = await tx
         .select({ id: disputes.id })
         .from(disputes)
         .where(
           and(
-            eq(disputes.purchaseId, purchase.id),
+            either(
+              eq(disputes.purchaseId, purchase.id),
+              eq(disputes.stripeChargeId, chargeId)
+            ),
             inArray(disputes.status, HOLDING_DISPUTE_STATUSES)
           )
         )
         .limit(1);
-      if (holding) return { ...scope, restored: false };
-
-      const standing = await this.standingRefundFields(tx, purchase.id);
-      if ((standing.refundAmountCents ?? 0) >= purchase.amountPaidCents) {
-        return { ...scope, restored: false };
-      }
+      if (holding) return kept('dispute_holds');
 
       const now = new Date();
+      const standing = await this.standingRefundFields(
+        tx,
+        purchase.id,
+        chargeId
+      );
+      const rebought = await this.keepsItemElsewhere(tx, purchase);
+      if (
+        rebought ||
+        (standing.refundAmountCents ?? 0) >= purchase.amountPaidCents
+      ) {
+        // Still refunded, but the failed refund no longer counts (LOW-2).
+        await tx
+          .update(purchases)
+          .set({ ...standing, updatedAt: now })
+          .where(eq(purchases.id, purchase.id));
+        return kept(rebought ? 'rebought' : 'still_refunded');
+      }
+
       await tx
         .update(purchases)
         .set({
@@ -3296,7 +3379,7 @@ export class PurchaseService extends BaseService {
         purchaseId: purchase.id,
         customerId: purchase.customerId,
       });
-      return { ...scope, restored: true };
+      return { ...scope, restored: true, reason: null };
     } catch (error) {
       this.handleError(error, 'restoreAfterFailedRefund');
     }
@@ -3312,8 +3395,12 @@ export class PurchaseService extends BaseService {
    * makes (`restoreAfterFailedRefund`). Studio Sales and `getSalesStats` read
    * it. A `refunded` purchase is left as it is: a failed full refund is
    * support's to settle. Idempotent; the caller runs it after `processRefund`.
+   * `chargeId` is the refund's charge, as for the restore.
    */
-  async restateStandingRefunds(paymentIntentId: string): Promise<void> {
+  async restateStandingRefunds(
+    paymentIntentId: string,
+    chargeId: string
+  ): Promise<void> {
     try {
       const restated = await this.db.transaction(async (tx) => {
         const [purchase] = await tx
@@ -3322,7 +3409,11 @@ export class PurchaseService extends BaseService {
           .where(eq(purchases.stripePaymentIntentId, paymentIntentId))
           .for('update');
         if (purchase?.status !== PURCHASE_STATUS.COMPLETED) return undefined;
-        const standing = await this.standingRefundFields(tx, purchase.id);
+        const standing = await this.standingRefundFields(
+          tx,
+          purchase.id,
+          chargeId
+        );
         await tx
           .update(purchases)
           .set({ ...standing, updatedAt: new Date() })
@@ -3347,11 +3438,15 @@ export class PurchaseService extends BaseService {
    * A purchase's refund fields as the refunds that still stand
    * (`STANDING_REFUND_STATUSES`) make them: their total, and the newest one's
    * id and reason; all null when none stands. A failed or canceled refund
-   * returned nothing, so it never counts.
+   * returned nothing, so it never counts. A refund of the purchase's charge
+   * still without a `purchase_id` (recorded before the purchase existed,
+   * Codex-aa08z) counts too, so the restatement and the restore always count
+   * the same refunds.
    */
   private async standingRefundFields(
     db: Tx | DatabaseClient,
-    purchaseId: string
+    purchaseId: string,
+    chargeId: string
   ): Promise<
     Pick<Purchase, 'refundAmountCents' | 'stripeRefundId' | 'refundReason'>
   > {
@@ -3364,7 +3459,13 @@ export class PurchaseService extends BaseService {
       .from(refunds)
       .where(
         and(
-          eq(refunds.purchaseId, purchaseId),
+          either(
+            eq(refunds.purchaseId, purchaseId),
+            and(
+              isNull(refunds.purchaseId),
+              eq(refunds.stripeChargeId, chargeId)
+            )
+          ),
           inArray(refunds.status, STANDING_REFUND_STATUSES)
         )
       )

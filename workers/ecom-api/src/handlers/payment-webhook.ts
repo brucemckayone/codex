@@ -33,7 +33,11 @@ import {
   STRIPE_EVENTS,
 } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
-import { type PurchaseService, supportRequesterOf } from '@codex/purchase';
+import {
+  type PurchaseService,
+  STANDING_REFUND_STATUSES,
+  supportRequesterOf,
+} from '@codex/purchase';
 import type { Bindings } from '@codex/shared-types';
 import {
   type CourseSubscriptionService,
@@ -344,10 +348,25 @@ async function handleChargeRefunded(
   // Every refund of the charge, recorded first (owner decision 2026-10-19,
   // "One refunds table"). The event names none: charge.refunds is no longer
   // sent (API 2022-11-15).
-  const [latestRefund] = await service.recordChargeRefunds({
+  const listed = await service.recordChargeRefunds({
     id: charge.id,
     paymentIntentId: paymentIntentId ?? null,
   });
+  // What the purchase counts as refunded NOW, from that fresh list, never the
+  // event's snapshot `amount_refunded`: a late or retried event must not
+  // re-apply a refund that failed and was settled since (MED-2). Newest
+  // first. The subscription's full-refund cancel below still reads Stripe's
+  // snapshot, as before.
+  const standing = listed.filter((refund) =>
+    (STANDING_REFUND_STATUSES as readonly string[]).includes(
+      refund.status ?? ''
+    )
+  );
+  const refundedCents = standing.reduce(
+    (sum, refund) => sum + refund.amount,
+    0
+  );
+  const [latestRefund] = standing;
 
   // The charge's amount is every source's clawback denominator (D1); each
   // refund's share is read from Stripe (Codex-2hxff.8).
@@ -371,14 +390,14 @@ async function handleChargeRefunded(
   const refundResult = await service.processRefund(paymentIntentId, {
     charge: clawbackCharge,
     stripeRefundId: latestRefund?.id,
-    refundAmountCents: charge.amount_refunded,
+    refundAmountCents: refundedCents,
     refundReason: latestRefund?.reason ?? undefined,
     paidAt: stripeTime(charge.created),
   });
   obs?.info('Charge refund processed', {
     chargeId: charge.id,
     paymentIntentId,
-    amountRefunded: charge.amount_refunded,
+    amountRefunded: refundedCents,
     stripeRefundId: latestRefund?.id,
     accessEnded: refundResult?.accessEnded ?? null,
   });
@@ -569,7 +588,8 @@ async function handleRefundUpdated(
     }
     // It returned nothing, as a failed one (owner decision 2026-10-25): a
     // purchase it refunded in part counts only the refunds that still stand.
-    if (paymentIntentId) await service.restateStandingRefunds(paymentIntentId);
+    if (paymentIntentId)
+      await service.restateStandingRefunds(paymentIntentId, charge.id);
     return;
   }
   if (refund.status === 'failed' && changed) {
@@ -602,7 +622,7 @@ async function handleRefundUpdated(
     // It returned nothing (owner decision 2026-10-24): a purchase it refunded
     // in part counts only the refunds that still stand. After processRefund,
     // which may raise the amount from the charge's.
-    await service.restateStandingRefunds(paymentIntentId);
+    await service.restateStandingRefunds(paymentIntentId, charge.id);
   }
   // Usually emailed at charge.refunded already; one that was waiting on the
   // customer then is emailed now. A failed refund is never emailed.

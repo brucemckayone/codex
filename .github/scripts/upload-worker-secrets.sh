@@ -23,8 +23,10 @@ set -e
 #   - ADMIN_API_STRIPE_RESTRICTED_KEY (secret, admin-api only, OPTIONAL):
 #     admin-api's OWN restricted key for support refunds (Codex-2hxff.28,
 #     owner decision Q4; Codex-5vvwj.2), uploaded as admin-api's
-#     STRIPE_SECRET_KEY. Sent only when set and non-empty; without it the
-#     deploy still succeeds and only the support refund routes fail.
+#     STRIPE_SECRET_KEY. Sent only when set and of this environment's mode
+#     (rk_live_ in production, rk_test_ elsewhere); unset is a ::warning::,
+#     any other value an ::error:: and not sent. Either way the deploy still
+#     succeeds and only the support refund routes fail.
 #   - STRIPE_WEBHOOK_SECRET_* (secrets, ecom-api only — it owns all Stripe webhooks)
 #   - STRIPE_PORTAL_CONFIGURATION_ID (ecom-api only — the locked Billing Portal
 #     configuration, bpc_...; without it the portal refuses to open)
@@ -148,12 +150,25 @@ EOF
     # so leaving it out keeps whatever admin-api already holds, where an empty
     # value would overwrite a working key with "". Without it the deploy still
     # succeeds; only the support refund routes need it.
+    #
+    # It must be a RESTRICTED key of this environment's mode (silent F8):
+    # rk_live_ in production, rk_test_ elsewhere. A full sk_ key would defeat
+    # the restriction, and a test key in production makes every live charge
+    # "unknown". Anything else is reported as a GitHub error annotation and
+    # NOT uploaded; the deploy carries on. An unset key is a warning.
+    if [ "$ENVIRONMENT" = "production" ]; then
+      ADMIN_API_KEY_PREFIX="rk_live_"
+    else
+      ADMIN_API_KEY_PREFIX="rk_test_"
+    fi
     ADMIN_API_STRIPE_JSON=""
-    if [ -n "${ADMIN_API_STRIPE_RESTRICTED_KEY:-}" ]; then
+    if [ -z "${ADMIN_API_STRIPE_RESTRICTED_KEY:-}" ]; then
+      echo "::warning title=admin-api Stripe key::ADMIN_API_STRIPE_RESTRICTED_KEY is not set: admin-api's STRIPE_SECRET_KEY is left as it is, and support refunds fail without one"
+    elif [[ "$ADMIN_API_STRIPE_RESTRICTED_KEY" != "$ADMIN_API_KEY_PREFIX"* ]]; then
+      echo "::error title=admin-api Stripe key::ADMIN_API_STRIPE_RESTRICTED_KEY does not start with ${ADMIN_API_KEY_PREFIX}: not uploaded, admin-api's STRIPE_SECRET_KEY is left as it is"
+    else
       ADMIN_API_STRIPE_JSON=",
   \"STRIPE_SECRET_KEY\":\"${ADMIN_API_STRIPE_RESTRICTED_KEY}\""
-    else
-      echo "ℹ️  ADMIN_API_STRIPE_RESTRICTED_KEY not set: admin-api's STRIPE_SECRET_KEY left as it is"
     fi
     SECRETS_JSON=$(cat <<EOF
 {

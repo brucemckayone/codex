@@ -89,11 +89,21 @@ function fakeStripe() {
   const stripe = createMockStripe();
   const charges = new Map<string, FakeCharge>();
   const refundsByCharge = new Map<string, Stripe.Refund[]>();
-  /** Keys Stripe has seen: a repeat with other parameters is refused. */
+  /**
+   * Keys Stripe has seen, with the FIRST answer it saved under each, a
+   * refusal or a 500 included: a repeat with other parameters is refused, a
+   * repeat with the same ones gets that answer again, for 24 hours.
+   */
   const keys = new Map<
     string,
-    { fingerprint: string; refund: Stripe.Refund }
+    {
+      fingerprint: string;
+      refund?: Stripe.Refund;
+      error?: Record<string, unknown>;
+    }
   >();
+  /** The next refunds.create calls fail with these, once the endpoint ran. */
+  const refusals: Array<Record<string, unknown>> = [];
   const invoiceByPaymentIntent = new Map<string, string>();
   const invoices = new Map<
     string,
@@ -133,6 +143,7 @@ function fakeStripe() {
       chargeId,
       params.amount,
       params.reason,
+      params.metadata ?? {},
     ]);
     const key = options?.idempotencyKey;
     const seen = key ? keys.get(key) : undefined;
@@ -149,7 +160,25 @@ function fakeStripe() {
           }
         );
       }
-      return seen.refund;
+      if (seen.error) {
+        throw Object.assign(new Error('Replayed'), seen.error, {
+          headers: { 'idempotent-replayed': 'true' },
+        });
+      }
+      if (seen.refund) return seen.refund;
+      // Still in flight under another request: Stripe's concurrent 409.
+      throw Object.assign(new Error('Another request is using this key'), {
+        type: 'StripeIdempotencyError',
+        statusCode: 409,
+      });
+    }
+    const refusal = refusals.shift();
+    if (refusal) {
+      if (key) keys.set(key, { fingerprint, error: refusal });
+      throw Object.assign(new Error('Refused at acct_1Secret'), refusal, {
+        requestId: `req_${uid()}`,
+        headers: {},
+      });
     }
     const refund = {
       id: `re_sup${uid()}`,
@@ -213,6 +242,7 @@ function fakeStripe() {
     charges,
     refundsByCharge,
     keys,
+    refusals,
     invoiceByPaymentIntent,
     invoices,
     paidInvoices,
@@ -267,6 +297,12 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
     ).id;
   });
 
+  /** The service's own log, watched. */
+  let serviceLog: () => {
+    warn: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+  };
+
   beforeEach(() => {
     fake = fakeStripe();
     obs.error.mockClear();
@@ -276,6 +312,23 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       stripe: fake.stripe,
       purchase: new PurchaseService({ db, environment: 'test' }, fake.stripe),
     });
+    const log = (
+      service as unknown as {
+        obs: {
+          warn: (...a: unknown[]) => void;
+          error: (...a: unknown[]) => void;
+        };
+      }
+    ).obs;
+    const watched = {
+      warn: vi.spyOn(log, 'warn'),
+      error: vi.spyOn(log, 'error'),
+    };
+    serviceLog = () =>
+      watched as unknown as {
+        warn: ReturnType<typeof vi.fn>;
+        error: ReturnType<typeof vi.fn>;
+      };
   });
 
   // Payout rows feed global drains and sweeps: never leave them behind.
@@ -727,23 +780,87 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       expect(fake.stripe.refunds.create).not.toHaveBeenCalled();
     });
 
-    it('the same key with another reason is REFUND_ALREADY_SUBMITTED (409)', async () => {
+    it('a key held by a request still in flight, with no refund listed, is REFUND_KEY_SPENT (409), never "submitted"', async () => {
       const { chargeId } = await purchaseCharge();
       // Another tab's request with this key is still in flight: Stripe holds
-      // the key, and the refund is not listed yet.
+      // the key, and no refund is listed.
       const key = `support_refund_${chargeId}_0_500`;
-      fake.keys.set(key, {
-        fingerprint: JSON.stringify([chargeId, 500, 'duplicate']),
-        refund: {} as Stripe.Refund,
-      });
+      fake.keys.set(key, { fingerprint: 'another request' });
 
       const error = await failureOf(
         service.issueRefund(chargeId, refundInput(500), supportId)
       );
 
       expect(error.statusCode).toBe(409);
-      expect(error.context).toEqual({ code: 'REFUND_ALREADY_SUBMITTED' });
-      expect(JSON.stringify(error.context)).not.toContain('idempotent');
+      expect(error.context).toEqual({ code: 'REFUND_KEY_SPENT' });
+    });
+
+    it('a held key whose refund is listed by the time it is read again is a replay', async () => {
+      const { chargeId } = await purchaseCharge();
+      const key = `support_refund_${chargeId}_0_500`;
+      const made = stripeRefund(chargeId, 500, {
+        metadata: { codex_support_key: key },
+      });
+      fake.keys.set(key, { fingerprint: 'another tab', refund: made });
+      // The first read of the list predates that refund.
+      vi.mocked(fake.stripe.refunds.list).mockResolvedValueOnce({
+        object: 'list',
+        data: [],
+        has_more: false,
+      } as never);
+
+      const result = await service.issueRefund(
+        chargeId,
+        refundInput(500),
+        supportId
+      );
+
+      expect(result).toEqual({
+        refund: expect.objectContaining({ id: made.id }),
+        replayed: true,
+      });
+    });
+
+    it('a refusal is saved under its key: resubmitting with another reason is REFUND_KEY_SPENT, not "submitted" (F1)', async () => {
+      const { chargeId } = await purchaseCharge();
+      fake.refusals.push({
+        type: 'StripeInvalidRequestError',
+        statusCode: 400,
+        code: 'charge_disputed',
+      });
+
+      const refused = await failureOf(
+        service.issueRefund(chargeId, refundInput(500), supportId)
+      );
+      const again = await failureOf(
+        service.issueRefund(
+          chargeId,
+          { ...refundInput(500), reason: 'duplicate' },
+          supportId
+        )
+      );
+
+      expect(refused.context).toEqual({
+        code: 'STRIPE_REFUSED',
+        stripeCode: 'charge_disputed',
+      });
+      expect(again.context).toEqual({ code: 'REFUND_KEY_SPENT' });
+    });
+
+    it('the same submit after a Stripe 500 gets that 500 replayed: REFUND_KEY_SPENT, not "try again" (F1)', async () => {
+      const { chargeId } = await purchaseCharge();
+      fake.refusals.push({ type: 'StripeAPIError', statusCode: 500 });
+
+      const outage = await failureOf(
+        service.issueRefund(chargeId, refundInput(500), supportId)
+      );
+      const retry = await failureOf(
+        service.issueRefund(chargeId, refundInput(500), supportId)
+      );
+
+      expect(outage.statusCode).toBe(500);
+      expect(retry.statusCode).toBe(409);
+      expect(retry.context).toEqual({ code: 'REFUND_KEY_SPENT' });
     });
 
     it('is open for 13 d 23 h 59 min after the charge, and closed at exactly 14 days', async () => {
@@ -856,6 +973,42 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
         stripeCode: 'charge_disputed',
       });
       expect(error.message).not.toContain('acct_');
+      // Logged with ids and Stripe's code, never its message (F2).
+      expect(serviceLog().warn).toHaveBeenCalledWith(
+        'Stripe refused a support refund',
+        {
+          chargeId,
+          stripeCode: 'charge_disputed',
+          stripeRequestId: null,
+          statusCode: 400,
+          requestedByUserId: supportId,
+        }
+      );
+    });
+
+    it("an invalid request outside Stripe's refusal list is our defect: a 500, alerted at error (F2)", async () => {
+      const { chargeId } = await purchaseCharge();
+      fake.refusals.push({
+        type: 'StripeInvalidRequestError',
+        statusCode: 400,
+        code: 'parameter_unknown',
+      });
+
+      const error = await failureOf(
+        service.issueRefund(chargeId, refundInput(100), supportId)
+      );
+
+      expect(error.statusCode).toBe(500);
+      expect(JSON.stringify(error.context ?? {})).not.toContain('acct_');
+      expect(serviceLog().error).toHaveBeenCalledWith(
+        expect.stringContaining('a defect in the request'),
+        expect.objectContaining({
+          errorId: expect.any(String),
+          chargeId,
+          stripeCode: 'parameter_unknown',
+          stripeRequestId: expect.stringMatching(/^req_/),
+        })
+      );
     });
 
     it('a charge we hold no record of is a 404, and nothing is refunded', async () => {
@@ -947,6 +1100,26 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
   });
 
   describe('getChargeDetail: what the approved page shows besides', () => {
+    it("carries the split card's totals: what was taken back, and the fee's share in basis points", async () => {
+      const untouched = await purchaseCharge();
+      const clawed = await purchaseCharge();
+      await failedRefund(clawed, 1000);
+
+      const before = await service.getChargeDetail(untouched.chargeId);
+      const after = await service.getChargeDetail(clawed.chargeId);
+
+      expect(before.split).toEqual({
+        takenTotalCents: 0,
+        platformFeeShareBps: 1000,
+      });
+      // The creator's 765 reversed, the organisation's 135 cancelled, and the
+      // fee's own 100 kept back: every slice, as the card's footer sums them.
+      expect(after.split.takenTotalCents).toBe(1000);
+      expect(after.split.takenTotalCents).toBe(
+        after.slices.reduce((sum, slice) => sum + slice.takenCents, 0)
+      );
+    });
+
     it('a creator slice carries the share of the agreement that split it; no other slice does', async () => {
       const bought = await purchaseCharge();
       await db
@@ -1211,6 +1384,22 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
   ) {
     const refund = { id: `re_sup${uid()}`, amountCents, createdAt: 1 };
     created.stripeRefundIds.push(refund.id);
+    // Stripe lists it too, failed: the engine's causes come from that list.
+    fake.refundsByCharge.set(charge.chargeId, [
+      ...(fake.refundsByCharge.get(charge.chargeId) ?? []),
+      {
+        id: refund.id,
+        object: 'refund',
+        amount: amountCents,
+        charge: charge.chargeId,
+        currency: 'gbp',
+        status: 'failed',
+        reason: 'requested_by_customer',
+        failure_reason: 'expired_or_canceled_card',
+        created: nowSeconds() - 120,
+        metadata: {},
+      } as unknown as Stripe.Refund,
+    ]);
     const deps: ClawbackDeps = {
       db,
       stripe: fake.stripe,
@@ -1435,8 +1624,10 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       }
 
       expect(settled.settled.accessRestored).toBe(true);
+      expect(settled.settled.accessNotRestoredReason).toBeNull();
       expect(settled.restoredAccess).toEqual({
         restored: true,
+        reason: null,
         userId: buyerId,
         organizationId: orgId,
       });
@@ -1497,7 +1688,159 @@ describe('SupportService (real DB, Stripe faked at the client)', () => {
       }
 
       expect(settled.settled.accessRestored).toBe(false);
+      expect(settled.settled.accessNotRestoredReason).toBe('partial');
       expect(settled.restoredAccess).toBeNull();
+    });
+
+    it('creators_repaid is refused (422) when a chargeback was shared against the failed refund, and re-pays nothing (HIGH-1)', async () => {
+      const charge = await purchaseCharge();
+      const failed = await failedRefund(charge, 1000);
+      await dispute(charge.chargeId, 'lost', charge.purchase.id);
+
+      const error = await failureOf(
+        service.resolveFailedRefund(
+          failed.id,
+          { resolution: 'creators_repaid', note: 'Re-pay' },
+          supportId
+        )
+      );
+
+      expect(error.statusCode).toBe(422);
+      expect(error.context).toEqual({
+        code: 'REPAY_BLOCKED_BY_LATER_CAUSE',
+        reason: 'chargeback',
+      });
+      expect(await repayRowsOf(failed.stripeRefundId)).toEqual([]);
+      const [row] = await db
+        .select({ resolvedAt: refunds.resolvedAt })
+        .from(refunds)
+        .where(eq(refunds.id, failed.id));
+      expect(row?.resolvedAt).toBeNull();
+    });
+
+    it('creators_repaid is refused (422) when a later refund used up the charge with this one counted (HIGH-1)', async () => {
+      const charge = await purchaseCharge();
+      const failed = await failedRefund(charge, 1000);
+      // Support refunded it again from the screen after the first one failed.
+      stripeRefund(charge.chargeId, 1000, { created: nowSeconds() - 60 });
+
+      const error = await failureOf(
+        service.resolveFailedRefund(
+          failed.id,
+          { resolution: 'creators_repaid', note: 'Re-pay' },
+          supportId
+        )
+      );
+
+      expect(error.context).toEqual({
+        code: 'REPAY_BLOCKED_BY_LATER_CAUSE',
+        reason: 'later_refunds',
+      });
+      expect(await repayRowsOf(failed.stripeRefundId)).toEqual([]);
+    });
+
+    /** The creator's step of a failed refund, as a dead delivery left it. */
+    async function abandonCreatorStep(
+      charge: Awaited<ReturnType<typeof purchaseCharge>>,
+      stripeRefundId: string
+    ) {
+      const where = and(
+        eq(payoutReversals.causeId, stripeRefundId),
+        eq(payoutReversals.payoutId, charge.creator.id)
+      );
+      // Claimed by a delivery that died two days ago: no retry will run it.
+      await db
+        .update(payoutReversals)
+        .set({
+          status: 'pending',
+          attemptedAt: new Date(Date.now() - 2 * DAY * 1000),
+        })
+        .where(where);
+      return async () =>
+        takeFirst(
+          await db
+            .select({ status: payoutReversals.status })
+            .from(payoutReversals)
+            .where(where)
+        ).status;
+    }
+
+    it('a step a dead delivery left no longer blocks the settlement: its reversal landed, so it is done and re-paid (F3, LOW-4)', async () => {
+      const charge = await purchaseCharge();
+      const failed = await failedRefund(charge, 1000);
+      const statusOf = await abandonCreatorStep(charge, failed.stripeRefundId);
+
+      const settled = await service.resolveFailedRefund(
+        failed.id,
+        { resolution: 'creators_repaid', note: 'Re-pay' },
+        supportId
+      );
+      for (const row of settled.settled.repaid) {
+        created.payoutIds.push(row.payoutId);
+      }
+
+      expect(
+        settled.settled.repaid
+          .map((row) => row.amountCents)
+          .sort((a, b) => a - b)
+      ).toEqual([135, 765]);
+      expect(await statusOf()).toBe('done');
+    });
+
+    it('a step a dead delivery left, whose reversal never landed, is cancelled and not re-paid (F3)', async () => {
+      const charge = await purchaseCharge();
+      const failed = await failedRefund(charge, 1000);
+      const statusOf = await abandonCreatorStep(charge, failed.stripeRefundId);
+      vi.mocked(fake.stripe.transfers.listReversals).mockResolvedValue({
+        object: 'list',
+        data: [],
+        has_more: false,
+      } as never);
+
+      const settled = await service.resolveFailedRefund(
+        failed.id,
+        { resolution: 'creators_repaid', note: 'Re-pay' },
+        supportId
+      );
+      for (const row of settled.settled.repaid) {
+        created.payoutIds.push(row.payoutId);
+      }
+
+      // Only the organisation's cancellation took money: it alone is re-paid.
+      expect(settled.settled.repaid.map((row) => row.amountCents)).toEqual([
+        135,
+      ]);
+      expect(await statusOf()).toBe('cancelled');
+    });
+
+    it('a failed refund recorded without its purchase finds it from the charge, and still gives access back (F4)', async () => {
+      const charge = await purchaseCharge();
+      const failed = await failedRefund(charge, 1000);
+      await endAccess(charge);
+      await db
+        .update(refunds)
+        .set({ purchaseId: null })
+        .where(eq(refunds.id, failed.id));
+
+      const list = await service.listFailedRefunds({ page: 1, limit: 50 });
+      const settled = await service.resolveFailedRefund(
+        failed.id,
+        { resolution: 'creators_repaid', note: 'Buyer keeps the item' },
+        supportId
+      );
+      for (const row of settled.settled.repaid) {
+        created.payoutIds.push(row.payoutId);
+      }
+
+      // The queue names it from its charge's purchase slices too.
+      expect(
+        list.items.find((row) => row.refundId === failed.id)
+      ).toMatchObject({
+        kind: 'purchase',
+        title: charge.item.title,
+        isFull: true,
+      });
+      expect(settled.settled.accessRestored).toBe(true);
     });
 
     it('a note is required to re-pay the payees', () => {

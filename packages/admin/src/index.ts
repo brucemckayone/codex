@@ -51,6 +51,7 @@ export {
 
 // Support refunds: the platform-owner refund screen and queue (Codex-2hxff.28)
 export type {
+  AccessNotRestoredReason,
   ChargebackRow,
   ChargebackState,
   ChargeDetail,
@@ -139,8 +140,8 @@ export {
   isAdminServiceError,
   NotFoundError,
   NothingLeftToRefundError,
-  RefundAlreadySubmittedError,
   RefundAmountTooLargeError,
+  RefundKeySpentError,
   RefundWindowClosedError,
   StripeRefusedRefundError,
   ValidationError,
