@@ -57,9 +57,18 @@ unpublished.
 The same holds for a course taken off sale. Someone entitled to it still opens
 it, with every practice that was ever released, including practices taken off
 sale since. A course or practice that was never released stays hidden from
-everyone except the editor (`Codex-2hxff.65`). "Released" means
-`published_at` is set, or the row is `published`; unpublishing never clears
-`published_at`.
+everyone except the editor (`Codex-2hxff.65`), and no one can stream it by its
+id either: the access decision grants a never-released row to no one, a buyer
+included (`Codex-nacky`). "Released" means `published_at` is set, or the row
+is `published`; unpublishing never clears `published_at`. Detaching an item
+from its organisation does: a database trigger (migration 0004) makes it a
+draft and clears `published_at`, so it reads as never released.
+
+When an organisation is deleted, nobody keeps its content, buyers included
+(owner decision, 2026-10-25: "Nobody"; `Codex-7ncbh`). Its pages are already
+gone (the org's site no longer resolves), and the stream and access checks
+treat its content as deleted. What a deletion owes those buyers is an open
+question (`Codex-ltbml`).
 
 A tier subscription does **not** keep an unpublished item for good. It is a
 licence, not a sale. When a removed creator's items come off sale

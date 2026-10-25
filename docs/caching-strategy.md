@@ -57,7 +57,7 @@ a stored copy**:
 |---|---|---|
 | `per-viewer` | `public, max-age=0, no-cache` | A shared cache may STORE it but must revalidate with the origin before serving it to anyone (RFC 9111). An anonymous burst is absorbed as 304s; a signed-in viewer always gets their own body. |
 | `private` | `private, no-cache` | The viewer's own browser only. **The default when nothing is declared.** Anything whose SSR output varies by auth. |
-| `fresh` | `private, no-store` | Not merely per-viewer but per-REQUEST: bodies that embed a credential, such as the HLS playlists in `content-api`'s `content-access.ts`, where a copy on the browser's own disk outlives the presigned URL inside it. |
+| `fresh` | `private, no-store` | Not merely per-viewer but per-REQUEST: bodies that embed a credential, such as the HLS playlists in `content-api`'s `content-access.ts`, where a copy on the browser's own disk outlives the presigned URL inside it. Also a content detail page carrying a GATED body (`detailPageCacheHeaders` in `apps/web/src/lib/server/content-detail.ts`; owner decision 2026-10-25, Codex-hyz1c), so a reader who later loses access keeps no copy on disk or in the back/forward cache. A free or denied detail page stays `private`. |
 
 The apps/web view, `CACHE_HEADERS` name → preset name: `STATIC_PUBLIC` →
 `static`, `DYNAMIC_PUBLIC` → `public`, `PER_VIEWER` → `per-viewer`, `PRIVATE` →
