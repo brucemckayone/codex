@@ -120,6 +120,19 @@ jobs:
             test-worker:local \
             tests/integration/verify_cpu_transcode.py
 
+      # Real QuickTime sources (iPhone HEVC 10-bit HLG, ProRes 4:2:2, rotated
+      # portrait, 4:4:4, no-audio screen recording, timecode track, a 1.2 s
+      # clip), generated inside the image and encoded with ITS ffmpeg: every
+      # output must be H.264 High yuv420p at 48 kHz, sized by its short side,
+      # and described truthfully by the master playlist (Codex-l2c48.8).
+      - name: Verify QuickTime sources end to end
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/${{ env.WORKING_DIR }}/tests/integration:/app/tests/integration \
+            --entrypoint python3 \
+            test-worker:local \
+            tests/integration/verify_quicktime_outputs.py
+
       # --- Publish (main only) ---
       # The image published is the one verified above, not a second build.
       # Pointing the RunPod endpoint at it happens in deploy-production.yml,

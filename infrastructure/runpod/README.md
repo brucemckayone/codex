@@ -85,6 +85,22 @@ docker run --rm \
 
 *Note: This generates a dummy video file in `tests/assets` if one doesn't exist.*
 
+#### 3. QuickTime Sources End to End (Docker, or any ffmpeg >= 4.4)
+Generates the sources Apple devices and editors hand over (HEVC 10-bit HLG,
+ProRes 4:2:2, rotated portrait, 4:4:4, a no-audio screen recording, a
+timecode track, a 1.2 s clip), encodes each with the handler's own functions,
+and checks every output with ffprobe: H.264 High yuv420p, 48 kHz audio, rungs
+sized by their short side, a truthful master playlist, posters never
+upscaled. CI runs it inside the built image.
+
+```bash
+docker run --rm \
+  -v $(pwd)/tests/integration:/app/tests/integration \
+  --entrypoint python3 \
+  test-worker:local \
+  tests/integration/verify_quicktime_outputs.py
+```
+
 ## CI/CD Pipeline
 
 Two workflows share the work: the image is built where the transcoder changed,
