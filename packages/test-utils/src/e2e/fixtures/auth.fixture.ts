@@ -213,6 +213,14 @@ export const authFixture = {
     name?: string;
     role?: string;
   }): Promise<RegisteredUser> {
+    // Public sign-up never sets a role (Codex-cslai), and this path has no
+    // database to set one: a test asking for one must not run as a customer.
+    if (data.role && data.role !== 'customer') {
+      throw new Error(
+        `fast-register is unavailable, and public sign-up cannot give role "${data.role}"`
+      );
+    }
+
     // Step 1: Register via HTTP POST to /api/auth/sign-up/email
     const registerResponse = await httpClient.post(
       `${AUTH_URL}/api/auth/sign-up/email`,
@@ -224,7 +232,6 @@ export const authFixture = {
           email: data.email,
           password: data.password,
           name: data.name ?? data.email.split('@')[0],
-          role: data.role ?? 'customer',
         },
       }
     );
