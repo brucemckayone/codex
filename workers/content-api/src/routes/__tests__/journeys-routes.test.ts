@@ -183,6 +183,7 @@ const MEDIA_PRACTICE = {
   streamingUrl: null,
   waveformUrl: null,
   body: null,
+  bodyHtml: null,
   initialProgressSeconds: 0,
   playlist: [],
   completions: [],
@@ -1492,6 +1493,9 @@ describe('GET /api/journeys/courses/:courseId/practices/:contentSlug — in-cour
     expect(payload.data.streamingUrl).toBeNull();
     expect(payload.data.body).toEqual(WRITTEN_PRACTICE.body);
     expect(accessSpies.getStreamingUrl).not.toHaveBeenCalled();
+    // A stored body (or, for media, an HLS token) is stored nowhere, as
+    // /stream's (Codex-hyz1c).
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
   });
 
   it('NOT entitled → 200 { data: null }, practice read NEVER called', async () => {

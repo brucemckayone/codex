@@ -549,6 +549,19 @@ export type ProgressData = {
 };
 
 /**
+ * A content body as it is stored: TipTap JSON, or legacy markdown. Either may
+ * be null, and a piece may have neither. One shape from the service through
+ * the wire to the web, so "the body was not returned" (no `body`) never reads
+ * as "the piece has no body" (both null). Defined here, not in @codex/access,
+ * because the in-course payload in ./journeys carries it too; @codex/access
+ * re-exports it.
+ */
+export interface ContentBodySource {
+  contentBody: string | null;
+  contentBodyJson: Record<string, unknown> | null;
+}
+
+/**
  * Stripe checkout session response
  * Returned from ecom-api checkout creation endpoint
  */

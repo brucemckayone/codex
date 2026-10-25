@@ -182,7 +182,8 @@ app.get(
       // a per-user HLS token, and with `include=body` a gated piece's body, so
       // no copy of IT may outlive the request on any disk. That covers this
       // response only: the detail page that renders the body sends its own
-      // header (`CACHE_HEADERS.PRIVATE`), which keeps it out of shared caches.
+      // header, `private, no-store` too when it carries a gated body
+      // (`detailPageCacheHeaders`, Codex-hyz1c).
       cache: 'fresh',
     },
     input: {

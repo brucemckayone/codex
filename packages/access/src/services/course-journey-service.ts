@@ -1033,6 +1033,8 @@ export class CourseJourneyService extends BaseService {
         streamingUrl: null,
         waveformUrl: null,
         body,
+        // For one release only, for a web older than this worker (Codex-sb3sr).
+        bodyHtml: body?.contentBody ?? null,
         initialProgressSeconds: progressSeconds,
         playlist: flattenPlaylist(stages),
         completions,
@@ -4256,6 +4258,13 @@ export class CourseJourneyService extends BaseService {
    * but the player then refused to open it). "Released" is `publishedAt` set
    * (it is never cleared when a course goes back to draft), or `published` for
    * a legacy row without one. A course that was never released does not open.
+   *
+   * Nor does a course of a deleted organisation, to anyone (owner decision,
+   * 2026-10-25: "Nobody"; Codex-7ncbh). Soft-deleting an org leaves its
+   * courses and their entitlements in place, and a written practice reaches
+   * its reader through this read alone (no stream), so the dashboard and the
+   * player both stop here. `courses.organization_id` is NOT NULL, so the join
+   * always finds the org row.
    */
   private async loadCourseSummaryById(
     courseId: string
@@ -4277,7 +4286,8 @@ export class CourseJourneyService extends BaseService {
             eq(courses.status, CONTENT_STATUS.PUBLISHED),
             isNotNull(courses.publishedAt)
           ),
-          isNull(courses.deletedAt)
+          isNull(courses.deletedAt),
+          isNull(organizations.deletedAt)
         )
       )
       .limit(1);
@@ -4629,7 +4639,7 @@ export class CourseJourneyService extends BaseService {
     contentId: string
   ): Promise<InCoursePracticeData['body']> {
     const row = await this.db.query.content.findFirst({
-      where: eq(content.id, contentId),
+      where: and(eq(content.id, contentId), isNull(content.deletedAt)),
       columns: { contentBody: true, contentBodyJson: true },
     });
     if (!row) return null;

@@ -537,6 +537,9 @@ function applyPublicationRule(
 ): AccessDecision {
   if (!decision.granted) return decision;
   if (policy.status === CONTENT_STATUS.PUBLISHED) return decision;
+  // Also where a SOLD item lands once detached from its org: migration 0004's
+  // trigger makes it a draft and nulls published_at. Denied either way
+  // (Codex-7ncbh, "Nobody"); read a `never_released` refusal of a buyer as that.
   if (!isReleased(policy)) return deny('never_released');
   if (subscriptionCoversOffSaleItem(decision, policy.offSaleAt)) {
     return decision;

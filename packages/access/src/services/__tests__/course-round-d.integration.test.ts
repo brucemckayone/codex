@@ -761,6 +761,43 @@ describe('Round-D read services (Codex-776gg)', () => {
       expect(fromMedia?.body).toBeNull();
     });
 
+    // Owner decision, 2026-10-25: "Nobody" (Codex-7ncbh). A written practice
+    // reaches its reader through this read alone, so a deleted org's course
+    // must stop here, for the dashboard and the player both.
+    it("a deleted organisation's course opens for no one: dashboard and player both null", async () => {
+      const journey = new CourseJourneyService({ db, environment: 'test' });
+      const [doomedOrg] = await db
+        .insert(organizations)
+        .values({ name: 'Doomed Org', slug: createUniqueSlug('doomed') })
+        .returning({ id: organizations.id });
+      if (!doomedOrg) throw new Error('failed to create org');
+      const course = await createCourse(db, doomedOrg.id, creatorId, {
+        status: 'published',
+      });
+      const stage = await createStage(db, course.id, 1);
+      const written = await addPractice(db, {
+        creatorId,
+        organizationId: doomedOrg.id,
+        stageId: stage,
+        sortOrder: 1,
+        written: { contentBody: 'the paid text', contentBodyJson: null },
+      });
+      // The control: it opens while the org is live.
+      expect(
+        await journey.getInCoursePractice(u1, course.id, written.slug)
+      ).not.toBeNull();
+
+      await db
+        .update(organizations)
+        .set({ deletedAt: new Date() })
+        .where(eq(organizations.id, doomedOrg.id));
+
+      expect(
+        await journey.getInCoursePractice(u1, course.id, written.slug)
+      ).toBeNull();
+      expect(await journey.getCourseDashboard(u1, course.id)).toBeNull();
+    });
+
     it('listEnrolledCourses: strictly scoped to the caller — user A never sees user B enrollments (IDOR)', async () => {
       const journey = new CourseJourneyService({ db, environment: 'test' });
       const courseX = await createCourse(db, orgAId, creatorId, {

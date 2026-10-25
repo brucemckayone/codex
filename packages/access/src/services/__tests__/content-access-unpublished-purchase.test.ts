@@ -40,6 +40,7 @@ import type { GetStreamingUrlInput } from '@codex/validation';
 import { and, eq, isNull } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccessDeniedError, ContentNotFoundError } from '../../errors';
+import type { AccessRevocation } from '../access-revocation';
 import { ContentAccessService } from '../ContentAccessService';
 import { resolveDisputePause } from '../content-access/access-decision';
 
@@ -83,7 +84,11 @@ function createStubDb() {
   return { mocks, transaction };
 }
 
-function buildService(stub: ReturnType<typeof createStubDb>) {
+function buildService(
+  stub: ReturnType<typeof createStubDb>,
+  /** Wire the KV revocation check, reporting this block (Codex-7ncbh case). */
+  options: { revokedFor?: string } = {}
+) {
   const { obs } = createMockObservability();
   const dbForService = {
     query: stub.mocks,
@@ -92,6 +97,9 @@ function buildService(stub: ReturnType<typeof createStubDb>) {
   } as unknown as ServiceConfig['db'];
 
   const verifyPurchase = vi.fn(async () => false);
+  const isRevoked = vi.fn(async () =>
+    options.revokedFor ? { reason: options.revokedFor } : null
+  );
   const service = new ContentAccessService({
     db: dbForService,
     environment: 'test',
@@ -102,9 +110,12 @@ function buildService(stub: ReturnType<typeof createStubDb>) {
     purchaseService: { verifyPurchase } as unknown as PurchaseService,
     contentApiBaseUrl: 'https://api.revelations.studio',
     hlsTokenSecret: 'test-worker-shared-secret',
+    ...(options.revokedFor
+      ? { revocation: { isRevoked } as unknown as AccessRevocation }
+      : {}),
   });
   (service as unknown as { obs: typeof obs }).obs = obs;
-  return { service, verifyPurchase, db: dbForService };
+  return { service, verifyPurchase, isRevoked, db: dbForService };
 }
 
 const userId = 'user_abc';
@@ -328,6 +339,22 @@ describe('Codex-p3m5j: a one-off purchase outlives unpublication', () => {
       ).rejects.toThrow(ContentNotFoundError);
       expect(verifyPurchase).not.toHaveBeenCalled();
       expect(stub.mocks.purchases.findFirst).not.toHaveBeenCalled();
+    });
+
+    // The KV revocation check runs first. Answered there, a deleted org's
+    // item would be a 403 naming the block's reason (a paused dispute
+    // included) and the org, not the uniform 404.
+    it("a revoked reader of a deleted organisation's item gets the 404, not the revocation", async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(ofDeletedOrg());
+      noRelationships(stub);
+      const { service, isRevoked } = buildService(stub, {
+        revokedFor: 'purchase_dispute',
+      });
+
+      await expect(
+        service.getStreamingUrl(userId, streamingInput)
+      ).rejects.toThrow(ContentNotFoundError);
+      expect(isRevoked).not.toHaveBeenCalled();
     });
 
     it("hasContentAccess is false for a deleted organisation's item, even to its buyer", async () => {

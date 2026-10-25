@@ -40,7 +40,9 @@ import {
   gt,
   ilike,
   inArray,
+  isNotNull,
   isNull,
+  notExists,
   or,
   type SQL,
   sql,
@@ -272,7 +274,24 @@ export async function listUserLibrary(
 
   // ── Step 2: Build shared filter conditions ────────────────────────
   const buildContentFilters = () => {
-    const conditions: ReturnType<typeof eq>[] = [];
+    // A deleted organisation's content is gone to every arm (owner decision,
+    // 2026-10-25: "Nobody"; Codex-7ncbh), so it leaves the shelf too rather
+    // than linger as a card that 404s. An anti-join, as content-service's
+    // orgIsLive, so it holds whatever each union branch joins; orgless
+    // content has no org row to match and stays.
+    const conditions: ReturnType<typeof eq>[] = [
+      notExists(
+        db
+          .select({ one: sql`1` })
+          .from(organizations)
+          .where(
+            and(
+              eq(organizations.id, content.organizationId),
+              isNotNull(organizations.deletedAt)
+            )
+          )
+      ),
+    ];
     if (input.contentType && input.contentType !== 'all') {
       conditions.push(eq(content.contentType, input.contentType));
     }

@@ -428,6 +428,9 @@ app.get(
     policy: {
       auth: 'required',
       rateLimit: 'api', // 100 req/min
+      // `private, no-store`, as /stream: this carries a written practice's
+      // stored body or a per-user HLS token (Codex-hyz1c).
+      cache: 'fresh',
     },
     input: {
       params: inCoursePracticeParamsSchema,

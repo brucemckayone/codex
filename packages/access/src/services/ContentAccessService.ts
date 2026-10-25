@@ -400,14 +400,20 @@ export class ContentAccessService
             isNull(content.deletedAt)
           ),
           columns: { organizationId: true },
+          with: { organization: { columns: { deletedAt: true } } },
         });
 
         // Personal content (no organizationId) can't be revoked at the org
         // scope — fall through to the transaction below. The content row
-        // may also be missing entirely (not found / deleted); let the
-        // transaction surface `ContentNotFoundError` with consistent
-        // context rather than duplicating the 404 path here.
-        const orgId = contentRow?.organizationId ?? null;
+        // may also be missing entirely (not found / deleted), or belong to a
+        // deleted org (Codex-7ncbh); let the transaction surface
+        // `ContentNotFoundError` with consistent context rather than
+        // duplicating the 404 path here. A revocation answered first would
+        // name its reason, a paused dispute included, for an item that is
+        // gone.
+        const orgId = isOfDeletedOrg(contentRow)
+          ? null
+          : (contentRow?.organizationId ?? null);
         if (orgId) {
           const revocation = await this.revocation.isRevoked(userId, orgId);
           if (revocation) {
@@ -604,7 +610,7 @@ export class ContentAccessService
             },
           });
           // A deleted org's pieces are gone with it, as on the public list.
-          if (!found || found.organization?.deletedAt != null) {
+          if (!found || isOfDeletedOrg(found)) {
             throw notFound();
           }
 
