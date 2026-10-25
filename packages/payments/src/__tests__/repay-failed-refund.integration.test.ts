@@ -55,6 +55,7 @@ import {
 import {
   repayDispute,
   repayFailedRefund,
+  type StrandedStep,
   settleUnfinishedRefundSteps,
 } from '../repay';
 
@@ -217,8 +218,11 @@ describe('repayFailedRefund (creators_repaid)', () => {
     return refund;
   }
 
-  /** Support's settlement, as the route runs it: one transaction. */
-  function settle(refundId: string) {
+  /**
+   * Support's settlement, as the route runs it: one transaction, given the
+   * pre-step's `unlanded` steps.
+   */
+  function settle(refundId: string, unlanded?: readonly StrandedStep[]) {
     const now = new Date();
     return db.transaction(async (tx) => {
       const repaid = await repayFailedRefund(tx, {
@@ -226,6 +230,8 @@ describe('repayFailedRefund (creators_repaid)', () => {
         resolvedByUserId: supportId,
         note: NOTE,
         now,
+        chargeAmountCents: 1000,
+        unlanded,
       });
       await tx
         .update(refunds)
@@ -337,6 +343,7 @@ describe('repayFailedRefund (creators_repaid)', () => {
         resolvedByUserId: supportId,
         note: NOTE,
         now: new Date(),
+        chargeAmountCents: 1000,
       })
     );
 
@@ -450,7 +457,7 @@ describe('repayFailedRefund (creators_repaid)', () => {
     // The cron retries it within the hour: the pre-step leaves it alone.
     expect(
       await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
-    ).toEqual({ landed: 0, cancelled: 0, forPerson: 0 });
+    ).toEqual({ landed: 0, unlanded: [], forPerson: 0 });
     const error = await settle(refund.id).catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(BusinessLogicError);
@@ -494,13 +501,19 @@ describe('repayFailedRefund (creators_repaid)', () => {
     return { charge, org, refund, step };
   }
 
-  it('a step Stripe refused on every try, with no reversal at Stripe, is cancelled by the pre-step, and the rest is re-paid', async () => {
+  it('a step Stripe refused on every try, with no reversal at Stripe, is listed by the pre-step and cancelled by the settlement; the rest is re-paid', async () => {
     const { org, refund, step } = await exhaustedStep();
 
+    const checked = await settleUnfinishedRefundSteps(deps, {
+      stripeRefundId: refund.id,
+    });
+    expect(checked).toMatchObject({ landed: 0, forPerson: 0 });
+    expect(checked.unlanded.map((s) => s.id)).toEqual([step.id]);
+    // Listed, not cancelled: that is the settlement's decision.
     expect(
-      await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
-    ).toEqual({ landed: 0, cancelled: 1, forPerson: 0 });
-    const repaid = await settle(refund.id);
+      (await stepsOf(refund.id)).find((s) => s.id === step.id)?.status
+    ).toBe('failed');
+    const repaid = await settle(refund.id, checked.unlanded);
 
     expect(stripe.transfers.listReversals).toHaveBeenCalled();
     expect(
@@ -530,7 +543,7 @@ describe('repayFailedRefund (creators_repaid)', () => {
 
     expect(
       await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
-    ).toEqual({ landed: 1, cancelled: 0, forPerson: 0 });
+    ).toEqual({ landed: 1, unlanded: [], forPerson: 0 });
     const repaid = await settle(refund.id);
 
     expect(
@@ -562,7 +575,7 @@ describe('repayFailedRefund (creators_repaid)', () => {
 
     expect(
       await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
-    ).toEqual({ landed: 0, cancelled: 0, forPerson: 0 });
+    ).toEqual({ landed: 0, unlanded: [], forPerson: 0 });
     const error = await settle(refund.id).catch((e: unknown) => e);
 
     expect((error as BusinessLogicError).context).toEqual({
@@ -611,10 +624,12 @@ describe('repayFailedRefund (creators_repaid)', () => {
       metadata: { payout_reversal_id: landed.id },
     });
 
-    expect(
-      await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
-    ).toEqual({ landed: 1, cancelled: 1, forPerson: 0 });
-    const repaid = await settle(refund.id);
+    const checked = await settleUnfinishedRefundSteps(deps, {
+      stripeRefundId: refund.id,
+    });
+    expect(checked).toMatchObject({ landed: 1, forPerson: 0 });
+    expect(checked.unlanded.map((s) => s.id)).toEqual([lost.id]);
+    const repaid = await settle(refund.id, checked.unlanded);
 
     const steps = await stepsOf(refund.id);
     expect(steps.find((s) => s.id === landed.id)?.status).toBe('done');
@@ -622,7 +637,102 @@ describe('repayFailedRefund (creators_repaid)', () => {
     expect(repaid.map((r) => r.amountCents).sort()).toEqual([135, 765]);
   });
 
-  it('an unfinished cancellation on a slice already cancelled is left for a person, logged, and the settlement still refuses', async () => {
+  it('a refused settlement leaves an unlanded step as it was, for a redelivery to finish (LOW-B)', async () => {
+    const charge = newCharge();
+    await slice(charge, 'organization_fee', 135);
+    const refund = await failedRefund(charge, 1000);
+    const lost = await claimedLongAgo(
+      refund,
+      await slice(charge, 'creator_payout', 765),
+      'transfer_reversal'
+    );
+    const checked = await settleUnfinishedRefundSteps(deps, {
+      stripeRefundId: refund.id,
+    });
+    expect(checked.unlanded.map((s) => s.id)).toEqual([lost.id]);
+    // A chargeback recorded after the check: the settlement refuses.
+    const disputeId = `dp_repay_${uid()}`;
+    createdDisputeIds.push(disputeId);
+    await db.insert(disputes).values({
+      stripeDisputeId: disputeId,
+      stripeChargeId: charge.id,
+      amountCents: 1000,
+      currency: 'gbp',
+      status: 'needs_response',
+      stripeCreatedAt: new Date(),
+    });
+
+    const error = await settle(refund.id, checked.unlanded).catch(
+      (e: unknown) => e
+    );
+
+    expect((error as BusinessLogicError).context).toMatchObject({
+      code: 'REPAY_BLOCKED_BY_LATER_CAUSE',
+    });
+    expect(
+      (await stepsOf(refund.id)).find((s) => s.id === lost.id)
+    ).toMatchObject({ status: 'pending' });
+  });
+
+  it('an unlanded step that moved after the check (a redelivery tried it again) is not cancelled: the settlement refuses (LOW-B)', async () => {
+    const { refund, step } = await exhaustedStep();
+    const checked = await settleUnfinishedRefundSteps(deps, {
+      stripeRefundId: refund.id,
+    });
+    expect(checked.unlanded.map((s) => s.id)).toEqual([step.id]);
+    // A redelivery claims it and fails without an answer from Stripe: the step
+    // reads as it did before, except that it moved.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await db
+      .update(payoutReversals)
+      .set({ attemptedAt: new Date() })
+      .where(eq(payoutReversals.id, step.id));
+    await db
+      .update(payoutReversals)
+      .set({ attemptedAt: null })
+      .where(eq(payoutReversals.id, step.id));
+
+    const error = await settle(refund.id, checked.unlanded).catch(
+      (e: unknown) => e
+    );
+
+    expect((error as BusinessLogicError).context).toEqual({
+      code: 'REFUND_CLAWBACK_UNFINISHED',
+      unfinishedSteps: 1,
+    });
+    expect(
+      (await stepsOf(refund.id)).find((s) => s.id === step.id)
+    ).toMatchObject({ status: 'failed', attempt: MAX_CLAWBACK_ATTEMPTS });
+  });
+
+  it('a later refund recorded after the caller checked Stripe blocks the re-pay inside the transaction (LOW-D)', async () => {
+    const charge = newCharge();
+    await slice(charge, 'creator_payout', 900);
+    const refund = await failedRefund(charge, 1000);
+    // R2, made in the Dashboard a moment ago: recorded by its webhook.
+    const later = `re_repay_${uid()}`;
+    createdRefundIds.push(later);
+    await db.insert(refunds).values({
+      stripeRefundId: later,
+      stripeChargeId: charge.id,
+      amountCents: 1000,
+      currency: 'gbp',
+      status: 'succeeded',
+      stripeCreatedAt: new Date(Date.now() + 60_000),
+    });
+
+    const error = await settle(refund.id).catch((e: unknown) => e);
+
+    expect((error as BusinessLogicError).context).toEqual({
+      code: 'REPAY_BLOCKED_BY_LATER_CAUSE',
+      reason: 'later_refunds',
+    });
+    expect(
+      (await stepsOf(refund.id)).every((s) => s.repaidByPayoutId === null)
+    ).toBe(true);
+  });
+
+  it('an unfinished cancellation on a slice already cancelled is left for a person, logged, and the settlement says a person must check it (LOW-C)', async () => {
     const charge = newCharge();
     await slice(charge, 'organization_fee', 135);
     const refund = await failedRefund(charge, 1000);
@@ -634,18 +744,25 @@ describe('repayFailedRefund (creators_repaid)', () => {
     );
     const step = await claimedLongAgo(refund, cancelled, 'cancellation');
 
-    expect(
-      await settleUnfinishedRefundSteps(deps, { stripeRefundId: refund.id })
-    ).toEqual({ landed: 0, cancelled: 0, forPerson: 1 });
-    const error = await settle(refund.id).catch((e: unknown) => e);
+    const checked = await settleUnfinishedRefundSteps(deps, {
+      stripeRefundId: refund.id,
+    });
+    expect(checked).toEqual({ landed: 0, unlanded: [], forPerson: 1 });
+    const error = await settle(refund.id, checked.unlanded).catch(
+      (e: unknown) => e
+    );
 
     expect(obs.error).toHaveBeenCalledWith(
       expect.stringContaining('a person must decide'),
       expect.objectContaining({ payoutReversalId: step.id })
     );
-    expect((error as BusinessLogicError).context).toMatchObject({
-      code: 'REFUND_CLAWBACK_UNFINISHED',
+    expect((error as BusinessLogicError).context).toEqual({
+      code: 'REFUND_CLAWBACK_NEEDS_PERSON',
+      steps: 1,
     });
+    expect((error as BusinessLogicError).message).toMatch(
+      /Trying again will not help/
+    );
   });
 
   it('a debt with no review (a slice with no payee) is cancelled, so it never reads "owed"', async () => {
@@ -902,6 +1019,7 @@ describe('repayFailedRefund (creators_repaid)', () => {
           resolvedByUserId: supportId,
           note: NOTE,
           now: new Date(),
+          chargeAmountCents: 1000,
         });
         await tx
           .update(refunds)

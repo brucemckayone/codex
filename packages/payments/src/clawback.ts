@@ -222,12 +222,55 @@ export async function listClawableRefunds(
       amountCents: refund.amount,
       createdAt: refund.created,
     }))
-    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    .sort(inRefundOrder);
+}
+
+/** Stripe's order of a charge's refunds: by `created`, then by id. */
+function inRefundOrder(a: ClawbackRefund, b: ClawbackRefund): number {
+  return a.createdAt - b.createdAt || a.id.localeCompare(b.id);
 }
 
 /** Settled at Stripe, whichever way: see `ClawbackRefund`. */
+const CLAWABLE_REFUND_STATUSES = ['succeeded', 'failed'];
+
 function isClawable(status: string | null): boolean {
-  return status === 'succeeded' || status === 'failed';
+  return status !== null && CLAWABLE_REFUND_STATUSES.includes(status);
+}
+
+/**
+ * The charge's refunds the clawback counts, as the refund webhooks have
+ * recorded them in `refunds`: settled (`listClawableRefunds`' rule), less
+ * those support re-paid, in Stripe's order. No Stripe call, so a failed
+ * refund's re-pay re-checks its block with it INSIDE its transaction
+ * (`repayFailedRefund`). Every refund is recorded here before its clawback
+ * runs.
+ */
+export async function recordedClawableRefunds(
+  db: Client,
+  chargeId: string
+): Promise<ClawbackRefund[]> {
+  const rows = await db
+    .select({
+      id: refunds.stripeRefundId,
+      amountCents: refunds.amountCents,
+      createdAt: refunds.stripeCreatedAt,
+    })
+    .from(refunds)
+    .where(
+      and(
+        eq(refunds.stripeChargeId, chargeId),
+        inArray(refunds.status, CLAWABLE_REFUND_STATUSES),
+        sql`${refunds.amountCents} > 0`,
+        sql`${refunds.resolution} IS DISTINCT FROM 'creators_repaid'`
+      )
+    );
+  return rows
+    .map((row) => ({
+      id: row.id,
+      amountCents: row.amountCents,
+      createdAt: Math.floor(row.createdAt.getTime() / 1000),
+    }))
+    .sort(inRefundOrder);
 }
 
 /**

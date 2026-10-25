@@ -36,9 +36,11 @@ import {
   type ClawbackSource,
   cancelUnclaimedStep,
   chargebacksFor,
+  failedRefundRepayBlock,
   listClawableRefunds,
   MAX_CLAWBACK_ATTEMPTS,
   type RepayBlockReason,
+  recordedClawableRefunds,
   reverseCharge,
   settleIfFullyReversed,
 } from './clawback';
@@ -92,7 +94,7 @@ export async function repayDispute(
   input: { disputeId: string }
 ): Promise<DisputeRepayResult> {
   const steps = await deps.db
-    .select({ record: payoutReversals, slice: payouts })
+    .select({ record: payoutReversals, slice: payouts, version: stepVersion() })
     .from(payoutReversals)
     .innerJoin(payouts, eq(payoutReversals.payoutId, payouts.id))
     .where(
@@ -108,7 +110,7 @@ export async function repayDispute(
     debtsClosed: 0,
   };
   let busy = 0;
-  for (const { record, slice } of steps) {
+  for (const { record, slice, version } of steps) {
     if (record.kind === 'retained_fee') {
       if (record.status === 'cancelled') continue;
       // Not under a clawback that claimed it before the win: it would mark
@@ -150,7 +152,7 @@ export async function repayDispute(
         // `reversed`, so totals count its re-pay row and not it as well.
         await settleIfFullyReversed(deps, slice.id);
         if (await writeRepay(deps.db, done, slice)) result.repaid++;
-      } else if (await cancelUnfinished(deps, record)) {
+      } else if (await cancelUnfinished(deps.db, record.id, version)) {
         result.cancelled++;
       } else {
         busy++;
@@ -258,6 +260,20 @@ const PAYEE_STEP_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The codes a refused `creators_repaid` settlement carries: the context
+ * `code` of its `BusinessLogicError` (422). Each tells support something
+ * different to do.
+ */
+export const REFUND_REPAY_CODES = {
+  /** A later cause was shared against the refund: settle by hand, or mark it refunded elsewhere. */
+  BLOCKED_BY_LATER_CAUSE: 'REPAY_BLOCKED_BY_LATER_CAUSE',
+  /** A step of its clawback is still running: try again later. */
+  CLAWBACK_UNFINISHED: 'REFUND_CLAWBACK_UNFINISHED',
+  /** A step only a person can read: retrying will not help. */
+  CLAWBACK_NEEDS_PERSON: 'REFUND_CLAWBACK_NEEDS_PERSON',
+} as const;
+
+/**
  * The typed refusal of a `creators_repaid` settlement that a later cause was
  * shared against (`failedRefundRepayBlock`; owner decision 2026-10-25). A 422
  * whose context is the code and the reason only. Support's route throws it
@@ -271,8 +287,19 @@ export function repayBlockedError(
     reason === 'chargeback'
       ? 'This charge has a chargeback, which was shared against this refund. Settle it by hand, or mark it refunded elsewhere.'
       : 'A later refund of this charge was shared against this one. Settle it by hand, or mark it refunded elsewhere.',
-    { code: 'REPAY_BLOCKED_BY_LATER_CAUSE', reason }
+    { code: REFUND_REPAY_CODES.BLOCKED_BY_LATER_CAUSE, reason }
   );
+}
+
+/**
+ * A step `settleUnfinishedRefundSteps` checked with Stripe and found no
+ * reversal for, as it read it. `repayFailedRefund` cancels it only if it is
+ * still that version.
+ */
+export interface StrandedStep {
+  id: string;
+  /** Its `updated_at` in microseconds (`stepVersion`). */
+  version: string;
 }
 
 /**
@@ -290,19 +317,23 @@ export function repayBlockedError(
  * The caller runs, in this order: `failedRefundRepayBlock`, then
  * `settleUnfinishedRefundSteps` (it asks Stripe, so it is outside the
  * transaction), then this, inside the transaction that locks the `refunds`
- * row and records the resolution. The settlement commits whole or not at all.
- * Once it has, the clawback leaves the refund out (`withoutRepaidRefunds`).
+ * row and records the resolution, passing the pre-step's `unlanded` steps and
+ * the charge's amount. The settlement commits whole or not at all. Once it
+ * has, the clawback leaves the refund out (`withoutRepaidRefunds`).
  *
  * Owner rules (2026-10-24, 2026-10-25):
  *
- * 1. A step that can never move money is cancelled. One never claimed (it
- *    never reached Stripe) is cancelled here. One no retry will ever run (a
- *    lease that ran out, or out of attempts) is settled first by
- *    `settleUnfinishedRefundSteps`: done if Stripe made its reversal, else
- *    cancelled. Any step still pending or failed here is still running (a
- *    retry is due, or a delivery holds it), so this throws
- *    `REFUND_CLAWBACK_UNFINISHED` and the caller's transaction rolls back:
- *    support tries again later.
+ * 1. A step that can never move money is cancelled, here, so a refused
+ *    settlement leaves it to be finished. One never claimed never reached
+ *    Stripe. One no retry will run (a lease that ran out, or out of attempts)
+ *    is checked with Stripe first by `settleUnfinishedRefundSteps`, which
+ *    records a reversal Stripe made as `done`, and lists the rest as
+ *    `unlanded`; each of those is cancelled only if it has not moved since
+ *    (compare-and-set). Any other step still pending or failed is still
+ *    running (a retry is due, a delivery holds it, or it moved since the
+ *    check), so this throws `REFUND_CLAWBACK_UNFINISHED`: support tries again
+ *    later. One the ledger cannot read (`needsAPerson`) throws
+ *    `REFUND_CLAWBACK_NEEDS_PERSON` instead, because retrying will not help.
  * 2. A debt the payee already settled (`creator_absorbed`,
  *    `manually_reversed`) gets a re-pay row too; one the platform wrote off
  *    (`platform_absorbed`) gets nothing. The refund's open debts close as
@@ -311,9 +342,14 @@ export function repayBlockedError(
  * 3. The platform fee's share (`retained_fee`) is cancelled, and a fee slice
  *    it had marked `reversed` is `paid` again, with no re-pay row: the money is
  *    back in the platform's balance.
- * 4. A chargeback open or lost on the charge refuses the settlement
- *    (`repayBlockedError('chargeback')`), re-read here because one can open
- *    after the caller's check.
+ * 4. A later cause shared against the refund refuses the settlement
+ *    (`repayBlockedError`). The caller checks it on Stripe's list. This checks
+ *    it again from the recorded `refunds` and `disputes`, because a chargeback
+ *    or a refund can be recorded after the caller's check. What remains is a
+ *    refund or chargeback recorded after this read, whose clawback runs before
+ *    the commit. That clawback reads this refund's resolution without a lock,
+ *    so it still counts this refund, for the length of this transaction
+ *    (under a second).
  */
 export async function repayFailedRefund(
   tx: Tx,
@@ -322,6 +358,10 @@ export async function repayFailedRefund(
     resolvedByUserId: string;
     note: string;
     now: Date;
+    /** The charge's amount, from Stripe: the running total's cap. */
+    chargeAmountCents: number;
+    /** `settleUnfinishedRefundSteps`' `unlanded`: cancelled if unchanged. */
+    unlanded?: readonly StrandedStep[];
   }
 ): Promise<FailedRefundRepay[]> {
   const [refund] = await tx
@@ -334,9 +374,13 @@ export async function repayFailedRefund(
       stripeRefundId: input.stripeRefundId,
     });
   }
-  if ((await chargebacksFor(tx, refund.chargeId)).length > 0) {
-    throw repayBlockedError('chargeback');
-  }
+  const blocked = failedRefundRepayBlock({
+    chargeAmountCents: input.chargeAmountCents,
+    refunds: await recordedClawableRefunds(tx, refund.chargeId),
+    chargebacks: await chargebacksFor(tx, refund.chargeId),
+    stripeRefundId: input.stripeRefundId,
+  });
+  if (blocked) throw repayBlockedError(blocked);
 
   const steps = await tx
     .select({ record: payoutReversals, payout: payouts })
@@ -349,15 +393,35 @@ export async function repayFailedRefund(
       )
     );
 
+  const checked = new Map(
+    (input.unlanded ?? []).map((step) => [step.id, step.version])
+  );
   let unfinished = 0;
-  for (const { record } of steps) {
+  let forPerson = 0;
+  for (const { record, payout } of steps) {
     if (record.status !== 'pending' && record.status !== 'failed') continue;
-    if (!(await cancelUnclaimedStep(tx, record.id))) unfinished++;
+    if (needsAPerson(record, payout)) {
+      forPerson++;
+      continue;
+    }
+    if (await cancelUnclaimedStep(tx, record.id)) continue;
+    const version = checked.get(record.id);
+    if (version && (await cancelUnfinished(tx, record.id, version))) continue;
+    unfinished++;
+  }
+  if (forPerson > 0) {
+    throw new BusinessLogicError(
+      "A person must check this refund's clawback before it can be re-paid. Trying again will not help.",
+      { code: REFUND_REPAY_CODES.CLAWBACK_NEEDS_PERSON, steps: forPerson }
+    );
   }
   if (unfinished > 0) {
     throw new BusinessLogicError(
       "This refund's clawback is still running. Try again later.",
-      { code: 'REFUND_CLAWBACK_UNFINISHED', unfinishedSteps: unfinished }
+      {
+        code: REFUND_REPAY_CODES.CLAWBACK_UNFINISHED,
+        unfinishedSteps: unfinished,
+      }
     );
   }
 
@@ -429,34 +493,36 @@ export async function repayFailedRefund(
   return repaid;
 }
 
-/** What `settleUnfinishedRefundSteps` did. */
+/** What `settleUnfinishedRefundSteps` found. */
 export interface UnfinishedRefundSteps {
   /** Steps whose reversal Stripe had made: recorded `done`, so they are re-paid. */
   landed: number;
-  /** Steps no retry will run, which took nothing: cancelled. */
-  cancelled: number;
-  /** Steps the ledger cannot read, logged for a person: the settlement still refuses. */
+  /** Steps Stripe has no reversal for: pass them to `repayFailedRefund`, which cancels them. */
+  unlanded: StrandedStep[];
+  /** Steps the ledger cannot read, logged for a person: the settlement refuses them. */
   forPerson: number;
 }
 
 /**
- * Settle the steps of a failed refund that no retry will ever run, before its
- * `creators_repaid` settlement (Codex-2hxff.28, silent F3 and money LOW-4). It
- * asks Stripe, so the caller runs it BEFORE the settlement's transaction. It
- * is safe to repeat.
+ * Check with Stripe the steps of a failed refund that no retry will ever run,
+ * before its `creators_repaid` settlement (Codex-2hxff.28, silent F3, money
+ * LOW-4 and LOW-B). It asks Stripe, so the caller runs it BEFORE the
+ * settlement's transaction. It is safe to repeat.
  *
  * Such a step is either `pending` with a lease that ran out (the delivery
  * that claimed it died), or `failed` and out of attempts, so the cron no
  * longer selects it. Its last try may have landed at Stripe, so, as for a won
  * dispute (`repayDispute`):
  *
- * - a transfer reversal Stripe made for it is recorded `done`, and the
- *   settlement then re-pays it;
+ * - a transfer reversal Stripe made for it is recorded `done` here. That is
+ *   true whatever the settlement decides, and the settlement then re-pays it;
  * - one Stripe has no reversal for, and a reduction or a fee share (database
- *   only, so an unfinished one did nothing), is cancelled;
+ *   only, so an unfinished one did nothing), is returned in `unlanded` with
+ *   the version that was checked, NOT cancelled. Cancelling is the
+ *   settlement's decision: `repayFailedRefund` cancels it in its transaction,
+ *   so a refused settlement leaves it for a redelivery to finish;
  * - a cancellation whose slice is already `cancelled_by_refund` is left
- *   alone and logged for a person. The ledger cannot tell whether this step's
- *   cancel took the slice, or whether a transfer it then reversed went out.
+ *   alone and logged for a person (`needsAPerson`).
  *
  * A step never claimed, a step due another retry, and a step a delivery holds
  * are left as they are. The settlement cancels the first and refuses the
@@ -469,7 +535,11 @@ export async function settleUnfinishedRefundSteps(
   input: { stripeRefundId: string }
 ): Promise<UnfinishedRefundSteps> {
   const steps = await deps.db
-    .select({ record: payoutReversals, payout: payouts })
+    .select({
+      record: payoutReversals,
+      payout: payouts,
+      version: stepVersion(),
+    })
     .from(payoutReversals)
     .innerJoin(payouts, eq(payoutReversals.payoutId, payouts.id))
     .where(
@@ -481,11 +551,24 @@ export async function settleUnfinishedRefundSteps(
     );
   const result: UnfinishedRefundSteps = {
     landed: 0,
-    cancelled: 0,
+    unlanded: [],
     forPerson: 0,
   };
-  for (const { record, payout } of steps) {
+  for (const { record, payout, version } of steps) {
     if (!isStranded(record)) continue;
+    if (needsAPerson(record, payout)) {
+      result.forPerson++;
+      deps.obs.error(
+        "A failed refund's cancellation step never finished, and its slice is cancelled: a person must decide whether it took the slice before the refund is re-paid",
+        {
+          errorId: crypto.randomUUID(),
+          stripeRefundId: input.stripeRefundId,
+          payoutReversalId: record.id,
+          payoutId: payout.id,
+        }
+      );
+      continue;
+    }
     if (record.kind === 'transfer_reversal' && payout.stripeTransferId) {
       const landed = await findLandedReversal(
         deps,
@@ -499,25 +582,24 @@ export async function settleUnfinishedRefundSteps(
         }
         continue;
       }
-    } else if (
-      record.kind === 'cancellation' &&
-      payout.status === 'cancelled_by_refund'
-    ) {
-      result.forPerson++;
-      deps.obs.error(
-        "A failed refund's cancellation step never finished, and its slice is cancelled: a person must decide whether it took the slice before the refund is re-paid",
-        {
-          errorId: crypto.randomUUID(),
-          stripeRefundId: input.stripeRefundId,
-          payoutReversalId: record.id,
-          payoutId: payout.id,
-        }
-      );
-      continue;
     }
-    if (await cancelUnfinished(deps, record)) result.cancelled++;
+    result.unlanded.push({ id: record.id, version });
   }
   return result;
+}
+
+/**
+ * A step the ledger cannot read: a cancellation no retry will run whose slice
+ * is already `cancelled_by_refund`. It cannot tell whether this step's cancel
+ * took the slice, or whether a transfer it then reversed went out, so a
+ * person must look (`REFUND_CLAWBACK_NEEDS_PERSON`).
+ */
+function needsAPerson(record: PayoutReversal, payout: Payout): boolean {
+  return (
+    isStranded(record) &&
+    record.kind === 'cancellation' &&
+    payout.status === 'cancelled_by_refund'
+  );
 }
 
 /**
@@ -681,20 +763,38 @@ async function writeRepay(
   }
 }
 
-/** Cancel a step Stripe has no reversal for, if no delivery holds it. */
+/**
+ * A step's version: its `updated_at` in microseconds, as text. Every write to
+ * a step moves it (`$onUpdate`), so an equal version means the step has not
+ * changed since it was read. `attempt` and `attempted_at` alone cannot say
+ * that: a claim followed by a failure Stripe did not confirm puts both back
+ * as they were. Microseconds, because a JS Date drops them.
+ */
+function stepVersion() {
+  return sql<string>`(extract(epoch from ${payoutReversals.updatedAt}) * 1000000)::bigint::text`;
+}
+
+/**
+ * Cancel a step Stripe has no reversal for, if no delivery holds it and it is
+ * still the version that was checked: compare-and-set (money LOW-B). A step
+ * that moved since (a redelivery claimed and tried it) may have landed, so it
+ * is left, and the caller treats it as unfinished.
+ */
 async function cancelUnfinished(
-  deps: ClawbackDeps,
-  record: PayoutReversal
+  db: Client,
+  stepId: string,
+  version: string
 ): Promise<boolean> {
   const now = new Date();
-  const [cancelled] = await deps.db
+  const [cancelled] = await db
     .update(payoutReversals)
     .set({ status: 'cancelled', attemptedAt: null, resolvedAt: now })
     .where(
       and(
-        eq(payoutReversals.id, record.id),
+        eq(payoutReversals.id, stepId),
         inArray(payoutReversals.status, ['pending', 'failed']),
-        unleased(now)
+        unleased(now),
+        sql`(extract(epoch from ${payoutReversals.updatedAt}) * 1000000)::bigint = ${version}::bigint`
       )
     )
     .returning();

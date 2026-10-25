@@ -346,22 +346,37 @@ Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
      charge, or a refund after it that takes the running total over the
      charge. That cause took less because the failed refund counted, so
      re-paying would overpay the payees. Support settles it by hand or marks
-     it refunded elsewhere (`failedRefundRepayBlock`). The chargeback check
-     runs again inside the settlement's transaction, because one can open in
-     between. A refund made in that same gap is not checked again: two people
-     refunding one charge within seconds, the race the refund route already
-     accepts (two refunds of one charge in the same second both pass its
-     refund-count check).
-  2. **A step that can never move money is cancelled.** One never claimed
-     never reached Stripe. One no retry will run (its delivery died, or
-     Stripe refused it on every try) is checked with Stripe before the
-     settlement's transaction opens (`settleUnfinishedRefundSteps`): recorded
-     `done`, and so re-paid, if Stripe made its reversal; cancelled if not. A
-     step still retrying, or held by a delivery right now, may yet reach
-     Stripe, so the settlement is refused (`REFUND_CLAWBACK_UNFINISHED`): the
-     clawback is still running, and support tries again later. A clawback
-     step cannot start once the refund is settled: its claim reads the refund
-     under a lock.
+     it refunded elsewhere (`failedRefundRepayBlock`). Both checks run again
+     inside the settlement's transaction, from the recorded refunds and
+     disputes, because either can be recorded after the first check. What is
+     left is a refund or chargeback recorded after that read whose clawback
+     runs before the settlement commits: for that moment, under a second, it
+     still counts the failed refund. That is two people acting on one charge
+     within the same second, the race the refund route already accepts (two
+     refunds of one charge in the same second both pass its refund-count
+     check).
+  2. **A step that can never move money is cancelled, by the settlement.**
+     - **Never claimed.** It never reached Stripe.
+     - **No retry will run it.** Its delivery died, or Stripe refused it on
+       every try. It is checked with Stripe before the settlement's
+       transaction opens (`settleUnfinishedRefundSteps`). If Stripe made its
+       reversal, it is recorded `done`, and so re-paid, since that is true
+       whatever support decides. If not, the settlement cancels it inside its
+       transaction, only if the step has not moved since the check. So a
+       refused settlement leaves it for a redelivery to finish, and a step a
+       redelivery tried again meanwhile is not cancelled unchecked.
+     - **Still running.** A step still retrying, held by a delivery right
+       now, or moved since the check may yet reach Stripe, so the settlement is
+       refused (`REFUND_CLAWBACK_UNFINISHED`): the clawback is still running,
+       and support tries again later.
+     - **Needs a person.** An unfinished cancellation whose slice is already
+       cancelled is one the ledger cannot read, because it cannot tell
+       whether that step took the slice. It refuses with
+       `REFUND_CLAWBACK_NEEDS_PERSON`, since retrying will not help. **Gap:**
+       there is no tool yet for a person to settle it.
+     - **Nothing starts after the settlement.** A clawback step cannot start
+       once the refund is settled, because its claim reads the refund under a
+       lock.
   3. **A debt the payee already paid** (`creator_absorbed`,
      `manually_reversed`) gets a re-pay row too; one the platform wrote off
      (`platform_absorbed`) gets nothing. The refund's open debts close as

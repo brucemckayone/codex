@@ -84,9 +84,11 @@ export {
 export {
   type DisputeRepayResult,
   type FailedRefundRepay,
+  REFUND_REPAY_CODES,
   repayBlockedError,
   repayDispute,
   repayFailedRefund,
+  type StrandedStep,
   settleUnfinishedRefundSteps,
   type UnfinishedRefundSteps,
 } from './repay';
