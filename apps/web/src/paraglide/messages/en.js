@@ -18683,6 +18683,14 @@ export const support_payee_creator = () => `Creator`
 
 
 /**
+ * @param {{ share: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_payee_creator_agreement = (params) => `Creator · ${params.share} agreement`
+
+
+/**
  * @param {{ name: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -19987,19 +19995,11 @@ export const support_queue_loading = () => `Loading the queue…`
 
 
 /**
- * @param {{ title: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @param {{ title: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_failed_charge_purchase = (params) => `${params.title} · ${params.amount}`
-
-
-/**
- * @param {{ title: NonNullable<unknown>, amount: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const support_failed_charge_invoice = (params) => `${params.title} invoice · ${params.amount}`
+export const support_failed_charge_invoice_title = (params) => `${params.title} invoice`
 
 
 /**
@@ -20200,6 +20200,22 @@ export const support_history_cause_refund_plain = () => `Refund`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_history_cause_dispute = (params) => `Chargeback of ${params.amount}`
+
+
+/**
+ * @param {{ opened: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_cause_dispute_opened = (params) => `Chargeback · opened ${params.opened}`
+
+
+/**
+ * @param {{ opened: NonNullable<unknown>, won: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_history_cause_dispute_won = (params) => `Chargeback · opened ${params.opened}, won ${params.won}`
 
 
 /**

@@ -83,7 +83,7 @@ describe('Failed refunds table', () => {
     const row = document.querySelector('[data-testid="failed-refund-row"]');
     const rowText = row?.textContent?.replace(/\s+/g, ' ') ?? '';
     expect(rowText).toContain('Daniel Price');
-    expect(rowText).toContain('Sleep Reset Programme · £24.00');
+    expect(rowText).toContain('Sleep Reset Programme · 12 Oct · £24.00');
     expect(rowText).toContain(
       m.support_failed_full_by({ date: '16 Oct', name: 'Jordan Reid' })
     );
@@ -96,6 +96,28 @@ describe('Failed refunds table', () => {
 
     row?.querySelector<HTMLButtonElement>('button')?.click();
     expect(onSettle).toHaveBeenCalledWith(failedRefund(), 'refunded_elsewhere');
+  });
+
+  test('the charge line: an invoice says so, and a date we hold no record of is left out', () => {
+    render(FailedRefundsTable, {
+      items: [
+        failedRefund({
+          kind: 'subscription_invoice',
+          title: 'Inner Circle',
+          chargeAmountCents: 1200,
+          chargePaidAt: '2026-10-02T06:00:00.000Z',
+        }),
+        failedRefund({ refundId: 'r-2', chargePaidAt: null }),
+      ],
+      onSettle: vi.fn(),
+    });
+    const links = [
+      ...document.querySelectorAll('table [data-testid="failed-refund-row"] a'),
+    ].map((a) => a.textContent?.replace(/\s+/g, ' ').trim());
+    expect(links).toEqual([
+      'Inner Circle invoice · 2 Oct · £12.00',
+      'Sleep Reset Programme · £24.00',
+    ]);
   });
 });
 

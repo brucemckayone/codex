@@ -34,6 +34,8 @@ export function slice(overrides: Partial<Slice> = {}): Slice {
     transferId: 'tr_3QeT9aLk2v',
     takenCents: 324,
     owedCents: 0,
+    // A purchase split without an agreement: B1 says only "Creator".
+    agreementShareBps: null,
     history: [],
     ...overrides,
   };
@@ -211,6 +213,7 @@ export function failedRefund(
       deleted: false,
     },
     chargeAmountCents: 2400,
+    chargePaidAt: '2026-10-12T10:00:00.000Z',
     amountCents: 2400,
     isFull: true,
     requestedBy: { userId: 'user-jordan', name: 'Jordan Reid', deleted: false },
@@ -232,6 +235,8 @@ export function historyLine(overrides: Partial<HistoryLine> = {}): HistoryLine {
     outcome: 'owed',
     repayPayoutId: null,
     debtResolution: null,
+    disputeOpenedAt: null,
+    disputeWonAt: null,
     ...overrides,
   };
 }
@@ -269,6 +274,8 @@ export function creatorDebt(
         causeAmountCents: 3000,
         amountCents: 2430,
         outcome: 'paid_back',
+        disputeOpenedAt: '2026-10-13T09:00:00.000Z',
+        disputeWonAt: '2026-10-20T09:00:00.000Z',
       }),
       historyLine({
         causeId: 're_3QhB1aLk2v',

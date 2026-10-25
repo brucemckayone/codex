@@ -24,14 +24,19 @@
 
   const { items, onSettle }: Props = $props();
 
+  /** "Inner Circle invoice · 2 Oct · £12.00" (D1); a part we hold no record of is left out. */
   function chargeLabel(item: FailedRefundItem): string {
     const title = item.title ?? m.support_unknown_item();
-    const amount =
-      item.chargeAmountCents === null ? '' : formatPrice(item.chargeAmountCents);
-    if (!amount) return title;
-    return item.kind && item.kind !== 'purchase'
-      ? m.support_failed_charge_invoice({ title, amount })
-      : m.support_failed_charge_purchase({ title, amount });
+    return [
+      item.kind && item.kind !== 'purchase'
+        ? m.support_failed_charge_invoice_title({ title })
+        : title,
+      // A no-break space keeps "12 Oct" on one line when the cell wraps.
+      item.chargePaidAt ? formatShortDay(item.chargePaidAt).replace(' ', '\u00a0') : null,
+      item.chargeAmountCents === null ? null : formatPrice(item.chargeAmountCents),
+    ]
+      .filter(Boolean)
+      .join(' · ');
   }
 
   function madeLine(item: FailedRefundItem): string {

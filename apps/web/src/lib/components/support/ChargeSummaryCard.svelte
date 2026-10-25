@@ -160,6 +160,9 @@
         {#if charge.paymentIntentId}
           · <span class="mono">{charge.paymentIntentId}</span>
         {/if}
+        {#if source.type !== 'purchase'}
+          · <span class="mono">{source.stripeSubscriptionId}</span>
+        {/if}
       </dd>
     </dl>
   </Card.Content>

@@ -65,6 +65,7 @@ describe('The charge', () => {
         source: {
           type: 'subscription',
           subscriptionId: 'sub-1',
+          stripeSubscriptionId: 'sub_1PpRwLk2vRb',
           planName: 'Inner Circle',
           planDeleted: false,
           interval: 'month',
@@ -81,6 +82,9 @@ describe('The charge', () => {
     expect(text()).toContain(
       m.support_period_current({ start: '20 Oct', end: '20 Nov 2026' })
     );
+    // Stripe's own subscription id, never our row's.
+    expect(text()).toContain('sub_1PpRwLk2vRb');
+    expect(text()).not.toContain('sub-1');
   });
 
   test('a deleted buyer is labelled, not hidden', () => {
@@ -136,6 +140,29 @@ describe('How it was split', () => {
     expect(fee).toContain('10%');
     // The total is the server's takenCents summed, nothing re-derived.
     expect(document.querySelector('tfoot')?.textContent).toContain('£4.00');
+  });
+
+  test('a creator’s slice names its agreement’s share, when there was one', () => {
+    render(SplitCard, {
+      detail: chargeDetail({
+        slices: [
+          slice({ agreementShareBps: 6000 }),
+          slice({
+            payoutId: 'payout-maya',
+            payee: { userId: 'user-maya', name: 'Maya Chen', deleted: false },
+            agreementShareBps: null,
+          }),
+        ],
+      }),
+    });
+    const [rowan, maya] = [
+      ...document.querySelectorAll('[data-testid="slice-row"]'),
+    ].map((row) => row.textContent?.replace(/\s+/g, ' ') ?? '');
+    expect(rowan).toContain(
+      m.support_payee_creator_agreement({ share: '60%' })
+    );
+    expect(maya).toContain(m.support_payee_creator());
+    expect(maya).not.toContain('agreement');
   });
 
   test('a slice with history opens it underneath', () => {
@@ -261,6 +288,36 @@ describe('A slice’s history', () => {
       (line) => line.getAttribute('data-outcome') === 'owed'
     );
     expect(owed?.textContent).toContain(m.support_history_this_debt());
+  });
+
+  test('a chargeback line is dated: when it opened, and when its win was applied', () => {
+    render(SliceHistory, {
+      title: 'History',
+      lines: [
+        historyLine({
+          causeType: 'dispute',
+          causeId: 'du_won',
+          disputeOpenedAt: '2026-10-13T09:00:00.000Z',
+          disputeWonAt: '2026-10-20T09:00:00.000Z',
+          outcome: 'paid_back',
+        }),
+        historyLine({
+          causeType: 'dispute',
+          causeId: 'du_open',
+          disputeOpenedAt: '2026-10-22T09:00:00.000Z',
+        }),
+      ],
+    });
+    const [won, open] = [
+      ...document.querySelectorAll('[data-testid="history-line"]'),
+    ].map((line) => line.textContent?.replace(/\s+/g, ' ') ?? '');
+    expect(won).toContain(
+      m.support_history_cause_dispute_won({ opened: '13 Oct', won: '20 Oct' })
+    );
+    expect(open).toContain(
+      m.support_history_cause_dispute_opened({ opened: '22 Oct' })
+    );
+    expect(open).not.toMatch(/, won /);
   });
 
   test('a settled debt says how it was settled', () => {

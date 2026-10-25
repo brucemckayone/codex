@@ -17,7 +17,7 @@
   import * as m from '$paraglide/messages';
   import { Badge } from '$lib/components/ui';
   import { formatPrice } from '$lib/utils/format';
-  import { historyOutcome, resolutionLabel } from './support-format';
+  import { formatShortDay, historyOutcome, resolutionLabel } from './support-format';
 
   interface Props {
     title: string;
@@ -33,6 +33,16 @@
     const amount =
       line.causeAmountCents === null ? null : formatPrice(line.causeAmountCents);
     if (line.causeType === 'dispute') {
+      // Dated as drawn (D2): when it opened, and when its win was applied.
+      if (line.disputeOpenedAt) {
+        const opened = formatShortDay(line.disputeOpenedAt);
+        return line.disputeWonAt
+          ? m.support_history_cause_dispute_won({
+              opened,
+              won: formatShortDay(line.disputeWonAt),
+            })
+          : m.support_history_cause_dispute_opened({ opened });
+      }
       return amount
         ? m.support_history_cause_dispute({ amount })
         : m.support_history_cause_dispute_plain();

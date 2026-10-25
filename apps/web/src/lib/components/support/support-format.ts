@@ -22,6 +22,7 @@ import {
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_INQUIRY_STATUSES,
 } from '@codex/constants';
+import { formatShareBps } from '$lib/components/studio/ownership/ownership-view';
 import * as m from '$paraglide/messages';
 
 export type BadgeVariant = 'neutral' | 'success' | 'warning' | 'error' | 'info';
@@ -254,7 +255,13 @@ export function payeeCell(slice: Slice): { title: string; detail: string } {
   }
   return {
     title: slice.payee?.name ?? m.support_payee_unknown(),
-    detail: m.support_payee_creator(),
+    // The agreement that split it, when there was one (C1).
+    detail:
+      slice.agreementShareBps === null
+        ? m.support_payee_creator()
+        : m.support_payee_creator_agreement({
+            share: formatShareBps(slice.agreementShareBps),
+          }),
   };
 }
 
