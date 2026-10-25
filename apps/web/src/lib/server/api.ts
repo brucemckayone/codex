@@ -212,7 +212,7 @@ export type PublicContentListItem = Omit<
  * R2 keys the way the public list does, so the page draws an item withdrawn
  * from sale exactly as it drew it on the storefront.
  */
-export interface WithdrawnContentItem {
+interface WithdrawnContentItem {
   content: PublicContentListItem;
   held: ContentHeld;
 }
