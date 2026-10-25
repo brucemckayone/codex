@@ -95,6 +95,8 @@ function makeSequenceInput(opts: {
   host: string;
   path?: string;
   method?: string;
+  isRemoteRequest?: boolean;
+  routed?: () => Response;
 }) {
   const url = new URL(`https://${opts.host}${opts.path ?? '/some/probe/path'}`);
   const event = {
@@ -104,8 +106,10 @@ function makeSequenceInput(opts: {
     // Loosely typed: the assertions below read locals.requestId, which only
     // exists once the real sessionHook has run.
     locals: {} as Record<string, unknown>,
+    isRemoteRequest: opts.isRemoteRequest ?? false,
   };
-  const resolve = vi.fn(async () => new Response('rendered page'));
+  const routed = opts.routed ?? (() => new Response('rendered page'));
+  const resolve = vi.fn(async () => routed());
   const input = {
     event,
     resolve,
@@ -384,6 +388,44 @@ describe('handle — the assembled sequence', () => {
     expect(resolve).toHaveBeenCalledTimes(1);
     // The full chain really ran — sessionHook stamped the request ID.
     expect(event.locals.requestId).toEqual(expect.any(String));
+  });
+});
+
+// A remote function cannot set a header (Kit's `setHeaders` throws inside
+// one), and Kit marks only a remote call's error `no-store`: a successful one,
+// such as a refreshed signed stream URL, carried no Cache-Control at all.
+describe('handle — a remote function response is never stored (Codex-877bi)', () => {
+  // As Kit's `json()` sends a successful remote query: no Cache-Control.
+  const remoteResult = () =>
+    Response.json({ type: 'result', result: '{"streamingUrl":"…"}' });
+
+  it('a successful remote call is sent no-store', async () => {
+    const { input } = makeSequenceInput({
+      host: 'studio-alpha.revelations.studio',
+      path: '/_app/remote/abc123/refreshStreamingUrl',
+      isRemoteRequest: true,
+      routed: remoteResult,
+    });
+
+    const response = await handle(input);
+
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(CACHE_PRESETS.fresh).toBe('private, no-store');
+  });
+
+  it('a page keeps its own header', async () => {
+    const { input } = makeSequenceInput({
+      host: 'studio-alpha.revelations.studio',
+      path: '/content/practice',
+      routed: () =>
+        new Response('rendered page', {
+          headers: { 'cache-control': CACHE_PRESETS.private },
+        }),
+    });
+
+    const response = await handle(input);
+
+    expect(response.headers.get('cache-control')).toBe(CACHE_PRESETS.private);
   });
 });
 

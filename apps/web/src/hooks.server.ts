@@ -259,6 +259,16 @@ const securityHook: Handle = async ({ event, resolve }) => {
   );
   response.headers.set('X-Request-Id', event.locals.requestId);
 
+  // A remote function's response is never stored (Codex-877bi). Kit marks
+  // only a remote call's ERROR `no-store`, and a remote function cannot set a
+  // header itself (`setHeaders` throws inside one), so a successful call, such
+  // as a signed stream URL whose token outlives a refund, went out with no
+  // Cache-Control. Every remote function here answers one viewer, and a
+  // response with no validators is never reused: this only keeps it off disk.
+  if (event.isRemoteRequest) {
+    response.headers.set('Cache-Control', CACHE_PRESETS.fresh);
+  }
+
   // HSTS: 2-year max-age + subdomains. Production-only — pinning HTTPS on
   // a developer's browser via lvh.me would block local HTTP dev, and
   // preview/staging deploys without zone-level HSTS get worker-level
