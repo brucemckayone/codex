@@ -155,8 +155,16 @@ export function failure(
 }
 
 /** A rejection as kit delivers it: an HttpError's shape. */
-export function httpError(status: number, message = 'Request failed') {
-  return { status, body: { message } };
+/**
+ * A rejected query as kit gives it. The worker's own 404 carries
+ * `code: 'NOT_FOUND'` (forwardClientErrors); the remote guard's has none.
+ */
+export function httpError(
+  status: number,
+  message = 'Request failed',
+  code?: string
+) {
+  return { status, body: code === undefined ? { message } : { message, code } };
 }
 
 export function reset() {

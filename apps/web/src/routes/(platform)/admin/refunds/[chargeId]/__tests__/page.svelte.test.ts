@@ -3,7 +3,9 @@
  * mockup B1–B4).
  *
  * - The charge is ONE awaited call: until it lands there is a skeleton and
- *   no form; a 404 is "no record of this charge"; another failure an error.
+ *   no form; the worker's 404 is "no record of this charge"; the guard's
+ *   404 (no code), a 401 or a 403 is "your session has ended" (R2-M1);
+ *   another failure an error.
  * - After a refund the charge and the counts are refreshed ONCE, then a
  *   Refresh button is offered (Q10). Nothing polls.
  * - Each answer reloads, or offers "Reload the charge", as drawn.
@@ -136,7 +138,11 @@ describe('loading the charge', () => {
 
   test('a 404 is "no record of this charge", never a blank page', () => {
     mountCharge();
-    chargeSlot(CHARGE_ID).error = httpError(404, 'Not Found');
+    chargeSlot(CHARGE_ID).error = httpError(
+      404,
+      'No record of this charge',
+      'NOT_FOUND'
+    );
     flushSync();
     expect(document.querySelector('h2')?.textContent).toContain(
       m.support_not_found_title()
@@ -163,6 +169,37 @@ describe('loading the charge', () => {
     expect(text()).not.toContain('An unexpected error occurred');
   });
 
+  test('the guard’s 404 (no code) says the session ended, never "no record"', () => {
+    mountCharge();
+    chargeSlot(CHARGE_ID).error = httpError(404, 'Not Found');
+    flushSync();
+    expect(
+      document.querySelector('[data-testid="session-ended"]')?.textContent
+    ).toContain(m.support_outcome_signed_out_lead());
+    expect(text()).not.toContain(m.support_not_found_title());
+    // No Try again: only signing in again helps.
+    expect(
+      document.querySelector('[data-testid="charge-load-error"]')
+    ).toBeNull();
+    expect(document.querySelectorAll('h1')).toHaveLength(1);
+    expect(review()).toBeNull();
+  });
+
+  test('a reload refused because the session ended says so above the record', () => {
+    mountCharge();
+    const charge = chargeSlot(CHARGE_ID);
+    charge.current = chargeDetail();
+    flushSync();
+    charge.error = httpError(401, 'Unauthorized');
+    flushSync();
+    expect(
+      document.querySelector('[data-testid="session-ended"]')
+    ).not.toBeNull();
+    expect(
+      document.querySelector('[data-testid="charge-reload-error"]')
+    ).toBeNull();
+  });
+
   test('an id that is not a charge is not found, and nothing is asked for', () => {
     mountCharge('not-a-charge');
     expect(getSupportCharge).not.toHaveBeenCalled();
@@ -176,7 +213,11 @@ describe('the page heading', () => {
     [
       'not found',
       () => {
-        chargeSlot(CHARGE_ID).error = httpError(404, 'Not Found');
+        chargeSlot(CHARGE_ID).error = httpError(
+          404,
+          'No record of this charge',
+          'NOT_FOUND'
+        );
       },
     ],
     [
@@ -228,6 +269,32 @@ describe('a reload of the same charge', () => {
     charge.current = chargeDetail();
     flushSync();
     expect(slot.refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a preview the route refuses', () => {
+  test('reloads the charge: what it showed has moved (R2-L1)', async () => {
+    mountCharge();
+    const charge = chargeSlot(CHARGE_ID);
+    charge.current = chargeDetail();
+    flushSync();
+    document.querySelector<HTMLInputElement>('input[value="part"]')?.click();
+    flushSync();
+    const input = document.querySelector<HTMLInputElement>(
+      'input[inputmode="decimal"]'
+    );
+    if (!input) throw new Error('no amount input');
+    input.value = '7.50';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await tick(300);
+    previewSlot({
+      chargeId: CHARGE_ID,
+      amountCents: 750,
+      refundCount: 1,
+    }).error = httpError(400, 'Too large', 'VALIDATION_ERROR');
+    flushSync();
+    expect(charge.refresh).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -366,6 +433,64 @@ describe('after Refund', () => {
       .find((b) => b.textContent?.includes(m.support_reload_charge()))
       ?.click();
     expect(charge.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  test('REFUND_IN_FLIGHT: every amount is locked until a reload of the charge lands', async () => {
+    issueSupportRefund.mockResolvedValue(
+      failure({
+        status: 409,
+        code: 'CONFLICT',
+        detailsCode: 'REFUND_IN_FLIGHT',
+      })
+    );
+    mountCharge();
+    const charge = chargeSlot(CHARGE_ID);
+    charge.current = chargeDetail();
+    flushSync();
+    let land = () => {};
+    charge.refresh.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        })
+    );
+    await refund750();
+    const alert = document.querySelector('[data-testid="refund-outcome"]');
+    expect(alert?.getAttribute('data-kind')).toBe('in_flight');
+    expect(charge.refresh).not.toHaveBeenCalled();
+
+    // Another amount: a new key, so a second refund. Locked too.
+    const input = document.querySelector<HTMLInputElement>(
+      'input[inputmode="decimal"]'
+    );
+    if (!input) throw new Error('no amount input');
+    input.value = '8.00';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await tick(300);
+    previewSlot({
+      chargeId: CHARGE_ID,
+      amountCents: 800,
+      refundCount: 1,
+    }).current = preview({ amountCents: 800 });
+    flushSync();
+    expect(review()?.disabled).toBe(true);
+    expect(
+      document.querySelector('[data-testid="refund-locked"]')
+    ).not.toBeNull();
+
+    // Asking for the reload is not enough: it must land.
+    [...(alert?.querySelectorAll('button') ?? [])]
+      .find((b) => b.textContent?.includes(m.support_reload_charge()))
+      ?.click();
+    await tick(0);
+    expect(charge.refresh).toHaveBeenCalledTimes(1);
+    expect(review()?.disabled).toBe(true);
+
+    land();
+    await tick(0);
+    expect(review()?.disabled).toBe(false);
+    expect(document.querySelector('[data-testid="refund-locked"]')).toBeNull();
   });
 
   test('while the charge reloads, Review waits', async () => {

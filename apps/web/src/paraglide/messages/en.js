@@ -19355,6 +19355,22 @@ export const support_preview_error = (params) => `We couldn't work out what ${pa
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_refused_lead = () => `This charge has changed since it loaded.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_preview_refused_body = (params) => `${params.amount} may no longer fit: reload it to see what's left.`
+
+
+/**
  * @param {{ amount: NonNullable<unknown>, payees: NonNullable<unknown>, platform: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -19879,6 +19895,14 @@ export const support_outcome_signed_out_body = () => `Nothing was refunded. Sign
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const support_session_ended_body = () => `Sign in again, then reload this page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const support_outcome_rate_limited_lead = () => `Too many requests.`
 
 
@@ -19912,6 +19936,30 @@ export const support_sentences_two = (params) => `${params.first} ${params.secon
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_outcome_key_spent_lead = () => `Stripe already refused this exact refund.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_in_flight_lead = () => `A refund for this exact amount is still being processed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_form_locked_in_flight = () => `Reload the charge before sending another refund: one is still being processed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_outcome_in_flight_body = () => `Reload the charge in a minute to see it. Don't refund it again until then: the buyer could be refunded twice.`
 
 
 /**
@@ -20104,6 +20152,30 @@ export const support_failed_phone_part = (params) => `Part refund made ${params.
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_failed_phone_full = (params) => `Full refund made ${params.made} · failed ${params.failed}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_size_unknown = (params) => `Full or part unknown · made ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown>, name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_size_unknown_by = (params) => `Full or part unknown · made ${params.date} by ${params.name}`
+
+
+/**
+ * @param {{ made: NonNullable<unknown>, failed: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_failed_phone_size_unknown = (params) => `Refund made ${params.made} (full or part unknown) · failed ${params.failed}`
 
 
 /**
@@ -20723,6 +20795,14 @@ export const support_settle_failed = () => `It couldn't be settled, and nothing 
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_settle_session_ended = () => `Nothing was settled. Sign in again, then reload this page.`
+
+
+/**
  * @param {{ buyer: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -20771,11 +20851,19 @@ export const support_repay_blocked_later_refunds = () => `A later refund of this
 
 
 /**
- * @param {{ buyer: NonNullable<unknown> }} params
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_access_kept_partial = (params) => `${params.buyer}'s access didn't change: a part refund never ended it.`
+export const support_repay_needs_person_lead = () => `This one needs settling by hand.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_needs_person_body = () => `Part of what the refund took back can only be checked by a person in Stripe, so the payees can't be re-paid from here, and trying again won't help. Settle it by hand, or mark it refunded another way.`
 
 
 /**
@@ -20783,7 +20871,15 @@ export const support_access_kept_partial = (params) => `${params.buyer}'s access
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_access_kept_not_refunded = (params) => `${params.buyer}'s access didn't change: the purchase isn't marked refunded.`
+export const support_access_kept_partial = (params) => `A part refund never ended ${params.buyer}'s access, so there is none to give back.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_access_kept_not_refunded = (params) => `${params.buyer}'s purchase isn't marked refunded, so access stays as it is.`
 
 
 /**
@@ -20799,7 +20895,7 @@ export const support_access_kept_dispute = (params) => `${params.buyer} doesn't 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_access_kept_duplicate = () => `There was no access to give back: a duplicate payment never granted any.`
+export const support_access_kept_duplicate = () => `There is no access to give back: a duplicate payment never granted any.`
 
 
 /**
@@ -20823,7 +20919,7 @@ export const support_access_kept_still_refunded = (params) => `${params.buyer} d
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_access_kept_no_purchase = () => `Access didn't change: this charge paid an invoice, not a purchase.`
+export const support_access_kept_no_purchase = () => `Access isn't affected: this charge paid an invoice, not a purchase.`
 
 
 /**
@@ -20831,7 +20927,31 @@ export const support_access_kept_no_purchase = () => `Access didn't change: this
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_access_kept_other = (params) => `${params.buyer}'s access didn't change.`
+export const support_access_kept_other = (params) => `${params.buyer}'s access stays as it is.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_off_chargeback = () => `Re-pay is off: a chargeback took the payees' shares too. Settle it another way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_off_later_refunds = () => `Re-pay is off: a later refund took the payees' shares too. Settle it another way.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_off_needs_person = () => `Re-pay is off: this one needs settling by hand.`
 
 
 /**

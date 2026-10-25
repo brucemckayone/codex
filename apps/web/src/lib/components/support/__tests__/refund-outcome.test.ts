@@ -77,6 +77,11 @@ describe('refundOutcomeOf', () => {
       { status: 409, code: 'CONFLICT' },
       { kind: 'key_spent' },
     ],
+    [
+      'REFUND_IN_FLIGHT',
+      { status: 409, code: 'CONFLICT' },
+      { kind: 'in_flight' },
+    ],
   ] as const)('details.code %s', (detailsCode, fields, expected) => {
     expect(
       refundOutcomeOf(failure({ detailsCode, ...fields }), context)
@@ -148,6 +153,7 @@ describe('what reloads after an outcome', () => {
     for (const kind of [
       'refused',
       'key_spent',
+      'in_flight',
       'signed_out',
       'rate_limited',
       'failed',

@@ -20,18 +20,22 @@
   @prop {() => HTMLElement | null} [closeFocus] - Where focus goes on close.
 
   While its request runs the dialog can't be dismissed, and the answer names
-  the payee that was sent, captured then.
+  the payee that was sent, captured then. A refusal that keeps the dialog
+  open takes focus, so it is read out (R2-L3); one from a session that ended
+  says to sign in again (R2-M1).
 -->
 <script lang="ts">
   import type { CreatorDebtItem, CreatorDebtResolution } from '@codex/admin';
   import type { CreateDialogProps } from '@melt-ui/svelte';
   import { SUPPORT_NOTE_MAX_LENGTH } from '@codex/validation';
+  import { tick } from 'svelte';
   import * as m from '$paraglide/messages';
   import { Alert, Button, Label } from '$lib/components/ui';
   import * as Dialog from '$lib/components/ui/Dialog';
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import { formatPrice } from '$lib/utils/format';
   import { resolveCreatorDebt } from '$lib/remote/support.remote';
+  import { isSessionEnded } from './session';
   import { resolutionLabel } from './support-format';
   import type { SettleNotice } from './settle-notice';
 
@@ -54,7 +58,7 @@
   let choice = $state<CreatorDebtResolution | null>(null);
   let note = $state('');
   let busy = $state(false);
-  let problem = $state<'failed' | null>(null);
+  let problem = $state<'session_ended' | 'failed' | null>(null);
   let choiceMissing = $state(false);
   let noteMissing = $state(false);
 
@@ -149,13 +153,20 @@
         onFinished({ variant: 'info', text: m.support_settle_gone() });
       } else if (answer.status === 400 && noteRequired) {
         noteMissing = true;
+      } else if (answer.status === 401 || answer.status === 403) {
+        problem = 'session_ended';
       } else {
         problem = 'failed';
       }
-    } catch {
-      problem = 'failed';
+    } catch (error) {
+      problem = isSessionEnded(error) ? 'session_ended' : 'failed';
     } finally {
       busy = false;
+    }
+    if (problem !== null) {
+      // The dialog stays open: move to why, so it is read out.
+      await tick();
+      document.querySelector<HTMLElement>('[data-settle-problem]')?.focus();
     }
   }
 </script>
@@ -208,8 +219,21 @@
           />
         </div>
         {#if problem}
-          <Alert variant="error" data-testid="settle-problem" data-problem={problem}>
-            <p>{m.support_settle_failed()}</p>
+          <Alert
+            variant={problem === 'failed' ? 'error' : 'warning'}
+            tabindex={-1}
+            data-settle-problem
+            data-testid="settle-problem"
+            data-problem={problem}
+          >
+            {#if problem === 'session_ended'}
+              <p>
+                <strong>{m.support_outcome_signed_out_lead()}</strong>
+                {m.support_settle_session_ended()}
+              </p>
+            {:else}
+              <p>{m.support_settle_failed()}</p>
+            {/if}
           </Alert>
         {/if}
       </Dialog.Body>

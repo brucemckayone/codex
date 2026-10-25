@@ -38,6 +38,12 @@ export type RefundOutcome =
    */
   | { kind: 'key_spent' }
   /**
+   * Another request with this refund's key is still running at Stripe (two
+   * tabs, or two people, sent the same decision). It may still succeed, so
+   * nothing else is tried until the charge is reloaded.
+   */
+  | { kind: 'in_flight' }
+  /**
    * Refused before the route ran (401, 403, or the remote's own 404 for a
    * session that is no longer the platform owner's): nothing was refunded.
    */
@@ -77,6 +83,8 @@ export function refundOutcomeOf(
       return { kind: 'too_large', maxCents: answer.maxCents };
     case 'REFUND_KEY_SPENT':
       return { kind: 'key_spent' };
+    case 'REFUND_IN_FLIGHT':
+      return { kind: 'in_flight' };
     default:
       return outcomeOfStatus(answer.status);
   }
@@ -102,12 +110,14 @@ export function rejectedOutcome(error: unknown): RefundOutcome {
 /**
  * The outcomes after which what the page shows is known to be out of date, so
  * it reloads the charge once (Q10). The others offer "Reload the charge":
- * Stripe refused, or never answered, and nothing changed.
+ * Stripe refused, or never answered, and nothing changed; or, in flight, a
+ * reload now would be too soon to show it.
  */
 export function reloadsCharge(outcome: RefundOutcome): boolean {
   return ![
     'refused',
     'key_spent',
+    'in_flight',
     'signed_out',
     'rate_limited',
     'failed',

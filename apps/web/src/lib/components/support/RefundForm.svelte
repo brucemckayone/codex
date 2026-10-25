@@ -24,13 +24,23 @@
   A blocked charge (window closed, a chargeback, nothing left) shows the
   reason in place of the form; the server refuses all three too.
 
+  A preview the route REFUSES (a 4xx: the amount no longer fits, nothing is
+  left) means the charge moved since it loaded, so trying again can never
+  work: the form asks the page to reload it, once per charge state and
+  amount, and offers "Reload the charge" (R2-L1). A session that ended says
+  so (R2-M1). When Review or Try again opens nothing, focus moves to what
+  the preview now says, never to the page's top (R2-L2). The amount's error
+  shows once the field is left or submitted, not between keystrokes (R2-L5).
+
   @prop {ChargeDetail} detail
   @prop {boolean} [stale=false] - The charge is reloading: Review waits.
+  @prop {boolean} [locked=false] - A refund is still being made: nothing more is sent until the charge is reloaded.
   @prop {(outcome: RefundOutcome) => void} onOutcome
+  @prop {() => void} [onStale] - Reload the charge: the preview was refused.
 -->
 <script lang="ts">
   import type { ChargeDetail, RefundPreviewLine } from '@codex/admin';
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import {
     DISPUTE_CHARGEBACK_OPEN_STATUSES,
     DISPUTE_INQUIRY_STATUSES,
@@ -51,6 +61,8 @@
     refundOutcomeOf,
     rejectedOutcome,
   } from './refund-outcome';
+  import { isSessionEnded } from './session';
+  import SessionEndedAlert from './SessionEndedAlert.svelte';
   import {
     formatDay,
     formatTime,
@@ -63,10 +75,12 @@
   interface Props {
     detail: ChargeDetail;
     stale?: boolean;
+    locked?: boolean;
     onOutcome: (outcome: RefundOutcome) => void;
+    onStale?: () => void;
   }
 
-  const { detail, stale = false, onOutcome }: Props = $props();
+  const { detail, stale = false, locked = false, onOutcome, onStale }: Props = $props();
 
   /** After the last keystroke, before the preview is asked for. */
   const PREVIEW_DEBOUNCE_MS = 300;
@@ -93,8 +107,10 @@
     if (mode !== 'part' || typedCents === null) return null;
     return typedCents >= 1 && typedCents <= maxCents ? typedCents : null;
   });
+  /** The field was left or submitted since its last edit: only then is it wrong. */
+  let amountChecked = $state(false);
   const amountInvalid = $derived(
-    mode === 'part' && amountText.trim() !== '' && shownCents === null
+    amountChecked && mode === 'part' && amountText.trim() !== '' && shownCents === null
   );
 
   // ── The preview: 300 ms after the amount stops changing ──────────────────
@@ -126,11 +142,32 @@
     if (!current || shownCents === null || previewCents !== shownCents) return null;
     return current.amountCents === shownCents ? current : null;
   });
-  const previewError = $derived(
-    previewCents !== null && previewCents === shownCents
-      ? queryErrorMessage(previewQuery?.error)
-      : null
+  /** Why the preview of the amount on screen failed, if it did. */
+  const previewRejection = $derived(
+    previewCents !== null && previewCents === shownCents ? previewQuery?.error : undefined
   );
+  const previewError = $derived(queryErrorMessage(previewRejection));
+  const previewProblem = $derived.by(() => {
+    if (previewError === null) return null;
+    if (isSessionEnded(previewRejection)) return 'session_ended' as const;
+    const status = (previewRejection as { status?: unknown } | null)?.status;
+    // A 4xx other than a rate limit: the route refused this amount for this charge.
+    return typeof status === 'number' && status >= 400 && status < 500 && status !== 429
+      ? ('refused' as const)
+      : ('failed' as const);
+  });
+
+  // A refused preview: reload the charge, once for this charge state and
+  // amount. A reload that changes nothing leaves the same key, so it can't
+  // loop; "Reload the charge" stays on offer.
+  let staleKeyReloaded: string | null = null;
+  $effect(() => {
+    if (previewProblem !== 'refused') return;
+    const key = `${detail.refundCount}:${detail.refundable.maxCents}:${previewCents}`;
+    if (key === staleKeyReloaded) return;
+    staleKeyReloaded = key;
+    untrack(() => onStale?.());
+  });
 
   // A reload of the same charge can still have moved a payout (paid since,
   // say): ask for the preview again with it. A new refund count is a new
@@ -153,7 +190,12 @@
   let focusOutcome = false;
 
   const canReview = $derived(
-    preview !== null && previewError === null && !stale && !submitting && !reviewing
+    preview !== null &&
+      previewError === null &&
+      !stale &&
+      !locked &&
+      !submitting &&
+      !reviewing
   );
 
   const uid = $props.id();
@@ -294,9 +336,34 @@
     return REASONS.includes(value as Reason);
   }
 
+  /**
+   * After Review or Try again, which disable themselves while they run: if
+   * focus is still on that control, or dropped to the page, move it to what
+   * the preview now says (R2-L2). Focus anywhere else (the amount, after
+   * Enter) stays.
+   */
+  async function focusPreview(control: Element | null) {
+    await tick();
+    const active = document.activeElement;
+    const dropped = active === null || active === document.body || !active.isConnected;
+    if (!dropped && (control === null || active !== control)) return;
+    (
+      document.querySelector<HTMLElement>('[data-preview-problem]') ??
+      document.querySelector<HTMLElement>('[data-preview-heading]')
+    )?.focus();
+  }
+
+  async function retryPreview(event: MouseEvent) {
+    const control = event.currentTarget instanceof Element ? event.currentTarget : null;
+    await previewQuery?.refresh().catch(() => {});
+    await focusPreview(control);
+  }
+
   // ── Submit ─────────────────────────────────────────────────────────────
   async function openReview() {
     if (!canReview || !previewQuery) return;
+    const active = document.activeElement;
+    const control = active?.matches('[data-refund-review]') ? active : null;
     const query = previewQuery;
     const cents = shownCents;
     reviewing = true;
@@ -313,8 +380,12 @@
       preview !== null &&
       preview.amountCents === cents &&
       previewError === null &&
-      !stale;
-    if (!fresh) return;
+      !stale &&
+      !locked;
+    if (!fresh) {
+      await focusPreview(control);
+      return;
+    }
     focusOutcome = false;
     dialogOpen = true;
   }
@@ -326,7 +397,7 @@
   async function handleConfirm() {
     // Set before the first await: a second click in the same tick, before
     // the button re-renders disabled, returns here and sends nothing.
-    if (submitting || !preview) return;
+    if (submitting || locked || !preview) return;
     submitting = true;
     const reviewed = preview;
     const seenRefundIds = detail.refunds.map((refund) => refund.id);
@@ -426,11 +497,16 @@
                     aria-describedby="{amountErrorId} {partHintId}"
                     aria-invalid={amountInvalid ? 'true' : undefined}
                     data-error={amountInvalid}
+                    oninput={() => (amountChecked = false)}
+                    onblur={() => (amountChecked = true)}
                     onkeydown={(event: KeyboardEvent) => {
-                      if (event.key === 'Enter') void openReview();
+                      if (event.key !== 'Enter') return;
+                      amountChecked = true;
+                      void openReview();
                     }}
                   />
-                  <!-- Always mounted with the field, so text arriving is read out. -->
+                  <!-- Always mounted with the field, so text arriving is read
+                       out; it arrives only on blur or Enter. -->
                   <span class="amount-error" id={amountErrorId} aria-live="polite">
                     {amountInvalid
                       ? m.support_form_amount_invalid({ max: formatPrice(maxCents) })
@@ -505,18 +581,47 @@
           {#if shownCents === null}
             <p class="field__help">{m.support_preview_choose()}</p>
           {:else}
-            <h3 class="preview__heading">
+            <h3 class="preview__heading" tabindex="-1" data-preview-heading>
               {m.support_preview_heading({ amount: formatPrice(shownCents) })}
             </h3>
-            {#if previewError}
-              <Alert variant="error" data-testid="preview-error">
+            {#if previewProblem === 'session_ended'}
+              <SessionEndedAlert tabindex={-1} data-preview-problem />
+            {:else if previewProblem === 'refused'}
+              <Alert
+                variant="warning"
+                tabindex={-1}
+                data-preview-problem
+                data-testid="preview-refused"
+              >
+                <p>
+                  <strong>{m.support_preview_refused_lead()}</strong>
+                  {m.support_preview_refused_body({ amount: formatPrice(shownCents) })}
+                </p>
+                <div class="alert-actions">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={stale}
+                    onclick={() => onStale?.()}
+                  >
+                    {m.support_reload_charge()}
+                  </Button>
+                </div>
+              </Alert>
+            {:else if previewProblem === 'failed'}
+              <Alert
+                variant="error"
+                tabindex={-1}
+                data-preview-problem
+                data-testid="preview-error"
+              >
                 <p>{m.support_preview_error({ amount: formatPrice(shownCents) })}</p>
                 <div class="alert-actions">
                   <Button
                     variant="secondary"
                     size="sm"
                     loading={previewQuery?.loading === true}
-                    onclick={() => void previewQuery?.refresh().catch(() => {})}
+                    onclick={(event: MouseEvent) => void retryPreview(event)}
                   >
                     {m.support_try_again()}
                   </Button>
@@ -574,6 +679,9 @@
           {/if}
         </div>
 
+        {#if locked}
+          <p class="field__help" data-testid="refund-locked">{m.support_form_locked_in_flight()}</p>
+        {/if}
         <Button
           variant="primary"
           class="refund-form__review"

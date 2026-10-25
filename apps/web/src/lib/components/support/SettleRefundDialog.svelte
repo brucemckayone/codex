@@ -14,8 +14,11 @@
   A clawback still running refuses calmly: try again later. A later
   chargeback or refund that took the payees' shares too refuses re-paying
   for good, since it would pay them twice: support settles it by hand, or as
-  refunded another way. When re-paying doesn't give access back, the
-  confirmation says why.
+  refunded another way. So does a clawback step only a person can read
+  (`REFUND_CLAWBACK_NEEDS_PERSON`): support settles it by hand. Whether re-paying gives the buyer access back is the
+  server's prediction (`accessRestoreBlockedReason`, the restore's own rule,
+  nothing locked), so the dialog says what it predicts and the confirmation
+  says what happened (`accessNotRestoredReason`).
 
   @prop {FailedRefundItem | null} item
   @prop {FailedRefundResolution | null} resolution
@@ -25,7 +28,9 @@
 
   While its request runs the dialog can't be dismissed (Escape, outside
   click, the close button), and the answer's text names the item that was
-  sent, captured then.
+  sent, captured then. A refusal that keeps the dialog open takes focus, so
+  it is read out (R2-L3); one from a session that ended says to sign in again
+  (R2-M1).
 -->
 <script lang="ts">
   import type {
@@ -35,12 +40,15 @@
   } from '@codex/admin';
   import type { CreateDialogProps } from '@melt-ui/svelte';
   import { SUPPORT_NOTE_MAX_LENGTH } from '@codex/validation';
+  import { tick } from 'svelte';
   import * as m from '$paraglide/messages';
   import { Alert, Button, Label } from '$lib/components/ui';
   import * as Dialog from '$lib/components/ui/Dialog';
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import { formatPrice } from '$lib/utils/format';
   import { resolveFailedRefund } from '$lib/remote/support.remote';
+  import { markRepayBlocked } from './repay-blocks.svelte';
+  import { isSessionEnded } from './session';
   import { formatList, formatShortDay } from './support-format';
   import type { SettleNotice } from './settle-notice';
 
@@ -64,9 +72,21 @@
   let busy = $state(false);
   /** A refusal the dialog stays open for: later, another way, or again. */
   let problem = $state<
-    'clawback_running' | 'blocked_chargeback' | 'blocked_later_refunds' | 'failed' | null
+    | 'clawback_running'
+    | 'blocked_chargeback'
+    | 'blocked_later_refunds'
+    | 'needs_person'
+    | 'session_ended'
+    | 'failed'
+    | null
   >(null);
   let noteMissing = $state(false);
+  /** Refused for good: Submit is off, and nothing is said of what re-paying would do. */
+  const refusedForGood = $derived(
+    problem === 'blocked_chargeback' ||
+      problem === 'blocked_later_refunds' ||
+      problem === 'needs_person'
+  );
 
   const noteId = $props.id();
 
@@ -88,12 +108,22 @@
   const amount = $derived(item ? formatPrice(item.amountCents) : '');
   const taken = $derived(item ? formatPrice(item.takenFromPayeesCents) : '');
   const noteRequired = $derived(resolution === 'creators_repaid');
-  /** A failed full purchase refund ended access; re-paying gives it back (Q5d). */
-  const restoresAccess = $derived(
-    resolution === 'creators_repaid' && item?.isFull === true && item.kind === 'purchase'
-  );
+  /** The server's prediction: null means re-paying gives access back (Q5d). */
+  const blocked = $derived(item?.accessRestoreBlockedReason ?? null);
+  const repaying = $derived(resolution === 'creators_repaid' && item !== null);
+  /** What re-paying would do to access is said only while re-paying is on offer. */
+  const predicting = $derived(repaying && !refusedForGood);
+  const restoresAccess = $derived(predicting && blocked === null);
+  /** An invoice's full refund cancelled the subscription; re-paying keeps it so. */
   const keepsCancelled = $derived(
-    resolution === 'creators_repaid' && item?.isFull === true && item.kind !== 'purchase'
+    predicting && blocked === 'no_purchase' && item?.isFull === true
+  );
+  /** Why access won't come back, when there is something to say: a part
+   * refund never ended it, and an invoice has its own note. */
+  const accessBlockedNote = $derived(
+    predicting && blocked !== null && blocked !== 'partial' && blocked !== 'no_purchase'
+      ? accessKept(blocked, buyer)
+      : null
   );
 
   /** Why the buyer's access stayed as it was, when re-paying didn't give it back. */
@@ -170,16 +200,30 @@
       } else if (answer.detailsCode === 'REFUND_CLAWBACK_UNFINISHED') {
         problem = 'clawback_running';
       } else if (answer.detailsCode === 'REPAY_BLOCKED_BY_LATER_CAUSE') {
-        problem = answer.reason === 'chargeback' ? 'blocked_chargeback' : 'blocked_later_refunds';
+        // Refused for good: the row's Re-pay stays off for the session.
+        const reason = answer.reason === 'chargeback' ? 'chargeback' : 'later_refunds';
+        markRepayBlocked(settling.refundId, reason);
+        problem = reason === 'chargeback' ? 'blocked_chargeback' : 'blocked_later_refunds';
+      } else if (answer.detailsCode === 'REFUND_CLAWBACK_NEEDS_PERSON') {
+        // Retrying never helps either: Re-pay stays off for the session.
+        markRepayBlocked(settling.refundId, 'needs_person');
+        problem = 'needs_person';
       } else if (answer.status === 400 && noteRequired) {
         noteMissing = true;
+      } else if (answer.status === 401 || answer.status === 403) {
+        problem = 'session_ended';
       } else {
         problem = 'failed';
       }
-    } catch {
-      problem = 'failed';
+    } catch (error) {
+      problem = isSessionEnded(error) ? 'session_ended' : 'failed';
     } finally {
       busy = false;
+    }
+    if (problem !== null) {
+      // The dialog stays open: move to why, so it is read out.
+      await tick();
+      document.querySelector<HTMLElement>('[data-settle-problem]')?.focus();
     }
   }
 </script>
@@ -217,6 +261,10 @@
             </Alert>
           {:else if keepsCancelled}
             <Alert variant="info"><p>{m.support_repay_subscription()}</p></Alert>
+          {:else if accessBlockedNote}
+            <Alert variant="info" data-testid="repay-access-blocked">
+              <p>{accessBlockedNote}</p>
+            </Alert>
           {/if}
         {/if}
         <div class="field">
@@ -241,6 +289,8 @@
               : problem === 'failed'
                 ? 'error'
                 : 'warning'}
+            tabindex={-1}
+            data-settle-problem
             data-testid="settle-problem"
             data-problem={problem}
           >
@@ -256,6 +306,16 @@
                 <strong>{m.support_repay_blocked_lead()}</strong>
                 {m.support_repay_blocked_later_refunds()}
               </p>
+            {:else if problem === 'needs_person'}
+              <p>
+                <strong>{m.support_repay_needs_person_lead()}</strong>
+                {m.support_repay_needs_person_body()}
+              </p>
+            {:else if problem === 'session_ended'}
+              <p>
+                <strong>{m.support_outcome_signed_out_lead()}</strong>
+                {m.support_settle_session_ended()}
+              </p>
             {:else}
               <p>{m.support_settle_failed()}</p>
             {/if}
@@ -266,7 +326,13 @@
         <Button variant="secondary" onclick={() => (open = false)} disabled={busy}>
           {m.support_confirm_cancel()}
         </Button>
-        <Button variant="primary" loading={busy} onclick={handleSubmit} data-testid="settle-submit">
+        <Button
+          variant="primary"
+          loading={busy}
+          disabled={refusedForGood}
+          onclick={handleSubmit}
+          data-testid="settle-submit"
+        >
           {resolution === 'refunded_elsewhere'
             ? m.support_elsewhere_submit()
             : m.support_repay_submit({ amount: taken })}

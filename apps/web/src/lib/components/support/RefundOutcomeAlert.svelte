@@ -5,7 +5,8 @@
   (pending or succeeded), already made (a replay of the same decision),
   changed under the open page, refused (Stripe's code under a plain
   sentence), refused earlier for this exact refund (Stripe's 24-hour answer),
-  blocked since the page loaded, or not sent.
+  still being made by another request with the same key, blocked since the
+  page loaded, or not sent.
 
   "Succeeded" is not "clawed back": the shares are taken when Stripe's
   `charge.refunded` event arrives, and the page reloads once and offers
@@ -180,6 +181,15 @@
             body: m.support_outcome_key_spent_body(),
             mono: null,
             reload: false,
+          };
+        case 'in_flight':
+          // No Dashboard advice: a refund made there now could pay the buyer twice.
+          return {
+            variant: 'warning',
+            lead: m.support_outcome_in_flight_lead(),
+            body: m.support_outcome_in_flight_body(),
+            mono: null,
+            reload: true,
           };
         case 'window_closed':
           return {

@@ -11,10 +11,16 @@
   refunds card moves to the top of the record so the two sit together. The
   charge is reloaded once when what it shows is known to be out of date, and
   the counts with it when a refund exists; then Refresh (Q10). No polling.
-  Each reload also asks the form's preview again (RefundForm). The outcome
+  Each reload also asks the form's preview again (RefundForm), and a preview
+  the route refused asks for a reload (`onStale`). After REFUND_IN_FLIGHT the
+  form is locked, every amount, until a reload of the charge lands: a new
+  amount is a new key, so it could make a second refund while the first is
+  landing. The outcome
   takes focus as it arrives, so a screen reader reads it out.
 
   The not-found, error and loading states still name the page with an h1.
+  Only the worker's own 404 is "not found": the remote guard's bare 404, like
+  a 401 or a 403, means the session ended (R2-M1, `session.ts`).
 -->
 <script lang="ts">
   import { tick } from 'svelte';
@@ -30,6 +36,7 @@
   import RefundForm from '$lib/components/support/RefundForm.svelte';
   import RefundOutcomeAlert from '$lib/components/support/RefundOutcomeAlert.svelte';
   import RefundsCard from '$lib/components/support/RefundsCard.svelte';
+  import SessionEndedAlert from '$lib/components/support/SessionEndedAlert.svelte';
   import SplitCard from '$lib/components/support/SplitCard.svelte';
   import {
     type RefundOutcome,
@@ -43,6 +50,7 @@
     formatShortDay,
   } from '$lib/components/support/support-format';
   import { useQueueCounts } from '$lib/components/support/queue-counts';
+  import { isRecordNotFound, isSessionEnded } from '$lib/components/support/session';
   import { queryErrorMessage } from '$lib/remote/query-result';
   import { getSupportCharge } from '$lib/remote/support.remote';
 
@@ -56,20 +64,22 @@
   const detail = $derived(chargeQuery?.current);
   const loadError = $derived(queryErrorMessage(chargeQuery?.error));
   const notFound = $derived(
-    !isChargeId ||
-      (detail === undefined &&
-        (chargeQuery?.error as { status?: unknown } | undefined)?.status === 404)
+    !isChargeId || (detail === undefined && isRecordNotFound(chargeQuery?.error))
   );
+  const sessionEnded = $derived(isSessionEnded(chargeQuery?.error));
   const reloading = $derived(detail !== undefined && chargeQuery?.loading === true);
   const countsQuery = useQueueCounts();
 
   let outcome = $state<RefundOutcome | null>(null);
   let refreshingByHand = $state(false);
+  /** A refund with this key is still being made: nothing more is sent until a reload lands. */
+  let inFlightLock = $state(false);
 
   // A different charge starts clean.
   $effect(() => {
     void chargeId;
     outcome = null;
+    inFlightLock = false;
   });
 
   // "Back to results" returns to the search it came from, query and all.
@@ -81,7 +91,14 @@
   });
 
   function reloadCharge(): Promise<void> {
-    return chargeQuery?.refresh().catch(() => {}) ?? Promise.resolve();
+    return (
+      chargeQuery
+        ?.refresh()
+        .then(() => {
+          inFlightLock = false;
+        })
+        .catch(() => {}) ?? Promise.resolve()
+    );
   }
 
   async function handleRefresh() {
@@ -95,6 +112,7 @@
 
   async function handleOutcome(next: RefundOutcome) {
     outcome = next;
+    if (next.kind === 'in_flight') inFlightLock = true;
     if (reloadsCharge(next)) void reloadCharge();
     if (refreshesCounts(next)) void countsQuery.refresh().catch(() => {});
     await tick();
@@ -149,6 +167,9 @@
       headingLevel={2}
     />
   </Card.Root>
+{:else if detail === undefined && sessionEnded}
+  <h1 class="sr-only">{m.support_charge_heading()}</h1>
+  <SessionEndedAlert />
 {:else if detail === undefined && loadError !== null}
   <h1 class="sr-only">{m.support_charge_heading()}</h1>
   <Alert variant="error" data-testid="charge-load-error">
@@ -204,7 +225,9 @@
     {/snippet}
   </PageHeader>
 
-  {#if loadError !== null}
+  {#if sessionEnded}
+    <SessionEndedAlert />
+  {:else if loadError !== null}
     <Alert variant="warning" data-testid="charge-reload-error">
       <p><strong>{m.support_reload_error_lead()}</strong> {m.support_reload_error_body()}</p>
       <div class="alert-actions">
@@ -241,7 +264,13 @@
       <ChargebacksCard chargebacks={detail.chargebacks} />
     </div>
     <aside class="charge-aside">
-      <RefundForm {detail} stale={reloading} onOutcome={handleOutcome} />
+      <RefundForm
+        {detail}
+        stale={reloading}
+        locked={inFlightLock}
+        onOutcome={handleOutcome}
+        onStale={() => void reloadCharge()}
+      />
     </aside>
   </div>
 {/if}

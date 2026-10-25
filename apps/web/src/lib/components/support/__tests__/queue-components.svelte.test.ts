@@ -27,6 +27,7 @@ import {
 } from '../__fixtures__/support-fixtures';
 import {
   failure,
+  httpError,
   reset,
   resolveCreatorDebt,
   resolveFailedRefund,
@@ -34,6 +35,11 @@ import {
 import ChargeResults from '../ChargeResults.svelte';
 import CreatorDebtsTable from '../CreatorDebtsTable.svelte';
 import FailedRefundsTable from '../FailedRefundsTable.svelte';
+import {
+  clearRepayBlocks,
+  markRepayBlocked,
+  repayBlockReason,
+} from '../repay-blocks.svelte';
 import SettleDebtDialog from '../SettleDebtDialog.svelte';
 import SettleRefundDialog from '../SettleRefundDialog.svelte';
 import type { SettleNotice } from '../settle-notice';
@@ -41,7 +47,10 @@ import TabLinks from '../TabLinks.svelte';
 
 let component: ReturnType<typeof mount> | null = null;
 
-beforeEach(() => reset());
+beforeEach(() => {
+  reset();
+  clearRepayBlocks();
+});
 
 afterEach(() => {
   if (component) unmount(component);
@@ -98,6 +107,26 @@ describe('Failed refunds table', () => {
     expect(onSettle).toHaveBeenCalledWith(failedRefund(), 'refunded_elsewhere');
   });
 
+  test('a refund whose size we hold no record of says so, never "part"', () => {
+    render(FailedRefundsTable, {
+      items: [failedRefund({ isFull: null })],
+      onSettle: vi.fn(),
+    });
+    const all = text();
+    expect(all).toContain(
+      m.support_failed_size_unknown_by({ date: '16 Oct', name: 'Jordan Reid' })
+    );
+    expect(all).toContain(
+      m.support_failed_phone_size_unknown({ made: '16 Oct', failed: '21 Oct' })
+    );
+    expect(all).not.toContain(
+      m.support_failed_part_by({ date: '16 Oct', name: 'Jordan Reid' })
+    );
+    expect(all).not.toContain(
+      m.support_failed_phone_part({ made: '16 Oct', failed: '21 Oct' })
+    );
+  });
+
   test('the charge line: an invoice says so, and a date we hold no record of is left out', () => {
     render(FailedRefundsTable, {
       items: [
@@ -118,6 +147,44 @@ describe('Failed refunds table', () => {
       'Inner Circle invoice · 2 Oct · £12.00',
       'Sleep Reset Programme · £24.00',
     ]);
+  });
+});
+
+describe('a row whose re-pay was refused for a later cause', () => {
+  test('keeps Re-pay off, says why beside it, and still offers "refunded another way"', () => {
+    const blocked = failedRefund();
+    const other = failedRefund({
+      refundId: '33333333-3333-4333-8333-333333333333',
+    });
+    markRepayBlocked(blocked.refundId, 'chargeback');
+    render(FailedRefundsTable, { items: [blocked, other], onSettle: vi.fn() });
+    const [first, second] = [
+      ...document.querySelectorAll<HTMLElement>(
+        'table [data-testid="failed-refund-row"]'
+      ),
+    ];
+    const buttonIn = (row: HTMLElement, label: string) =>
+      [...row.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+        b.textContent?.includes(label)
+      );
+    expect(buttonIn(first, m.support_action_repay())?.disabled).toBe(true);
+    expect(
+      first.querySelector('[data-testid="repay-off"]')?.textContent
+    ).toContain(m.support_repay_off_chargeback());
+    expect(buttonIn(first, m.support_action_elsewhere())?.disabled).toBe(false);
+    expect(buttonIn(second, m.support_action_repay())?.disabled).toBe(false);
+    expect(second.querySelector('[data-testid="repay-off"]')).toBeNull();
+  });
+
+  test('one that needs a person says it must be settled by hand', () => {
+    markRepayBlocked(failedRefund().refundId, 'needs_person');
+    render(FailedRefundsTable, { items: [failedRefund()], onSettle: vi.fn() });
+    const row = document.querySelector<HTMLElement>(
+      'table [data-testid="failed-refund-row"]'
+    );
+    expect(
+      row?.querySelector('[data-testid="repay-off"]')?.textContent
+    ).toContain(m.support_repay_off_needs_person());
   });
 });
 
@@ -258,6 +325,41 @@ describe('Settling a failed refund', () => {
     );
   });
 
+  test.each([
+    ['nothing in the way', failedRefund(), 'restores'],
+    [
+      'a chargeback holding it',
+      failedRefund({ accessRestoreBlockedReason: 'dispute_holds' }),
+      'blocked',
+    ],
+    [
+      'a part refund',
+      failedRefund({ isFull: false, accessRestoreBlockedReason: 'partial' }),
+      'nothing',
+    ],
+    [
+      'an invoice',
+      failedRefund({
+        kind: 'subscription_invoice',
+        accessRestoreBlockedReason: 'no_purchase',
+      }),
+      'subscription',
+    ],
+  ] as const)('before re-paying, the dialog says what the server predicts for access: %s', (_case, item, expected) => {
+    renderDialog('creators_repaid', item);
+    const restores = m.support_repay_access_lead({ buyer: 'Daniel Price' });
+    const blockedLine = m.support_access_kept_dispute({
+      buyer: 'Daniel Price',
+    });
+    const subscription = m.support_repay_subscription();
+    expect(text().includes(restores)).toBe(expected === 'restores');
+    expect(text().includes(blockedLine)).toBe(expected === 'blocked');
+    expect(text().includes(subscription)).toBe(expected === 'subscription');
+    expect(
+      document.querySelector('[data-testid="repay-access-blocked"]') !== null
+    ).toBe(expected === 'blocked');
+  });
+
   test('"refunded another way" needs no note', async () => {
     resolveFailedRefund.mockResolvedValue({
       outcome: 'done',
@@ -304,6 +406,51 @@ describe('Settling a failed refund', () => {
     expect(problem?.textContent).toContain(m.support_repay_blocked_lead());
     expect(problem?.textContent).toContain(body);
     expect(notices).toHaveLength(0);
+    // Refused for good: no retry from here, and the row remembers why.
+    expect(submit()?.disabled).toBe(true);
+    expect(repayBlockReason(failedRefund().refundId)).toBe(reason);
+    // Re-paying won't happen, so nothing is said of what it would do.
+    expect(text()).not.toContain(
+      m.support_repay_access_lead({ buyer: 'Daniel Price' })
+    );
+  });
+
+  test('a clawback step only a person can read: settle it by hand, and Re-pay stays off', async () => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'REFUND_CLAWBACK_NEEDS_PERSON' })
+    );
+    const notices = renderDialog('creators_repaid');
+    typeNote('Re-pay.');
+    submit()?.click();
+    await settled();
+    const problem = document.querySelector('[data-testid="settle-problem"]');
+    expect(problem?.getAttribute('data-problem')).toBe('needs_person');
+    expect(problem?.getAttribute('data-variant')).toBe('warning');
+    expect(problem?.textContent).toContain(m.support_repay_needs_person_lead());
+    expect(problem?.textContent).toContain(m.support_repay_needs_person_body());
+    expect(notices).toHaveLength(0);
+    expect(submit()?.disabled).toBe(true);
+    expect(repayBlockReason(failedRefund().refundId)).toBe('needs_person');
+    expect(text()).not.toContain(
+      m.support_repay_access_lead({ buyer: 'Daniel Price' })
+    );
+  });
+
+  test('a refusal to try again later keeps the access prediction', async () => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'REFUND_CLAWBACK_UNFINISHED' })
+    );
+    renderDialog('creators_repaid');
+    expect(text()).toContain(
+      m.support_repay_access_lead({ buyer: 'Daniel Price' })
+    );
+    typeNote('Re-pay.');
+    submit()?.click();
+    await settled();
+    expect(text()).toContain(m.support_settle_clawback_running());
+    expect(text()).toContain(
+      m.support_repay_access_lead({ buyer: 'Daniel Price' })
+    );
   });
 
   test.each([
@@ -427,6 +574,43 @@ describe('Settling a creator debt', () => {
       reviewId: creatorDebt().reviewId,
       body: { resolution: 'platform_absorbed', note: '' },
     });
+  });
+
+  test.each([
+    ['a failure', () => failure({ status: 500 }), 'failed'],
+    [
+      'a 401',
+      () => failure({ status: 401, code: 'UNAUTHORIZED' }),
+      'session_ended',
+    ],
+  ])('%s keeps it open, says why, and takes focus there', async (_what, answer, kind) => {
+    resolveCreatorDebt.mockResolvedValue(answer());
+    renderDialog();
+    radios()[1].click();
+    flushSync();
+    submit()?.focus();
+    submit()?.click();
+    await settled();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const problem = document.querySelector<HTMLElement>(
+      '[data-testid="settle-problem"]'
+    );
+    expect(problem?.dataset.problem).toBe(kind);
+    expect(document.activeElement).toBe(problem);
+  });
+
+  test('a settle the guard refused (a 404, no code) says the session ended', async () => {
+    resolveCreatorDebt.mockRejectedValue(httpError(404, 'Not Found'));
+    renderDialog();
+    radios()[1].click();
+    flushSync();
+    submit()?.click();
+    await settled();
+    expect(
+      document.querySelector<HTMLElement>('[data-testid="settle-problem"]')
+        ?.dataset.problem
+    ).toBe('session_ended');
+    expect(text()).toContain(m.support_settle_session_ended());
   });
 
   test('on a chargeback’s debt, absorbing it says a win pays nothing back', () => {

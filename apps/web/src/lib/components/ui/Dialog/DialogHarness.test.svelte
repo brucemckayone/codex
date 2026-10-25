@@ -8,12 +8,18 @@
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     size?: 'sm' | 'md' | 'lg';
+    dismissible?: boolean;
   }
 
-  let { open = $bindable(false), onOpenChange, size = 'md' }: Props = $props();
+  let {
+    open = $bindable(false),
+    onOpenChange,
+    size = 'md',
+    dismissible = true,
+  }: Props = $props();
 </script>
 
-<Dialog bind:open {onOpenChange}>
+<Dialog bind:open {onOpenChange} {dismissible}>
   <DialogContent {size}>
     <DialogTitle>Dialog Title</DialogTitle>
     <DialogDescription>Dialog description text</DialogDescription>

@@ -4,7 +4,9 @@
   Failed refunds waiting for a person, oldest first (Codex-2hxff.28, mockup
   D1). The buyer's bank sent each one back: the money is in the platform's
   balance again and the payees' shares are still taken back. Each row offers
-  the two settlements; the page opens the confirm dialog.
+  the two settlements; the page opens the confirm dialog. A row whose re-pay
+  the server refused for a later cause (`repay-blocks.svelte.ts`) keeps Re-pay
+  disabled for the session, with the reason beside it.
 
   @prop {FailedRefundItem[]} items
   @prop {(item, resolution) => void} onSettle
@@ -15,6 +17,7 @@
   import { Badge, Button } from '$lib/components/ui';
   import * as Table from '$lib/components/ui/Table';
   import { formatPrice } from '$lib/utils/format';
+  import { repayBlockReason } from './repay-blocks.svelte';
   import { formatDay, formatShortDay } from './support-format';
 
   interface Props {
@@ -42,12 +45,25 @@
   function madeLine(item: FailedRefundItem): string {
     const date = formatShortDay(item.createdAt);
     const name = item.requestedBy?.name;
-    if (item.isFull) {
+    if (item.isFull === true) {
       return name
         ? m.support_failed_full_by({ date, name })
         : m.support_failed_full({ date });
     }
+    // Null: no record of the charge, so its size is unknown, never "part".
+    if (item.isFull === null) {
+      return name
+        ? m.support_failed_size_unknown_by({ date, name })
+        : m.support_failed_size_unknown({ date });
+    }
     return name ? m.support_failed_part_by({ date, name }) : m.support_failed_part({ date });
+  }
+
+  function phoneLine(item: FailedRefundItem): string {
+    const dates = { made: formatShortDay(item.createdAt), failed: formatShortDay(item.failedAt) };
+    if (item.isFull === true) return m.support_failed_phone_full(dates);
+    if (item.isFull === null) return m.support_failed_phone_size_unknown(dates);
+    return m.support_failed_phone_part(dates);
   }
 
   function chargeHref(chargeId: string): string {
@@ -63,12 +79,28 @@
 {/snippet}
 
 {#snippet actions(item: FailedRefundItem)}
+  {@const blockedBy = repayBlockReason(item.refundId)}
   <Button variant="secondary" size="sm" onclick={() => onSettle(item, 'refunded_elsewhere')}>
     {m.support_action_elsewhere()}
   </Button>
-  <Button variant="secondary" size="sm" onclick={() => onSettle(item, 'creators_repaid')}>
+  <Button
+    variant="secondary"
+    size="sm"
+    disabled={blockedBy !== null}
+    data-repay-blocked={blockedBy ?? undefined}
+    onclick={() => onSettle(item, 'creators_repaid')}
+  >
     {m.support_action_repay()}
   </Button>
+  {#if blockedBy}
+    <span class="action-note" data-testid="repay-off">
+      {blockedBy === 'chargeback'
+        ? m.support_repay_off_chargeback()
+        : blockedBy === 'needs_person'
+          ? m.support_repay_off_needs_person()
+          : m.support_repay_off_later_refunds()}
+    </span>
+  {/if}
 {/snippet}
 
 <div class="queue-table">
@@ -124,10 +156,7 @@
       </div>
       <a class="row-link cell-sub" href={chargeHref(item.chargeId)}>{chargeLabel(item)}</a>
       <span class="cell-sub">
-        {(item.isFull ? m.support_failed_phone_full : m.support_failed_phone_part)({
-          made: formatShortDay(item.createdAt),
-          failed: formatShortDay(item.failedAt),
-        })}
+        {phoneLine(item)}
       </span>
       <span class="text-sm">{item.failureLabel}</span>
       <span class="cell-sub">
@@ -202,6 +231,19 @@
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: var(--space-2);
+  }
+
+  /* Its own line, under the buttons. */
+  .action-note {
+    flex-basis: 100%;
+    max-width: var(--control-width-md);
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .table-actions .action-note {
+    margin-left: auto;
+    text-align: right;
   }
 
   .queue-table :global(.table-cell) {

@@ -10,7 +10,8 @@
 
   As on the search page, a list whose query was rejected shows an error,
   never the empty state. Settling the last row of a later page goes back to
-  the last page with rows, rather than saying nothing is waiting.
+  the last page with rows, rather than saying nothing is waiting. A list
+  refused because the session ended says so, with no Try again (R2-M1).
 
   When a settle dialog closes on an answer, focus moves to the notice
   (`tabindex="-1"`) so it is read out; on Cancel, back to the row's button.
@@ -31,6 +32,8 @@
   import FailedRefundsTable from '$lib/components/support/FailedRefundsTable.svelte';
   import SettleDebtDialog from '$lib/components/support/SettleDebtDialog.svelte';
   import SettleRefundDialog from '$lib/components/support/SettleRefundDialog.svelte';
+  import SessionEndedAlert from '$lib/components/support/SessionEndedAlert.svelte';
+  import { isSessionEnded } from '$lib/components/support/session';
   import type { SettleNotice } from '$lib/components/support/settle-notice';
   import TabLinks from '$lib/components/support/TabLinks.svelte';
   import { useQueueCounts } from '$lib/components/support/queue-counts';
@@ -55,6 +58,7 @@
   );
   const activeQuery = $derived(tab === 'failed' ? failedQuery : debtsQuery);
   const listError = $derived(queryErrorMessage(activeQuery?.error));
+  const sessionEnded = $derived(isSessionEnded(activeQuery?.error));
   const failed = $derived(failedQuery?.current);
   const debts = $derived(debtsQuery?.current);
   const active = $derived(tab === 'failed' ? failed : debts);
@@ -169,7 +173,9 @@
   </Alert>
 {/if}
 
-{#if listError && !active}
+{#if sessionEnded && !active}
+  <SessionEndedAlert />
+{:else if listError && !active}
   <Alert variant="error" data-testid="queue-error">
     <p><strong>{m.support_queue_load_error_lead()}</strong> {m.support_try_again_soon()}</p>
     <div class="alert-actions">

@@ -8,6 +8,10 @@
  * - One refund call per submit, even on a double click, carrying the refund
  *   count the page showed.
  * - A blocked charge shows its reason in place of the form.
+ * - A preview the route refuses reloads the charge; a session that ended
+ *   says so; neither offers a Try again that can't work (R2-L1, R2-M1).
+ * - When Review or Try again opens nothing, focus moves to why (R2-L2).
+ * - The amount's error waits for the field to be left or submitted (R2-L5).
  *
  * Mounts the real component with the real Dialog; only the remote module
  * (it imports `$app/server`) is replaced by the reactive double.
@@ -34,6 +38,7 @@ import {
 import {
   failure,
   getRefundPreview,
+  httpError,
   issueSupportRefund,
   previewSlot,
   reset,
@@ -43,10 +48,12 @@ import type { RefundOutcome } from '../refund-outcome';
 
 let component: ReturnType<typeof mount> | null = null;
 let outcomes: RefundOutcome[] = [];
+const onStale = vi.fn();
 
 beforeEach(() => {
   reset();
   outcomes = [];
+  onStale.mockReset();
   vi.useFakeTimers();
 });
 
@@ -69,6 +76,7 @@ function mountForm(
       detail: props.detail ?? chargeDetail(),
       stale: props.stale ?? false,
       onOutcome: (outcome: RefundOutcome) => outcomes.push(outcome),
+      onStale,
     },
   });
   flushSync();
@@ -94,6 +102,16 @@ async function wait(ms: number) {
   await vi.advanceTimersByTimeAsync(ms);
   flushSync();
 }
+
+const amountInput = () =>
+  document.querySelector<HTMLInputElement>('input[inputmode="decimal"]');
+/** Leave the amount field. */
+function blurAmount() {
+  amountInput()?.dispatchEvent(new FocusEvent('blur'));
+  flushSync();
+}
+const amountError = () =>
+  document.querySelector('.amount-error')?.textContent?.trim() ?? '';
 
 const ARGS_750 = { chargeId: CHARGE_ID, amountCents: 750, refundCount: 1 };
 const NOW_ISO = '2026-10-24T09:41:00.000Z';
@@ -140,6 +158,7 @@ describe('the preview', () => {
     mountForm();
     choosePart('20.01');
     await wait(400);
+    blurAmount();
     expect(getRefundPreview).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain(
       m.support_form_amount_invalid({ max: '£20.00' })
@@ -334,6 +353,7 @@ describe('the amount field', () => {
   test('sits outside the radio’s label; its error is tied to it and read out', () => {
     mountForm();
     choosePart('20.01');
+    blurAmount();
     const radio = document.querySelector<HTMLInputElement>(
       'input[value="part"]'
     );
@@ -353,6 +373,199 @@ describe('the amount field', () => {
       m.support_form_amount_invalid({ max: '£20.00' })
     );
     expect(input?.getAttribute('aria-invalid')).toBe('true');
+  });
+});
+
+describe('the amount’s error (R2-L5)', () => {
+  test('waits while it is typed: shown on leaving the field, cleared by typing', () => {
+    const message = m.support_form_amount_invalid({ max: '£20.00' });
+    mountForm();
+    // "7." is on its way to "7.50": not an amount yet, and not an error.
+    choosePart('7.');
+    expect(amountError()).toBe('');
+    expect(amountInput()?.getAttribute('aria-invalid')).toBeNull();
+
+    blurAmount();
+    expect(amountError()).toBe(message);
+    expect(amountInput()?.getAttribute('aria-invalid')).toBe('true');
+
+    // Typing again clears it, even on the way to another wrong amount.
+    choosePart('20.01');
+    expect(amountError()).toBe('');
+    blurAmount();
+    expect(amountError()).toBe(message);
+  });
+
+  test('Enter shows it too', () => {
+    mountForm();
+    choosePart('20.01');
+    expect(amountError()).toBe('');
+    amountInput()?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+    );
+    flushSync();
+    expect(amountError()).toBe(
+      m.support_form_amount_invalid({ max: '£20.00' })
+    );
+  });
+});
+
+describe('a preview the route refuses (R2-L1)', () => {
+  test.each([
+    400, 422,
+  ])('a %i reloads the charge, once for this charge, and offers Reload, not Try again', async (status) => {
+    mountForm();
+    choosePart('7.50');
+    await wait(300);
+    const slot = previewSlot(ARGS_750);
+    slot.error = httpError(status, 'Refused', 'BUSINESS_LOGIC_ERROR');
+    flushSync();
+    expect(onStale).toHaveBeenCalledTimes(1);
+    const refused = document.querySelector('[data-testid="preview-refused"]');
+    expect(refused?.textContent).toContain(m.support_preview_refused_lead());
+    expect(document.querySelector('[data-testid="preview-error"]')).toBeNull();
+    const buttons = [...(refused?.querySelectorAll('button') ?? [])];
+    expect(buttons.map((b) => b.textContent?.trim())).toEqual([
+      m.support_reload_charge(),
+    ]);
+
+    // Asked again and refused again for the same charge: no second reload.
+    slot.error = httpError(status, 'Refused', 'BUSINESS_LOGIC_ERROR');
+    flushSync();
+    expect(onStale).toHaveBeenCalledTimes(1);
+
+    buttons[0]?.click();
+    expect(onStale).toHaveBeenCalledTimes(2);
+    expect(review()?.disabled).toBe(true);
+  });
+
+  test('a reload that changes nothing asks no second reload; one that changes the charge may', async () => {
+    const props = $state({
+      detail: chargeDetail(),
+      stale: false,
+      onOutcome: (outcome: RefundOutcome) => outcomes.push(outcome),
+      onStale,
+    });
+    component = mount(RefundForm, { target: document.body, props });
+    flushSync();
+    choosePart('7.50');
+    await wait(300);
+    previewSlot(ARGS_750).error = httpError(
+      400,
+      'Refused',
+      'BUSINESS_LOGIC_ERROR'
+    );
+    flushSync();
+    expect(onStale).toHaveBeenCalledTimes(1);
+
+    // The reload lands: a new answer, the same charge. No loop.
+    props.detail = chargeDetail();
+    flushSync();
+    await wait(0);
+    expect(onStale).toHaveBeenCalledTimes(1);
+
+    // Another refund landed meanwhile: a new preview, refused again.
+    props.detail = chargeDetail({ refundCount: 2 });
+    flushSync();
+    previewSlot({ ...ARGS_750, refundCount: 2 }).error = httpError(
+      400,
+      'Refused',
+      'BUSINESS_LOGIC_ERROR'
+    );
+    flushSync();
+    expect(onStale).toHaveBeenCalledTimes(2);
+  });
+
+  test.each([
+    429, 500,
+  ])('a %i is a failure to try again, with no reload', async (status) => {
+    mountForm();
+    choosePart('7.50');
+    await wait(300);
+    previewSlot(ARGS_750).error = httpError(status, 'Busy');
+    flushSync();
+    expect(
+      document.querySelector('[data-testid="preview-error"]')
+    ).not.toBeNull();
+    expect(
+      document.querySelector('[data-testid="preview-refused"]')
+    ).toBeNull();
+    expect(onStale).not.toHaveBeenCalled();
+  });
+
+  test('a session that ended says so, with no Try again and no reload (R2-M1)', async () => {
+    mountForm();
+    choosePart('7.50');
+    await wait(300);
+    // The remote guard's 404: no code, unlike the worker's NOT_FOUND.
+    previewSlot(ARGS_750).error = httpError(404, 'Not Found');
+    flushSync();
+    const ended = document.querySelector('[data-testid="session-ended"]');
+    expect(ended?.textContent).toContain(m.support_outcome_signed_out_lead());
+    expect(ended?.querySelector('button')).toBeNull();
+    expect(document.querySelector('[data-testid="preview-error"]')).toBeNull();
+    expect(onStale).not.toHaveBeenCalled();
+    expect(review()?.disabled).toBe(true);
+  });
+});
+
+describe('focus after Review or Try again (R2-L2)', () => {
+  async function readyAt750() {
+    mountForm();
+    choosePart('7.50');
+    await wait(300);
+    const slot = previewSlot(ARGS_750);
+    slot.current = preview();
+    flushSync();
+    return slot;
+  }
+
+  test('a Review that opens nothing moves focus to why', async () => {
+    const slot = await readyAt750();
+    slot.refresh.mockImplementation(async () => {
+      slot.error = httpError(500, 'boom');
+      throw new Error('boom');
+    });
+    review()?.focus();
+    review()?.click();
+    await wait(0);
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="preview-error"]')
+    );
+  });
+
+  test('Try again that lands moves focus to the preview’s heading', async () => {
+    const slot = await readyAt750();
+    slot.error = httpError(500, 'boom');
+    flushSync();
+    slot.refresh.mockImplementation(async () => {
+      slot.error = undefined;
+    });
+    const retry = document.querySelector<HTMLButtonElement>(
+      '[data-testid="preview-error"] button'
+    );
+    retry?.focus();
+    retry?.click();
+    await wait(0);
+    expect(document.querySelector('[data-testid="preview-error"]')).toBeNull();
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-preview-heading]')
+    );
+  });
+
+  test('after Enter in the amount, focus stays in the amount', async () => {
+    const slot = await readyAt750();
+    slot.refresh.mockImplementation(async () => {
+      slot.error = httpError(500, 'boom');
+      throw new Error('boom');
+    });
+    amountInput()?.focus();
+    amountInput()?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+    );
+    await wait(0);
+    expect(slot.refresh).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(amountInput());
   });
 });
 

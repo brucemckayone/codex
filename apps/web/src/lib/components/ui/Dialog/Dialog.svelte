@@ -52,6 +52,14 @@
     // We omit the 'open' property from the initial options to avoid type errors with runes
     // and instead sync it via the states object and $effect.
     onOpenChange: ({ next }) => {
+      // Melt closing on its own (Escape, a press outside, the close button)
+      // while not dismissible: refused. Our own `open = false` has already
+      // set the prop, so it passes. This is the one guard for every path, and
+      // it rebuilds nothing: toggling Melt's `closeOnOutsideClick` store
+      // instead re-created the focus trap, which moved focus to the first
+      // tabbable element and off the answer the dialog had just shown
+      // (Codex-2hxff.28, R2-L3).
+      if (!next && open && !dismissible) return true;
       open = next;
       onOpenChange?.(next);
       return next;
@@ -84,8 +92,9 @@
     meltOpen.set(open);
   });
 
+  // Escape is ignored outright too. Its behaviour is a store the key handler
+  // reads, so changing it rebuilds nothing.
   $effect(() => {
-    dialog.options.closeOnOutsideClick.set(dismissible);
     dialog.options.escapeBehavior.set(dismissible ? 'close' : 'ignore');
   });
 

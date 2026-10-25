@@ -83,6 +83,17 @@ describe('searching', () => {
     expect(text()).not.toContain('An unexpected error occurred');
   });
 
+  test('a search the guard refused (a 404, no code) says the session ended', () => {
+    mountAt(`/admin/refunds?q=${encodeURIComponent(EMAIL)}`);
+    searchSlot(EMAIL).error = httpError(404, 'Not Found');
+    flushSync();
+    expect(
+      document.querySelector('[data-testid="session-ended"]')?.textContent
+    ).toContain(m.support_outcome_signed_out_lead());
+    expect(document.querySelector('[data-testid="search-error"]')).toBeNull();
+    expect(document.body.textContent).not.toContain(m.support_try_again_soon());
+  });
+
   test('while it runs: skeleton rows, and neither an error nor the empty state', () => {
     mountAt(`/admin/refunds?q=${encodeURIComponent(EMAIL)}`);
     expect(document.querySelector('[aria-busy="true"]')).not.toBeNull();

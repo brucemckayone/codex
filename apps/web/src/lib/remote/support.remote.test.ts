@@ -12,9 +12,13 @@
  * - The preview's `refundCount` keys the query only; it is never sent.
  * - Anyone but the platform owner gets a 404 before any worker call: a remote
  *   function is reachable without its page, so it repeats the layout's guard.
+ *   They get it whatever they send: the guard runs inside the schema, which
+ *   kit validates before the handler (R2-L4).
  * - Each function's input schema refuses what the route would.
  *
- * Set up like `admin-grant-forwarding.test.ts`: `@sveltejs/kit` is real.
+ * Set up like `admin-grant-forwarding.test.ts`: `@sveltejs/kit` is real. The
+ * `$app/server` double validates as kit does (`remote/shared.js`): the
+ * schema's `~standard.validate` first, a 400 on any issue, then the handler.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -42,16 +46,39 @@ const event = vi.hoisted(() => ({
   locals: { user: { role: 'platform_owner' } as { role: string } | null },
 }));
 
+type Standard = {
+  '~standard': {
+    validate: (
+      value: unknown
+    ) =>
+      | { issues?: unknown[]; value?: unknown }
+      | Promise<{ issues?: unknown[]; value?: unknown }>;
+  };
+};
+
 // The handler is the last argument; a schema, when there is one, the first.
-const makeRemote = (type: string, args: unknown[]) =>
-  Object.assign(
-    (...input: unknown[]) =>
-      (args[args.length - 1] as (...a: unknown[]) => unknown)(...input),
-    {
-      __: { type, id: '', name: '' },
-      schema: args.length > 1 ? args[0] : null,
-    }
+const makeRemote = (type: string, args: unknown[]) => {
+  const handler = args[args.length - 1] as (arg: unknown) => unknown;
+  const schema = args.length > 1 ? (args[0] as Standard) : null;
+  return Object.assign(
+    async (arg?: unknown) => {
+      if (!schema) {
+        if (arg !== undefined)
+          throw { status: 400, body: { message: 'Bad Request' } };
+        return handler(arg);
+      }
+      const result = await schema['~standard'].validate(arg);
+      if (result.issues) {
+        throw {
+          status: 400,
+          body: { message: 'Invalid input', code: 'VALIDATION_ERROR' },
+        };
+      }
+      return handler(result.value);
+    },
+    { __: { type, id: '', name: '' }, schema }
   );
+};
 vi.mock('$app/server', () => ({
   command: vi.fn((...args: unknown[]) => makeRemote('command', args)),
   form: vi.fn((...args: unknown[]) => makeRemote('form', args)),
@@ -63,8 +90,7 @@ vi.mock('$app/server', () => ({
   })),
 }));
 
-type Schema = { safeParse: (input: unknown) => { success: boolean } };
-type Fn = ((input?: unknown) => Promise<unknown>) & { schema: Schema | null };
+type Fn = ((input?: unknown) => Promise<unknown>) & { schema: Standard | null };
 const remote = (await import('./support.remote')) as unknown as Record<
   string,
   Fn
@@ -84,6 +110,8 @@ beforeEach(() => {
 });
 
 const UUID = '11111111-1111-4111-8111-111111111111';
+/** No function's schema takes a bare number. */
+const MALFORMED = 42;
 /** Each function, with an input its schema accepts. */
 const CALLS: [string, unknown][] = [
   ['searchSupportCharges', { q: 'e@x.com', page: 1, limit: 20 }],
@@ -118,6 +146,25 @@ describe('the owner guard', () => {
     for (const fn of Object.values(api)) expect(fn).not.toHaveBeenCalled();
   });
 
+  it('they get the 404 for malformed input too, never kit’s 400', async () => {
+    event.locals.user = { role: 'customer' };
+    for (const [name] of CALLS) {
+      await expect(remote[name](MALFORMED), name).rejects.toMatchObject({
+        status: 404,
+      });
+    }
+    for (const fn of Object.values(api)) expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('the platform owner’s malformed input is a 400, and no worker call', async () => {
+    for (const [name] of CALLS) {
+      await expect(remote[name](MALFORMED), name).rejects.toMatchObject({
+        status: 400,
+      });
+    }
+    for (const fn of Object.values(api)) expect(fn).not.toHaveBeenCalled();
+  });
+
   it('the platform owner reaches the worker', async () => {
     api.getQueueCounts.mockResolvedValue({ failedRefunds: 0, creatorDebts: 0 });
     await expect(remote.getSupportQueueCounts()).resolves.toEqual({
@@ -128,46 +175,46 @@ describe('the owner guard', () => {
 });
 
 describe('the input schemas', () => {
-  const accepts = (name: string, input: unknown) =>
-    remote[name].schema?.safeParse(input).success;
+  const accepts = async (name: string, input: unknown) => {
+    const schema = remote[name].schema;
+    if (!schema) throw new Error(`${name} has no schema`);
+    const result = await schema['~standard'].validate(input);
+    return result.issues === undefined;
+  };
 
-  it('every function but the counts takes a schema, and accepts its good input', () => {
+  it('every function takes a schema, and accepts its good input', async () => {
     for (const [name, input] of CALLS) {
-      if (name === 'getSupportQueueCounts') {
-        expect(remote[name].schema).toBeNull();
-      } else {
-        expect(accepts(name, input), name).toBe(true);
-      }
+      expect(await accepts(name, input), name).toBe(true);
     }
   });
 
-  it('a refund needs a charge id that is a charge, and a whole number of pence', () => {
+  it('a refund needs a charge id that is a charge, and a whole number of pence', async () => {
     const { chargeId: _omit, ...noCharge } = REFUND_INPUT;
-    expect(accepts('issueSupportRefund', noCharge)).toBe(false);
+    expect(await accepts('issueSupportRefund', noCharge)).toBe(false);
     expect(
-      accepts('issueSupportRefund', {
+      await accepts('issueSupportRefund', {
         ...REFUND_INPUT,
         chargeId: 'pi_3QeT8xLk2v',
       })
     ).toBe(false);
     expect(
-      accepts('issueSupportRefund', { ...REFUND_INPUT, amountCents: 7.5 })
+      await accepts('issueSupportRefund', { ...REFUND_INPUT, amountCents: 7.5 })
     ).toBe(false);
   });
 
-  it('the preview’s refund count is a whole number, zero allowed', () => {
+  it('the preview’s refund count is a whole number, zero allowed', async () => {
     const preview = { chargeId: CHARGE, amountCents: 750 };
-    expect(accepts('getRefundPreview', { ...preview, refundCount: 0 })).toBe(
-      true
-    );
-    expect(accepts('getRefundPreview', { ...preview, refundCount: -1 })).toBe(
-      false
-    );
-    expect(accepts('getRefundPreview', { ...preview, refundCount: 1.5 })).toBe(
-      false
-    );
     expect(
-      accepts('getRefundPreview', {
+      await accepts('getRefundPreview', { ...preview, refundCount: 0 })
+    ).toBe(true);
+    expect(
+      await accepts('getRefundPreview', { ...preview, refundCount: -1 })
+    ).toBe(false);
+    expect(
+      await accepts('getRefundPreview', { ...preview, refundCount: 1.5 })
+    ).toBe(false);
+    expect(
+      await accepts('getRefundPreview', {
         ...preview,
         amountCents: 0,
         refundCount: 0,
@@ -175,22 +222,22 @@ describe('the input schemas', () => {
     ).toBe(false);
   });
 
-  it('the settle routes take uuids, never a Stripe id', () => {
+  it('the settle routes take uuids, never a Stripe id', async () => {
     const body = { resolution: 'refunded_elsewhere', note: '' };
     expect(
-      accepts('resolveFailedRefund', { refundId: 're_3QgB1aLk2v', body })
+      await accepts('resolveFailedRefund', { refundId: 're_3QgB1aLk2v', body })
     ).toBe(false);
     expect(
-      accepts('resolveCreatorDebt', {
+      await accepts('resolveCreatorDebt', {
         reviewId: 'not-a-uuid',
         body: { resolution: 'platform_absorbed', note: '' },
       })
     ).toBe(false);
   });
 
-  it('a debt is never settled as dispute_won from here', () => {
+  it('a debt is never settled as dispute_won from here', async () => {
     expect(
-      accepts('resolveCreatorDebt', {
+      await accepts('resolveCreatorDebt', {
         reviewId: UUID,
         body: { resolution: 'dispute_won', note: 'x' },
       })

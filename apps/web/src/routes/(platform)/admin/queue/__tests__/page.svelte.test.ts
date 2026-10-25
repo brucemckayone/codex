@@ -44,17 +44,22 @@ import {
   countsSlot,
   debtsSlot,
   failedSlot,
+  failure,
   httpError,
   listCreatorDebts,
   listFailedRefunds,
   reset,
   resolveFailedRefund,
 } from '$lib/components/support/__fixtures__/support-remote.mock.svelte';
+import { clearRepayBlocks } from '$lib/components/support/repay-blocks.svelte';
 import QueuePage from '../+page.svelte';
 
 let component: ReturnType<typeof mount> | null = null;
 
-beforeEach(() => reset());
+beforeEach(() => {
+  reset();
+  clearRepayBlocks();
+});
 
 afterEach(() => {
   if (component) unmount(component);
@@ -127,6 +132,17 @@ describe('the list', () => {
     // Our own words, not the server's pasted into the sentence.
     expect(text()).toContain(m.support_try_again_soon());
     expect(text()).not.toContain('An unexpected error occurred');
+  });
+
+  test('a list the guard refused (a 404, no code) says the session ended, with no Try again', () => {
+    mountAt('/admin/queue');
+    failedSlot().error = httpError(404, 'Not Found');
+    flushSync();
+    expect(
+      document.querySelector('[data-testid="session-ended"]')?.textContent
+    ).toContain(m.support_outcome_signed_out_lead());
+    expect(document.querySelector('[data-testid="queue-error"]')).toBeNull();
+    expect(text()).not.toContain(m.support_queue_failed_empty_title());
   });
 
   test('a later page left empty goes back a page, never "nothing waiting"', () => {
@@ -226,6 +242,91 @@ describe('the settle dialog', () => {
     flushSync();
     await afterFocus();
     expect(document.querySelector('[data-testid="settle-submit"]')).toBeNull();
+  });
+});
+
+describe('a refusal that keeps the dialog open', () => {
+  async function submitRepay() {
+    mountAt('/admin/queue');
+    failedSlot().current = list([failedRefund()]);
+    flushSync();
+    rowButton(m.support_action_repay())?.click();
+    flushSync();
+    const area = document.querySelector<HTMLTextAreaElement>(
+      '[role="dialog"] textarea'
+    );
+    if (!area) throw new Error('no note');
+    area.value = 'Re-pay.';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const submit = document.querySelector<HTMLButtonElement>(
+      '[data-testid="settle-submit"]'
+    );
+    submit?.focus();
+    submit?.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    flushSync();
+    await afterFocus();
+  }
+  const problem = () =>
+    document.querySelector<HTMLElement>('[data-testid="settle-problem"]');
+
+  test('takes focus, so it is read out (R2-L3)', async () => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({ detailsCode: 'REFUND_CLAWBACK_UNFINISHED' })
+    );
+    await submitRepay();
+    expect(problem()?.dataset.problem).toBe('clawback_running');
+    expect(document.activeElement).toBe(problem());
+  });
+
+  test('a settle the guard refused says the session ended (R2-M1)', async () => {
+    resolveFailedRefund.mockRejectedValue(httpError(404, 'Not Found'));
+    await submitRepay();
+    expect(problem()?.dataset.problem).toBe('session_ended');
+    expect(problem()?.textContent).toContain(m.support_settle_session_ended());
+    expect(document.activeElement).toBe(problem());
+  });
+});
+
+describe('a re-pay refused for a later cause', () => {
+  test('turns that row’s Re-pay off for the session, with the reason beside it', async () => {
+    resolveFailedRefund.mockResolvedValue(
+      failure({
+        detailsCode: 'REPAY_BLOCKED_BY_LATER_CAUSE',
+        reason: 'later_refunds',
+      })
+    );
+    mountAt('/admin/queue');
+    failedSlot().current = list([failedRefund()]);
+    flushSync();
+    rowButton(m.support_action_repay())?.click();
+    flushSync();
+    const area = document.querySelector<HTMLTextAreaElement>(
+      '[role="dialog"] textarea'
+    );
+    if (!area) throw new Error('no note');
+    area.value = 'Re-pay.';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="settle-submit"]')
+      ?.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    flushSync();
+    [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+      .find((b) => b.textContent?.trim() === m.support_confirm_cancel())
+      ?.click();
+    flushSync();
+    await afterFocus();
+
+    expect(rowButton(m.support_action_repay())?.disabled).toBe(true);
+    expect(rowButton(m.support_action_elsewhere())?.disabled).toBe(false);
+    expect(
+      document.querySelector(
+        '[data-testid="failed-refund-row"] [data-testid="repay-off"]'
+      )?.textContent
+    ).toContain(m.support_repay_off_later_refunds());
   });
 });
 

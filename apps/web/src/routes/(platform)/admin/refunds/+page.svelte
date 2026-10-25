@@ -8,7 +8,8 @@
   undefined and `loading` false, which a naive gate reads as "no results":
   it would tell support "No charge found" when the search never ran. So the
   error is checked first, then "no answer yet", and only a real empty answer
-  shows the empty state.
+  shows the empty state. An error from a session that ended says so, since
+  trying again cannot help (R2-M1).
 -->
 <script lang="ts">
   import { REFUND_WINDOW_DAYS } from '@codex/constants';
@@ -20,6 +21,8 @@
   import { ReceiptIcon } from '$lib/components/ui/Icon';
   import { SearchPill } from '$lib/components/ui/SearchPill';
   import ChargeResults from '$lib/components/support/ChargeResults.svelte';
+  import SessionEndedAlert from '$lib/components/support/SessionEndedAlert.svelte';
+  import { isSessionEnded } from '$lib/components/support/session';
   import { matchedBy } from '$lib/components/support/support-format';
   import { queryErrorMessage } from '$lib/remote/query-result';
   import { searchSupportCharges } from '$lib/remote/support.remote';
@@ -47,6 +50,7 @@
   );
   const results = $derived(searchQuery?.current);
   const searchError = $derived(queryErrorMessage(searchQuery?.error));
+  const sessionEnded = $derived(isSessionEnded(searchQuery?.error));
   const items = $derived(results?.items ?? []);
   const pagination = $derived(results?.pagination);
 
@@ -128,7 +132,9 @@
 {#if tooShort}
   <p class="muted" role="status">{m.support_search_too_short()}</p>
 {:else if searchQuery}
-  {#if searchError && !results}
+  {#if sessionEnded && !results}
+    <SessionEndedAlert />
+  {:else if searchError && !results}
     <Alert variant="error" data-testid="search-error">
       <p>
         <strong>{m.support_search_error_lead()}</strong>

@@ -56,7 +56,7 @@
     return payoutReasonLabel(slice.reason);
   }
 
-  /** The fee's rate as charged (10.5% stays 10.5%), from the server. */
+  /** The fee slice's share of this charge, from the server: the effective share, not a configured rate. */
   function platformShare(slice: Slice): string | null {
     const bps = detail.split.platformFeeShareBps;
     if (slice.payoutType !== 'platform_fee' || bps === null) return null;

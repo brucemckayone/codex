@@ -213,6 +213,23 @@ describe('the same refund refused earlier', () => {
   });
 });
 
+describe('the same refund still being made', () => {
+  test('in_flight: still being processed, reload in a minute, and no Dashboard advice', () => {
+    const onReload = vi.fn();
+    const alert = render({ kind: 'in_flight' }, chargeDetail(), { onReload });
+    expect(alert.getAttribute('data-variant')).toBe('warning');
+    expect(text(alert)).toContain(m.support_outcome_in_flight_lead());
+    expect(text(alert)).toContain(m.support_outcome_in_flight_body());
+    expect(text(alert)).not.toContain('Dashboard');
+    const buttons = [...alert.querySelectorAll('button')];
+    expect(buttons.map((b) => b.textContent?.trim())).toEqual([
+      m.support_reload_charge(),
+    ]);
+    buttons[0]?.click();
+    expect(onReload).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('focus', () => {
   test('the alert can take focus, for the page to move it there', () => {
     const alert = render({ kind: 'nothing_left' });

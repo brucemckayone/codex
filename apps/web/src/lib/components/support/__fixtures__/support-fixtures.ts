@@ -224,6 +224,8 @@ export function failedRefund(
     failureReason: 'expired_or_canceled_card',
     failureLabel: 'The card has expired or been cancelled',
     takenFromPayeesCents: 2160,
+    // Re-paying would give Daniel access back (the server's prediction).
+    accessRestoreBlockedReason: null,
     ...overrides,
   };
 }
