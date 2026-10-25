@@ -91,6 +91,7 @@
     membershipLabel = null,
     accessLabel = null,
     cta = 'View portal',
+    dimmed = false,
   }: JourneyEntryCardProps = $props();
 
   const priceLabel = $derived(
@@ -268,7 +269,13 @@
   </div>
 {/snippet}
 
-<a class="jec" {href} data-layout={layout} class:jec--featured={featured}>
+<a
+  class="jec"
+  {href}
+  data-layout={layout}
+  class:jec--featured={featured}
+  class:jec--dimmed={dimmed}
+>
   <div class="jec__cover">
     <!-- ALWAYS painted, so a missing / broken / not-yet-loaded photo degrades
          to the gradient with no handler and no layout shift. -->
@@ -946,6 +953,16 @@
     justify-content: space-between;
     gap: var(--space-3);
     margin-top: auto;
+  }
+
+  /* Listed but paused by a payment dispute (Codex-2hxff.60). Opacity, not
+     colour, as on a paused ContentCard. The access chip is left at full
+     strength: it is the explanation. A tile's text sits inside its cover,
+     so only a row's body text is named, or a tile's would dim twice. */
+  .jec--dimmed .jec__cover,
+  .jec--dimmed .jec__body .jec__text,
+  .jec--dimmed .jec__cta {
+    opacity: var(--opacity-60);
   }
 
   .jec__price {

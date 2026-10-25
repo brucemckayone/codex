@@ -62,7 +62,9 @@ import { Hono } from 'hono';
  *
  * No-op when `CACHE_KV` binding is absent (dev stub / misconfigured env).
  * Errors are swallowed inside the `waitUntil` promise so a KV hiccup never
- * surfaces as a mutation failure — the DB write has already committed.
+ * surfaces as a mutation failure — the DB write has already committed. They
+ * are logged at error, not warn: the key keeps refusing a subscriber whose
+ * access was restored, for up to its TTL (Codex-2hxff.60).
  *
  * See bead Codex-13ml3 (clear counterpart to Codex-usgf7 writes).
  */
@@ -81,7 +83,7 @@ function clearAccessRevocation(
   try {
     ctx.executionCtx.waitUntil(
       revocation.clear(userId, organizationId).catch((error) => {
-        ctx.obs?.warn('subscriptions-route: AccessRevocation.clear failed', {
+        ctx.obs?.error('subscriptions-route: AccessRevocation.clear failed', {
           userId,
           orgId: organizationId,
           error: error instanceof Error ? error.message : String(error),
@@ -89,7 +91,7 @@ function clearAccessRevocation(
       })
     );
   } catch (error) {
-    ctx.obs?.warn(
+    ctx.obs?.error(
       'subscriptions-route: waitUntil threw synchronously (clear)',
       {
         userId,

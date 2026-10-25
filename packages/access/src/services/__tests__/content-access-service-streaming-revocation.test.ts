@@ -269,6 +269,8 @@ describe('ContentAccessService.getStreamingUrl — revocation short-circuit', ()
       'payment_failed',
       'refund',
       'admin_revoke',
+      'purchase_dispute',
+      'subscription_dispute',
     ];
 
     for (const reason of reasons) {

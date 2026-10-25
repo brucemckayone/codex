@@ -87,6 +87,20 @@ export interface WithdrawnContent {
 }
 
 /**
+ * Response for GET /api/access/courses/:courseId/can-enter.
+ *
+ * `disputeHold` is set only when `canEnter` is false and an open payment
+ * dispute holds back the user's grant to the course while nothing else
+ * opens it (Codex-2hxff.60), so the course page shows the dispute notice
+ * instead of Buy or Join. The same predicate as the course shelf's
+ * `EnrolledCourseSummary.disputeHold`. The kind only, never a date.
+ */
+export interface CourseEntryResponse {
+  canEnter: boolean;
+  disputeHold: 'purchase_dispute' | 'subscription_dispute' | null;
+}
+
+/**
  * Response for GET /api/access/content/:id/progress
  * Returns current playback progress or null if not started
  */

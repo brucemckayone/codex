@@ -106,7 +106,9 @@ File errors: `MissingFileError`, `FileTooLargeError`, `InvalidFileTypeError`, `F
 
 `ctx.services` provides lazy getters for every service. Access a service by name — it instantiates on first access.
 
-Available services: `content`, `categories`, `media`, `access`, `entitlements`, `imageProcessing` (alias: `images`), `organization`, `settings`, `devDomain`, `purchase`, `feeConfig`, `agreements`, `subscription`, `tier`, `connect`, `courseSubscription`, `courseAccess`, `courseJourney`, `courseInsights`, `transcoding`, `adminAnalytics`, `adminContent`, `adminCustomer`, `templates`, `notifications`, `preferences`, `identity`
+Available services: `content`, `categories`, `media`, `access`, `entitlements`, `imageProcessing` (alias: `images`), `organization`, `settings`, `devDomain`, `purchase`, `feeConfig`, `agreements`, `subscription`, `tier`, `connect`, `courseSubscription`, `courseAccess`, `courseJourney`, `courseInsights`, `transcoding`, `adminAnalytics`, `adminContent`, `adminCustomer`, `support`, `templates`, `notifications`, `preferences`, `identity`
+
+`support` (admin-api's support refunds, Codex-2hxff.28) takes the lazy Stripe proxy, so its DB-only queue reads never need `STRIPE_SECRET_KEY`; only a Stripe call does. admin-api's key is its own restricted one (`ADMIN_API_STRIPE_RESTRICTED_KEY` at deploy).
 
 ### Adding a New Service
 

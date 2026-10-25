@@ -50,6 +50,8 @@ interface QueryMocks {
   organizationFollowers: { findFirst: FindFirstFn };
   subscriptions: { findFirst: FindFirstFn };
   subscriptionTiers: { findFirst: FindFirstFn };
+  /** Read on the deny path only, by `disputeHold` (Codex-2hxff.60). */
+  purchases: { findFirst: FindFirstFn };
 }
 
 /** Chainable empty `.select()` — the additive entitlement/course reads. */
@@ -73,6 +75,7 @@ function createStubDb() {
     organizationFollowers: { findFirst: vi.fn() },
     subscriptions: { findFirst: vi.fn() },
     subscriptionTiers: { findFirst: vi.fn() },
+    purchases: { findFirst: vi.fn() },
   };
   const tx = { query: mocks, select: emptySelect };
   const transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(tx));

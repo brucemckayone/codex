@@ -24,7 +24,7 @@
  * - Idempotent: processRefund / processDispute check state before mutating
  */
 
-import { AccessRevocation } from '@codex/access';
+import { AccessRevocation, type RevocationReason } from '@codex/access';
 import { VersionedCache } from '@codex/cache';
 import {
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
@@ -33,7 +33,11 @@ import {
   STRIPE_EVENTS,
 } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
-import type { PurchaseService } from '@codex/purchase';
+import {
+  type PurchaseService,
+  STANDING_REFUND_STATUSES,
+  supportRequesterOf,
+} from '@codex/purchase';
 import type { Bindings } from '@codex/shared-types';
 import {
   type CourseSubscriptionService,
@@ -45,6 +49,12 @@ import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
 import { isTransientError } from '../utils/error-classification';
+
+/** The reasons a refund or a dispute writes into the streaming block. */
+type PaymentBlockReason = Extract<
+  RevocationReason,
+  'refund' | 'purchase_dispute' | 'subscription_dispute'
+>;
 
 /**
  * What a refund or dispute does outside the database: the buyer's library
@@ -66,8 +76,12 @@ export interface AccessEffects {
    * `{ userId }` only and deliberately skip it (the library bump is enough,
    * because `processRefund` soft-deletes `contentAccess`). Mirror of
    * `revokeAccess` in `subscription-webhook.ts`.
+   *
+   * `reason` is what the content page shows while the key lives: an opened
+   * chargeback pauses access (`'purchase_dispute'`, `'subscription_dispute'`,
+   * Codex-2hxff.60); a refund or a lost dispute ends it (`'refund'`).
    */
-  revokeAccess(userId: string, orgId: string): void;
+  revokeAccess(userId: string, orgId: string, reason: PaymentBlockReason): void;
   /**
    * Clear that key once a won dispute has restored the access the chargeback
    * paused (Codex-2hxff.9). The stream endpoint still checks access before
@@ -85,26 +99,25 @@ export function createAccessEffects(deps: {
 }): AccessEffects {
   const { kv, waitUntil, obs } = deps;
 
-  /** Errors are swallowed inside the promise, and around `waitUntil` too. */
+  /**
+   * Errors are swallowed inside the promise, and around `waitUntil` too, and
+   * logged at `level`.
+   */
   function inBackground(
     run: () => Promise<unknown>,
     failure: string,
-    fields: Record<string, unknown>
+    fields: Record<string, unknown>,
+    level: 'warn' | 'error'
   ): void {
-    try {
-      waitUntil(
-        run().catch((error: unknown) => {
-          obs?.warn(failure, {
-            ...fields,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        })
-      );
-    } catch (error) {
-      obs?.warn(`${failure}: waitUntil threw synchronously`, {
+    const log = (message: string, error: unknown) =>
+      obs?.[level](message, {
         ...fields,
         error: error instanceof Error ? error.message : String(error),
       });
+    try {
+      waitUntil(run().catch((error: unknown) => log(failure, error)));
+    } catch (error) {
+      log(`${failure}: waitUntil threw synchronously`, error);
     }
   }
 
@@ -131,22 +144,29 @@ export function createAccessEffects(deps: {
         });
       }
     },
-    revokeAccess(userId, orgId) {
+    // A failed revoke is a warning: the database mark still refuses the
+    // stream, and `disputeHold` rebuilds the same reason from it.
+    revokeAccess(userId, orgId, reason) {
       if (!kv) return;
       const revocation = new AccessRevocation(kv, obs);
       inBackground(
-        () => revocation.revoke(userId, orgId, 'refund'),
+        () => revocation.revoke(userId, orgId, reason),
         'payment-webhook: AccessRevocation.revoke failed',
-        { userId, orgId }
+        { userId, orgId, reason },
+        'warn'
       );
     },
+    // A failed clear is an error: the key keeps refusing a buyer whose
+    // dispute was won, for up to its TTL, while the library and the database
+    // say it is settled.
     clearRevocation(userId, orgId) {
       if (!kv) return;
       const revocation = new AccessRevocation(kv, obs);
       inBackground(
         () => revocation.clear(userId, orgId),
         'payment-webhook: AccessRevocation.clear failed',
-        { userId, orgId }
+        { userId, orgId },
+        'error'
       );
     },
   };
@@ -328,10 +348,27 @@ async function handleChargeRefunded(
   // Every refund of the charge, recorded first (owner decision 2026-10-19,
   // "One refunds table"). The event names none: charge.refunds is no longer
   // sent (API 2022-11-15).
-  const [latestRefund] = await service.recordChargeRefunds({
+  const listed = await service.recordChargeRefunds({
     id: charge.id,
     paymentIntentId: paymentIntentId ?? null,
   });
+  // What the purchase counts as refunded NOW, from that fresh list, never the
+  // event's snapshot `amount_refunded`: a late or retried event must not
+  // re-apply a refund that failed and was settled since (MED-2). Newest
+  // first. The subscription's full-refund cancel below still reads Stripe's
+  // snapshot, safely: a late or retried event can only cancel what its own
+  // on-time delivery, with the same snapshot, would have cancelled, and a
+  // settlement never un-cancels a subscription (owner, 2026-10-24).
+  const standing = listed.filter((refund) =>
+    (STANDING_REFUND_STATUSES as readonly string[]).includes(
+      refund.status ?? ''
+    )
+  );
+  const refundedCents = standing.reduce(
+    (sum, refund) => sum + refund.amount,
+    0
+  );
+  const [latestRefund] = standing;
 
   // The charge's amount is every source's clawback denominator (D1); each
   // refund's share is read from Stripe (Codex-2hxff.8).
@@ -355,14 +392,14 @@ async function handleChargeRefunded(
   const refundResult = await service.processRefund(paymentIntentId, {
     charge: clawbackCharge,
     stripeRefundId: latestRefund?.id,
-    refundAmountCents: charge.amount_refunded,
+    refundAmountCents: refundedCents,
     refundReason: latestRefund?.reason ?? undefined,
     paidAt: stripeTime(charge.created),
   });
   obs?.info('Charge refund processed', {
     chargeId: charge.id,
     paymentIntentId,
-    amountRefunded: charge.amount_refunded,
+    amountRefunded: refundedCents,
     stripeRefundId: latestRefund?.id,
     accessEnded: refundResult?.accessEnded ?? null,
   });
@@ -460,7 +497,7 @@ async function endSubscriptionForFullRefund(
     const effects = accessEffectsFor(c);
     effects.invalidateLibrary(subscription.userId);
     if (deleted?.userId && deleted.orgId) {
-      effects.revokeAccess(deleted.userId, deleted.orgId);
+      effects.revokeAccess(deleted.userId, deleted.orgId, 'refund');
     }
     if (deleted?.email) {
       sendEmailToWorker(c.env, c.executionCtx, deleted.email);
@@ -491,8 +528,10 @@ async function endSubscriptionForFullRefund(
  *   customer must still be refunded some other way, so the clawback stands
  *   (one that failed straight from pending is clawed back now). The row is
  *   support's to settle: they refund the customer elsewhere or re-pay the
- *   creators (owner decision 2026-10-19, "Hold it for support").
- * - `canceled`: nothing was paid out and nothing is clawed back.
+ *   creators (owner decision 2026-10-19, "Hold it for support"). A purchase
+ *   it refunded in part no longer counts it as refunded (2026-10-24).
+ * - `canceled`: nothing was paid out and nothing is clawed back. A purchase
+ *   it refunded in part no longer counts it, as for `failed` (2026-10-25).
  */
 async function handleRefundUpdated(
   event: Stripe.Event,
@@ -536,6 +575,9 @@ async function handleRefundUpdated(
     reason: refund.reason ?? null,
     failureReason: refund.failure_reason ?? null,
     stripeCreatedAt: new Date(refund.created * 1000),
+    // A support refund names its requester (Codex-2hxff.28); one made in the
+    // Stripe Dashboard has none.
+    requestedByUserId: supportRequesterOf(refund),
   });
 
   if (refund.status === 'canceled') {
@@ -546,6 +588,10 @@ async function handleRefundUpdated(
         { errorId: crypto.randomUUID(), refundId: refund.id, chargeId }
       );
     }
+    // It returned nothing, as a failed one (owner decision 2026-10-25): a
+    // purchase it refunded in part counts only the refunds that still stand.
+    if (paymentIntentId)
+      await service.restateStandingRefunds(paymentIntentId, charge.id);
     return;
   }
   if (refund.status === 'failed' && changed) {
@@ -574,6 +620,12 @@ async function handleRefundUpdated(
         paidAt: stripeTime(charge.created),
       })
     : undefined;
+  if (refund.status === 'failed' && paymentIntentId) {
+    // It returned nothing (owner decision 2026-10-24): a purchase it refunded
+    // in part counts only the refunds that still stand. After processRefund,
+    // which may raise the amount from the charge's.
+    await service.restateStandingRefunds(paymentIntentId, charge.id);
+  }
   // Usually emailed at charge.refunded already; one that was waiting on the
   // customer then is emailed now. A failed refund is never emailed.
   if (refund.status === 'succeeded') {
@@ -717,9 +769,8 @@ export async function processDispute(
       // Org-scoped purchases revoke access within their org; orgless
       // creator-direct purchases (`purchases.organizationId` nullable,
       // Codex-69t7c) have no org, so the guard below skips org-scoped
-      // revocation. Revocation reason reuses 'refund' because the
-      // AccessRevocation reason enum is observability-only and disputes are
-      // the same access-reducing class.
+      // revocation. The reason says access is paused, not ended, so the
+      // content page shows the dispute notice (Codex-2hxff.60).
       const paused = await purchase.processDispute(paymentIntentId, {
         stripeDisputeId: dispute.id,
         disputeReason: dispute.reason ?? undefined,
@@ -729,11 +780,11 @@ export async function processDispute(
       // of a duplicate payment): the block would stop every stream in the
       // org, including the copy they own (Codex-2hxff.14).
       if (paused?.userId && paused.orgId && paused.accessEnded) {
-        effects.revokeAccess(paused.userId, paused.orgId);
+        effects.revokeAccess(paused.userId, paused.orgId, 'purchase_dispute');
       }
     }
     const pausedSubscription = await subscription.pauseForDispute(disputeInput);
-    blockSubscriber(effects, pausedSubscription);
+    blockSubscriber(effects, pausedSubscription, 'subscription_dispute');
     await clawBack();
     if (pausedSubscription) {
       await subscription.pauseBillingForDispute(pausedSubscription, dispute.id);
@@ -806,13 +857,15 @@ export async function processDispute(
       // Written when it opened, unless it opened already lost: again here.
       // Not when the buyer keeps the item through another purchase.
       if (ended?.userId && ended.orgId && ended.accessEnded) {
-        effects.revokeAccess(ended.userId, ended.orgId);
+        effects.revokeAccess(ended.userId, ended.orgId, 'refund');
       }
     }
     // A subscription's access ends now; it is cancelled at Stripe after the
     // clawback, so the cancel cannot keep the held slices from being cut.
+    // `customer.subscription.deleted` then overwrites the reason with
+    // `'subscription_deleted'`: the later reason wins.
     const endedSubscription = await subscription.pauseForDispute(disputeInput);
-    blockSubscriber(effects, endedSubscription);
+    blockSubscriber(effects, endedSubscription, 'refund');
     // The clawback now cancels or reduces the held slices like a refund.
     await clawBack();
     if (endedSubscription) {
@@ -877,16 +930,22 @@ async function alertPreventedAfterClawback(
 
 /**
  * A subscription a dispute paused or ended: its library caches cleared, and
- * the streaming block written for its organisation.
+ * the streaming block written for its organisation, with `reason`
+ * (`'subscription_dispute'` while paused, `'refund'` once lost).
  */
 function blockSubscriber(
   effects: AccessEffects,
-  subscription: { userId: string; organizationId: string | null } | undefined
+  subscription: { userId: string; organizationId: string | null } | undefined,
+  reason: PaymentBlockReason
 ): void {
   if (!subscription) return;
   effects.invalidateLibrary(subscription.userId);
   if (subscription.organizationId) {
-    effects.revokeAccess(subscription.userId, subscription.organizationId);
+    effects.revokeAccess(
+      subscription.userId,
+      subscription.organizationId,
+      reason
+    );
   }
 }
 

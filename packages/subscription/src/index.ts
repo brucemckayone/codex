@@ -98,6 +98,9 @@ export {
   invalidateForUser,
   type WaitUntilFn,
 } from './services/subscription-invalidation';
+// Whether a payment paid for the current billing period: support's refund
+// preview (Codex-2hxff.28)
+export { isCurrentPeriodPayment } from './services/subscription-refund';
 export type {
   CreatorEarningsSummary,
   CreatorPayoutBreakdown,

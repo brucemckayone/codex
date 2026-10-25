@@ -23,11 +23,11 @@ import { evaluateCourseGate } from '$lib/journeys/gate';
 import {
   fetchCourseDashboard,
   fetchInCoursePractice,
-  resolveCanEnterCourse,
   resolveCanView,
   resolveCourseBySlug,
+  resolveCourseEntry,
 } from '$lib/server/journeys/round-d-seam';
-import { buildJourneyUrl } from '$lib/utils/subdomain';
+import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
 import type { PageServerLoad } from './$types';
 
 export const ssr = false;
@@ -39,19 +39,31 @@ export const load: PageServerLoad = async (event) => {
   const { org, user } = await parent();
   const course = await resolveCourseBySlug(event, params.journeySlug);
 
-  const canEnter =
-    user && course
-      ? await resolveCanEnterCourse(event, user.id, course.id)
-      : false;
+  const entry =
+    user && course ? await resolveCourseEntry(event, user.id, course.id) : null;
 
   const outcome = evaluateCourseGate({
     courseExists: course !== null,
     isAuthenticated: Boolean(user),
-    canEnterCourse: canEnter,
+    canEnterCourse: entry?.canEnter ?? false,
   });
 
   if (outcome.kind === 'not-found') error(404, 'Course not found');
   if (outcome.kind === 'redirect-to-sales') {
+    // A course paused by a payment dispute is refused here too. Its lessons
+    // keep the dispute notice (owner decision 2026-10-24, Codex-2hxff.60), so
+    // the refusal's own `disputeHold` sends the reader to this lesson's content
+    // page, which shows it with no Buy or Subscribe.
+    if (entry?.disputeHold && org) {
+      redirect(
+        303,
+        buildContentUrl(url, {
+          slug: params.contentSlug,
+          id: params.contentSlug,
+          organizationSlug: org.slug ?? null,
+        })
+      );
+    }
     redirect(
       303,
       buildJourneyUrl(

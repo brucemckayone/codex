@@ -97,6 +97,10 @@ export const payoutReversals = pgTable(
       .where(sql`${table.status} = 'failed'`),
     // The drain sums a pending row's reductions.
     index('idx_payout_reversals_payout').on(table.payoutId),
+    // The clawback's re-pay and support's charge history find a refund's or a
+    // dispute's steps by cause alone (Codex-2hxff.28); the per-cause unique
+    // index leads with payout_id, so it cannot serve that.
+    index('idx_payout_reversals_cause').on(table.causeType, table.causeId),
     // One re-pay per reversal; the clawback's row scope excludes re-pay rows.
     uniqueIndex('uq_payout_reversals_repaid_by')
       .on(table.repaidByPayoutId)

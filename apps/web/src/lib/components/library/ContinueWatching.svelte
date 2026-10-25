@@ -68,6 +68,7 @@
     {
       accessType: item.accessType,
       organizationSlug: item.content.organizationSlug ?? null,
+      purchaseDisputedAt: item.purchase?.disputedAt ?? null,
     },
     subsBySlug
   )}

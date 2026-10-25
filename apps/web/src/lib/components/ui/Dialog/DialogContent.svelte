@@ -15,6 +15,8 @@
     elements: { portalled, overlay, content, close },
     states: { open },
   } = getContext<ReturnType<typeof createDialog>>('DIALOG');
+  /** Dialog.Root's `dismissible`: false while a request it started runs. */
+  const dismissible = getContext<{ current: boolean } | undefined>('DIALOG_DISMISSIBLE');
 
   /**
    * Forward org brand tokens into the portalled dialog.
@@ -63,7 +65,12 @@
         {...restProps}
       >
         {@render children()}
-        <button use:melt={$close} class="dialog-close" aria-label="Close">
+        <button
+          use:melt={$close}
+          class="dialog-close"
+          aria-label="Close"
+          disabled={dismissible ? !dismissible.current : false}
+        >
           <XIcon size={18} />
         </button>
       </div>
@@ -155,6 +162,11 @@
 
   .dialog-close:active {
     background: var(--color-surface-tertiary);
+  }
+
+  .dialog-close:disabled {
+    opacity: var(--opacity-50);
+    cursor: not-allowed;
   }
 
   /* ── Entry animations ─────────────────────────────────────────────── */

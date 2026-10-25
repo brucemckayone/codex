@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { AUTH_ROLES } from '@codex/constants';
 	import type { LayoutUser, LayoutOrganization } from '$lib/types';
 	import { page } from '$app/state';
 	import { PLATFORM_RAIL_NAV, getOrgRailNav } from '$lib/config/navigation';
@@ -87,6 +88,11 @@
 		return pathname.startsWith(href);
 	}
 
+	// ── Platform support (Codex-2hxff.28) ─────────────────────────────
+	const showSupport = $derived(
+		variant === 'platform' && user?.role === AUTH_ROLES.PLATFORM_OWNER
+	);
+
 	// ── Studio access ─────────────────────────────────────────────
 	const studioAccess = useStudioAccess(() => ({ user, url: page.url }));
 	const canAccessStudio = $derived(studioAccess.canAccessStudio);
@@ -159,6 +165,18 @@
 				index={i}
 			/>
 		{/each}
+		<!-- Platform support (/admin), for the platform owner only. The
+		     pages 404 for anyone else, so the link would lead nowhere. -->
+		{#if showSupport}
+			<SidebarRailItem
+				href="/admin"
+				label={m.support_nav_label()}
+				icon="life-buoy"
+				active={isActive('/admin')}
+				{expanded}
+				index={navItems.length}
+			/>
+		{/if}
 	</div>
 
 	<!-- Spacer pushes bottom section down -->

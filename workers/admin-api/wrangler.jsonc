@@ -249,8 +249,15 @@
   //
   // Production Secrets (set via wrangler CLI):
   //   wrangler secret put DATABASE_URL --env production
+  //   wrangler secret put STRIPE_SECRET_KEY --env production
   //
   // Required Variables:
   //   - DATABASE_URL: PostgreSQL connection string
   //   - RATE_LIMIT_API: rate limit binding (configured above)
+  //   - RATE_LIMIT_STRICT: the `strict` preset the platform support writes
+  //     take (configured above; no new binding for support refunds)
+  //   - STRIPE_SECRET_KEY: admin-api's OWN restricted key for support refunds
+  //     (Codex-2hxff.28, owner decision Q4; Codex-5vvwj.2), never ecom-api's.
+  //     Read charges, refunds, disputes, invoices, payment intents; write
+  //     refunds. Test mode for development and test, live for production.
 }

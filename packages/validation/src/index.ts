@@ -45,6 +45,8 @@ export * from './schemas/purchase';
 export * from './schemas/settings';
 // Subscription schemas
 export * from './schemas/subscription';
+// Support refunds: the platform-owner refund screen and queue (Codex-2hxff.28)
+export * from './schemas/support';
 // Transcoding schemas (RunPod webhooks, transcoding API)
 export * from './schemas/transcoding';
 // Shared schemas (pagination, etc)

@@ -290,6 +290,11 @@
   {:else}
     <div class="subscription-list">
       {#each subscriptions as sub (sub.id)}
+        <!-- An open chargeback on one of its invoices pauses the plan's access
+             and billing (Codex-2hxff.60). Until the bank settles it, the card
+             says so and offers only Cancel: no tier change, reactivate or
+             payment update. -->
+        {@const disputed = sub.disputedAt != null}
         <Card.Root>
           <Card.Content>
             <div
@@ -313,27 +318,30 @@
                     <span class="tier-name">{sub.tier.name}</span>
                   </div>
                 </div>
-                <Badge variant={statusVariant(sub.status)} data-testid="subscription-status-badge">
-                  {statusLabel(sub.status)}
+                <Badge
+                  variant={disputed ? 'warning' : statusVariant(sub.status)}
+                  data-testid="subscription-status-badge"
+                >
+                  {disputed ? m.access_paused_dispute_label() : statusLabel(sub.status)}
                 </Badge>
               </div>
 
-              {#if sub.status === 'past_due'}
+              {#if disputed}
+                <Alert variant="warning" data-testid="subscription-dispute-notice">
+                  {m.access_paused_dispute_subscription()}
+                </Alert>
+              {:else if sub.status === 'past_due'}
                 <Alert variant="error">
                   {m.subscription_past_due_message()}
                   <Button variant="ghost" size="sm" onclick={handleUpdatePayment}>
                     {m.subscription_update_payment()}
                   </Button>
                 </Alert>
-              {/if}
-
-              {#if sub.status === 'paused'}
+              {:else if sub.status === 'paused'}
                 <Alert variant="warning">
                   {m.subscription_paused_message()}
                 </Alert>
-              {/if}
-
-              {#if sub.status === 'cancelling'}
+              {:else if sub.status === 'cancelling'}
                 <p class="cancelling-message">
                   {m.subscription_cancelling_message({
                     date: formatDate(sub.currentPeriodEnd),
@@ -354,17 +362,19 @@
               </div>
 
               <div class="subscription-actions">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  data-testid="subscription-change-tier-button"
-                  onclick={() => {
-                    const orgUrl = buildOrgUrl(page.url, sub.organization.slug, '/pricing');
-                    window.location.href = orgUrl;
-                  }}
-                >
-                  {m.subscription_change_tier()}
-                </Button>
+                {#if !disputed}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    data-testid="subscription-change-tier-button"
+                    onclick={() => {
+                      const orgUrl = buildOrgUrl(page.url, sub.organization.slug, '/pricing');
+                      window.location.href = orgUrl;
+                    }}
+                  >
+                    {m.subscription_change_tier()}
+                  </Button>
+                {/if}
                 {#if sub.status === 'active'}
                   <Button
                     variant="ghost"
@@ -375,7 +385,7 @@
                     {m.subscription_cancel()}
                   </Button>
                 {/if}
-                {#if sub.status === 'cancelling'}
+                {#if sub.status === 'cancelling' && !disputed}
                   <Button
                     variant="primary"
                     size="sm"
@@ -386,7 +396,7 @@
                     {m.subscription_reactivate()}
                   </Button>
                 {/if}
-                {#if sub.status === 'paused'}
+                {#if sub.status === 'paused' && !disputed}
                   <Button
                     variant="primary"
                     size="sm"

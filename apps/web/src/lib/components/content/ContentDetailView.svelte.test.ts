@@ -17,6 +17,7 @@
 
 import { PRICE_LIMITS } from '@codex/constants';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import * as m from '$paraglide/messages';
 import {
   createRawSnippet,
   flushSync,
@@ -485,6 +486,151 @@ describe('withdrawn from sale, still the reader’s (Codex-ov2ii)', () => {
   test('an item on the storefront shows no note', () => {
     render({ content: makeContent(SELLABLE), hasAccess: true });
     expect(note()).toBeNull();
+  });
+});
+
+describe('paused by a payment dispute (Codex-2hxff.60)', () => {
+  const anyGate = () => document.querySelector('.content-detail__purchase');
+  const purchaseForm = () => document.querySelector(`.${PURCHASE_FORM}`);
+  const subscribeButton = () =>
+    document.querySelector('[data-testid="subscribe-button"]');
+  const announcement = () =>
+    document
+      .querySelector('.content-detail__player-status')
+      ?.textContent?.trim();
+
+  test('a disputed buyer sees the notice in the player and no Buy below it', () => {
+    render({
+      content: makeContent(SELLABLE),
+      hasAccess: false,
+      revocationReason: 'purchase_dispute',
+    });
+    const overlay = player().querySelector('.access-revoked');
+    expect(overlay?.getAttribute('data-reason')).toBe('purchase_dispute');
+    expect(anyGate()).toBeNull();
+    expect(purchaseForm()).toBeNull();
+    expect(announcement()).toBe('Access paused.');
+  });
+
+  test('a disputed subscriber is offered no Subscribe, Upgrade or Buy', () => {
+    render({
+      content: makeContent({ ...SELLABLE, includedInTierId: 'tier-1' }),
+      hasAccess: false,
+      requiresSubscription: true,
+      hasSubscription: false,
+      revocationReason: 'subscription_dispute',
+    });
+    expect(
+      player().querySelector('.access-revoked')?.getAttribute('data-reason')
+    ).toBe('subscription_dispute');
+    expect(anyGate()).toBeNull();
+    expect(subscribeButton()).toBeNull();
+    expect(purchaseForm()).toBeNull();
+    expect(announcement()).toBe('Access paused.');
+  });
+
+  test.each([
+    ['purchase_dispute', m.access_paused_dispute_purchase()],
+    ['subscription_dispute', m.access_paused_dispute_subscription()],
+  ] as const)('a written item, with no player, shows the %s notice in the gate slot', (reason, line) => {
+    render({
+      content: makeContent({
+        ...SELLABLE,
+        contentType: 'written',
+        mediaItem: null,
+      }),
+      contentBodyHtml: '<p>The first paragraph of the article.</p>',
+      hasAccess: false,
+      revocationReason: reason,
+    });
+    const gate = document
+      .getElementById('purchase-label-dispute')
+      ?.closest('.content-detail__purchase');
+    expect(gate?.textContent).toContain(m.access_paused_dispute_title());
+    expect(gate?.textContent).toContain(line);
+    const support = gate?.querySelector('a');
+    expect(support?.textContent?.trim()).toBe(m.access_contact_support());
+    expect(support?.getAttribute('href')).toBe(
+      'mailto:support@revelations.studio?subject=Access%20issue'
+    );
+    // The dispute section is the only gate, and the body lock agrees with it.
+    expect(document.querySelectorAll('.content-detail__purchase')).toHaveLength(
+      1
+    );
+    expect(purchaseForm()).toBeNull();
+    expect(
+      document.querySelector('.content-detail__body-lock-text')?.textContent
+    ).toBe(m.access_paused_dispute_title());
+  });
+
+  // Owner decision 2026-10-24: a course lesson keeps the notice while the
+  // course purchase or the course subscription is disputed. The stream names
+  // the dispute for a course-only item, and the notice must win over the
+  // course note, which would otherwise say "Part of a course" to someone who
+  // owns the course.
+  describe('a course lesson', () => {
+    const courseLesson = (overrides: Record<string, unknown> = {}) =>
+      makeContent({ ...SELLABLE, courseOnly: true, ...overrides });
+    const journeyLink = { title: 'Rootwork', salesHref: '/journeys/rootwork' };
+
+    test.each([
+      'purchase_dispute',
+      'subscription_dispute',
+    ] as const)('a video lesson under a %s shows the notice, not the course note', (reason) => {
+      render({
+        content: courseLesson(),
+        hasAccess: false,
+        revocationReason: reason,
+        journeyLink,
+      });
+      expect(
+        player().querySelector('.access-revoked')?.getAttribute('data-reason')
+      ).toBe(reason);
+      expect(player().textContent).not.toContain('Part of a course');
+      expect(document.getElementById('purchase-label-course')).toBeNull();
+      expect(anyGate()).toBeNull();
+      expect(purchaseForm()).toBeNull();
+      expect(subscribeButton()).toBeNull();
+      expect(announcement()).toBe('Access paused.');
+    });
+
+    test.each([
+      ['purchase_dispute', m.access_paused_dispute_purchase()],
+      ['subscription_dispute', m.access_paused_dispute_subscription()],
+    ] as const)('a written lesson under a %s shows the notice in the gate slot', (reason, line) => {
+      render({
+        content: courseLesson({ contentType: 'written', mediaItem: null }),
+        contentBodyHtml: '<p>The first paragraph of the lesson.</p>',
+        hasAccess: false,
+        revocationReason: reason,
+        journeyLink,
+      });
+      const gates = document.querySelectorAll('.content-detail__purchase');
+      expect(gates).toHaveLength(1);
+      expect(gates[0]?.textContent).toContain(line);
+      expect(document.getElementById('purchase-label-course')).toBeNull();
+      expect(purchaseForm()).toBeNull();
+      expect(subscribeButton()).toBeNull();
+      expect(
+        document.querySelector('.content-detail__body-lock-text')?.textContent
+      ).toBe(m.access_paused_dispute_title());
+    });
+  });
+});
+
+describe('checkout help (Codex-2hxff.60)', () => {
+  test('the third failed checkout links to the platform support address', () => {
+    render({
+      content: makeContent(SELLABLE),
+      hasAccess: false,
+      formResult: { checkoutError: 'Your card was declined.', retryCount: 3 },
+    });
+    const link = document.querySelector<HTMLAnchorElement>(
+      '.content-detail__purchase-error-escalation a'
+    );
+    expect(link?.getAttribute('href')).toBe(
+      'mailto:support@revelations.studio?subject=Checkout%20help'
+    );
   });
 });
 

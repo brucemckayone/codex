@@ -2,7 +2,8 @@
   @component AccessRevokedOverlay
 
   Contextual overlay shown when a previously-authorised user has lost access
-  to content (subscription cancelled, payment failed, refund, admin revoke).
+  to content (subscription cancelled, payment failed, refund, admin revoke),
+  or has it paused while a payment dispute is open (Codex-2hxff.60).
   Copy + CTA vary by revocation reason — see the table in Codex-zdf2u.
 
   The overlay is absolutely positioned so the caller's poster / thumbnail
@@ -24,7 +25,9 @@
   import { reactivateSubscription } from '$lib/remote/subscription.remote';
   import { openBillingPortal } from '$lib/remote/account.remote';
   import { page } from '$app/state';
+  import * as m from '$paraglide/messages';
   import type { AccessRevocationReason } from '$lib/server/content-detail';
+  import { supportMailto } from '$lib/utils/support-mailto';
   import type { Component } from 'svelte';
 
   interface Props {
@@ -102,6 +105,20 @@
           icon: AlertCircleIcon,
           primary: { label: 'Contact support', action: 'support' },
         };
+      // A chargeback is open on the purchase or on a subscription invoice.
+      // Nothing to buy or reactivate until the bank settles it, so the only
+      // action is support. Translated, unlike the older cases above.
+      case 'purchase_dispute':
+      case 'subscription_dispute':
+        return {
+          title: m.access_paused_dispute_title(),
+          body:
+            reason === 'purchase_dispute'
+              ? m.access_paused_dispute_purchase()
+              : m.access_paused_dispute_subscription(),
+          icon: AlertCircleIcon,
+          primary: { label: m.access_contact_support(), action: 'support' },
+        };
       default:
         return {
           title: 'Access denied',
@@ -123,7 +140,7 @@
       return;
     }
     if (action === 'support') {
-      window.location.href = 'mailto:support@codex.example?subject=Access%20issue';
+      window.location.href = supportMailto('Access issue');
       return;
     }
     if (action === 'reactivate') {
@@ -309,9 +326,12 @@
     cursor: not-allowed;
   }
 
+  /* Ink keyed to the accent fill, as the content page's purchase button is:
+     --color-text-inverse painted white on the amber default, 2.15:1
+     (Codex-1g5lh.18, Codex-2hxff.60). */
   .access-revoked__btn--primary {
     background: var(--color-brand-accent, var(--color-primary-500));
-    color: var(--color-text-inverse);
+    color: var(--color-text-on-accent);
   }
 
   .access-revoked__btn--primary:hover:not(:disabled) {

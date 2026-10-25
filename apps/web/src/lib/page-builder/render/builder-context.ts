@@ -162,6 +162,9 @@ export function builderSalesContext(
     checkoutUrl: input.checkoutUrl ?? '',
     dashboardUrl: input.dashboardUrl ?? '',
     enrolled: false,
+    // The canvas shows the SELL state, as `enrolled` does: never a viewer's
+    // dispute (Codex-2hxff.60).
+    disputeHold: null,
     offer: input.offer ?? null,
     // ALWAYS TRUE, and pinned explicitly rather than left to the field's default.
     //

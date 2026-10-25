@@ -85,6 +85,7 @@ describe('buildPublicContext — checkout vs dashboard key-spaces', () => {
       }),
       sellPreview: SELL_PREVIEW,
       enrolled: false,
+      disputeHold: null,
       offer: null,
       mediaBaseUrl: null,
       url: URL_,
@@ -101,6 +102,7 @@ describe('buildPublicContext — checkout vs dashboard key-spaces', () => {
       }),
       sellPreview: SELL_PREVIEW,
       enrolled: false,
+      disputeHold: null,
       offer: null,
       mediaBaseUrl: null,
       url: URL_,
@@ -122,6 +124,7 @@ describe('buildPublicContext — checkout vs dashboard key-spaces', () => {
       coursePage: page,
       sellPreview: SELL_PREVIEW,
       enrolled: false,
+      disputeHold: null,
       offer: null,
       mediaBaseUrl: null,
       url: URL_,
@@ -137,6 +140,7 @@ describe('buildPublicContext — purchasable is a confident negative only', () =
       coursePage: coursePage(),
       sellPreview: SELL_PREVIEW,
       enrolled: false,
+      disputeHold: null,
       offer: null,
       mediaBaseUrl: null,
       url: URL_,
@@ -150,6 +154,7 @@ describe('buildPublicContext — purchasable is a confident negative only', () =
       coursePage: coursePage(),
       sellPreview: SELL_PREVIEW,
       enrolled: false,
+      disputeHold: null,
       offer: offer({ paths: ['purchase'], purchase: { priceCents: 4900 } }),
       mediaBaseUrl: null,
       url: URL_,
@@ -163,6 +168,7 @@ describe('buildPublicContext — purchasable is a confident negative only', () =
       coursePage: coursePage(),
       sellPreview: SELL_PREVIEW,
       enrolled: false,
+      disputeHold: null,
       offer: offer(),
       mediaBaseUrl: null,
       url: URL_,
@@ -178,6 +184,7 @@ describe('buildPublicContext — passthrough fields', () => {
       coursePage: coursePage(),
       sellPreview: SELL_PREVIEW,
       enrolled: true,
+      disputeHold: null,
       offer: null,
       mediaBaseUrl: null,
       url: URL_,
@@ -191,6 +198,7 @@ describe('buildPublicContext — passthrough fields', () => {
       coursePage: coursePage(),
       sellPreview: SELL_PREVIEW,
       enrolled: false,
+      disputeHold: null,
       offer: null,
       mediaBaseUrl: 'https://cdn.example.test',
       url: URL_,
@@ -199,6 +207,7 @@ describe('buildPublicContext — passthrough fields', () => {
       coursePage: coursePage(),
       sellPreview: SELL_PREVIEW,
       enrolled: false,
+      disputeHold: null,
       offer: null,
       mediaBaseUrl: null,
       url: URL_,
@@ -214,6 +223,7 @@ describe('buildPublicContext — passthrough fields', () => {
       coursePage: page,
       sellPreview: SELL_PREVIEW,
       enrolled: false,
+      disputeHold: null,
       offer: null,
       mediaBaseUrl: null,
       url: URL_,
@@ -232,6 +242,7 @@ describe('offerAsVisitor — the ?preview override reaches the offer too', () =>
       coursePage: coursePage(),
       sellPreview: SELL_PREVIEW,
       enrolled: false,
+      disputeHold: null,
       offer: previewOffer,
       mediaBaseUrl: null,
       url: URL_,
@@ -251,5 +262,27 @@ describe('offerAsVisitor — the ?preview override reaches the offer too', () =>
     const entitled = offer({ entitled: true, courseId: 'course-9' });
     expect(offerAsVisitor(entitled)).toEqual({ ...entitled, entitled: false });
     expect(offerAsVisitor(null)).toBeNull();
+  });
+});
+
+// A disputed owner (Codex-2hxff.60): the hold the caller passes reaches the
+// kit's context, which turns every Buy and Join slot into the notice.
+describe('buildPublicContext — the dispute hold', () => {
+  it('carries the hold through, and null when there is none', () => {
+    const base = {
+      coursePage: coursePage(),
+      sellPreview: SELL_PREVIEW,
+      enrolled: false,
+      offer: null,
+      mediaBaseUrl: null,
+      url: URL_,
+    };
+    expect(
+      buildPublicContext({ ...base, disputeHold: 'subscription_dispute' })
+        .disputeHold
+    ).toBe('subscription_dispute');
+    expect(
+      buildPublicContext({ ...base, disputeHold: null }).disputeHold
+    ).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import {
+  type CourseEntryResponse,
   createContentAccessService,
   type PlaybackProgressResponse,
   type StreamingUrlResponse,
@@ -98,7 +99,11 @@ const hlsStreamingRateLimit = createMiddleware<HonoEnv>((c, next) =>
  * grant OR a derived tier grant, never a stale `course_enrollments` row — so a
  * lapsed tier loses entry instantly (instant-revocation). Delegates to the
  * frozen `EntitlementResolver.canEnterCourse` on the access service.
- * @returns {{ canEnter: boolean }}
+ *
+ * On a refusal it also names an open payment dispute that holds the user's
+ * grant back (`disputeHold`, Codex-2hxff.60), so the course page shows the
+ * dispute notice instead of Buy or Join.
+ * @returns {CourseEntryResponse}
  */
 app.get(
   '/courses/:courseId/can-enter',
@@ -110,13 +115,11 @@ app.get(
     input: {
       params: canEnterCourseParamsSchema,
     },
-    handler: async (ctx): Promise<{ canEnter: boolean }> => {
-      const canEnter = await ctx.services.access.canEnterCourse(
+    handler: async (ctx): Promise<CourseEntryResponse> =>
+      ctx.services.access.getCourseEntry(
         ctx.user.id,
         ctx.input.params.courseId
-      );
-      return { canEnter };
-    },
+      ),
   })
 );
 

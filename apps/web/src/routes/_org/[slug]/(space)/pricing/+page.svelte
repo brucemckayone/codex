@@ -45,8 +45,14 @@
 
   function mapSubscriptionErrorMessage(
     code: string | undefined,
-    message: string
+    message: string,
+    detailsCode?: string
   ): string {
+    // A plan with an open chargeback is refused under a top-level CONFLICT,
+    // with its own code in `details` (Codex-2hxff.60). Retrying can't help.
+    if (detailsCode === 'SUBSCRIPTION_DISPUTED') {
+      return m.subscription_tier_change_disputed();
+    }
     switch (code) {
       case 'ALREADY_SUBSCRIBED':
         return 'You already have an active subscription to this organisation. Manage it from your account.';
@@ -584,7 +590,8 @@
       if (!result.success) {
         tierChangePreviewError = mapSubscriptionErrorMessage(
           result.code,
-          result.message
+          result.message,
+          'detailsCode' in result ? result.detailsCode : undefined
         );
         return;
       }
@@ -662,7 +669,8 @@
         }
         switchTierError = mapSubscriptionErrorMessage(
           result.code,
-          result.message
+          result.message,
+          'detailsCode' in result ? result.detailsCode : undefined
         );
         if (result.code === 'TIER_NOT_FOUND') {
           invalidateAll();

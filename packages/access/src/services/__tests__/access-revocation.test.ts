@@ -131,6 +131,19 @@ describe('AccessRevocation', () => {
       expect(typeof result?.revokedAt).toBe('string');
     });
 
+    // A reason the reader does not know reads as malformed, and the block is
+    // ignored: the content page would lose its "Access paused" copy
+    // (Codex-2hxff.60).
+    it.each([
+      'purchase_dispute',
+      'subscription_dispute',
+    ] as const)('round-trips the dispute reason %s', async (reason) => {
+      await revocation.revoke(userId, orgId, reason);
+
+      const result = await revocation.isRevoked(userId, orgId);
+      expect(result?.reason).toBe(reason);
+    });
+
     it('returns null for a key that was never written', async () => {
       const result = await revocation.isRevoked(userId, orgId);
       expect(result).toBeNull();

@@ -106,6 +106,10 @@ import {
   sql,
 } from 'drizzle-orm';
 import {
+  type DisputeHold,
+  resolveCourseDisputePauses,
+} from './content-access/access-decision';
+import {
   assertCourseCreatorCanBePaid,
   courseEarnsMoney,
 } from './course-payouts';
@@ -1174,11 +1178,13 @@ export class CourseJourneyService extends BaseService {
       // THREE queries for the whole shelf, not three PER COURSE. The Neon HTTP
       // driver makes one round trip per statement, so the old per-row
       // `loadStages` + `loadCompletions` pair was O(N) round trips in
-      // catalogue size (Codex-kgrdp.23 defect 2).
-      const stagesByCourse = await this.loadStagesForCourses(
-        rows.map((row) => row.courseId),
-        r2PublicUrlBase
-      );
+      // catalogue size (Codex-kgrdp.23 defect 2). The dispute pause is
+      // batched the same way, and runs beside them.
+      const courseIds = rows.map((row) => row.courseId);
+      const [stagesByCourse, pauses] = await Promise.all([
+        this.loadStagesForCourses(courseIds, r2PublicUrlBase),
+        this.disputePausesForShelf(userId, organizationId, courseIds),
+      ]);
       const allCompletions = await this.loadCompletions(
         userId,
         [...stagesByCourse.values()].flat()
@@ -1219,11 +1225,38 @@ export class CourseJourneyService extends BaseService {
           },
           enrollmentSource: row.source,
           progress: rollUpEnrollment(stages, completions),
+          disputeHold: pauses.get(row.courseId) ?? null,
         });
       }
       return summaries;
     } catch (error) {
       this.handleError(error, 'listEnrolledCourses');
+    }
+  }
+
+  /**
+   * The shelf's paused courses ({@link resolveCourseDisputePauses}). A failed
+   * read must not blank the shelf: it is logged at error, and every card
+   * then reads unpaused, while each lesson's own page still says why it is
+   * refused.
+   */
+  private async disputePausesForShelf(
+    userId: string,
+    organizationId: string,
+    courseIds: readonly string[]
+  ): Promise<ReadonlyMap<string, DisputeHold>> {
+    try {
+      return await resolveCourseDisputePauses(this.db, userId, courseIds);
+    } catch (error) {
+      this.obs.error(
+        'Course shelf: dispute pause check failed; shown unpaused',
+        {
+          userId,
+          organizationId,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+      return new Map();
     }
   }
 

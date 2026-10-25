@@ -15,6 +15,7 @@
  * what makes this testable with a plain `new URL(...)`, no SvelteKit runtime.
  */
 import { buildJourneyUrl } from '@codex/urls';
+import type { CourseDisputeHold } from '$lib/journeys/types';
 import type { CourseOffer, JourneyCoursePage } from '$lib/page-builder';
 import { deriveOfferPaths } from './offer-paths';
 import type { JourneySalesContext, SellPreview } from './render/types';
@@ -31,6 +32,12 @@ export interface PublicContextInput {
    * function only ever sees the final answer.
    */
   enrolled: boolean;
+  /**
+   * The open payment dispute behind a refused can-enter (Codex-2hxff.60), as
+   * THIS RENDER should show it: the caller clears it under `?preview`, with
+   * `enrolled`.
+   */
+  disputeHold: CourseDisputeHold | null;
   /** The authoritative offer (SPEC §7), or null when the read failed/was skipped. */
   offer: CourseOffer | null;
   /**
@@ -61,7 +68,15 @@ export interface PublicContextInput {
 export function buildPublicContext(
   input: PublicContextInput
 ): JourneySalesContext {
-  const { coursePage, sellPreview, enrolled, offer, mediaBaseUrl, url } = input;
+  const {
+    coursePage,
+    sellPreview,
+    enrolled,
+    disputeHold,
+    offer,
+    mediaBaseUrl,
+    url,
+  } = input;
 
   const checkoutUrl = buildJourneyUrl(
     url,
@@ -95,6 +110,7 @@ export function buildPublicContext(
     checkoutUrl,
     dashboardUrl,
     enrolled,
+    disputeHold,
     offer,
     purchasable,
     sellPreview,

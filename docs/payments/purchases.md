@@ -301,8 +301,17 @@ self-served by customers (owner decision 2026-10-13, "Platform support") — fro
 an admin screen that calls Stripe and then lets the `charge.refunded` webhook do
 the rest, so there is one refund path — **gap**: `Codex-2hxff.28` (today refunds
 can only be started in the Stripe Dashboard). Support can refund up to **14 days**
-after the purchase (owner decision 2026-10-13, "14 days"). The customer-facing
-refund policy is being drafted for legal review — `Codex-2hxff.31`.
+after the purchase (owner decision 2026-10-13, "14 days"): 14 × 24 hours from
+Stripe's `charge.created`, for a purchase and a subscription invoice alike, so a
+renewal's window runs from that renewal (owner decision 2026-10-24, Q1). The
+rule is `refundWindow` in `@codex/payments` (`REFUND_WINDOW_DAYS`), checked on
+the server's clock before Stripe is called. Only support's screen enforces it:
+Dashboard refunds and the platform's own refunds (duplicates, the early-fraud
+refund) are not support decisions. `issueRefund` refunds in part or in full;
+the screen previews what a refund will take from each slice with the engine's
+own rules (`planClawback`), so the preview and the clawback cannot disagree.
+The customer-facing refund policy is being drafted for legal review —
+`Codex-2hxff.31`.
 
 Stripe sends `charge.refunded` to `/webhooks/stripe/payment`. The clawback
 reads the charge's **settled** refunds (succeeded or failed) from Stripe, not
@@ -318,12 +327,75 @@ refund can fail even after it succeeded, up to 30 days later. Stripe returns
 the money to the platform balance, but the customer must still be refunded
 some other way. So the clawback stands, and the failure is recorded in
 `refunds` (support's queue is its failed rows) and logged with an `errorId`.
-Support then either refunds the customer elsewhere or re-pays the creators —
-**gap**: `Codex-2hxff.28` (the screen and the re-pay action; until then a
-person does it by hand). A
-`canceled` refund paid nothing out and is never clawed back, but the purchase
-`charge.refunded` recorded stays refunded, so it is logged for a person to
-check the buyer's access.
+Support then settles it one of two ways (owner decisions 2026-10-24, Q5):
+
+- **refunded elsewhere**: the customer was refunded another way, so the
+  clawback stands and the row is just resolved;
+- **creators re-paid**: the customer is not refunded, so the payees get back
+  what the refund took (`repayFailedRefund`, `@codex/payments`). Each step of
+  its clawback that took money from a payee, on a slice or on a re-pay row,
+  gets one pending re-pay row for its amount, as a won dispute's does
+  ([dispute record](dispute-record.md#the-re-pay-a-new-pending-payout-row-per-reversed-slice)).
+  The refund then leaves the charge's running refund total, so a refund or
+  chargeback clawed back AFTER the settlement is shared as if it had never
+  been made, and takes its share off the re-pay rows. That is not
+  retroactive: a cause recorded while the failed refund still counted keeps
+  the share it got then. Four rules (owner decisions 2026-10-24, 2026-10-25):
+  1. **A later cause shared against it refuses the re-pay**
+     (`REPAY_BLOCKED_BY_LATER_CAUSE`, 422): a chargeback open or lost on the
+     charge, or a refund after it that takes the running total over the
+     charge. That cause took less because the failed refund counted, so
+     re-paying would overpay the payees. Support settles it by hand or marks
+     it refunded elsewhere (`failedRefundRepayBlock`). Both checks run again
+     inside the settlement's transaction, from the recorded refunds and
+     disputes, because either can be recorded after the first check. What is
+     left is a refund or chargeback recorded after that read whose clawback
+     runs before the settlement commits: for that moment, under a second, it
+     still counts the failed refund. That is two people acting on one charge
+     within the same second, the race the refund route already accepts (two
+     refunds of one charge in the same second both pass its refund-count
+     check).
+  2. **A step that can never move money is cancelled, by the settlement.**
+     - **Never claimed.** It never reached Stripe.
+     - **No retry will run it.** Its delivery died, or Stripe refused it on
+       every try. It is checked with Stripe before the settlement's
+       transaction opens (`settleUnfinishedRefundSteps`). If Stripe made its
+       reversal, it is recorded `done`, and so re-paid, since that is true
+       whatever support decides. If not, the settlement cancels it inside its
+       transaction, only if the step has not moved since the check. So a
+       refused settlement leaves it for a redelivery to finish, and a step a
+       redelivery tried again meanwhile is not cancelled unchecked.
+     - **Still running.** A step still retrying, held by a delivery right
+       now, or moved since the check may yet reach Stripe, so the settlement is
+       refused (`REFUND_CLAWBACK_UNFINISHED`): the clawback is still running,
+       and support tries again later.
+     - **Needs a person.** An unfinished cancellation whose slice is already
+       cancelled is one the ledger cannot read, because it cannot tell
+       whether that step took the slice. It refuses with
+       `REFUND_CLAWBACK_NEEDS_PERSON`, since retrying will not help. **Gap:**
+       there is no tool yet for a person to settle it.
+     - **Nothing starts after the settlement.** A clawback step cannot start
+       once the refund is settled, because its claim reads the refund under a
+       lock.
+  3. **A debt the payee already paid** (`creator_absorbed`,
+     `manually_reversed`) gets a re-pay row too; one the platform wrote off
+     (`platform_absorbed`) gets nothing. The refund's open debts close as
+     `refund_failed`. A debt with no payee to owe it is cancelled.
+  4. **The platform fee's share is cancelled** and the fee slice is `paid`
+     again, with no re-pay row: the money is back in the platform's balance.
+
+A purchase it refunded in part stops counting it: `refund.updated` restates
+the purchase's refunded amount, id and reason from the refunds still standing
+(`restateStandingRefunds`, owner decision 2026-10-24), so Sales and its stats
+count only money the buyer got back. A failed full refund keeps the purchase
+`refunded` until support settles it.
+
+The screen and its two actions are **gap**: `Codex-2hxff.28`; until it ships, a
+person settles a failed refund by hand. A
+`canceled` refund paid nothing out and is never clawed back. A purchase it
+refunded in part stops counting it, restated as for a failed refund (owner
+decision 2026-10-25, "same as failed"); one it refunded in full stays
+refunded, so it is logged for a person to check the buyer's access.
 
 **A full refund** (the whole charge refunded):
 

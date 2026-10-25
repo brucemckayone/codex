@@ -23,12 +23,22 @@
 	let currentStatus = $derived(page.url.searchParams.get('status') || 'all');
 	let currentPage = $derived(Math.max(1, parseInt(page.url.searchParams.get('page') || '1', 10)));
 
+	// A completed payment with an open chargeback shows as 'disputed'
+	// (Codex-2hxff.60). A lost dispute refunds it, and the row says Refunded
+	// although `disputedAt` stays set; a won one clears the mark.
+	function displayStatus(purchase: PageData['purchases']['items'][number]): string {
+		return purchase.status === 'completed' && purchase.disputedAt != null
+			? 'disputed'
+			: purchase.status;
+	}
+
 	// Map purchase status to badge variant
 	function getStatusVariant(status: string): 'success' | 'warning' | 'error' | 'neutral' {
 		switch (status) {
 			case 'completed':
 				return 'success';
 			case 'pending':
+			case 'disputed':
 				return 'warning';
 			case 'failed':
 				return 'error';
@@ -50,6 +60,8 @@
 				return m.account_payments_status_failed();
 			case 'refunded':
 				return m.account_payments_status_refunded();
+			case 'disputed':
+				return m.account_payments_status_disputed();
 			default:
 				return m.account_payments_status_unknown();
 		}
@@ -168,6 +180,7 @@
 					<Table.Body>
 						{#each data.purchases.items as purchase (purchase.id)}
 							{@const title = purchase.contentTitle ?? purchase.courseTitle}
+							{@const status = displayStatus(purchase)}
 							<Table.Row>
 								<Table.Cell class="date-cell">
 									{formatDate(purchase.createdAt)}
@@ -186,8 +199,8 @@
 									{formatPrice(purchase.amountCents)}
 								</Table.Cell>
 								<Table.Cell class="status-cell">
-									<Badge variant={getStatusVariant(purchase.status)}>
-										{getStatusText(purchase.status)}
+									<Badge variant={getStatusVariant(status)}>
+										{getStatusText(status)}
 									</Badge>
 								</Table.Cell>
 							</Table.Row>

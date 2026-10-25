@@ -24,7 +24,7 @@ import { evaluateCourseGate } from '$lib/journeys/gate';
 import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
-import { resolveCanEnterCourse } from '$lib/server/journeys/round-d-seam';
+import { resolveCourseEntry } from '$lib/server/journeys/round-d-seam';
 import { buildJourneyUrl } from '$lib/utils/subdomain';
 import type { PageServerLoad } from './$types';
 import {
@@ -178,16 +178,25 @@ export const load: PageServerLoad = async (event) => {
   // `@codex/cache` `VersionedCache` exists for. Cache it in the worker under a
   // version key, or fold it into the `access.coursePage` read so it costs no
   // extra hop, and the second goes away without moving it off the critical path.
-  const [enrolled, offer] = await Promise.all([
+  //
+  // The same entitlement read also says, on a refusal, whether an open payment
+  // dispute on the viewer's course purchase or subscription is why
+  // (`disputeHold`, Codex-2hxff.60). Then no Buy or Join is offered: every such
+  // slot shows the dispute notice (`kit/model/cta.ts`). A failed read is a
+  // refusal with no hold, the join CTA, as before.
+  const NOT_ENTERED = { canEnter: false, disputeHold: null } as const;
+  const [entry, offer] = await Promise.all([
     user
-      ? resolveCanEnterCourse(event, user.id, coursePage.course.id).catch(
-          () => false
+      ? resolveCourseEntry(event, user.id, coursePage.course.id).catch(
+          () => NOT_ENTERED
         )
-      : Promise.resolve(false),
+      : Promise.resolve(NOT_ENTERED),
     createServerApi(platform, cookies)
       .courses.offer(coursePage.course.id)
       .catch(() => null),
   ]);
+  const enrolled = entry.canEnter;
+  const disputeHold = entry.disputeHold;
 
   // Version-keyed invalidation dependency. NOTE (flagged for the conductor):
   // the page/course payload should cache under new `CacheType.PAGE_CONFIG` /
@@ -364,6 +373,9 @@ export const load: PageServerLoad = async (event) => {
     // hands to `PageRenderer`.
     kitPage,
     enrolled,
+    // The kind of dispute that pauses this viewer's course, or null. The kind
+    // only; this page is `PRIVATE`, so it never reaches a shared cache.
+    disputeHold,
     // Rendered by the ROOT layout, once, so the page overrides rather than
     // duplicates. See the derivation above.
     pageMeta,

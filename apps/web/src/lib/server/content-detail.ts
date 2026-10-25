@@ -56,7 +56,8 @@ import { logReadFailure } from './read-failure';
 /**
  * Revocation reasons surfaced from `AccessDeniedError` when a previously-
  * authorised user lost access (subscription cancelled, payment failed,
- * refund, admin revoke). Mirrors the union in
+ * refund, admin revoke), or has it paused while a payment dispute on the
+ * purchase or the subscription is open (Codex-2hxff.60). Mirrors the union in
  * `packages/access/src/services/access-revocation.ts` — kept inline here
  * rather than importing so the web app doesn't pull the server-only
  * `@codex/access` package through the SSR bundle.
@@ -65,7 +66,9 @@ export type AccessRevocationReason =
   | 'subscription_deleted'
   | 'payment_failed'
   | 'refund'
-  | 'admin_revoke';
+  | 'admin_revoke'
+  | 'purchase_dispute'
+  | 'subscription_dispute';
 
 interface AccessAndProgress {
   hasAccess: boolean;
@@ -115,6 +118,8 @@ const REVOCATION_REASONS: ReadonlySet<AccessRevocationReason> = new Set([
   'payment_failed',
   'refund',
   'admin_revoke',
+  'purchase_dispute',
+  'subscription_dispute',
 ]);
 
 function extractRevocationReason(

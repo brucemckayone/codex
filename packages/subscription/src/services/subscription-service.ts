@@ -118,6 +118,7 @@ import {
 import type Stripe from 'stripe';
 import {
   AlreadySubscribedError,
+  ConflictError,
   ConnectAccountNotReadyError,
   ForbiddenError,
   SubscriptionCheckoutError,
@@ -3100,7 +3101,9 @@ export class SubscriptionService extends BaseService {
    * charged a different amount than they confirmed.
    *
    * Reuses the same tier-existence + price-configured guards as `changeTier()`
-   * so a preview that succeeds is a strong signal the commit will too.
+   * so a preview that succeeds is a strong signal the commit will too,
+   * including its refusal while the subscription is disputed
+   * (`assertNotDisputed`, Codex-2hxff.60).
    */
   async previewTierChange(
     userId: string,
@@ -3110,6 +3113,7 @@ export class SubscriptionService extends BaseService {
   ): Promise<TierChangePreview> {
     try {
       const sub = await this.getSubscriptionOrThrow(userId, orgId);
+      this.assertNotDisputed(sub, orgId);
 
       const [newTier] = await this.db
         .select()
@@ -3215,6 +3219,11 @@ export class SubscriptionService extends BaseService {
    * `TIER_CHANGE_PREVIEW_TTL_MS`; an older one, one from the future, or one
    * before the current period throws `TierChangePreviewExpiredError` before
    * Stripe is touched (Codex-2hxff.15, SUB-12).
+   *
+   * Refused with a `ConflictError` (409) while a chargeback on one of the
+   * subscription's invoices is open (`assertNotDisputed`): its access and its
+   * billing are paused until the dispute ends, and an upgrade would invoice
+   * at once (owner decision, Codex-2hxff.60). Stripe is not touched.
    */
   async changeTier(
     userId: string,
@@ -3225,6 +3234,7 @@ export class SubscriptionService extends BaseService {
   ): Promise<{ userId: string; orgId: string; subscription: Subscription }> {
     try {
       const sub = await this.getSubscriptionOrThrow(userId, orgId);
+      this.assertNotDisputed(sub, orgId);
 
       // Validate new tier
       const [newTier] = await this.db
@@ -5041,6 +5051,21 @@ export class SubscriptionService extends BaseService {
   }
 
   // ─── Private Helpers ─────────────────────────────────────────────────────
+
+  /**
+   * Refuse a tier change, and its preview, while a chargeback on one of the
+   * subscription's invoices is open (`disputedAt` set): its access and billing
+   * are paused until the dispute ends (Codex-2hxff.60). Called before any
+   * Stripe call. The context is sent to the client: nothing about the dispute
+   * itself.
+   */
+  private assertNotDisputed(sub: Subscription, orgId: string): void {
+    if (!sub.disputedAt) return;
+    throw new ConflictError(
+      'The plan cannot be changed while a payment dispute on this subscription is open.',
+      { code: 'SUBSCRIPTION_DISPUTED', organizationId: orgId }
+    );
+  }
 
   private async getSubscriptionOrThrow(
     userId: string,

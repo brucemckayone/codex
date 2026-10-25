@@ -20,6 +20,18 @@ export const COPY = {
     unavailableTitle: 'Not open for enrolment yet',
     unavailableBody:
       'This course is not taking new members right now. Check back soon.',
+    /*
+      A disputed owner (Codex-2hxff.60): the content page's dispute notice,
+      word for word. Those strings are paraglide's `access_paused_dispute_*`
+      and `access_contact_support`; this module stays English by contract A20,
+      so `cta.test.ts` pins the two to each other.
+    */
+    pausedTitle: 'Access paused',
+    pausedPurchase:
+      'Access is paused while a payment dispute on this purchase is open.',
+    pausedSubscription:
+      'Access is paused while a payment dispute on this subscription is open.',
+    contactSupport: 'Contact support',
   },
   pricing: {
     recommended: 'Recommended',

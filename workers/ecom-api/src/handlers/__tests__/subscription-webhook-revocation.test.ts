@@ -551,7 +551,7 @@ describe('handleSubscriptionWebhook — access revocation', () => {
       expect(mockClear).not.toHaveBeenCalled();
     });
 
-    it('fire-and-forget: KV clear failure does NOT surface', async () => {
+    it('fire-and-forget: KV clear failure does NOT surface, and is logged at error (it refuses a restored subscriber)', async () => {
       mockHandleResumed.mockResolvedValueOnce({
         userId: 'user_resume_fail',
         orgId: 'org_resume_fail',
@@ -565,6 +565,14 @@ describe('handleSubscriptionWebhook — access revocation', () => {
       ).resolves.not.toThrow();
       await expect(drainWaitUntil(bundle)).resolves.not.toThrow();
       expect(mockClear).toHaveBeenCalledTimes(1);
+      expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+        'subscription-webhook: AccessRevocation.clear failed',
+        {
+          userId: 'user_resume_fail',
+          orgId: 'org_resume_fail',
+          error: 'KV unreachable',
+        }
+      );
     });
   });
 

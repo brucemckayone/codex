@@ -65,9 +65,17 @@ PURCHASE_STATUS          // { PENDING, COMPLETED, FAILED, REFUNDED }
 SUBSCRIPTION_STATUS      // { ACTIVE, PAST_DUE, CANCELLING, CANCELLED, INCOMPLETE, PAUSED }
 BILLING_INTERVAL         // { MONTH, YEAR }
 CONNECT_ACCOUNT_STATUS   // { ONBOARDING, ACTIVE, RESTRICTED, DISABLED }
+REFUND_WINDOW_DAYS       // 14: support's refund window, from Stripe's charge.created
+STRIPE_ENV_METADATA_KEY            // 'codex_env': the environment tag on every Stripe object
+STRIPE_SUPPORT_KEY_METADATA_KEY    // 'codex_support_key': a support refund's idempotency key
+STRIPE_REQUESTED_BY_METADATA_KEY   // 'codex_requested_by': who in support issued a refund
 ```
 
+**Support refund metadata** (Codex-2hxff.28): a support refund carries `codex_support_key`, so a retried submission finds the refund it already made, and `codex_requested_by`, which `supportRequesterOf` (`@codex/purchase`) reads into `refunds.requested_by_user_id`. Use these constants on both sides, never the literals.
+
 **Default currency is GBP (£)**, not USD.
+
+**`REFUND_WINDOW_DAYS`** (Codex-2hxff.28, owner decision Q1): support can refund a payment for 14 × 24 hours after Stripe's `charge.created`, so a renewal's window runs from that renewal. Read it only through `refundWindow(chargeCreatedSeconds, now)` in `@codex/payments`, so the page and the refund route cannot disagree. Only the support refund route enforces it: Dashboard refunds and the platform's own refunds (duplicates, early cancels, the early-fraud refund) are not support decisions.
 
 ## Limits & File Sizes
 
@@ -188,7 +196,10 @@ POSTGRES_ERROR_CODES // { UNIQUE_VIOLATION: '23505', FOREIGN_KEY_VIOLATION: '235
 DOMAINS              // { PROD: 'revelations.studio', STAGING: 'staging.revelations.studio', DEV_REMOTE: 'dev.revelations.studio', DEV: 'lvh.me', LOCAL: 'localhost' }
 RESERVED_SUBDOMAINS  // Array of reserved org slug names (cdn, api, auth, www, admin, etc.)
 RESERVED_SUBDOMAINS_SET  // Set<string> for O(1) lookups
+PLATFORM_SUPPORT_EMAIL   // 'support@revelations.studio': every "Contact support" mailto in apps/web
 ```
+
+**`PLATFORM_SUPPORT_EMAIL`** (owner decision 2026-10-24, Codex-2hxff.60) replaced the undeliverable `support@codex.example`. It is a literal, not built from `DOMAINS.PROD`, because the domain may change and the mailbox would not move with it. Confirm the mailbox exists and is read before production (Codex-5vvwj.1). apps/web builds its links with `supportMailto(subject)` (`$lib/utils/support-mailto.ts`), never by hand.
 
 **MUST** check `isReservedSubdomain(slug)` when validating org slugs (built into `createOrganizationSchema` in `@codex/validation`). The helper adds the `cdn-` prefix rule on top of `RESERVED_SUBDOMAINS_SET` — reading the Set directly re-opens that gap.
 
@@ -222,11 +233,11 @@ INFRA_KEYS.DATABASE  // { URL, URL_LOCAL_PROXY }
 
 ## Reference Files
 
-- `packages/constants/src/urls.ts` — `SERVICE_PORTS`, `DOMAINS`, `RESERVED_SUBDOMAINS`
+- `packages/constants/src/urls.ts` — `SERVICE_PORTS`, `DOMAINS`, `RESERVED_SUBDOMAINS`, `PLATFORM_SUPPORT_EMAIL`
 - `packages/constants/src/env.ts` — `ENV_NAMES`, `isDev`, `isDevRemote`, `validateServiceUrl`, `INFRA_KEYS` (URL building moved to `@codex/urls`)
 - `packages/constants/src/cookies.ts` — `COOKIES`, `CookieConfig` (`getCookieConfig` moved to `@codex/urls`)
 - `packages/constants/src/limits.ts` — `PAGINATION`, `FILE_SIZES`, `RATE_LIMIT_PRESETS`, `CACHE_TTL`, `CACHE_PRESETS`, `CachePresetName`, `R2_OVERWRITTEN_OBJECT_CACHE_CONTROL`
-- `packages/constants/src/commerce.ts` — `FEES`, `CURRENCY`, `STRIPE_EVENTS`, `PURCHASE_STATUS`
+- `packages/constants/src/commerce.ts` — `FEES`, `CURRENCY`, `STRIPE_EVENTS`, `PURCHASE_STATUS`, `REFUND_WINDOW_DAYS`
 - `packages/constants/src/content.ts` — `CONTENT_STATUS`, `MEDIA_STATUS`, `CONTENT_TYPES`, `VISIBILITY`
 - `packages/constants/src/mime.ts` — `MIME_TYPES`, `HEADERS`, `SUPPORTED_*_MIME_TYPES`
 - `packages/constants/src/database.ts` — `POSTGRES_ERROR_CODES`, `ORGANIZATION_ROLES`, `DB_METHODS`

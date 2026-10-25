@@ -18,6 +18,7 @@ import {
   AdminAnalyticsService,
   AdminContentManagementService,
   AdminCustomerManagementService,
+  SupportService,
 } from '@codex/admin';
 import { AgreementService } from '@codex/agreements';
 import {
@@ -405,6 +406,7 @@ export async function createServiceRegistry(
   let _adminAnalytics: AdminAnalyticsService | undefined;
   let _adminContent: AdminContentManagementService | undefined;
   let _adminCustomer: AdminCustomerManagementService | undefined;
+  let _support: SupportService | undefined;
   let _templates: TemplateService | undefined;
   let _notifications: NotificationsService | undefined;
   let _preferences: NotificationPreferencesService | undefined;
@@ -1312,6 +1314,24 @@ export async function createServiceRegistry(
         });
       }
       return _adminCustomer;
+    },
+
+    /**
+     * Codex-2hxff.28: platform support's refunds. The shared per-request
+     * client, because settling a failed refund is one transaction; the lazy
+     * Stripe proxy, so the queue's DB-only reads never need the key. The
+     * purchase service gives a re-paid failed refund's access back (Q5d).
+     */
+    get support() {
+      if (!_support) {
+        _support = new SupportService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          stripe: getLazyStripeClient(),
+          purchase: registry.purchase,
+        });
+      }
+      return _support;
     },
 
     // ========================================================================

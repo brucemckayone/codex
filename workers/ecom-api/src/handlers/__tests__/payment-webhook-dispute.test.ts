@@ -282,7 +282,13 @@ describe('handlePaymentWebhook — disputes', () => {
       expect.objectContaining({ userId: 'user_disp', reason: 'refund' }),
       expect.anything()
     );
-    expect(mockRevoke).toHaveBeenCalledWith('user_disp', 'org_disp', 'refund');
+    // Paused, not ended: the content page shows the dispute notice
+    // (Codex-2hxff.60). The library bump keeps its own 'refund' reason.
+    expect(mockRevoke).toHaveBeenCalledWith(
+      'user_disp',
+      'org_disp',
+      'purchase_dispute'
+    );
     expect(mockReverseSubscription).toHaveBeenCalledWith(charge);
     expect(purchase.clawBackPurchaseCharge).toHaveBeenCalledWith(
       'pi_test_dispute',
@@ -473,6 +479,25 @@ describe('handlePaymentWebhook — disputes', () => {
     expect(purchase.markDisputeOutcomeApplied).not.toHaveBeenCalled();
   });
 
+  it('a late win (a won event on a lost record) acts on the record: nothing is restored or re-paid', async () => {
+    // Owner decision 2026-10-25, "alert only": recordDispute keeps the row
+    // lost and alerts; Codex-2hxff.70 will record the win with the undo.
+    recordedAs('lost', { outcomeAppliedAt: new Date() });
+    const bundle = buildContext();
+
+    await handlePaymentWebhook(
+      createDisputeEvent({ status: 'won' }),
+      mockStripe,
+      bundle.context
+    );
+
+    expect(purchase.restoreDisputedPurchase).not.toHaveBeenCalled();
+    expect(subscription.restoreAfterDispute).not.toHaveBeenCalled();
+    expect(purchase.settleWonDispute).not.toHaveBeenCalled();
+    expect(mockClear).not.toHaveBeenCalled();
+    expect(purchase.processLostDispute).not.toHaveBeenCalled();
+  });
+
   it("a subscription invoice's chargeback (no purchase for the PaymentIntent) still claws back the subscription's slices", async () => {
     purchase.processDispute?.mockResolvedValueOnce(undefined);
     const bundle = buildContext();
@@ -592,6 +617,43 @@ describe('handlePaymentWebhook — disputes', () => {
     ).resolves.not.toThrow();
     await expect(drainWaitUntil(bundle)).resolves.not.toThrow();
     expect(mockRevoke).toHaveBeenCalledTimes(1);
+    // A warning: the database mark still refuses, with the same reason.
+    expect(bundle.mock._obs.warn).toHaveBeenCalledWith(
+      'payment-webhook: AccessRevocation.revoke failed',
+      expect.objectContaining({ userId: 'user_fire', error: 'KV unreachable' })
+    );
+    expect(bundle.mock._obs.error).not.toHaveBeenCalledWith(
+      'payment-webhook: AccessRevocation.revoke failed',
+      expect.anything()
+    );
+  });
+
+  it('won: a failed clear of the block does not surface, and is logged at error (it refuses a settled buyer)', async () => {
+    purchase.restoreDisputedPurchase?.mockResolvedValueOnce({
+      userId: 'user_clear',
+      orgId: 'org_clear',
+    });
+    mockClear.mockRejectedValueOnce(new Error('KV unreachable'));
+    const bundle = buildContext();
+
+    await expect(
+      handlePaymentWebhook(
+        {
+          ...createDisputeEvent({ status: 'won' }),
+          type: STRIPE_EVENTS.CHARGE_DISPUTE_CLOSED,
+        } as Stripe.Event,
+        mockStripe,
+        bundle.context
+      )
+    ).resolves.not.toThrow();
+    await expect(drainWaitUntil(bundle)).resolves.not.toThrow();
+
+    expect(mockClear).toHaveBeenCalledWith('user_clear', 'org_clear');
+    expect(bundle.mock._obs.error).toHaveBeenCalledWith(
+      'payment-webhook: AccessRevocation.clear failed',
+      { userId: 'user_clear', orgId: 'org_clear', error: 'KV unreachable' }
+    );
+    expect(purchase.settleWonDispute).toHaveBeenCalledWith('dp_test_dispute');
   });
 
   // ── a subscription invoice's dispute (docs/payments/subscription-disputes.md)
@@ -625,7 +687,11 @@ describe('handlePaymentWebhook — disputes', () => {
     await drainWaitUntil(bundle);
 
     expect(subscription.pauseForDispute).toHaveBeenCalledWith(disputeInput);
-    expect(mockRevoke).toHaveBeenCalledWith('user_sub', 'org_sub', 'refund');
+    expect(mockRevoke).toHaveBeenCalledWith(
+      'user_sub',
+      'org_sub',
+      'subscription_dispute'
+    );
     expect(subscription.pauseBillingForDispute).toHaveBeenCalledWith(
       disputedSubscription,
       'dp_test_dispute'

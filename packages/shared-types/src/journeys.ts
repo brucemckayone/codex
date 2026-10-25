@@ -780,6 +780,13 @@ export interface EnrolledCourseSummary {
    */
   enrollmentSource: string;
   progress: EnrolledCourseProgress;
+  /**
+   * Set while an open payment dispute holds back the caller's grant to this
+   * course and nothing else opens it (Codex-2hxff.60): the card reads
+   * "Paused: payment dispute", exactly when the course's lessons show the
+   * dispute notice. The kind only, never a date. `null` otherwise.
+   */
+  disputeHold: 'purchase_dispute' | 'subscription_dispute' | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

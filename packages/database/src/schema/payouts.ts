@@ -207,6 +207,10 @@ export const payouts = pgTable(
       .where(
         sql`${table.needsReviewAt} IS NOT NULL AND ${table.status} = 'failed'`
       ),
+    // Every slice of one charge: support's charge page and the clawback's
+    // invoice scope (Codex-2hxff.28). The per-charge unique indexes above are
+    // partial by payout type, so none serves a lookup by charge alone.
+    index('idx_payouts_stripe_charge').on(table.stripeChargeId),
 
     check('check_payouts_amount_positive', sql`${table.amountCents} > 0`),
     check(

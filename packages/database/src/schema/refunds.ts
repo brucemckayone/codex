@@ -56,6 +56,14 @@ export const refunds = pgTable(
 
     /** When the buyer was emailed about this refund. */
     notifiedAt: timestamp('notified_at', { withTimezone: true }),
+    /**
+     * Who in support issued it, from the Stripe refund's
+     * `metadata.codex_requested_by` (Codex-2hxff.28, Q3). Null for a refund
+     * made in the Stripe Dashboard or by the platform itself.
+     */
+    requestedByUserId: text('requested_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
 
     /** How support settled a failed refund. */
     resolution: varchar('resolution', { length: 32 }),
@@ -63,6 +71,8 @@ export const refunds = pgTable(
     resolvedByUserId: text('resolved_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    /** Support's note on the settlement: a money record, not a log line (Q6). */
+    resolutionNote: text('resolution_note'),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -105,6 +115,10 @@ export const refundsRelations = relations(refunds, ({ one }) => ({
   }),
   resolvedBy: one(users, {
     fields: [refunds.resolvedByUserId],
+    references: [users.id],
+  }),
+  requestedBy: one(users, {
+    fields: [refunds.requestedByUserId],
     references: [users.id],
   }),
 }));

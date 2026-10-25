@@ -399,9 +399,32 @@ function notLive(endedAt: AnyPgColumn, status: AnyPgColumn): SQL {
   return condition;
 }
 
+/**
+ * The payment paid for its subscription's CURRENT billing period, the test
+ * `cancelForFullRefund` makes before it cancels: an invoice raised for a
+ * period, and the subscription's newest paid one. Support's refund preview
+ * reads it (Codex-2hxff.28 §3): a full refund of such a payment cancels the
+ * subscription, any other leaves it running. False for a one-off purchase,
+ * an upgrade's proration invoice and an earlier period's payment. It only
+ * reads Stripe.
+ */
+export async function isCurrentPeriodPayment(
+  deps: SubscriptionChargeDeps,
+  paymentIntentId: string | null
+): Promise<boolean> {
+  const paid = await invoiceForPaymentIntent(deps, paymentIntentId);
+  if (!paid?.stripeSubscriptionId) return false;
+  if (!PERIOD_BILLING_REASONS.includes(paid.billingReason ?? '')) return false;
+  const periodInvoiceId = await currentPeriodInvoiceId(
+    deps,
+    paid.stripeSubscriptionId
+  );
+  return periodInvoiceId === paid.invoiceId;
+}
+
 /** The newest paid invoice that bought a billing period, newest first. */
 async function currentPeriodInvoiceId(
-  deps: SubscriptionRefundDeps,
+  deps: Pick<SubscriptionChargeDeps, 'stripe'>,
   stripeSubscriptionId: string
 ): Promise<string | null> {
   const page = await deps.stripe.invoices.list({

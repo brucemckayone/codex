@@ -148,11 +148,13 @@
     const accessType = (item as { accessType?: string }).accessType;
     const organizationSlug =
       (item.content as { organizationSlug?: string | null }).organizationSlug ?? null;
+    const purchaseDisputedAt =
+      (item as { purchase?: { disputedAt?: string | null } | null }).purchase?.disputedAt ?? null;
     if (accessType !== 'purchased' && accessType !== 'membership' && accessType !== 'subscription') {
       return { kind: 'active' as const };
     }
     return getLibraryAccessState(
-      { accessType, organizationSlug },
+      { accessType, organizationSlug, purchaseDisputedAt },
       subsBySlug
     );
   }

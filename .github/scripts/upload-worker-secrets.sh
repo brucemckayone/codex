@@ -16,10 +16,17 @@ set -e
 #   - DATABASE_URL (secret)
 #   - R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (secrets)
 #   - R2_BUCKET_MEDIA, R2_BUCKET_ASSETS, R2_BUCKET_PLATFORM, R2_BUCKET_RESOURCES (vars)
-#   - STRIPE_SECRET_KEY (secret, every worker that makes a Stripe API call:
-#     ecom-api — purchase/subscription/connect/course-subscription — and
-#     organization-api, which owns subscription-tier creation. No other worker
-#     reaches a Stripe-backed service; do not add it elsewhere without one.)
+#   - STRIPE_SECRET_KEY (secret, the platform's full key: ecom-api —
+#     purchase/subscription/connect/course-subscription — and organization-api,
+#     which owns subscription-tier creation. No other worker gets it; do not
+#     add it elsewhere without a Stripe-backed service there.)
+#   - ADMIN_API_STRIPE_RESTRICTED_KEY (secret, admin-api only, OPTIONAL):
+#     admin-api's OWN restricted key for support refunds (Codex-2hxff.28,
+#     owner decision Q4; Codex-5vvwj.2), uploaded as admin-api's
+#     STRIPE_SECRET_KEY. Sent only when set and of this environment's mode
+#     (rk_live_ in production, rk_test_ elsewhere); unset is a ::warning::,
+#     any other value an ::error:: and not sent. Either way the deploy still
+#     succeeds and only the support refund routes fail.
 #   - STRIPE_WEBHOOK_SECRET_* (secrets, ecom-api only — it owns all Stripe webhooks)
 #   - STRIPE_PORTAL_CONFIGURATION_ID (ecom-api only — the locked Billing Portal
 #     configuration, bpc_...; without it the portal refuses to open)
@@ -136,9 +143,36 @@ EOF
     ;;
 
   admin-api)
+    # STRIPE_SECRET_KEY comes from ADMIN_API_STRIPE_RESTRICTED_KEY, never from
+    # STRIPE_SECRET_KEY (ecom-api's full key): support refunds use admin-api's
+    # own restricted key (Codex-2hxff.28, owner decision Q4). It is sent ONLY
+    # when set and non-empty. `secret bulk` writes just the keys it is given,
+    # so leaving it out keeps whatever admin-api already holds, where an empty
+    # value would overwrite a working key with "". Without it the deploy still
+    # succeeds; only the support refund routes need it.
+    #
+    # It must be a RESTRICTED key of this environment's mode (silent F8):
+    # rk_live_ in production, rk_test_ elsewhere. A full sk_ key would defeat
+    # the restriction, and a test key in production makes every live charge
+    # "unknown". Anything else is reported as a GitHub error annotation and
+    # NOT uploaded; the deploy carries on. An unset key is a warning.
+    if [ "$ENVIRONMENT" = "production" ]; then
+      ADMIN_API_KEY_PREFIX="rk_live_"
+    else
+      ADMIN_API_KEY_PREFIX="rk_test_"
+    fi
+    ADMIN_API_STRIPE_JSON=""
+    if [ -z "${ADMIN_API_STRIPE_RESTRICTED_KEY:-}" ]; then
+      echo "::warning title=admin-api Stripe key::ADMIN_API_STRIPE_RESTRICTED_KEY is not set: admin-api's STRIPE_SECRET_KEY is left as it is, and support refunds fail without one"
+    elif [[ "$ADMIN_API_STRIPE_RESTRICTED_KEY" != "$ADMIN_API_KEY_PREFIX"* ]]; then
+      echo "::error title=admin-api Stripe key::ADMIN_API_STRIPE_RESTRICTED_KEY does not start with ${ADMIN_API_KEY_PREFIX}: not uploaded, admin-api's STRIPE_SECRET_KEY is left as it is"
+    else
+      ADMIN_API_STRIPE_JSON=",
+  \"STRIPE_SECRET_KEY\":\"${ADMIN_API_STRIPE_RESTRICTED_KEY}\""
+    fi
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}"
+  "DATABASE_URL":"${DATABASE_URL}"${ADMIN_API_STRIPE_JSON}
 }
 EOF
 )

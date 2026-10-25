@@ -21,16 +21,31 @@ import { createServerApi } from '$lib/server/api';
 
 type SubscriptionCommandFailure = {
   success: false;
+  /** The worker's top-level code, often a class code such as 'CONFLICT'. */
   code: string | undefined;
+  /**
+   * The worker's `details.code`. Most subscription errors put their own code
+   * there, under a class code at the top level: 'SUBSCRIPTION_DISPUTED' sits
+   * under 'CONFLICT' (Codex-2hxff.60). Kept apart from `code` so that every
+   * mapping keyed on the top-level code reads what it read before.
+   */
+  detailsCode: string | undefined;
   message: string;
   status: number;
 };
+
+function detailsCodeOf(details: unknown): string | undefined {
+  if (!details || typeof details !== 'object') return undefined;
+  const code = (details as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
 
 function toCommandFailure(error: unknown): SubscriptionCommandFailure {
   if (ApiError.isApiError(error)) {
     return {
       success: false,
       code: error.code,
+      detailsCode: detailsCodeOf(error.details),
       message: error.message,
       status: error.status,
     };
@@ -38,6 +53,7 @@ function toCommandFailure(error: unknown): SubscriptionCommandFailure {
   return {
     success: false,
     code: undefined,
+    detailsCode: undefined,
     message: error instanceof Error ? error.message : 'Unexpected error',
     status: 500,
   };

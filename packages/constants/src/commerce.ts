@@ -101,6 +101,22 @@ export function isForeignStripeEnvironment(
   return typeof tag === 'string' && tag !== '' && tag !== environment;
 }
 
+/**
+ * The metadata key on a support refund naming its decision: the idempotency
+ * key `support_refund_{charge}_{refundCount}_{amount}` (Codex-2hxff.28 §5).
+ * A repeat of the same submit finds the refund by it and answers `replayed`.
+ * Written by `SupportService.issueRefund` (@codex/admin).
+ */
+export const STRIPE_SUPPORT_KEY_METADATA_KEY = 'codex_support_key';
+
+/**
+ * The metadata key on a support refund naming who in support issued it
+ * (Codex-2hxff.28, Q3). Written by `SupportService.issueRefund`; read back by
+ * the refund webhook (`supportRequesterOf`, @codex/purchase) into
+ * `refunds.requested_by_user_id`. A Dashboard refund carries none.
+ */
+export const STRIPE_REQUESTED_BY_METADATA_KEY = 'codex_requested_by';
+
 export const PURCHASE_STATUS = {
   PENDING: 'pending',
   COMPLETED: 'completed',
@@ -139,6 +155,16 @@ export const CHECKOUT_SESSION_KIND = {
  * is shown a fresh preview, so they pay what they were shown.
  */
 export const TIER_CHANGE_PREVIEW_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * How long support can refund a payment: 14 × 24 hours from Stripe's
+ * `charge.created`, so a renewal's window runs from that renewal (owner
+ * decisions 2026-10-13 and 2026-10-24, Q1; Codex-2hxff.28). Only the support
+ * refund route enforces it: Dashboard refunds and the platform's own
+ * (duplicates, early cancels) are not support decisions. `refundWindow` in
+ * @codex/payments is the one reader.
+ */
+export const REFUND_WINDOW_DAYS = 14;
 
 export const SUBSCRIPTION_STATUS = {
   ACTIVE: 'active',

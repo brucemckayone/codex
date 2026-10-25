@@ -322,6 +322,7 @@ describe('PurchaseService — access gaps (Codex-2hxff.21)', () => {
           courseTitle: 'The Descent',
           amountCents: 1000,
           status: 'completed',
+          disputedAt: null,
         },
       ]);
 

@@ -315,7 +315,11 @@ describe('runDisputeReconcile', () => {
       stripeDisputeId: 'dp_open',
       disputeReason: 'fraudulent',
     });
-    expect(effects.revokeAccess).toHaveBeenCalledWith('user_1', 'org_1');
+    expect(effects.revokeAccess).toHaveBeenCalledWith(
+      'user_1',
+      'org_1',
+      'purchase_dispute'
+    );
     expect(subscription.reverseSubscriptionPayoutsForCharge).toHaveBeenCalled();
     expect(purchase.clawBackPurchaseCharge).toHaveBeenCalled();
   });

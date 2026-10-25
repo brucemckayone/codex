@@ -20,6 +20,7 @@ import {
   createStripeClient, verifyWebhookSignature,
   resolveOrCreateCustomer, withStaleCustomerRecovery,
   findActiveCreatorAgreementShare,
+  supportRequesterOf, STANDING_REFUND_STATUSES,
 } from '@codex/purchase';
 ```
 
@@ -54,6 +55,9 @@ emails — the open defect `Codex-2hxff.7`.
 | `listSales`, `getSalesStats` / `listMySales`, `getMySalesStats` | An organisation's sales ledger / a solo creator's own orgless sales; one shared query, so both have the same rows and filters |
 | `verifyCheckoutSession(sessionId, customerId)` | Success-page check; only the buyer who started the session |
 | `processRefund(paymentIntentId, details?)` | Called by the `charge.refunded` webhook. **Records** a refund made in Stripe and reverses transfers — it never issues one. |
+| `recordRefund(refund)` / `recordChargeRefunds(charge)` | One `refunds` row per Stripe refund, forward only (`failed`/`canceled` are final). `requestedByUserId` (from `supportRequesterOf(refund)`, the `codex_requested_by` metadata) is written once and only if a user has that id, so an edited value never fails the webhook. A missing `purchase_id` is filled in, here and by `processRefund` for its charge; "standing" also counts a refund of the charge still without one |
+| `restoreAfterFailedRefund(tx, purchaseId, chargeId)` | Support settles a failed FULL refund as `creators_repaid` (Codex-2hxff.28, Q5d): inside the caller's transaction, the purchase is `completed` again and its access restored. Otherwise `reason` (`RefundAccessKept`, logged at info): `partial`, `not_refunded`, `dispute_holds` (by purchase or charge), `duplicate`, `rebought`, `still_refunded`; after the last two the refund fields are still restated |
+| `restateStandingRefunds(paymentIntentId, chargeId)` | A refund that failed (2026-10-24) or was canceled (2026-10-25) returned nothing: a part-refunded (`completed`) purchase's refund amount, id and reason are restated from the refunds still standing (`STANDING_REFUND_STATUSES`), the same restatement as above. `refund.updated` runs it after `processRefund`, which only ever raises the amount |
 | `processDispute(...)` | Called by the dispute webhook |
 | `createPortalSession(email, userId, returnUrl)` | Stripe billing portal session |
 
