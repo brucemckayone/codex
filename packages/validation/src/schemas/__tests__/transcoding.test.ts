@@ -98,6 +98,24 @@ describe('RunPod Webhook Output Schema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('should accept a portrait 8K picture, reported upright', () => {
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...validOutput,
+      width: 4320,
+      height: 7680,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject a height over 8K', () => {
+    const result = runpodWebhookOutputSchema.safeParse({
+      ...validOutput,
+      width: 4320,
+      height: 7681,
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('should reject empty readyVariants', () => {
     const result = runpodWebhookOutputSchema.safeParse({
       ...validOutput,

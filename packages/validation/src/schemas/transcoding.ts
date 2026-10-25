@@ -162,8 +162,10 @@ export const runpodWebhookOutputSchema = z
     // NOTE: nullable() is required because Python sends None → JSON null for audio
     // files (no video dimensions). Zod .optional() only accepts undefined, not null.
     durationSeconds: z.number().int().min(1).max(86400).nullable().optional(), // Max 24 hours
-    width: z.number().int().min(1).max(7680).nullable().optional(), // Max 8K
-    height: z.number().int().min(1).max(4320).nullable().optional(), // Max 8K
+    // Max 8K in either orientation: the handler reports the picture as shown
+    // (upright), so a portrait 8K clip is 4320x7680 (Codex-l2c48.8).
+    width: z.number().int().min(1).max(7680).nullable().optional(),
+    height: z.number().int().min(1).max(7680).nullable().optional(),
 
     // HLS variants that are ready (bounded to prevent DoS via unbounded array)
     readyVariants: z.array(hlsVariantSchema).min(1).max(10),

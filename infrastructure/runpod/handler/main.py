@@ -234,6 +234,27 @@ VIDEO_PROFILE = ["-profile:v", "high"]
 AUDIO_SAMPLE_RATE = ["-ar", "48000"]
 
 
+def ladder_filter(short_side: int) -> str:
+    """The -vf of every video encode: square the pixels, scale the picture's
+    SHORT side to `short_side`, then 8-bit 4:2:0.
+
+    A rung's name is its short side, so a portrait 720p is 720x1280, not the
+    406x720 that `scale=-2:720` made. ffmpeg autorotates before this chain
+    runs, so iw/ih are already upright here. The callers never pass a
+    short_side above the source's, so nothing is upscaled.
+    """
+    return (
+        "scale='trunc(iw*sar/2)*2':ih,setsar=1,"
+        f"scale='if(gte(iw,ih),-2,{short_side})':'if(gte(iw,ih),{short_side},-2)',"
+        f"{VIDEO_PIXEL_FORMAT}"
+    )
+
+
+def even_floor(value: int) -> int:
+    """H.264 4:2:0 needs even dimensions."""
+    return max(2, value - value % 2)
+
+
 # =============================================================================
 # FFmpeg Helper
 # =============================================================================
@@ -498,11 +519,53 @@ def get_media_info(probe_data: dict[str, Any]) -> tuple[int, int | None, int | N
     height = None
     for stream in probe_data.get("streams", []):
         if stream.get("codec_type") == "video":
-            width = stream.get("width")
-            height = stream.get("height")
+            width, height = display_dimensions(stream)
             break
 
     return duration, width, height
+
+
+def _ratio(value: Any) -> tuple[int, int] | None:
+    """'8:9' → (8, 9); None for '0:1', 'N/A' or anything unusable."""
+    try:
+        num, den = (int(part) for part in str(value).split(":"))
+    except (TypeError, ValueError):
+        return None
+    return (num, den) if num > 0 and den > 0 else None
+
+
+def _rotation_degrees(stream: dict[str, Any]) -> int:
+    """The display rotation ffprobe reports: a display-matrix side data entry
+    (iPhone clips; ffmpeg 4.4 prints it as `rotation`), else the legacy
+    `rotate` tag."""
+    for side_data in stream.get("side_data_list") or []:
+        if "rotation" in side_data:
+            try:
+                return int(float(side_data["rotation"]))
+            except (TypeError, ValueError):
+                break
+    try:
+        return int((stream.get("tags") or {}).get("rotate", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def display_dimensions(stream: dict[str, Any]) -> tuple[int | None, int | None]:
+    """The picture's size as it is shown: square pixels, upright.
+
+    A portrait iPhone clip is stored 1920x1080 with a 90° display matrix and
+    is reported 1080x1920. Every encode autorotates and ladder_filter squares
+    the pixels, so this is also the shape every rung keeps.
+    """
+    width, height = stream.get("width"), stream.get("height")
+    if not width or not height:
+        return width, height
+    sar = _ratio(stream.get("sample_aspect_ratio"))
+    if sar is not None and sar[0] != sar[1]:
+        width = round(width * sar[0] / sar[1])
+    if _rotation_degrees(stream) % 180 != 0:
+        width, height = height, width
+    return width, height
 
 
 def validate_streams(probe_data: dict[str, Any], media_type: str) -> None:
@@ -709,7 +772,7 @@ def _build_hls_variant_cmd(
             "-i",
             input_path,
             "-vf",
-            f"scale=-2:{settings['height']},{VIDEO_PIXEL_FORMAT}",
+            ladder_filter(settings["height"]),
             "-c:v",
             "h264_nvenc",
             *VIDEO_PROFILE,
@@ -748,7 +811,7 @@ def _build_hls_variant_cmd(
         "-i",
         input_path,
         "-vf",
-        f"scale=-2:{settings['height']},{VIDEO_PIXEL_FORMAT}",
+        ladder_filter(settings["height"]),
         "-c:v",
         "libx264",
         *VIDEO_PROFILE,
@@ -822,16 +885,129 @@ def _validate_hls_rung(variant_dir: str, playlist_path: str, what: str) -> None:
     validate_output(os.path.join(variant_dir, "stream.ts"), f"{what} stream")
 
 
+# H.264 profile_idc and constraint byte, for an RFC 6381 `avc1.PPCCLL` string.
+_AVC_PROFILES = {
+    "High": (0x64, 0x00),
+    "Main": (0x4D, 0x40),
+    "Constrained Baseline": (0x42, 0xE0),
+    "Baseline": (0x42, 0x00),
+}
+AAC_LC_CODEC = "mp4a.40.2"
+
+
+def peak_bandwidth(playlist_path: str) -> int | None:
+    """A rung's peak bits/s: each single-file segment is an #EXTINF duration
+    and an #EXT-X-BYTERANGE length. Segments under a second (a clip's tail)
+    are skipped unless they are all there is. None if nothing can be read."""
+    rates: list[tuple[float, int]] = []
+    duration: float | None = None
+    try:
+        with open(playlist_path) as playlist:
+            for line in playlist:
+                line = line.strip()
+                if line.startswith("#EXTINF:"):
+                    try:
+                        duration = float(line[len("#EXTINF:") :].split(",")[0])
+                    except ValueError:
+                        duration = None
+                elif line.startswith("#EXT-X-BYTERANGE:") and duration:
+                    length = int(line[len("#EXT-X-BYTERANGE:") :].split("@")[0])
+                    rates.append((duration, math.ceil(length * 8 / duration)))
+                    duration = None
+    except (OSError, ValueError):
+        return None
+    if not rates:
+        return None
+    full = [rate for seconds, rate in rates if seconds >= 1.0]
+    return max(full or [rate for _, rate in rates])
+
+
+def encoded_stream_tags(stream_path: str) -> tuple[str | None, str | None]:
+    """RESOLUTION and CODECS for a rung, read back from what was encoded.
+
+    An output ffprobe can't read is a bad output (OUTPUT_VALIDATION_FAILED).
+    """
+    try:
+        probe = json.loads(
+            run_ffmpeg(
+                [
+                    "ffprobe",
+                    "-v",
+                    "quiet",
+                    "-print_format",
+                    "json",
+                    "-show_streams",
+                    stream_path,
+                ],
+                timeout=30,
+                description="ffprobe output",
+            ).stdout
+            or "{}"
+        )
+    except (TranscodeError, json.JSONDecodeError) as e:
+        raise TranscodeError(
+            TranscodeErrorCode.OUTPUT_VALIDATION_FAILED,
+            f"encoded stream unreadable: {e}",
+        ) from e
+
+    resolution = None
+    codecs: list[str] = []
+    for stream in probe.get("streams", []):
+        if stream.get("codec_type") == "video" and resolution is None:
+            if stream.get("width") and stream.get("height"):
+                resolution = f"{stream['width']}x{stream['height']}"
+            avc = _AVC_PROFILES.get(stream.get("profile", ""))
+            level = stream.get("level")
+            if avc and isinstance(level, int) and level > 0:
+                codecs.insert(0, f"avc1.{avc[0]:02x}{avc[1]:02x}{level:02x}")
+        elif stream.get("codec_type") == "audio" and stream.get("codec_name") == "aac":
+            if AAC_LC_CODEC not in codecs:
+                codecs.append(AAC_LC_CODEC)
+    return resolution, ",".join(codecs) or None
+
+
+def write_master_playlist(
+    master_path: str, rungs: list[tuple[str, str]], nominal_bps: dict[str, int]
+) -> None:
+    """The master playlist, describing each rung as encoded.
+
+    `rungs` is (name, directory) in ladder order. BANDWIDTH is the measured
+    peak, falling back to the nominal rate; RESOLUTION and CODECS come from
+    the rung's own stream (RESOLUTION is absent for audio).
+    """
+    with open(master_path, "w") as master:
+        master.write("#EXTM3U\n")
+        master.write("#EXT-X-VERSION:3\n")
+        for name, rung_dir in rungs:
+            bandwidth = peak_bandwidth(os.path.join(rung_dir, "index.m3u8"))
+            resolution, codecs = encoded_stream_tags(
+                os.path.join(rung_dir, "stream.ts")
+            )
+            attributes = [f"BANDWIDTH={bandwidth or nominal_bps[name]}"]
+            if resolution:
+                attributes.append(f"RESOLUTION={resolution}")
+            if codecs:
+                attributes.append(f'CODECS="{codecs}"')
+            master.write(f"#EXT-X-STREAM-INF:{','.join(attributes)}\n")
+            master.write(f"{name}/index.m3u8\n")
+
+
+def _bps(bitrate: str) -> int:
+    """'3000k' → 3_000_000."""
+    return int(bitrate[:-1]) * 1000
+
+
 def transcode_video_hls(
     input_path: str,
     output_dir: str,
-    source_height: int | None,
+    source_short_side: int | None,
     use_gpu: bool,
 ) -> list[str]:
     """Transcode video to multi-quality HLS variants.
 
-    If source is smaller than all standard variants, produces a 'source'
-    variant at the native resolution so the master playlist is never empty.
+    A rung is encoded when the source's short side reaches it (portrait and
+    landscape alike). If the source is smaller than every rung, one 'source'
+    rung keeps its own size, so the master playlist is never empty.
     """
     print("Transcoding video to HLS variants...")
 
@@ -839,9 +1015,9 @@ def transcode_video_hls(
     variant_playlists = []
 
     for variant_name, settings in HLS_VARIANTS.items():
-        if source_height and settings["height"] > source_height:
+        if source_short_side and settings["height"] > source_short_side:
             print(
-                f"Skipping {variant_name} (source height {source_height} < {settings['height']})"
+                f"Skipping {variant_name} (source short side {source_short_side} < {settings['height']})"
             )
             continue
 
@@ -857,12 +1033,12 @@ def transcode_video_hls(
         variant_playlists.append((variant_name, settings))
 
     # Fallback: if source is smaller than all standard variants, encode at native resolution
-    if not ready_variants and source_height is not None:
+    if not ready_variants and source_short_side is not None:
         print(
-            f"No standard variants fit source ({source_height}p). Encoding 'source' variant..."
+            f"No standard variants fit source ({source_short_side}p). Encoding 'source' variant..."
         )
         settings = {
-            "height": source_height,
+            "height": even_floor(source_short_side),
             "video_bitrate": "800k",
             "audio_bitrate": "64k",
         }
@@ -876,18 +1052,14 @@ def transcode_video_hls(
         ready_variants.append("source")
         variant_playlists.append(("source", settings))
 
-    # Generate master playlist
-    master_path = os.path.join(output_dir, "master.m3u8")
-    with open(master_path, "w") as f:
-        f.write("#EXTM3U\n")
-        f.write("#EXT-X-VERSION:3\n")
-        for variant_name, settings in variant_playlists:
-            bandwidth = int(settings["video_bitrate"][:-1]) * 1000
-            resolution = f"{int(settings['height'] * 16 / 9)}x{settings['height']}"
-            f.write(
-                f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={resolution}\n"
-            )
-            f.write(f"{variant_name}/index.m3u8\n")
+    write_master_playlist(
+        os.path.join(output_dir, "master.m3u8"),
+        [(name, os.path.join(output_dir, name)) for name, _ in variant_playlists],
+        {
+            name: _bps(settings["video_bitrate"]) + _bps(settings["audio_bitrate"])
+            for name, settings in variant_playlists
+        },
+    )
 
     return ready_variants
 
@@ -943,15 +1115,11 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
         _validate_hls_rung(variant_dir, playlist_path, f"audio {variant_name}")
         variant_playlists.append((variant_name, settings))
 
-    # Generate master playlist
-    master_path = os.path.join(output_dir, "master.m3u8")
-    with open(master_path, "w") as f:
-        f.write("#EXTM3U\n")
-        f.write("#EXT-X-VERSION:3\n")
-        for variant_name, settings in variant_playlists:
-            bandwidth = int(settings["audio_bitrate"][:-1]) * 1000
-            f.write(f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}\n")
-            f.write(f"{variant_name}/index.m3u8\n")
+    write_master_playlist(
+        os.path.join(output_dir, "master.m3u8"),
+        [(name, os.path.join(output_dir, name)) for name, _ in variant_playlists],
+        {name: _bps(settings["audio_bitrate"]) for name, settings in variant_playlists},
+    )
 
     # Report 'audio' as the LOGICAL ready variant (matches hlsVariantSchema —
     # the readyVariants label set surfaced to the client quality picker).
@@ -970,6 +1138,7 @@ def _build_preview_cmd(
     start_time: int,
     preview_duration: int,
     use_gpu: bool,
+    short_side: int = PREVIEW_HEIGHT,
 ) -> list[str]:
     """Build ffmpeg command for preview clip (single-file HLS, see variant cmd)."""
     segment_path = os.path.join(preview_dir, "stream.ts")
@@ -988,7 +1157,7 @@ def _build_preview_cmd(
             "-t",
             str(preview_duration),
             "-vf",
-            f"scale=-2:{PREVIEW_HEIGHT},{VIDEO_PIXEL_FORMAT}",
+            ladder_filter(short_side),
             "-c:v",
             "h264_nvenc",
             *VIDEO_PROFILE,
@@ -1023,7 +1192,7 @@ def _build_preview_cmd(
         "-t",
         str(preview_duration),
         "-vf",
-        f"scale=-2:{PREVIEW_HEIGHT},{VIDEO_PIXEL_FORMAT}",
+        ladder_filter(short_side),
         "-c:v",
         "libx264",
         *VIDEO_PROFILE,
@@ -1051,9 +1220,14 @@ def _build_preview_cmd(
 
 
 def create_preview(
-    input_path: str, output_dir: str, duration: int, use_gpu: bool
+    input_path: str,
+    output_dir: str,
+    duration: int,
+    use_gpu: bool,
+    source_short_side: int | None = None,
 ) -> None:
-    """Create 30-second preview clip at 720p with GPU → CPU fallback."""
+    """Create a 30-second preview clip with GPU → CPU fallback: 720p, or the
+    source's own size when it is smaller (never upscaled)."""
     print("Creating preview clip...")
 
     preview_dir = os.path.join(output_dir, "preview")
@@ -1061,13 +1235,21 @@ def create_preview(
 
     start_time = max(0, int(duration * 0.1))
     preview_duration = min(PREVIEW_DURATION, duration - start_time)
+    short_side = PREVIEW_HEIGHT
+    if source_short_side:
+        short_side = min(PREVIEW_HEIGHT, even_floor(source_short_side))
 
     playlist_path = os.path.join(preview_dir, "preview.m3u8")
     if use_gpu:
         try:
             run_ffmpeg(
                 _build_preview_cmd(
-                    input_path, preview_dir, start_time, preview_duration, use_gpu=True
+                    input_path,
+                    preview_dir,
+                    start_time,
+                    preview_duration,
+                    use_gpu=True,
+                    short_side=short_side,
                 ),
                 timeout=120,
                 description="preview (GPU)",
@@ -1079,7 +1261,12 @@ def create_preview(
 
     run_ffmpeg(
         _build_preview_cmd(
-            input_path, preview_dir, start_time, preview_duration, use_gpu=False
+            input_path,
+            preview_dir,
+            start_time,
+            preview_duration,
+            use_gpu=False,
+            short_side=short_side,
         ),
         timeout=120,
         description="preview (CPU)",
@@ -1466,8 +1653,12 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         hls_dir = os.path.join(work_dir, "hls")
         os.makedirs(hls_dir, exist_ok=True)
 
+        # The picture's short side (upright, square pixels) picks the rungs.
+        short_side = min(width, height) if width and height else None
         if media_type == "video":
-            ready_variants = transcode_video_hls(input_path, hls_dir, height, use_gpu)
+            ready_variants = transcode_video_hls(
+                input_path, hls_dir, short_side, use_gpu
+            )
         else:
             ready_variants = transcode_audio_hls(input_path, hls_dir)
 
@@ -1476,7 +1667,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         preview_generated = False
         if FEATURES["video_preview"] and media_type == "video" and duration > 0:
             send_progress(webhook_url, webhook_secret, job_id, "preview", 72, media_id)
-            create_preview(input_path, hls_dir, duration, use_gpu)
+            create_preview(input_path, hls_dir, duration, use_gpu, short_side)
             preview_generated = True
 
         # Upload HLS to R2 (includes preview if generated above)
