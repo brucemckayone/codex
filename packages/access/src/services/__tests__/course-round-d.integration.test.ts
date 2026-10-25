@@ -241,6 +241,11 @@ async function addPractice(
     deletedAt?: Date | null;
     /** Set to model a practice released and later taken off sale. */
     publishedAt?: Date | null;
+    /** A written practice, with its body as the editor stores it. */
+    written?: {
+      contentBody: string | null;
+      contentBodyJson: Record<string, unknown> | null;
+    };
   }
 ): Promise<{ contentId: string; slug: string }> {
   const [row] = await db
@@ -253,6 +258,7 @@ async function addPractice(
         ...(opts.publishedAt !== undefined
           ? { publishedAt: opts.publishedAt }
           : {}),
+        ...(opts.written ? { contentType: 'written', ...opts.written } : {}),
       })
     )
     .returning({ id: content.id, slug: content.slug });
@@ -687,6 +693,72 @@ describe('Round-D read services (Codex-776gg)', () => {
       expect(
         await journey.getInCoursePractice(u1, c1.id, draftPractice.slug)
       ).toBeNull();
+    });
+
+    // The editor writes TipTap JSON to contentBodyJson and leaves contentBody
+    // null; the player read only contentBody, so it rendered empty.
+    it('getInCoursePractice: a written practice carries its stored body, editor JSON included (Codex-woj7k)', async () => {
+      const journey = new CourseJourneyService({ db, environment: 'test' });
+      const course = await createCourse(db, orgAId, creatorId, {
+        status: 'published',
+      });
+      const stage = await createStage(db, course.id, 1);
+      const doc = {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: 'Set your intention.' }],
+          },
+        ],
+      };
+      const editorWritten = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stage,
+        sortOrder: 1,
+        written: { contentBody: null, contentBodyJson: doc },
+      });
+      const markdownWritten = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stage,
+        sortOrder: 2,
+        written: { contentBody: '# Breathe', contentBodyJson: null },
+      });
+      const media = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stage,
+        sortOrder: 3,
+      });
+
+      const fromEditor = await journey.getInCoursePractice(
+        u1,
+        course.id,
+        editorWritten.slug
+      );
+      expect(fromEditor?.body).toEqual({
+        contentBody: null,
+        contentBodyJson: doc,
+      });
+
+      const fromMarkdown = await journey.getInCoursePractice(
+        u1,
+        course.id,
+        markdownWritten.slug
+      );
+      expect(fromMarkdown?.body).toEqual({
+        contentBody: '# Breathe',
+        contentBodyJson: null,
+      });
+
+      const fromMedia = await journey.getInCoursePractice(
+        u1,
+        course.id,
+        media.slug
+      );
+      expect(fromMedia?.body).toBeNull();
     });
 
     it('listEnrolledCourses: strictly scoped to the caller — user A never sees user B enrollments (IDOR)', async () => {

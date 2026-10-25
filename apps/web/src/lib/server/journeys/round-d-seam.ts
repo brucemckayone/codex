@@ -130,12 +130,12 @@ export async function fetchCourseDashboard(
 /**
  * In-course player payload (practice + SIGNED stream URL + playlist).
  *
- * SECURITY: a written practice's `bodyHtml` is stored content rendered by the
- * worker and arrives here UNSANITISED — a stored-XSS vector, since the player
- * emits it via `{@html}`. We sanitise it HERE, the earliest server-only point
- * (before the value leaves the server), with the SAME isomorphic-dompurify pass
- * the standalone content page applies in `renderContentBody` — so the player's
- * `{@html}` receives the identical safe treatment as the standalone page.
+ * A written practice's body arrives AS STORED (TipTap JSON or legacy
+ * markdown) and is rendered HERE with the standalone content page's
+ * `renderContentBody`: the same TipTap/markdown render and the same
+ * isomorphic-dompurify pass, so the player's `{@html}` gets exactly the page's
+ * safe HTML, and an editor-written practice is no longer empty (Codex-woj7k).
+ * Server-only, so the stored body never reaches the browser.
  */
 export async function fetchInCoursePractice(
   ctx: SeamContext,
@@ -146,19 +146,21 @@ export async function fetchInCoursePractice(
   const data = await apiFor(ctx).access.inCoursePractice(courseId, contentSlug);
   if (!data) return null;
 
-  // Sanitise written bodies server-side (stored-XSS guard). Imported LAZILY so
-  // this seam's module-eval doesn't eagerly pull the heavy editor render chain
-  // ($lib/editor/render → ./extensions), which is CJS-interop-hostile to
-  // vitest's SSR eval and — via progress.ts → journeys.remote → round-d-seam —
-  // was breaking the collections/access-context unit suites. The real build is
-  // unaffected (SvelteKit strips the remote body from the client bundle).
-  // [[feedback_vite_ssr_module_load_cascade]]
+  const { body, ...rest } = data;
+  // Imported LAZILY so this seam's module-eval doesn't eagerly pull the heavy
+  // editor render chain ($lib/editor/render → ./extensions), which is
+  // CJS-interop-hostile to vitest's SSR eval and — via progress.ts →
+  // journeys.remote → round-d-seam — was breaking the collections/access-context
+  // unit suites. The real build is unaffected (SvelteKit strips the remote body
+  // from the client bundle). [[feedback_vite_ssr_module_load_cascade]]
   let bodyHtml: string | null = null;
-  if (data.bodyHtml) {
-    const { sanitizeContentHtml } = await import('$lib/editor/render');
-    bodyHtml = await sanitizeContentHtml(data.bodyHtml);
+  if (body) {
+    const { renderContentBody } = await import('$lib/editor/render');
+    bodyHtml = await renderContentBody(body, {
+      contentId: data.practice.contentId,
+    });
   }
-  return { ...data, bodyHtml };
+  return { ...rest, bodyHtml };
 }
 
 /**

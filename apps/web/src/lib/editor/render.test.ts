@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { renderContentBody, sanitizeContentHtml } from './render';
+import { describe, expect, it, vi } from 'vitest';
+import { logger } from '$lib/observability';
+import { renderContentBody } from './render';
+
+vi.mock('$lib/observability', () => ({ logger: { error: vi.fn() } }));
 
 /**
  * Guards the prod 500 on /content/liberty (Codex-eb00a.2): the content-detail
@@ -60,25 +63,40 @@ describe('renderContentBody', () => {
   });
 });
 
-describe('sanitizeContentHtml', () => {
-  it('strips a <script> payload from pre-rendered HTML', async () => {
-    const clean = await sanitizeContentHtml(
-      '<p>ok</p><script>alert(1)</script>'
-    );
-    // Falsifiable: a no-op / identity sanitizer would keep the <script> tag.
-    expect(clean).not.toContain('<script');
-    expect(clean).toContain('<p>ok</p>');
+// The in-course player emits this output via `{@html}` too (Codex-woj7k), so
+// a stored body is a stored-XSS vector on both pages. Markdown passes raw HTML
+// through `marked`, so the sanitize pass is the only guard.
+describe('renderContentBody sanitises what it renders', () => {
+  it('strips a <script> payload from a markdown body', async () => {
+    const html = await renderContentBody({
+      contentBody: 'ok\n\n<script>alert(1)</script>',
+    });
+    // Falsifiable: without the sanitize pass the <script> tag survives.
+    expect(html).not.toContain('<script');
+    expect(html).toContain('ok');
   });
 
   it('strips an onerror handler from an <img> payload', async () => {
-    const clean = await sanitizeContentHtml('<img src="x" onerror="alert(1)">');
-    expect(clean).not.toContain('onerror');
+    const html = await renderContentBody({
+      contentBody: '<img src="x" onerror="alert(1)">',
+    });
+    expect(html).not.toContain('onerror');
   });
 
   it('preserves benign formatting markup', async () => {
-    const clean = await sanitizeContentHtml(
-      '<p>hello <strong>world</strong></p>'
+    const html = await renderContentBody({ contentBody: 'hello **world**' });
+    expect(html).toContain('<strong>world</strong>');
+  });
+});
+
+describe('renderContentBody failure log (Codex-uuz1g)', () => {
+  it('names the content it failed to render', async () => {
+    const bad = { type: 'doc', content: [{ type: '__no_such_node__' }] };
+    await renderContentBody({ contentBodyJson: bad }, { contentId: 'c_123' });
+
+    expect(logger.error).toHaveBeenCalledWith(
+      'Failed to render content body',
+      expect.objectContaining({ contentId: 'c_123' })
     );
-    expect(clean).toContain('<strong>world</strong>');
   });
 });

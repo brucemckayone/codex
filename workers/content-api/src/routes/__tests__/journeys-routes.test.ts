@@ -182,7 +182,7 @@ const MEDIA_PRACTICE = {
   },
   streamingUrl: null,
   waveformUrl: null,
-  bodyHtml: null,
+  body: null,
   initialProgressSeconds: 0,
   playlist: [],
   completions: [],
@@ -198,7 +198,7 @@ const WRITTEN_PRACTICE = {
     contentType: 'written' as const,
     durationSeconds: null,
   },
-  bodyHtml: '<p>Set your intention.</p>',
+  body: { contentBody: null, contentBodyJson: { type: 'doc', content: [] } },
 };
 
 const PAGE_ID = '2c000000-0000-4000-8000-0000000000f0';
@@ -1479,7 +1479,7 @@ describe('GET /api/journeys/courses/:courseId/practices/:contentSlug — in-cour
     );
   });
 
-  it('written practice → 200 with bodyHtml and NO stream signing', async () => {
+  it('written practice → 200 with its stored body and NO stream signing', async () => {
     journeySpies.getInCoursePractice.mockResolvedValue(WRITTEN_PRACTICE);
     const res = await dispatch(
       buildApp(USER),
@@ -1487,10 +1487,10 @@ describe('GET /api/journeys/courses/:courseId/practices/:contentSlug — in-cour
     );
     expect(res.status).toBe(200);
     const payload = (await res.json()) as {
-      data: { streamingUrl: string | null; bodyHtml: string | null };
+      data: { streamingUrl: string | null; body: unknown };
     };
     expect(payload.data.streamingUrl).toBeNull();
-    expect(payload.data.bodyHtml).toBe(WRITTEN_PRACTICE.bodyHtml);
+    expect(payload.data.body).toEqual(WRITTEN_PRACTICE.body);
     expect(accessSpies.getStreamingUrl).not.toHaveBeenCalled();
   });
 

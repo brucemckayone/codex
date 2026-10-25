@@ -17,11 +17,17 @@ import { getRenderExtensions } from './extensions.js';
  * failure is soft-degraded to `null` (no body) rather than allowed to throw:
  * the loaders that call this treat a null body as "no body to show", so a
  * single malformed doc can never take down the whole content page with a 500.
+ * The failure is logged with `context.contentId`, so a render failure is
+ * findable rather than looking exactly like a piece with no body
+ * (Codex-uuz1g).
  */
-export async function renderContentBody(content: {
-  contentBodyJson?: Record<string, unknown> | null;
-  contentBody?: string | null;
-}): Promise<string | null> {
+export async function renderContentBody(
+  content: {
+    contentBodyJson?: Record<string, unknown> | null;
+    contentBody?: string | null;
+  },
+  context: { contentId?: string } = {}
+): Promise<string | null> {
   try {
     if (content.contentBodyJson) {
       // MUST use the `/server` entry, not `@tiptap/html`: the browser build
@@ -52,34 +58,11 @@ export async function renderContentBody(content: {
   } catch (error) {
     // Defense-in-depth: never let a body-render failure crash the page.
     logger.error('Failed to render content body', {
+      contentId: context.contentId,
       error: error instanceof Error ? error.message : String(error),
     });
     return null;
   }
 
   return null;
-}
-
-/**
- * Sanitize an ALREADY-RENDERED HTML string with the exact same
- * `isomorphic-dompurify` pass `renderContentBody` applies to freshly-generated
- * markup. Use this when trusted-shaped HTML arrives pre-rendered from another
- * source (e.g. a content-api journey payload) and needs the XSS scrub WITHOUT
- * the TipTap/markdown render step — so the value can safely reach an `{@html}`.
- *
- * Soft-degrades to `''` on failure (never throws, never returns the input): a
- * sanitize error must not surface unsanitized HTML to the client, and must not
- * 500 the caller. An empty string renders as "no body", matching how the
- * loaders treat a null body.
- */
-export async function sanitizeContentHtml(html: string): Promise<string> {
-  try {
-    const DOMPurify = (await import('isomorphic-dompurify')).default;
-    return DOMPurify.sanitize(html);
-  } catch (error) {
-    logger.error('Failed to sanitize content HTML', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return '';
-  }
 }

@@ -694,7 +694,7 @@ export interface PlaylistEntry {
 /**
  * Everything the in-course player needs after `canEnterCourse` (+ `canView` for
  * the stream) pass. `streamingUrl` / `waveformUrl` are signed R2 URLs for media;
- * `null` for `written` practices (their body renders from `bodyHtml`).
+ * `null` for `written` practices (their body renders from `body`).
  */
 export interface InCoursePracticeData {
   course: JourneyCourseSummary;
@@ -703,8 +703,16 @@ export interface InCoursePracticeData {
   /** Signed HLS URL — media only; null for written / when stream not viewable. */
   streamingUrl: string | null;
   waveformUrl: string | null;
-  /** Rendered body HTML for `written` practices; null for media. */
-  bodyHtml: string | null;
+  /**
+   * A `written` practice's body AS STORED: TipTap JSON (what the editor
+   * writes) or legacy markdown. The web renders it as the standalone content
+   * page does (Codex-woj7k). `null` for media. The shape of `@codex/access`
+   * `ContentBodySource`, which this package cannot import.
+   */
+  body: {
+    contentBody: string | null;
+    contentBodyJson: Record<string, unknown> | null;
+  } | null;
   /** Resume position for media (seconds). */
   initialProgressSeconds: number;
   /** The whole course sequence, for the playlist rail + prev/next. */

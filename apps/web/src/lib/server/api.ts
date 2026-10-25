@@ -9,6 +9,7 @@
  */
 
 import type {
+  ContentBodySource,
   ContentHeld,
   CourseEntryResponse,
   PlaybackProgressResponse,
@@ -213,6 +214,19 @@ export interface WithdrawnContentItem {
   content: PublicContentListItem;
   held: ContentHeld;
 }
+
+/**
+ * `GET /api/journeys/courses/:courseId/practices/:contentSlug`: the player's
+ * {@link InCoursePracticeData} with a written practice's body AS STORED in
+ * place of its HTML. `fetchInCoursePractice` renders it (Codex-woj7k), so the
+ * page only ever sees `bodyHtml`.
+ */
+export type InCoursePracticeResponse = Omit<
+  InCoursePracticeData,
+  'bodyHtml'
+> & {
+  body: ContentBodySource | null;
+};
 
 /**
  * Resolve API URL for a worker
@@ -1298,7 +1312,7 @@ export function createServerApi(
 
       /** In-course player payload (practice + playlist + signed stream URL). */
       inCoursePractice: (courseId: string, contentSlug: string) =>
-        request<InCoursePracticeData | null>(
+        request<InCoursePracticeResponse | null>(
           'access',
           `/api/journeys/courses/${courseId}/practices/${encodeURIComponent(
             contentSlug

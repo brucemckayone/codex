@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { InCoursePracticeData } from '$lib/journeys/types';
+import type { InCoursePracticeResponse } from '$lib/server/api';
 
 /**
- * Round-D member seam — stored-XSS guard.
+ * Round-D member seam — the written body's render and stored-XSS guard.
  *
- * The in-course player emits a written practice's `bodyHtml` via `{@html}`. That
- * HTML is stored content the worker returns UNSANITISED, so `fetchInCoursePractice`
- * MUST scrub it before it leaves the server. Here we mock ONLY the server API
- * client (no real worker fetch) and let the REAL sanitizer run — so the test
- * proves the SEAM wires the scrub, not just that the sanitizer exists. Removing
- * the `sanitizeContentHtml` call from the seam makes these assertions fail.
+ * The in-course player emits a written practice's `bodyHtml` via `{@html}`. The
+ * worker returns the body AS STORED (TipTap JSON or markdown), so
+ * `fetchInCoursePractice` MUST render and scrub it before it leaves the server
+ * (Codex-woj7k). Here we mock ONLY the server API client (no real worker
+ * fetch) and let the REAL renderer run, so the test proves the SEAM wires the
+ * render, not just that the renderer exists.
  */
 
 const { inCoursePractice, courseEntry } = vi.hoisted(() => ({
@@ -29,7 +29,7 @@ import {
 
 const ctx = {} as Parameters<typeof fetchInCoursePractice>[0];
 
-const basePractice: InCoursePracticeData = {
+const basePractice: InCoursePracticeResponse = {
   course: {
     id: '2c000000-0000-4000-8000-000000000001',
     slug: 'rootwork',
@@ -48,47 +48,83 @@ const basePractice: InCoursePracticeData = {
   },
   streamingUrl: null,
   waveformUrl: null,
-  bodyHtml: null,
+  body: null,
   initialProgressSeconds: 0,
   playlist: [],
   completions: [],
 };
+
+function fetchFieldNotes() {
+  return fetchInCoursePractice(
+    ctx,
+    'user-1',
+    basePractice.course.id,
+    'field-notes'
+  );
+}
 
 describe('fetchInCoursePractice', () => {
   beforeEach(() => {
     inCoursePractice.mockReset();
   });
 
-  it('sanitises a stored-XSS bodyHtml before returning it', async () => {
+  it('renders an editor-written (TipTap JSON) body, which the markdown column alone left empty', async () => {
     inCoursePractice.mockResolvedValue({
       ...basePractice,
-      bodyHtml:
-        '<p>safe</p><script>alert(1)</script><img src="x" onerror="alert(2)">',
+      body: {
+        contentBody: null,
+        contentBodyJson: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Set your intention.' }],
+            },
+          ],
+        },
+      },
     });
 
-    const result = await fetchInCoursePractice(
-      ctx,
-      'user-1',
-      basePractice.course.id,
-      'field-notes'
-    );
+    const result = await fetchFieldNotes();
 
-    expect(result?.bodyHtml).not.toContain('<script');
-    expect(result?.bodyHtml).not.toContain('onerror');
-    expect(result?.bodyHtml).toContain('<p>safe</p>');
+    expect(result?.bodyHtml).toContain('<p>Set your intention.</p>');
   });
 
-  it('leaves a null bodyHtml (media practice) untouched', async () => {
-    inCoursePractice.mockResolvedValue({ ...basePractice, bodyHtml: null });
+  it('renders a legacy markdown body and scrubs a stored-XSS payload', async () => {
+    inCoursePractice.mockResolvedValue({
+      ...basePractice,
+      body: {
+        contentBody:
+          '**safe**\n\n<script>alert(1)</script><img src="x" onerror="alert(2)">',
+        contentBodyJson: null,
+      },
+    });
 
-    const result = await fetchInCoursePractice(
-      ctx,
-      'user-1',
-      basePractice.course.id,
-      'field-notes'
-    );
+    const result = await fetchFieldNotes();
+
+    expect(result?.bodyHtml).toContain('<strong>safe</strong>');
+    expect(result?.bodyHtml).not.toContain('<script');
+    expect(result?.bodyHtml).not.toContain('onerror');
+  });
+
+  it('never hands the stored body to the page', async () => {
+    inCoursePractice.mockResolvedValue({
+      ...basePractice,
+      body: { contentBody: 'text', contentBodyJson: null },
+    });
+
+    const result = await fetchFieldNotes();
+
+    expect(result).not.toHaveProperty('body');
+  });
+
+  it('a media practice (no body) has no bodyHtml', async () => {
+    inCoursePractice.mockResolvedValue(basePractice);
+
+    const result = await fetchFieldNotes();
 
     expect(result?.bodyHtml).toBeNull();
+    expect(result).not.toHaveProperty('body');
   });
 
   it('passes through a null payload (no such practice)', async () => {
