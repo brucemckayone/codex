@@ -65,6 +65,94 @@ FEATURES = {
 
 
 # =============================================================================
+# Error Codes
+# =============================================================================
+
+
+class TranscodeErrorCode:
+    """Why a job failed: the failure webhook's `errorCode`.
+
+    The service believes only these six (JOB_ERROR_CODES in
+    packages/constants/src/transcoding.ts; test_error_codes.py reads that file)
+    and files anything else as INFRA_ERROR. Which codes are worth a retry is
+    the service's decision, not the handler's.
+    """
+
+    CORRUPT_INPUT = "CORRUPT_INPUT"
+    UNSUPPORTED_CODEC = "UNSUPPORTED_CODEC"
+    INVALID_DURATION = "INVALID_DURATION"
+    MISSING_STREAM = "MISSING_STREAM"
+    OUTPUT_VALIDATION_FAILED = "OUTPUT_VALIDATION_FAILED"
+    INFRA_ERROR = "INFRA_ERROR"
+
+
+class TranscodeError(RuntimeError):
+    """A failure that knows its code.
+
+    A RuntimeError, so the GPU → CPU fallbacks (which catch RuntimeError) still
+    try the CPU before giving up.
+    """
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def error_code_of(error: BaseException) -> str:
+    """The code to report: a TranscodeError's own, else INFRA_ERROR."""
+    if isinstance(error, TranscodeError):
+        return error.code
+    return TranscodeErrorCode.INFRA_ERROR
+
+
+# ffmpeg's wording when the bytes can't be read. Anything it says that is not
+# listed here (or the decoder line below) is treated as our problem.
+_CORRUPT_INPUT_MARKERS = (
+    "Invalid data found when processing input",
+    "moov atom not found",
+)
+_MISSING_DECODER = re.compile(r"Decoder \(codec [^)]*\) not found|Unknown decoder")
+
+
+def classify_ffmpeg_failure(stderr: str) -> str:
+    """Map a failed ffmpeg/ffprobe run's stderr to a code."""
+    if _MISSING_DECODER.search(stderr):
+        return TranscodeErrorCode.UNSUPPORTED_CODEC
+    if any(marker in stderr for marker in _CORRUPT_INPUT_MARKERS):
+        return TranscodeErrorCode.CORRUPT_INPUT
+    return TranscodeErrorCode.INFRA_ERROR
+
+
+def validate_output(path: str, what: str) -> None:
+    """An encoder that exits 0 but leaves nothing behind has still failed."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    if size <= 0:
+        raise TranscodeError(
+            TranscodeErrorCode.OUTPUT_VALIDATION_FAILED,
+            f"{what} is missing or empty: {os.path.basename(path)}",
+        )
+
+
+# Matches the service's uuidSchema (Zod's RFC 9562 check: a version digit and
+# a variant nibble). A failure report carrying anything else as mediaId fails
+# the service's schema, so it is sent as null instead.
+_UUID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def reportable_media_id(value: Any) -> str | None:
+    """`value` if the service would accept it as a mediaId, else None."""
+    if isinstance(value, str) and _UUID.match(value):
+        return value
+    return None
+
+
+# =============================================================================
 # Type Definitions
 # =============================================================================
 
@@ -133,6 +221,18 @@ PREVIEW_HEIGHT = 720
 # Segment duration for HLS
 HLS_SEGMENT_DURATION = 6
 
+# Browsers play H.264 High at 8-bit 4:2:0 only. Without this, an iPhone HEVC
+# 10-bit clip, a ProRes 4:2:2 or a 4:4:4 source comes out as High 10 / High
+# 4:2:2 / High 4:4:4: `ready`, yet unplayable (checked on prod's ffmpeg 4.4.2).
+# It is a CPU filter; with `-hwaccel cuda` and no `-hwaccel_output_format`, the
+# decoded frames are in system memory, so it works on the NVENC path too.
+VIDEO_PIXEL_FORMAT = "format=yuv420p"
+VIDEO_PROFILE = ["-profile:v", "high"]
+
+# loudnorm works at 192 kHz, and the AAC encoder keeps the highest rate it
+# supports (96 kHz came out). Every audio output is pinned to 48 kHz.
+AUDIO_SAMPLE_RATE = ["-ar", "48000"]
+
 
 # =============================================================================
 # FFmpeg Helper
@@ -144,17 +244,18 @@ def run_ffmpeg(
 ) -> subprocess.CompletedProcess:
     """Run an ffmpeg/ffprobe command with proper error capture.
 
-    On failure, raises RuntimeError with the last 2KB of stderr
-    so the actual ffmpeg error message is preserved for debugging.
+    On failure, raises TranscodeError with the last 2KB of stderr so the actual
+    ffmpeg error message is preserved for debugging, coded from the whole of it.
     """
     try:
         return subprocess.run(
             cmd, check=True, capture_output=True, text=True, timeout=timeout
         )
     except subprocess.CalledProcessError as e:
-        stderr_excerpt = (e.stderr or "")[-2000:]
-        raise RuntimeError(
-            f"{description} failed (exit {e.returncode}): {stderr_excerpt}"
+        stderr = e.stderr or ""
+        raise TranscodeError(
+            classify_ffmpeg_failure(stderr),
+            f"{description} failed (exit {e.returncode}): {stderr[-2000:]}",
         ) from e
 
 
@@ -366,13 +467,32 @@ def probe_media(input_path: str) -> dict[str, Any]:
         "-show_streams",
         input_path,
     ]
-    result = run_ffmpeg(cmd, timeout=30, description="ffprobe")
-    return json.loads(result.stdout)
+    try:
+        result = run_ffmpeg(cmd, timeout=30, description="ffprobe")
+    except TranscodeError as e:
+        # ffprobe needs no decoders, so a file it refuses is unreadable.
+        code = e.code
+        if code == TranscodeErrorCode.INFRA_ERROR:
+            code = TranscodeErrorCode.CORRUPT_INPUT
+        raise TranscodeError(code, str(e)) from e
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise TranscodeError(
+            TranscodeErrorCode.CORRUPT_INPUT, f"ffprobe output is not JSON: {e}"
+        ) from e
 
 
 def get_media_info(probe_data: dict[str, Any]) -> tuple[int, int | None, int | None]:
-    """Extract duration, width, height from probe data."""
-    duration = int(float(probe_data.get("format", {}).get("duration", 0)))
+    """Extract duration, width, height from probe data.
+
+    A duration ffprobe can't state ("N/A", absent) comes back as 0, which the
+    handler reports as INVALID_DURATION.
+    """
+    try:
+        duration = int(float(probe_data.get("format", {}).get("duration", 0)))
+    except (TypeError, ValueError):
+        duration = 0
 
     width = None
     height = None
@@ -392,9 +512,15 @@ def validate_streams(probe_data: dict[str, Any], media_type: str) -> None:
     has_audio = any(s.get("codec_type") == "audio" for s in streams)
 
     if media_type == "video" and not has_video:
-        raise ValueError("File declared as video but contains no video streams")
+        raise TranscodeError(
+            TranscodeErrorCode.MISSING_STREAM,
+            "File declared as video but contains no video streams",
+        )
     if media_type == "audio" and not has_audio:
-        raise ValueError("File declared as audio but contains no audio streams")
+        raise TranscodeError(
+            TranscodeErrorCode.MISSING_STREAM,
+            "File declared as audio but contains no audio streams",
+        )
 
 
 def check_gpu_available() -> bool:
@@ -438,8 +564,11 @@ def _build_mezzanine_cmd(input_path: str, output_path: str, use_gpu: bool) -> li
             "cuda",
             "-i",
             input_path,
+            "-vf",
+            VIDEO_PIXEL_FORMAT,
             "-c:v",
             "h264_nvenc",
+            *VIDEO_PROFILE,
             "-preset",
             "p4",
             "-cq",
@@ -448,6 +577,7 @@ def _build_mezzanine_cmd(input_path: str, output_path: str, use_gpu: bool) -> li
             "aac",
             "-b:a",
             "256k",
+            *AUDIO_SAMPLE_RATE,
             output_path,
         ]
     return [
@@ -455,8 +585,11 @@ def _build_mezzanine_cmd(input_path: str, output_path: str, use_gpu: bool) -> li
         "-y",
         "-i",
         input_path,
+        "-vf",
+        VIDEO_PIXEL_FORMAT,
         "-c:v",
         "libx264",
+        *VIDEO_PROFILE,
         "-preset",
         "slow",
         "-crf",
@@ -465,6 +598,7 @@ def _build_mezzanine_cmd(input_path: str, output_path: str, use_gpu: bool) -> li
         "aac",
         "-b:a",
         "256k",
+        *AUDIO_SAMPLE_RATE,
         output_path,
     ]
 
@@ -483,6 +617,7 @@ def create_mezzanine(input_path: str, output_path: str, use_gpu: bool) -> None:
                 timeout=3600,
                 description="mezzanine (GPU)",
             )
+            validate_output(output_path, "mezzanine")
             return
         except RuntimeError as e:
             print(f"GPU mezzanine failed, falling back to CPU: {e}")
@@ -492,6 +627,7 @@ def create_mezzanine(input_path: str, output_path: str, use_gpu: bool) -> None:
         timeout=3600,
         description="mezzanine (CPU)",
     )
+    validate_output(output_path, "mezzanine")
 
 
 def _safe_loudness(value: float, default: float) -> float:
@@ -504,8 +640,13 @@ def _safe_loudness(value: float, default: float) -> float:
     return default
 
 
-def analyze_loudness(input_path: str) -> dict[str, float]:
-    """Two-pass loudness analysis using loudnorm filter."""
+def analyze_loudness(input_path: str) -> dict[str, float] | None:
+    """Two-pass loudness analysis using loudnorm filter.
+
+    Returns None when ffmpeg gives no usable measurement, so the job reports
+    no loudness rather than made-up figures. The numbers are statistics only
+    (never fed to the encoder), so their absence never fails the job.
+    """
     print("Analyzing audio loudness...")
 
     cmd = [
@@ -518,30 +659,29 @@ def analyze_loudness(input_path: str) -> dict[str, float]:
         "null",
         "-",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        print("WARNING: Loudness analysis timed out; reporting none")
+        return None
 
     # Parse loudnorm output from stderr
-    output = result.stderr
+    output = result.stderr or ""
+    json_start = output.rfind("{")
+    json_end = output.rfind("}") + 1
     try:
-        json_start = output.rfind("{")
-        json_end = output.rfind("}") + 1
         if json_start >= 0 and json_end > json_start:
             loudness_data = json.loads(output[json_start:json_end])
             return {
-                "input_i": _safe_loudness(
-                    float(loudness_data.get("input_i", -16)), -70.0
-                ),
-                "input_tp": _safe_loudness(
-                    float(loudness_data.get("input_tp", -1)), -1.0
-                ),
-                "input_lra": _safe_loudness(
-                    float(loudness_data.get("input_lra", 7)), 0.0
-                ),
+                "input_i": _safe_loudness(float(loudness_data["input_i"]), -70.0),
+                "input_tp": _safe_loudness(float(loudness_data["input_tp"]), -1.0),
+                "input_lra": _safe_loudness(float(loudness_data["input_lra"]), 0.0),
             }
-    except (json.JSONDecodeError, ValueError):
-        print("WARNING: Failed to parse loudness data, using defaults")
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        pass
 
-    return {"input_i": -16, "input_tp": -1, "input_lra": 7}
+    print("WARNING: No loudness data in ffmpeg output; reporting none")
+    return None
 
 
 def _build_hls_variant_cmd(
@@ -569,9 +709,10 @@ def _build_hls_variant_cmd(
             "-i",
             input_path,
             "-vf",
-            f"scale=-2:{settings['height']}",
+            f"scale=-2:{settings['height']},{VIDEO_PIXEL_FORMAT}",
             "-c:v",
             "h264_nvenc",
+            *VIDEO_PROFILE,
             "-preset",
             "p4",
             "-cq",
@@ -586,6 +727,7 @@ def _build_hls_variant_cmd(
             "aac",
             "-b:a",
             settings["audio_bitrate"],
+            *AUDIO_SAMPLE_RATE,
             "-af",
             "loudnorm=I=-16:TP=-1.5:LRA=11",
             "-f",
@@ -606,9 +748,10 @@ def _build_hls_variant_cmd(
         "-i",
         input_path,
         "-vf",
-        f"scale=-2:{settings['height']}",
+        f"scale=-2:{settings['height']},{VIDEO_PIXEL_FORMAT}",
         "-c:v",
         "libx264",
+        *VIDEO_PROFILE,
         "-preset",
         "fast",
         "-crf",
@@ -623,6 +766,7 @@ def _build_hls_variant_cmd(
         "aac",
         "-b:a",
         settings["audio_bitrate"],
+        *AUDIO_SAMPLE_RATE,
         "-af",
         "loudnorm=I=-16:TP=-1.5:LRA=11",
         "-f",
@@ -657,6 +801,7 @@ def _encode_hls_variant(
                 timeout=3600,
                 description=f"HLS {variant_name} (GPU)",
             )
+            _validate_hls_rung(variant_dir, playlist_path, f"HLS {variant_name}")
             return
         except RuntimeError as e:
             print(f"GPU failed for {variant_name}, falling back to CPU: {e}")
@@ -668,6 +813,13 @@ def _encode_hls_variant(
         timeout=3600,
         description=f"HLS {variant_name} (CPU)",
     )
+    _validate_hls_rung(variant_dir, playlist_path, f"HLS {variant_name}")
+
+
+def _validate_hls_rung(variant_dir: str, playlist_path: str, what: str) -> None:
+    """A single-file HLS rung is its playlist plus one stream.ts; both must exist."""
+    validate_output(playlist_path, f"{what} playlist")
+    validate_output(os.path.join(variant_dir, "stream.ts"), f"{what} stream")
 
 
 def transcode_video_hls(
@@ -740,6 +892,37 @@ def transcode_video_hls(
     return ready_variants
 
 
+def _build_audio_hls_cmd(
+    input_path: str, variant_dir: str, playlist_path: str, settings: dict
+) -> list[str]:
+    """Build ffmpeg command for one audio-only HLS rung (single-file HLS)."""
+    return [
+        "ffmpeg",
+        "-y",
+        "-i",
+        input_path,
+        "-vn",
+        "-c:a",
+        "aac",
+        "-b:a",
+        settings["audio_bitrate"],
+        *AUDIO_SAMPLE_RATE,
+        "-af",
+        "loudnorm=I=-16:TP=-1.5:LRA=11",
+        "-f",
+        "hls",
+        "-hls_time",
+        str(HLS_SEGMENT_DURATION),
+        "-hls_playlist_type",
+        "vod",
+        "-hls_flags",
+        "single_file",
+        "-hls_segment_filename",
+        os.path.join(variant_dir, "stream.ts"),
+        playlist_path,
+    ]
+
+
 def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
     """Transcode audio to HLS variants."""
     print("Transcoding audio to HLS variants...")
@@ -752,33 +935,12 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
         playlist_path = os.path.join(variant_dir, "index.m3u8")
 
         print(f"Encoding audio {variant_name}...")
-
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            input_path,
-            "-vn",
-            "-c:a",
-            "aac",
-            "-b:a",
-            settings["audio_bitrate"],
-            "-af",
-            "loudnorm=I=-16:TP=-1.5:LRA=11",
-            "-f",
-            "hls",
-            "-hls_time",
-            str(HLS_SEGMENT_DURATION),
-            "-hls_playlist_type",
-            "vod",
-            "-hls_flags",
-            "single_file",
-            "-hls_segment_filename",
-            os.path.join(variant_dir, "stream.ts"),
-            playlist_path,
-        ]
-
-        run_ffmpeg(cmd, timeout=600, description=f"audio HLS {variant_name}")
+        run_ffmpeg(
+            _build_audio_hls_cmd(input_path, variant_dir, playlist_path, settings),
+            timeout=600,
+            description=f"audio HLS {variant_name}",
+        )
+        _validate_hls_rung(variant_dir, playlist_path, f"audio {variant_name}")
         variant_playlists.append((variant_name, settings))
 
     # Generate master playlist
@@ -826,9 +988,10 @@ def _build_preview_cmd(
             "-t",
             str(preview_duration),
             "-vf",
-            f"scale=-2:{PREVIEW_HEIGHT}",
+            f"scale=-2:{PREVIEW_HEIGHT},{VIDEO_PIXEL_FORMAT}",
             "-c:v",
             "h264_nvenc",
+            *VIDEO_PROFILE,
             "-preset",
             "p4",
             "-cq",
@@ -837,6 +1000,7 @@ def _build_preview_cmd(
             "aac",
             "-b:a",
             "128k",
+            *AUDIO_SAMPLE_RATE,
             "-f",
             "hls",
             "-hls_time",
@@ -859,9 +1023,10 @@ def _build_preview_cmd(
         "-t",
         str(preview_duration),
         "-vf",
-        f"scale=-2:{PREVIEW_HEIGHT}",
+        f"scale=-2:{PREVIEW_HEIGHT},{VIDEO_PIXEL_FORMAT}",
         "-c:v",
         "libx264",
+        *VIDEO_PROFILE,
         "-preset",
         "fast",
         "-crf",
@@ -870,6 +1035,7 @@ def _build_preview_cmd(
         "aac",
         "-b:a",
         "128k",
+        *AUDIO_SAMPLE_RATE,
         "-f",
         "hls",
         "-hls_time",
@@ -896,6 +1062,7 @@ def create_preview(
     start_time = max(0, int(duration * 0.1))
     preview_duration = min(PREVIEW_DURATION, duration - start_time)
 
+    playlist_path = os.path.join(preview_dir, "preview.m3u8")
     if use_gpu:
         try:
             run_ffmpeg(
@@ -905,6 +1072,7 @@ def create_preview(
                 timeout=120,
                 description="preview (GPU)",
             )
+            _validate_hls_rung(preview_dir, playlist_path, "preview")
             return
         except RuntimeError as e:
             print(f"GPU preview failed, falling back to CPU: {e}")
@@ -916,6 +1084,7 @@ def create_preview(
         timeout=120,
         description="preview (CPU)",
     )
+    _validate_hls_rung(preview_dir, playlist_path, "preview")
 
 
 def extract_thumbnail(input_path: str, output_path: str, duration: int) -> None:
@@ -1005,6 +1174,7 @@ def extract_thumbnail_variants(
         ]
 
         run_ffmpeg(cmd, timeout=60, description=f"thumbnail {size_name}")
+        validate_output(output_path, f"thumbnail {size_name}")
         variants[size_name] = output_path
 
         file_size = os.path.getsize(output_path)
@@ -1036,6 +1206,7 @@ def generate_waveform(
         "8",
     ]
     run_ffmpeg(cmd_json, timeout=120, description="waveform JSON")
+    validate_output(json_path, "waveform JSON")
 
     if image_path is None:
         return
@@ -1054,6 +1225,7 @@ def generate_waveform(
         "audition",
     ]
     run_ffmpeg(cmd_png, timeout=120, description="waveform PNG")
+    validate_output(image_path, "waveform PNG")
 
 
 # =============================================================================
@@ -1144,78 +1316,102 @@ def send_progress(
 
 def handler(job: dict[str, Any]) -> dict[str, Any]:
     """RunPod serverless handler for transcoding jobs."""
-    job_input: JobInput = job["input"]
+    job_input = job.get("input") or {}
 
-    media_id = job_input["mediaId"]
-    creator_id = job_input["creatorId"]
-    media_type = job_input["type"]
-    input_key = job_input["inputKey"]
+    # The maintenance run's keep-alive ping (`ping` in
+    # packages/transcoding/src/runpod-api.ts). Its request alone resets
+    # RunPod's idle clock, so it is answered before anything a real job
+    # carries is read.
+    if job_input.get("ping") is True:
+        print("Keep-alive ping")
+        return {"status": "pong"}
 
-    # --- Input validation ---
-    validate_path_component(creator_id, "creatorId")
-    validate_path_component(media_id, "mediaId")
-    validate_input_key(input_key)
-    validate_webhook_url(job_input["webhookUrl"])
-
-    if media_type not in ("video", "audio"):
-        raise ValueError(
-            f"Invalid media type: '{media_type}'. Must be 'video' or 'audio'."
-        )
-
-    print(f"Starting transcoding job for {media_type}: {media_id}")
-    print(f"Active features: {FEATURES}")
-
-    # Progress tracking — captured early so steps can report progress
-    webhook_url = job_input["webhookUrl"]
-    job_id = job.get("id", media_id)
-
-    # --- Environment credentials ---
-    b2_endpoint = os.environ.get("B2_ENDPOINT")
-    b2_access_key_id = os.environ.get("B2_ACCESS_KEY_ID")
-    b2_secret_access_key = os.environ.get("B2_SECRET_ACCESS_KEY")
-    b2_bucket_name = os.environ.get("B2_BUCKET_NAME")
-
-    if not all([b2_endpoint, b2_access_key_id, b2_secret_access_key, b2_bucket_name]):
-        raise ValueError(
-            "B2 credentials not configured in environment. Add secrets in RunPod console."
-        )
-
-    r2_endpoint = os.environ.get("R2_ENDPOINT")
-    r2_access_key_id = os.environ.get("R2_ACCESS_KEY_ID")
-    r2_secret_access_key = os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket_name = os.environ.get("R2_BUCKET_NAME")
-
-    if not all([r2_endpoint, r2_access_key_id, r2_secret_access_key, r2_bucket_name]):
-        raise ValueError(
-            "R2 credentials not configured in environment. Add secrets in RunPod console."
-        )
-
-    assets_bucket_name = os.environ.get("ASSETS_BUCKET_NAME")
-    if not assets_bucket_name:
-        raise ValueError(
-            "ASSETS_BUCKET_NAME not configured in environment. Add secret in RunPod console."
-        )
-
+    job_id = job.get("id") or str(job_input.get("mediaId") or "unknown")
+    webhook_url = job_input.get("webhookUrl", "")
     webhook_secret = os.environ.get("WEBHOOK_SECRET", "")
+
+    # Without a safe URL and a signing secret there is nobody to tell, so these
+    # two raise: RunPod records the job FAILED, and the maintenance run
+    # reconciles the row from the job's status. Every other check runs inside
+    # the try below, so its failure is reported.
+    validate_webhook_url(webhook_url)
     if not webhook_secret:
         raise ValueError("WEBHOOK_SECRET not configured in environment.")
 
-    # --- Storage clients ---
-    r2_client = create_s3_client(r2_endpoint, r2_access_key_id, r2_secret_access_key)
-    b2_client = create_s3_client(b2_endpoint, b2_access_key_id, b2_secret_access_key)
-    assets_client = create_s3_client(
-        r2_endpoint, r2_access_key_id, r2_secret_access_key
-    )
-
-    # --- GPU check ---
-    use_gpu = check_gpu_available()
-    print(f"GPU available: {use_gpu}")
-
-    # --- Processing ---
-    work_dir = tempfile.mkdtemp(prefix="transcoding_")
+    work_dir: str | None = None
     uploaded_keys: list[tuple[Any, str, str]] = []
+    # The completed report, once every output is uploaded. If it then cannot
+    # be delivered, the outputs are kept (see the except).
+    completion: dict[str, Any] | None = None
 
     try:
+        media_id = job_input["mediaId"]
+        creator_id = job_input["creatorId"]
+        media_type = job_input["type"]
+        input_key = job_input["inputKey"]
+
+        # --- Input validation ---
+        validate_path_component(creator_id, "creatorId")
+        validate_path_component(media_id, "mediaId")
+        validate_input_key(input_key)
+
+        if media_type not in ("video", "audio"):
+            raise ValueError(
+                f"Invalid media type: '{media_type}'. Must be 'video' or 'audio'."
+            )
+
+        print(f"Starting transcoding job for {media_type}: {media_id}")
+        print(f"Active features: {FEATURES}")
+
+        # --- Environment credentials ---
+        b2_endpoint = os.environ.get("B2_ENDPOINT")
+        b2_access_key_id = os.environ.get("B2_ACCESS_KEY_ID")
+        b2_secret_access_key = os.environ.get("B2_SECRET_ACCESS_KEY")
+        b2_bucket_name = os.environ.get("B2_BUCKET_NAME")
+
+        if not all(
+            [b2_endpoint, b2_access_key_id, b2_secret_access_key, b2_bucket_name]
+        ):
+            raise ValueError(
+                "B2 credentials not configured in environment. Add secrets in RunPod console."
+            )
+
+        r2_endpoint = os.environ.get("R2_ENDPOINT")
+        r2_access_key_id = os.environ.get("R2_ACCESS_KEY_ID")
+        r2_secret_access_key = os.environ.get("R2_SECRET_ACCESS_KEY")
+        r2_bucket_name = os.environ.get("R2_BUCKET_NAME")
+
+        if not all(
+            [r2_endpoint, r2_access_key_id, r2_secret_access_key, r2_bucket_name]
+        ):
+            raise ValueError(
+                "R2 credentials not configured in environment. Add secrets in RunPod console."
+            )
+
+        assets_bucket_name = os.environ.get("ASSETS_BUCKET_NAME")
+        if not assets_bucket_name:
+            raise ValueError(
+                "ASSETS_BUCKET_NAME not configured in environment. Add secret in RunPod console."
+            )
+
+        # --- Storage clients ---
+        r2_client = create_s3_client(
+            r2_endpoint, r2_access_key_id, r2_secret_access_key
+        )
+        b2_client = create_s3_client(
+            b2_endpoint, b2_access_key_id, b2_secret_access_key
+        )
+        assets_client = create_s3_client(
+            r2_endpoint, r2_access_key_id, r2_secret_access_key
+        )
+
+        # --- GPU check ---
+        use_gpu = check_gpu_available()
+        print(f"GPU available: {use_gpu}")
+
+        # --- Processing ---
+        work_dir = tempfile.mkdtemp(prefix="transcoding_")
+
         # Step 1: Download original from R2
         send_progress(webhook_url, webhook_secret, job_id, "downloading", 0, media_id)
         input_ext = os.path.splitext(input_key)[1] or ".mp4"
@@ -1229,8 +1425,9 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         print(f"Media info: duration={duration}s, width={width}, height={height}")
 
         if duration <= 0:
-            raise ValueError(
-                f"Invalid media duration: {duration}s. File may be corrupt or empty."
+            raise TranscodeError(
+                TranscodeErrorCode.INVALID_DURATION,
+                f"Invalid media duration: {duration}s. File may be corrupt or empty.",
             )
 
         validate_streams(probe_data, media_type)
@@ -1255,9 +1452,12 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             send_progress(webhook_url, webhook_secret, job_id, "loudness", 15, media_id)
             loudness = analyze_loudness(input_path)
             print(f"Loudness: {loudness}")
-            loudness_integrated = max(-10000, min(1000, int(loudness["input_i"] * 100)))
-            loudness_peak = max(-10000, min(2000, int(loudness["input_tp"] * 100)))
-            loudness_range = max(0, min(50000, int(loudness["input_lra"] * 100)))
+            if loudness is not None:
+                loudness_integrated = max(
+                    -10000, min(1000, int(loudness["input_i"] * 100))
+                )
+                loudness_peak = max(-10000, min(2000, int(loudness["input_tp"] * 100)))
+                loudness_range = max(0, min(50000, int(loudness["input_lra"] * 100)))
 
         # Step 5: Transcode HLS variants
         send_progress(
@@ -1373,18 +1573,33 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
         # Step 10: Send completion webhook
         send_progress(webhook_url, webhook_secret, job_id, "finalizing", 95, media_id)
-        webhook_payload = {
+        completion = {
             "jobId": job_id,
             "status": "completed",
             "output": result,
         }
-        send_webhook(webhook_url, webhook_secret, webhook_payload)
+        send_webhook(webhook_url, webhook_secret, completion)
 
         return {"status": "success", "mediaId": media_id}
 
     except Exception as e:
         error_msg = str(e)
-        print(f"Transcoding failed: {error_msg}")
+
+        if completion is not None:
+            # Every output is uploaded; only the report failed, and the service
+            # may even have recorded it before answering badly. Deleting the
+            # outputs and reporting a failure could contradict a row already
+            # `ready`. So keep them and finish COMPLETED: the maintenance run
+            # finds the job COMPLETED without its webhook (WEBHOOK_LOST).
+            print(f"Completion webhook undeliverable; keeping outputs: {error_msg}")
+            return {
+                "status": "webhook_undelivered",
+                "mediaId": completion["output"]["mediaId"],
+                "error": error_msg[:2000],
+            }
+
+        error_code = error_code_of(e)
+        print(f"Transcoding failed ({error_code}): {error_msg}")
 
         # Clean up any partial uploads
         if uploaded_keys:
@@ -1392,13 +1607,16 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             cleanup_uploaded_keys(uploaded_keys)
 
         # Send failure webhook (include mediaId so the service can find it even
-        # when runpodJobId hasn't been stored yet — common in local /runsync flow)
+        # when runpodJobId hasn't been stored yet — common in local /runsync
+        # flow). A mediaId the service's schema would refuse goes as null, so
+        # the report itself is never rejected.
         try:
             webhook_payload = {
                 "jobId": job_id,
                 "status": "failed",
                 "error": error_msg[:2000],
-                "mediaId": media_id,
+                "errorCode": error_code,
+                "mediaId": reportable_media_id(job_input.get("mediaId")),
             }
             send_webhook(webhook_url, webhook_secret, webhook_payload)
         except Exception as webhook_error:
@@ -1407,10 +1625,11 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             # rather than a quiet error-dict return. Idempotent retry is safe.
             raise
 
-        return {"status": "error", "error": error_msg}
+        return {"status": "error", "error": error_msg, "errorCode": error_code}
 
     finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        if work_dir is not None:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 
 # RunPod serverless entry point.

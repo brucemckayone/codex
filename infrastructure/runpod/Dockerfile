@@ -10,6 +10,11 @@
 
 FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
 
+# The NVIDIA container runtime mounts only the driver libraries this lists.
+# Without `video`, libnvidia-encode is absent, h264_nvenc cannot open, and
+# check_gpu_available() quietly sends every job to libx264 on the CPU.
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+
 # Prevent interactive prompts during install
 ENV DEBIAN_FRONTEND=noninteractive
 

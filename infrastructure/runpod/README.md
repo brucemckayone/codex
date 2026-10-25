@@ -141,39 +141,80 @@ The repo-level `RUNPOD_*` secrets are a different thing: the E2E workflows pass 
 - **GPU**: `h264_nvenc`, preset p4, cq 23
 - **CPU fallback**: `libx264`, preset fast, crf 23
 - **Mezzanine**: CRF 18 (archive quality)
+- **Every encode**: `format=yuv420p` and `-profile:v high` (browsers play 8-bit
+  4:2:0 H.264 only), audio at 48 kHz
 
 ### HLS Variants
-| Quality | Resolution | Video Bitrate | Audio Bitrate |
-|---------|------------|---------------|---------------|
-| 1080p | 1920x1080 | 5000 kbps | 192 kbps |
-| 720p | 1280x720 | 3000 kbps | 128 kbps |
-| 480p | 854x480 | 1500 kbps | 96 kbps |
-| 360p | 640x360 | 800 kbps | 64 kbps |
+| Quality | Height | Video Bitrate | Audio Bitrate |
+|---------|--------|---------------|---------------|
+| 720p | 720 | 3000 kbps | 128 kbps |
+| 480p | 480 | 1500 kbps | 96 kbps |
+
+A source shorter than 480 lines gets one `source` rung at its own size.
 
 ## Webhook Payload
 
-### Success
+The service parses these with `runpodWebhookUnionSchema`
+(`packages/validation/src/schemas/transcoding.ts`).
+
+### Completed
 
 ```json
 {
+  "jobId": "runpod-job-id",
   "status": "completed",
-  "mediaId": "uuid",
-  "hlsMasterPlaylistKey": "creator-id/hls/media-id/master.m3u8",
-  "hlsPreviewKey": "creator-id/hls/media-id/preview/preview.m3u8",
-  "thumbnailKey": "creator-id/thumbnails/media-id/auto-generated.jpg",
-  "waveformKey": null,
-  "waveformImageKey": null,
-  "mezzanineKey": "creator-id/mezzanine/media-id/mezzanine.mp4",
-  "durationSeconds": 600,
-  "readyVariants": ["1080p", "720p", "480p", "360p"],
-  "error": null
+  "output": {
+    "mediaId": "uuid",
+    "type": "video",
+    "hlsMasterKey": "creator-id/hls/media-id/master.m3u8",
+    "hlsPreviewKey": "creator-id/hls/media-id/preview/preview.m3u8",
+    "thumbnailKey": "creator-id/media-thumbnails/media-id/lg.webp",
+    "thumbnailVariants": { "sm": "…/sm.webp", "md": "…/md.webp", "lg": "…/lg.webp" },
+    "durationSeconds": 600,
+    "width": 1920,
+    "height": 1080,
+    "readyVariants": ["720p", "480p"],
+    "loudnessIntegrated": -1400
+  }
 }
 ```
 
+### Failed
+
+```json
+{
+  "jobId": "runpod-job-id",
+  "status": "failed",
+  "error": "ffprobe failed (exit 1): moov atom not found…",
+  "errorCode": "CORRUPT_INPUT",
+  "mediaId": "uuid"
+}
+```
+
+`errorCode` is one of `CORRUPT_INPUT`, `UNSUPPORTED_CODEC`,
+`INVALID_DURATION`, `MISSING_STREAM`, `OUTPUT_VALIDATION_FAILED`,
+`INFRA_ERROR` (the service treats anything else as `INFRA_ERROR`). `mediaId`
+is `null` when the job's own value is not a UUID.
+
+If the completed report cannot be delivered, the handler keeps the outputs and
+finishes the job COMPLETED with `{"status": "webhook_undelivered"}`; the
+maintenance run then finds it via RunPod's job status.
+
+### Progress
+
+`{"jobId", "status": "progress", "progress": 0-100, "step", "mediaId"}`, one
+attempt each, never retried.
+
 ### Webhook Signature
 
-Webhooks are signed with HMAC-SHA256:
+Webhooks are signed with HMAC-SHA256 over `timestamp.payload`:
 
 ```
-X-Runpod-Signature: hmac_sha256(payload, webhook_secret)
+X-Runpod-Timestamp: <unix seconds>
+X-Runpod-Signature: hmac_sha256(f"{timestamp}.{payload}", WEBHOOK_SECRET)
 ```
+
+### Keep-alive ping
+
+`{"input": {"ping": true}}` is answered `{"status": "pong"}` before anything
+else is read; it only resets RunPod's idle clock.

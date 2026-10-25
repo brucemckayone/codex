@@ -105,6 +105,13 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
+      # A GitHub runner has no GPU, so NVENC itself can't be exercised here;
+      # this pins the setting that lets RunPod's GPU reach it (Dockerfile).
+      - name: Image enables the NVENC driver library
+        run: |
+          docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' test-worker:local \
+            | grep -qx 'NVIDIA_DRIVER_CAPABILITIES=compute,utility,video'
+
       - name: Run Inner Container Verification
         run: |
           docker run --rm \

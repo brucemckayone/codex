@@ -67,9 +67,11 @@ the existing hourly production cron.
 
 1. `ensureEndpointAwake`, first, so the ping finds the endpoint awake.
 2. Keep-alive `ping` in the 03:00 UTC run (RunPod pauses after 7 idle days).
-   A FAILED ping job is never alerted: the old handler fails it, and the
-   request reset RunPod's idle clock anyway. A ping RunPod REFUSES for a
-   reason that will not pass (`not_permitted`, `not_found`) is
+   The handler answers a ping before reading any job field (`{status:
+   'pong'}`, Codex-l2c48.8); the image deployed before it (3f0ce3fa) raises
+   `KeyError` and fails the job. A FAILED ping job is never alerted either
+   way: the request already reset RunPod's idle clock. A ping RunPod REFUSES
+   for a reason that will not pass (`not_permitted`, `not_found`) is alerted
    (`pingRefused`, once a day).
 3. `transcoding` rows past their job's `executionTimeout` (with a job id) or
    `ttl` (without) plus 15 min: ask RunPod. Still running → leave; COMPLETED
