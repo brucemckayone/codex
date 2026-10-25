@@ -4,7 +4,7 @@
   Stripe's answer, above the refunds list (Codex-2hxff.28, mockup B3): made
   (pending or succeeded), already made (a replay of the same decision),
   changed under the open page, refused (Stripe's code under a plain
-  sentence), refused earlier for this exact refund (Stripe's 24-hour answer),
+  sentence), answered before for this exact refund (Stripe's 24-hour answer),
   still being made by another request with the same key, blocked since the
   page loaded, or not sent.
 
@@ -180,7 +180,8 @@
             lead: m.support_outcome_key_spent_lead(),
             body: m.support_outcome_key_spent_body(),
             mono: null,
-            reload: false,
+            // The form waits for a reload (`locksUntilReload`), so offer one.
+            reload: true,
           };
         case 'in_flight':
           // No Dashboard advice: a refund made there now could pay the buyer twice.

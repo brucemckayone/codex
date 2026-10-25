@@ -12,10 +12,12 @@
   charge is reloaded once when what it shows is known to be out of date, and
   the counts with it when a refund exists; then Refresh (Q10). No polling.
   Each reload also asks the form's preview again (RefundForm), and a preview
-  the route refused asks for a reload (`onStale`). After REFUND_IN_FLIGHT the
-  form is locked, every amount, until a reload of the charge lands: a new
-  amount is a new key, so it could make a second refund while the first is
-  landing. The outcome
+  the route refused asks for a reload (`onStale`). After REFUND_IN_FLIGHT or
+  REFUND_KEY_SPENT the form is locked, every amount, until a reload of the
+  charge lands without error (`locksUntilReload`): a new amount is a new key,
+  so it could make a second refund while the first is landing. A failed
+  reload proves nothing, and kit resolves an older refresh when a newer one
+  fails, so the lock reads the query's error, not the promise. The outcome
   takes focus as it arrives, so a screen reader reads it out.
 
   The not-found, error and loading states still name the page with an h1.
@@ -41,6 +43,7 @@
   import {
     type RefundOutcome,
     refreshesCounts,
+    locksUntilReload,
     reloadsCharge,
   } from '$lib/components/support/refund-outcome';
   import {
@@ -72,14 +75,14 @@
 
   let outcome = $state<RefundOutcome | null>(null);
   let refreshingByHand = $state(false);
-  /** A refund with this key is still being made: nothing more is sent until a reload lands. */
-  let inFlightLock = $state(false);
+  /** A refund with this key may still be landing: nothing more is sent until a reload lands. */
+  let reloadLock = $state(false);
 
   // A different charge starts clean.
   $effect(() => {
     void chargeId;
     outcome = null;
-    inFlightLock = false;
+    reloadLock = false;
   });
 
   // "Back to results" returns to the search it came from, query and all.
@@ -91,11 +94,14 @@
   });
 
   function reloadCharge(): Promise<void> {
+    const query = chargeQuery;
     return (
-      chargeQuery
+      query
         ?.refresh()
         .then(() => {
-          inFlightLock = false;
+          // Landed, not merely settled: kit also resolves this when a later
+          // refresh fails, with the error set by then.
+          if (!query.error) reloadLock = false;
         })
         .catch(() => {}) ?? Promise.resolve()
     );
@@ -112,7 +118,7 @@
 
   async function handleOutcome(next: RefundOutcome) {
     outcome = next;
-    if (next.kind === 'in_flight') inFlightLock = true;
+    if (locksUntilReload(next)) reloadLock = true;
     if (reloadsCharge(next)) void reloadCharge();
     if (refreshesCounts(next)) void countsQuery.refresh().catch(() => {});
     await tick();
@@ -175,7 +181,12 @@
   <Alert variant="error" data-testid="charge-load-error">
     <p><strong>{m.support_load_error_lead()}</strong> {m.support_try_again_soon()}</p>
     <div class="alert-actions">
-      <Button variant="secondary" size="sm" onclick={() => void reloadCharge()}>
+      <Button
+        variant="secondary"
+        size="sm"
+        loading={chargeQuery?.loading === true}
+        onclick={() => void reloadCharge()}
+      >
         {m.support_try_again()}
       </Button>
     </div>
@@ -231,7 +242,12 @@
     <Alert variant="warning" data-testid="charge-reload-error">
       <p><strong>{m.support_reload_error_lead()}</strong> {m.support_reload_error_body()}</p>
       <div class="alert-actions">
-        <Button variant="secondary" size="sm" onclick={() => void reloadCharge()}>
+        <Button
+          variant="secondary"
+          size="sm"
+          loading={reloading}
+          onclick={() => void reloadCharge()}
+        >
           {m.support_try_again()}
         </Button>
       </div>
@@ -267,7 +283,7 @@
       <RefundForm
         {detail}
         stale={reloading}
-        locked={inFlightLock}
+        locked={reloadLock}
         onOutcome={handleOutcome}
         onStale={() => void reloadCharge()}
       />

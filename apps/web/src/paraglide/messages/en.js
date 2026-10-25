@@ -19935,7 +19935,7 @@ export const support_sentences_two = (params) => `${params.first} ${params.secon
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_outcome_key_spent_lead = () => `Stripe already refused this exact refund.`
+export const support_outcome_key_spent_lead = () => `Stripe already answered this exact refund.`
 
 
 /**
@@ -19951,7 +19951,7 @@ export const support_outcome_in_flight_lead = () => `A refund for this exact amo
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_form_locked_in_flight = () => `Reload the charge before sending another refund: one is still being processed.`
+export const support_form_locked_until_reload = () => `Reload the charge before sending another refund: one may still be landing.`
 
 
 /**
@@ -19967,7 +19967,7 @@ export const support_outcome_in_flight_body = () => `Reload the charge in a minu
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const support_outcome_key_spent_body = () => `Nothing was refunded. Stripe keeps its answer to the same refund of this charge for 24 hours. Change the amount, or use the Stripe Dashboard.`
+export const support_outcome_key_spent_body = () => `Reload the charge first: a refund for this amount may still be landing. Stripe keeps its answer to the same refund of this charge for 24 hours. Change the amount, or use the Stripe Dashboard.`
 
 
 /**
@@ -20848,6 +20848,14 @@ export const support_repay_blocked_chargeback = () => `This charge has a chargeb
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const support_repay_blocked_later_refunds = () => `A later refund of this charge took the payees' shares too. Settle it by hand, or mark it refunded another way.`
+
+
+/**
+ * @param {{ buyer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const support_repay_access_unknown = (params) => `We couldn't check in advance whether ${params.buyer} gets access back. Re-paying checks again, and says what it did.`
 
 
 /**

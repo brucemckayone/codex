@@ -124,6 +124,17 @@ export function reloadsCharge(outcome: RefundOutcome): boolean {
   ].includes(outcome.kind);
 }
 
+/**
+ * The outcomes after which nothing more is sent until a reload of the charge
+ * lands: a refund with this key may still be landing. `in_flight`: another
+ * request with it is running at Stripe. `key_spent`: Stripe answered this exact
+ * refund before, from a saved answer or a replayed outage that may have made
+ * it. A new amount is a new key, so it could refund the buyer twice.
+ */
+export function locksUntilReload(outcome: RefundOutcome): boolean {
+  return outcome.kind === 'in_flight' || outcome.kind === 'key_spent';
+}
+
 /** A refund exists, so the queue's counts may have moved with it. */
 export function refreshesCounts(outcome: RefundOutcome): boolean {
   return outcome.kind === 'made' || outcome.kind === 'replayed';

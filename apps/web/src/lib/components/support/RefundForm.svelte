@@ -28,9 +28,13 @@
   left) means the charge moved since it loaded, so trying again can never
   work: the form asks the page to reload it, once per charge state and
   amount, and offers "Reload the charge" (R2-L1). A session that ended says
-  so (R2-M1). When Review or Try again opens nothing, focus moves to what
-  the preview now says, never to the page's top (R2-L2). The amount's error
-  shows once the field is left or submitted, not between keystrokes (R2-L5).
+  so (R2-M1); both alerts are `role="alert"`, since they can arrive while
+  focus stays in the amount (R3-L4). When Review or Try again opens nothing,
+  focus moves to what the preview now says, never to the page's top (R2-L2).
+  The amount's error shows once the field is left or submitted, not between
+  keystrokes (R2-L5), or at once when a reload shrinks what is left under a
+  typed amount: the charge moved, not the typing. If the reload the form asked
+  for leaves focus on the page, it goes to the amount (R3-L3).
 
   @prop {ChargeDetail} detail
   @prop {boolean} [stale=false] - The charge is reloading: Review waits.
@@ -166,21 +170,53 @@
     const key = `${detail.refundCount}:${detail.refundable.maxCents}:${previewCents}`;
     if (key === staleKeyReloaded) return;
     staleKeyReloaded = key;
-    untrack(() => onStale?.());
+    untrack(() => requestReload());
   });
 
-  // A reload of the same charge can still have moved a payout (paid since,
-  // say): ask for the preview again with it. A new refund count is a new
-  // query, fetched anyway.
+  /** A reload this form asked for: when it lands, focus is put back if it dropped. */
+  let reloadAsked = false;
+  function requestReload() {
+    reloadAsked = true;
+    onStale?.();
+  }
+
+  async function refocusAfterReload() {
+    await tick();
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && active.isConnected) return;
+    (
+      document.querySelector<HTMLElement>('[data-refund-amount]') ??
+      document.querySelector<HTMLElement>('[data-preview-heading]')
+    )?.focus();
+  }
+
+  // A reload landed: a new answer for this charge.
   let lastDetail: ChargeDetail | null = null;
   $effect(() => {
     const next = detail;
     const previous = lastDetail;
     lastDetail = next;
-    if (!previous || previous === next || previous.refundCount !== next.refundCount) return;
-    untrack(() => previewQuery)
-      ?.refresh()
-      .catch(() => {});
+    if (!previous || previous === next) return;
+    untrack(() => {
+      // Less left under a typed amount: the charge moved, not the typing, so
+      // an amount that no longer fits says so now.
+      if (
+        previous.refundable.maxCents !== next.refundable.maxCents &&
+        mode === 'part' &&
+        amountText.trim() !== ''
+      ) {
+        amountChecked = true;
+      }
+      if (reloadAsked) {
+        reloadAsked = false;
+        void refocusAfterReload();
+      }
+      // The same refund count can still have moved a payout (paid since,
+      // say): ask for the preview again. A new count is a new query anyway.
+      if (previous.refundCount === next.refundCount) {
+        previewQuery?.refresh().catch(() => {});
+      }
+    });
   });
 
   let submitting = $state(false);
@@ -494,6 +530,7 @@
                     inputmode="decimal"
                     autocomplete="off"
                     aria-label={m.support_form_amount_label()}
+                    data-refund-amount
                     aria-describedby="{amountErrorId} {partHintId}"
                     aria-invalid={amountInvalid ? 'true' : undefined}
                     data-error={amountInvalid}
@@ -585,10 +622,11 @@
               {m.support_preview_heading({ amount: formatPrice(shownCents) })}
             </h3>
             {#if previewProblem === 'session_ended'}
-              <SessionEndedAlert tabindex={-1} data-preview-problem />
+              <SessionEndedAlert role="alert" tabindex={-1} data-preview-problem />
             {:else if previewProblem === 'refused'}
               <Alert
                 variant="warning"
+                role="alert"
                 tabindex={-1}
                 data-preview-problem
                 data-testid="preview-refused"
@@ -602,7 +640,7 @@
                     variant="secondary"
                     size="sm"
                     loading={stale}
-                    onclick={() => onStale?.()}
+                    onclick={() => requestReload()}
                   >
                     {m.support_reload_charge()}
                   </Button>
@@ -680,7 +718,7 @@
         </div>
 
         {#if locked}
-          <p class="field__help" data-testid="refund-locked">{m.support_form_locked_in_flight()}</p>
+          <p class="field__help" data-testid="refund-locked">{m.support_form_locked_until_reload()}</p>
         {/if}
         <Button
           variant="primary"

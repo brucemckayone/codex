@@ -202,14 +202,18 @@ describe('the other answers', () => {
 });
 
 describe('the same refund refused earlier', () => {
-  test('key_spent: nothing was made, change the amount or use the Dashboard, and no reload', () => {
-    const alert = render({ kind: 'key_spent' }, chargeDetail(), {
-      onReload: () => {},
-    });
+  test('key_spent: reload first, then change the amount or use the Dashboard; it offers the reload', () => {
+    const onReload = vi.fn();
+    const alert = render({ kind: 'key_spent' }, chargeDetail(), { onReload });
     expect(alert.getAttribute('data-variant')).toBe('warning');
     expect(text(alert)).toContain(m.support_outcome_key_spent_lead());
     expect(text(alert)).toContain(m.support_outcome_key_spent_body());
-    expect(alert.querySelector('button')).toBeNull();
+    const buttons = [...alert.querySelectorAll('button')];
+    expect(buttons.map((b) => b.textContent?.trim())).toEqual([
+      m.support_reload_charge(),
+    ]);
+    buttons[0]?.click();
+    expect(onReload).toHaveBeenCalledTimes(1);
   });
 });
 

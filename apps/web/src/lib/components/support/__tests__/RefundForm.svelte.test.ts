@@ -423,6 +423,8 @@ describe('a preview the route refuses (R2-L1)', () => {
     expect(onStale).toHaveBeenCalledTimes(1);
     const refused = document.querySelector('[data-testid="preview-refused"]');
     expect(refused?.textContent).toContain(m.support_preview_refused_lead());
+    // Heard even while focus stays in the amount (R3-L4).
+    expect(refused?.getAttribute('role')).toBe('alert');
     expect(document.querySelector('[data-testid="preview-error"]')).toBeNull();
     const buttons = [...(refused?.querySelectorAll('button') ?? [])];
     expect(buttons.map((b) => b.textContent?.trim())).toEqual([
@@ -502,10 +504,88 @@ describe('a preview the route refuses (R2-L1)', () => {
     flushSync();
     const ended = document.querySelector('[data-testid="session-ended"]');
     expect(ended?.textContent).toContain(m.support_outcome_signed_out_lead());
+    expect(ended?.getAttribute('role')).toBe('alert');
     expect(ended?.querySelector('button')).toBeNull();
     expect(document.querySelector('[data-testid="preview-error"]')).toBeNull();
     expect(onStale).not.toHaveBeenCalled();
     expect(review()?.disabled).toBe(true);
+  });
+});
+
+describe('after the reload a refused preview asked for (R3-L3)', () => {
+  const LESS_LEFT = () =>
+    chargeDetail({
+      refundCount: 2,
+      refundable: { maxCents: 250, blocked: null },
+    });
+
+  function mountReactive() {
+    const props = $state({
+      detail: chargeDetail(),
+      stale: false,
+      onOutcome: (outcome: RefundOutcome) => outcomes.push(outcome),
+      onStale,
+    });
+    component = mount(RefundForm, { target: document.body, props });
+    flushSync();
+    return props;
+  }
+
+  async function refusedAt750() {
+    const props = mountReactive();
+    choosePart('7.50');
+    await wait(300);
+    previewSlot(ARGS_750).error = httpError(
+      400,
+      'Too large',
+      'BUSINESS_LOGIC_ERROR'
+    );
+    flushSync();
+    expect(onStale).toHaveBeenCalledTimes(1);
+    return props;
+  }
+
+  test('less left than the typed amount: the error shows at once, though the field was never left', async () => {
+    const props = await refusedAt750();
+    expect(amountError()).toBe('');
+    props.detail = LESS_LEFT();
+    flushSync();
+    expect(amountError()).toBe(m.support_form_amount_invalid({ max: '£2.50' }));
+  });
+
+  test('focus on the refused alert, which the reload removes, goes to the amount', async () => {
+    const props = await refusedAt750();
+    document
+      .querySelector<HTMLElement>('[data-testid="preview-refused"]')
+      ?.focus();
+    props.detail = LESS_LEFT();
+    flushSync();
+    await wait(0);
+    expect(
+      document.querySelector('[data-testid="preview-refused"]')
+    ).toBeNull();
+    expect(document.activeElement).toBe(amountInput());
+  });
+
+  test('focus elsewhere stays; a reload it did not ask for moves nothing', async () => {
+    const props = await refusedAt750();
+    const radio =
+      document.querySelector<HTMLInputElement>('input[value="all"]');
+    radio?.focus();
+    props.detail = LESS_LEFT();
+    flushSync();
+    await wait(0);
+    expect(document.activeElement).toBe(radio);
+
+    // The ask was used up: a later reload, with focus on the page, moves nothing.
+    radio?.blur();
+    props.detail = chargeDetail({
+      refundCount: 3,
+      refundable: { maxCents: 200, blocked: null },
+    });
+    flushSync();
+    await wait(0);
+    expect(document.activeElement).toBe(document.body);
   });
 });
 

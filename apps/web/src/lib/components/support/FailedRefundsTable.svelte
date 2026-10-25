@@ -139,7 +139,7 @@
           </Table.Cell>
           <Table.Cell class="support-amount">{formatPrice(item.takenFromPayeesCents)}</Table.Cell>
           <Table.Cell class="support-right">
-            <span class="table-actions">{@render actions(item)}</span>
+            <span class="table-actions" data-row-actions>{@render actions(item)}</span>
           </Table.Cell>
         </Table.Row>
       {/each}
@@ -162,7 +162,7 @@
       <span class="cell-sub">
         {m.support_failed_taken_line({ amount: formatPrice(item.takenFromPayeesCents) })}
       </span>
-      <div class="row-item__actions">{@render actions(item)}</div>
+      <div class="row-item__actions" data-row-actions>{@render actions(item)}</div>
     </li>
   {/each}
 </ul>

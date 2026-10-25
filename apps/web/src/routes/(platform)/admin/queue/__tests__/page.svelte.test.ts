@@ -289,6 +289,56 @@ describe('a refusal that keeps the dialog open', () => {
   });
 });
 
+describe('a re-pay refused for good', () => {
+  test.each([
+    [
+      'a later cause',
+      failure({
+        detailsCode: 'REPAY_BLOCKED_BY_LATER_CAUSE',
+        reason: 'chargeback',
+      }),
+    ],
+    [
+      'a step that needs a person',
+      failure({ detailsCode: 'REFUND_CLAWBACK_NEEDS_PERSON' }),
+    ],
+  ])('(%s) then Cancel: focus goes to the row’s next enabled choice, not the page (R3-L2)', async (_why, answer) => {
+    resolveFailedRefund.mockResolvedValue(answer);
+    mountAt('/admin/queue');
+    failedSlot().current = list([failedRefund()]);
+    flushSync();
+    const repay = rowButton(m.support_action_repay());
+    repay?.focus();
+    repay?.click();
+    flushSync();
+    const area = document.querySelector<HTMLTextAreaElement>(
+      '[role="dialog"] textarea'
+    );
+    if (!area) throw new Error('no note');
+    area.value = 'Re-pay.';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    document
+      .querySelector<HTMLButtonElement>('[data-testid="settle-submit"]')
+      ?.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    flushSync();
+    await afterFocus();
+    expect(rowButton(m.support_action_repay())?.disabled).toBe(true);
+
+    const cancel = [
+      ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+    ].find((b) => b.textContent?.trim() === m.support_confirm_cancel());
+    cancel?.focus();
+    cancel?.click();
+    flushSync();
+    await afterFocus();
+    expect(document.activeElement).toBe(
+      rowButton(m.support_action_elsewhere())
+    );
+  });
+});
+
 describe('a re-pay refused for a later cause', () => {
   test('turns that row’s Re-pay off for the session, with the reason beside it', async () => {
     resolveFailedRefund.mockResolvedValue(

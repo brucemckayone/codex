@@ -119,12 +119,16 @@
     predicting && blocked === 'no_purchase' && item?.isFull === true
   );
   /** Why access won't come back, when there is something to say: a part
-   * refund never ended it, and an invoice has its own note. */
-  const accessBlockedNote = $derived(
-    predicting && blocked !== null && blocked !== 'partial' && blocked !== 'no_purchase'
-      ? accessKept(blocked, buyer)
-      : null
-  );
+   * refund never ended it, and an invoice has its own note. `unknown`: the
+   * server couldn't read Stripe to predict, so the settle decides. */
+  const accessBlockedNote = $derived.by(() => {
+    if (!predicting || blocked === null || blocked === 'partial' || blocked === 'no_purchase') {
+      return null;
+    }
+    return blocked === 'unknown'
+      ? m.support_repay_access_unknown({ buyer })
+      : accessKept(blocked, buyer);
+  });
 
   /** Why the buyer's access stayed as it was, when re-paying didn't give it back. */
   function accessKept(reason: AccessNotRestoredReason, name: string): string {

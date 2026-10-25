@@ -436,6 +436,21 @@ describe('Settling a failed refund', () => {
     );
   });
 
+  test('a prediction the server couldn’t make says so, and promises nothing', () => {
+    renderDialog(
+      'creators_repaid',
+      failedRefund({ accessRestoreBlockedReason: 'unknown' })
+    );
+    expect(
+      document.querySelector('[data-testid="repay-access-blocked"]')
+        ?.textContent
+    ).toContain(m.support_repay_access_unknown({ buyer: 'Daniel Price' }));
+    // No promise of access back: the "gets access back" alert is not shown.
+    expect(text()).not.toContain(
+      m.support_repay_access_body({ title: 'Sleep Reset Programme' })
+    );
+  });
+
   test('a refusal to try again later keeps the access prediction', async () => {
     resolveFailedRefund.mockResolvedValue(
       failure({ detailsCode: 'REFUND_CLAWBACK_UNFINISHED' })

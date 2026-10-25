@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vitest';
 import { preview } from '../__fixtures__/support-fixtures';
 import { failure } from '../__fixtures__/support-remote.mock.svelte';
 import {
+  locksUntilReload,
   parsePounds,
   refreshesCounts,
   refundOutcomeOf,
@@ -159,6 +160,27 @@ describe('what reloads after an outcome', () => {
       'failed',
     ] as const) {
       expect(reloadsCharge({ kind } as never), kind).toBe(false);
+    }
+  });
+
+  test('only "in flight" and "key spent" lock the form until a reload lands', () => {
+    for (const kind of ['in_flight', 'key_spent'] as const) {
+      expect(locksUntilReload({ kind } as never), kind).toBe(true);
+    }
+    for (const kind of [
+      'made',
+      'replayed',
+      'changed',
+      'refused',
+      'window_closed',
+      'chargeback',
+      'nothing_left',
+      'too_large',
+      'signed_out',
+      'rate_limited',
+      'failed',
+    ] as const) {
+      expect(locksUntilReload({ kind } as never), kind).toBe(false);
     }
   });
 

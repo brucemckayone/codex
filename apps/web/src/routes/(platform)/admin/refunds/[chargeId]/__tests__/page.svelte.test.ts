@@ -435,13 +435,12 @@ describe('after Refund', () => {
     expect(charge.refresh).toHaveBeenCalledTimes(1);
   });
 
-  test('REFUND_IN_FLIGHT: every amount is locked until a reload of the charge lands', async () => {
+  test.each([
+    ['REFUND_IN_FLIGHT', 'in_flight'],
+    ['REFUND_KEY_SPENT', 'key_spent'],
+  ] as const)('%s: every amount is locked until a reload of the charge lands', async (detailsCode, kind) => {
     issueSupportRefund.mockResolvedValue(
-      failure({
-        status: 409,
-        code: 'CONFLICT',
-        detailsCode: 'REFUND_IN_FLIGHT',
-      })
+      failure({ status: 409, code: 'CONFLICT', detailsCode })
     );
     mountCharge();
     const charge = chargeSlot(CHARGE_ID);
@@ -456,7 +455,7 @@ describe('after Refund', () => {
     );
     await refund750();
     const alert = document.querySelector('[data-testid="refund-outcome"]');
-    expect(alert?.getAttribute('data-kind')).toBe('in_flight');
+    expect(alert?.getAttribute('data-kind')).toBe(kind);
     expect(charge.refresh).not.toHaveBeenCalled();
 
     // Another amount: a new key, so a second refund. Locked too.
@@ -491,6 +490,78 @@ describe('after Refund', () => {
     await tick(0);
     expect(review()?.disabled).toBe(false);
     expect(document.querySelector('[data-testid="refund-locked"]')).toBeNull();
+  });
+
+  test('a reload that fails keeps the lock, even when kit resolves an older one (R3-L1)', async () => {
+    issueSupportRefund.mockResolvedValue(
+      failure({
+        status: 409,
+        code: 'CONFLICT',
+        detailsCode: 'REFUND_IN_FLIGHT',
+      })
+    );
+    mountCharge();
+    const charge = chargeSlot(CHARGE_ID);
+    charge.current = chargeDetail();
+    flushSync();
+    // Kit: when a later refresh fails, it RESOLVES the earlier pending one,
+    // with the error already set.
+    let resolveFirst = () => {};
+    charge.refresh
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFirst = resolve;
+          })
+      )
+      .mockImplementationOnce(async () => {
+        charge.error = httpError(500, 'boom');
+        throw new Error('boom');
+      })
+      .mockImplementationOnce(async () => {
+        charge.error = undefined;
+      });
+    await refund750();
+    const reloadButton = () =>
+      [
+        ...(document
+          .querySelector('[data-testid="refund-outcome"]')
+          ?.querySelectorAll('button') ?? []),
+      ].find((b) => b.textContent?.includes(m.support_reload_charge()));
+
+    reloadButton()?.click();
+    reloadButton()?.click();
+    await tick(0);
+    resolveFirst();
+    await tick(0);
+    expect(charge.refresh).toHaveBeenCalledTimes(2);
+    expect(
+      document.querySelector('[data-testid="refund-locked"]')
+    ).not.toBeNull();
+
+    // A reload that lands without error frees it.
+    reloadButton()?.click();
+    await tick(0);
+    expect(document.querySelector('[data-testid="refund-locked"]')).toBeNull();
+  });
+
+  test.each([
+    ['with the charge on screen', true, 'charge-reload-error'],
+    ['with nothing loaded yet', false, 'charge-load-error'],
+  ])('Try again shows it is running (%s)', (_when, loaded, testId) => {
+    mountCharge();
+    const charge = chargeSlot(CHARGE_ID);
+    if (loaded) charge.current = chargeDetail();
+    charge.error = httpError(500, 'boom');
+    flushSync();
+    const retry = () =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-testid="${testId}"] button`
+      );
+    expect(retry()?.disabled).toBe(false);
+    charge.loading = true;
+    flushSync();
+    expect(retry()?.disabled).toBe(true);
   });
 
   test('while the charge reloads, Review waits', async () => {

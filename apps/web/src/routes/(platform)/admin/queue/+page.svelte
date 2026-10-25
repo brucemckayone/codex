@@ -14,7 +14,9 @@
   refused because the session ended says so, with no Try again (R2-M1).
 
   When a settle dialog closes on an answer, focus moves to the notice
-  (`tabindex="-1"`) so it is read out; on Cancel, back to the row's button.
+  (`tabindex="-1"`) so it is read out; on Cancel, back to the row's button,
+  or, when Re-pay has turned itself off (refused for good), to the row's
+  next enabled choice (R3-L2).
 -->
 <script lang="ts">
   import type {
@@ -98,7 +100,17 @@
 
   function focusAfterSettle(): HTMLElement | null {
     if (focusNotice) return document.querySelector<HTMLElement>('[data-settle-notice]');
-    return returnFocus?.isConnected ? returnFocus : null;
+    if (!returnFocus?.isConnected) return null;
+    // A disabled button can't take focus: Re-pay turns itself off when it is
+    // refused for good, so go to the row's next enabled choice.
+    if (returnFocus.matches(':disabled')) {
+      return (
+        returnFocus
+          .closest('[data-row-actions]')
+          ?.querySelector<HTMLElement>('button:not(:disabled)') ?? null
+      );
+    }
+    return returnFocus;
   }
 
   function openRefund(item: FailedRefundItem, resolution: FailedRefundResolution) {
