@@ -100,6 +100,12 @@ export interface ContentAccessPolicyRow {
    * does not — so the access layer needs it, not just the fetch predicate.
    */
   status: string;
+  /**
+   * When the item was first published; kept when it is unpublished. Read by
+   * the publication rule (Codex-nacky): a row that is not published now and
+   * never was is a draft that was never offered, so no grant reaches it.
+   */
+  publishedAt: Date | null;
   isFree: boolean;
   isPurchasable: boolean;
   priceCents: number | null;
@@ -136,7 +142,9 @@ export type DenyReason =
   | 'paid'
   | 'paid_requires_purchase'
   /** Content is not published and the grant was not one someone paid for. */
-  | 'unpublished_requires_purchase';
+  | 'unpublished_requires_purchase'
+  /** Content was never published: a draft never offered, open to no arm. */
+  | 'never_released';
 
 /**
  * Which arm granted — the streaming adapter maps this to the WP-1 grant log
@@ -413,6 +421,11 @@ async function decidePolicyAccess(
  * role grants access *while the item is on offer*. Unpublishing withdraws the
  * offer; it does not undo a sale.
  *
+ * So the table is read only for an item withdrawn after it was RELEASED. A
+ * row never published was never sold, and no arm reaches it, `true` or not
+ * (Codex-nacky): an editor may put a draft practice in a curriculum before it
+ * publishes, and its course's buyers must not stream it by id.
+ *
  * Deliberately a `Record<GrantVia, boolean>` and not a `Set`: it is
  * exhaustiveness-checked, so adding a grant arm to {@link GrantVia} FAILS THE
  * BUILD until someone classifies it. A `Set` would silently default a new arm
@@ -505,6 +518,16 @@ async function decideContentAccess(
 }
 
 /**
+ * Published now, or once. The course player's curriculum read and the
+ * withdrawn-item read use the same rule, in SQL.
+ */
+function isReleased(policy: ContentAccessPolicyRow): boolean {
+  return (
+    policy.status === CONTENT_STATUS.PUBLISHED || policy.publishedAt != null
+  );
+}
+
+/**
  * The publication rule, asked of a decision the policy branches made. Its own
  * function so {@link disputeHold} asks it of the grant a dispute holds back.
  */
@@ -514,6 +537,7 @@ function applyPublicationRule(
 ): AccessDecision {
   if (!decision.granted) return decision;
   if (policy.status === CONTENT_STATUS.PUBLISHED) return decision;
+  if (!isReleased(policy)) return deny('never_released');
   if (subscriptionCoversOffSaleItem(decision, policy.offSaleAt)) {
     return decision;
   }
@@ -547,9 +571,11 @@ export type DisputeHold = Extract<
  *   subscription would grant but for its `disputed_at`, publication rule
  *   included; or, through the course arm, a course grant a disputed course
  *   or tier subscription holds back.
- * - `null` otherwise: team-only, an orgless tier gate, a follow, or a
- *   subscription below the item's tier. A course grant survives
- *   unpublication, so the course arm needs no publication rule.
+ * - `null` otherwise: team-only, an orgless tier gate, a follow, a
+ *   subscription below the item's tier, or a row never released, which no
+ *   grant reaches, so no dispute explains its refusal (Codex-nacky). A course
+ *   grant survives unpublication of a released row, so the course arm needs
+ *   no publication rule of its own.
  *
  * Mirrors the branch order of `decidePolicyAccess`. It only picks the copy
  * the page shows; the refusal itself stands either way.
@@ -560,6 +586,7 @@ async function disputeHold(
   contentId: string,
   policy: ContentAccessPolicyRow
 ): Promise<DisputeHold | null> {
+  if (!isReleased(policy)) return null;
   const orgId = policy.organizationId;
   if (orgId == null && policy.includedInTierId != null) return null;
   if (policy.courseOnly) return courseDisputeHold(db, userId, contentId);
@@ -714,6 +741,7 @@ const POLICY_COLUMNS = {
   id: true,
   organizationId: true,
   status: true,
+  publishedAt: true,
   isFree: true,
   isPurchasable: true,
   priceCents: true,
@@ -783,7 +811,7 @@ export async function resolveHasContentAccess(
 
 /**
  * The policy row the boolean adapters read, or `undefined` for missing or
- * soft-deleted content.
+ * soft-deleted content, or content of a deleted organisation.
  *
  * No `status` predicate (Codex-p3m5j). Unpublished content is fetched and
  * then adjudicated by the publication rule inside `decideContentAccess`,
@@ -791,12 +819,24 @@ export async function resolveHasContentAccess(
  * would deny a buyer before their purchase was ever considered.
  *
  * `deletedAt` STAYS: a soft-deleted item is gone, not withdrawn from sale.
+ * So is an item of a deleted organisation, to every arm (owner decision,
+ * 2026-10-25: "Nobody"; Codex-7ncbh). Deleting an org leaves its content
+ * published, so only this read can tell.
  */
-function findPolicyRow(db: DatabaseClient, contentId: string) {
-  return db.query.content.findFirst({
+async function findPolicyRow(db: DatabaseClient, contentId: string) {
+  const row = await db.query.content.findFirst({
     where: and(eq(content.id, contentId), isNull(content.deletedAt)),
     columns: POLICY_COLUMNS,
+    with: { organization: { columns: { deletedAt: true } } },
   });
+  return isOfDeletedOrg(row) ? undefined : row;
+}
+
+/** Is this content row's organisation soft-deleted? (Codex-7ncbh) */
+export function isOfDeletedOrg(
+  row: { organization?: { deletedAt: Date | null } | null } | undefined
+): boolean {
+  return row?.organization?.deletedAt != null;
 }
 
 /**

@@ -37,6 +37,7 @@ import {
   type AccessGrant,
   assertStreamingAccess,
   type GrantVia,
+  isOfDeletedOrg,
   resolveContentGrant,
   resolveCourseDisputePauses,
   resolveHasContentAccess,
@@ -329,19 +330,18 @@ export class ContentAccessService
    *
    * With `options.includeBody`, the result also carries the content's body,
    * taken from the row the access decision just read, only once that decision
-   * granted, and only for a released row (published now, or once): a draft
-   * never published carries none even to a grant that outlives
-   * unpublication. It is how an entitled reader gets a gated piece's body:
-   * the public content API returns a body only for fully public rows
-   * (Codex-039vo). The detail pages ask for it; the player's URL refreshes do
-   * not, so they never carry it.
+   * granted. A draft never published is granted to no one (Codex-nacky), so
+   * its text never leaves here. It is how an entitled reader gets a gated
+   * piece's body: the public content API returns a body only for fully public
+   * rows (Codex-039vo). The detail pages ask for it; the player's URL
+   * refreshes do not, so they never carry it.
    *
    * @param userId - Authenticated user ID
    * @param input - Content ID and optional expiry
-   * @param options.includeBody - Also return the body (after access is granted,
-   *   for a released row)
+   * @param options.includeBody - Also return the body (after access is granted)
    * @returns Streaming URL and expiration timestamp
-   * @throws {ContentNotFoundError} Content doesn't exist or is deleted
+   * @throws {ContentNotFoundError} Content doesn't exist, is deleted, or its
+   *   organisation is deleted
    * @throws {AccessDeniedError} User hasn't purchased content and isn't org member
    * @throws {R2SigningError} Failed to generate signed URL
    */
@@ -361,8 +361,8 @@ export class ContentAccessService
      */
     readyVariants?: string[];
     /**
-     * The content's body. Present only when `options.includeBody` was set,
-     * access was granted, and the row is released (published now, or once).
+     * The content's body. Present only when `options.includeBody` was set and
+     * access was granted.
      */
     body?: ContentBodySource;
   }> {
@@ -443,6 +443,9 @@ export class ContentAccessService
           // Filtering here would 404 the buyer before their purchase was
           // considered, and a 404 is also the WRONG shape: the item exists and
           // they own it. `deletedAt` STAYS — deleted is gone, not withdrawn.
+          // So is an item of a deleted organisation, to every arm (Codex-7ncbh),
+          // decided here, before the access decision, so its refusal is never
+          // named a paused payment dispute.
           const contentRecord = await tx.query.content.findFirst({
             where: and(
               eq(content.id, input.contentId),
@@ -450,13 +453,15 @@ export class ContentAccessService
             ),
             with: {
               mediaItem: true, // Includes r2_key, content_type, duration
+              organization: { columns: { deletedAt: true } },
             },
           });
 
-          if (!contentRecord) {
+          if (!contentRecord || isOfDeletedOrg(contentRecord)) {
             this.obs.warn('Content not found or not accessible', {
               contentId: input.contentId,
               userId,
+              organizationDeleted: isOfDeletedOrg(contentRecord),
             });
 
             throw new ContentNotFoundError(input.contentId);
@@ -475,39 +480,21 @@ export class ContentAccessService
           // Access check passed — resolve the streamable media target
           // (written article → null-URL, else validated HLS descriptor). The
           // body, when asked for, is this same row's: read under the snapshot
-          // that granted access, after the decision, never before it.
-          //
-          // And only for a RELEASED row (published now, or once). Purchase and
-          // course grants outlive unpublication, for an item withdrawn after
-          // it was sold. A practice never published (a draft an editor put in a
-          // curriculum) was never offered, so its text stays out, as the
-          // course player's released-only rule keeps it (Codex-039vo review).
-          const released =
-            contentRecord.status === CONTENT_STATUS.PUBLISHED ||
-            contentRecord.publishedAt != null;
-          // Only this side can tell a withheld body from a worker that ignored
-          // the flag, and the web logs a granted response without `body` as a
-          // fault. A warn, not an error: it is policy, not a failure.
-          if (options.includeBody && !released) {
-            this.obs.warn('Body withheld: the granted row was never released', {
-              userId,
-              contentId: input.contentId,
-              status: contentRecord.status,
-            });
-          }
+          // that granted access, after the decision, never before it. A row
+          // never released got this far for no arm (Codex-nacky), so a grant
+          // here is a grant to its text too.
           return {
             target: resolveStreamableMedia(
               this.obs,
               input.contentId,
               contentRecord
             ),
-            body:
-              options.includeBody && released
-                ? {
-                    contentBody: contentRecord.contentBody,
-                    contentBodyJson: contentRecord.contentBodyJson,
-                  }
-                : undefined,
+            body: options.includeBody
+              ? {
+                  contentBody: contentRecord.contentBody,
+                  contentBodyJson: contentRecord.contentBodyJson,
+                }
+              : undefined,
           };
         },
         {
