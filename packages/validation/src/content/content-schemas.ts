@@ -164,7 +164,9 @@ export const createMediaItemSchema = z.object({
     .max(5 * 1024 * 1024 * 1024, 'File size cannot exceed 5GB'), // 5GB max
 
   // R2 storage path — optional, generated server-side if not provided.
-  // When provided (e.g. tests), validated to prevent path traversal.
+  // When provided (e.g. tests), validated to prevent path traversal here, and
+  // MediaItemService.create refuses any key outside the caller's own
+  // `{creatorId}/originals/` folder (Codex-58h6c).
   r2Key: z
     .string()
     .min(1, 'R2 key cannot be empty')

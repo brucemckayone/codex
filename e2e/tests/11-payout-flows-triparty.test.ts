@@ -325,7 +325,6 @@ describe('Tri-party (in-org agreement) payout flows', () => {
         data: {
           title: ctx.name('Test Media'),
           mediaType: 'video',
-          r2Key: `e2e/originals/${testMediaId}/original.mp4`,
           fileSizeBytes: 2097152,
           mimeType: 'video/mp4',
         },

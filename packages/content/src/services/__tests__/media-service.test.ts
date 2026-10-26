@@ -112,6 +112,50 @@ describe('MediaItemService', () => {
       expect(result.uploadedAt).toBeNull();
       expect(result.durationSeconds).toBeNull();
     });
+
+    // Codex-58h6c: the key is the file a presigned PUT and the upload
+    // fallback overwrite, and the file transcoding reads.
+    describe('a storage key the caller names', () => {
+      const named = (r2Key: string): CreateMediaItemInput => ({
+        title: 'Named key',
+        mediaType: 'video',
+        mimeType: 'video/mp4',
+        r2Key,
+        fileSizeBytes: 1024,
+      });
+      const stored = (r2Key: string) =>
+        db.query.mediaItems.findFirst({
+          where: (media, { eq }) => eq(media.r2Key, r2Key),
+        });
+
+      it('is used when it is in the creator’s own originals folder', async () => {
+        const mine = getOriginalKey(creatorId, crypto.randomUUID(), 'mine.mp4');
+        const result = await service.create(named(mine), creatorId);
+        expect(result.r2Key).toBe(mine);
+      });
+
+      it.each([
+        [
+          'another creator’s original',
+          () =>
+            getOriginalKey(otherCreatorId, crypto.randomUUID(), 'theirs.mp4'),
+        ],
+        [
+          'a key in no creator’s folder',
+          () => `e2e/originals/${crypto.randomUUID()}/original.mp4`,
+        ],
+        [
+          'the creator’s own key outside originals',
+          () => `${creatorId}/hls/${crypto.randomUUID()}/master.m3u8`,
+        ],
+      ])('is refused, with nothing created: %s', async (_case, key) => {
+        const r2Key = key();
+        await expect(
+          service.create(named(r2Key), creatorId)
+        ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+        expect(await stored(r2Key)).toBeUndefined();
+      });
+    });
   });
 
   describe('get', () => {

@@ -98,7 +98,6 @@ describe('Purchase History API', () => {
         data: {
           title: 'History Test Video 1',
           mediaType: 'video',
-          r2Key: `e2e/originals/${testMediaId1}/original.mp4`,
           fileSizeBytes: 1048576,
           mimeType: 'video/mp4',
         },
@@ -112,7 +111,6 @@ describe('Purchase History API', () => {
         data: {
           title: 'History Test Video 2',
           mediaType: 'video',
-          r2Key: `e2e/originals/${testMediaId2}/original.mp4`,
           fileSizeBytes: 2097152,
           mimeType: 'video/mp4',
         },

@@ -209,7 +209,6 @@ describe('Bi-party (orgless) payout flows', () => {
         data: {
           title: ctx.name('Test Media'),
           mediaType: 'video',
-          r2Key: `e2e/originals/${testMediaId}/original.mp4`,
           fileSizeBytes: 1048576,
           mimeType: 'video/mp4',
         },
