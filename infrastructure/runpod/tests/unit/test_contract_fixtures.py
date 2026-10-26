@@ -59,7 +59,9 @@ def _check(name: str, payload: dict) -> None:
         path.write_text(text)
         return
     assert path.exists(), f"{path} missing: run with UPDATE_CONTRACT_FIXTURES=1"
-    assert path.read_text() == text, (
+    # Compared as data: the commit hook's biome reformats the file (it puts
+    # a short array on one line), which must not read as a contract change.
+    assert json.loads(path.read_text()) == json.loads(text), (
         f"{path.name} no longer matches what the handler sends. If the change is "
         "intended, re-run with UPDATE_CONTRACT_FIXTURES=1 and run the validation "
         "package's contract test."
