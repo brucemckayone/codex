@@ -17,8 +17,9 @@ type ServerApi = ReturnType<typeof createServerApi>;
  *   are no creators to search.
  * - `unknown`: the org lookup failed, so the org's id is not known.
  *   Answering with every org's content would put other orgs' work in this
- *   org's palette, so content is not searched. Creators still are: the org
- *   worker scopes them by the slug itself, so they can only be this org's.
+ *   org's palette, so content is not searched. Creators are still fetched:
+ *   the org worker scopes them by the slug itself, so they can only be this
+ *   org's. (It does not filter them by the query yet: Codex-pd8m1.)
  */
 type SearchScope =
   | { kind: 'org'; orgId: string; slug: string }
@@ -36,6 +37,12 @@ function parseScopeSlug(raw: string | null): string | null {
   return parsed.success ? parsed.data : null;
 }
 
+// A 404 from either org read means the slug names no org: the documented
+// widening, never a failure worth a log.
+function isNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
 async function resolveScope(
   api: ServerApi,
   slug: string | null
@@ -51,10 +58,7 @@ async function resolveScope(
     );
     return { kind: 'unknown', slug };
   } catch (error) {
-    // No such org: the documented widening, and nothing to log.
-    if (error instanceof ApiError && error.status === 404) {
-      return { kind: 'platform' };
-    }
+    if (isNotFound(error)) return { kind: 'platform' };
     logReadFailure('Search scope org not loaded', { scope: slug }, error);
     return { kind: 'unknown', slug };
   }
@@ -77,7 +81,8 @@ function searchContent(
 }
 
 // Creators belong to an org: a slug no org has has none, and asking would
-// only 404. A slug whose lookup failed may still have them.
+// only 404. A slug whose lookup failed may still have them. (The worker does
+// not filter them by the query yet: Codex-pd8m1.)
 function searchCreators(
   api: ServerApi,
   scope: SearchScope,
@@ -112,7 +117,8 @@ export const GET: RequestHandler = async ({ url, platform, cookies }) => {
       contentRes.reason
     );
   }
-  if (creatorsRes.status === 'rejected') {
+  // A creators 404 after a failed lookup is the same "no such org".
+  if (creatorsRes.status === 'rejected' && !isNotFound(creatorsRes.reason)) {
     logReadFailure(
       'Search creators not loaded',
       { scope: scopeSlug },

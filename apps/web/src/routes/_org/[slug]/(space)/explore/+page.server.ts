@@ -257,8 +257,9 @@ export const load: PageServerLoad = async ({
       });
       // Every param that varies the RESULT must vary the key, or two filter
       // combinations read each other's cached payload. `v3` is the item shape:
-      // bump it whenever the browse list NARROWS, or slots the old code wrote
-      // keep serving the removed fields until their TTL (v2, Codex-osuqt: no
+      // bump it whenever the browse list CHANGES SHAPE, or slots the old code
+      // wrote keep serving removed fields, or lack a field a reader needs,
+      // until their TTL (v2, Codex-osuqt: no
       // body, no creator email; v3, Codex-1bdx0: the public list's media item
       // and org, no longer the whole media_items and organizations rows, and no
       // purchaseCount, owner 2026-10-26). The browse select (the shared

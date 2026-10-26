@@ -356,19 +356,19 @@ instead of the list envelope. Cache `{ items, pagination }` and re-wrap after.
 encodes the QUERY, never the payload, so dropping a field from a cached read (a
 column, a relation, a stripped body) leaves every slot written by the old code a
 valid hit after deploy. It keeps serving what was removed until its TTL runs
-out. The other direction bites too: a field a new reader needs is missing from
-every old slot, and nothing tells the reader so. The
-case that taught it: org content lists would have kept serving `creator.email`
-from 2h slots (Codex-osuqt). Put a shape version in the `type`, as
-`PUBLIC_CONTENT_SHAPE_VERSION` (`content:public:v4:…`) and explore's
-`content:auth:v3:…` do, and bump it with the change. Old slots are never read
-again. A bump also renames the cache-stats series. A cached payload is the whole
-thing the slot stores: for content-api's org list, `listPublic`'s rows, with
-the wire item built after the read; for explore's `content:auth`, the browse
-route's whole response. So stripping a field from the wire builder, or from
-the shared browse select (`PUBLIC_*_COLUMNS`, `CATALOGUE_CONTENT_COLUMNS` in
-`@codex/content`), is a narrowing of `content:auth`, and any change to
-`listPublic`'s select needs a `content:public` bump.
+out. The case that taught it: org content lists would have kept serving
+`creator.email` from 2h slots (Codex-osuqt). The other direction bites too: a
+field a new reader needs is missing from every old slot, and nothing tells the
+reader so. Put a shape version in the `type`, as `PUBLIC_CONTENT_SHAPE_VERSION`
+(`content:public:v4:…`) and explore's `content:auth:v3:…` do, and bump it with
+the change. Old slots are never read again. A bump also renames the
+cache-stats series. A cached payload is the whole thing the slot stores: for
+content-api's org list, `listPublic`'s rows, with the wire item built after
+the read; for explore's `content:auth`, the browse route's whole response. The
+shared column lists in `@codex/content` (`PUBLIC_*_COLUMNS`,
+`CATALOGUE_CONTENT_COLUMNS`) are selected by both `listPublic` and browse, so a
+change to them needs BOTH bumps; a field removed from the wire builder alone
+needs only the `content:auth` one.
 
 **Currently cached:** User profile (10min), user preferences (10min), public creator profile (10min, keyed by user id) + its username->id hop (1h), org branding/info and stats (4h, keyed by org slug), the org's public creators list (4h, under its own id `org:{slug}:creators` — bump both through `invalidateOrgPublicCaches`), org tiers (24h), org content collection versions. See `docs/caching-strategy.md` for full details.
 

@@ -61,17 +61,21 @@ const PUBLIC_CONTENT_CACHE_TTL = 7200;
  * PUBLIC_MEDIA_ITEM_COLUMNS, say) is missing from the old slots, and the wire
  * omits it, while `satisfies` tells TypeScript the row has it.
  *
- * v2 (Codex-osuqt): no creator email, and no body on a catalogue read. v3 (Codex-039vo): no body on a by-slug read of a gated row,
- * which a course-only practice flagged free used to keep. v4 (Codex-ve5eh,
+ * v2 (Codex-osuqt): no creator email, and no body on a catalogue read.
+ * v3 (Codex-039vo): no body on a by-slug read of a gated row, which a
+ * course-only practice flagged free used to keep. v4 (Codex-ve5eh,
  * Codex-567de, one bump for both): the slot holds listPublic's narrowed row,
  * the media item three columns (durationSeconds, thumbnailKey, hlsPreviewKey)
  * where it held the whole media_items row with its raw R2 keys, RunPod job id
  * and transcoding error, and the org four (id, name, slug, logoUrl) where it
  * held the whole organizations row; the content row has no `purchaseCount`.
+ *
  * The wire item (`toPublicItems`) is built AFTER the cache, so a change to it
- * alone needs no bump here. apps/web's /explore does cache the builder's
- * output (`content:auth:vN`), so a field removed from the builder needs a bump
- * THERE.
+ * alone needs no bump here. apps/web's /explore caches the browse route's
+ * response (`content:auth:vN`), so a change to the shared column lists
+ * (`PUBLIC_*_COLUMNS`, `CATALOGUE_CONTENT_COLUMNS`, which listPublic and
+ * browse both select) or a field removed from the builder needs a bump THERE
+ * too.
  *
  * THE RULE WHEN TWO BRANCHES BUMP AT ONCE, whatever order they merge in: the
  * one that merges SECOND takes a version no deployed build has ever written.

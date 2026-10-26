@@ -148,6 +148,22 @@ describe('GET /api/search', () => {
     );
   });
 
+  it('does not log a creators 404 after a failed lookup: the slug names no org', async () => {
+    getPublicInfo.mockRejectedValue(new ApiError(503, 'Service unavailable'));
+    getPublicCreators.mockRejectedValue(
+      new ApiError(404, 'Organization not found', 'NOT_FOUND')
+    );
+
+    const body = await search(`q=yoga&scope=${ORG_SLUG}`);
+
+    expect(body).toEqual({ content: [], creators: [] });
+    expect(loggerMock.warn).not.toHaveBeenCalledWith(
+      'Search creators not loaded',
+      expect.anything()
+    );
+    expectNoErrorLog();
+  });
+
   it('never searches every org when the lookup answers without an id', async () => {
     getPublicInfo.mockResolvedValue(null);
 
