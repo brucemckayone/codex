@@ -20,6 +20,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
+import type { MediaStatusChange } from '@codex/validation';
 import { eq } from 'drizzle-orm';
 import {
   afterAll,
@@ -30,6 +31,7 @@ import {
   it,
   vi,
 } from 'vitest';
+import type { MediaStatusFeed } from '../media-status';
 import type { TranscodingAlerts } from '../services/transcoding-alerts';
 import {
   TranscodingService,
@@ -401,6 +403,119 @@ describe.skipIf(!HAS_DB)('dispatch state machine (database)', () => {
           transcodingError: 'moov atom not found',
         })
       );
+    });
+
+    // Codex-l2c48.9: the studio hears from the delivery whose guarded write
+    // applied, as the emails do, and never from a stale job.
+    describe('live status', () => {
+      function publishingService() {
+        const changes: MediaStatusChange[] = [];
+        const feed: MediaStatusFeed = {
+          changed: (change) => {
+            changes.push(change);
+          },
+          removed: vi.fn(),
+          progress: vi.fn(async () => true),
+          resync: vi.fn(async () => {}),
+        };
+        const publishing = new TranscodingService({
+          db,
+          environment: 'test',
+          runpodApiKey: 'test-key',
+          runpodEndpointId: 'test-endpoint',
+          webhookBaseUrl: 'https://media-api.test',
+          mediaStatus: feed,
+        } as TranscodingServiceFullConfig);
+        return { publishing, changes };
+      }
+
+      it('publishes a completion once however many times it is delivered', async () => {
+        const { publishing, changes } = publishingService();
+        const media = await insertMedia({
+          status: MEDIA_STATUS.TRANSCODING,
+          transcodingAttempts: 1,
+          runpodJobId: 'job-live',
+        });
+
+        for (let delivery = 0; delivery < 3; delivery++) {
+          await publishing.handleWebhook({
+            jobId: 'job-live',
+            status: 'completed',
+            output: output(media.id),
+          });
+        }
+
+        const row = await read(media.id);
+        expect(changes).toEqual([
+          {
+            mediaId: media.id,
+            creatorId,
+            lifecycle: 'ready',
+            errorCode: null,
+            attempts: 1,
+            jobId: 'job-live',
+            at: row.updatedAt.getTime(),
+          },
+        ]);
+      });
+
+      it('publishes nothing for a job the row no longer holds', async () => {
+        const { publishing, changes } = publishingService();
+        const media = await insertMedia({
+          status: MEDIA_STATUS.TRANSCODING,
+          transcodingAttempts: 2,
+          runpodJobId: 'job-current',
+        });
+
+        await publishing.handleWebhook({
+          jobId: 'job-stale',
+          status: 'completed',
+          output: output(media.id),
+        });
+
+        expect((await read(media.id)).status).toBe('transcoding');
+        expect(changes).toHaveLength(0);
+      });
+
+      it('publishes one claim however many race for it', async () => {
+        const { publishing, changes } = publishingService();
+        const media = await insertMedia();
+
+        await Promise.all(
+          [1, 2, 3].map(() =>
+            publishing.claimForDispatch(media.id, [MEDIA_STATUS.UPLOADED], {
+              creatorId,
+            })
+          )
+        );
+
+        expect(changes.map((change) => change.lifecycle)).toEqual([
+          'transcoding',
+        ]);
+      });
+
+      it('writes nothing for a progress tick', async () => {
+        const { publishing } = publishingService();
+        const media = await insertMedia({
+          status: MEDIA_STATUS.TRANSCODING,
+          transcodingAttempts: 1,
+          runpodJobId: 'job-ticking',
+        });
+        const before = await read(media.id);
+
+        await publishing.handleProgressWebhook({
+          jobId: 'job-ticking',
+          status: 'progress',
+          progress: 40,
+          step: 'encoding_variants',
+          mediaId: media.id,
+          creatorId,
+        });
+
+        const after = await read(media.id);
+        expect(after.updatedAt).toEqual(before.updatedAt);
+        expect(after.transcodingProgress).toBe(before.transcodingProgress);
+      });
     });
 
     it("records a failed job's code without counting another attempt", async () => {

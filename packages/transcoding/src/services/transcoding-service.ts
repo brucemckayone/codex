@@ -66,6 +66,7 @@ import {
   TranscodingMediaNotFoundError,
   TranscodingNotRetryableError,
 } from '../errors';
+import { type MediaStatusFeed, publishMediaStatus } from '../media-status';
 import {
   isPassingFailure,
   RUNPOD_SERVERLESS_API_URL,
@@ -134,6 +135,11 @@ export interface TranscodingServiceConfig {
   runpodApi?: RunPodApi;
   /** Failure and setup-fault emails (Codex-l2c48.6). Absent: none sent. */
   alerts?: TranscodingAlerts;
+  /**
+   * The studio's live status (Codex-l2c48.9): every write that returned a
+   * row is published, and progress goes there only. Absent: nothing is.
+   */
+  mediaStatus?: MediaStatusFeed;
 }
 
 export interface TranscodingServiceFullConfig
@@ -255,6 +261,7 @@ export type InternalTriggerResult =
 export class TranscodingService extends BaseService {
   private readonly runpodApi: RunPodApi;
   private readonly alerts?: TranscodingAlerts;
+  private readonly mediaStatus?: MediaStatusFeed;
   private readonly runpodWorkersMax: number;
   private readonly runpodApiKey: string;
   private readonly runpodApiUrl: string;
@@ -306,6 +313,7 @@ export class TranscodingService extends BaseService {
       ? workersMax
       : RUNPOD_WORKERS_MAX_DEFAULT;
     this.alerts = config.alerts;
+    this.mediaStatus = config.mediaStatus;
     this.runpodApi =
       config.runpodApi ??
       new RunPodApi({
@@ -349,8 +357,6 @@ export class TranscodingService extends BaseService {
         transcodingError: null,
         transcodingErrorCode: null,
         runpodJobId: null,
-        transcodingProgress: 0,
-        transcodingStep: null,
         ...(options.priority !== undefined && {
           transcodingPriority: options.priority,
         }),
@@ -371,7 +377,14 @@ export class TranscodingService extends BaseService {
       )
       .returning();
 
-    return claimed ? (claimed as TranscodingMediaItem) : null;
+    if (!claimed) return null;
+    this.publish(claimed);
+    return claimed as TranscodingMediaItem;
+  }
+
+  /** Tell the studio what a guarded write returned. Never throws. */
+  publish(row: typeof mediaItems.$inferSelect): void {
+    publishMediaStatus(this.mediaStatus, row, this.obs);
   }
 
   /**
@@ -504,6 +517,7 @@ export class TranscodingService extends BaseService {
         .set({ runpodJobId: outcome.jobId, updatedAt: new Date() })
         .where(claimStillHeld)
         .returning();
+      for (const row of stored) this.publish(row);
       this.obs.info('transcoding.dispatched', {
         mediaId,
         runpodJobId: outcome.jobId,
@@ -519,6 +533,7 @@ export class TranscodingService extends BaseService {
         .set(waitingFields(outcome.code, outcome.detail))
         .where(claimStillHeld)
         .returning();
+      for (const row of waiting) this.publish(row);
       const context = {
         mediaId,
         code: outcome.code,
@@ -715,13 +730,12 @@ export class TranscodingService extends BaseService {
         loudnessRange: output.loudnessRange,
         transcodingError: null, // Clear any previous error
         transcodingErrorCode: null,
-        transcodingProgress: null,
-        transcodingStep: null,
         updatedAt: new Date(),
       },
       { heldJobId: media.runpodJobId }
     );
     if (!applied) return;
+    this.publish(applied);
 
     // thumbnailVariants is logged, not stored: every size is beside
     // thumbnailKey, in the folder it names.
@@ -822,7 +836,10 @@ export class TranscodingService extends BaseService {
       failedFields(code, detail),
       { code }
     );
-    if (failed) this.alerts?.mediaFailed(failed);
+    if (failed) {
+      this.publish(failed);
+      this.alerts?.mediaFailed(failed);
+    }
     return failed !== undefined;
   }
 
@@ -872,41 +889,31 @@ export class TranscodingService extends BaseService {
       mediaId,
       failedRows: result.length,
     });
-    for (const failed of result) this.alerts?.mediaFailed(failed);
+    for (const failed of result) {
+      this.publish(failed);
+      this.alerts?.mediaFailed(failed);
+    }
     return result.length > 0;
   }
 
   /**
-   * Handle a progress webhook from the transcoding handler.
-   * Updates progress percentage and current step in the database.
-   * Fire-and-forget: silently ignores updates for completed/failed jobs and
-   * for jobs the row no longer holds.
+   * A progress webhook from the transcoding handler: it goes to the studio's
+   * live status only, never Postgres (Codex-l2c48.9; about nine writes a job
+   * removed). The object applies a tick only while the row is `transcoding`
+   * and holds this job (or none yet), the rule the SQL WHERE used to be.
+   * Advisory: a tick that cannot be delivered is logged by the feed.
    */
   async handleProgressWebhook(
     payload: RunPodProgressWebhookPayload
   ): Promise<void> {
-    const { jobId, progress, step, mediaId } = payload;
-
-    // Match by jobId OR mediaId (the job id may not be stored yet). A DB
-    // error propagates: the webhook route logs it and answers 500.
-    await this.db
-      .update(mediaItems)
-      .set({
-        transcodingProgress: progress,
-        transcodingStep: step,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          or(
-            eq(mediaItems.runpodJobId, jobId),
-            mediaId ? eq(mediaItems.id, mediaId) : undefined
-          ),
-          eq(mediaItems.status, MEDIA_STATUS.TRANSCODING),
-          heldJobIs(jobId),
-          isNull(mediaItems.deletedAt)
-        )
-      );
+    const { jobId, progress, step, mediaId, creatorId } = payload;
+    // Every handler since the first sends mediaId when it has one; without
+    // it there is no item to show the tick on.
+    if (!mediaId || !this.mediaStatus) return;
+    await this.mediaStatus.progress(
+      { mediaId, jobId, step, progress },
+      creatorId ?? null
+    );
   }
 
   /**

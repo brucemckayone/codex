@@ -185,21 +185,19 @@ export const createMediaItemSchema = z.object({
 export type CreateMediaItemInput = z.infer<typeof createMediaItemSchema>;
 
 /**
- * Update Media Item Input
- * Used by transcoding service to update status, metadata, etc.
- * Also supports user-editable fields (title, description) via the studio UI.
+ * Update Media Item Input: what a creator may edit (PATCH /api/media/:id).
+ *
+ * Strict, so a body naming anything else is refused, not quietly trimmed.
+ * Status, keys and dimensions are written only by the upload and transcoding
+ * paths (Codex-l2c48.9): a creator setting `status: 'ready'` skipped the
+ * transcode, and the live status object never heard of the change.
  */
-export const updateMediaItemSchema = z.object({
-  title: z.string().min(1).max(255).optional(),
-  description: z.string().max(2000).optional().nullable(),
-  status: mediaStatusEnum.optional(),
-  durationSeconds: z.number().int().min(0).max(86400).optional(), // Max 24 hours
-  width: z.number().int().min(1).max(7680).optional(), // Max 8K width
-  height: z.number().int().min(1).max(4320).optional(), // Max 8K height
-  hlsMasterPlaylistKey: z.string().max(500).optional().nullable(),
-  thumbnailKey: z.string().max(500).optional().nullable(),
-  uploadedAt: z.date().optional(),
-});
+export const updateMediaItemSchema = z
+  .object({
+    title: z.string().min(1).max(255).optional(),
+    description: z.string().max(2000).optional().nullable(),
+  })
+  .strict();
 
 export type UpdateMediaItemInput = z.infer<typeof updateMediaItemSchema>;
 
@@ -218,9 +216,8 @@ export type UpdateMediaItemInput = z.infer<typeof updateMediaItemSchema>;
  * duration" and let the upload complete. A 400 here would lose the creator's
  * file after its bytes are already in R2.
  *
- * `min(1)`, unlike `updateMediaItemSchema`'s `min(0)`: a zero-length runtime is
- * not a runtime. Storing 0 paints a `0:00` badge, which is a lie, where NULL
- * correctly paints nothing.
+ * `min(1)`: a zero-length runtime is not a runtime. Storing 0 paints a
+ * `0:00` badge, which is a lie, where NULL correctly paints nothing.
  */
 export const uploadCompleteSchema = z
   .object({

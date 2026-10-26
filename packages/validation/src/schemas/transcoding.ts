@@ -277,6 +277,11 @@ export const runpodProgressWebhookSchema = z.object({
   progress: z.number().int().min(0).max(100),
   step: transcodingStepEnum,
   mediaId: uuidSchema.optional(),
+  // Echoed by the handler since Codex-l2c48.8 so the tick routes to the
+  // creator's status shard; it never decides who sees it (the object shows a
+  // tick only on the row it already holds). A value this can't take is
+  // dropped rather than costing the tick; an older handler sends none.
+  creatorId: z.string().min(1).max(64).nullish().catch(undefined),
 });
 
 export type RunPodProgressWebhookPayload = z.infer<

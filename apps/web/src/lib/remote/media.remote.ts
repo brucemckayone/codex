@@ -88,15 +88,10 @@ export const createMedia = command(createMediaSchema, async (data) => {
 
 const updateMediaSchema = z.object({
   id: z.string().uuid(),
+  // What a creator may edit; content-api refuses any other field.
   data: z.object({
     title: z.string().min(1).max(255).optional(),
     description: z.string().max(2000).optional().nullable(),
-    status: z
-      .enum(['uploading', 'uploaded', 'transcoding', 'ready', 'failed'])
-      .optional(),
-    durationSeconds: z.number().int().min(0).max(86400).optional(),
-    width: z.number().int().min(1).max(7680).optional(),
-    height: z.number().int().min(1).max(4320).optional(),
   }),
 });
 

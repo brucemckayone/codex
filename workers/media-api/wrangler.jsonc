@@ -27,6 +27,12 @@
       {
         "name": "ORPHAN_CLEANUP_DO",
         "class_name": "OrphanedFileCleanupDO"
+      },
+      // Live media status for studio tabs (Codex-l2c48.9). Reached only
+      // through statusObjectFor() in @codex/worker-utils.
+      {
+        "name": "MEDIA_STATUS",
+        "class_name": "MediaStatusObject"
       }
     ]
   },
@@ -37,6 +43,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["OrphanedFileCleanupDO"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["MediaStatusObject"]
     }
   ],
 
@@ -139,6 +149,10 @@
           {
             "name": "ORPHAN_CLEANUP_DO",
             "class_name": "OrphanedFileCleanupDO"
+          },
+          {
+            "name": "MEDIA_STATUS",
+            "class_name": "MediaStatusObject"
           }
         ]
       },
@@ -231,6 +245,10 @@
           {
             "name": "ORPHAN_CLEANUP_DO",
             "class_name": "OrphanedFileCleanupDO"
+          },
+          {
+            "name": "MEDIA_STATUS",
+            "class_name": "MediaStatusObject"
           }
         ]
       },

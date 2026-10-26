@@ -60,10 +60,16 @@ export interface MiddlewareConfig {
   enableSecurityHeaders?: boolean;
 }
 
+/** The bindings that decide which browser origins may call a worker. */
+type OriginBindings = Partial<
+  Pick<Bindings, 'WEB_APP_URL' | 'API_URL' | 'ENVIRONMENT'>
+>;
+
 /**
- * Creates CORS middleware with standard configuration
+ * Whether a browser origin may call the workers: CORS, and the media status
+ * socket's upgrade, which CORS does not cover (Codex-l2c48.9).
  *
- * Supports:
+ * Allows:
  * - Production URLs (from WEB_APP_URL, API_URL env vars)
  * - Preview deployments (e.g., codex-preview-123.revelations.studio)
  * - Staging deployments (e.g., codex-staging.revelations.studio)
@@ -71,60 +77,63 @@ export interface MiddlewareConfig {
  * - Local dev subdomains (*.lvh.me with any port)
  * - Phone/LAN testing (*.{ip}.nip.io with any port)
  */
+export function isAllowedOrigin(
+  origin: string,
+  env: OriginBindings | undefined
+): boolean {
+  const isDev = env?.ENVIRONMENT === 'development';
+
+  // Exact match origins from environment
+  const exactMatchOrigins = [
+    env?.WEB_APP_URL,
+    env?.API_URL,
+    // Dev-only localhost origins
+    ...(isDev
+      ? [
+          'http://localhost:3000',
+          'http://localhost:5173',
+          'http://localhost:8787',
+          'http://localhost:8788',
+          'http://localhost:8789',
+          'http://localhost:4001',
+          'http://localhost:4002',
+        ]
+      : []),
+  ];
+  if (exactMatchOrigins.includes(origin)) {
+    return true;
+  }
+
+  // Pattern-based matching for preview and staging deployments
+  const allowedPatterns = [
+    // Preview deployments: *-preview-{PR}.revelations.studio
+    /^https:\/\/[\w-]+-preview-\d+\.revelations\.studio$/,
+    // Staging deployments: *-staging.revelations.studio
+    /^https:\/\/[\w-]+-staging\.revelations\.studio$/,
+    // Production deployments: *.revelations.studio (any subdomain)
+    /^https:\/\/[\w-]+\.revelations\.studio$/,
+    // Dev-only patterns: lvh.me and nip.io for local/LAN testing
+    ...(isDev
+      ? [
+          /^http:\/\/([\w-]+\.)*lvh\.me(:\d+)?$/,
+          /^http:\/\/([\w-]+\.)*\d+\.\d+\.\d+\.\d+\.nip\.io(:\d+)?$/,
+        ]
+      : []),
+  ];
+  return allowedPatterns.some((pattern) => pattern.test(origin));
+}
+
+/**
+ * Creates CORS middleware with standard configuration: the origins
+ * isAllowedOrigin allows.
+ */
 export function createCorsMiddleware(): MiddlewareHandler<HonoEnv> {
   return cors({
-    origin: (origin, c) => {
-      // Exact match origins from environment
-      const exactMatchOrigins = [
-        c.env?.WEB_APP_URL,
-        c.env?.API_URL,
-        // Dev-only localhost origins
-        ...(c.env?.ENVIRONMENT === 'development'
-          ? [
-              'http://localhost:3000',
-              'http://localhost:5173',
-              'http://localhost:8787',
-              'http://localhost:8788',
-              'http://localhost:8789',
-              'http://localhost:4001',
-              'http://localhost:4002',
-            ]
-          : []),
-      ].filter(Boolean) as string[];
-
-      // Check exact matches
-      if (exactMatchOrigins.includes(origin)) {
-        return origin;
-      }
-
-      const isDev = c.env?.ENVIRONMENT === 'development';
-
-      // Pattern-based matching for preview and staging deployments
-      const allowedPatterns = [
-        // Preview deployments: *-preview-{PR}.revelations.studio
-        /^https:\/\/[\w-]+-preview-\d+\.revelations\.studio$/,
-        // Staging deployments: *-staging.revelations.studio
-        /^https:\/\/[\w-]+-staging\.revelations\.studio$/,
-        // Production deployments: *.revelations.studio (any subdomain)
-        /^https:\/\/[\w-]+\.revelations\.studio$/,
-        // Dev-only patterns: lvh.me and nip.io for local/LAN testing
-        ...(isDev
-          ? [
-              /^http:\/\/([\w-]+\.)*lvh\.me(:\d+)?$/,
-              /^http:\/\/([\w-]+\.)*\d+\.\d+\.\d+\.\d+\.nip\.io(:\d+)?$/,
-            ]
-          : []),
-      ];
-
-      for (const pattern of allowedPatterns) {
-        if (pattern.test(origin)) {
-          return origin;
-        }
-      }
-
-      // Default fallback for development/testing
-      return exactMatchOrigins[0] || 'http://localhost:3000';
-    },
+    origin: (origin, c) =>
+      isAllowedOrigin(origin, c.env)
+        ? origin
+        : // Default fallback for development/testing
+          c.env?.WEB_APP_URL || c.env?.API_URL || 'http://localhost:3000',
     credentials: true,
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'Cookie'],

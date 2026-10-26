@@ -8,9 +8,11 @@
  */
 
 import { TRANSCODING_ERROR_MAX_LENGTH } from '@codex/constants';
+import type { MediaProgressTick, MediaStatusChange } from '@codex/validation';
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MediaStatusFeed } from '../media-status';
 import type { EndpointWorkersResult, RunPodApi } from '../runpod-api';
 import type { TranscodingAlerts } from '../services/transcoding-alerts';
 import {
@@ -110,6 +112,24 @@ const config = (db: unknown): TranscodingServiceFullConfig =>
     runpodApiBaseUrl: 'https://api.mock',
   }) as TranscodingServiceFullConfig;
 
+/** A status feed that records what the service told it. */
+function recordingFeed() {
+  const changes: MediaStatusChange[] = [];
+  const ticks: { tick: MediaProgressTick; creatorId: string | null }[] = [];
+  const feed: MediaStatusFeed = {
+    changed: (change) => {
+      changes.push(change);
+    },
+    removed: vi.fn(),
+    progress: async (progressTick, creatorId) => {
+      ticks.push({ tick: progressTick, creatorId });
+      return true;
+    },
+    resync: vi.fn(async () => {}),
+  };
+  return { feed, changes, ticks };
+}
+
 // spyOn, not `global.fetch = vi.fn()`: restoreAllMocks() undoes a spy only.
 function runpodAnswers(status: number, body: unknown) {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -148,12 +168,46 @@ describe('claimForDispatch', () => {
       transcodingError: null,
       transcodingErrorCode: null,
       runpodJobId: null,
-      transcodingProgress: 0,
-      transcodingStep: null,
     });
+    // Progress lives in the status object now (Codex-l2c48.9).
+    expect(write?.set).not.toHaveProperty('transcodingProgress');
+    expect(write?.set).not.toHaveProperty('transcodingStep');
     expect(render(write?.set.transcodingAttempts)).toContain(
       '"transcoding_attempts" + 1'
     );
+  });
+
+  it('publishes the claimed row, and nothing when the claim lost', async () => {
+    const { feed, changes } = recordingFeed();
+    const publishing = new TranscodingService({
+      ...config(fake.db),
+      mediaStatus: feed,
+    });
+    fake.returning.push(
+      [
+        {
+          ...media({ status: 'transcoding', transcodingAttempts: 1 }),
+          updatedAt: new Date(),
+        },
+      ],
+      []
+    );
+
+    await publishing.claimForDispatch(MEDIA_ID, ['uploaded'], {
+      creatorId: CREATOR_ID,
+    });
+    await publishing.claimForDispatch(MEDIA_ID, ['uploaded'], {
+      creatorId: CREATOR_ID,
+    });
+
+    expect(changes).toEqual([
+      expect.objectContaining({
+        mediaId: MEDIA_ID,
+        creatorId: CREATOR_ID,
+        lifecycle: 'transcoding',
+        attempts: 1,
+      }),
+    ]);
   });
 
   it("claims only the creator's undeleted row, from the allowed states, with attempts left", async () => {
@@ -641,21 +695,83 @@ describe('handleWebhook', () => {
   });
 });
 
+describe('publish', () => {
+  it('never fails the write it reports', () => {
+    const throwing: MediaStatusFeed = {
+      ...recordingFeed().feed,
+      changed: () => {
+        throw new Error('publisher bug');
+      },
+    };
+    const publishing = new TranscodingService({
+      ...config(fake.db),
+      mediaStatus: throwing,
+    });
+    const claimed = { ...media(), updatedAt: new Date() };
+    expect(() =>
+      publishing.publish(claimed as Parameters<typeof publishing.publish>[0])
+    ).not.toThrow();
+  });
+});
+
 describe('handleProgressWebhook', () => {
-  it('updates progress only for the job the row holds', async () => {
-    await service.handleProgressWebhook({
-      jobId: JOB_ID,
-      status: 'progress',
-      progress: 40,
-      step: 'encoding_variants',
-      mediaId: MEDIA_ID,
+  const tick = {
+    jobId: JOB_ID,
+    status: 'progress' as const,
+    progress: 40,
+    step: 'encoding_variants' as const,
+    mediaId: MEDIA_ID,
+  };
+
+  // Progress lives only in the status object (Codex-l2c48.9): ~9 Neon
+  // writes a job, gone, and the object drops a stale job's tick itself.
+  it('sends the tick to the status object and touches no database', async () => {
+    const { feed, ticks } = recordingFeed();
+    const publishing = new TranscodingService({
+      ...config(fake.db),
+      mediaStatus: feed,
     });
 
-    expect(fake.writes[0]?.set).toMatchObject({ transcodingProgress: 40 });
-    expect(fake.writes[0]?.where).toContain(
-      '"media_items"."runpod_job_id" is null or'
-    );
-    expect(fake.writes[0]?.where).toContain('"media_items"."status" = ');
+    await publishing.handleProgressWebhook({ ...tick, creatorId: CREATOR_ID });
+
+    expect(ticks).toEqual([
+      {
+        tick: {
+          mediaId: MEDIA_ID,
+          jobId: JOB_ID,
+          step: 'encoding_variants',
+          progress: 40,
+        },
+        creatorId: CREATOR_ID,
+      },
+    ]);
+    expect(fake.writes).toHaveLength(0);
+    expect(fake.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("routes an older handler's tick, which names no creator", async () => {
+    const { feed, ticks } = recordingFeed();
+    const publishing = new TranscodingService({
+      ...config(fake.db),
+      mediaStatus: feed,
+    });
+
+    await publishing.handleProgressWebhook(tick);
+
+    expect(ticks[0]?.creatorId).toBeNull();
+  });
+
+  it('drops a tick that names no item', async () => {
+    const { feed, ticks } = recordingFeed();
+    const publishing = new TranscodingService({
+      ...config(fake.db),
+      mediaStatus: feed,
+    });
+
+    await publishing.handleProgressWebhook({ ...tick, mediaId: undefined });
+
+    expect(ticks).toHaveLength(0);
+    expect(fake.writes).toHaveLength(0);
   });
 });
 

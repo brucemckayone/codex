@@ -19,6 +19,7 @@
  *
  * Durable Objects:
  * - OrphanedFileCleanupDO: Periodic cleanup of orphaned R2 files
+ * - MediaStatusObject: live media status for studio tabs (Codex-l2c48.9)
  *
  * Routes:
  * - /health - Health check endpoint (public)
@@ -27,6 +28,8 @@
  * - /api/transcoding/retry/:id - Retry failed transcoding (authenticated)
  * - /api/transcoding/status/:id - Get transcoding status (authenticated)
  * - /internal/orphan-cleanup/* - Orphan cleanup DO management (internal)
+ * - /api/media-status/ticket, /api/media-status/live - live media status
+ * - /internal/media-status - a lifecycle change from content-api (worker auth)
  */
 
 import { messageForLog } from '@codex/database';
@@ -41,10 +44,12 @@ import {
   standardDatabaseCheck,
 } from '@codex/worker-utils';
 // Import route modules
+import mediaStatusRoutes from './routes/media-status';
 import transcodingRoutes from './routes/transcoding';
 import webhookRoutes from './routes/webhook';
 
-// Export Durable Object class for Cloudflare binding
+// Export Durable Object classes for Cloudflare bindings
+export { MediaStatusObject } from './durable-objects/media-status-object';
 export { OrphanedFileCleanupDO } from './durable-objects/orphaned-file-cleanup-do';
 
 // ============================================================================
@@ -104,6 +109,14 @@ app.route('/', transcodingRoutes);
  * - /api/transcoding/webhook (HMAC verified, no session auth)
  */
 app.route('/', webhookRoutes);
+
+/**
+ * Mount live media status routes (Codex-l2c48.9)
+ * - /api/media-status/ticket (authenticated)
+ * - /api/media-status/live (ticket, WebSocket)
+ * - /internal/media-status (workerAuth)
+ */
+app.route('/', mediaStatusRoutes);
 
 // ============================================================================
 // Mock RunPod /run endpoint (test/dev only)

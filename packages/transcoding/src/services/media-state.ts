@@ -2,6 +2,10 @@
  * The SETs of the moves to `failed` and back to waiting, shared by the
  * dispatch state machine (TranscodingService) and the hourly maintenance run
  * (TranscodingMaintenance). Internal to the package.
+ *
+ * Neither touches transcoding_progress / transcoding_step: progress lives in
+ * the studio's status object now (Codex-l2c48.9), and the columns are
+ * dropped once no deployed code writes them.
  */
 
 import {
@@ -18,8 +22,6 @@ export function failedFields(code: TranscodingErrorCode, detail: string) {
     status: MEDIA_STATUS.FAILED,
     transcodingError: detail.slice(0, TRANSCODING_ERROR_MAX_LENGTH),
     transcodingErrorCode: code,
-    transcodingProgress: null,
-    transcodingStep: null,
     updatedAt: new Date(),
   };
 }
@@ -34,8 +36,6 @@ export function waitingFields(code: TranscodingErrorCode, detail: string) {
     transcodingError: detail.slice(0, TRANSCODING_ERROR_MAX_LENGTH),
     transcodingErrorCode: code,
     transcodingAttempts: sql`GREATEST(${mediaItems.transcodingAttempts} - 1, 0)`,
-    transcodingProgress: null,
-    transcodingStep: null,
     updatedAt: new Date(),
   };
 }

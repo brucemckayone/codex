@@ -76,12 +76,18 @@ import {
 } from '@codex/subscription';
 import {
   type AlertLedger,
+  type MediaStatusFeed,
+  type MediaStatusPublisher,
   TranscodingAlerts,
   TranscodingMaintenance,
   TranscodingService,
 } from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
 import { sendEmailToWorker } from '../email/send-email';
+import {
+  DurableObjectMediaStatusFeed,
+  WorkerMediaStatusPublisher,
+} from '../media-status';
 import { followUpMemberDeparture } from './member-departure';
 import type { ServiceRegistry } from './types';
 import type { BackgroundTracker } from './upload-shared';
@@ -268,6 +274,12 @@ export interface ServiceRegistryOverrides {
    * change, verified on its own.
    */
   skipHyperdrive?: boolean;
+  /**
+   * Where media lifecycle changes go (Codex-l2c48.9). MediaStatusObject's
+   * alarm passes a feed into itself, so a retry it runs reports straight
+   * back to it rather than through a stub to itself.
+   */
+  mediaStatus?: MediaStatusFeed;
 }
 
 /**
@@ -488,6 +500,42 @@ export async function createServiceRegistry(
     return _transcodingAlerts;
   }
 
+  // Not a `ctx.services` entry: shared by the media and transcoding getters.
+  let _mediaStatusFeed: MediaStatusFeed | undefined;
+  /**
+   * The status object's feed (Codex-l2c48.9): media-api binds MEDIA_STATUS.
+   * None without an execution context to send from. A publish touches no
+   * pool, so it rides plain waitUntil (`cacheWaitUntil`), as a KV put does.
+   */
+  function getMediaStatusFeed(): MediaStatusFeed | undefined {
+    if (overrides?.mediaStatus) return overrides.mediaStatus;
+    if (!env.MEDIA_STATUS || !cacheWaitUntil) return undefined;
+    _mediaStatusFeed ??= new DurableObjectMediaStatusFeed(
+      env.MEDIA_STATUS,
+      cacheWaitUntil,
+      _obs
+    );
+    return _mediaStatusFeed;
+  }
+
+  /**
+   * MediaItemService's publisher. A worker without the binding (content-api)
+   * publishes through media-api, the way it triggers a transcode.
+   */
+  function getMediaStatusPublisher(): MediaStatusPublisher | undefined {
+    const feed = getMediaStatusFeed();
+    if (feed) return feed;
+    if (!env.MEDIA_API_URL || !env.WORKER_SHARED_SECRET || !cacheWaitUntil) {
+      return undefined;
+    }
+    return new WorkerMediaStatusPublisher(
+      env.MEDIA_API_URL,
+      env.WORKER_SHARED_SECRET,
+      cacheWaitUntil,
+      _obs
+    );
+  }
+
   /**
    * Get environment (defaults to 'development')
    */
@@ -629,6 +677,7 @@ export async function createServiceRegistry(
           db: getSharedDb(),
           environment: getEnvironment(),
           r2: mediaR2,
+          mediaStatus: getMediaStatusPublisher(),
         });
       }
       return _media;
@@ -1310,6 +1359,7 @@ export async function createServiceRegistry(
             ? Number(env.RUNPOD_WORKERS_MAX)
             : undefined,
           alerts: getTranscodingAlerts(),
+          mediaStatus: getMediaStatusFeed(),
         });
       }
       return _transcoding;
@@ -1329,6 +1379,7 @@ export async function createServiceRegistry(
             ? async (key) => (await originals.head(key)) !== null
             : undefined,
           alerts: getTranscodingAlerts(),
+          mediaStatus: getMediaStatusFeed(),
         });
       }
       return _transcodingMaintenance;

@@ -231,43 +231,26 @@ describe('Media Item Schemas', () => {
   });
 
   describe('updateMediaItemSchema', () => {
-    it('should validate status update', () => {
-      const update = {
-        status: 'ready' as const,
-      };
-
-      const result = updateMediaItemSchema.parse(update);
-      expect(result.status).toBe('ready');
+    it('accepts what a creator may edit', () => {
+      const result = updateMediaItemSchema.parse({
+        title: 'Retitled',
+        description: null,
+      });
+      expect(result).toEqual({ title: 'Retitled', description: null });
     });
 
-    it('should validate metadata update', () => {
-      const update = {
-        durationSeconds: 3600, // 1 hour
-        width: 1920,
-        height: 1080,
-        hlsMasterPlaylistKey: 'hls/abc123/master.m3u8',
-        thumbnailKey: 'thumbnails/abc123/thumb.jpg',
-      };
-
-      const result = updateMediaItemSchema.parse(update);
-      expect(result.width).toBe(1920);
-      expect(result.height).toBe(1080);
-    });
-
-    it('should reject duration exceeding 24 hours', () => {
-      expect(() =>
-        updateMediaItemSchema.parse({
-          durationSeconds: 86401, // 24 hours + 1 second
-        })
-      ).toThrow();
-    });
-
-    it('should reject width exceeding 8K', () => {
-      expect(() =>
-        updateMediaItemSchema.parse({
-          width: 7681, // 8K + 1
-        })
-      ).toThrow();
+    // A creator setting these skipped the transcode (`status: 'ready'`) or
+    // pointed their item at someone else's stream (Codex-l2c48.9).
+    it.each([
+      { status: 'ready' },
+      { hlsMasterPlaylistKey: 'other-creator/hls/master.m3u8' },
+      { thumbnailKey: 'other-creator/thumb.webp' },
+      { durationSeconds: 3600 },
+      { width: 1920, height: 1080 },
+    ])('refuses %o', (field) => {
+      expect(
+        updateMediaItemSchema.safeParse({ title: 'T', ...field }).success
+      ).toBe(false);
     });
   });
 });

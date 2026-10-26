@@ -116,6 +116,13 @@ export type Bindings = {
   RATE_LIMIT_DO?: import('@cloudflare/workers-types').DurableObjectNamespace;
 
   /**
+   * media-api's MediaStatusObject namespace (Codex-l2c48.9): live media
+   * status for studio tabs. Bound on media-api only; reach it through
+   * statusObjectFor() in @codex/worker-utils, never directly.
+   */
+  MEDIA_STATUS?: import('@cloudflare/workers-types').DurableObjectNamespace;
+
+  /**
    * Session caching KV namespace
    * Used for caching authenticated sessions to reduce database load
    */

@@ -39,6 +39,18 @@ export {
   type HealthCheckResult,
   standardDatabaseCheck,
 } from './health-checks';
+// Live media status (Codex-l2c48.9): reaching media-api's MediaStatusObject.
+export {
+  DurableObjectMediaStatusFeed,
+  deliverMediaStatusEvent,
+  MEDIA_STATUS_CONNECT_HEADERS,
+  MEDIA_STATUS_INTERNAL_ROUTE,
+  MEDIA_STATUS_OBJECT_PATHS,
+  MEDIA_STATUS_SHARD_COUNT,
+  mediaStatusShardOf,
+  statusObjectFor,
+  WorkerMediaStatusPublisher,
+} from './media-status';
 // Middleware factories
 export {
   createAuthMiddleware,
@@ -55,6 +67,7 @@ export {
   createSecurityHeadersMiddleware,
   createSecurityHeadersWrapper,
   ERROR_CODES,
+  isAllowedOrigin,
   type MiddlewareConfig,
   sequence,
 } from './middleware';

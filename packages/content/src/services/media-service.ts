@@ -38,8 +38,10 @@ import {
   getHlsPrefix,
   getOriginalKey,
   isValidR2Key,
+  type MediaStatusPublisher,
   PATH_CONFIG,
   parseR2Key,
+  publishMediaStatus,
 } from '@codex/transcoding';
 import type {
   CreateMediaItemInput,
@@ -49,7 +51,7 @@ import {
   createMediaItemSchema,
   updateMediaItemSchema,
 } from '@codex/validation';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { MediaNotFoundError } from '../errors';
 import type {
   MediaItem,
@@ -57,6 +59,21 @@ import type {
   MediaItemWithRelations,
   PaginationParams,
 } from '../types';
+
+/** The columns applyUpdate writes: the creator's two, or a lifecycle write's. */
+type MediaRowUpdate = Partial<
+  Pick<
+    typeof mediaItems.$inferInsert,
+    | 'title'
+    | 'description'
+    | 'status'
+    | 'durationSeconds'
+    | 'width'
+    | 'height'
+    | 'hlsMasterPlaylistKey'
+    | 'thumbnailKey'
+  >
+>;
 
 /**
  * A key the caller named is used only inside the caller's OWN originals
@@ -76,6 +93,11 @@ function isOwnOriginalKey(r2Key: string, creatorId: string): boolean {
 interface MediaItemServiceConfig extends ServiceConfig {
   /** R2Service with signing config for presigned upload URLs. Optional in dev. */
   r2?: R2Service;
+  /**
+   * Live status for the creator's studio tabs (Codex-l2c48.9): told after a
+   * write returned its row. Absent: nothing is published.
+   */
+  mediaStatus?: MediaStatusPublisher;
 }
 
 /**
@@ -91,10 +113,12 @@ interface MediaItemServiceConfig extends ServiceConfig {
  */
 export class MediaItemService extends BaseService {
   private readonly r2?: R2Service;
+  private readonly mediaStatus?: MediaStatusPublisher;
 
   constructor(config: MediaItemServiceConfig) {
     super(config);
     this.r2 = config.r2;
+    this.mediaStatus = config.mediaStatus;
   }
   /**
    * Create new media item
@@ -170,6 +194,8 @@ export class MediaItemService extends BaseService {
           mediaId,
         });
       }
+      // The uploading tab reports its % against this row (owner's choice 2A).
+      publishMediaStatus(this.mediaStatus, newMediaItem, this.obs);
 
       // Generate presigned upload URL if R2 signing is available.
       // Null in local dev (no S3 creds) — client uses fallback upload endpoint.
@@ -280,32 +306,31 @@ export class MediaItemService extends BaseService {
   }
 
   /**
-   * Update media item
-   *
-   * Security:
-   * - Validates creator ownership before update
-   * - Used by transcoding service to update status/metadata
-   *
-   * Common updates:
-   * - Set status to 'transcoding', 'ready', or 'failed'
-   * - Add HLS playlist key and thumbnail key
-   * - Set duration, width, height metadata
+   * Update what a creator may edit: title and description (PATCH
+   * /api/media/:id). Lifecycle, keys and dimensions are written only by the
+   * upload and transcoding paths, whose guarded writes publish to the live
+   * status object (Codex-l2c48.9).
    *
    * @param id - Media item ID
    * @param input - Partial update data
    * @param creatorId - Creator ID (for authorization)
    * @returns Updated media item
-   * @throws {MediaNotFoundError} If media doesn't exist
-   * @throws {ForbiddenError} If media doesn't belong to creator
+   * @throws {MediaNotFoundError} If media doesn't exist or isn't the creator's
    */
   async update(
     id: string,
     input: UpdateMediaItemInput,
     creatorId: string
   ): Promise<MediaItem> {
-    // Validate input
-    const validated = updateMediaItemSchema.parse(input);
+    return this.applyUpdate(id, updateMediaItemSchema.parse(input), creatorId);
+  }
 
+  /** One scoped write of the given columns; the row it wrote. */
+  private async applyUpdate(
+    id: string,
+    fields: MediaRowUpdate,
+    creatorId: string
+  ): Promise<MediaItem> {
     try {
       const result = await this.db.transaction(async (tx) => {
         // Verify media exists and belongs to creator
@@ -324,7 +349,7 @@ export class MediaItemService extends BaseService {
         const [updated] = await tx
           .update(mediaItems)
           .set({
-            ...validated,
+            ...fields,
             updatedAt: new Date(),
           })
           .where(
@@ -405,6 +430,8 @@ export class MediaItemService extends BaseService {
             and(eq(mediaItems.id, id), withCreatorScope(mediaItems, creatorId))
           );
       });
+      // After commit: a rolled-back delete must not vanish from the studio.
+      this.mediaStatus?.removed(id, creatorId);
 
       // After commit: hard-delete R2 objects across all four prefixes.
       // The helper swallows internally so a list/delete failure on one
@@ -580,7 +607,37 @@ export class MediaItemService extends BaseService {
     // 2. TranscodingService atomic WHERE (eq(status, 'transcoding')) for webhook updates
     // 3. upload-complete handler checking current status before calling this
     // No extra DB roundtrip here — avoids Neon proxy hang in workerd.
-    return this.update(id, { status }, creatorId);
+    const updated = await this.applyUpdate(id, { status }, creatorId);
+    publishMediaStatus(this.mediaStatus, updated, this.obs);
+    return updated;
+  }
+
+  /**
+   * Record the uploading tab's own measurement of the file's runtime, so the
+   * runtime badge shows before transcoding completes. Only into an empty
+   * column, in the same statement: the completion webhook's figure, measured
+   * off the transcoded output, is the better authority and is never
+   * overwritten, even by an upload-complete re-POST racing it.
+   */
+  async recordClientDuration(
+    id: string,
+    creatorId: string,
+    durationSeconds: number
+  ): Promise<void> {
+    try {
+      await this.db
+        .update(mediaItems)
+        .set({ durationSeconds, updatedAt: new Date() })
+        .where(
+          and(
+            eq(mediaItems.id, id),
+            scopedNotDeleted(mediaItems, creatorId),
+            isNull(mediaItems.durationSeconds)
+          )
+        );
+    } catch (error) {
+      this.handleError(error, 'recordClientDuration');
+    }
   }
 
   /**
@@ -593,7 +650,7 @@ export class MediaItemService extends BaseService {
    */
   async markUploaded(id: string, creatorId: string): Promise<void> {
     try {
-      await this.db
+      const [uploaded] = await this.db
         .update(mediaItems)
         .set({
           status: MEDIA_STATUS.UPLOADED,
@@ -606,7 +663,9 @@ export class MediaItemService extends BaseService {
             scopedNotDeleted(mediaItems, creatorId),
             eq(mediaItems.status, MEDIA_STATUS.UPLOADING)
           )
-        );
+        )
+        .returning();
+      if (uploaded) publishMediaStatus(this.mediaStatus, uploaded, this.obs);
     } catch (error) {
       this.handleError(error, 'markUploaded');
     }
@@ -633,7 +692,7 @@ export class MediaItemService extends BaseService {
     },
     creatorId: string
   ): Promise<MediaItem> {
-    return this.update(
+    const ready = await this.applyUpdate(
       id,
       {
         status: MEDIA_STATUS.READY,
@@ -645,6 +704,8 @@ export class MediaItemService extends BaseService {
       },
       creatorId
     );
+    publishMediaStatus(this.mediaStatus, ready, this.obs);
+    return ready;
   }
 
   /**
@@ -671,7 +732,7 @@ export class MediaItemService extends BaseService {
     creatorId: string,
     error: string
   ): Promise<void> {
-    await this.db
+    const [waiting] = await this.db
       .update(mediaItems)
       .set({
         transcodingError: error.slice(0, TRANSCODING_ERROR_MAX_LENGTH),
@@ -684,6 +745,9 @@ export class MediaItemService extends BaseService {
           scopedNotDeleted(mediaItems, creatorId),
           eq(mediaItems.status, MEDIA_STATUS.UPLOADED)
         )
-      );
+      )
+      .returning();
+    // A waiting row: the status object retries it within minutes.
+    if (waiting) publishMediaStatus(this.mediaStatus, waiting, this.obs);
   }
 }

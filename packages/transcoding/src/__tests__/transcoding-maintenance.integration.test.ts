@@ -17,6 +17,7 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
+import type { MediaStatusResync } from '@codex/validation';
 import { eq, sql } from 'drizzle-orm';
 import {
   afterAll,
@@ -462,6 +463,57 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
     });
 
     // One row per step, each one the step would act on were it not deleted.
+    // Codex-l2c48.9: the run hands the status object every in-flight row,
+    // so a publish lost along the way is put right within the hour.
+    it('resyncs the live status with every in-flight row, and only those', async () => {
+      const resync = vi.fn(async (_resync: MediaStatusResync) => {});
+      const resyncing = new TranscodingMaintenance({
+        db,
+        environment: 'test',
+        transcoding: new TranscodingService({
+          db,
+          environment: 'test',
+          runpodApiKey: 'test-key',
+          runpodEndpointId: 'test-endpoint',
+          webhookBaseUrl: 'https://media-api.test',
+          runpodApi: api as unknown as RunPodApi,
+        } as TranscodingServiceFullConfig),
+        originalExists,
+        mediaStatus: {
+          changed: vi.fn(),
+          removed: vi.fn(),
+          progress: vi.fn(async () => true),
+          resync,
+        },
+      });
+      const uploading = await insert({ status: MEDIA_STATUS.UPLOADING });
+      const transcoding = await insert({
+        status: MEDIA_STATUS.TRANSCODING,
+        runpodJobId: 'job-in-flight',
+      });
+      await insert({
+        status: MEDIA_STATUS.READY,
+        hlsMasterPlaylistKey: 'hls/master.m3u8',
+        thumbnailKey: 'thumb.webp',
+      });
+      await insert({ status: MEDIA_STATUS.FAILED });
+      await insert({ status: MEDIA_STATUS.UPLOADED, deletedAt: new Date() });
+
+      const report = await resyncing.run({
+        now: new Date(),
+        deadline: Date.now() + 60_000,
+      });
+
+      expect(resync).toHaveBeenCalledTimes(1);
+      const [sent] = resync.mock.calls[0] ?? [];
+      expect(sent?.complete).toBe(true);
+      const mine = sent?.rows.filter((row) => row.creatorId === creatorId);
+      expect(mine?.map((row) => row.mediaId).sort()).toEqual(
+        [uploading.id, transcoding.id].sort()
+      );
+      expect(report.resynced).toBe(sent?.rows.length);
+    });
+
     it('never touches deleted media in any step', async () => {
       const deletedAt = new Date();
       const lost = await insert({

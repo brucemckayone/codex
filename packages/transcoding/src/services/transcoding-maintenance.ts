@@ -14,6 +14,9 @@
  *    transcoder, or stranded by a failed content-api hop); give up at 24 h.
  * 5. Check `uploading` rows untouched for 24 h against R2: the file arrived
  *    (upload-complete was lost) or it never did.
+ * 6. Resync the studio's live status (Codex-l2c48.9) with every non-terminal
+ *    row, after the steps above have written theirs: a lost publish is put
+ *    right within the hour.
  *
  * A row the run fails emails its creator and the owner (TranscodingAlerts),
  * once: only when the guarded write returned it. A setup fault a step finds
@@ -38,7 +41,9 @@ import {
   InternalServiceError,
   type ServiceConfig,
 } from '@codex/service-errors';
-import { and, asc, eq, isNull, lt } from 'drizzle-orm';
+import { MEDIA_STATUS_RESYNC_MAX_ROWS } from '@codex/validation';
+import { and, asc, eq, inArray, isNull, lt } from 'drizzle-orm';
+import type { RunPodDispatchOutcome } from '../dispatch';
 import {
   type JobAnswer,
   type LostJobAction,
@@ -51,6 +56,7 @@ import {
   type WaitingAction,
   waitingAction,
 } from '../maintenance-rules';
+import { type MediaStatusFeed, toMediaStatusChange } from '../media-status';
 import type { RunPodApiFailureReason } from '../runpod-api';
 import { failedFields, waitingFields } from './media-state';
 import type { TranscodingAlerts } from './transcoding-alerts';
@@ -90,7 +96,16 @@ interface TranscodingMaintenanceConfig extends ServiceConfig {
   originalExists?: (r2Key: string) => Promise<boolean>;
   /** Failure and setup-fault emails (Codex-l2c48.6). Absent: none sent. */
   alerts?: TranscodingAlerts;
+  /** The studio's live status (Codex-l2c48.9). Absent: no resync step. */
+  mediaStatus?: MediaStatusFeed;
 }
+
+/** The lifecycle states the live status mirrors (the rest are terminal). */
+const IN_FLIGHT = [
+  MEDIA_STATUS.UPLOADING,
+  MEDIA_STATUS.UPLOADED,
+  MEDIA_STATUS.TRANSCODING,
+] as const;
 
 export interface MaintenanceReport {
   ping: 'not_due' | 'accepted' | RunPodApiFailureReason;
@@ -105,6 +120,8 @@ export interface MaintenanceReport {
     deferred: number;
   };
   uploads: { arrived: number; incomplete: number; unknown: number };
+  /** Rows the live status was resynced with; null when it was not. */
+  resynced: number | null;
   /** Writes and claims that matched nothing: a webhook, a Retry or another run got there first. */
   raced: number;
   /** Steps that threw; the run went on. */
@@ -115,12 +132,14 @@ export class TranscodingMaintenance extends BaseService {
   private readonly transcoding: TranscodingService;
   private readonly originalExists?: (r2Key: string) => Promise<boolean>;
   private readonly alerts?: TranscodingAlerts;
+  private readonly mediaStatus?: MediaStatusFeed;
 
   constructor(config: TranscodingMaintenanceConfig) {
     super(config);
     this.transcoding = config.transcoding;
     this.originalExists = config.originalExists;
     this.alerts = config.alerts;
+    this.mediaStatus = config.mediaStatus;
   }
 
   /** One run. NEVER THROWS: a failing step is logged and reported. */
@@ -137,6 +156,7 @@ export class TranscodingMaintenance extends BaseService {
       reconciled: { failed: 0, waiting: 0, left: 0, notDue: 0 },
       waiting: { retried: 0, notAccepted: 0, gaveUp: 0, deferred: 0 },
       uploads: { arrived: 0, incomplete: 0, unknown: 0 },
+      resynced: null,
       raced: 0,
       failedSteps: [],
     };
@@ -166,7 +186,55 @@ export class TranscodingMaintenance extends BaseService {
     await step('uploads', () =>
       this.checkStalledUploads(now, deadline, report)
     );
+    await step('resync', () => this.resync(report));
     return report;
+  }
+
+  /**
+   * One waiting item, now: the status object's alarm retries an item the
+   * transcoder refused within minutes rather than at the next hourly run.
+   * The same guarded claim and dispatch as step 4, so it cannot double up
+   * with the cron or a creator's Retry. null: nothing to claim.
+   */
+  async retryOne(mediaId: string): Promise<RunPodDispatchOutcome | null> {
+    const claimed = await this.transcoding.claimForDispatch(
+      mediaId,
+      [MEDIA_STATUS.UPLOADED],
+      MAINTENANCE_SCOPE
+    );
+    if (!claimed) return null;
+    return this.transcoding.dispatch(claimed);
+  }
+
+  private async resync(report: MaintenanceReport): Promise<void> {
+    const feed = this.mediaStatus;
+    if (!feed) return;
+    const asOf = Date.now();
+    const rows = await this.db.query.mediaItems.findMany({
+      columns: {
+        id: true,
+        creatorId: true,
+        status: true,
+        transcodingErrorCode: true,
+        transcodingAttempts: true,
+        runpodJobId: true,
+        updatedAt: true,
+      },
+      where: and(
+        inArray(mediaItems.status, [...IN_FLIGHT]),
+        isNull(mediaItems.deletedAt)
+      ),
+      orderBy: asc(mediaItems.updatedAt),
+      // One over the cap tells a capped read from a complete one.
+      limit: MEDIA_STATUS_RESYNC_MAX_ROWS + 1,
+    });
+    const listed = rows.slice(0, MEDIA_STATUS_RESYNC_MAX_ROWS);
+    await feed.resync({
+      rows: listed.map(toMediaStatusChange),
+      asOf,
+      complete: rows.length <= MEDIA_STATUS_RESYNC_MAX_ROWS,
+    });
+    report.resynced = listed.length;
   }
 
   private async ping(
@@ -309,6 +377,7 @@ export class TranscodingMaintenance extends BaseService {
       report.raced++;
       return;
     }
+    this.transcoding.publish(written);
 
     const context = {
       mediaId: row.id,
@@ -411,6 +480,7 @@ export class TranscodingMaintenance extends BaseService {
       report.raced++;
       return;
     }
+    this.transcoding.publish(failed);
     report.waiting.gaveUp++;
     this.alerts?.mediaFailed(failed);
     this.obs.warn('transcoding.waiting_given_up', {
@@ -480,6 +550,7 @@ export class TranscodingMaintenance extends BaseService {
           })
           .where(stillStalled)
           .returning();
+        for (const row of written) this.transcoding.publish(row);
         if (written.length > 0) report.uploads.arrived++;
         else report.raced++;
         continue;
@@ -499,6 +570,7 @@ export class TranscodingMaintenance extends BaseService {
         report.raced++;
         continue;
       }
+      for (const row of written) this.transcoding.publish(row);
       report.uploads.incomplete++;
       this.obs.warn('transcoding.upload_incomplete', {
         mediaId: row.id,

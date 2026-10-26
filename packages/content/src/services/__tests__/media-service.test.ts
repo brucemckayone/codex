@@ -229,7 +229,7 @@ describe('MediaItemService', () => {
   });
 
   describe('update', () => {
-    it('should update media metadata', async () => {
+    it('should update what the creator may edit', async () => {
       const created = await service.create(
         {
           title: 'Test',
@@ -243,24 +243,43 @@ describe('MediaItemService', () => {
 
       const updated = await service.update(
         created.id,
+        { title: 'Retitled', description: 'About it' },
+        creatorId
+      );
+
+      expect(updated.title).toBe('Retitled');
+      expect(updated.description).toBe('About it');
+    });
+
+    it('refuses a lifecycle field, writing nothing', async () => {
+      const created = await service.create(
         {
-          durationSeconds: 120,
-          width: 1920,
-          height: 1080,
+          title: 'Test',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
+          fileSizeBytes: 1024,
         },
         creatorId
       );
 
-      expect(updated.durationSeconds).toBe(120);
-      expect(updated.width).toBe(1920);
-      expect(updated.height).toBe(1080);
+      // What a route hands over: JSON off the wire, typed only by its claim.
+      const fromTheWire: Parameters<typeof service.update>[1] = JSON.parse(
+        '{"title":"T","status":"ready"}'
+      );
+      await expect(
+        service.update(created.id, fromTheWire, creatorId)
+      ).rejects.toThrow();
+      const after = await service.get(created.id, creatorId);
+      expect(after?.status).toBe('uploading');
+      expect(after?.title).toBe('Test');
     });
 
     it('should throw MediaNotFoundError if media does not exist', async () => {
       await expect(
         service.update(
           '00000000-0000-0000-0000-000000000000',
-          { status: 'ready' },
+          { title: 'Missing' },
           creatorId
         )
       ).rejects.toThrow(MediaNotFoundError);
@@ -283,8 +302,48 @@ describe('MediaItemService', () => {
       );
 
       await expect(
-        service.update(created.id, { status: 'ready' }, creatorId)
+        service.update(created.id, { title: 'Not mine' }, creatorId)
       ).rejects.toThrow(MediaNotFoundError);
+    });
+  });
+
+  describe('recordClientDuration', () => {
+    async function created(owner = creatorId) {
+      return service.create(
+        {
+          title: 'Timed',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: getOriginalKey(owner, crypto.randomUUID(), 'timed.mp4'),
+          fileSizeBytes: 1024,
+        },
+        owner
+      );
+    }
+
+    it('writes into an empty column', async () => {
+      const media = await created();
+      await service.recordClientDuration(media.id, creatorId, 137);
+      expect((await service.get(media.id, creatorId))?.durationSeconds).toBe(
+        137
+      );
+    });
+
+    it("never overwrites the transcoder's figure", async () => {
+      const media = await created();
+      await service.recordClientDuration(media.id, creatorId, 1800);
+      await service.recordClientDuration(media.id, creatorId, 137);
+      expect((await service.get(media.id, creatorId))?.durationSeconds).toBe(
+        1800
+      );
+    });
+
+    it("leaves another creator's item alone", async () => {
+      const media = await created(otherCreatorId);
+      await service.recordClientDuration(media.id, creatorId, 137);
+      expect(
+        (await service.get(media.id, otherCreatorId))?.durationSeconds
+      ).toBeNull();
     });
   });
 

@@ -1716,6 +1716,9 @@ importers:
       '@codex/transcoding':
         specifier: workspace:*
         version: link:../../packages/transcoding
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../../packages/urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation

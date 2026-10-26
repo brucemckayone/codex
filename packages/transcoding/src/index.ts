@@ -56,6 +56,14 @@ export {
   TranscodingServiceError,
   ValidationError,
 } from './errors';
+// Live media status (Codex-l2c48.9): where lifecycle changes are published
+export {
+  type MediaStatusFeed,
+  type MediaStatusPublisher,
+  type MediaStatusRow,
+  publishMediaStatus,
+  toMediaStatusChange,
+} from './media-status';
 // Path utilities (SINGLE SOURCE OF TRUTH for R2/B2 keys)
 export {
   // B2 paths (mezzanine archival)

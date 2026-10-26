@@ -251,19 +251,18 @@ app.post(
       // 3. Record the client's measurement, so the runtime badge is available
       // IMMEDIATELY rather than only after RunPod calls back minutes later.
       //
-      // ONLY WHEN WE HAVE NOTHING. The RunPod completion webhook writes the
-      // figure measured off the transcoded output, and that is the better authority for the file
-      // that actually gets streamed — so this must never overwrite it. This
-      // route is also deliberately idempotent (step 2 re-triggers transcoding
-      // when a dispatch failed), and without the null check a retry arriving
-      // after transcoding had completed would clobber the good value with the
-      // client's.
+      // ONLY INTO AN EMPTY COLUMN, checked in the write itself. The RunPod
+      // completion webhook writes the figure measured off the transcoded
+      // output, the better authority for the file that actually gets
+      // streamed, and this route is deliberately idempotent (step 2
+      // re-triggers transcoding when a dispatch failed): a retry arriving
+      // after transcoding completed must not clobber the good value.
       const clientDuration = ctx.input.body?.durationSeconds;
-      if (clientDuration && media.durationSeconds == null) {
-        await ctx.services.media.update(
+      if (clientDuration) {
+        await ctx.services.media.recordClientDuration(
           mediaId,
-          { durationSeconds: clientDuration },
-          creatorId
+          creatorId,
+          clientDuration
         );
       }
 
