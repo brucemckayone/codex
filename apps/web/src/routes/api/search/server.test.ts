@@ -78,7 +78,7 @@ describe('GET /api/search', () => {
     getPublicContent.mockResolvedValue({ items: [item('org-hit')] });
     getDiscoverContent.mockResolvedValue({ items: [item('platform-hit')] });
     getPublicCreators.mockResolvedValue({
-      items: [{ name: 'Alex', avatarUrl: null }],
+      items: [{ name: 'Alex', username: 'alex', avatarUrl: null }],
     });
   });
 
@@ -88,9 +88,13 @@ describe('GET /api/search', () => {
     expect(getPublicContent).toHaveBeenCalledOnce();
     expect(getPublicContent.mock.calls[0][0].get('orgId')).toBe('org-1');
     expect(getPublicCreators.mock.calls[0][0]).toBe(ORG_SLUG);
+    // The worker filters creators by it (Codex-pd8m1).
+    expect(getPublicCreators.mock.calls[0][1].get('search')).toBe('yoga');
     expect(getDiscoverContent).not.toHaveBeenCalled();
     expect(body.content.map((c) => c.id)).toEqual(['org-hit']);
-    expect(body.creators).toEqual([{ name: 'Alex', avatarUrl: null }]);
+    expect(body.creators).toEqual([
+      { name: 'Alex', username: 'alex', avatarUrl: null },
+    ]);
   });
 
   it('widens to the platform-wide search, silently, when no org has the slug', async () => {
@@ -141,7 +145,9 @@ describe('GET /api/search', () => {
     expect(body.content).toEqual([]);
     // The worker scopes creators by the slug itself, so they still answer.
     expect(getPublicCreators.mock.calls[0][0]).toBe(ORG_SLUG);
-    expect(body.creators).toEqual([{ name: 'Alex', avatarUrl: null }]);
+    expect(body.creators).toEqual([
+      { name: 'Alex', username: 'alex', avatarUrl: null },
+    ]);
     expect(loggerMock.warn).toHaveBeenCalledWith(
       'Search scope org not loaded',
       expect.objectContaining({ scope: ORG_SLUG })
@@ -201,6 +207,18 @@ describe('GET /api/search', () => {
       'Search creators not loaded',
       expect.objectContaining({ scope: ORG_SLUG, status: 502 })
     );
+  });
+
+  it('answers a creator with no username with a null one, for the palette to link around', async () => {
+    getPublicCreators.mockResolvedValue({
+      items: [{ name: 'Sam', username: null, avatarUrl: null }],
+    });
+
+    const body = await search(`q=yoga&scope=${ORG_SLUG}`);
+
+    expect(body.creators).toEqual([
+      { name: 'Sam', username: null, avatarUrl: null },
+    ]);
   });
 
   it('searches platform-wide with no lookup when there is no scope', async () => {

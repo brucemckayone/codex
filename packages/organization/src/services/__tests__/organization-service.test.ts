@@ -1817,6 +1817,103 @@ describe('OrganizationService', () => {
     });
   });
 
+  // Codex-pd8m1: the search palette sent a search the list ignored, so its
+  // Creators section showed the org's first five whatever was typed.
+  describe('searching the creators list', () => {
+    let slug: string;
+    let priyaHandle: string;
+
+    beforeAll(async () => {
+      const [ownerId, priyaId, samId, subscriberId] = await seedTestUsers(
+        db,
+        4
+      );
+      priyaHandle = createUniqueSlug('ppatel');
+      const people = [
+        { id: ownerId!, name: 'Orla Owner', username: createUniqueSlug('oo') },
+        { id: priyaId!, name: 'Priya Patel', username: priyaHandle },
+        { id: samId!, name: 'Sam 100% Real', username: createUniqueSlug('sr') },
+        {
+          id: subscriberId!,
+          name: 'Priya Subscriber',
+          username: createUniqueSlug('ps'),
+        },
+      ];
+      for (const { id, name, username } of people) {
+        await db
+          .update(schema.users)
+          .set({ name, username })
+          .where(eq(schema.users.id, id));
+      }
+      const org = await service.create(
+        {
+          name: 'Creator Search Org',
+          slug: createUniqueSlug('creator-search'),
+        },
+        ownerId!
+      );
+      slug = org.slug;
+      await db.insert(schema.organizationMemberships).values([
+        {
+          organizationId: org.id,
+          userId: priyaId!,
+          role: 'creator',
+          status: 'active',
+        },
+        {
+          organizationId: org.id,
+          userId: samId!,
+          role: 'creator',
+          status: 'active',
+        },
+        // Matches the search, but a subscriber is never on the list.
+        {
+          organizationId: org.id,
+          userId: subscriberId!,
+          role: 'subscriber',
+          status: 'active',
+        },
+      ]);
+    });
+
+    it('lists every creator when there is no search', async () => {
+      const result = await service.getPublicCreators(slug);
+
+      expect(result.items.map((item) => item.name).sort()).toEqual([
+        'Orla Owner',
+        'Priya Patel',
+        'Sam 100% Real',
+      ]);
+      expect(result.pagination.total).toBe(3);
+    });
+
+    it('matches a name case-insensitively, and the total counts only matches', async () => {
+      const result = await service.getPublicCreators(slug, undefined, 'PRIYA');
+
+      expect(result.items.map((item) => item.name)).toEqual(['Priya Patel']);
+      expect(result.pagination.total).toBe(1);
+    });
+
+    it('matches a username', async () => {
+      const result = await service.getPublicCreators(
+        slug,
+        undefined,
+        priyaHandle.slice(0, 10)
+      );
+
+      expect(result.items.map((item) => item.username)).toEqual([priyaHandle]);
+    });
+
+    it('matches % and _ as themselves, not as wildcards', async () => {
+      const percent = await service.getPublicCreators(slug, undefined, '%');
+      const underscore = await service.getPublicCreators(slug, undefined, '_');
+
+      expect(percent.items.map((item) => item.name)).toEqual(['Sam 100% Real']);
+      expect(underscore.items).toEqual([]);
+      expect(underscore.pagination.total).toBe(0);
+    });
+  });
+
   describe('getPublicMembers', () => {
     let membersTestOrgId: string;
     let membersTestOrgSlug: string;

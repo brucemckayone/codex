@@ -6,7 +6,7 @@
 	import { fade, fly } from 'svelte/transition';
 	import { SearchIcon, XIcon } from '$lib/components/ui/Icon';
 	import { Spinner } from '$lib/components/ui/Feedback/Spinner';
-	import { buildContentUrl } from '$lib/utils/subdomain';
+	import { buildContentUrl, buildCreatorsUrl } from '$lib/utils/subdomain';
 	import { gateSearchQuery } from '@codex/validation';
 	import * as m from '$paraglide/messages';
 
@@ -41,10 +41,16 @@
 
 	interface SearchCreatorResult {
 		name: string;
+		username: string | null;
 		avatarUrl: string | null;
 	}
 
-	let results = $state<{ content: SearchContentResult[]; creators: SearchCreatorResult[] }>({
+	interface SearchResults {
+		content: SearchContentResult[];
+		creators: SearchCreatorResult[];
+	}
+
+	let results = $state<SearchResults>({
 		content: [],
 		creators: [],
 	});
@@ -115,26 +121,42 @@
 		// the floor is a performance gate on the caller, not a validation rule.
 		const gatedQuery = gateSearchQuery(query);
 		if (!gatedQuery) {
-			results = { content: [], creators: [] };
-			loading = false;
+			resetSearch();
 			return;
 		}
 
 		loading = true;
 		debounceTimer = setTimeout(async () => {
-			try {
-				const params = new URLSearchParams({ q: gatedQuery, limit: '5' });
-				if (scope === 'org' && orgSlug) params.set('scope', orgSlug);
-				const res = await fetch(`/api/search?${params}`);
-				if (res.ok) {
-					results = await res.json();
-				}
-			} catch {
-				results = { content: [], creators: [] };
-			} finally {
-				loading = false;
-			}
+			const found = await fetchResults(gatedQuery);
+			// The box has moved on since this search was sent: a newer query, a
+			// cleared box or a reopened palette. Showing these would list an
+			// earlier query's matches under the new text (Codex-qhtw7).
+			if (gateSearchQuery(query) !== gatedQuery) return;
+			results = found;
+			loading = false;
 		}, DEBOUNCE_MS);
+	}
+
+	// Nothing to search: cancel a pending search and list nothing. A request
+	// already sent is dropped when it lands, because the box no longer holds
+	// its query, so the spinner is turned off here.
+	function resetSearch() {
+		if (debounceTimer) clearTimeout(debounceTimer);
+		results = { content: [], creators: [] };
+		loading = false;
+	}
+
+	// A failed search answers with no results, never the last query's.
+	async function fetchResults(q: string): Promise<SearchResults> {
+		try {
+			const params = new URLSearchParams({ q, limit: '5' });
+			if (scope === 'org' && orgSlug) params.set('scope', orgSlug);
+			const res = await fetch(`/api/search?${params}`);
+			if (res.ok) return await res.json();
+		} catch {
+			// A network failure reads as no results, as a non-OK answer does.
+		}
+		return { content: [], creators: [] };
 	}
 
 	// ── Recent searches ───────────────────────────────────────
@@ -156,6 +178,26 @@
 	}
 
 	// ── Navigation ────────────────────────────────────────────
+	// goto() refuses a URL on another origin (it returns a rejected promise and
+	// does nothing), and a result often lives on another subdomain: an item on
+	// another org's, a creator's profile on the creators host. Those need a full
+	// page load (Codex-ynktj).
+	function navigate(href: string) {
+		const target = new URL(href, page.url);
+		if (target.origin === page.url.origin) {
+			goto(href);
+			return;
+		}
+		window.location.href = target.href;
+	}
+
+	// A creator with no username has no profile page, so their result opens
+	// the org's creators page, which lists them.
+	function creatorHref(creator: SearchCreatorResult): string {
+		if (!creator.username) return '/creators';
+		return buildCreatorsUrl(page.url, `/@${encodeURIComponent(creator.username)}`);
+	}
+
 	function selectItem(item: FlatItem) {
 		if (item.type === 'recent') {
 			saveRecent(item.term);
@@ -164,11 +206,10 @@
 		} else if (item.type === 'content') {
 			saveRecent(query.trim());
 			open = false;
-			// buildContentUrl handles cross-org subdomain hops — when the
-			// content lives on a different org than the current host, it
-			// returns a full URL via buildOrgUrl so goto navigates correctly
-			// instead of 404ing on `/content/{slug}` of the wrong subdomain.
-			goto(
+			// buildContentUrl returns a full URL on the item's own org subdomain
+			// when that is not the current host, so it never 404s on
+			// `/content/{slug}` of the wrong org.
+			navigate(
 				buildContentUrl(page.url, {
 					slug: item.item.slug,
 					id: item.item.id,
@@ -178,7 +219,7 @@
 		} else if (item.type === 'creator') {
 			saveRecent(query.trim());
 			open = false;
-			goto(`/creators/${encodeURIComponent(item.item.name)}`);
+			navigate(creatorHref(item.item));
 		}
 	}
 
@@ -240,7 +281,7 @@
 			requestAnimationFrame(() => inputEl?.focus());
 			query = '';
 			activeIndex = -1;
-			results = { content: [], creators: [] };
+			resetSearch();
 		}
 	});
 
@@ -303,7 +344,7 @@
 					onclick={() => {
 						query = '';
 						inputEl?.focus();
-						results = { content: [], creators: [] };
+						resetSearch();
 					}}
 				>
 					<XIcon size={16} />
@@ -379,7 +420,7 @@
 						<div class="palette__group-header">
 							<span>{m.command_palette_creators()}</span>
 						</div>
-						{#each results.creators as creator, i (creator.name)}
+						{#each results.creators as creator, i (creator.username ?? creator.name)}
 							{@const flatIdx = creatorFlatIndex(i)}
 							<button
 								class="palette__item palette__item--creator"

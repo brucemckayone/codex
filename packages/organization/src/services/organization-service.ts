@@ -68,6 +68,7 @@ import {
   isNull,
   ne,
   or,
+  type SQL,
   sql,
 } from 'drizzle-orm';
 import {
@@ -124,6 +125,21 @@ export const READABLE_ORGANIZATION_COLUMNS = {
   Exclude<keyof Organization, keyof ReadableOrganization>,
   false
 >;
+
+/**
+ * Narrows an org's creators list to the members whose name or username
+ * contains `search`, case-insensitively (Codex-pd8m1). None when there is no
+ * search. A subquery, as `listedCreatorConditions`' account check is, so the
+ * count, which reads memberships alone, agrees with the list. `\`, `%` and `_`
+ * are escaped so they match themselves.
+ */
+function creatorNameMatches(search: string | undefined): SQL[] {
+  if (!search) return [];
+  const pattern = `%${search.replace(/[\\%_]/g, '\\$&')}%`;
+  return [
+    sql`exists (select 1 from ${users} where ${users.id} = ${organizationMemberships.userId} and (${users.name} ilike ${pattern} or ${users.username} ilike ${pattern}))`,
+  ];
+}
 
 /**
  * Organization Service Class
@@ -647,12 +663,15 @@ export class OrganizationService extends BaseService {
    *
    * @param slug - Organization slug
    * @param pagination - Optional pagination params { page, limit }
+   * @param search - Optional text a creator's name or username must contain
+   *   (case-insensitive); the total counts only the creators it matches
    * @returns Paginated list of public creator profiles with content counts
    * @throws {OrganizationNotFoundError} If organization doesn't exist
    */
   async getPublicCreators(
     slug: string,
-    pagination?: { page: number; limit: number }
+    pagination?: { page: number; limit: number },
+    search?: string
   ): Promise<
     PaginatedListResponse<{
       id: string;
@@ -682,13 +701,17 @@ export class OrganizationService extends BaseService {
 
     try {
       const org = await this.findOrgIdBySlugOrThrow(slug);
+      const listedWhere = and(
+        this.activeCreatorWhere(org.id),
+        ...creatorNameMatches(search)
+      );
 
       // Run count + members queries concurrently (both depend on org.id but not each other)
       const [countResult, members] = await Promise.all([
         this.db
           .select({ totalCount: count() })
           .from(organizationMemberships)
-          .where(this.activeCreatorWhere(org.id)),
+          .where(listedWhere),
         this.db
           .select({
             userId: users.id,
@@ -717,7 +740,7 @@ export class OrganizationService extends BaseService {
               isNull(content.deletedAt)
             )
           )
-          .where(this.activeCreatorWhere(org.id))
+          .where(listedWhere)
           .groupBy(
             users.id,
             organizationMemberships.id,

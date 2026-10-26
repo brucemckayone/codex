@@ -19,7 +19,7 @@ type ServerApi = ReturnType<typeof createServerApi>;
  *   Answering with every org's content would put other orgs' work in this
  *   org's palette, so content is not searched. Creators are still fetched:
  *   the org worker scopes them by the slug itself, so they can only be this
- *   org's. (It does not filter them by the query yet: Codex-pd8m1.)
+ *   org's.
  */
 type SearchScope =
   | { kind: 'org'; orgId: string; slug: string }
@@ -81,8 +81,8 @@ function searchContent(
 }
 
 // Creators belong to an org: a slug no org has has none, and asking would
-// only 404. A slug whose lookup failed may still have them. (The worker does
-// not filter them by the query yet: Codex-pd8m1.)
+// only 404. A slug whose lookup failed may still have them. The worker
+// matches `search` against each creator's name and username (Codex-pd8m1).
 function searchCreators(
   api: ServerApi,
   scope: SearchScope,
@@ -144,6 +144,8 @@ export const GET: RequestHandler = async ({ url, platform, cookies }) => {
     creatorsRes.status === 'fulfilled'
       ? (creatorsRes.value?.items ?? []).map((c) => ({
           name: c.name,
+          // The palette links to the profile by it (Codex-ynktj).
+          username: c.username ?? null,
           avatarUrl: c.avatarUrl ?? null,
         }))
       : [];
