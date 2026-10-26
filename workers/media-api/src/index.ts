@@ -26,7 +26,6 @@
  * - /internal/media/:id/transcode - Trigger transcoding (worker auth)
  * - /api/transcoding/webhook - RunPod webhook callback (HMAC verified)
  * - /api/transcoding/retry/:id - Retry failed transcoding (authenticated)
- * - /api/transcoding/status/:id - Get transcoding status (authenticated)
  * - /internal/orphan-cleanup/* - Orphan cleanup DO management (internal)
  * - /api/media-status/ticket, /api/media-status/live - live media status
  * - /internal/media-status - a lifecycle change from content-api (worker auth)
@@ -100,7 +99,6 @@ app.use(
  * Mount transcoding routes
  * - /internal/media/:id/transcode (workerAuth)
  * - /api/transcoding/retry/:id (authenticated)
- * - /api/transcoding/status/:id (authenticated)
  */
 app.route('/', transcodingRoutes);
 

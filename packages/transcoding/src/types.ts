@@ -10,8 +10,6 @@ import type { TranscodingStep } from '@codex/validation';
 
 // Re-export all transcoding schemas and types from validation package
 export {
-  type GetTranscodingStatusInput,
-  getTranscodingStatusSchema,
   hlsVariantSchema,
   mezzanineStatusEnum,
   type RetryTranscodingInput,
@@ -27,11 +25,9 @@ export {
   // Schemas
   runpodWebhookSchema,
   runpodWebhookUnionSchema,
-  type TranscodingStatusResponse,
   type TranscodingStep,
   type TriggerTranscodingInput,
   transcodingPrioritySchema,
-  transcodingStatusResponseSchema,
   transcodingStepEnum,
   triggerTranscodingSchema,
 } from '@codex/validation';

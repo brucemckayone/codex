@@ -9,14 +9,25 @@ Transcoding orchestration via RunPod. Handles the full transcoding lifecycle: tr
 | Method | Path | Auth | Input | Success | Notes |
 |---|---|---|---|---|---|
 | POST | `/internal/media/:id/transcode` | `worker` (HMAC) | params: `id` (uuid); body: `{ priority? }` | 200 | Trigger transcoding; RunPod dispatch runs via `ctx.background()` |
-| POST | `/api/transcoding/retry/:id` | `required`, `rateLimit: 'strict'` | params: `id` (uuid) | 200 | Retry a failed job; only 1 retry allowed per media item |
-| GET | `/api/transcoding/status/:id` | `required`, `rateLimit: 'api'` | params: `id` (uuid) | 200 | Get current transcoding status |
+| POST | `/api/transcoding/retry/:id` | `required`, `rateLimit: 'strict'` | params: `id` (uuid) | 200 | The studio's Try again, from `failed` or waiting; refused for a file problem or once `MAX_TRANSCODING_ATTEMPTS` (3) jobs were accepted |
+
+Status is not polled: the studio reads lifecycle and progress from the live status socket (`/api/media-status/*`).
 
 ### Webhook Route (non-procedure)
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | POST | `/api/transcoding/webhook` | RunPod HMAC (`RUNPOD_WEBHOOK_SECRET`) | Receives `completed`, `failed`, or `progress` callbacks; raw body read for signature verification before parsing |
+
+### Live Media Status Routes (Codex-l2c48.9)
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| POST | `/api/media-status/ticket` | `required`, roles creator/admin | `{ url, ticket, expiresAt }`: a one-minute, single-use socket ticket |
+| GET | `/api/media-status/live` | the ticket, sent as subprotocol `ticket.<t>` beside `media-status.v1`; Origin checked | WebSocket upgrade into `MediaStatusObject` (Hibernation API); close 4401 = session ended |
+| POST | `/internal/media-status` | `worker` (HMAC) | A lifecycle change from content-api, which has no `MEDIA_STATUS` binding |
+
+The object is reached only through `statusObjectFor()` (`@codex/worker-utils`). The web client is `apps/web/src/lib/client/media-status.svelte.ts`.
 
 ### Orphan Cleanup DO Routes (internal, worker HMAC)
 

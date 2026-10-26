@@ -106,8 +106,6 @@ export {
 
 // Types
 export {
-  type GetTranscodingStatusInput,
-  getTranscodingStatusSchema,
   type HlsVariant,
   hlsVariantSchema,
   type MediaStatus,
@@ -130,11 +128,9 @@ export {
   runpodWebhookUnionSchema,
   type TranscodingMediaItem,
   type TranscodingServiceConfig,
-  type TranscodingStatusResponse,
   type TranscodingStep,
   type TriggerTranscodingInput,
   transcodingPrioritySchema,
-  transcodingStatusResponseSchema,
   transcodingStepEnum,
   triggerTranscodingSchema,
 } from './types';

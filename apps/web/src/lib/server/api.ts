@@ -99,6 +99,7 @@ import type {
   CreatePortalSessionInput,
   CreateSubscriptionCheckoutInput,
   CreateTierInput,
+  MediaStatusTicket,
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
   SupportChargeSearchQuery,
@@ -2669,17 +2670,25 @@ export function createServerApi(
         }),
 
       /**
-       * Get transcoding status and progress for a media item
-       * Calls media-api worker (not content-api)
+       * A one-minute ticket for the studio's live status socket, and the URL
+       * to open it on (media-api's own public origin). Single-use: every
+       * connect needs a fresh one.
        */
-      transcodingStatus: (id: string) =>
-        request<{
-          status: string;
-          transcodingProgress: number | null;
-          transcodingStep: string | null;
-          transcodingAttempts: number;
-          transcodingErrorCode: string | null;
-        }>('media', `/api/transcoding/status/${id}`),
+      statusTicket: () =>
+        request<MediaStatusTicket>('media', '/api/media-status/ticket', {
+          method: 'POST',
+        }),
+
+      /**
+       * The creator's Try again: claims the item for one more attempt. The
+       * RunPod call runs after the reply; the live channel reports how it went.
+       */
+      retryTranscoding: (id: string) =>
+        request<{ message: string; mediaId: string }>(
+          'media',
+          `/api/transcoding/retry/${id}`,
+          { method: 'POST' }
+        ),
 
       /**
        * Mark upload as complete and trigger transcoding

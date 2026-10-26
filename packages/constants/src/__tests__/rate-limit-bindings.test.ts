@@ -103,6 +103,18 @@ function collectBindings(): RateLimitBinding[] {
 }
 
 /**
+ * Source with its comments removed, so the probes below see code only. A
+ * comment that merely names `procedure()` (workers/auth/src/user-fields.ts
+ * does) made a worker with no procedure route "need" the api binding. The
+ * `[^:]` keeps a URL's `//` (https://…) from reading as a line comment.
+ */
+function withoutComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+/**
  * Presets a worker's own source declares on a `procedure()` policy, plus the
  * `api` fallback whenever that worker has any procedure route at all — an
  * omitted `rateLimit` is enforced as `api`, not as "unlimited".
@@ -132,7 +144,7 @@ function declaredPresets(worker: string): Set<string> {
       if (!entry.name.endsWith('.ts') || entry.name.includes('.test.'))
         continue;
 
-      const source = readFileSync(full, 'utf-8');
+      const source = withoutComments(readFileSync(full, 'utf-8'));
       for (const match of source.matchAll(/rateLimit:\s*'([a-z]+)'/g)) {
         presets.add(match[1] as string);
       }

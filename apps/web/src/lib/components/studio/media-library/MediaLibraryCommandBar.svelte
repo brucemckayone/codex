@@ -29,6 +29,11 @@
     total: number;
     /** Whether the list is currently loading (dims the count) */
     loading?: boolean;
+    /**
+     * The live status socket (Codex-l2c48.7): `live`, or why the tiles may
+     * lag. Absent while connecting or when the socket is not in use.
+     */
+    live?: 'live' | 'reconnecting' | 'polling' | null;
     /** Active media-type filter */
     mediaType: MediaTypeFilter;
     /** Active status filter */
@@ -50,6 +55,7 @@
   const {
     total,
     loading = false,
+    live = null,
     mediaType,
     status,
     searchValue,
@@ -106,6 +112,15 @@
       <span class="count-num">{ordinalText}</span>
       <span class="count-label">{countLabel}</span>
     </span>
+    {#if live}
+      <span class="live-chip" data-state={live}>
+        {live === 'live'
+          ? m.media_live_live()
+          : live === 'reconnecting'
+            ? m.media_live_reconnecting()
+            : m.media_live_polling()}
+      </span>
+    {/if}
   </div>
 
   <div class="bar-filters" aria-label="Filter media">
@@ -300,6 +315,48 @@
     font-family: var(--font-sans);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
+  }
+
+  /* Live status socket: green while live, amber while it lags. */
+  .live-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding: 2px var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    white-space: nowrap;
+    border-radius: var(--radius-full);
+    border: var(--border-width) var(--border-style) var(--color-status-success-border);
+    background: var(--color-status-success-surface);
+    color: var(--color-status-success-text);
+  }
+
+  .live-chip::before {
+    content: '';
+    width: var(--space-1-5);
+    height: var(--space-1-5);
+    border-radius: var(--radius-full);
+    background: currentColor;
+  }
+
+  .live-chip[data-state='reconnecting'],
+  .live-chip[data-state='polling'] {
+    border-color: var(--color-status-warning-border);
+    background: var(--color-status-warning-surface);
+    color: var(--color-status-warning-text);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .live-chip[data-state='reconnecting']::before {
+      animation: live-chip-blink 1s steps(2) infinite;
+    }
+  }
+
+  @keyframes live-chip-blink {
+    50% { opacity: 0.2; }
   }
 
   /* ── Dual segmented filters ─────────────────────────────── */

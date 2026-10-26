@@ -10,7 +10,6 @@ import {
   runpodWebhookUnionSchema,
   THUMBNAIL_SIZES,
   thumbnailSizeSchema,
-  transcodingStatusResponseSchema,
 } from '../transcoding';
 
 describe('Thumbnail Sizes', () => {
@@ -498,48 +497,5 @@ describe('Sized poster folders (Codex-l2c48)', () => {
         },
       }).success
     ).toBe(true);
-  });
-});
-
-describe('transcodingStatusResponseSchema', () => {
-  const waiting = {
-    status: 'uploaded',
-    transcodingAttempts: 0,
-    transcodingErrorCode: 'TRANSCODER_PAUSED',
-    runpodJobId: null,
-    transcodingPriority: 2,
-    transcodingProgress: null,
-    transcodingStep: null,
-    readyVariants: null,
-  };
-
-  it('carries the error code of a waiting item', () => {
-    const parsed = transcodingStatusResponseSchema.parse(waiting);
-    expect(parsed.transcodingErrorCode).toBe('TRANSCODER_PAUSED');
-  });
-
-  it('accepts a null code when nothing has gone wrong', () => {
-    expect(
-      transcodingStatusResponseSchema.safeParse({
-        ...waiting,
-        transcodingErrorCode: null,
-      }).success
-    ).toBe(true);
-  });
-
-  it("never carries the transcoder's raw detail (Codex-l2c48)", () => {
-    const parsed = transcodingStatusResponseSchema.parse({
-      ...waiting,
-      transcodingError: 'botocore: https://internal.example said 503',
-    });
-    expect(parsed).not.toHaveProperty('transcodingError');
-  });
-
-  // The response tracks the column: a status built without it is a bug.
-  it('rejects a response that leaves the code out', () => {
-    const { transcodingErrorCode: _omitted, ...withoutCode } = waiting;
-    expect(transcodingStatusResponseSchema.safeParse(withoutCode).success).toBe(
-      false
-    );
   });
 });

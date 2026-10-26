@@ -6,8 +6,15 @@
   media-tile grid with inline upload ghosts, and pagination. Upload
   surface is a viewport-wide drop overlay + floating queue dock (see
   MediaUpload.svelte).
+
+  Live (Codex-l2c48.7): the page subscribes to the studio's status socket
+  (`$lib/client/media-status`), which feeds every tile and asks for a list
+  refetch when the list falls behind. A finished item is announced once in
+  a polite live region; the grid itself is not a live region, because live
+  progress would make a screen reader read every tick.
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import MediaUpload, { type UploadItem } from '$lib/components/studio/MediaUpload.svelte';
@@ -20,6 +27,7 @@
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { FilmIcon, SearchXIcon, UploadIcon } from '$lib/components/ui/Icon';
   import { deleteMedia, updateMedia } from '$lib/remote/media.remote';
+  import { mediaStatus } from '$lib/client/media-status.svelte';
   import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
   import * as m from '$paraglide/messages';
@@ -70,6 +78,47 @@
   function openPicker() {
     triggerPicker?.();
   }
+
+  // ── Live status ───────────────────────────────────────────────────────
+  // An item this tab is uploading shows as its ghost tile, never twice: the
+  // live channel can refetch the list while the upload is still running.
+  const uploadingHere = $derived(
+    new Set(
+      uploadQueue
+        .filter((u) => u.id !== null && u.status !== 'done' && u.status !== 'queued')
+        .map((u) => u.id as string)
+    )
+  );
+
+  const listedLifecycles = $derived(
+    new Map(data.mediaItems.map((item) => [item.id, item.status]))
+  );
+
+  let announcement = $state('');
+
+  // onMount, not $effect: register() reads the store's own state, which an
+  // effect would track, re-subscribing on every connection change.
+  onMount(() =>
+    mediaStatus.register({
+      listed: () => listedLifecycles,
+      refresh: () => onRefresh?.(),
+      settled: (mediaId, lifecycle) => {
+        const title = data.mediaItems.find((item) => item.id === mediaId)?.title;
+        if (!title) return;
+        announcement =
+          lifecycle === 'ready'
+            ? m.media_announce_ready({ title })
+            : m.media_announce_failed({ title });
+      },
+    })
+  );
+
+  const liveChip = $derived.by(() => {
+    const connection = mediaStatus.connection;
+    return connection === 'live' || connection === 'reconnecting' || connection === 'polling'
+      ? connection
+      : null;
+  });
 
   // ── Delete state ──────────────────────────────────────────────────────
   let showDeleteConfirm = $state(false);
@@ -162,9 +211,10 @@
 
   // ── Client-side search (filters current page items by title) ──────────
   const filteredItems = $derived.by(() => {
-    if (!activeSearch.trim()) return data.mediaItems;
+    const listed = data.mediaItems.filter((item) => !uploadingHere.has(item.id));
+    if (!activeSearch.trim()) return listed;
     const needle = activeSearch.toLowerCase();
-    return data.mediaItems.filter((item) =>
+    return listed.filter((item) =>
       item.title.toLowerCase().includes(needle)
     );
   });
@@ -249,6 +299,7 @@
 <div class="media-page {className ?? ''}">
   <MediaLibraryCommandBar
     total={totalItems}
+    live={liveChip}
     mediaType={activeMediaType}
     status={activeStatus}
     searchValue={searchValue}
@@ -260,12 +311,9 @@
   />
 
   <!-- Library body — feature slab (page 1 only), grid, pagination -->
-  <div
-    class="library-body"
-    role="status"
-    aria-live="polite"
-    aria-busy={!data}
-  >
+  <p class="sr-only" role="status" aria-live="polite">{announcement}</p>
+
+  <div class="library-body">
     {#if data.mediaItems.length === 0 && ghostItems.length === 0}
       <EmptyState
         title={m.media_empty()}

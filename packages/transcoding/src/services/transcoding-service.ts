@@ -73,11 +73,9 @@ import {
   RunPodApi,
 } from '../runpod-api';
 import type {
-  HlsVariant,
   MediaStatus,
   RunPodJobRequest,
   TranscodingMediaItem,
-  TranscodingStatusResponse,
 } from '../types';
 import { failedFields, NO_PROGRESS, waitingFields } from './media-state';
 import type { TranscodingAlerts } from './transcoding-alerts';
@@ -987,36 +985,6 @@ export class TranscodingService extends BaseService {
     if (media.transcodingAttempts >= MAX_TRANSCODING_ATTEMPTS) {
       throw new MaxRetriesExceededError(media.id, media.transcodingAttempts);
     }
-  }
-
-  /**
-   * Get current transcoding status for a media item
-   *
-   * @param mediaId - Media item UUID
-   * @param creatorId - Creator ID for authorization
-   * @returns Transcoding status response
-   *
-   * @throws {TranscodingMediaNotFoundError} If media doesn't exist or isn't the creator's
-   */
-  async getTranscodingStatus(
-    mediaId: string,
-    creatorId: string
-  ): Promise<TranscodingStatusResponse> {
-    const media = await this.getMediaForTranscoding(mediaId, creatorId);
-
-    return {
-      status: media.status,
-      transcodingAttempts: media.transcodingAttempts,
-      // The code only: the raw detail stays in the database (Codex-l2c48).
-      transcodingErrorCode: media.transcodingErrorCode,
-      runpodJobId: media.runpodJobId,
-      transcodingPriority: media.transcodingPriority,
-      transcodingProgress: media.transcodingProgress ?? null,
-      // Cast from varchar to TranscodingStep - DB stores as text, validated on write
-      transcodingStep: media.transcodingStep ?? null,
-      // Cast from string[] to HlsVariant[] - DB stores as text[], validated on write
-      readyVariants: media.readyVariants as HlsVariant[] | null,
-    };
   }
 
   /**

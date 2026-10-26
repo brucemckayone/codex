@@ -4,19 +4,23 @@
   Editorial media tile for the Studio media library grid. 16:9 thumbnail
   (or branded placeholder when thumbnailUrl is absent) with duration
   overlay bottom-right, mono ordinal top-left, status pill inline,
-  inline media-type chip. Transcoding progress renders as an overlaid
-  bar on the thumbnail with a step label. Hover reveals edit/delete
+  inline media-type chip. Upload and transcode progress render as an
+  overlaid bar on the thumbnail with a step label. Hover reveals edit/delete
   overlay actions.
 
-  Polls transcoding status every 5s when media.status === 'transcoding'
-  (lifted from MediaCard.svelte) — behaviour preserved verbatim.
+  Live (Codex-l2c48.7): the tile reads its item's state from the studio's one
+  status socket (`$lib/client/media-status`) instead of polling, and
+  `describeTile` decides what it shows: why an item waits or failed, a
+  countdown to the automatic retry, and Try again where another attempt can
+  help. Every state is drawn in docs/handover/live-media-status/index.html.
 -->
 <script lang="ts">
-  import { onDestroy } from 'svelte';
-  import { browser } from '$app/environment';
-  import { getTranscodingStatus } from '$lib/remote/media.remote';
+  import { mediaStatus } from '$lib/client/media-status.svelte';
+  import { retryTranscoding } from '$lib/remote/media.remote';
   import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
+  import { Button } from '$lib/components/ui';
+  import { toast } from '$lib/components/ui/Toast/toast-store';
   import {
     FilmIcon,
     MusicIcon,
@@ -25,10 +29,21 @@
     PlayIcon,
     AlertTriangleIcon,
     CheckIcon,
+    ClockIcon,
+    RefreshCwIcon,
+    UploadIcon,
   } from '$lib/components/ui/Icon';
   import { formatDuration, formatFileSize, formatRelativeTime } from '$lib/utils/format';
   import { getThumbnailSrcset } from '$lib/utils/image';
   import * as m from '$paraglide/messages';
+  import { MAX_TRANSCODING_ATTEMPTS } from '@codex/constants';
+  import {
+    describeTile,
+    formatCountdown,
+    tilePill,
+    type TileFailure,
+    type TilePill,
+  } from './tile-state';
 
   // MediaItemWithRelations doesn't declare thumbnailUrl on the base schema
   // (only thumbnailKey) — but the public content API resolves keys to CDN
@@ -48,15 +63,12 @@
 
   const { ordinal, media, onEdit, onDelete }: Props = $props();
 
-  // ── Polling (lifted verbatim from MediaCard for transcoding items) ──────
-  let progress = $state<{ progress: number | null; step: string | null; status: string } | null>(null);
-  const effectiveStatus = $derived(progress?.status ?? media.status);
-  const isTranscoding = $derived(effectiveStatus === 'transcoding');
-
-  let pollInterval: ReturnType<typeof setInterval> | null = null;
-  let pollErrors = 0;
-  let visible = true;
-  const MAX_CONSECUTIVE_ERRORS = 3;
+  // ── Live state ──────────────────────────────────────────────────────────
+  const live = $derived(mediaStatus.items.get(media.id));
+  // Only a tile counting down reads the clock, so only it re-renders each second.
+  const now = $derived(live?.retryAt != null ? mediaStatus.now : 0);
+  const view = $derived(describeTile(media, live, now));
+  const pill = $derived(tilePill(view));
 
   /**
    * MediaTileGrid's tile: one full-width column below 40rem, else
@@ -66,65 +78,6 @@
    */
   const TILE_SIZES = '(max-width: 39.9375rem) calc(100vw - 2rem), 24rem';
 
-  function stopPolling() {
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = null;
-    if (browser) document.removeEventListener('visibilitychange', onVisibilityChange);
-  }
-
-  async function pollProgress() {
-    if (!visible) return;
-    try {
-      const q = getTranscodingStatus(media.id);
-      await q.refresh();
-      const result = q.current;
-      if (!result) return;
-      pollErrors = 0;
-      progress = {
-        progress: result.transcodingProgress ?? null,
-        step: result.transcodingStep ?? null,
-        status: result.status,
-      };
-      if (result.status === 'ready' || result.status === 'failed') {
-        stopPolling();
-      }
-    } catch (error) {
-      pollErrors++;
-      if (pollErrors >= MAX_CONSECUTIVE_ERRORS) {
-        logger.warn('MediaTile: stopping poll after consecutive failures', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        stopPolling();
-      }
-    }
-  }
-
-  function onVisibilityChange() {
-    visible = browser && document.visibilityState === 'visible';
-    if (visible) pollProgress();
-  }
-
-  // Poll while the item is still processing. The backend sets status to
-  // 'uploaded' synchronously and only flips to 'transcoding' a few seconds
-  // later (async, after onMount would have run), so gate on BOTH states —
-  // otherwise a tile that mounts at 'uploaded' never starts polling and its
-  // status is frozen until a hard reload. Using a reactive $effect (not
-  // onMount) means it also starts when a freshly-uploaded row transitions into
-  // a processing state after mount, and tears down once it reaches ready/failed.
-  $effect(() => {
-    const s = effectiveStatus;
-    if (s !== 'uploaded' && s !== 'transcoding') return;
-    pollProgress();
-    pollInterval = setInterval(pollProgress, 5000);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => {
-      stopPolling();
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-    };
-  });
-
-  onDestroy(() => stopPolling());
-
   // ── Derived meta ────────────────────────────────────────────────────────
   const isVideo = $derived(media.mediaType === 'video');
   const typeMeta = $derived(
@@ -133,23 +86,117 @@
       : { label: m.media_type_audio(), icon: MusicIcon }
   );
 
-  type StatusKey = 'ready' | 'transcoding' | 'failed' | 'uploading' | 'uploaded';
-  const statusKey = $derived<StatusKey>(effectiveStatus as StatusKey);
+  const PILL_LABELS: Record<TilePill, () => string> = {
+    uploading: () => m.media_status_uploading(),
+    stopped: () => m.media_status_stopped(),
+    processing: () => m.media_status_processing(),
+    waiting: () => m.media_status_waiting(),
+    ready: () => m.media_status_ready(),
+    failed: () => m.media_status_failed(),
+  };
 
-  const statusMeta = $derived.by(() => {
-    switch (statusKey) {
-      case 'ready':
-        return { label: m.media_status_ready(), variant: 'ready' as const };
-      case 'transcoding':
-        return { label: m.media_status_processing(), variant: 'transcoding' as const };
-      case 'failed':
-        return { label: m.media_status_failed(), variant: 'failed' as const };
-      case 'uploaded':
-        return { label: m.media_status_uploaded(), variant: 'uploading' as const };
+  /**
+   * The bar over the thumbnail. `pct` null draws it indeterminate. `kind`
+   * picks its colour: an upload or a wait is informational, encoding is
+   * work in progress.
+   */
+  type Overlay = {
+    kind: 'upload' | 'wait' | 'transcode';
+    label: string;
+    pct: number | null;
+  };
+
+  const overlay = $derived.by((): Overlay | null => {
+    switch (view.kind) {
+      case 'uploading':
+        return {
+          kind: 'upload',
+          label: view.elsewhere ? m.media_tile_upload_elsewhere() : m.media_status_uploading(),
+          pct: view.pct,
+        };
+      case 'starting':
+        return { kind: 'transcode', label: m.media_tile_starting(), pct: null };
+      case 'processing':
+        return {
+          kind: 'transcode',
+          label: view.step ? getStepLabel(view.step) : m.media_status_processing(),
+          pct: view.pct,
+        };
+      case 'waiting':
+        return {
+          kind: 'wait',
+          label:
+            view.cause === 'config'
+              ? m.media_tile_waiting_config_step()
+              : m.media_tile_waiting_service_step(),
+          pct: null,
+        };
       default:
-        return { label: m.media_status_uploading(), variant: 'uploading' as const };
+        return null;
     }
   });
+
+  /** The sentence under the title: why it waits, stopped or failed. */
+  const reason = $derived.by((): { text: string; tone: 'info' | 'warning' | 'error' } | null => {
+    switch (view.kind) {
+      case 'stopped':
+        return { text: m.media_tile_stopped(), tone: 'warning' };
+      case 'waiting':
+        if (view.cause === 'config') {
+          return { text: m.media_tile_waiting_config(), tone: 'info' };
+        }
+        return {
+          text: view.retryInSeconds
+            ? m.media_tile_waiting_service({ time: formatCountdown(view.retryInSeconds) })
+            : m.media_tile_waiting_service_later(),
+          tone: 'info',
+        };
+      case 'failed':
+        return { text: failureText(view.reason), tone: 'error' };
+      default:
+        return null;
+    }
+  });
+
+  function failureText(failure: TileFailure): string {
+    switch (failure) {
+      case 'file':
+        return m.media_tile_failed_file();
+      case 'upload':
+        return m.media_tile_stopped();
+      case 'exhausted':
+        return m.media_tile_failed_exhausted({ count: MAX_TRANSCODING_ATTEMPTS });
+      case 'timeout':
+        return m.media_tile_failed_timeout();
+      default:
+        return m.media_tile_failed_internal();
+    }
+  }
+
+  // ── Try again ───────────────────────────────────────────────────────────
+  let retrying = $state(false);
+
+  async function tryAgain() {
+    if (retrying) return;
+    retrying = true;
+    try {
+      await retryTranscoding(media.id);
+      // What happens next arrives over the socket; without one, the list.
+      if (mediaStatus.connection !== 'live') mediaStatus.refreshList();
+    } catch (error) {
+      const status = (error as { status?: unknown } | null)?.status;
+      if (status !== 429) {
+        logger.warn('media_tile.retry_refused', { mediaId: media.id, status });
+      }
+      toast.error(
+        status === 429 ? m.media_tile_retry_rate_limited() : m.media_tile_retry_failed()
+      );
+      // A refusal means the tile is out of date (another tab, or no tries left).
+      mediaStatus.refreshList();
+    } finally {
+      retrying = false;
+    }
+  }
 
   const durationText = $derived(formatDuration(media.durationSeconds));
   const sizeText = $derived(formatFileSize(media.fileSizeBytes));
@@ -172,7 +219,7 @@
   }
 </script>
 
-<article class="tile" data-status={statusMeta.variant}>
+<article class="tile" data-status={pill}>
   <div class="tile-thumb">
     {#if media.thumbnailUrl}
       <img
@@ -199,7 +246,7 @@
     </span>
 
     <!-- Bottom-right duration overlay (YouTube-style) when ready -->
-    {#if durationText && statusKey === 'ready'}
+    {#if durationText && view.kind === 'ready'}
       <span class="thumb-duration" aria-hidden="true">
         {#if isVideo}
           <PlayIcon size={10} />
@@ -208,32 +255,45 @@
       </span>
     {/if}
 
-    <!-- Transcoding progress overlay -->
-    {#if isTranscoding}
-      <div class="thumb-progress" role="progressbar"
-        aria-valuenow={progress?.progress ?? 0}
+    {#if view.kind === 'stopped'}
+      <span class="thumb-dim" aria-hidden="true"></span>
+    {/if}
+
+    <!-- Upload / transcode / wait progress overlay -->
+    {#if overlay}
+      <div
+        class="thumb-progress"
+        data-kind={overlay.kind}
+        role="progressbar"
+        aria-label={overlay.label}
+        aria-valuenow={overlay.pct ?? undefined}
         aria-valuemin={0}
         aria-valuemax={100}
       >
         <div class="thumb-progress-meta">
           <span class="thumb-progress-step">
-            {progress?.step ? getStepLabel(progress.step) : m.media_status_processing()}
+            {#if overlay.kind === 'upload'}
+              <UploadIcon size={12} />
+            {:else if overlay.kind === 'wait'}
+              <ClockIcon size={12} />
+            {/if}
+            {overlay.label}
           </span>
-          {#if progress?.progress != null}
-            <span class="thumb-progress-pct">{progress.progress}%</span>
+          {#if overlay.pct != null}
+            <span class="thumb-progress-pct">{overlay.pct}%</span>
           {/if}
         </div>
         <div class="thumb-progress-bar">
           <div
-            class="thumb-progress-fill"
-            style="width: {progress?.progress ?? 0}%"
+            class={['thumb-progress-fill', { indeterminate: overlay.pct == null }]}
+            style:width={overlay.pct == null ? undefined : `${overlay.pct}%`}
           ></div>
         </div>
       </div>
     {/if}
 
     <!-- Failed overlay -->
-    {#if statusKey === 'failed'}
+    {#if view.kind === 'failed'}
       <div class="thumb-failed" aria-hidden="true">
         <AlertTriangleIcon size={20} />
       </div>
@@ -267,15 +327,33 @@
   <div class="tile-body">
     <div class="tile-header">
       <h3 class="tile-title" title={media.title}>{media.title}</h3>
-      <span class="tile-status-pill" data-status={statusMeta.variant}>
+      <span class="tile-status-pill" data-status={pill}>
         <span class="tile-status-dot" aria-hidden="true">
-          {#if statusKey === 'ready'}
+          {#if pill === 'ready'}
             <CheckIcon size={8} />
           {/if}
         </span>
-        {statusMeta.label}
+        {PILL_LABELS[pill]()}
       </span>
     </div>
+
+    {#if reason}
+      <p class="tile-reason" data-tone={reason.tone}>{reason.text}</p>
+    {/if}
+
+    {#if view.kind === 'failed' && view.canRetry}
+      <div class="tile-cta">
+        <Button size="xs" loading={retrying} disabled={retrying} onclick={tryAgain}>
+          <RefreshCwIcon size={12} />
+          {m.media_tile_try_again()}
+        </Button>
+        <span class="tile-cta-note">
+          {view.attemptsLeft === 1
+            ? m.media_tile_tries_left_one()
+            : m.media_tile_tries_left({ count: view.attemptsLeft })}
+        </span>
+      </div>
+    {/if}
 
     <dl class="tile-meta">
       {#if sizeText}
@@ -433,10 +511,13 @@
   }
 
   .thumb-progress-step {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
     font-weight: var(--font-semibold);
-    color: var(--color-warning-700);
+    color: var(--progress-ink, var(--color-status-warning-text));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -461,9 +542,39 @@
 
   .thumb-progress-fill {
     height: 100%;
-    background-color: var(--color-warning-500, var(--color-warning));
+    background-color: var(--progress-fill, var(--color-warning));
     border-radius: var(--radius-full);
     transition: width var(--duration-slower) var(--ease-default);
+  }
+
+  /* An upload or a wait is informational; encoding keeps the warning ink. */
+  .thumb-progress[data-kind='upload'],
+  .thumb-progress[data-kind='wait'] {
+    --progress-ink: var(--color-status-info-text);
+    --progress-fill: var(--color-info);
+  }
+
+  /* No % to show (starting, waiting, an upload not yet reported). */
+  .thumb-progress-fill.indeterminate {
+    width: 30%;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .thumb-progress-fill.indeterminate {
+      animation: thumb-progress-slide 1.4s var(--ease-default) infinite;
+    }
+  }
+
+  @keyframes thumb-progress-slide {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(340%); }
+  }
+
+  /* A stopped upload: the thumbnail fades back behind its reason. */
+  .thumb-dim {
+    position: absolute;
+    inset: 0;
+    background: color-mix(in srgb, var(--color-surface) 35%, transparent);
   }
 
   .thumb-failed {
@@ -472,8 +583,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--color-error-700);
-    background: color-mix(in srgb, var(--color-error-50) 80%, transparent);
+    color: var(--color-status-error-text);
+    background: color-mix(in srgb, var(--color-status-error-surface) 80%, transparent);
   }
 
   /* Hover action bar */
@@ -604,26 +715,58 @@
   }
 
   .tile-status-pill[data-status='ready'] {
-    color: var(--color-success-700);
-    background: var(--color-success-50);
-    border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+    color: var(--color-status-success-text);
+    background: var(--color-status-success-surface);
+    border-color: var(--color-status-success-border);
   }
 
-  .tile-status-pill[data-status='transcoding'] {
-    color: var(--color-warning-700);
-    background: var(--color-warning-50);
-    border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  .tile-status-pill[data-status='processing'],
+  .tile-status-pill[data-status='stopped'] {
+    color: var(--color-status-warning-text);
+    background: var(--color-status-warning-surface);
+    border-color: var(--color-status-warning-border);
   }
 
   .tile-status-pill[data-status='failed'] {
-    color: var(--color-error-700);
-    background: var(--color-error-50);
-    border-color: color-mix(in srgb, var(--color-error) 30%, transparent);
+    color: var(--color-status-error-text);
+    background: var(--color-status-error-surface);
+    border-color: var(--color-status-error-border);
   }
 
+  .tile-status-pill[data-status='waiting'] {
+    color: var(--color-status-info-text);
+    background: var(--color-status-info-surface);
+    border-color: var(--color-status-info-border);
+  }
+
+  /* Neutral, but text-secondary: muted ink read 2.3:1 on this fill. */
   .tile-status-pill[data-status='uploading'] {
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     background: var(--color-surface-secondary);
+  }
+
+  /* ── Reason + Try again ───────────────────────────────── */
+  .tile-reason {
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-snug);
+    color: var(--color-text-secondary);
+  }
+
+  .tile-reason[data-tone='error'] { color: var(--color-status-error-text); }
+  .tile-reason[data-tone='info'] { color: var(--color-status-info-text); }
+  .tile-reason[data-tone='warning'] { color: var(--color-status-warning-text); }
+
+  .tile-cta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .tile-cta-note {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
   }
 
   /* ── Meta row (labelled like slab) ────────────────────── */

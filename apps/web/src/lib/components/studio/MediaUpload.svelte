@@ -26,6 +26,7 @@
 -->
 <script lang="ts">
   import { createMedia, completeUpload } from '$lib/remote/media.remote';
+  import { mediaStatus } from '$lib/client/media-status.svelte';
   import { measureMediaDuration } from '$lib/utils/media-duration';
   import { logger } from '$lib/observability';
   import { UploadIcon, XIcon, CheckIcon, AlertTriangleIcon } from '$lib/components/ui/Icon';
@@ -235,6 +236,7 @@
       // length". `measureMediaDuration` never throws and never rejects; it
       // returns null when it cannot tell, and the upload proceeds regardless.
       item.status = 'completing';
+      mediaStatus.endUpload(mediaId);
       const durationSeconds = await measureMediaDuration(item.file);
       await completeUpload({
         id: mediaId,
@@ -246,6 +248,7 @@
       onUploadComplete?.({ id: mediaId });
     } catch (error) {
       item.status = 'error';
+      if (item.id) mediaStatus.endUpload(item.id);
       // Never echo provider/network errors — they may contain presigned URL
       // fragments, internal paths, or other leakage. Surface a generic i18n
       // message to the user; log the full error via ObservabilityClient.
@@ -296,6 +299,15 @@
   }
 
   /**
+   * Show the % here, and on the creator's other tabs and devices through
+   * the live status socket (Codex-l2c48.7), which throttles the reports.
+   */
+  function setProgress(item: UploadItem, percent: number) {
+    item.progress = percent;
+    if (item.id) mediaStatus.reportUpload(item.id, percent);
+  }
+
+  /**
    * PUT file directly to R2 via presigned URL with XHR progress tracking
    */
   function uploadToR2(item: UploadItem, presignedUrl: string): Promise<void> {
@@ -303,7 +315,7 @@
       url: presignedUrl,
       method: 'PUT',
       file: item.file,
-      onProgress: (percent) => { item.progress = percent; },
+      onProgress: (percent) => setProgress(item, percent),
       errorPrefix: 'Upload',
     });
   }
@@ -318,7 +330,7 @@
       url: `/api/media/${mediaId}/upload`,
       method: 'POST',
       file: item.file,
-      onProgress: (percent) => { item.progress = percent; },
+      onProgress: (percent) => setProgress(item, percent),
       withCredentials: true,
       errorPrefix: 'Worker upload',
     });

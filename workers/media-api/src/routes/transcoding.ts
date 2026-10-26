@@ -4,7 +4,9 @@
  * Routes for transcoding orchestration:
  * - POST /internal/media/:id/transcode - Trigger transcoding (workerAuth)
  * - POST /api/transcoding/retry/:id - Retry failed transcoding (authenticated)
- * - GET /api/transcoding/status/:id - Get transcoding status (authenticated)
+ *
+ * Progress is not polled: the studio reads it from the live status socket
+ * (routes/media-status.ts).
  */
 
 import type { HonoEnv } from '@codex/shared-types';
@@ -142,34 +144,6 @@ app.post(
       dispatchAfterReply(ctx, id, dispatchPromise);
 
       return { message: 'Transcoding retry triggered', mediaId: id };
-    },
-  })
-);
-
-/**
- * GET /api/transcoding/status/:id
- *
- * Get current transcoding status for a media item.
- *
- * Security: requireAuth (session cookie)
- * Rate Limit: api (100 requests per minute)
- */
-app.get(
-  '/api/transcoding/status/:id',
-  procedure({
-    policy: { auth: 'required', rateLimit: 'api' },
-    input: {
-      params: idParamSchema,
-    },
-    handler: async (ctx) => {
-      const { id } = ctx.input.params;
-
-      const status = await ctx.services.transcoding.getTranscodingStatus(
-        id,
-        ctx.user.id
-      );
-
-      return status;
     },
   })
 );

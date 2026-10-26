@@ -323,17 +323,6 @@ export const retryTranscodingSchema = z.object({
 export type RetryTranscodingInput = z.infer<typeof retryTranscodingSchema>;
 
 /**
- * Get transcoding status request
- */
-export const getTranscodingStatusSchema = z.object({
-  mediaId: uuidSchema,
-});
-
-export type GetTranscodingStatusInput = z.infer<
-  typeof getTranscodingStatusSchema
->;
-
-/**
  * Trigger transcoding request (internal/service use)
  */
 export const triggerTranscodingSchema = z.object({
@@ -346,24 +335,3 @@ export type TriggerTranscodingInput = z.infer<typeof triggerTranscodingSchema>;
 // ============================================================================
 // Response Types (for documentation/type safety)
 // ============================================================================
-
-/**
- * Transcoding status response
- */
-export const transcodingStatusResponseSchema = z.object({
-  status: z.enum(['uploading', 'uploaded', 'transcoding', 'ready', 'failed']),
-  transcodingAttempts: z.number().int().min(0),
-  // Raw code; null = nothing has gone wrong. Only a non-null code goes through
-  // transcodingErrorInfo() (@codex/constants), which reads null and any
-  // unknown code as INFRA_ERROR.
-  transcodingErrorCode: z.string().nullable(),
-  runpodJobId: z.string().nullable(),
-  transcodingPriority: z.number().int().min(0).max(4),
-  transcodingProgress: z.number().int().min(0).max(100).nullable(),
-  transcodingStep: transcodingStepEnum.nullable(),
-  readyVariants: z.array(hlsVariantSchema).nullable(),
-});
-
-export type TranscodingStatusResponse = z.infer<
-  typeof transcodingStatusResponseSchema
->;

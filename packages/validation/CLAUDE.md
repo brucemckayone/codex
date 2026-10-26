@@ -95,7 +95,7 @@ admin-api's `/api/admin/support/*` routes (Codex-2hxff.28), all platform-owner o
 ### Transcoding (`schemas/transcoding.ts`)
 - `runpodWebhookSchema`, `runpodWebhookUnionSchema` — RunPod webhook payloads
 - `runpodWebhookOutputSchema` — transcoding output (HLS variants, thumbnails)
-- `retryTranscodingSchema`, `getTranscodingStatusSchema`
+- `retryTranscodingSchema`
 - Enums: `runpodJobStatusEnum`, `transcodingStepEnum`, `hlsVariantSchema`, `thumbnailSizeSchema`, `mezzanineStatusEnum`
 - Types: `RunPodWebhookPayload`, `RunPodWebhookOutput`, `TranscodingStep`
 

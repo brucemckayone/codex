@@ -7,6 +7,8 @@
  * whether the creator may retry, and which sentence the studio shows.
  */
 
+import { MEDIA_STATUS } from './content';
+
 /**
  * Every reason a transcode can stop. Grouped by who detects it:
  *
@@ -193,6 +195,22 @@ export function transcodingErrorInfo(
 ): TranscodingErrorCodeInfo {
   const category = CODE_CATEGORY[toTranscodingErrorCode(code)];
   return { category, ...CATEGORY_POLICY[category] };
+}
+
+/**
+ * A row WAITING for the transcoder: back at `uploaded` with a transient code,
+ * for an automatic retry to dispatch again. The status object schedules those
+ * retries by it, and the studio words the wait by it.
+ */
+export function isWaitingForTranscoder(
+  lifecycle: string,
+  errorCode: string | null | undefined
+): boolean {
+  return (
+    lifecycle === MEDIA_STATUS.UPLOADED &&
+    errorCode != null &&
+    transcodingErrorInfo(errorCode).transient
+  );
 }
 
 /**

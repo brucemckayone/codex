@@ -30,9 +30,9 @@ import type {
   DurableObjectState,
 } from '@cloudflare/workers-types';
 import {
+  isWaitingForTranscoder,
   MAX_TRANSCODING_ATTEMPTS,
   MEDIA_STATUS,
-  transcodingErrorInfo,
 } from '@codex/constants';
 import { messageForLog } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
@@ -213,15 +213,6 @@ function nextRetryAt(
   if (held?.retry_at != null) return held.retry_at;
   const delay = RETRY_DELAYS_MS[held?.retries ?? 0];
   return delay === undefined ? null : Date.now() + delay;
-}
-
-/** A waiting row is retried by the alarm while it has retries left. */
-function isWaitingForTranscoder(lifecycle: string, errorCode: string | null) {
-  return (
-    lifecycle === MEDIA_STATUS.UPLOADED &&
-    errorCode !== null &&
-    transcodingErrorInfo(errorCode).transient
-  );
 }
 
 export class MediaStatusObject {

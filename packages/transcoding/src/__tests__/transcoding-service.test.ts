@@ -1164,27 +1164,3 @@ describe('setup-fault emails', () => {
     expect(alerts.dispatchRefused).toHaveBeenCalledTimes(1);
   });
 });
-
-describe('getTranscodingStatus', () => {
-  it('returns the stored error code of a waiting item', async () => {
-    fake.findFirst.mockResolvedValue(
-      media({
-        transcodingError: 'RunPod answered 409',
-        transcodingErrorCode: 'TRANSCODER_PAUSED',
-      })
-    );
-
-    const status = await service.getTranscodingStatus(MEDIA_ID, CREATOR_ID);
-
-    expect(status.transcodingErrorCode).toBe('TRANSCODER_PAUSED');
-    // The raw detail stays in the database (Codex-l2c48).
-    expect(status).not.toHaveProperty('transcodingError');
-    // A mock returns whatever it is given, so the select is asserted too:
-    // without the column there, production reads undefined.
-    expect(fake.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        columns: expect.objectContaining({ transcodingErrorCode: true }),
-      })
-    );
-  });
-});

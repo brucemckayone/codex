@@ -44,7 +44,6 @@ RunPod credentials are required. Storage credentials (R2, B2) are stored in RunP
 | `handleWebhook` | `(payload: RunPodWebhookPayload)` | Completion → `ready`; failure → `failed` with a job-side code. Both writes are guarded on `transcoding` AND the held job (`heldJobIs`), so a stale webhook changes nothing. Attempts are never counted here. |
 | `rejectWebhookOutput` | `({ jobId, mediaId }, detail)` | A signed completion/failure our schema rejected → `failed OUTPUT_REJECTED` now, not after the cron's timeout. |
 | `handleProgressWebhook` | `(payload: RunPodProgressWebhookPayload)` | Progress/step updates, guarded on the held job. |
-| `getTranscodingStatus` | `(mediaId, creatorId)` | Returns `TranscodingStatusResponse`, including `transcodingErrorCode`. |
 | `ensureEndpointAwake` | `(deadline: number)` | Reads the endpoint's max workers over REST v2 and raises it to `runpodWorkersMax` when RunPod scaled it down (paused = 0). `dispatch` calls it on a 409; the cron calls it every run. A key without access is logged at error as `transcoding.auto_unpause_not_permitted`; any other failure that is not a passing outage (an unreadable answer, a 2xx that did not apply the new value) is an error too. A bad `runpodWorkersMax` logs `transcoding.workers_max_invalid` at error and uses the default. |
 
 ## `RunPodApi` (`runpod-api.ts`)

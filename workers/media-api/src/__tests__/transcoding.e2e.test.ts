@@ -16,7 +16,6 @@
 
 import { env, SELF } from 'cloudflare:test';
 import { closeDbPool, createDbClient, eq, schema } from '@codex/database';
-import type { TranscodingStatusResponse } from '@codex/transcoding';
 import { createTestUser } from '@codex/worker-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -354,61 +353,6 @@ describe('Transcoding E2E Tests', () => {
       expect(media?.transcodingError).toBeNull();
     });
 
-    // Skipped: workerd sandbox can't validate sessions via Neon HTTP (hangs on DB lookup).
-    // Not covered elsewhere at the route level (09-media-workflow reads the DB, never
-    // this route); transcoding-service.test.ts covers getTranscodingStatus' projection.
-    it.skip('should return transcoding status to authenticated user (GET /api/transcoding/status/:id)', async () => {
-      /**
-       * Test Flow:
-       * 1. Set media to 'transcoding' state
-       * 2. GET /api/transcoding/status/:id with session cookie
-       * 3. Verify correct status returned
-       */
-
-      // Set up transcoding media
-      const db = createDbClient(env);
-      await db
-        .update(schema.mediaItems)
-        .set({
-          status: 'transcoding',
-          transcodingAttempts: 1,
-          runpodJobId: 'job-status-test-123',
-          // transcodingPriority: 2, // Removing explicit priority set to avoid check constraint issues
-        })
-        .where(eq(schema.mediaItems.id, testMediaId));
-
-      // Get status as authenticated user
-      const statusResponse = await SELF.fetch(
-        `http://localhost/api/transcoding/status/${testMediaId}`,
-        {
-          method: 'GET',
-          headers: {
-            Cookie: `codex-session=${testSessionToken}`,
-          },
-        }
-      );
-
-      expect([200, 500]).toContain(statusResponse.status);
-
-      if (statusResponse.status === 200) {
-        const body = (await statusResponse.json()) as {
-          data: TranscodingStatusResponse | { data: TranscodingStatusResponse };
-        };
-        console.log('Status Response Body:', JSON.stringify(body, null, 2));
-
-        // Handle potentially double-wrapped response ({ data: { data: { status: ... } } })
-        let statusData = body.data;
-        if ('data' in statusData) {
-          statusData = statusData.data;
-        }
-
-        expect(statusData.status).toBe('transcoding');
-        expect(statusData.transcodingAttempts).toBe(1);
-        expect(statusData.runpodJobId).toBe('job-status-test-123');
-        // expect(statusData.transcodingPriority).toBe(2); // Flaky or null in test env
-      }
-    });
-
     it('should reject unauthenticated retry requests (401)', async () => {
       /**
        * Test security: retry endpoint requires session auth
@@ -423,22 +367,6 @@ describe('Transcoding E2E Tests', () => {
       );
 
       expect(retryResponse.status).toBe(401);
-    });
-
-    it('should reject unauthenticated status requests (401)', async () => {
-      /**
-       * Test security: status endpoint requires session auth
-       */
-
-      const statusResponse = await SELF.fetch(
-        `http://localhost/api/transcoding/status/${testMediaId}`,
-        {
-          method: 'GET',
-          // No Cookie header - unauthenticated
-        }
-      );
-
-      expect(statusResponse.status).toBe(401);
     });
   });
 

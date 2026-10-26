@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isTranscodingErrorCode,
+  isWaitingForTranscoder,
   TRANSCODING_ERROR_CODE_MAX_LENGTH,
   TRANSCODING_ERROR_CODES,
   toJobErrorCode,
@@ -127,5 +128,28 @@ describe('toJobErrorCode', () => {
     'SOME_FUTURE_CODE',
   ])('does not believe the job claiming %s', (code) => {
     expect(toJobErrorCode(code)).toBe('INFRA_ERROR');
+  });
+});
+
+describe('isWaitingForTranscoder', () => {
+  it.each([
+    'TRANSCODER_PAUSED',
+    'TRANSCODER_BUSY',
+    'TRANSCODER_UNAVAILABLE',
+    'TRANSCODER_MISCONFIGURED',
+  ])('an uploaded row holding %s waits', (code) => {
+    expect(isWaitingForTranscoder('uploaded', code)).toBe(true);
+  });
+
+  it('an uploaded row with no code is about to be claimed, not waiting', () => {
+    expect(isWaitingForTranscoder('uploaded', null)).toBe(false);
+  });
+
+  it('a failed row keeps its transient code but no longer waits', () => {
+    expect(isWaitingForTranscoder('failed', 'TRANSCODER_PAUSED')).toBe(false);
+  });
+
+  it('a file problem never waits', () => {
+    expect(isWaitingForTranscoder('uploaded', 'CORRUPT_INPUT')).toBe(false);
   });
 });

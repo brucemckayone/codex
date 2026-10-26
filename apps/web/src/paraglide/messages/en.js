@@ -5455,6 +5455,198 @@ export const media_status_failed = () => `Failed`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const media_status_stopped = () => `Stopped`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_status_waiting = () => `Waiting`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_starting = () => `Starting`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_upload_elsewhere = () => `On another device`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_waiting_service_step = () => `Waiting for the service`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_waiting_service = (params) => `Our processing service is busy or starting up. We'll try again automatically in ${params.time}; you don't need to do anything.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_waiting_service_later = () => `Our processing service is busy or starting up. We'll keep trying automatically; you don't need to do anything.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_waiting_config_step = () => `Waiting for a fix`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_waiting_config = () => `Our processing service needs attention. We've told the team and will process this as soon as it's fixed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_stopped = () => `The upload stopped before it finished. Upload the file again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_failed_internal = () => `Something went wrong on our side while processing this file.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_failed_timeout = () => `Processing took too long.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_failed_file = () => `We couldn't process this file. It may be damaged or in a format we don't support. Upload a new copy.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_failed_exhausted = (params) => `We tried ${params.count} times without success. Upload the file again; if it keeps failing, contact support.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_try_again = () => `Try again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_tries_left_one = () => `1 try left`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_tries_left = (params) => `${params.count} tries left`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_retry_failed = () => `We couldn't start another try. Refresh the page and try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_tile_retry_rate_limited = () => `Too many tries in a row. Wait a minute, then try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_live_live = () => `Live`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_live_reconnecting = () => `Reconnecting`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_live_polling = () => `Updates every minute`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_announce_ready = (params) => `${params.title} is ready.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_announce_failed = (params) => `${params.title} couldn't be processed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const media_empty = () => `No media files yet`
 
 

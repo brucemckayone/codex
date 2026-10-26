@@ -14,6 +14,7 @@ import { updateMediaItemSchema } from '@codex/validation';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
+import { forwardClientErrors } from '$lib/server/forward-client-errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Media List Query
@@ -119,22 +120,32 @@ export const deleteMedia = command(z.string().uuid(), async (id) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Transcoding Status Query
+// Live Status + Try Again (Codex-l2c48.7)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Get transcoding status and progress for a media item
- * Used by MediaCard to poll progress during transcoding
+ * A ticket for the studio's live status socket (`$lib/client/media-status`).
+ *
+ * A command, not a query: each ticket is single-use, so a cached one would
+ * be refused. A 4xx keeps its status and code (401 = the session ended,
+ * 429 = back off), which is how the socket decides whether to try again.
  */
-export const getTranscodingStatus = query(
-  z.string().uuid(),
-  async (mediaId) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
+export const getMediaStatusTicket = command(async () => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return forwardClientErrors(() => api.media.statusTicket());
+});
 
-    return api.media.transcodingStatus(mediaId);
-  }
-);
+/**
+ * The failed tile's Try again. A refusal (the state moved, no tries left,
+ * rate limited) is a 4xx the tile reads; the outcome of the retry itself
+ * arrives over the live socket.
+ */
+export const retryTranscoding = command(z.string().uuid(), async (mediaId) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return forwardClientErrors(() => api.media.retryTranscoding(mediaId));
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Complete Upload Command
