@@ -130,31 +130,14 @@ export async function deliverMediaStatusEvent(
 
 type WaitUntil = (promise: Promise<unknown>) => void;
 
-/** A publish after the response: it never fails the write, a loss is logged. */
-function publishInBackground(
-  waitUntil: WaitUntil,
-  obs: ObservabilityClient | undefined,
-  event: MediaStatusEvent,
-  deliver: () => Promise<void>
-): void {
-  waitUntil(
-    deliver().catch((error: unknown) => {
-      obs?.error('media_status.publish_failed', {
-        event: event.event,
-        mediaId:
-          event.event === 'changed' ? event.change.mediaId : event.mediaId,
-        error: messageForLog(error),
-      });
-    })
-  );
-}
-
-/** media-api's publisher: straight to the object through its binding. */
-export class DurableObjectMediaStatusFeed implements MediaStatusFeed {
+/**
+ * changed/removed as publishes after the response: they never fail the write
+ * they report, and a loss is logged. A subclass says how one is delivered.
+ */
+abstract class BackgroundMediaStatusPublisher implements MediaStatusPublisher {
   constructor(
-    private readonly namespace: DurableObjectNamespace,
     private readonly waitUntil: WaitUntil,
-    private readonly obs?: ObservabilityClient
+    protected readonly obs?: ObservabilityClient
   ) {}
 
   changed(change: MediaStatusChange): void {
@@ -163,6 +146,35 @@ export class DurableObjectMediaStatusFeed implements MediaStatusFeed {
 
   removed(mediaId: string, creatorId: string): void {
     this.publish({ event: 'removed', mediaId, creatorId });
+  }
+
+  protected abstract deliver(event: MediaStatusEvent): Promise<void>;
+
+  private publish(event: MediaStatusEvent): void {
+    this.waitUntil(
+      this.deliver(event).catch((error: unknown) => {
+        this.obs?.error('media_status.publish_failed', {
+          event: event.event,
+          mediaId:
+            event.event === 'changed' ? event.change.mediaId : event.mediaId,
+          error: messageForLog(error),
+        });
+      })
+    );
+  }
+}
+
+/** media-api's publisher: straight to the object through its binding. */
+export class DurableObjectMediaStatusFeed
+  extends BackgroundMediaStatusPublisher
+  implements MediaStatusFeed
+{
+  constructor(
+    private readonly namespace: DurableObjectNamespace,
+    waitUntil: WaitUntil,
+    obs?: ObservabilityClient
+  ) {
+    super(waitUntil, obs);
   }
 
   async progress(
@@ -200,44 +212,34 @@ export class DurableObjectMediaStatusFeed implements MediaStatusFeed {
     }
   }
 
-  private publish(event: MediaStatusEvent): void {
-    publishInBackground(this.waitUntil, this.obs, event, () =>
-      deliverMediaStatusEvent(this.namespace, event)
-    );
+  protected deliver(event: MediaStatusEvent): Promise<void> {
+    return deliverMediaStatusEvent(this.namespace, event);
   }
 }
 
 /** A worker without the binding: through media-api, with worker HMAC. */
-export class WorkerMediaStatusPublisher implements MediaStatusPublisher {
+export class WorkerMediaStatusPublisher extends BackgroundMediaStatusPublisher {
   constructor(
     private readonly mediaApiUrl: string,
     private readonly workerSecret: string,
-    private readonly waitUntil: WaitUntil,
-    private readonly obs?: ObservabilityClient
-  ) {}
-
-  changed(change: MediaStatusChange): void {
-    this.publish({ event: 'changed', change });
+    waitUntil: WaitUntil,
+    obs?: ObservabilityClient
+  ) {
+    super(waitUntil, obs);
   }
 
-  removed(mediaId: string, creatorId: string): void {
-    this.publish({ event: 'removed', mediaId, creatorId });
-  }
-
-  private publish(event: MediaStatusEvent): void {
-    publishInBackground(this.waitUntil, this.obs, event, async () => {
-      const response = await workerFetch(
-        `${this.mediaApiUrl}${MEDIA_STATUS_INTERNAL_ROUTE}`,
-        {
-          method: 'POST',
-          body: JSON.stringify(event),
-          signal: AbortSignal.timeout(5_000),
-        },
-        this.workerSecret
-      );
-      if (!response.ok) {
-        throw new InternalServiceError(`media-api answered ${response.status}`);
-      }
-    });
+  protected async deliver(event: MediaStatusEvent): Promise<void> {
+    const response = await workerFetch(
+      `${this.mediaApiUrl}${MEDIA_STATUS_INTERNAL_ROUTE}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(event),
+        signal: AbortSignal.timeout(5_000),
+      },
+      this.workerSecret
+    );
+    if (!response.ok) {
+      throw new InternalServiceError(`media-api answered ${response.status}`);
+    }
   }
 }

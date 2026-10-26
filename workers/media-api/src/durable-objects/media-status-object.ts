@@ -160,23 +160,8 @@ function isSameChange(held: Row, change: MediaStatusChange): boolean {
   );
 }
 
-/** The row a change leaves. A new claim starts at 0; the job-id write keeps its ticks. */
+/** The row a change leaves. */
 function nextRow(held: Row | null, change: MediaStatusChange): Row {
-  const transcoding = change.lifecycle === MEDIA_STATUS.TRANSCODING;
-  const uploading = change.lifecycle === MEDIA_STATUS.UPLOADING;
-  const sameJob =
-    held?.lifecycle === MEDIA_STATUS.TRANSCODING &&
-    (held.job_id === null || held.job_id === change.jobId);
-  const retries = held?.retries ?? 0;
-  let retryAt: number | null = null;
-  if (isWaitingForTranscoder(change.lifecycle, change.errorCode)) {
-    // An alarm already due keeps its time; a new wait takes the next delay.
-    retryAt =
-      held?.retry_at ??
-      (retries < RETRY_DELAYS_MS.length
-        ? Date.now() + RETRY_DELAYS_MS[retries]
-        : null);
-  }
   return {
     media_id: change.mediaId,
     creator_id: change.creatorId,
@@ -184,15 +169,50 @@ function nextRow(held: Row | null, change: MediaStatusChange): Row {
     error_code: change.errorCode,
     attempts: change.attempts,
     job_id: change.jobId,
-    step: transcoding && sameJob ? (held?.step ?? null) : null,
-    progress: transcoding ? (sameJob ? (held?.progress ?? 0) : 0) : null,
-    upload_pct: uploading ? (held?.upload_pct ?? null) : null,
-    upload_socket: uploading ? (held?.upload_socket ?? null) : null,
-    retry_at: retryAt,
-    retries,
+    ...progressOf(held, change),
+    ...uploadOf(held, change),
+    retry_at: nextRetryAt(held, change),
+    retries: held?.retries ?? 0,
     version: (held?.version ?? 0) + 1,
     updated_at: change.at,
   };
+}
+
+/** A new claim starts at 0; the job-id write keeps the ticks so far. */
+function progressOf(
+  held: Row | null,
+  change: MediaStatusChange
+): Pick<Row, 'step' | 'progress'> {
+  if (change.lifecycle !== MEDIA_STATUS.TRANSCODING) {
+    return { step: null, progress: null };
+  }
+  const sameJob =
+    held?.lifecycle === MEDIA_STATUS.TRANSCODING &&
+    (held.job_id === null || held.job_id === change.jobId);
+  return sameJob
+    ? { step: held.step, progress: held.progress ?? 0 }
+    : { step: null, progress: 0 };
+}
+
+/** The uploading tab's % lasts while the item uploads. */
+function uploadOf(
+  held: Row | null,
+  change: MediaStatusChange
+): Pick<Row, 'upload_pct' | 'upload_socket'> {
+  return change.lifecycle === MEDIA_STATUS.UPLOADING && held
+    ? { upload_pct: held.upload_pct, upload_socket: held.upload_socket }
+    : { upload_pct: null, upload_socket: null };
+}
+
+/** An alarm already due keeps its time; a new wait takes the next delay. */
+function nextRetryAt(
+  held: Row | null,
+  change: MediaStatusChange
+): number | null {
+  if (!isWaitingForTranscoder(change.lifecycle, change.errorCode)) return null;
+  if (held?.retry_at != null) return held.retry_at;
+  const delay = RETRY_DELAYS_MS[held?.retries ?? 0];
+  return delay === undefined ? null : Date.now() + delay;
 }
 
 /** A waiting row is retried by the alarm while it has retries left. */
@@ -253,6 +273,8 @@ export class MediaStatusObject {
   // Routes (media-api's Worker only)
   // ==========================================================================
 
+  /** media-api's Worker only. Invoked by workerd, so no static caller. */
+  // fallow-ignore-next-line unused-class-member
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
     try {
@@ -373,14 +395,32 @@ export class MediaStatusObject {
    */
   async applyChange(change: MediaStatusChange): Promise<void> {
     const held = this.row(change.mediaId);
-    if (held && held.creator_id !== change.creatorId) {
+    if (held && !this.isNews(held, change)) return;
+    const row = nextRow(held, change);
+    if (TERMINAL.has(change.lifecycle)) {
+      // The final state goes out, then the row: nothing to keep.
+      this.state.storage.sql.exec(
+        'DELETE FROM items WHERE media_id = ?',
+        change.mediaId
+      );
+    } else {
+      this.write(row);
+    }
+    this.broadcast(row);
+    // A terminal row's retry_at is null: its alarm moves only if it had one.
+    if ((held?.retry_at ?? null) !== row.retry_at) await this.rescheduleAlarm();
+  }
+
+  /** Whether a change tells the held row anything; the suspect ones logged. */
+  private isNews(held: Row, change: MediaStatusChange): boolean {
+    if (held.creator_id !== change.creatorId) {
       // An item never changes creator: a publisher bug, not a move.
       this.obs.error('media_status.change_creator_mismatch', {
         mediaId: change.mediaId,
       });
-      return;
+      return false;
     }
-    if (held && change.at < held.updated_at) {
+    if (change.at < held.updated_at) {
       // Stamped by different machines' clocks: say so when it was news.
       if (!isSameChange(held, { ...change, at: held.updated_at })) {
         this.obs.warn('media_status.change_dropped_as_stale', {
@@ -388,23 +428,9 @@ export class MediaStatusObject {
           skewMs: held.updated_at - change.at,
         });
       }
-      return;
+      return false;
     }
-    if (held && isSameChange(held, change)) return;
-    const row = nextRow(held, change);
-    if (TERMINAL.has(change.lifecycle)) {
-      // The final state goes out, then the row: nothing to keep.
-      this.broadcast(row);
-      this.state.storage.sql.exec(
-        'DELETE FROM items WHERE media_id = ?',
-        change.mediaId
-      );
-      if ((held?.retry_at ?? null) !== null) await this.rescheduleAlarm();
-      return;
-    }
-    this.write(row);
-    this.broadcast(row);
-    if ((held?.retry_at ?? null) !== row.retry_at) await this.rescheduleAlarm();
+    return !isSameChange(held, change);
   }
 
   async applyRemoved(mediaId: string, creatorId: string): Promise<void> {
@@ -468,7 +494,11 @@ export class MediaStatusObject {
   // Sockets (Hibernation API)
   // ==========================================================================
 
-  /** The uploading tab's %; everything else a tab sends is dropped. */
+  /**
+   * The uploading tab's %; everything else a tab sends is dropped. Invoked
+   * by workerd (Hibernation API), so no static caller.
+   */
+  // fallow-ignore-next-line unused-class-member
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
     const attachment = this.attachmentOf(ws);
     if (!attachment) return;
@@ -513,6 +543,8 @@ export class MediaStatusObject {
     for (const row of rows) this.broadcast(row);
   }
 
+  /** Invoked by workerd (Hibernation API), so no static caller. */
+  // fallow-ignore-next-line unused-class-member
   webSocketClose(ws: WebSocket, code: number, reason: string): void {
     this.releaseUploads(ws);
     // Before compatibility date 2026-04-07 the runtime does not answer the
@@ -524,6 +556,8 @@ export class MediaStatusObject {
     }
   }
 
+  /** Invoked by workerd (Hibernation API), so no static caller. */
+  // fallow-ignore-next-line unused-class-member
   webSocketError(ws: WebSocket): void {
     this.releaseUploads(ws);
   }
@@ -548,6 +582,8 @@ export class MediaStatusObject {
   // Alarm: waiting uploads retried within minutes
   // ==========================================================================
 
+  /** The earliest due retry's alarm. Invoked by workerd, so no static caller. */
+  // fallow-ignore-next-line unused-class-member
   async alarm(): Promise<void> {
     const now = Date.now();
     const due = this.state.storage.sql

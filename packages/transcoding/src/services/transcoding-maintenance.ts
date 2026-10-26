@@ -560,52 +560,7 @@ export class TranscodingMaintenance extends BaseService {
         break;
       }
 
-      const stillStalled = and(
-        eq(mediaItems.id, row.id),
-        eq(mediaItems.status, MEDIA_STATUS.UPLOADING),
-        isNull(mediaItems.deletedAt),
-        lt(mediaItems.updatedAt, stalledSince)
-      );
-      if (exists) {
-        // upload-complete never arrived. The 24 h clock starts now, and the
-        // next run's retry step dispatches it.
-        const written = await this.db
-          .update(mediaItems)
-          .set({
-            status: MEDIA_STATUS.UPLOADED,
-            uploadedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(stillStalled)
-          .returning();
-        for (const row of written) this.transcoding.publish(row);
-        if (written.length > 0) report.uploads.arrived++;
-        else report.raced++;
-        continue;
-      }
-
-      const written = await this.db
-        .update(mediaItems)
-        .set(
-          failedFields(
-            TRANSCODING_ERROR_CODES.UPLOAD_INCOMPLETE,
-            'The upload never finished'
-          )
-        )
-        .where(stillStalled)
-        .returning();
-      if (written.length === 0) {
-        report.raced++;
-        continue;
-      }
-      for (const row of written) this.transcoding.publish(row);
-      report.uploads.incomplete++;
-      this.obs.warn('transcoding.upload_incomplete', {
-        mediaId: row.id,
-        ageHours: Math.floor(
-          (now.getTime() - row.updatedAt.getTime()) / 3_600_000
-        ),
-      });
+      await this.resolveStalledUpload(row, exists, stalledSince, now, report);
     }
 
     if (report.uploads.incomplete >= INCOMPLETE_UPLOAD_BURST) {
@@ -614,5 +569,58 @@ export class TranscodingMaintenance extends BaseService {
       });
       this.alerts?.uploadsIncomplete(report.uploads.incomplete);
     }
+  }
+  /**
+   * One stalled upload, moved on if nothing else has since: a file that
+   * arrived goes to `uploaded` (upload-complete never came; the 24 h clock
+   * starts now and the next run's retry step dispatches it), one that never
+   * did fails UPLOAD_INCOMPLETE.
+   */
+  private async resolveStalledUpload(
+    row: { id: string; updatedAt: Date },
+    exists: boolean,
+    stalledSince: Date,
+    now: Date,
+    report: MaintenanceReport
+  ): Promise<void> {
+    const [written] = await this.db
+      .update(mediaItems)
+      .set(
+        exists
+          ? {
+              status: MEDIA_STATUS.UPLOADED,
+              uploadedAt: new Date(),
+              updatedAt: new Date(),
+            }
+          : failedFields(
+              TRANSCODING_ERROR_CODES.UPLOAD_INCOMPLETE,
+              'The upload never finished'
+            )
+      )
+      .where(
+        and(
+          eq(mediaItems.id, row.id),
+          eq(mediaItems.status, MEDIA_STATUS.UPLOADING),
+          isNull(mediaItems.deletedAt),
+          lt(mediaItems.updatedAt, stalledSince)
+        )
+      )
+      .returning();
+    if (!written) {
+      report.raced++;
+      return;
+    }
+    this.transcoding.publish(written);
+    if (exists) {
+      report.uploads.arrived++;
+      return;
+    }
+    report.uploads.incomplete++;
+    this.obs.warn('transcoding.upload_incomplete', {
+      mediaId: row.id,
+      ageHours: Math.floor(
+        (now.getTime() - row.updatedAt.getTime()) / 3_600_000
+      ),
+    });
   }
 }
