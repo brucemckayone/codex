@@ -261,6 +261,25 @@ VIDEO_PROFILE = ["-profile:v", "high"]
 # supports (96 kHz came out). Every audio output is pinned to 48 kHz.
 AUDIO_SAMPLE_RATE = ["-ar", "48000"]
 
+# EBU R128-style levelling on every audio output (its stats are analyze_loudness).
+LOUDNORM = "loudnorm=I=-16:TP=-1.5:LRA=11"
+
+# Square the pixels before any scale, so an anamorphic source keeps the shape
+# it is shown at.
+SQUARE_PIXELS = "scale='trunc(iw*sar/2)*2':ih,setsar=1"
+
+
+def _filters(*parts: str | None) -> str:
+    """A -vf chain from its parts, leaving out an absent one (an SDR source's
+    tone-map)."""
+    return ",".join(part for part in parts if part)
+
+
+def _audio_codec(bitrate: str) -> list[str]:
+    """AAC at `bitrate`, pinned to 48 kHz."""
+    return ["-c:a", "aac", "-b:a", bitrate, *AUDIO_SAMPLE_RATE]
+
+
 # A video job is encoded past damaged frames (owner's choice, 2026-10-26).
 # ffmpeg already conceals a bad frame and carries on; what fails the file is
 # its error-rate check, exit 69 once 2/3 of ALL decoded frames failed, audio
@@ -281,6 +300,14 @@ _ZSCALE_PRIMARIES = ("bt709", "bt2020", "smpte431", "smpte432")
 _ZSCALE_MATRICES = ("bt709", "bt2020nc", "bt2020c")
 
 
+def first_video_stream(probe_data: dict[str, Any]) -> dict[str, Any] | None:
+    """The source's picture: its first video stream, if it has one."""
+    return next(
+        (s for s in probe_data.get("streams", []) if s.get("codec_type") == "video"),
+        None,
+    )
+
+
 def tonemap_filter(probe_data: dict[str, Any]) -> str | None:
     """The filters that bring an HDR (PQ or HLG) picture to SDR BT.709, or
     None when the first video stream is SDR.
@@ -289,10 +316,7 @@ def tonemap_filter(probe_data: dict[str, Any]) -> str | None:
     rather than read from each frame. The encoder is tagged BT.709 by the
     frames this leaves (checked on 4.4.2), so no output option is needed.
     """
-    video = next(
-        (s for s in probe_data.get("streams", []) if s.get("codec_type") == "video"),
-        {},
-    )
+    video = first_video_stream(probe_data) or {}
     transfer = video.get("color_transfer")
     if transfer not in HDR_TRANSFERS:
         return None
@@ -321,13 +345,11 @@ def ladder_filter(short_side: int, tonemap: str | None = None) -> str:
     in float after the scale, at the rung's size: about 2.5x the plain
     encode's time for 1080p -> 720p, against far more at the source's.
     """
-    return ",".join(
-        [
-            "scale='trunc(iw*sar/2)*2':ih,setsar=1",
-            f"scale='if(gte(iw,ih),-2,{short_side})':'if(gte(iw,ih),{short_side},-2)'",
-            *([tonemap] if tonemap else []),
-            VIDEO_PIXEL_FORMAT,
-        ]
+    return _filters(
+        SQUARE_PIXELS,
+        f"scale='if(gte(iw,ih),-2,{short_side})':'if(gte(iw,ih),{short_side},-2)'",
+        tonemap,
+        VIDEO_PIXEL_FORMAT,
     )
 
 
@@ -665,13 +687,8 @@ def get_media_info(probe_data: dict[str, Any]) -> tuple[int, int | None, int | N
     except (TypeError, ValueError):
         duration = 0
 
-    width = None
-    height = None
-    for stream in probe_data.get("streams", []):
-        if stream.get("codec_type") == "video":
-            width, height = display_dimensions(stream)
-            break
-
+    video = first_video_stream(probe_data)
+    width, height = display_dimensions(video) if video else (None, None)
     return duration, width, height
 
 
@@ -822,6 +839,39 @@ def _hls_output(segment_path: str, playlist_path: str) -> list[str]:
     ]
 
 
+def _encode_with_fallback(
+    use_gpu: bool,
+    build: Callable[[bool], list[str]],
+    check: Callable[[], None],
+    what: str,
+    timeout: int,
+    on_seconds: Callable[[float], None] | None = None,
+) -> None:
+    """Run `build(True)` and `check()` its output; when either fails (an
+    NVENC fault, or an output that fails its check) the CPU gets a try with
+    `build(False)`, whose failure is the job's."""
+    if use_gpu:
+        try:
+            run_ffmpeg(
+                build(True),
+                timeout=timeout,
+                description=f"{what} (GPU)",
+                on_seconds=on_seconds,
+            )
+            check()
+            return
+        except RuntimeError as e:
+            print(f"GPU {what} failed, falling back to CPU: {e}")
+
+    run_ffmpeg(
+        build(False),
+        timeout=timeout,
+        description=f"{what} (CPU)",
+        on_seconds=on_seconds,
+    )
+    check()
+
+
 def _build_mezzanine_cmd(
     input_path: str, output_path: str, use_gpu: bool, tonemap: str | None = None
 ) -> list[str]:
@@ -831,13 +881,9 @@ def _build_mezzanine_cmd(
         "-y",
         *_input_args(input_path, use_gpu),
         "-vf",
-        ",".join([*([tonemap] if tonemap else []), VIDEO_PIXEL_FORMAT]),
+        _filters(tonemap, VIDEO_PIXEL_FORMAT),
         *_video_codec(use_gpu, 18, cpu_preset="slow"),
-        "-c:a",
-        "aac",
-        "-b:a",
-        "256k",
-        *AUDIO_SAMPLE_RATE,
+        *_audio_codec("256k"),
         output_path,
     ]
 
@@ -850,25 +896,13 @@ def create_mezzanine(
     Falls back to CPU if GPU encoding fails (e.g. OOM).
     """
     print("Creating mezzanine (CRF 18)...")
-
-    if use_gpu:
-        try:
-            run_ffmpeg(
-                _build_mezzanine_cmd(input_path, output_path, True, tonemap),
-                timeout=3600,
-                description="mezzanine (GPU)",
-            )
-            validate_output(output_path, "mezzanine")
-            return
-        except RuntimeError as e:
-            print(f"GPU mezzanine failed, falling back to CPU: {e}")
-
-    run_ffmpeg(
-        _build_mezzanine_cmd(input_path, output_path, False, tonemap),
+    _encode_with_fallback(
+        use_gpu,
+        lambda gpu: _build_mezzanine_cmd(input_path, output_path, gpu, tonemap),
+        lambda: validate_output(output_path, "mezzanine"),
+        "mezzanine",
         timeout=3600,
-        description="mezzanine (CPU)",
     )
-    validate_output(output_path, "mezzanine")
 
 
 def _safe_loudness(value: float, default: float) -> float:
@@ -890,12 +924,17 @@ def analyze_loudness(input_path: str) -> dict[str, float] | None:
     """
     print("Analyzing audio loudness...")
 
+    # Audio only: without -vn the null output decodes every video frame too
+    # (12x slower on a 4K HEVC source), enough to reach the timeout below.
     cmd = [
         "ffmpeg",
         "-i",
         input_path,
+        "-vn",
+        "-sn",
+        "-dn",
         "-af",
-        "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json",
+        f"{LOUDNORM}:print_format=json",
         "-f",
         "null",
         "-",
@@ -953,13 +992,9 @@ def _build_hls_variant_cmd(
         settings["video_bitrate"],
         "-bufsize",
         f"{int(settings['video_bitrate'][:-1]) * 2}k",
-        "-c:a",
-        "aac",
-        "-b:a",
-        settings["audio_bitrate"],
-        *AUDIO_SAMPLE_RATE,
+        *_audio_codec(settings["audio_bitrate"]),
         "-af",
-        "loudnorm=I=-16:TP=-1.5:LRA=11",
+        LOUDNORM,
         *_hls_output(os.path.join(variant_dir, "stream.ts"), playlist_path),
     ]
 
@@ -975,32 +1010,18 @@ def _encode_hls_variant(
     on_seconds: Callable[[float], None] | None = None,
 ) -> None:
     """Encode a single HLS variant with GPU → CPU fallback."""
-    if use_gpu:
-        try:
-            run_ffmpeg(
-                _build_hls_variant_cmd(
-                    input_path, variant_dir, playlist_path, settings, True, tonemap
-                ),
-                timeout=3600,
-                description=f"HLS {variant_name} (GPU)",
-                on_seconds=on_seconds,
-            )
-            _validate_hls_rung(
-                variant_dir, playlist_path, f"HLS {variant_name}", picture=True
-            )
-            return
-        except RuntimeError as e:
-            print(f"GPU failed for {variant_name}, falling back to CPU: {e}")
-
-    run_ffmpeg(
-        _build_hls_variant_cmd(
-            input_path, variant_dir, playlist_path, settings, False, tonemap
+    _encode_with_fallback(
+        use_gpu,
+        lambda gpu: _build_hls_variant_cmd(
+            input_path, variant_dir, playlist_path, settings, gpu, tonemap
         ),
+        lambda: _validate_hls_rung(
+            variant_dir, playlist_path, f"HLS {variant_name}", picture=True
+        ),
+        f"HLS {variant_name}",
         timeout=3600,
-        description=f"HLS {variant_name} (CPU)",
         on_seconds=on_seconds,
     )
-    _validate_hls_rung(variant_dir, playlist_path, f"HLS {variant_name}", picture=True)
 
 
 def _validate_hls_rung(
@@ -1236,13 +1257,9 @@ def _build_audio_hls_cmd(
         "-i",
         input_path,
         "-vn",
-        "-c:a",
-        "aac",
-        "-b:a",
-        settings["audio_bitrate"],
-        *AUDIO_SAMPLE_RATE,
+        *_audio_codec(settings["audio_bitrate"]),
         "-af",
-        "loudnorm=I=-16:TP=-1.5:LRA=11",
+        LOUDNORM,
         *_hls_output(os.path.join(variant_dir, "stream.ts"), playlist_path),
     ]
 
@@ -1309,11 +1326,7 @@ def _build_preview_cmd(
         "-vf",
         ladder_filter(short_side, tonemap),
         *_video_codec(use_gpu, 23, cpu_preset="fast"),
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        *AUDIO_SAMPLE_RATE,
+        *_audio_codec("128k"),
         *_hls_output(
             os.path.join(preview_dir, "stream.ts"),
             os.path.join(preview_dir, "preview.m3u8"),
@@ -1343,40 +1356,21 @@ def create_preview(
         short_side = min(PREVIEW_HEIGHT, even_floor(source_short_side))
 
     playlist_path = os.path.join(preview_dir, "preview.m3u8")
-    if use_gpu:
-        try:
-            run_ffmpeg(
-                _build_preview_cmd(
-                    input_path,
-                    preview_dir,
-                    start_time,
-                    preview_duration,
-                    use_gpu=True,
-                    short_side=short_side,
-                    tonemap=tonemap,
-                ),
-                timeout=120,
-                description="preview (GPU)",
-            )
-            _validate_hls_rung(preview_dir, playlist_path, "preview")
-            return
-        except RuntimeError as e:
-            print(f"GPU preview failed, falling back to CPU: {e}")
-
-    run_ffmpeg(
-        _build_preview_cmd(
+    _encode_with_fallback(
+        use_gpu,
+        lambda gpu: _build_preview_cmd(
             input_path,
             preview_dir,
             start_time,
             preview_duration,
-            use_gpu=False,
+            use_gpu=gpu,
             short_side=short_side,
             tonemap=tonemap,
         ),
+        lambda: _validate_hls_rung(preview_dir, playlist_path, "preview"),
+        "preview",
         timeout=120,
-        description="preview (CPU)",
     )
-    _validate_hls_rung(preview_dir, playlist_path, "preview")
 
 
 def extract_thumbnail(input_path: str, output_path: str, duration: int) -> None:
@@ -1462,13 +1456,7 @@ def extract_thumbnail_variants(
             "-vframes",
             "1",
             "-vf",
-            ",".join(
-                [
-                    "scale='trunc(iw*sar/2)*2':ih,setsar=1",
-                    *([tonemap] if tonemap else []),
-                    f"scale='min({config['width']},iw)':-1",
-                ]
-            ),
+            _filters(SQUARE_PIXELS, tonemap, f"scale='min({config['width']},iw)':-1"),
             "-c:v",
             "libwebp",
             "-quality",
@@ -1552,6 +1540,16 @@ def sign_payload(payload: str, secret: str, timestamp: str | None = None) -> str
     ).hexdigest()
 
 
+def _signed_headers(payload: str, secret: str) -> dict[str, str]:
+    """The headers media-api verifies: an HMAC over `timestamp.payload`."""
+    timestamp = str(int(time.time()))
+    return {
+        "Content-Type": "application/json",
+        "X-Runpod-Signature": sign_payload(payload, secret, timestamp),
+        "X-Runpod-Timestamp": timestamp,
+    }
+
+
 def send_webhook(url: str, secret: str, result: dict) -> None:
     """Send signed webhook with retry (3 attempts, exponential backoff).
 
@@ -1561,13 +1559,7 @@ def send_webhook(url: str, secret: str, result: dict) -> None:
     backoff_base = 2
 
     payload = json.dumps(result)
-    timestamp = str(int(time.time()))
-    signature = sign_payload(payload, secret, timestamp)
-    headers = {
-        "Content-Type": "application/json",
-        "X-Runpod-Signature": signature,
-        "X-Runpod-Timestamp": timestamp,
-    }
+    headers = _signed_headers(payload, secret)
 
     last_error: Exception | None = None
     for attempt in range(max_attempts):
@@ -1609,14 +1601,11 @@ def send_progress(
         payload_dict["mediaId"] = media_id
     payload = json.dumps(payload_dict)
     try:
-        timestamp = str(int(time.time()))
-        signature = sign_payload(payload, secret, timestamp)
-        headers = {
-            "Content-Type": "application/json",
-            "X-Runpod-Signature": signature,
-            "X-Runpod-Timestamp": timestamp,
-        }
-        requests.post(url, data=payload, headers=headers, timeout=5)
+        # Short: it is fire-and-forget, and the end of a rung waits for a
+        # tick in flight.
+        requests.post(
+            url, data=payload, headers=_signed_headers(payload, secret), timeout=(2, 3)
+        )
     except Exception as e:
         print(f"Progress webhook failed (non-fatal): {e}")
 

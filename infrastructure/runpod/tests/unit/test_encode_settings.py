@@ -5,23 +5,12 @@ H.264 High 10, ProRes High 4:2:2, a 4:4:4 source High 4:4:4 (all `ready`, none
 playable), and loudnorm's 192 kHz reached AAC as 96 kHz.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
+from _jobs import video_cmds
 
 from handler import main as handler_module
-
-SETTINGS_720 = handler_module.HLS_VARIANTS["720p"]
-
-
-def _video_cmds(use_gpu: bool) -> dict[str, list[str]]:
-    return {
-        "mezzanine": handler_module._build_mezzanine_cmd("in.mov", "out.mp4", use_gpu),
-        "variant": handler_module._build_hls_variant_cmd(
-            "in.mov", "/out/720p", "/out/720p/index.m3u8", SETTINGS_720, use_gpu
-        ),
-        "preview": handler_module._build_preview_cmd(
-            "in.mov", "/out/preview", 3, 30, use_gpu
-        ),
-    }
 
 
 def _value(cmd: list[str], flag: str) -> str:
@@ -33,18 +22,18 @@ def _value(cmd: list[str], flag: str) -> str:
 @pytest.mark.parametrize("name", ["mezzanine", "variant", "preview"])
 class TestVideoEncodes:
     def test_converts_to_8_bit_420_after_scaling(self, name, use_gpu):
-        filters = _value(_video_cmds(use_gpu)[name], "-vf").split(",")
+        filters = _value(video_cmds(use_gpu)[name], "-vf").split(",")
         assert filters[-1] == "format=yuv420p"
 
     def test_encodes_high_profile(self, name, use_gpu):
-        assert _value(_video_cmds(use_gpu)[name], "-profile:v") == "high"
+        assert _value(video_cmds(use_gpu)[name], "-profile:v") == "high"
 
     def test_profile_follows_the_video_codec(self, name, use_gpu):
-        cmd = _video_cmds(use_gpu)[name]
+        cmd = video_cmds(use_gpu)[name]
         assert cmd.index("-profile:v") == cmd.index("-c:v") + 2
 
     def test_audio_is_48_khz(self, name, use_gpu):
-        assert _value(_video_cmds(use_gpu)[name], "-ar") == "48000"
+        assert _value(video_cmds(use_gpu)[name], "-ar") == "48000"
 
 
 @pytest.mark.parametrize("rung", list(handler_module.AUDIO_VARIANTS))
@@ -58,3 +47,13 @@ def test_audio_only_rungs_are_48_khz(rung):
     assert _value(cmd, "-ar") == "48000"
     assert "-vn" in cmd
     assert _value(cmd, "-hls_flags") == "single_file"
+
+
+def test_loudness_reads_the_audio_only():
+    """Without -vn the null output decodes every video frame as well: 12x
+    slower on a 4K HEVC source, enough to reach the analysis's timeout."""
+    with patch("subprocess.run", return_value=MagicMock(stderr="")) as run:
+        handler_module.analyze_loudness("in.mov")
+    cmd = run.call_args.args[0]
+    assert {"-vn", "-sn", "-dn"} <= set(cmd)
+    assert cmd.index("-vn") > cmd.index("-i")

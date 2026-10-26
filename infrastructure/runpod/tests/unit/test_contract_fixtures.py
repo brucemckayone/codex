@@ -16,26 +16,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from _jobs import run_job
+from _jobs import CREATOR_ID, MEDIA_ID, job_input, run_job
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "contract"
 UPDATE = os.environ.get("UPDATE_CONTRACT_FIXTURES") == "1"
 
-MEDIA_ID = "550e8400-e29b-41d4-a716-446655440000"
-# A real user id's shape (userIdSchema: letters and digits), so the echo shows.
-CREATOR_ID = "k9Xq2LmVt7RzP4wN"
 NONCE = "0f1e2d3c"
-
-
-def _job(**fields):
-    return {
-        "mediaId": MEDIA_ID,
-        "creatorId": CREATOR_ID,
-        "type": "video",
-        "inputKey": f"{CREATOR_ID}/originals/{MEDIA_ID}/clip.mov",
-        "webhookUrl": "https://media-api.example.com/api/transcoding/webhook",
-        **fields,
-    }
 
 
 def _video(width, height, rotation=0):
@@ -81,19 +67,19 @@ def fixed_nonce():
 
 def test_completed_video_in_the_sized_layout():
     _, posts = run_job(
-        _job(contract=2), _video(1920, 1080, rotation=-90), job_id="job-sized"
+        job_input(contract=2), _video(1920, 1080, rotation=-90), job_id="job-sized"
     )
     _check("completed-video-sized", _final(posts, "completed"))
     _check("progress", posts[0])
 
 
 def test_completed_video_in_the_flat_layout():
-    _, posts = run_job(_job(), _video(1920, 1080), job_id="job-flat")
+    _, posts = run_job(job_input(), _video(1920, 1080), job_id="job-flat")
     _check("completed-video-flat", _final(posts, "completed"))
 
 
 def test_completed_audio():
-    job = _job(
+    job = job_input(
         contract=2, type="audio", inputKey=f"{CREATOR_ID}/originals/{MEDIA_ID}/talk.m4a"
     )
     _, posts = run_job(job, AUDIO, job_id="job-audio")
@@ -102,7 +88,7 @@ def test_completed_audio():
 
 def test_failed_unreadable_file():
     _, posts = run_job(
-        _job(contract=2),
+        job_input(contract=2),
         _video(1920, 1080),
         job_id="job-corrupt",
         fail_on="ffprobe",
@@ -112,7 +98,7 @@ def test_failed_unreadable_file():
 
 
 def test_failed_with_no_reportable_media_id():
-    job = _job(contract=2, mediaId="not-a-uuid")
+    job = job_input(contract=2, mediaId="not-a-uuid")
     del job["creatorId"]
     _, posts = run_job(job, _video(1920, 1080), job_id="job-broken")
     _check("failed-no-media-id", _final(posts, "failed"))

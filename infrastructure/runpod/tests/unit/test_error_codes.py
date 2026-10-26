@@ -12,12 +12,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from _jobs import PICTURE
 
 from handler import main as handler_module
 from handler.main import TranscodeError, TranscodeErrorCode
-
-# What ffprobe says of an encoded rung that holds a picture.
-PICTURE = {"codec_type": "video", "width": 1280, "height": 720}
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TS_CONSTANTS = REPO_ROOT / "packages/constants/src/transcoding.ts"

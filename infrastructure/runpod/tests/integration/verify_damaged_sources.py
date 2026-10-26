@@ -17,12 +17,9 @@ import random
 import subprocess
 import sys
 import tempfile
-from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-sys.modules.setdefault("runpod", MagicMock())
-
-from handler import main as h  # noqa: E402
+from _container import ffmpeg, hevc10, report
+from _container import handler as h
 
 COMPLETES = "completes"
 
@@ -43,12 +40,6 @@ EXPECTED = {
     # Audio is the whole content, and none of it decodes: exit 69.
     "broken_audio_only": ("audio", h.TranscodeErrorCode.CORRUPT_INPUT),
 }
-
-
-def ffmpeg(*args):
-    subprocess.run(
-        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args], check=True
-    )
 
 
 def scramble_packets(src: str, dst: str, codec_type: str) -> None:
@@ -136,14 +127,7 @@ def make_sources(work: str) -> dict:
         "-i",
         "testsrc2=d=8:s=1280x720:r=30",
         *lavfi_tone,
-        "-c:v",
-        "libx265",
-        "-x265-params",
-        "log-level=error",
-        "-pix_fmt",
-        "yuv420p10le",
-        "-tag:v",
-        "hvc1",
+        *hevc10(),
         *sound,
         "-movflags",
         "+faststart",
@@ -200,13 +184,9 @@ def main() -> int:
             print(f"  {name:22} {media_type}: {got}")
             if got != expected:
                 problems.append(f"{name}: {got}, expected {expected}")
-    if problems:
-        print("FAILED:")
-        for problem in problems:
-            print(f"  - {problem}")
-        return 1
-    print("Damaged sources complete, or fail as damaged, as expected.")
-    return 0
+    return report(
+        problems, "Damaged sources complete, or fail as damaged, as expected."
+    )
 
 
 if __name__ == "__main__":

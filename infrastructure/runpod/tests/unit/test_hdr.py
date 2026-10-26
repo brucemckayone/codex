@@ -9,12 +9,10 @@ it comes out tagged BT.709 on all three counts; the container verification
 from unittest.mock import patch
 
 import pytest
-from _jobs import run_job
+from _jobs import job_input, run_job
 
 from handler import main as handler_module
 from handler.main import tonemap_filter
-
-MEDIA_ID = "550e8400-e29b-41d4-a716-446655440000"
 
 
 def _probe(**video):
@@ -86,18 +84,7 @@ class TestPlacement:
 
 
 def _job(probe, media_type="video", gpu=False):
-    return run_job(
-        {
-            "mediaId": MEDIA_ID,
-            "creatorId": "k9Xq2LmVt7RzP4wN",
-            "type": media_type,
-            "inputKey": f"k9Xq2LmVt7RzP4wN/originals/{MEDIA_ID}/clip.mov",
-            "webhookUrl": "https://api.example.com/webhook",
-            "contract": 2,
-        },
-        probe,
-        gpu=gpu,
-    )
+    return run_job(job_input(type=media_type, contract=2), probe, gpu=gpu)
 
 
 class TestHandler:

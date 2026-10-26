@@ -25,18 +25,9 @@ import re
 import subprocess
 import sys
 import tempfile
-from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-sys.modules.setdefault("runpod", MagicMock())
-
-from handler import main as h  # noqa: E402
-
-
-def ffmpeg(*args):
-    subprocess.run(
-        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args], check=True
-    )
+from _container import ffmpeg, hevc10, report
+from _container import handler as h
 
 
 def ffmpeg_major() -> int:
@@ -92,20 +83,7 @@ def make_sources(work: str) -> dict:
         "-i",
         "testsrc2=s=1920x1080:d=4:r=30",
         *tone,
-        "-c:v",
-        "libx265",
-        "-x265-params",
-        "log-level=error",
-        "-pix_fmt",
-        "yuv420p10le",
-        "-tag:v",
-        "hvc1",
-        "-color_primaries",
-        "bt2020",
-        "-color_trc",
-        "arib-std-b67",
-        "-colorspace",
-        "bt2020nc",
+        *hevc10("arib-std-b67"),
         "-c:a",
         "aac",
         p("hevc10_hlg"),
@@ -117,20 +95,7 @@ def make_sources(work: str) -> dict:
         "lavfi",
         "-i",
         "testsrc2=s=1920x1080:d=4:r=30",
-        "-c:v",
-        "libx265",
-        "-x265-params",
-        "log-level=error",
-        "-pix_fmt",
-        "yuv420p10le",
-        "-tag:v",
-        "hvc1",
-        "-color_primaries",
-        "bt2020",
-        "-color_trc",
-        "smpte2084",
-        "-colorspace",
-        "bt2020nc",
+        *hevc10("smpte2084"),
         p("hevc10_pq"),
     )
     sources["hevc10_pq"] = (p("hevc10_pq"), False, (1920, 1080))
@@ -337,13 +302,10 @@ def main() -> int:
                 verify(name, path, has_audio, picture, work, problems)
             except Exception as error:  # report every source, not just the first
                 problems.append(f"{name}: {type(error).__name__}: {error}")
-    if problems:
-        print("FAILED:")
-        for problem in problems:
-            print(f"  - {problem}")
-        return 1
-    print("All QuickTime sources produce playable, truthfully described outputs.")
-    return 0
+    return report(
+        problems,
+        "All QuickTime sources produce playable, truthfully described outputs.",
+    )
 
 
 if __name__ == "__main__":

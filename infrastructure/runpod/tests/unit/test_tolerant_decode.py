@@ -14,32 +14,20 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
+from _jobs import PICTURE, video_cmds
 
 from handler import main as handler_module
 from handler.main import TOLERANT_DECODE, TranscodeError, TranscodeErrorCode
 
 SETTINGS_720 = handler_module.HLS_VARIANTS["720p"]
-PICTURE = {"codec_type": "video", "width": 1280, "height": 720}
 SOUND_ONLY = {"codec_type": "audio", "codec_name": "aac"}
-
-
-def _video_job_cmds(use_gpu: bool) -> dict[str, list[str]]:
-    return {
-        "mezzanine": handler_module._build_mezzanine_cmd("in.mov", "out.mp4", use_gpu),
-        "variant": handler_module._build_hls_variant_cmd(
-            "in.mov", "/out/720p", "/out/720p/index.m3u8", SETTINGS_720, use_gpu
-        ),
-        "preview": handler_module._build_preview_cmd(
-            "in.mov", "/out/preview", 3, 30, use_gpu
-        ),
-    }
 
 
 class TestEveryVideoDecodeIsTolerant:
     @pytest.mark.parametrize("use_gpu", [True, False], ids=["nvenc", "libx264"])
     @pytest.mark.parametrize("name", ["mezzanine", "variant", "preview"])
     def test_encodes(self, name, use_gpu):
-        cmd = _video_job_cmds(use_gpu)[name]
+        cmd = video_cmds(use_gpu)[name]
         start = cmd.index(TOLERANT_DECODE[0])
         assert cmd[start : start + 2] == ["-max_error_rate", "1.0"]
         # A global option: before the input, and before -hwaccel.

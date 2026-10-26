@@ -67,7 +67,8 @@ export type TranscodingStep = z.infer<typeof transcodingStepEnum>;
 /**
  * Canonical thumbnail size variants
  * Used by: transcoding paths, RunPod handler, webhook validation
- * Python mirror: infrastructure/runpod/handler/main.py ALLOWED_THUMBNAIL_SIZES
+ * Python mirror: infrastructure/runpod/handler/main.py FLAT_POSTER_SIZES (sm/md/lg)
+ * and POSTER_SIZES (+ xl); the contract fixtures pin both to this schema.
  */
 export const THUMBNAIL_SIZES = ['sm', 'md', 'lg'] as const;
 export const thumbnailSizeSchema = z.enum(THUMBNAIL_SIZES);
@@ -145,7 +146,8 @@ export const runpodWebhookOutputSchema = z
     // Multi-size thumbnail variants
     // sm/md/lg MUST match THUMBNAIL_SIZES constant above. If sizes change,
     // update both this schema and the THUMBNAIL_SIZES array.
-    // Also update: infrastructure/runpod/handler/main.py ALLOWED_THUMBNAIL_SIZES
+    // Also update main.py POSTER_SIZES / FLAT_POSTER_SIZES, and regenerate the
+    // contract fixtures (infrastructure/runpod/tests/fixtures/README.md).
     // `xl` comes only from a handler writing posters in the sized image layout
     // (job input contract 2, Codex-l2c48); an older image sends three sizes.
     thumbnailVariants: z

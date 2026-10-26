@@ -7,17 +7,16 @@ so the service can route it without reading the database.
 """
 
 import os
+import re
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from _jobs import run_job
+from _jobs import CREATOR_ID, MEDIA_ID, job_input, run_job
 
 from handler import main as handler_module
 from handler.main import ProgressReporter
-
-MEDIA_ID = "550e8400-e29b-41d4-a716-446655440000"
-CREATOR_ID = "k9Xq2LmVt7RzP4wN"
 
 
 class Polls:
@@ -160,14 +159,12 @@ def _job(media_type="video", creator_id=CREATOR_ID):
         ),
     }
     return run_job(
-        {
-            "mediaId": MEDIA_ID,
-            "creatorId": creator_id,
-            "type": media_type,
-            "inputKey": f"{creator_id}/originals/{MEDIA_ID}/clip.mov",
-            "webhookUrl": "https://api.example.com/webhook",
-            "contract": 2,
-        },
+        job_input(
+            creatorId=creator_id,
+            type=media_type,
+            inputKey=f"{creator_id}/originals/{MEDIA_ID}/clip.mov",
+            contract=2,
+        ),
         probe,
     )
 
@@ -192,3 +189,34 @@ class TestJob:
         # validate_path_component allows `-`; the service's userIdSchema does not.
         _, posts = _job(creator_id="user-123")
         assert posts and all(p["creatorId"] is None for p in posts)
+
+
+SERVICE_SCHEMAS = (
+    Path(__file__).resolve().parents[4]
+    / "packages/validation/src/schemas/transcoding.ts"
+)
+
+
+def service_steps() -> set[str]:
+    """transcodingStepEnum's values, read from the TypeScript source."""
+    source = SERVICE_SCHEMAS.read_text()
+    body = re.search(
+        r"transcodingStepEnum = z\.enum\(\[(.*?)\]\)", source, re.DOTALL
+    ).group(1)
+    return set(re.findall(r"'([a-z_]+)'", body))
+
+
+class TestStepsAreTheServiceSteps:
+    """A step the service does not know fails its schema, and send_progress
+    swallows that: the tick is lost with nothing in any log."""
+
+    def test_the_enum_is_read(self):
+        assert {"downloading", "encoding_variants", "finalizing"} <= service_steps()
+
+    @pytest.mark.parametrize("media_type", ["video", "audio"])
+    def test_every_step_a_job_sends(self, media_type):
+        with patch.dict(handler_module.FEATURES, {"mezzanine": True}):
+            _, posts = _job(media_type)
+        sent = {p["step"] for p in posts if p["status"] == "progress"}
+        assert len(sent) >= 6, sent
+        assert sent <= service_steps(), sent - service_steps()

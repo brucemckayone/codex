@@ -30,6 +30,39 @@ STORAGE_ENV = {
 
 LOUDNESS_STDERR = '{"input_i": "-14.0", "input_tp": "-0.5", "input_lra": "5.0"}'
 
+MEDIA_ID = "550e8400-e29b-41d4-a716-446655440000"
+# A real user id's shape (userIdSchema: letters and digits), so the echo shows.
+CREATOR_ID = "k9Xq2LmVt7RzP4wN"
+# What ffprobe says of an encoded rung that holds a picture.
+PICTURE = {"codec_type": "video", "width": 1280, "height": 720}
+
+
+def job_input(**fields: Any) -> dict[str, Any]:
+    """A video job's input from CREATOR_ID for MEDIA_ID; `fields` override."""
+    return {
+        "mediaId": MEDIA_ID,
+        "creatorId": CREATOR_ID,
+        "type": "video",
+        "inputKey": f"{CREATOR_ID}/originals/{MEDIA_ID}/clip.mov",
+        "webhookUrl": "https://media-api.example.com/api/transcoding/webhook",
+        **fields,
+    }
+
+
+def video_cmds(use_gpu: bool) -> dict[str, list[str]]:
+    """The three video builders' commands for a 720p rung's settings."""
+    settings = handler_module.HLS_VARIANTS["720p"]
+    return {
+        "mezzanine": handler_module._build_mezzanine_cmd("in.mov", "out.mp4", use_gpu),
+        "variant": handler_module._build_hls_variant_cmd(
+            "in.mov", "/out/720p", "/out/720p/index.m3u8", settings, use_gpu
+        ),
+        "preview": handler_module._build_preview_cmd(
+            "in.mov", "/out/preview", 3, 30, use_gpu
+        ),
+    }
+
+
 AAC = {"codec_type": "audio", "codec_name": "aac"}
 H264_720P = {
     "codec_type": "video",
