@@ -179,7 +179,7 @@ export function createTestMediaItemInput(
       isReady && mediaType === MEDIA_TYPES.AUDIO
         ? `waveforms/${tempId}.json`
         : null, // Required for audio
-    // Every row past `uploading` has it (migration 0115 backfilled the rest).
+    // Every row past `uploading` has it (migration 0116 backfilled the rest).
     uploadedAt: status === MEDIA_STATUS.UPLOADING ? null : new Date(),
     ...overrides,
   };
