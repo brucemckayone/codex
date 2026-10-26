@@ -69,7 +69,7 @@
       .map((u, i) => ({
         key: `${u.file.name}-${i}-${u.id ?? 'pending'}`,
         name: u.file.name,
-        mediaType: u.file.type.startsWith('video/') ? 'video' : 'audio',
+        mediaType: u.mediaType,
         progress: u.progress,
         status: u.status,
       }))

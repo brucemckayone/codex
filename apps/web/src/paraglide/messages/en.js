@@ -5411,6 +5411,38 @@ export const media_upload_rejected_type = (params) => `${params.name} is not a s
 
 
 /**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_upload_rejected_empty = (params) => `${params.name} is empty.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_upload_rejected_too_large = (params) => `${params.name} is larger than 5 GB, the most one upload can be.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_upload_error_direct = () => `The upload didn't reach storage. Check your connection, then try again.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_upload_try_again_named = (params) => `Try uploading ${params.name} again`
+
+
+/**
  * 
  * @returns {string}
  */

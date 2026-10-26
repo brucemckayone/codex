@@ -25,16 +25,27 @@
                           open the native file picker.
 -->
 <script lang="ts">
-  import { createMedia, completeUpload } from '$lib/remote/media.remote';
+  import { createMedia, completeUpload, deleteMedia } from '$lib/remote/media.remote';
   import { mediaStatus } from '$lib/client/media-status.svelte';
+  import { checkMediaFile } from './media-upload-file';
+  import { Button } from '$lib/components/ui';
   import { measureMediaDuration } from '$lib/utils/media-duration';
   import { logger } from '$lib/observability';
-  import { UploadIcon, XIcon, CheckIcon, AlertTriangleIcon } from '$lib/components/ui/Icon';
+  import {
+    UploadIcon,
+    XIcon,
+    CheckIcon,
+    AlertTriangleIcon,
+    RefreshCwIcon,
+  } from '$lib/components/ui/Icon';
   import { browser } from '$app/environment';
   import * as m from '$paraglide/messages';
 
   export interface UploadItem {
     file: File;
+    /** The platform's MIME type for it, which may not be `file.type`. */
+    mimeType: string;
+    mediaType: 'video' | 'audio';
     id: string | null;
     progress: number;
     status: 'queued' | 'uploading' | 'completing' | 'done' | 'error';
@@ -116,6 +127,7 @@
     'audio/ogg',
     // File extensions (some browsers need these instead of MIME types)
     '.mp4',
+    '.m4v',
     '.mov',
     '.avi',
     '.webm',
@@ -131,17 +143,21 @@
   const MAX_CONCURRENT = 2;
 
   /**
-   * Determine media type from MIME type
+   * The largest file the worker fallback takes. A Worker refuses a request
+   * body over 100 MB, so past this a failed direct upload is reported (with
+   * Try again) instead of being sent somewhere that cannot accept it.
    */
-  function getMediaType(mimeType: string): 'video' | 'audio' {
-    return mimeType.startsWith('video/') ? 'video' : 'audio';
-  }
+  const WORKER_UPLOAD_MAX_BYTES = 90 * 1024 * 1024;
 
-  /**
-   * Validate a file is an accepted type
-   */
-  function isValidFile(file: File): boolean {
-    return ACCEPTED_TYPES.includes(file.type);
+  function rejectionReason(file: File, reason: 'type' | 'empty' | 'too_large'): string {
+    switch (reason) {
+      case 'empty':
+        return m.media_upload_rejected_empty({ name: file.name });
+      case 'too_large':
+        return m.media_upload_rejected_too_large({ name: file.name });
+      default:
+        return m.media_upload_rejected_type({ name: file.name });
+    }
   }
 
   /**
@@ -153,15 +169,15 @@
     const newRejections: Rejection[] = [];
 
     for (const file of fileArray) {
-      if (!isValidFile(file)) {
-        newRejections.push({
-          name: file.name,
-          reason: m.media_upload_rejected_type({ name: file.name }),
-        });
+      const check = checkMediaFile(file);
+      if (check.ok === false) {
+        newRejections.push({ name: file.name, reason: rejectionReason(file, check.reason) });
         continue;
       }
       queue.push({
         file,
+        mimeType: check.mimeType,
+        mediaType: check.mediaType,
         id: null,
         progress: 0,
         status: 'queued',
@@ -194,13 +210,15 @@
   async function uploadFile(item: UploadItem) {
     item.status = 'uploading';
     item.progress = 0;
+    // Set when a direct upload failed for a file the fallback cannot take.
+    let directFailed = false;
 
     try {
       // Step 1: Create media item — server generates r2Key and returns presigned upload URL
       const result = await createMedia({
         title: item.file.name.replace(/\.[^/.]+$/, ''),
-        mediaType: getMediaType(item.file.type),
-        mimeType: item.file.type,
+        mediaType: item.mediaType,
+        mimeType: item.mimeType,
         fileSizeBytes: item.file.size,
       });
 
@@ -216,11 +234,18 @@
         try {
           await uploadToR2(item, presignedUrl);
         } catch (error) {
+          if (item.file.size > WORKER_UPLOAD_MAX_BYTES) {
+            directFailed = true;
+            throw error;
+          }
           logger.warn('Presigned URL upload failed, falling back to worker upload', {
             error: error instanceof Error ? error.message : String(error),
           });
           await uploadViaWorker(item, mediaId);
         }
+      } else if (item.file.size > WORKER_UPLOAD_MAX_BYTES) {
+        directFailed = true;
+        throw new Error('No direct upload URL, and the file is too large for the worker');
       } else {
         await uploadViaWorker(item, mediaId);
       }
@@ -256,8 +281,10 @@
         error: error instanceof Error ? error.message : String(error),
         mediaId: item.id,
         fileName: item.file.name,
+        fileSizeBytes: item.file.size,
+        directFailed,
       });
-      item.error = m.media_upload_error();
+      item.error = directFailed ? m.media_upload_error_direct() : m.media_upload_error();
     }
 
     // Process next in queue
@@ -272,6 +299,8 @@
     url: string;
     method: 'PUT' | 'POST';
     file: File;
+    /** The type createMedia was given: a presigned PUT is signed for it. */
+    mimeType: string;
     onProgress: (percent: number) => void;
     withCredentials?: boolean;
     errorPrefix?: string;
@@ -292,7 +321,7 @@
       };
       xhr.onerror = () => reject(new Error(`Network error during ${opts.errorPrefix?.toLowerCase() ?? 'upload'}`));
       xhr.open(opts.method, opts.url);
-      xhr.setRequestHeader('Content-Type', opts.file.type);
+      xhr.setRequestHeader('Content-Type', opts.mimeType);
       if (opts.withCredentials) xhr.withCredentials = true;
       xhr.send(opts.file);
     });
@@ -315,6 +344,7 @@
       url: presignedUrl,
       method: 'PUT',
       file: item.file,
+      mimeType: item.mimeType,
       onProgress: (percent) => setProgress(item, percent),
       errorPrefix: 'Upload',
     });
@@ -330,11 +360,49 @@
       url: `/api/media/${mediaId}/upload`,
       method: 'POST',
       file: item.file,
+      mimeType: item.mimeType,
       onProgress: (percent) => setProgress(item, percent),
       withCredentials: true,
       errorPrefix: 'Worker upload',
     });
   }
+
+  /**
+   * Try a failed upload again, as a new media item. The failed attempt's row
+   * is deleted first, or it would sit in 'uploading' until the hourly check
+   * fails it.
+   */
+  function retryItem(item: UploadItem) {
+    const failedAttempt = item.id;
+    item.id = null;
+    item.progress = 0;
+    item.error = null;
+    item.status = 'queued';
+    if (failedAttempt) {
+      deleteMedia(failedAttempt).catch((error) => {
+        logger.warn('Media upload: could not remove the failed attempt', {
+          mediaId: failedAttempt,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+    processQueue();
+  }
+
+  // Closing the tab mid-upload loses it: ask first, but only while one runs.
+  const uploadsPending = $derived(
+    queue.some(
+      (item) =>
+        item.status === 'queued' || item.status === 'uploading' || item.status === 'completing'
+    )
+  );
+
+  $effect(() => {
+    if (!uploadsPending) return;
+    const handler = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  });
 
   /**
    * Remove an item from the queue
@@ -511,7 +579,7 @@
                   <span class="queue-item-ok" aria-hidden="true"><CheckIcon size={12} /></span>
                   <span>{m.media_status_uploaded()}</span>
                 {:else if item.status === 'error'}
-                  <span role="alert">{item.error ?? m.media_status_failed()}</span>
+                  {m.media_status_failed()}
                 {/if}
               </span>
               {#if item.status === 'done' || item.status === 'error'}
@@ -525,6 +593,21 @@
                 </button>
               {/if}
             </div>
+
+            {#if item.status === 'error'}
+              <!-- Its own line: beside the name, it squeezed the name to nothing at 390 px. -->
+              <div class="queue-item-error">
+                <span role="alert">{item.error ?? m.media_status_failed()}</span>
+                <Button
+                  size="xs"
+                  aria-label={m.media_upload_try_again_named({ name: item.file.name })}
+                  onclick={() => retryItem(item)}
+                >
+                  <RefreshCwIcon size={12} />
+                  {m.media_tile_try_again()}
+                </Button>
+              </div>
+            {/if}
 
             {#if item.status === 'uploading' || item.status === 'completing'}
               <div
@@ -842,8 +925,16 @@
   .queue-item[data-status='done'] .queue-item-status { color: var(--color-success-700); }
   .queue-item[data-status='error'] .queue-item-status {
     color: var(--color-error-700);
-    text-transform: none;
-    letter-spacing: normal;
+  }
+
+  .queue-item-error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-error-700);
   }
 
   .queue-item-pct {
