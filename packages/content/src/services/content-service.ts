@@ -129,6 +129,32 @@ export const PUBLIC_CREATOR_COLUMNS = {
 } as const satisfies Record<keyof PublicContentCreator, true>;
 
 /**
+ * The content columns a catalogue row leaves out: every column but these.
+ * The route spreads the content row's own columns onto the wire, so this is
+ * where one is kept off it. `purchaseCount` is each piece's sales: on the
+ * anonymous list anyone could rank an org's catalogue by them without signing
+ * in. Owner, 2026-10-26: "Hide it from lists (Recommended)". Sorting by it
+ * still works, because ORDER BY reads the table, not the select. `viewCount`
+ * stays: the public Spotlight shows it.
+ *
+ * Exported for the withdrawn read (@codex/access), as the lists above are.
+ */
+export const CATALOGUE_CONTENT_COLUMNS = {
+  purchaseCount: false,
+} as const satisfies Partial<Record<keyof Content, false>>;
+
+/**
+ * The organizations columns a studio read leaves out. The studio list and
+ * `get` check content ownership, not org management, so any creator-role
+ * member reads them, and the org row is not theirs: the payee's user id stays
+ * off it, as it does on the org routes (Codex-kk6zx). Every other column is
+ * kept, including ones added later.
+ */
+const STUDIO_ORGANIZATION_COLUMNS = {
+  primaryConnectAccountUserId: false,
+} as const;
+
+/**
  * Content Service Class
  *
  * Handles all content-related business logic:
@@ -530,7 +556,7 @@ export class ContentService extends BaseService {
         where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         with: {
           mediaItem: true,
-          organization: true,
+          organization: { columns: STUDIO_ORGANIZATION_COLUMNS },
           creator: {
             columns: {
               id: true,
@@ -1329,7 +1355,8 @@ export class ContentService extends BaseService {
                 // viewer, so it selects what the anonymous public list
                 // selects: no creator email, and (Codex-1bdx0) no raw R2 key,
                 // RunPod job id or transcoding error on the media item, no
-                // payee id on the org.
+                // payee id on the org, no sales count on the row.
+                columns: CATALOGUE_CONTENT_COLUMNS,
                 with: {
                   mediaItem: { columns: PUBLIC_MEDIA_ITEM_COLUMNS },
                   organization: { columns: PUBLIC_ORGANIZATION_COLUMNS },
@@ -1342,10 +1369,10 @@ export class ContentService extends BaseService {
                 offset,
                 orderBy: [orderByClause],
                 // The studio scope is the signed-in creator's own rows, whole
-                // and with their email.
+                // and with their email. The org is not theirs: no payee id.
                 with: {
                   mediaItem: true,
-                  organization: true,
+                  organization: { columns: STUDIO_ORGANIZATION_COLUMNS },
                   creator: { columns: { id: true, email: true, name: true } },
                 },
               }),
@@ -1524,6 +1551,8 @@ export class ContentService extends BaseService {
             limit,
             offset,
             orderBy: [orderByClause],
+            // No sales count: see CATALOGUE_CONTENT_COLUMNS.
+            columns: CATALOGUE_CONTENT_COLUMNS,
             with: {
               // Three columns, not the row: see PUBLIC_MEDIA_ITEM_COLUMNS.
               mediaItem: { columns: PUBLIC_MEDIA_ITEM_COLUMNS },

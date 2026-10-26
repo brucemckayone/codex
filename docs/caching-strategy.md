@@ -452,10 +452,15 @@ fields until their TTL. See CLAUDE.md, Server-Side KV Caching. `content:public`
 v3 (Codex-039vo) dropped a gated row's body from a by-slug read. v4
 (Codex-ve5eh, Codex-567de) caches `listPublic`'s narrowed row: the media item
 `durationSeconds`, `thumbnailKey` and `hlsPreviewKey`, the org `id`, `name`,
-`slug` and `logoUrl`; both used to be the whole row. The wire item, with its
-CDN URLs, is built after the cache, so a missing CDN base is never frozen
-into a slot. `content:auth:v3` (Codex-1bdx0,
-apps/web /explore) is the signed-in browse list taking the same item.
+`slug` and `logoUrl`; both used to be the whole row. The row also leaves out
+`purchaseCount`, each piece's sales (owner, 2026-10-26). The wire item, with
+its CDN URLs, is built after the cache, so a missing CDN base is never frozen
+into a `content:public` slot. Because the wire is derived from the cached row,
+a `listPublic` select that WIDENS with a column the item reads needs a bump
+too, or old slots serve the item without it. `content:auth:v3` (Codex-1bdx0,
+apps/web /explore) is the signed-in browse list taking the same item. It
+caches the worker's finished response, URLs included, for 180s, so a field
+removed from the item builder needs a `content:auth` bump.
 
 **Two branches bumping the same version.** Whichever merges SECOND takes a
 version no deployed build has ever written, whatever the merge order. A value

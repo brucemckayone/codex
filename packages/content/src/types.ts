@@ -12,7 +12,7 @@ import type {
   NewContent,
   NewMediaItem,
 } from '@codex/database/schema';
-import type { Organization } from '@codex/organization';
+import type { ReadableOrganization } from '@codex/organization';
 
 /**
  * Database client type — re-exported from `@codex/database` so consumers
@@ -94,7 +94,8 @@ export interface ContentWithRelations extends Content {
     email?: string;
     name: string | null;
   };
-  organization?: Organization | null;
+  /** Never the payee's user id: every read leaves it out (Codex-kk6zx). */
+  organization?: ReadableOrganization | null;
   mediaItem?: MediaItem | null;
   /**
    * Ids of the `categories` (topic taxonomy) this content belongs to (WP-5).
@@ -151,15 +152,16 @@ export type PublicMediaItemSource = Pick<
 >;
 
 /**
- * A catalogue row any viewer may read: the content row, its creator without an
- * email, and the projected org and media item. `list({ scope: 'browse' })`
- * returns these (Codex-1bdx0); `listPublic` adds the topic slugs. The org and
- * creator are already their wire shapes (`@codex/shared-types`); the media
- * item still holds the two keys the route resolves to URLs.
+ * A catalogue row any viewer may read: the content row without its sales count
+ * (`CATALOGUE_CONTENT_COLUMNS`), its creator without an email, and the
+ * projected org and media item. `list({ scope: 'browse' })` returns these
+ * (Codex-1bdx0); `listPublic` adds the topic slugs. The org and creator are
+ * already their wire shapes (`@codex/shared-types`); the media item still holds
+ * the two keys the route resolves to URLs.
  */
 export type CatalogueContentRow = Omit<
   ContentWithRelations,
-  'mediaItem' | 'organization' | 'creator'
+  'mediaItem' | 'organization' | 'creator' | 'purchaseCount'
 > & {
   mediaItem: PublicMediaItemSource | null;
   organization: PublicContentOrganization | null;
@@ -174,16 +176,17 @@ export type PublicContentRow = CatalogueContentRow & {
 };
 
 /**
- * Public content item with resolved media URLs and the org's public fields.
- * It stays here, not in `@codex/shared-types`: it is built on the content row
- * type from `@codex/database`, and shared-types sits below the database.
+ * One item of `GET /api/content/public` as content-api sends it: a
+ * `listPublic` row with its media item's keys resolved to URLs. It is what the
+ * worker's builder (`toPublicItems`, r2-public-urls.ts) returns for a
+ * `PublicContentRow`, checked there at compile time. apps/web keeps its own
+ * copy, `PublicContentListItem` (api.ts), on its own row types. It stays here, not in
+ * `@codex/shared-types`: it is built on the content row type from
+ * `@codex/database`, and shared-types sits below the database.
  */
-export interface PublicContentItem
-  extends Omit<ContentWithRelations, 'mediaItem' | 'organization' | 'creator'> {
+export type PublicContentItem = Omit<PublicContentRow, 'mediaItem'> & {
   mediaItem: PublicMediaItem | null;
-  organization: PublicContentOrganization | null;
-  creator: PublicContentCreator;
-}
+};
 
 /**
  * Response for GET /api/content/public

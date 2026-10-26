@@ -1,3 +1,4 @@
+import { createSlugSchema } from '@codex/validation';
 import { json } from '@sveltejs/kit';
 import { ApiError } from '$lib/api/errors';
 import { createServerApi } from '$lib/server/api';
@@ -5,68 +6,116 @@ import { logReadFailure } from '$lib/server/read-failure';
 import { getDisplayThumbnail } from '$lib/utils/thumbnail';
 import type { RequestHandler } from './$types';
 
+type ServerApi = ReturnType<typeof createServerApi>;
+
+/**
+ * What a search is scoped to.
+ *
+ * - `org`: the org the slug names. Both searches run, scoped to it.
+ * - `platform`: no scope, or a slug no org has, so the content search widens
+ *   to every org's public catalogue (as a search with no scope does) and there
+ *   are no creators to search.
+ * - `unknown`: the org lookup failed, so which org the visitor is in is not
+ *   known. Answering with every org's content would put other orgs' work in
+ *   this org's palette, so nothing is searched.
+ */
+type SearchScope =
+  | { kind: 'org'; orgId: string; slug: string }
+  | { kind: 'platform' }
+  | { kind: 'unknown' };
+
+// The org routes' own slug rule. A slug that fails it names no org, and
+// sending it would come back a 400, which the read logs at error level as OUR
+// contract bug: any visitor could raise those at will with a URL.
+const scopeSlugSchema = createSlugSchema(255);
+
+function parseScopeSlug(raw: string | null): string | null {
+  if (!raw) return null;
+  const parsed = scopeSlugSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+async function resolveScope(
+  api: ServerApi,
+  slug: string | null
+): Promise<SearchScope> {
+  if (!slug) return { kind: 'platform' };
+  try {
+    const org = await api.org.getPublicInfo(slug);
+    if (org?.id) return { kind: 'org', orgId: org.id, slug };
+    logReadFailure(
+      'Search scope org not loaded',
+      { scope: slug },
+      new Error('The org lookup answered without an id')
+    );
+    return { kind: 'unknown' };
+  } catch (error) {
+    // No such org: the documented widening, and nothing to log.
+    if (error instanceof ApiError && error.status === 404) {
+      return { kind: 'platform' };
+    }
+    logReadFailure('Search scope org not loaded', { scope: slug }, error);
+    return { kind: 'unknown' };
+  }
+}
+
+// The `slug` param in publicContentQuerySchema is a content slug filter, not
+// an org slug, so an org-scoped search passes the resolved `orgId`.
+function searchContent(
+  api: ServerApi,
+  scope: SearchScope,
+  params: URLSearchParams
+) {
+  if (scope.kind === 'org') {
+    return api.content.getPublicContent(
+      new URLSearchParams({ ...Object.fromEntries(params), orgId: scope.orgId })
+    );
+  }
+  if (scope.kind === 'platform') return api.content.getDiscoverContent(params);
+  return Promise.resolve(null);
+}
+
+// Creators belong to an org, so only a found org has any to search.
+function searchCreators(
+  api: ServerApi,
+  scope: SearchScope,
+  params: URLSearchParams
+) {
+  if (scope.kind !== 'org') return Promise.resolve(null);
+  return api.org.getPublicCreators(scope.slug, params);
+}
+
 export const GET: RequestHandler = async ({ url, platform, cookies }) => {
   const q = url.searchParams.get('q')?.slice(0, 200) ?? '';
-  const scope = url.searchParams.get('scope'); // org slug or undefined
+  const scopeSlug = parseScopeSlug(url.searchParams.get('scope'));
   const limit = 5;
 
   if (!q) return json({ content: [], creators: [] });
 
   const api = createServerApi(platform, cookies);
-
-  // Resolve org slug → orgId so the content-api can scope by organization.
-  // The `slug` param in publicContentQuerySchema is a content slug filter,
-  // not an org slug — we must pass `orgId` for org-scoped searches.
-  //
-  // Only a 404 (no such org) falls back to the platform-wide search. Any other
-  // failure leaves the visitor's org unknown, and answering an org-scoped
-  // search with every org's content would put other orgs' work in this org's
-  // palette, so the content search is skipped instead.
-  let orgId: string | undefined;
-  let orgLookupFailed = false;
-  if (scope) {
-    try {
-      const org = await api.org.getPublicInfo(scope);
-      orgId = org?.id;
-    } catch (error) {
-      if (!(error instanceof ApiError && error.status === 404)) {
-        logReadFailure('Search scope org not loaded', { scope }, error);
-        orgLookupFailed = true;
-      }
-    }
-  }
-
+  const scope = await resolveScope(api, scopeSlug);
   const params = new URLSearchParams({ search: q, limit: String(limit) });
 
-  const searchContent = () => {
-    if (orgId) {
-      return api.content.getPublicContent(
-        new URLSearchParams({ ...Object.fromEntries(params), orgId })
-      );
-    }
-    if (orgLookupFailed) return Promise.resolve(null);
-    return api.content.getDiscoverContent(params);
-  };
-
   const [contentRes, creatorsRes] = await Promise.allSettled([
-    searchContent(),
-    scope
-      ? api.org.getPublicCreators(
-          scope,
-          new URLSearchParams({ search: q, limit: String(limit) })
-        )
-      : Promise.resolve({
-          items: [] as Array<{ name: string; avatarUrl: string | null }>,
-        }),
+    searchContent(api, scope, params),
+    searchCreators(api, scope, params),
   ]);
 
   // The palette answers with what did load; these logs are the only trace of
   // what did not.
   if (contentRes.status === 'rejected') {
-    logReadFailure('Search content not loaded', { scope }, contentRes.reason);
+    logReadFailure(
+      'Search content not loaded',
+      { scope: scopeSlug },
+      contentRes.reason
+    );
   }
   if (creatorsRes.status === 'rejected') {
-    logReadFailure('Search creators not loaded', { scope }, creatorsRes.reason);
+    logReadFailure(
+      'Search creators not loaded',
+      { scope: scopeSlug },
+      creatorsRes.reason
+    );
   }
 
   const content =

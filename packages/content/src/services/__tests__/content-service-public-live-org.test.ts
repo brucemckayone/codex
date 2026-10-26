@@ -30,7 +30,7 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ContentService } from '../content-service';
 
@@ -243,6 +243,18 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
     }
   });
 
+  // Owner, 2026-10-26: "Hide it from lists (Recommended)". The view count
+  // stays: the public Spotlight shows it.
+  it('the anonymous list carries no sales count, and keeps the view count', async () => {
+    const { items } = await read({ creatorId });
+
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      expect(item).not.toHaveProperty('purchaseCount');
+      expect(item).toHaveProperty('viewCount');
+    }
+  });
+
   // A catalogue read serialises into anonymous HTML, and it lists gated rows
   // alongside free ones. The follower-only row is the one that matters.
   it('a catalogue read carries no body, gated or free', async () => {
@@ -286,6 +298,7 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
       expect(item.contentBody).toBeNull();
       expect(item.contentBodyJson).toBeNull();
       expect(item.creator).not.toHaveProperty('email');
+      expect(item).not.toHaveProperty('purchaseCount');
     }
   });
 
@@ -300,5 +313,29 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
 
     expect(followerOnly?.contentBody).toBe(`article body ${token}`);
     expect(followerOnly?.creator).toHaveProperty('email');
+    expect(followerOnly).toHaveProperty('purchaseCount');
+  });
+
+  // The studio reads check content ownership, not org management, so any
+  // creator-role member reads them: the org row is not theirs (Codex-kk6zx).
+  it("the studio list and get leave the org's payee id out, and keep the rest", async () => {
+    await db
+      .update(organizations)
+      .set({ primaryConnectAccountUserId: creatorId })
+      .where(eq(organizations.id, liveOrgId));
+
+    const { items } = await service.list(
+      creatorId,
+      browseFilters(),
+      { page: 1, limit: 50 },
+      { scope: 'studio' }
+    );
+    const listed = items.find((item) => item.id === ids.liveOrg);
+    const got = await service.get(ids.liveOrg, creatorId);
+
+    for (const org of [listed?.organization, got?.organization]) {
+      expect(org).toMatchObject({ id: liveOrgId, name: `Live-org ${token}` });
+      expect(org).not.toHaveProperty('primaryConnectAccountUserId');
+    }
   });
 });

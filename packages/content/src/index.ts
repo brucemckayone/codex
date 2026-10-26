@@ -69,6 +69,7 @@ export type {
   WaitUntilFn,
 } from './services';
 export {
+  CATALOGUE_CONTENT_COLUMNS,
   CategoriesService,
   ContentService,
   type ContentServiceConfig,

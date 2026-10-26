@@ -257,6 +257,9 @@ describe('getWithdrawnContent: which rows the lookup can find (Codex-ov2ii)', ()
       'slug',
     ]);
     expect(Object.keys(result.content.creator).sort()).toEqual(['id', 'name']);
+    // The public list's content columns too: no sales count.
+    expect(result.content).not.toHaveProperty('purchaseCount');
+    expect(result.content).toHaveProperty('viewCount');
   });
 
   it('finds a departed creator’s item for a subscriber, until their period ends', async () => {

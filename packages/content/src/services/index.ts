@@ -21,6 +21,7 @@ export {
 } from './content-invalidation';
 // Content Service
 export {
+  CATALOGUE_CONTENT_COLUMNS,
   ContentService,
   type ContentServiceConfig,
   PUBLIC_CREATOR_COLUMNS,

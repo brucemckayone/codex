@@ -7,7 +7,7 @@
  * it did on the storefront. It is a helper module, not a router, so those
  * routes do not import a router file to reach it.
  *
- * Every relation on the item is BUILT field by field, never spread
+ * Every RELATION on the item is BUILT field by field, never spread
  * (Codex-ve5eh, Codex-567de, Codex-1bdx0). The routes used to spread the
  * service's rows, so whatever `listPublic` selected went on the wire: whole
  * media_items rows (the original upload's r2Key, the master playlist key, the
@@ -15,12 +15,19 @@
  * preview keys beside the URLs built from them) and whole organizations rows
  * (the payee's `primaryConnectAccountUserId`). The service now selects only
  * what is read here, and the allow-list is repeated HERE, at the boundary,
- * typed against the `@codex/shared-types` contract, so a wider select later
- * cannot widen the response.
+ * typed against the `@codex/shared-types` contract, so a wider relation select
+ * later cannot widen the response.
  *
- * The org list KV-caches this output, so removing a field here needs a
- * `PUBLIC_CONTENT_SHAPE_VERSION` bump (public-cache.ts), and apps/web's
- * /explore caches the browse output under `content:auth:v*`.
+ * The content row's OWN columns pass through as the service selects them, so
+ * the service is where a content column is kept off the wire (`listPublic` and
+ * the browse list leave out `purchaseCount`). A new internal column on
+ * `content` needs an exclusion there.
+ *
+ * Caches: the org list KV-caches `listPublic`'s ROWS and builds this after the
+ * read (public.ts), so a change here alone needs no
+ * `PUBLIC_CONTENT_SHAPE_VERSION` bump. apps/web's /explore KV-caches the browse
+ * route's output of this function under `content:auth:vN` (180s), so removing a
+ * field here needs a bump THERE.
  */
 
 import type { PublicMediaItemSource } from '@codex/content';
@@ -32,7 +39,7 @@ import type {
 } from '@codex/shared-types';
 
 /**
- * The two public hosts this route resolves keys against.
+ * The two public hosts these routes resolve keys against.
  *
  * TWO, NOT ONE, and that split is the point of the type (Codex-1g5lh.13).
  * `thumbnailKey` genuinely lives in the PUBLIC assets bucket. `hlsPreviewKey`
@@ -99,6 +106,30 @@ export type PublicItem<T extends CatalogueRelations> = Omit<
   creator: PublicContentCreator;
 };
 
+/**
+ * A key's public URL, or null when there is no key or no base to resolve it
+ * against. The builder and the missing-base warning share it, so the warning
+ * can never disagree with what was sent.
+ */
+function publicUrl(
+  base: string | undefined,
+  key: string | null
+): string | null {
+  if (!key || !base) return null;
+  return `${base}/${key}`;
+}
+
+function buildMediaItem(
+  mediaItem: PublicMediaItemSource,
+  bases: R2PublicBases
+): PublicMediaItem {
+  return {
+    durationSeconds: mediaItem.durationSeconds,
+    thumbnailUrl: publicUrl(bases.assets, mediaItem.thumbnailKey),
+    hlsPreviewUrl: publicUrl(bases.mediaPreview, mediaItem.hlsPreviewKey),
+  };
+}
+
 /** One row to its wire item: each relation rebuilt from named fields. */
 function buildPublicItem<T extends CatalogueRelations>(
   row: T,
@@ -107,19 +138,7 @@ function buildPublicItem<T extends CatalogueRelations>(
   const { mediaItem, organization, creator, ...rest } = row;
   return {
     ...rest,
-    mediaItem: mediaItem
-      ? {
-          durationSeconds: mediaItem.durationSeconds,
-          thumbnailUrl:
-            mediaItem.thumbnailKey && bases.assets
-              ? `${bases.assets}/${mediaItem.thumbnailKey}`
-              : null,
-          hlsPreviewUrl:
-            mediaItem.hlsPreviewKey && bases.mediaPreview
-              ? `${bases.mediaPreview}/${mediaItem.hlsPreviewKey}`
-              : null,
-        }
-      : null,
+    mediaItem: mediaItem ? buildMediaItem(mediaItem, bases) : null,
     organization: organization
       ? {
           id: organization.id,
@@ -141,13 +160,19 @@ function buildPublicItem<T extends CatalogueRelations>(
 function warnOnUnresolvedKeys(
   rows: readonly CatalogueRelations[],
   bases: R2PublicBases,
-  obs?: Logger
+  obs: Logger | undefined
 ): void {
   let unresolvedThumbnails = 0;
   let unresolvedPreviews = 0;
   for (const { mediaItem } of rows) {
-    if (mediaItem?.thumbnailKey && !bases.assets) unresolvedThumbnails++;
-    if (mediaItem?.hlsPreviewKey && !bases.mediaPreview) unresolvedPreviews++;
+    if (!mediaItem) continue;
+    const { thumbnailKey, hlsPreviewKey } = mediaItem;
+    if (thumbnailKey && !publicUrl(bases.assets, thumbnailKey)) {
+      unresolvedThumbnails++;
+    }
+    if (hlsPreviewKey && !publicUrl(bases.mediaPreview, hlsPreviewKey)) {
+      unresolvedPreviews++;
+    }
   }
   if (unresolvedThumbnails > 0 || unresolvedPreviews > 0) {
     obs?.warn('r2_public_base.missing', {
@@ -159,11 +184,15 @@ function warnOnUnresolvedKeys(
   }
 }
 
-/** One row to its wire item, warning when a key has no base to resolve it. */
+/**
+ * One row to its wire item, warning when a key has no base to resolve it.
+ * `obs` is required, though it may be undefined: a caller that leaves it out
+ * is a compile error, not a silent null poster (it was, once, Codex-ve5eh).
+ */
 export function toPublicItem<T extends CatalogueRelations>(
   row: T,
   bases: R2PublicBases,
-  obs?: Logger
+  obs: Logger | undefined
 ): PublicItem<T> {
   warnOnUnresolvedKeys([row], bases, obs);
   return buildPublicItem(row, bases);
@@ -173,7 +202,7 @@ export function toPublicItem<T extends CatalogueRelations>(
 export function toPublicItems<T extends CatalogueRelations>(
   rows: T[],
   bases: R2PublicBases,
-  obs?: Logger
+  obs: Logger | undefined
 ): PublicItem<T>[] {
   warnOnUnresolvedKeys(rows, bases, obs);
   return rows.map((row) => buildPublicItem(row, bases));

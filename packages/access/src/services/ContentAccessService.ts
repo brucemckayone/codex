@@ -2,6 +2,7 @@ import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
 import { CONTENT_STATUS, ENV_NAMES, type Env } from '@codex/constants';
 import {
+  CATALOGUE_CONTENT_COLUMNS,
   PUBLIC_CREATOR_COLUMNS,
   PUBLIC_MEDIA_ITEM_COLUMNS,
   PUBLIC_ORGANIZATION_COLUMNS,
@@ -608,7 +609,9 @@ export class ContentAccessService
           const found = await tx.query.content.findFirst({
             where: and(...conditions),
             // The public list's projection, not whole rows (Codex-ve5eh,
-            // Codex-567de): the route builds the same wire item from it.
+            // Codex-567de): the route builds the same wire item from it. The
+            // policy check below reads none of the excluded columns.
+            columns: CATALOGUE_CONTENT_COLUMNS,
             with: {
               mediaItem: { columns: PUBLIC_MEDIA_ITEM_COLUMNS },
               creator: { columns: PUBLIC_CREATOR_COLUMNS },

@@ -192,7 +192,8 @@ import { ApiError } from './errors';
  * is four fields, never the organizations row (Codex-567de), and the creator
  * is its id and name. All three are the `@codex/shared-types` contract the
  * worker's mapper is typed against; reading anything else off them needs a
- * worker change. `listPublic` attaches
+ * worker change. The row carries no sales count (`purchaseCount`): the lists
+ * leave it out (owner, 2026-10-26). `listPublic` attaches
  * `categorySlugs`; `content_type` is a `varchar`
  * column (so `ContentWithRelations` widens it to `string`) but is constrained
  * to its enum, so we narrow it here. The SPEC §6.1 access-policy flags
@@ -203,7 +204,7 @@ import { ApiError } from './errors';
  */
 export type PublicContentListItem = Omit<
   ContentWithRelations,
-  'mediaItem' | 'organization' | 'creator' | 'contentType'
+  'mediaItem' | 'organization' | 'creator' | 'contentType' | 'purchaseCount'
 > & {
   mediaItem: PublicMediaItem | null;
   organization: PublicContentOrganization | null;
@@ -1884,7 +1885,10 @@ export function createServerApi(
        * Get organization by slug
        */
       getBySlug: (slug: string) =>
-        request<OrganizationData>('org', `/api/organizations/slug/${slug}`),
+        request<OrganizationData>(
+          'org',
+          `/api/organizations/slug/${encodeURIComponent(slug)}`
+        ),
 
       /**
        * Get organization settings
@@ -2007,7 +2011,7 @@ export function createServerApi(
       getPublicBranding: (slug: string) =>
         request<PublicBrandingResponse>(
           'org',
-          `/api/organizations/public/${slug}`
+          `/api/organizations/public/${encodeURIComponent(slug)}`
         ),
 
       /**
@@ -2019,7 +2023,7 @@ export function createServerApi(
       getPublicInfo: (slug: string) =>
         request<OrganizationData>(
           'org',
-          `/api/organizations/public/${slug}/info`
+          `/api/organizations/public/${encodeURIComponent(slug)}/info`
         ),
 
       /**
@@ -2063,7 +2067,7 @@ export function createServerApi(
           }>
         >(
           'org',
-          `/api/organizations/public/${slug}/creators${params ? `?${params}` : ''}`
+          `/api/organizations/public/${encodeURIComponent(slug)}/creators${params ? `?${params}` : ''}`
         ),
 
       /**
@@ -2073,7 +2077,7 @@ export function createServerApi(
       getPublicStats: (slug: string) =>
         request<OrganizationPublicStatsResponse>(
           'org',
-          `/api/organizations/public/${slug}/stats`
+          `/api/organizations/public/${encodeURIComponent(slug)}/stats`
         ),
 
       /**

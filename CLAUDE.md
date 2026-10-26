@@ -358,11 +358,15 @@ relation, a stripped body) leaves every slot written by the old code a valid hit
 after deploy. It keeps serving what was removed until its TTL runs out. The
 case that taught it: org content lists would have kept serving `creator.email`
 from 2h slots (Codex-osuqt). Put a shape version in the `type`, as
-`PUBLIC_CONTENT_SHAPE_VERSION` (`content:public:v3:…`) and explore's
-`content:auth:v2:…` do, and bump it with the change. Old slots are never read
+`PUBLIC_CONTENT_SHAPE_VERSION` (`content:public:v4:…`) and explore's
+`content:auth:v3:…` do, and bump it with the change. Old slots are never read
 again. A bump also renames the cache-stats series. A cached payload is the whole
-thing the slot stores (for content-api, `listPublic` plus `resolveR2Urls`), so
-stripping R2 keys (Codex-tr7it) is a narrowing too.
+thing the slot stores: for content-api's org list, `listPublic`'s rows, with
+the wire item built after the read; for explore's `content:auth`, the browse
+route's whole response. So stripping a field from the wire builder is a
+narrowing of `content:auth`, and a `listPublic` select that widens with a
+column the builder reads needs a bump too, or old slots serve the item
+without it.
 
 **Currently cached:** User profile (10min), user preferences (10min), public creator profile (10min, keyed by user id) + its username->id hop (1h), org branding/info and stats (4h, keyed by org slug), the org's public creators list (4h, under its own id `org:{slug}:creators` — bump both through `invalidateOrgPublicCaches`), org tiers (24h), org content collection versions. See `docs/caching-strategy.md` for full details.
 

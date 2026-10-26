@@ -27,16 +27,24 @@ The 60s bound is the KV invalidation window; see `CACHE_PRESETS` in
 `@codex/constants`. Never set `Cache-Control` by hand here — the static-analysis
 gate rejects it.
 
-Every list item is BUILT field by field by `toPublicItems` (`r2-public-urls.ts`),
-never spread from the service's row: the media item is `durationSeconds`,
-`thumbnailUrl` and `hlsPreviewUrl`, the org `id`, `name`, `slug` and `logoUrl`,
-the creator `id` and `name` (Codex-ve5eh, Codex-567de). No raw R2 key, RunPod
-job id, transcoding error or payee id reaches a client. `listPublic` selects
-only those columns (`PUBLIC_*_COLUMNS` in `@codex/content`), and a narrowing
-of either needs a `PUBLIC_CONTENT_SHAPE_VERSION` bump (`public-cache.ts`).
+Every RELATION on a list item is BUILT field by field by `toPublicItems`
+(`r2-public-urls.ts`), never spread from the service's row: the media item is
+`durationSeconds`, `thumbnailUrl` and `hlsPreviewUrl`, the org `id`, `name`,
+`slug` and `logoUrl`, the creator `id` and `name` (Codex-ve5eh, Codex-567de).
+No raw R2 key, RunPod job id, transcoding error or payee id reaches a client.
+The content row's OWN columns pass through as `listPublic` selects them, so a
+content column is kept off the wire in the service: `CATALOGUE_CONTENT_COLUMNS`
+leaves out `purchaseCount` (owner, 2026-10-26), and a new internal content
+column needs an exclusion there too. `listPublic` selects only those columns
+(`PUBLIC_*_COLUMNS` and `CATALOGUE_CONTENT_COLUMNS` in `@codex/content`).
+The org list's KV slot holds those ROWS and the item is built after the read,
+so ANY change to `listPublic`'s select needs a `PUBLIC_CONTENT_SHAPE_VERSION`
+bump (`public-cache.ts`), and a change to the builder alone does not. apps/web
+/explore caches the builder's output (`content:auth:vN`), so a field removed
+from the builder needs a bump there.
 A key with no CDN base is sent as a null URL and logged once per request as
 `r2_public_base.missing`, by `toPublicItems` and the single `toPublicItem`
-alike; pass `ctx.obs` to either.
+alike; both take `ctx.obs` as a required argument.
 `GET /api/content/browse` (signed-in) sends the same item (Codex-1bdx0).
 
 | Method | Path | Policy | Notes |

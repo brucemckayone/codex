@@ -9,8 +9,10 @@
  * builder reports it too: the withdrawn read sends one item through it.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import type { PublicContentItem, PublicContentRow } from '@codex/content';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
+  type PublicItem,
   type R2PublicBases,
   toPublicItem,
   toPublicItems,
@@ -46,7 +48,7 @@ describe('toPublicItem — the creator is allow-listed too', () => {
       },
     };
 
-    expect(toPublicItem(withExtras, BOTH_BASES).creator).toEqual({
+    expect(toPublicItem(withExtras, BOTH_BASES, undefined).creator).toEqual({
       id: 'creator-1',
       name: 'Ada',
     });
@@ -104,5 +106,15 @@ describe('toPublicItem — the single item is reported the same way', () => {
     toPublicItem(row('a'), BOTH_BASES, obs);
 
     expect(obs.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('the documented item is the built item', () => {
+  it('builds exactly @codex/content PublicContentItem from a listPublic row', () => {
+    // A compile-time check: `PublicContentListResponse`, which the routes
+    // name in their @returns, used to be declared apart from what this module
+    // builds, and had drifted (no categorySlugs).
+    expectTypeOf<PublicItem<PublicContentRow>>().toExtend<PublicContentItem>();
+    expectTypeOf<PublicContentItem>().toExtend<PublicItem<PublicContentRow>>();
   });
 });

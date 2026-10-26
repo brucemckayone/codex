@@ -1,10 +1,11 @@
 /**
  * The command palette's search endpoint.
  *
- * An org-scoped search must never answer with other orgs' content. Only a 404
- * on the org lookup (no such org) widens it to the platform-wide search; any
- * other failure skips the content search, and every failed read is logged,
- * because the palette shows an empty list either way.
+ * An org-scoped search must never answer with other orgs' content. Only a slug
+ * no org has (a 404 from the lookup, or one no org could have) widens it to
+ * the platform-wide search; any other failure skips the content search. Every
+ * failed read is logged, because the palette shows an empty list either way,
+ * and nothing a visitor can put in a URL raises an error-level log.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -66,6 +67,10 @@ async function search(query: string) {
   }>;
 }
 
+function expectNoErrorLog() {
+  expect(loggerMock.error).not.toHaveBeenCalled();
+}
+
 describe('GET /api/search', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -77,17 +82,23 @@ describe('GET /api/search', () => {
     });
   });
 
-  it('scopes the content search to the org the slug names', async () => {
+  it('scopes both searches to the org the slug names', async () => {
     const body = await search(`q=yoga&scope=${ORG_SLUG}`);
 
     expect(getPublicContent).toHaveBeenCalledOnce();
     expect(getPublicContent.mock.calls[0][0].get('orgId')).toBe('org-1');
+    expect(getPublicCreators.mock.calls[0][0]).toBe(ORG_SLUG);
     expect(getDiscoverContent).not.toHaveBeenCalled();
     expect(body.content.map((c) => c.id)).toEqual(['org-hit']);
+    expect(body.creators).toEqual([{ name: 'Alex', avatarUrl: null }]);
   });
 
-  it('widens to the platform-wide search when no org has the slug', async () => {
+  it('widens to the platform-wide search, silently, when no org has the slug', async () => {
     getPublicInfo.mockRejectedValue(
+      new ApiError(404, 'Organization not found', 'NOT_FOUND')
+    );
+    // What the real worker does for an unknown slug, should it be asked.
+    getPublicCreators.mockRejectedValue(
       new ApiError(404, 'Organization not found', 'NOT_FOUND')
     );
 
@@ -95,8 +106,25 @@ describe('GET /api/search', () => {
 
     expect(getDiscoverContent).toHaveBeenCalledOnce();
     expect(body.content.map((c) => c.id)).toEqual(['platform-hit']);
+    // No org, no creators: the lookup is not made, so it cannot 404 and log.
+    expect(getPublicCreators).not.toHaveBeenCalled();
+    expect(body.creators).toEqual([]);
     expect(loggerMock.warn).not.toHaveBeenCalled();
-    expect(loggerMock.error).not.toHaveBeenCalled();
+    expectNoErrorLog();
+  });
+
+  it.each([
+    ['an underscore', 'studio_alpha'],
+    ['a path', '..%2F..%2Fuser%2Fx'],
+    ['an over-long slug', 'a'.repeat(256)],
+  ])('never sends a slug with %s to the worker, and logs nothing', async (_, raw) => {
+    const body = await search(`q=yoga&scope=${raw}`);
+
+    expect(getPublicInfo).not.toHaveBeenCalled();
+    expect(getPublicCreators).not.toHaveBeenCalled();
+    expect(body.content.map((c) => c.id)).toEqual(['platform-hit']);
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+    expectNoErrorLog();
   });
 
   it.each([
@@ -110,9 +138,21 @@ describe('GET /api/search', () => {
 
     expect(getDiscoverContent).not.toHaveBeenCalled();
     expect(getPublicContent).not.toHaveBeenCalled();
+    expect(getPublicCreators).not.toHaveBeenCalled();
+    expect(body).toEqual({ content: [], creators: [] });
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'Search scope org not loaded',
+      expect.objectContaining({ scope: ORG_SLUG })
+    );
+  });
+
+  it('never searches every org when the lookup answers without an id', async () => {
+    getPublicInfo.mockResolvedValue(null);
+
+    const body = await search(`q=yoga&scope=${ORG_SLUG}`);
+
+    expect(getDiscoverContent).not.toHaveBeenCalled();
     expect(body.content).toEqual([]);
-    // The creators search needs only the slug, so it still answers.
-    expect(body.creators).toEqual([{ name: 'Alex', avatarUrl: null }]);
     expect(loggerMock.warn).toHaveBeenCalledWith(
       'Search scope org not loaded',
       expect.objectContaining({ scope: ORG_SLUG })
@@ -149,6 +189,7 @@ describe('GET /api/search', () => {
     const body = await search('q=yoga');
 
     expect(getPublicInfo).not.toHaveBeenCalled();
+    expect(getPublicCreators).not.toHaveBeenCalled();
     expect(body.content.map((c) => c.id)).toEqual(['platform-hit']);
     expect(body.creators).toEqual([]);
   });

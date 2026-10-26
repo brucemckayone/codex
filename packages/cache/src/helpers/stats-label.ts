@@ -60,8 +60,8 @@ const VALUE_MARKERS = /* @__PURE__ */ new Set([
 
 /**
  * Backstop on label depth. The shape-versioned content types reach it:
- * `content:public:vN:newest` (v3 since Codex-039vo), and
- * `content:auth:v2:popular`, whose content type (the fifth segment) the cap
+ * `content:public:vN:newest` (v4 since Codex-ve5eh), and
+ * `content:auth:v3:popular`, whose content type (the fifth segment) the cap
  * now drops.
  */
 const MAX_LABEL_SEGMENTS = 4;
