@@ -458,9 +458,11 @@ its CDN URLs, is built after the cache, so a missing CDN base is never frozen
 into a `content:public` slot. Because the wire is derived from the cached row,
 a `listPublic` select that WIDENS with a column the item reads needs a bump
 too, or old slots serve the item without it. `content:auth:v3` (Codex-1bdx0,
-apps/web /explore) is the signed-in browse list taking the same item. It
-caches the worker's finished response, URLs included, for 180s, so a field
-removed from the item builder needs a `content:auth` bump.
+apps/web /explore) is the signed-in browse list taking the same item, and no
+`purchaseCount`. It caches the worker's finished response, URLs included, for
+180s, so a change to the browse select (the shared `PUBLIC_*_COLUMNS` and
+`CATALOGUE_CONTENT_COLUMNS`) or a field removed from the item builder needs a
+`content:auth` bump.
 
 **Two branches bumping the same version.** Whichever merges SECOND takes a
 version no deployed build has ever written, whatever the merge order. A value

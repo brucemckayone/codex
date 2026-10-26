@@ -40,8 +40,9 @@ column needs an exclusion there too. `listPublic` selects only those columns
 The org list's KV slot holds those ROWS and the item is built after the read,
 so ANY change to `listPublic`'s select needs a `PUBLIC_CONTENT_SHAPE_VERSION`
 bump (`public-cache.ts`), and a change to the builder alone does not. apps/web
-/explore caches the builder's output (`content:auth:vN`), so a field removed
-from the builder needs a bump there.
+/explore caches the browse route's response (`content:auth:vN`), so a change
+to the browse select (the same shared column lists) OR a field removed from
+the builder needs a bump there.
 A key with no CDN base is sent as a null URL and logged once per request as
 `r2_public_base.missing`, by `toPublicItems` and the single `toPublicItem`
 alike; both take `ctx.obs` as a required argument.

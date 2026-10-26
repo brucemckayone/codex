@@ -96,7 +96,11 @@
   };
   // No `organization`: this view never reads it, and the public API sends
   // only four of its fields (Codex-567de).
-  type ContentDetail = Omit<ContentWithRelations, 'mediaItem' | 'organization'> & {
+  // No `purchaseCount`: the public and browse lists never send it.
+  type ContentDetail = Omit<
+    ContentWithRelations,
+    'mediaItem' | 'organization' | 'purchaseCount'
+  > & {
     mediaItem?: ContentDetailMedia | null;
   };
 

@@ -138,8 +138,10 @@ describe('GET /api/search', () => {
 
     expect(getDiscoverContent).not.toHaveBeenCalled();
     expect(getPublicContent).not.toHaveBeenCalled();
-    expect(getPublicCreators).not.toHaveBeenCalled();
-    expect(body).toEqual({ content: [], creators: [] });
+    expect(body.content).toEqual([]);
+    // The worker scopes creators by the slug itself, so they still answer.
+    expect(getPublicCreators.mock.calls[0][0]).toBe(ORG_SLUG);
+    expect(body.creators).toEqual([{ name: 'Alex', avatarUrl: null }]);
     expect(loggerMock.warn).toHaveBeenCalledWith(
       'Search scope org not loaded',
       expect.objectContaining({ scope: ORG_SLUG })

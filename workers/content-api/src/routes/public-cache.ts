@@ -59,8 +59,9 @@ const PUBLIC_CONTENT_CACHE_TTL = 7200;
  * keeps serving what was removed: the content row's own columns go on the
  * wire as cached. A WIDENED one that the wire item reads (a column added to
  * PUBLIC_MEDIA_ITEM_COLUMNS, say) is missing from the old slots, and the wire
- * omits it, while `satisfies` tells TypeScript the row has it. v2 (Codex-osuqt): no creator email, and no body on a
- * catalogue read. v3 (Codex-039vo): no body on a by-slug read of a gated row,
+ * omits it, while `satisfies` tells TypeScript the row has it.
+ *
+ * v2 (Codex-osuqt): no creator email, and no body on a catalogue read. v3 (Codex-039vo): no body on a by-slug read of a gated row,
  * which a course-only practice flagged free used to keep. v4 (Codex-ve5eh,
  * Codex-567de, one bump for both): the slot holds listPublic's narrowed row,
  * the media item three columns (durationSeconds, thumbnailKey, hlsPreviewKey)

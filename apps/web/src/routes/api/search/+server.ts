@@ -15,14 +15,15 @@ type ServerApi = ReturnType<typeof createServerApi>;
  * - `platform`: no scope, or a slug no org has, so the content search widens
  *   to every org's public catalogue (as a search with no scope does) and there
  *   are no creators to search.
- * - `unknown`: the org lookup failed, so which org the visitor is in is not
- *   known. Answering with every org's content would put other orgs' work in
- *   this org's palette, so nothing is searched.
+ * - `unknown`: the org lookup failed, so the org's id is not known.
+ *   Answering with every org's content would put other orgs' work in this
+ *   org's palette, so content is not searched. Creators still are: the org
+ *   worker scopes them by the slug itself, so they can only be this org's.
  */
 type SearchScope =
   | { kind: 'org'; orgId: string; slug: string }
   | { kind: 'platform' }
-  | { kind: 'unknown' };
+  | { kind: 'unknown'; slug: string };
 
 // The org routes' own slug rule. A slug that fails it names no org, and
 // sending it would come back a 400, which the read logs at error level as OUR
@@ -48,14 +49,14 @@ async function resolveScope(
       { scope: slug },
       new Error('The org lookup answered without an id')
     );
-    return { kind: 'unknown' };
+    return { kind: 'unknown', slug };
   } catch (error) {
     // No such org: the documented widening, and nothing to log.
     if (error instanceof ApiError && error.status === 404) {
       return { kind: 'platform' };
     }
     logReadFailure('Search scope org not loaded', { scope: slug }, error);
-    return { kind: 'unknown' };
+    return { kind: 'unknown', slug };
   }
 }
 
@@ -75,13 +76,14 @@ function searchContent(
   return Promise.resolve(null);
 }
 
-// Creators belong to an org, so only a found org has any to search.
+// Creators belong to an org: a slug no org has has none, and asking would
+// only 404. A slug whose lookup failed may still have them.
 function searchCreators(
   api: ServerApi,
   scope: SearchScope,
   params: URLSearchParams
 ) {
-  if (scope.kind !== 'org') return Promise.resolve(null);
+  if (scope.kind === 'platform') return Promise.resolve(null);
   return api.org.getPublicCreators(scope.slug, params);
 }
 

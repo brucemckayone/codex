@@ -44,6 +44,7 @@ import {
   ImageProcessingService,
   ownContentThumbnailFolder,
 } from '@codex/image-processing';
+import { READABLE_ORGANIZATION_COLUMNS } from '@codex/organization';
 import type { ServiceConfig } from '@codex/service-errors';
 import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
@@ -101,7 +102,12 @@ import type {
  * Exported for the public list's twin, `ContentAccessService.
  * getWithdrawnContent` (@codex/access), which serves the same item to a reader
  * who still has a piece withdrawn from sale: one column list, so the two reads
- * cannot drift apart either. The same holds for the two lists below.
+ * cannot drift apart either. The same holds for the lists below.
+ *
+ * A change to ANY of these lists changes two cached payloads, so it needs two
+ * bumps: `PUBLIC_CONTENT_SHAPE_VERSION` (content-api public-cache.ts, which
+ * caches `listPublic`'s rows) and apps/web /explore's `content:auth:vN` (which
+ * caches the browse route's response).
  */
 export const PUBLIC_MEDIA_ITEM_COLUMNS = {
   durationSeconds: true,
@@ -137,22 +143,12 @@ export const PUBLIC_CREATOR_COLUMNS = {
  * still works, because ORDER BY reads the table, not the select. `viewCount`
  * stays: the public Spotlight shows it.
  *
- * Exported for the withdrawn read (@codex/access), as the lists above are.
+ * Exported for the withdrawn read (@codex/access), as the lists above are,
+ * and a change to it needs the same two cache bumps.
  */
 export const CATALOGUE_CONTENT_COLUMNS = {
   purchaseCount: false,
 } as const satisfies Partial<Record<keyof Content, false>>;
-
-/**
- * The organizations columns a studio read leaves out. The studio list and
- * `get` check content ownership, not org management, so any creator-role
- * member reads them, and the org row is not theirs: the payee's user id stays
- * off it, as it does on the org routes (Codex-kk6zx). Every other column is
- * kept, including ones added later.
- */
-const STUDIO_ORGANIZATION_COLUMNS = {
-  primaryConnectAccountUserId: false,
-} as const;
 
 /**
  * Content Service Class
@@ -556,7 +552,7 @@ export class ContentService extends BaseService {
         where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         with: {
           mediaItem: true,
-          organization: { columns: STUDIO_ORGANIZATION_COLUMNS },
+          organization: { columns: READABLE_ORGANIZATION_COLUMNS },
           creator: {
             columns: {
               id: true,
@@ -1372,7 +1368,7 @@ export class ContentService extends BaseService {
                 // and with their email. The org is not theirs: no payee id.
                 with: {
                   mediaItem: true,
-                  organization: { columns: STUDIO_ORGANIZATION_COLUMNS },
+                  organization: { columns: READABLE_ORGANIZATION_COLUMNS },
                   creator: { columns: { id: true, email: true, name: true } },
                 },
               }),

@@ -260,7 +260,10 @@ export const load: PageServerLoad = async ({
       // bump it whenever the browse list NARROWS, or slots the old code wrote
       // keep serving the removed fields until their TTL (v2, Codex-osuqt: no
       // body, no creator email; v3, Codex-1bdx0: the public list's media item
-      // and org, no longer the whole media_items and organizations rows).
+      // and org, no longer the whole media_items and organizations rows, and no
+      // purchaseCount, owner 2026-10-26). The browse select (the shared
+      // PUBLIC_*_COLUMNS and CATALOGUE_CONTENT_COLUMNS in @codex/content) and
+      // content-api's item builder both shape this payload.
       // The category is a `:cat:` suffix only when set, as in public-cache.ts.
       // An `all` placeholder let `?category=all` (a filter that matches
       // nothing) share the unfiltered slot, so one signed-in visitor blanked

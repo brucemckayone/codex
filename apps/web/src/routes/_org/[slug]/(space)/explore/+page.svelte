@@ -53,7 +53,11 @@
   // list, send the same media item: R2 keys resolved to URLs and nothing else
   // of the media_items row (Codex-ve5eh, Codex-1bdx0). These are the fields the
   // grid reads off it, and the org is the four-field public org (Codex-567de).
-  type ExploreItem = Omit<ContentWithRelations, 'mediaItem' | 'organization'> & {
+  // No `purchaseCount`: the public and browse lists never send it.
+  type ExploreItem = Omit<
+    ContentWithRelations,
+    'mediaItem' | 'organization' | 'purchaseCount'
+  > & {
     mediaItem?: {
       durationSeconds?: number | null;
       thumbnailUrl?: string | null;

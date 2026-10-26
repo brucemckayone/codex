@@ -70,6 +70,7 @@ export {
   type OwnershipTemplateName,
   type OwnershipViewCore,
   type OwnershipViewerRole,
+  READABLE_ORGANIZATION_COLUMNS,
   type WithdrawnCatalogue,
   withdrawCatalogueOnDeparture,
 } from './services';

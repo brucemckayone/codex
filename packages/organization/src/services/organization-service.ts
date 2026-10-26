@@ -111,10 +111,19 @@ import {
  * The columns `get`, `getBySlug` and `list` select: every one but the payee's
  * user id (Codex-kk6zx, see {@link ReadableOrganization}). A `false` entry
  * excludes that column and keeps the rest, so a column added later is read.
+ *
+ * Exported for every other read that loads an org for someone who does not
+ * manage it (@codex/content's studio `get` and `list`), so they cannot drift
+ * apart. `satisfies` ties the keys to exactly what `ReadableOrganization`
+ * omits: a misspelt key would otherwise be dropped by drizzle without a word,
+ * and an empty exclusion selects EVERY column.
  */
-const READABLE_ORGANIZATION_COLUMNS = {
+export const READABLE_ORGANIZATION_COLUMNS = {
   primaryConnectAccountUserId: false,
-} as const;
+} as const satisfies Record<
+  Exclude<keyof Organization, keyof ReadableOrganization>,
+  false
+>;
 
 /**
  * Organization Service Class

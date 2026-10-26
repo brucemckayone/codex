@@ -23,7 +23,11 @@
   // The media item and org fields a card and its link read. The public content
   // API sends the media fields with the R2 keys already resolved to CDN URLs
   // (Codex-ve5eh) and the org as four fields (Codex-567de).
-  type RelatedItem = Omit<ContentWithRelations, 'mediaItem' | 'organization'> & {
+  // No `purchaseCount`: the public and browse lists never send it.
+  type RelatedItem = Omit<
+    ContentWithRelations,
+    'mediaItem' | 'organization' | 'purchaseCount'
+  > & {
     mediaItem?: {
       durationSeconds?: number | null;
       thumbnailUrl?: string | null;

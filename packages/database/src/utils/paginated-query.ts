@@ -111,7 +111,12 @@ async function runCount(input: CountQuery): Promise<number> {
  *       limit,
  *       offset,
  *       orderBy: [orderByClause],
- *       with: { mediaItem: true, organization: true, creator: { columns: { id: true, email: true, name: true } } },
+ *       // Never `organization: true`: it carries the payee's user id.
+ *       with: {
+ *         mediaItem: true,
+ *         organization: { columns: READABLE_ORGANIZATION_COLUMNS },
+ *         creator: { columns: { id: true, email: true, name: true } },
+ *       },
  *     }),
  *   countQuery: { db: this.db, table: content, where },
  * });
@@ -126,7 +131,7 @@ async function runCount(input: CountQuery): Promise<number> {
  *   fetchItems: (limit, offset) => this.db.query.content.findMany({ ... }),
  *   countQuery: { db: this.db, table: content, where },
  *   mapItem: (item) =>
- *     item.accessType === CONTENT_ACCESS_TYPE.FREE
+ *     isPublicContent(item)
  *       ? item
  *       : { ...item, contentBody: null, contentBodyJson: null },
  * });
