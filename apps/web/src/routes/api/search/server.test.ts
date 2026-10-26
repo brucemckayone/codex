@@ -234,6 +234,8 @@ describe('GET /api/search', () => {
     ['one character', 'y'],
     ['two characters', 'yo'],
     ['a padded short term', '%20yo%20'],
+    ['a short term padded with NUL', 'ab%00'],
+    ['nothing but NUL', '%00%00%00'],
   ])('answers %s empty and calls no worker (the search floor)', async (_, q) => {
     const body = await search(`q=${q}&scope=${ORG_SLUG}`);
 

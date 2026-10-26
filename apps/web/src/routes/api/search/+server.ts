@@ -1,4 +1,8 @@
-import { createSlugSchema, gateSearchQuery } from '@codex/validation';
+import {
+  boundSearchParam,
+  createSlugSchema,
+  gateSearchQuery,
+} from '@codex/validation';
 import { json } from '@sveltejs/kit';
 import { ApiError } from '$lib/api/errors';
 import { createServerApi } from '$lib/server/api';
@@ -97,7 +101,9 @@ export const GET: RequestHandler = async ({ url, platform, cookies }) => {
   // one- or two-character term gives every search a sequential scan
   // (Codex-k618q), and the workers' rate limit cannot see a visitor behind
   // this server's hop. So a short term answers empty and calls no worker.
-  const q = gateSearchQuery(url.searchParams.get('q')?.slice(0, 200));
+  // Normalised as the workers' schema does (NUL dropped, then trimmed) BEFORE
+  // the floor: `ab%00` is three characters here but `ab` there.
+  const q = gateSearchQuery(boundSearchParam(url.searchParams.get('q'), 200));
   const scopeSlug = parseScopeSlug(url.searchParams.get('scope'));
   const limit = 5;
 

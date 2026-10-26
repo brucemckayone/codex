@@ -59,13 +59,40 @@
 	// Recents are replayed as `?q=` navigations by `selectItem`, so a term
 	// persisted before the search floor landed (Codex-k618q) would still be one
 	// click away from a below-floor scan. Filter on READ as well as on write.
-	let recentSearches = $state<string[]>(
-		browser
-			? ((JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as string[]) ?? []).filter(
-					(term) => !!gateSearchQuery(term)
-				)
-			: []
-	);
+	//
+	// The read runs as the palette mounts, and both root layouts mount it, so
+	// a throw here would break every page, not just search. Blocked site
+	// storage throws on access and a hand-edited value may not parse or not be
+	// a list of strings: each reads as no recents.
+	function readRecent(): string[] {
+		if (!browser) return [];
+		try {
+			const stored: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
+			if (!Array.isArray(stored)) return [];
+			return stored.filter(
+				(term): term is string => typeof term === 'string' && !!gateSearchQuery(term)
+			);
+		} catch (error) {
+			logger.warn('Recent searches not read', {
+				reason: error instanceof Error ? error.message : String(error),
+			});
+			return [];
+		}
+	}
+
+	// A write that fails (storage blocked or full) only loses the recents.
+	function writeRecent(terms: string[]) {
+		try {
+			if (terms.length > 0) localStorage.setItem(RECENT_KEY, JSON.stringify(terms));
+			else localStorage.removeItem(RECENT_KEY);
+		} catch (error) {
+			logger.warn('Recent searches not saved', {
+				reason: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	let recentSearches = $state<string[]>(readRecent());
 
 	// ── Reduced-motion preference (WCAG 2.3.3) ────────────────
 	// Svelte JS transitions bypass CSS media queries — gate fly translate
@@ -176,12 +203,12 @@
 			0,
 			MAX_RECENT
 		);
-		localStorage.setItem(RECENT_KEY, JSON.stringify(recentSearches));
+		writeRecent(recentSearches);
 	}
 
 	function clearRecent() {
 		recentSearches = [];
-		if (browser) localStorage.removeItem(RECENT_KEY);
+		if (browser) writeRecent([]);
 	}
 
 	// ── Navigation ────────────────────────────────────────────
@@ -192,11 +219,12 @@
 	function navigate(href: string) {
 		const target = new URL(href, page.url);
 		if (target.origin === page.url.origin) {
-			// A same-origin goto() still rejects when a beforeNavigate guard
-			// cancels it or a newer navigation overtakes it. The guard has shown
-			// its own UI by then, so this is a trace, not an error.
+			// A guard's cancel and an overtaking navigation both RESOLVE goto()
+			// (SvelteKit settles only `navigation.complete` for those), so a
+			// rejection here is a real failure: a render or callback threw.
 			goto(href).catch((error: unknown) => {
-				logger.debug('Palette navigation not completed', {
+				logger.error('Palette navigation failed', {
+					href,
 					reason: error instanceof Error ? error.message : String(error),
 				});
 			});

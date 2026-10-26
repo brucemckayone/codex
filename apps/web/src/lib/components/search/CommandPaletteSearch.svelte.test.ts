@@ -241,3 +241,69 @@ describe('where a selection goes (Codex-ynktj)', () => {
     expect(hrefSpy).not.toHaveBeenCalled();
   });
 });
+
+// Both root layouts mount the palette, so a throw while it reads the recents
+// would break every page, not just search.
+describe('recent searches it cannot read or save', () => {
+  const RECENT_KEY = 'codex-recent-searches';
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  const recents = () =>
+    [...document.querySelectorAll('[id^="palette-item-"] span')].map(
+      (el) => el.textContent
+    );
+
+  test('lists the stored recents (the calibration)', () => {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(['yoga', 'breathwork']));
+
+    openPalette();
+
+    expect(recents()).toEqual(['yoga', 'breathwork']);
+  });
+
+  test.each([
+    ['a value that is not JSON', '{not json'],
+    ['JSON that is not a list', '{"q":"yoga"}'],
+  ])('mounts with no recents over %s', (_, stored) => {
+    localStorage.setItem(RECENT_KEY, stored);
+
+    openPalette();
+
+    expect(input()).not.toBeNull();
+    expect(recents()).toEqual([]);
+  });
+
+  test('keeps only the string entries of a mixed list', () => {
+    localStorage.setItem(
+      RECENT_KEY,
+      JSON.stringify(['yoga', 42, null, 'pilates'])
+    );
+
+    openPalette();
+
+    expect(recents()).toEqual(['yoga', 'pilates']);
+  });
+
+  test('still navigates when saving the term fails', async () => {
+    fetchMock.mockResolvedValue(answer({ content: [item('a')] }));
+    const setItem = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      });
+    openPalette();
+    await search('yoga');
+
+    document
+      .querySelector<HTMLButtonElement>('.palette__item--content')
+      ?.click();
+    flushSync();
+
+    expect(goto).toHaveBeenCalledWith('/content/slug-a');
+    expect(setItem).toHaveBeenCalled();
+    setItem.mockRestore();
+  });
+});
