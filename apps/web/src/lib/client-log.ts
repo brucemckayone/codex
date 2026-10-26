@@ -59,7 +59,7 @@ export const clientLogEntrySchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-export type ClientLogEntry = z.infer<typeof clientLogEntrySchema>;
+type ClientLogEntry = z.infer<typeof clientLogEntrySchema>;
 
 const THROWN_MESSAGE_MAX = 300;
 const STACK_MAX = 2000;
