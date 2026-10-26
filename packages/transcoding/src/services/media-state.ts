@@ -17,8 +17,19 @@ import { mediaItems } from '@codex/database/schema';
 import { sql } from 'drizzle-orm';
 
 /** The SET of every move to `failed`; the detail is cut to fit the column. */
+/**
+ * Progress lives in the status object now (Codex-l2c48.9). Until the columns
+ * are dropped (Codex-32sym), every lifecycle write clears them, so the
+ * polling status endpoints report no progress rather than a stale %.
+ */
+export const NO_PROGRESS = {
+  transcodingProgress: null,
+  transcodingStep: null,
+} as const;
+
 export function failedFields(code: TranscodingErrorCode, detail: string) {
   return {
+    ...NO_PROGRESS,
     status: MEDIA_STATUS.FAILED,
     transcodingError: detail.slice(0, TRANSCODING_ERROR_MAX_LENGTH),
     transcodingErrorCode: code,
@@ -32,6 +43,7 @@ export function failedFields(code: TranscodingErrorCode, detail: string) {
  */
 export function waitingFields(code: TranscodingErrorCode, detail: string) {
   return {
+    ...NO_PROGRESS,
     status: MEDIA_STATUS.UPLOADED,
     transcodingError: detail.slice(0, TRANSCODING_ERROR_MAX_LENGTH),
     transcodingErrorCode: code,

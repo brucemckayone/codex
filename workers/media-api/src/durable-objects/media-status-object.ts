@@ -37,10 +37,11 @@ import {
 import { messageForLog } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
-import type { MediaStatusFeed } from '@codex/transcoding';
+import type { MediaStatusFeed, RetryDueReport } from '@codex/transcoding';
 import {
   MEDIA_STATUS_CLIENT_MESSAGE_MAX_BYTES,
   MEDIA_STATUS_PROTOCOL_VERSION,
+  MEDIA_STATUS_RESYNC_MAX_ROWS,
   MEDIA_STATUS_SUBPROTOCOL,
   type MediaItemState,
   type MediaProgressTick,
@@ -72,6 +73,17 @@ const CLIENT_MESSAGE_INTERVAL_MS = 1_000;
 
 /** Close code for a socket whose session ended (4000-4999 are ours). */
 const SESSION_EXPIRED_CLOSE = 4401;
+
+/**
+ * Open tabs one creator may hold. Every creator shares one object (and its
+ * 32,768-socket ceiling), so one account must not be able to fill it.
+ */
+const MAX_TABS_PER_CREATOR = 20;
+
+/** A resync whose rows are not yet validated one by one. */
+const resyncEnvelopeSchema = mediaStatusResyncSchema.extend({
+  rows: z.array(z.unknown()).max(MEDIA_STATUS_RESYNC_MAX_ROWS),
+});
 
 interface Row extends Record<string, string | number | null> {
   media_id: string;
@@ -127,6 +139,14 @@ function itemState(row: Row, socketId: string): MediaItemState {
     retryAt: row.retry_at,
     version: row.version,
   };
+}
+
+/** WebSocket.OPEN: the socket can still be sent to. */
+const WEBSOCKET_OPEN = 1;
+
+/** A header's number, or NaN when it is absent (Number(null) would be 0). */
+function numberOrNaN(value: string | null): number {
+  return value === null ? Number.NaN : Number(value);
 }
 
 /** A change the held row already reflects. */
@@ -217,6 +237,12 @@ export class MediaStatusObject {
     sql.exec(
       'CREATE INDEX IF NOT EXISTS items_retry ON items (retry_at) WHERE retry_at IS NOT NULL'
     );
+    // Tickets already presented, until they expire: a ticket is single-use,
+    // so one copied out of a request log is dead once its tab has used it.
+    sql.exec(`CREATE TABLE IF NOT EXISTS used_tickets (
+      id TEXT PRIMARY KEY,
+      expires_at INTEGER NOT NULL
+    )`);
     // A heartbeat answered without waking the object.
     state.setWebSocketAutoResponse(
       new WebSocketRequestResponsePair('ping', 'pong')
@@ -239,10 +265,10 @@ export class MediaStatusObject {
           );
           return new Response(null, { status: 204 });
         case MEDIA_STATUS_OBJECT_PATHS.removed: {
-          const { mediaId } = mediaStatusRemovedSchema.parse(
+          const { mediaId, creatorId } = mediaStatusRemovedSchema.parse(
             await request.json()
           );
-          await this.applyRemoved(mediaId);
+          await this.applyRemoved(mediaId, creatorId);
           return new Response(null, { status: 204 });
         }
         case MEDIA_STATUS_OBJECT_PATHS.progress:
@@ -252,7 +278,7 @@ export class MediaStatusObject {
           return new Response(null, { status: 204 });
         case MEDIA_STATUS_OBJECT_PATHS.resync:
           await this.applyResync(
-            mediaStatusResyncSchema.parse(await request.json())
+            this.readResync(resyncEnvelopeSchema.parse(await request.json()))
           );
           return new Response(null, { status: 204 });
         default:
@@ -277,14 +303,38 @@ export class MediaStatusObject {
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('Expected a WebSocket upgrade', { status: 426 });
     }
-    const creatorId = request.headers.get(
-      MEDIA_STATUS_CONNECT_HEADERS.creatorId
+    const headers = request.headers;
+    const creatorId = headers.get(MEDIA_STATUS_CONNECT_HEADERS.creatorId);
+    const ticketId = headers.get(MEDIA_STATUS_CONNECT_HEADERS.ticketId);
+    const sessionExpiresAt = numberOrNaN(
+      headers.get(MEDIA_STATUS_CONNECT_HEADERS.sessionExpiresAt)
     );
-    const sessionExpiresAt = Number(
-      request.headers.get(MEDIA_STATUS_CONNECT_HEADERS.sessionExpiresAt)
+    const ticketExpiresAt = numberOrNaN(
+      headers.get(MEDIA_STATUS_CONNECT_HEADERS.ticketExpiresAt)
     );
-    if (!creatorId || !Number.isFinite(sessionExpiresAt)) {
-      return new Response('Missing creator', { status: 400 });
+    if (
+      !creatorId ||
+      !ticketId ||
+      !Number.isFinite(sessionExpiresAt) ||
+      !Number.isFinite(ticketExpiresAt)
+    ) {
+      // Only media-api's Worker calls this: a missing header is its bug.
+      this.obs.error('media_status.connect_bad_headers', {
+        hasCreator: Boolean(creatorId),
+        hasTicket: Boolean(ticketId),
+        hasSessionExpiry: Number.isFinite(sessionExpiresAt),
+        hasTicketExpiry: Number.isFinite(ticketExpiresAt),
+      });
+      return new Response('Missing connect headers', { status: 400 });
+    }
+    if (!this.claimTicket(ticketId, ticketExpiresAt)) {
+      return new Response('Ticket already used', { status: 401 });
+    }
+    if (
+      this.state.getWebSockets(creatorTag(creatorId)).length >=
+      MAX_TABS_PER_CREATOR
+    ) {
+      return new Response('Too many open tabs', { status: 429 });
     }
 
     const [client, server] = Object.values(new WebSocketPair());
@@ -323,9 +373,24 @@ export class MediaStatusObject {
    */
   async applyChange(change: MediaStatusChange): Promise<void> {
     const held = this.row(change.mediaId);
-    if (held && (change.at < held.updated_at || isSameChange(held, change))) {
+    if (held && held.creator_id !== change.creatorId) {
+      // An item never changes creator: a publisher bug, not a move.
+      this.obs.error('media_status.change_creator_mismatch', {
+        mediaId: change.mediaId,
+      });
       return;
     }
+    if (held && change.at < held.updated_at) {
+      // Stamped by different machines' clocks: say so when it was news.
+      if (!isSameChange(held, { ...change, at: held.updated_at })) {
+        this.obs.warn('media_status.change_dropped_as_stale', {
+          mediaId: change.mediaId,
+          skewMs: held.updated_at - change.at,
+        });
+      }
+      return;
+    }
+    if (held && isSameChange(held, change)) return;
     const row = nextRow(held, change);
     if (TERMINAL.has(change.lifecycle)) {
       // The final state goes out, then the row: nothing to keep.
@@ -342,9 +407,9 @@ export class MediaStatusObject {
     if ((held?.retry_at ?? null) !== row.retry_at) await this.rescheduleAlarm();
   }
 
-  async applyRemoved(mediaId: string): Promise<void> {
+  async applyRemoved(mediaId: string, creatorId: string): Promise<void> {
     const held = this.row(mediaId);
-    if (held) await this.remove(held);
+    if (held && held.creator_id === creatorId) await this.remove(held);
   }
 
   /** A tick for the row's own job (or one not yet stored), when it moves. */
@@ -387,8 +452,9 @@ export class MediaStatusObject {
 
   private async remove(held: Row): Promise<void> {
     this.state.storage.sql.exec(
-      'DELETE FROM items WHERE media_id = ?',
-      held.media_id
+      'DELETE FROM items WHERE media_id = ? AND creator_id = ?',
+      held.media_id,
+      held.creator_id
     );
     this.toCreator(held.creator_id, () => ({
       v: MEDIA_STATUS_PROTOCOL_VERSION,
@@ -406,6 +472,8 @@ export class MediaStatusObject {
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
     const attachment = this.attachmentOf(ws);
     if (!attachment) return;
+    // A session that ended stops writing, not only reading.
+    if (this.closeIfExpired(ws, attachment)) return;
     if (
       typeof message !== 'string' ||
       message.length > MEDIA_STATUS_CLIENT_MESSAGE_MAX_BYTES
@@ -431,12 +499,15 @@ export class MediaStatusObject {
       .exec<Row>(
         `UPDATE items SET upload_pct = ?, upload_socket = ?, version = version + 1
          WHERE media_id = ? AND creator_id = ? AND lifecycle = ?
+           AND (upload_pct IS NOT ? OR upload_socket IS NOT ?)
          RETURNING *`,
         upload.data.pct,
         attachment.socketId,
         upload.data.mediaId,
         attachment.creatorId,
-        MEDIA_STATUS.UPLOADING
+        MEDIA_STATUS.UPLOADING,
+        upload.data.pct,
+        attachment.socketId
       )
       .toArray();
     for (const row of rows) this.broadcast(row);
@@ -486,31 +557,41 @@ export class MediaStatusObject {
       )
       .toArray()
       .map((row) => row.media_id);
-    // Counted and cleared first, so a retry that throws cannot loop.
+    if (due.length === 0) return;
+    // Counted and cleared first, so a retry that throws cannot loop. One that
+    // fails is the hourly cron's (its waiting step retries the same rows).
     for (const mediaId of due) {
       this.state.storage.sql.exec(
         'UPDATE items SET retry_at = NULL, retries = retries + 1 WHERE media_id = ?',
         mediaId
       );
     }
-    await this.rescheduleAlarm();
-    for (const mediaId of due) {
-      try {
-        await this.retry(mediaId);
-      } catch (error) {
-        this.obs.error('media_status.alarm_retry_failed', {
-          mediaId,
-          error: messageForLog(error),
-        });
-      }
+    try {
+      await this.rescheduleAlarm();
+    } catch (error) {
+      this.obs.error('media_status.alarm_reschedule_failed', {
+        due: due.length,
+        error: messageForLog(error),
+      });
+    }
+    try {
+      const report = await this.retry(due);
+      this.obs.info('media_status.alarm_retried', { ...report });
+    } catch (error) {
+      this.obs.error('media_status.alarm_retry_failed', {
+        due: due.length,
+        fallback: 'hourly_cron',
+        error: messageForLog(error),
+      });
     }
   }
 
   /**
-   * The cron's claim and dispatch, for one item. Its writes publish to this
-   * object directly (localFeed), not back through a stub.
+   * The cron's claim and dispatch, for the due items, with the cron's stop
+   * after a refusal. Its writes publish to this object directly (localFeed),
+   * not back through a stub.
    */
-  async retry(mediaId: string): Promise<void> {
+  async retry(mediaIds: readonly string[]): Promise<RetryDueReport> {
     const webhook = await createWebhookServices(
       this.env,
       {
@@ -521,7 +602,7 @@ export class MediaStatusObject {
       { obs: this.obs, mediaStatus: this.localFeed }
     );
     try {
-      await webhook.services.transcodingMaintenance.retryOne(mediaId);
+      return await webhook.services.transcodingMaintenance.retryDue(mediaIds);
     } finally {
       webhook.release();
     }
@@ -530,16 +611,45 @@ export class MediaStatusObject {
   /** A feed into this object, for the services the alarm runs. */
   private readonly localFeed: MediaStatusFeed = {
     changed: (change) => {
-      this.state.waitUntil(this.applyChange(change));
+      this.publishLocally('changed', change.mediaId, this.applyChange(change));
     },
-    removed: (mediaId) => {
-      this.state.waitUntil(this.applyRemoved(mediaId));
+    removed: (mediaId, creatorId) => {
+      this.publishLocally(
+        'removed',
+        mediaId,
+        this.applyRemoved(mediaId, creatorId)
+      );
     },
     progress: async (tick) => {
-      this.applyProgress(tick);
+      try {
+        this.applyProgress(tick);
+      } catch (error) {
+        this.obs.warn('media_status.progress_not_delivered', {
+          mediaId: tick.mediaId,
+          error: messageForLog(error),
+        });
+      }
     },
     resync: (resync) => this.applyResync(resync),
   };
+
+  /** As the Worker's publishers: a loss is logged, never thrown. */
+  private publishLocally(
+    event: 'changed' | 'removed',
+    mediaId: string,
+    applied: Promise<void>
+  ): void {
+    this.state.waitUntil(
+      applied.catch((error: unknown) => {
+        this.obs.error('media_status.publish_failed', {
+          event,
+          mediaId,
+          source: 'alarm',
+          error: messageForLog(error),
+        });
+      })
+    );
+  }
 
   /** One alarm, at the earliest due retry. */
   private async rescheduleAlarm(): Promise<void> {
@@ -644,21 +754,77 @@ export class MediaStatusObject {
     attachment: SocketAttachment,
     message: MediaStatusServerMessage
   ): void {
+    if (this.closeIfExpired(ws, attachment)) return;
     try {
-      if (Date.now() >= attachment.sessionExpiresAt) {
-        ws.send(
-          JSON.stringify({
-            v: MEDIA_STATUS_PROTOCOL_VERSION,
-            type: 'bye',
-            reason: 'session_expired',
-          } satisfies MediaStatusServerMessage)
-        );
-        ws.close(SESSION_EXPIRED_CLOSE, 'session expired');
-        return;
-      }
       ws.send(JSON.stringify(message));
-    } catch {
-      // A socket closing under us: its close handler tidies up.
+    } catch (error) {
+      // A socket closing under us is normal: its close handler tidies up.
+      // One still open that refused a message is not.
+      if (ws.readyState === WEBSOCKET_OPEN) {
+        this.obs.warn('media_status.send_failed', {
+          type: message.type,
+          error: messageForLog(error),
+        });
+      }
     }
+  }
+
+  /** Past its session: say so and close. True when it was closed. */
+  private closeIfExpired(ws: WebSocket, attachment: SocketAttachment): boolean {
+    if (Date.now() < attachment.sessionExpiresAt) return false;
+    try {
+      ws.send(
+        JSON.stringify({
+          v: MEDIA_STATUS_PROTOCOL_VERSION,
+          type: 'bye',
+          reason: 'session_expired',
+        } satisfies MediaStatusServerMessage)
+      );
+      ws.close(SESSION_EXPIRED_CLOSE, 'session expired');
+    } catch {
+      // Already closing.
+    }
+    return true;
+  }
+
+  /** Mark a ticket used. False when it already was. */
+  private claimTicket(id: string, expiresAt: number): boolean {
+    const sql = this.state.storage.sql;
+    sql.exec('DELETE FROM used_tickets WHERE expires_at <= ?', Date.now());
+    return (
+      sql
+        .exec(
+          `INSERT INTO used_tickets (id, expires_at) VALUES (?, ?)
+           ON CONFLICT (id) DO NOTHING RETURNING id`,
+          id,
+          expiresAt
+        )
+        .toArray().length === 1
+    );
+  }
+
+  /** Each resync row validated alone: one bad row must not stop the rest. */
+  private readResync(
+    resync: z.infer<typeof resyncEnvelopeSchema>
+  ): MediaStatusResync {
+    const rows: MediaStatusChange[] = [];
+    for (const raw of resync.rows) {
+      const row = mediaStatusChangeSchema.safeParse(raw);
+      if (row.success) {
+        rows.push(row.data);
+        continue;
+      }
+      const mediaId = (raw as { mediaId?: unknown } | null)?.mediaId;
+      this.obs.error('media_status.resync_row_invalid', {
+        mediaId: typeof mediaId === 'string' ? mediaId : null,
+        issues: row.error.issues.map((issue) => issue.path.join('.')),
+      });
+    }
+    // A skipped row is not known to be gone: the read is no longer complete.
+    return {
+      ...resync,
+      rows,
+      complete: resync.complete && rows.length === resync.rows.length,
+    };
   }
 }

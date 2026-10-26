@@ -86,3 +86,22 @@ export function publishMediaStatus(
     });
   }
 }
+
+/** The removal's counterpart of publishMediaStatus: never throws either. */
+export function publishMediaRemoved(
+  publisher: MediaStatusPublisher | undefined,
+  mediaId: string,
+  creatorId: string,
+  log?: PublishLog
+): void {
+  if (!publisher) return;
+  try {
+    publisher.removed(mediaId, creatorId);
+  } catch (error) {
+    log?.error('media_status.publish_failed', {
+      event: 'removed',
+      mediaId,
+      error: messageForLog(error),
+    });
+  }
+}

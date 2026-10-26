@@ -433,6 +433,42 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
         }
       });
 
+      // The status object's alarm (Codex-l2c48.9) keeps the same stop.
+      it("stops the alarm's retries at the first dispatch RunPod does not accept", async () => {
+        const waiting = [
+          await insert({
+            status: MEDIA_STATUS.UPLOADED,
+            transcodingErrorCode: 'TRANSCODER_PAUSED',
+          }),
+          await insert({
+            status: MEDIA_STATUS.UPLOADED,
+            transcodingErrorCode: 'TRANSCODER_PAUSED',
+          }),
+        ];
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+          async () =>
+            new Response(JSON.stringify({ code: 'ENDPOINT_PAUSED' }), {
+              status: 409,
+            })
+        );
+
+        const report = await maintenance.retryDue(
+          waiting.map((media) => media.id)
+        );
+
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(report).toEqual({
+          retried: 0,
+          notAccepted: 1,
+          deferred: 1,
+          raced: 0,
+        });
+        expect(await read(waiting[1]!.id)).toMatchObject({
+          status: 'uploaded',
+          transcodingAttempts: 0,
+        });
+      });
+
       it('leaves an upload touched in the last 10 minutes alone', async () => {
         const media = await insert({
           status: MEDIA_STATUS.UPLOADED,

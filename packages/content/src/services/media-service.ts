@@ -21,6 +21,7 @@ import {
   TRANSCODING_ERROR_MAX_LENGTH,
 } from '@codex/constants';
 import {
+  messageForLog,
   paginatedQuery,
   scopedNotDeleted,
   withCreatorScope,
@@ -41,6 +42,7 @@ import {
   type MediaStatusPublisher,
   PATH_CONFIG,
   parseR2Key,
+  publishMediaRemoved,
   publishMediaStatus,
 } from '@codex/transcoding';
 import type {
@@ -431,7 +433,7 @@ export class MediaItemService extends BaseService {
           );
       });
       // After commit: a rolled-back delete must not vanish from the studio.
-      this.mediaStatus?.removed(id, creatorId);
+      publishMediaRemoved(this.mediaStatus, id, creatorId, this.obs);
 
       // After commit: hard-delete R2 objects across all four prefixes.
       // The helper swallows internally so a list/delete failure on one
@@ -618,6 +620,9 @@ export class MediaItemService extends BaseService {
    * column, in the same statement: the completion webhook's figure, measured
    * off the transcoded output, is the better authority and is never
    * overwritten, even by an upload-complete re-POST racing it.
+   *
+   * Advisory, so it never throws: a badge must not cost the upload its
+   * `uploaded` step (upload-complete calls this first). A failure is logged.
    */
   async recordClientDuration(
     id: string,
@@ -636,7 +641,10 @@ export class MediaItemService extends BaseService {
           )
         );
     } catch (error) {
-      this.handleError(error, 'recordClientDuration');
+      this.obs.error('media.client_duration_not_recorded', {
+        mediaId: id,
+        error: messageForLog(error),
+      });
     }
   }
 

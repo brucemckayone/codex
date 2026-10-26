@@ -24,7 +24,9 @@ export const MEDIA_STATUS_SUBPROTOCOL = 'media-status.v1';
 
 /**
  * The ticket rides as a second subprotocol, `ticket.<ticket>`, never in the
- * URL: request URLs are logged, headers are not.
+ * URL, which our own request logs record. Cloudflare's request logs keep
+ * headers too, so a ticket is single-use: the object refuses one it has
+ * already seen, and one copied out of a log is dead once its tab connected.
  */
 export const MEDIA_STATUS_TICKET_PROTOCOL_PREFIX = 'ticket.';
 
@@ -86,8 +88,11 @@ export const mediaStatusEventSchema = z.discriminatedUnion('event', [
 
 export type MediaStatusEvent = z.infer<typeof mediaStatusEventSchema>;
 
-/** The object's /removed body: the Worker has already routed on the creator. */
-export const mediaStatusRemovedSchema = z.object({ mediaId: uuidSchema });
+/** The object's /removed body. It removes the row only if it is this creator's. */
+export const mediaStatusRemovedSchema = z.object({
+  mediaId: uuidSchema,
+  creatorId: creatorIdSchema,
+});
 
 // ============================================================================
 // Object ↔ studio tab

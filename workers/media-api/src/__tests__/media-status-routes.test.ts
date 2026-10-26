@@ -63,7 +63,12 @@ describe('the ticket', () => {
   it('carries its creator and session expiry back out', async () => {
     const { ticket, expiresAt } = await mintTicket(claims, SECRET, NOW);
     expect(expiresAt).toBe(NOW + 60_000);
-    expect(await verifyTicket(ticket, SECRET, NOW + 59_000)).toEqual(claims);
+    expect(await verifyTicket(ticket, SECRET, NOW + 59_000)).toEqual({
+      ...claims,
+      // What makes it single-use: the object keeps its signature until then.
+      id: ticket.split('.')[1],
+      expiresAt: NOW + 60_000,
+    });
   });
 
   it('is good for a minute only', async () => {
@@ -165,6 +170,19 @@ describe('GET /api/media-status/live', () => {
     expect(socket).not.toBeNull();
     socket!.accept();
     open.push(socket!);
+  });
+
+  it('refuses a ticket presented twice', async () => {
+    const headers = {
+      Upgrade: 'websocket',
+      Origin: testEnv.WEB_APP_URL,
+      'Sec-WebSocket-Protocol': await offer(creator()),
+    };
+    const first = await upgrade(headers);
+    expect(first.status).toBe(101);
+    first.webSocket!.accept();
+    open.push(first.webSocket!);
+    expect((await upgrade(headers)).status).toBe(401);
   });
 
   it('refuses a request that is not an upgrade', async () => {

@@ -60,6 +60,7 @@ export {
 export {
   type MediaStatusFeed,
   type MediaStatusPublisher,
+  publishMediaRemoved,
   publishMediaStatus,
 } from './media-status';
 // Path utilities (SINGLE SOURCE OF TRUTH for R2/B2 keys)
@@ -95,6 +96,7 @@ export {
 export {
   type AlertLedger,
   type MaintenanceReport,
+  type RetryDueReport,
   TranscodingAlerts,
   type TranscodingMailer,
   TranscodingMaintenance,

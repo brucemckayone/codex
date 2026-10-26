@@ -168,9 +168,12 @@ describe('claimForDispatch', () => {
       transcodingErrorCode: null,
       runpodJobId: null,
     });
-    // Progress lives in the status object now (Codex-l2c48.9).
-    expect(write?.set).not.toHaveProperty('transcodingProgress');
-    expect(write?.set).not.toHaveProperty('transcodingStep');
+    // Progress lives in the status object now (Codex-l2c48.9); the old
+    // columns are cleared so the polling endpoint shows no stale %.
+    expect(write?.set).toMatchObject({
+      transcodingProgress: null,
+      transcodingStep: null,
+    });
     expect(render(write?.set.transcodingAttempts)).toContain(
       '"transcoding_attempts" + 1'
     );

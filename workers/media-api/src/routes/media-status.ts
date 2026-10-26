@@ -11,11 +11,13 @@
  * checks the Origin itself, since CORS does not cover upgrades.
  */
 
+import { AUTH_ROLES } from '@codex/constants';
 import { rateLimit } from '@codex/security';
 import {
   ForbiddenError,
   InternalServiceError,
   mapErrorToResponse,
+  RateLimitExceededError,
   ServiceUnavailableError,
   UnauthorizedError,
   ValidationError,
@@ -76,7 +78,8 @@ function liveUrl(env: HonoEnv['Bindings']): string {
 app.post(
   MEDIA_STATUS_TICKET_ROUTE,
   procedure({
-    policy: { auth: 'required' },
+    // Who uploads media: the same roles as content-api's media routes.
+    policy: { auth: 'required', roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN] },
     handler: async (ctx): Promise<MediaStatusTicket> => {
       // Typed optional for every auth level; the socket's lifetime needs it.
       if (!ctx.session) {
@@ -98,17 +101,22 @@ app.post(
  * A ticket is good for a minute and may be presented more than once, so
  * connects count against the creator's `api` bucket, as their API calls do.
  */
-async function connectAllowed(
+async function limitConnects(
   c: Context<HonoEnv>,
   claims: TicketClaims
-): Promise<Response | null> {
-  // The middleware answers only when it refuses; a pass calls `next`.
-  const refused = await rateLimit({
+): Promise<void> {
+  // A refusal throws, so the route answers it in the error envelope.
+  await rateLimit({
     preset: 'api',
     binding: c.env.RATE_LIMIT_API,
     subject: () => ({ kind: 'session', value: claims.creatorId }),
+    handler: (blocked, decision) => {
+      blocked.header('Retry-After', decision.retryAfterSeconds.toString());
+      throw new RateLimitExceededError(decision.retryAfterSeconds, {
+        preset: 'api',
+      });
+    },
   })(c, async () => {});
-  return refused ?? null;
 }
 
 /** GET /api/media-status/live: verified here, accepted by the object. */
@@ -133,8 +141,7 @@ app.get(MEDIA_STATUS_LIVE_ROUTE, async (c) => {
       throw new ServiceUnavailableError('Live media status is not available');
     }
 
-    const refused = await connectAllowed(c, claims);
-    if (refused) return refused;
+    await limitConnects(c, claims);
 
     // Only what the object reads: never the caller's own copies of these.
     const headers = new Headers({ Upgrade: 'websocket' });
@@ -142,6 +149,11 @@ app.get(MEDIA_STATUS_LIVE_ROUTE, async (c) => {
     headers.set(
       MEDIA_STATUS_CONNECT_HEADERS.sessionExpiresAt,
       String(claims.sessionExpiresAt)
+    );
+    headers.set(MEDIA_STATUS_CONNECT_HEADERS.ticketId, claims.id);
+    headers.set(
+      MEDIA_STATUS_CONNECT_HEADERS.ticketExpiresAt,
+      String(claims.expiresAt)
     );
     return await statusObjectFor(namespace, claims.creatorId).fetch(
       `https://media-status.internal${MEDIA_STATUS_OBJECT_PATHS.connect}`,

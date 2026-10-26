@@ -43,7 +43,6 @@ import {
 } from '@codex/service-errors';
 import { MEDIA_STATUS_RESYNC_MAX_ROWS } from '@codex/validation';
 import { and, asc, eq, inArray, isNull, lt } from 'drizzle-orm';
-import type { RunPodDispatchOutcome } from '../dispatch';
 import {
   type JobAnswer,
   type LostJobAction,
@@ -128,6 +127,16 @@ export interface MaintenanceReport {
   failedSteps: string[];
 }
 
+/** What one alarm's retries did (TranscodingMaintenance.retryDue). */
+export interface RetryDueReport {
+  retried: number;
+  notAccepted: number;
+  /** Not tried: an earlier one was not accepted. */
+  deferred: number;
+  /** Claimed elsewhere first, or no longer waiting. */
+  raced: number;
+}
+
 export class TranscodingMaintenance extends BaseService {
   private readonly transcoding: TranscodingService;
   private readonly originalExists?: (r2Key: string) => Promise<boolean>;
@@ -191,19 +200,38 @@ export class TranscodingMaintenance extends BaseService {
   }
 
   /**
-   * One waiting item, now: the status object's alarm retries an item the
+   * The items the status object's alarm found due: it retries what the
    * transcoder refused within minutes rather than at the next hourly run.
    * The same guarded claim and dispatch as step 4, so it cannot double up
-   * with the cron or a creator's Retry. null: nothing to claim.
+   * with the cron or a creator's Retry, and the same stop: after one
+   * dispatch RunPod did not accept, the rest would fare the same and wait.
    */
-  async retryOne(mediaId: string): Promise<RunPodDispatchOutcome | null> {
-    const claimed = await this.transcoding.claimForDispatch(
-      mediaId,
-      [MEDIA_STATUS.UPLOADED],
-      MAINTENANCE_SCOPE
-    );
-    if (!claimed) return null;
-    return this.transcoding.dispatch(claimed);
+  async retryDue(mediaIds: readonly string[]): Promise<RetryDueReport> {
+    const report: RetryDueReport = {
+      retried: 0,
+      notAccepted: 0,
+      deferred: 0,
+      raced: 0,
+    };
+    for (const mediaId of mediaIds) {
+      if (report.notAccepted > 0) {
+        report.deferred++;
+        continue;
+      }
+      const claimed = await this.transcoding.claimForDispatch(
+        mediaId,
+        [MEDIA_STATUS.UPLOADED],
+        MAINTENANCE_SCOPE
+      );
+      if (!claimed) {
+        report.raced++;
+        continue;
+      }
+      const outcome = await this.transcoding.dispatch(claimed);
+      if (outcome.kind === 'accepted') report.retried++;
+      else report.notAccepted++;
+    }
+    return report;
   }
 
   private async resync(report: MaintenanceReport): Promise<void> {

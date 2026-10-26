@@ -145,21 +145,32 @@ afterEach(() => {
   }
 });
 
+/** What the Worker forwards once it has verified a ticket. */
+function connectHeaders(
+  creatorId: string,
+  sessionExpiresAt = Date.now() + HOUR,
+  ticketId: string = crypto.randomUUID()
+): Record<string, string> {
+  return {
+    Upgrade: 'websocket',
+    [MEDIA_STATUS_CONNECT_HEADERS.creatorId]: creatorId,
+    [MEDIA_STATUS_CONNECT_HEADERS.sessionExpiresAt]: String(sessionExpiresAt),
+    [MEDIA_STATUS_CONNECT_HEADERS.ticketId]: ticketId,
+    [MEDIA_STATUS_CONNECT_HEADERS.ticketExpiresAt]: String(Date.now() + 60_000),
+  };
+}
+
+function connect(headers: Record<string, string>): Promise<Response> {
+  return object().fetch(`${BASE}${MEDIA_STATUS_OBJECT_PATHS.connect}`, {
+    headers,
+  });
+}
+
 async function openTab(
   creatorId: string,
   sessionExpiresAt = Date.now() + HOUR
 ): Promise<Tab> {
-  const res = await object().fetch(
-    `${BASE}${MEDIA_STATUS_OBJECT_PATHS.connect}`,
-    {
-      headers: {
-        Upgrade: 'websocket',
-        [MEDIA_STATUS_CONNECT_HEADERS.creatorId]: creatorId,
-        [MEDIA_STATUS_CONNECT_HEADERS.sessionExpiresAt]:
-          String(sessionExpiresAt),
-      },
-    }
-  );
+  const res = await connect(connectHeaders(creatorId, sessionExpiresAt));
   expect(res.status).toBe(101);
   expect(res.headers.get('Sec-WebSocket-Protocol')).toBe(
     MEDIA_STATUS_SUBPROTOCOL
@@ -236,6 +247,29 @@ describe('MediaStatusObject: who sees what', () => {
     // In order: had B's item gone to A, it would have arrived first.
     expect(tabA.messages.map((m) => m.type)).toEqual(['snapshot', 'item']);
     expect(itemsOf(tabB, mine.mediaId)).toHaveLength(0);
+  });
+
+  it('takes a ticket once', async () => {
+    const headers = connectHeaders(creator());
+    const first = await connect(headers);
+    expect(first.status).toBe(101);
+    first.webSocket!.accept();
+    open.push(first.webSocket!);
+    expect((await connect(headers)).status).toBe(401);
+  });
+
+  it('holds a bounded number of tabs per creator', async () => {
+    const a = creator();
+    for (let tab = 0; tab < 20; tab++) await openTab(a);
+    expect((await connect(connectHeaders(a))).status).toBe(429);
+    // Another creator is not held back by it.
+    await openTab(creator());
+  });
+
+  it('refuses a connect missing what the Worker sets', async () => {
+    const headers = connectHeaders(creator());
+    delete headers[MEDIA_STATUS_CONNECT_HEADERS.sessionExpiresAt];
+    expect((await connect(headers)).status).toBe(400);
   });
 
   it('closes a tab whose session has ended, saying why', async () => {
@@ -324,6 +358,7 @@ describe('MediaStatusObject: what it holds', () => {
 
     const res = await post(MEDIA_STATUS_OBJECT_PATHS.removed, {
       mediaId: c.mediaId,
+      creatorId: a,
     });
     expect(res.status).toBe(204);
     await vi.waitFor(() =>
@@ -333,6 +368,31 @@ describe('MediaStatusObject: what it holds', () => {
       })
     );
     expect(await held(c.mediaId)).toBeNull();
+  });
+
+  it("never moves an item to another creator's tabs", async () => {
+    const owner = creator();
+    const c = change({ creatorId: owner });
+    await publish(c);
+    const intruder = creator();
+    const intruderTab = await openTab(intruder);
+
+    await publish({ ...c, creatorId: intruder, at: c.at + 1 });
+    await settle();
+
+    expect((await held(c.mediaId))?.lifecycle).toBe('uploading');
+    expect(intruderTab.messages.map((m) => m.type)).toEqual(['snapshot']);
+  });
+
+  it("removes nothing on another creator's word", async () => {
+    const c = change();
+    await publish(c);
+    const res = await post(MEDIA_STATUS_OBJECT_PATHS.removed, {
+      mediaId: c.mediaId,
+      creatorId: creator(),
+    });
+    expect(res.status).toBe(204);
+    expect(await held(c.mediaId)).not.toBeNull();
   });
 
   it('refuses a body its services could not have formed', async () => {
@@ -368,6 +428,26 @@ describe('MediaStatusObject: the hourly resync', () => {
     expect(await held(lost.mediaId)).toBeNull();
     // Changed inside the grace window: a write raced the resync's read.
     expect(await held(recent.mediaId)).not.toBeNull();
+  });
+});
+
+describe('MediaStatusObject: a resync row it cannot read', () => {
+  it('applies the rest, and drops nothing on an incomplete read', async () => {
+    const asOf = Date.now();
+    const old = change({ at: asOf - RESYNC_GRACE_MS - 60_000 });
+    await publish(old);
+    const fresh = change();
+
+    const res = await post(MEDIA_STATUS_OBJECT_PATHS.resync, {
+      rows: [fresh, { mediaId: 'not-a-uuid' }],
+      asOf,
+      complete: true,
+    });
+
+    expect(res.status).toBe(204);
+    expect(await held(fresh.mediaId)).not.toBeNull();
+    // The bad row could have been `old`: it is not known to be gone.
+    expect(await held(old.mediaId)).not.toBeNull();
   });
 });
 
@@ -469,6 +549,19 @@ describe("MediaStatusObject: the uploading tab's %", () => {
       })
     );
     await settle();
+    expect((await held(c.mediaId))?.upload_pct).toBeNull();
+  });
+
+  it('takes nothing from a tab whose session has since ended', async () => {
+    const a = creator();
+    const c = change({ creatorId: a });
+    await publish(c);
+    const tab = await openTab(a, Date.now() + 300);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    sendUpload(tab, c.mediaId, 40);
+
+    expect((await tab.closed).code).toBe(4401);
     expect((await held(c.mediaId))?.upload_pct).toBeNull();
   });
 

@@ -47,6 +47,9 @@ export const MEDIA_STATUS_OBJECT_PATHS = {
 export const MEDIA_STATUS_CONNECT_HEADERS = {
   creatorId: 'X-Media-Status-Creator',
   sessionExpiresAt: 'X-Media-Status-Session-Expires-At',
+  /** The ticket's signature: the object refuses one it has seen. */
+  ticketId: 'X-Media-Status-Ticket',
+  ticketExpiresAt: 'X-Media-Status-Ticket-Expires-At',
 } as const;
 
 /** media-api's route for a worker that does not bind the object. */
@@ -121,7 +124,7 @@ export async function deliverMediaStatusEvent(
   await postToObject(
     statusObjectFor(namespace, event.creatorId),
     MEDIA_STATUS_OBJECT_PATHS.removed,
-    { mediaId: event.mediaId }
+    { mediaId: event.mediaId, creatorId: event.creatorId }
   );
 }
 

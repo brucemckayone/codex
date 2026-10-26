@@ -106,7 +106,7 @@ describe('deliverMediaStatusEvent', () => {
       {
         name: `media-status:${mediaStatusShardOf(change.creatorId)}`,
         path: MEDIA_STATUS_OBJECT_PATHS.removed,
-        body: { mediaId: change.mediaId },
+        body: { mediaId: change.mediaId, creatorId: change.creatorId },
       },
     ]);
   });

@@ -79,7 +79,7 @@ import type {
   TranscodingMediaItem,
   TranscodingStatusResponse,
 } from '../types';
-import { failedFields, waitingFields } from './media-state';
+import { failedFields, NO_PROGRESS, waitingFields } from './media-state';
 import type { TranscodingAlerts } from './transcoding-alerts';
 
 /**
@@ -352,6 +352,7 @@ export class TranscodingService extends BaseService {
     const [claimed] = await this.db
       .update(mediaItems)
       .set({
+        ...NO_PROGRESS,
         status: MEDIA_STATUS.TRANSCODING,
         transcodingAttempts: sql`${mediaItems.transcodingAttempts} + 1`,
         transcodingError: null,
@@ -708,6 +709,7 @@ export class TranscodingService extends BaseService {
       media.id,
       jobId,
       {
+        ...NO_PROGRESS,
         status: MEDIA_STATUS.READY,
         hlsMasterPlaylistKey: output.hlsMasterKey,
         hlsPreviewKey: output.hlsPreviewKey,
@@ -908,8 +910,15 @@ export class TranscodingService extends BaseService {
   ): Promise<void> {
     const { jobId, progress, step, mediaId, creatorId } = payload;
     // Every handler since the first sends mediaId when it has one; without
-    // it there is no item to show the tick on.
-    if (!mediaId || !this.mediaStatus) return;
+    // it there is no item to show the tick on. Without the feed (an env with
+    // no MEDIA_STATUS binding) there is nowhere to keep it.
+    if (!mediaId || !this.mediaStatus) {
+      this.obs.warn('transcoding.progress_dropped', {
+        jobId,
+        reason: mediaId ? 'no_feed' : 'no_media_id',
+      });
+      return;
+    }
     await this.mediaStatus.progress(
       { mediaId, jobId, step, progress },
       creatorId ?? null

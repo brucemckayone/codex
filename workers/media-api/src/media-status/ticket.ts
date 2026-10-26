@@ -26,6 +26,13 @@ export interface TicketClaims {
   sessionExpiresAt: number;
 }
 
+/** A verified ticket: its claims, plus what makes it single-use. */
+export interface VerifiedTicket extends TicketClaims {
+  /** The ticket's signature, unique to it. */
+  id: string;
+  expiresAt: number;
+}
+
 /** Creator, session expiry, ticket expiry. */
 const payloadSchema = z.object({
   c: creatorIdSchema,
@@ -99,12 +106,12 @@ export async function mintTicket(
   };
 }
 
-/** The ticket's claims, or null when it is forged, expired, or malformed. */
+/** The ticket, or null when it is forged, expired, or malformed. */
 export async function verifyTicket(
   ticket: string,
   workerSecret: string,
   now = Date.now()
-): Promise<TicketClaims | null> {
+): Promise<VerifiedTicket | null> {
   const [body, signatureText, extra] = ticket.split('.');
   if (!body || !signatureText || extra !== undefined) return null;
   const signature = fromBase64Url(signatureText);
@@ -131,5 +138,10 @@ export async function verifyTicket(
   if (!payload.success || payload.data.e <= now || payload.data.s <= now) {
     return null;
   }
-  return { creatorId: payload.data.c, sessionExpiresAt: payload.data.s };
+  return {
+    creatorId: payload.data.c,
+    sessionExpiresAt: payload.data.s,
+    id: signatureText,
+    expiresAt: payload.data.e,
+  };
 }

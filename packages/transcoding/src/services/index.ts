@@ -9,6 +9,7 @@ export {
 } from './transcoding-alerts';
 export {
   type MaintenanceReport,
+  type RetryDueReport,
   TranscodingMaintenance,
 } from './transcoding-maintenance';
 export {

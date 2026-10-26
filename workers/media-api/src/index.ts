@@ -257,6 +257,13 @@ async function runTranscodingMaintenance(
     return;
   }
 
+  if (!env.MEDIA_STATUS) {
+    // Progress has no other store, and the resync step cannot run.
+    obs.error('media_status.feed_unavailable', {
+      reason: 'MEDIA_STATUS not bound',
+    });
+  }
+
   let release: (() => void) | undefined;
   try {
     const webhook = await createWebhookServices(env, ctx, { obs });

@@ -519,17 +519,15 @@ export async function createServiceRegistry(
   }
 
   /**
-   * MediaItemService's publisher. A worker without the binding (content-api)
-   * publishes through media-api, the way it triggers a transcode.
+   * MediaItemService's publisher. A worker without the binding (content-api,
+   * organization-api's intro video) publishes through media-api.
    */
   function getMediaStatusPublisher(): MediaStatusPublisher | undefined {
     const feed = getMediaStatusFeed();
     if (feed) return feed;
-    if (!env.MEDIA_API_URL || !env.WORKER_SHARED_SECRET || !cacheWaitUntil) {
-      return undefined;
-    }
+    if (!env.WORKER_SHARED_SECRET || !cacheWaitUntil) return undefined;
     return new WorkerMediaStatusPublisher(
-      env.MEDIA_API_URL,
+      buildServiceUrl('media', env),
       env.WORKER_SHARED_SECRET,
       cacheWaitUntil,
       _obs
