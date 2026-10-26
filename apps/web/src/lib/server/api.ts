@@ -1976,7 +1976,7 @@ export function createServerApi(
             | 'failed';
           introVideoUrl: string | null;
           progress: number | null;
-          error: string | null;
+          errorCode: string | null;
         }>(
           'org',
           `/api/organizations/${id}/settings/branding/intro-video/status`
@@ -2678,7 +2678,7 @@ export function createServerApi(
           transcodingProgress: number | null;
           transcodingStep: string | null;
           transcodingAttempts: number;
-          transcodingError: string | null;
+          transcodingErrorCode: string | null;
         }>('media', `/api/transcoding/status/${id}`),
 
       /**

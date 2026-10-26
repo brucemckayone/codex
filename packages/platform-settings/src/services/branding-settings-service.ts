@@ -665,7 +665,8 @@ export class BrandingSettingsService extends BaseService {
       | 'failed';
     introVideoUrl: string | null;
     progress: number | null;
-    error: string | null;
+    /** A TRANSCODING_ERROR_CODES value; its sentence is the client's. */
+    errorCode: string | null;
   }> {
     // Get the linked media item ID
     const brandingResult = await this.db
@@ -683,7 +684,7 @@ export class BrandingSettingsService extends BaseService {
         status: 'none',
         introVideoUrl: null,
         progress: null,
-        error: null,
+        errorCode: null,
       };
     }
 
@@ -693,7 +694,7 @@ export class BrandingSettingsService extends BaseService {
         status: schema.mediaItems.status,
         hlsMasterPlaylistKey: schema.mediaItems.hlsMasterPlaylistKey,
         transcodingProgress: schema.mediaItems.transcodingProgress,
-        transcodingError: schema.mediaItems.transcodingError,
+        transcodingErrorCode: schema.mediaItems.transcodingErrorCode,
       })
       .from(schema.mediaItems)
       .where(eq(schema.mediaItems.id, branding.introVideoMediaItemId))
@@ -705,7 +706,7 @@ export class BrandingSettingsService extends BaseService {
         status: 'none',
         introVideoUrl: null,
         progress: null,
-        error: null,
+        errorCode: null,
       };
     }
 
@@ -738,7 +739,9 @@ export class BrandingSettingsService extends BaseService {
         | 'failed',
       introVideoUrl,
       progress: media.transcodingProgress,
-      error: media.transcodingError,
+      // The code, never the transcoder's raw detail (Codex-l2c48): a client
+      // shows its sentence (transcodingErrorInfo).
+      errorCode: media.transcodingErrorCode,
     };
   }
 

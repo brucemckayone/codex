@@ -20,6 +20,7 @@
 
 import type { R2Service } from '@codex/cloudflare-clients';
 import { TRANSCODING_ERROR_MAX_LENGTH } from '@codex/constants';
+import { mediaItems } from '@codex/database/schema';
 import {
   type Database,
   seedTestUsers,
@@ -28,6 +29,7 @@ import {
 } from '@codex/test-utils';
 import { getHlsPrefix, getOriginalKey } from '@codex/transcoding';
 import type { CreateMediaItemInput } from '@codex/validation';
+import { eq } from 'drizzle-orm';
 import {
   afterAll,
   beforeAll,
@@ -993,6 +995,36 @@ describe('MediaItemService', () => {
       return created;
     };
 
+    // The detail lives in the row only: no response serves it (Codex-l2c48).
+    const stored = (id: string) =>
+      db.query.mediaItems.findFirst({ where: eq(mediaItems.id, id) });
+
+    it('keeps the detail in the row, and no read serves it', async () => {
+      const created = await makeMedia();
+      await service.recordTranscodingTriggerFailure(
+        created.id,
+        creatorId,
+        'botocore: endpoint https://internal.example returned 503'
+      );
+
+      expect((await stored(created.id))?.transcodingError).toContain(
+        'botocore'
+      );
+      const served = await service.get(created.id, creatorId);
+      expect(served?.transcodingErrorCode).toBe('TRANSCODER_UNAVAILABLE');
+      expect(served).not.toHaveProperty('transcodingError');
+      const listed = await service.list(creatorId, {}, { page: 1, limit: 50 });
+      const row = listed.items.find((item) => item.id === created.id);
+      expect(row).toBeDefined();
+      expect(row).not.toHaveProperty('transcodingError');
+      const updated = await service.update(
+        created.id,
+        { title: 'Retitled' },
+        creatorId
+      );
+      expect(updated).not.toHaveProperty('transcodingError');
+    });
+
     it('marks the item waiting WITHOUT changing status so re-trigger still works', async () => {
       const created = await makeMedia();
 
@@ -1002,7 +1034,7 @@ describe('MediaItemService', () => {
         'Transcoding dispatch returned 503'
       );
 
-      const after = await service.get(created.id, creatorId);
+      const after = await stored(created.id);
       expect(after?.transcodingError).toBe('Transcoding dispatch returned 503');
       expect(after?.transcodingErrorCode).toBe('TRANSCODER_UNAVAILABLE');
       // Status stays 'uploaded' (not flipped to 'failed') so the idempotent
@@ -1019,7 +1051,7 @@ describe('MediaItemService', () => {
         'Transcoding dispatch returned 503'
       );
 
-      const after = await service.get(created.id, creatorId);
+      const after = await stored(created.id);
       expect(after?.transcodingError).toBeNull();
       expect(after?.transcodingErrorCode).toBeNull();
     });
@@ -1033,7 +1065,7 @@ describe('MediaItemService', () => {
         'x'.repeat(5000)
       );
 
-      const after = await service.get(created.id, creatorId);
+      const after = await stored(created.id);
       expect(after?.transcodingError?.length).toBe(
         TRANSCODING_ERROR_MAX_LENGTH
       );
@@ -1049,7 +1081,7 @@ describe('MediaItemService', () => {
         'should not be written'
       );
 
-      const after = await service.get(created.id, creatorId);
+      const after = await stored(created.id);
       expect(after?.transcodingError).toBeNull();
     });
   });

@@ -353,7 +353,6 @@ export type TriggerTranscodingInput = z.infer<typeof triggerTranscodingSchema>;
 export const transcodingStatusResponseSchema = z.object({
   status: z.enum(['uploading', 'uploaded', 'transcoding', 'ready', 'failed']),
   transcodingAttempts: z.number().int().min(0),
-  transcodingError: z.string().nullable(),
   // Raw code; null = nothing has gone wrong. Only a non-null code goes through
   // transcodingErrorInfo() (@codex/constants), which reads null and any
   // unknown code as INFRA_ERROR.

@@ -17,7 +17,11 @@ import {
   PAGINATION,
   requiresPayoutsToPublish,
 } from '@codex/constants';
-import { schema, withPagination } from '@codex/database';
+import {
+  MEDIA_ITEM_RESPONSE_COLUMNS,
+  schema,
+  withPagination,
+} from '@codex/database';
 import {
   BaseService,
   BusinessLogicError,
@@ -142,7 +146,7 @@ export class AdminContentManagementService extends BaseService {
             isNull(schema.content.deletedAt)
           ),
           with: {
-            mediaItem: true,
+            mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
             creator: {
               columns: {
                 id: true,

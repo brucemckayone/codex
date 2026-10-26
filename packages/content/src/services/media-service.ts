@@ -21,10 +21,12 @@ import {
   TRANSCODING_ERROR_MAX_LENGTH,
 } from '@codex/constants';
 import {
+  MEDIA_ITEM_RESPONSE_COLUMNS,
   messageForLog,
   paginatedQuery,
   scopedNotDeleted,
   withCreatorScope,
+  withoutTranscodingDetail,
 } from '@codex/database';
 import { mediaItems } from '@codex/database/schema';
 import {
@@ -60,6 +62,7 @@ import type {
   MediaItemFilters,
   MediaItemWithRelations,
   PaginationParams,
+  ServedMediaItem,
 } from '../types';
 
 /** The columns applyUpdate writes: the creator's two, or a lifecycle write's. */
@@ -290,6 +293,7 @@ export class MediaItemService extends BaseService {
           eq(mediaItems.id, id),
           scopedNotDeleted(mediaItems, creatorId)
         ),
+        columns: MEDIA_ITEM_RESPONSE_COLUMNS,
         with: {
           creator: {
             columns: {
@@ -323,8 +327,10 @@ export class MediaItemService extends BaseService {
     id: string,
     input: UpdateMediaItemInput,
     creatorId: string
-  ): Promise<MediaItem> {
-    return this.applyUpdate(id, updateMediaItemSchema.parse(input), creatorId);
+  ): Promise<ServedMediaItem> {
+    return withoutTranscodingDetail(
+      await this.applyUpdate(id, updateMediaItemSchema.parse(input), creatorId)
+    );
   }
 
   /** One scoped write of the given columns; the row it wrote. */
@@ -562,6 +568,7 @@ export class MediaItemService extends BaseService {
             limit,
             offset,
             orderBy: [orderByClause],
+            columns: MEDIA_ITEM_RESPONSE_COLUMNS,
             with: {
               creator: {
                 columns: {

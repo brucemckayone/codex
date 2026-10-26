@@ -34,7 +34,9 @@ export interface ContentWithRelations extends Content {
   mediaItem?: MediaItem | null;
 }
 
-export interface MediaItemWithRelations extends MediaItem {
+/** As content-api serves it: never the transcoder's raw detail. */
+export interface MediaItemWithRelations
+  extends Omit<MediaItem, 'transcodingError'> {
   creator?: {
     id: string;
     email: string;

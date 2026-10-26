@@ -1007,7 +1007,7 @@ export class TranscodingService extends BaseService {
     return {
       status: media.status,
       transcodingAttempts: media.transcodingAttempts,
-      transcodingError: media.transcodingError,
+      // The code only: the raw detail stays in the database (Codex-l2c48).
       transcodingErrorCode: media.transcodingErrorCode,
       runpodJobId: media.runpodJobId,
       transcodingPriority: media.transcodingPriority,

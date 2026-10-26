@@ -1177,6 +1177,8 @@ describe('getTranscodingStatus', () => {
     const status = await service.getTranscodingStatus(MEDIA_ID, CREATOR_ID);
 
     expect(status.transcodingErrorCode).toBe('TRANSCODER_PAUSED');
+    // The raw detail stays in the database (Codex-l2c48).
+    expect(status).not.toHaveProperty('transcodingError');
     // A mock returns whatever it is given, so the select is asserted too:
     // without the column there, production reads undefined.
     expect(fake.findFirst).toHaveBeenCalledWith(

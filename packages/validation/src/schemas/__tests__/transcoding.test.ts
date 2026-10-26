@@ -505,7 +505,6 @@ describe('transcodingStatusResponseSchema', () => {
   const waiting = {
     status: 'uploaded',
     transcodingAttempts: 0,
-    transcodingError: 'RunPod endpoint is paused',
     transcodingErrorCode: 'TRANSCODER_PAUSED',
     runpodJobId: null,
     transcodingPriority: 2,
@@ -523,10 +522,17 @@ describe('transcodingStatusResponseSchema', () => {
     expect(
       transcodingStatusResponseSchema.safeParse({
         ...waiting,
-        transcodingError: null,
         transcodingErrorCode: null,
       }).success
     ).toBe(true);
+  });
+
+  it("never carries the transcoder's raw detail (Codex-l2c48)", () => {
+    const parsed = transcodingStatusResponseSchema.parse({
+      ...waiting,
+      transcodingError: 'botocore: https://internal.example said 503',
+    });
+    expect(parsed).not.toHaveProperty('transcodingError');
   });
 
   // The response tracks the column: a status built without it is a bug.
