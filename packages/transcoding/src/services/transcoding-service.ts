@@ -84,8 +84,8 @@ import type { TranscodingAlerts } from './transcoding-alerts';
  * The columns both media reads select. `satisfies` makes it name every
  * TranscodingMediaItem field: a field added to the type but not selected is a
  * compile error, not an `undefined` that the `as TranscodingMediaItem` casts
- * below would hide (the status endpoint would report a missing error code as
- * "nothing went wrong").
+ * below would hide (a missing error code would read as "nothing went
+ * wrong").
  */
 const TRANSCODING_MEDIA_COLUMNS = {
   id: true,

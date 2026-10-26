@@ -95,6 +95,9 @@
     live: () => m.media_live_live(),
     reconnecting: () => m.media_live_reconnecting(),
     polling: () => m.media_live_polling(),
+    // The session ended, or the ticket was refused twice in a row: nothing
+    // reconnects until the page loads again.
+    stopped: () => m.media_live_stopped(),
   };
   const liveLabel = $derived(LIVE_LABELS[live]);
 

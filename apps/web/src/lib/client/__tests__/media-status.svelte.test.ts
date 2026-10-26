@@ -5,7 +5,9 @@
  */
 import type { MediaItemState } from '@codex/validation';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { logger } from '$lib/observability';
 import {
+  AUTH_REFUSALS_BEFORE_STOP,
   createMediaStatus,
   FAILURES_BEFORE_POLLING,
   HEARTBEAT_MS,
@@ -17,6 +19,7 @@ import {
   REFRESH_DEBOUNCE_MS,
   SILENCE_LIMIT_MS,
   type StatusSocket,
+  TICKET_TIMEOUT_MS,
   UPLOAD_REPORT_INTERVAL_MS,
 } from '../media-status.svelte';
 
@@ -155,6 +158,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   setVisibility('visible');
 });
 
@@ -234,7 +238,10 @@ describe('applying states', () => {
 
   it('drops an in-flight item a snapshot no longer has, keeps a terminal one', async () => {
     const h = harness();
-    h.store.register(page({ [ID_A]: 'transcoding', [ID_B]: 'transcoding' }));
+    const p = page({ [ID_A]: 'transcoding', [ID_B]: 'transcoding' });
+    // The list has not caught up (a landed refetch drops it: see below).
+    p.refresh.mockReturnValue(new Promise<void>(() => {}));
+    h.store.register(p);
     await goLive(h, [state(ID_A), state(ID_B)]);
     h.last().receive(item(state(ID_B, { version: 2, lifecycle: 'ready' })));
     h.last().drop();
@@ -246,9 +253,10 @@ describe('applying states', () => {
     expect(h.store.items.get(ID_B)?.lifecycle).toBe('ready');
   });
 
-  it('survives a message it cannot read', async () => {
+  it('survives a message it cannot read, and refetches the list for it', async () => {
     const h = harness();
-    h.store.register(page());
+    const p = page({ [ID_A]: 'transcoding' });
+    h.store.register(p);
     await goLive(h, [state(ID_A)]);
 
     h.last().receive('not json');
@@ -256,6 +264,58 @@ describe('applying states', () => {
     h.last().receive('pong');
     expect(h.store.items.get(ID_A)?.version).toBe(1);
     expect(h.store.connection).toBe('live');
+    expect(h.last().closedWith).toBeNull();
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    expect(p.refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a held terminal state', () => {
+  it('is dropped once the refetch it asked for lands: a Try again the list shows wins', async () => {
+    const h = harness();
+    const p = page({ [ID_A]: 'transcoding' });
+    h.store.register(p);
+    await goLive(h, [state(ID_A)]);
+    h.last().receive(item(state(ID_A, { version: 2, lifecycle: 'failed' })));
+    expect(h.store.items.get(ID_A)?.lifecycle).toBe('failed');
+
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    await settle();
+    expect(p.refresh).toHaveBeenCalledTimes(1);
+    expect(h.store.items.has(ID_A)).toBe(false);
+  });
+
+  it('is kept when a newer state arrives while the refetch runs', async () => {
+    const h = harness();
+    const p = page({ [ID_A]: 'transcoding' });
+    let land = () => {};
+    p.refresh.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        })
+    );
+    h.store.register(p);
+    await goLive(h, [state(ID_A)]);
+    h.last().receive(item(state(ID_A, { version: 2, lifecycle: 'failed' })));
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+
+    // Retried meanwhile: the object starts its row again at version 1.
+    h.last().receive(item(state(ID_A, { version: 1 })));
+    land();
+    await settle();
+    expect(h.store.items.get(ID_A)?.lifecycle).toBe('transcoding');
+  });
+
+  it('is kept when the refetch rejects: the list did not catch up', async () => {
+    const h = harness();
+    const p = page({ [ID_A]: 'transcoding' });
+    p.refresh.mockRejectedValue(new Error('offline'));
+    h.store.register(p);
+    await goLive(h, [state(ID_A)]);
+    h.last().receive(item(state(ID_A, { version: 2, lifecycle: 'ready' })));
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    expect(h.store.items.get(ID_A)?.lifecycle).toBe('ready');
   });
 });
 
@@ -452,15 +512,101 @@ describe('recovering', () => {
 
   it.each([
     401, 403,
-  ])('stops when the ticket is refused with %i', async (status) => {
+  ])('stops, saying why, when the ticket is refused with %i twice in a row', async (status) => {
+    const warn = vi.spyOn(logger, 'warn');
     const h = harness();
-    h.refuseTickets({ status, body: { message: 'no' } });
+    h.refuseTickets({ status, body: { message: 'no', code: 'UNAUTHORIZED' } });
     h.store.register(page());
     await settle();
+    expect(h.store.connection).toBe('connecting');
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[0]);
     expect(h.store.connection).toBe('stopped');
+    expect(warn).toHaveBeenCalledWith('media_status.stopped', {
+      reason: 'ticket_refused',
+      stage: 'ticket',
+      status,
+      code: 'UNAUTHORIZED',
+    });
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(h.ticket).toHaveBeenCalledTimes(1);
+    expect(h.ticket).toHaveBeenCalledTimes(AUTH_REFUSALS_BEFORE_STOP);
     expect(h.sockets).toHaveLength(0);
+  });
+
+  it('one 401 (a session lookup that failed) tries again, and recovers', async () => {
+    const h = harness();
+    h.refuseTickets({ status: 401 });
+    h.store.register(page());
+    await settle();
+    h.refuseTickets(null);
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[0]);
+    h.last().open();
+    h.last().receive(snapshot([]));
+    expect(h.store.connection).toBe('live');
+
+    // Counted in a row: an earlier refusal does not make the next one final.
+    h.refuseTickets({ status: 401 });
+    h.last().drop();
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[0]);
+    expect(h.store.connection).toBe('reconnecting');
+  });
+
+  it('a ticket that never answers counts as a failed connect', async () => {
+    const h = harness();
+    h.ticket.mockImplementationOnce(() => new Promise(() => {}));
+    h.store.register(page());
+    await vi.advanceTimersByTimeAsync(TICKET_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[0]);
+    expect(h.ticket).toHaveBeenCalledTimes(2);
+    expect(h.sockets).toHaveLength(1);
+  });
+
+  it('a handshake that hangs is given up on at the silence limit', async () => {
+    const h = harness();
+    h.store.register(page());
+    await settle();
+    // Never opens.
+    await vi.advanceTimersByTimeAsync(SILENCE_LIMIT_MS + HEARTBEAT_MS);
+    expect(h.sockets[0].closedWith).toBe(4000);
+    await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[0]);
+    expect(h.sockets).toHaveLength(2);
+  });
+
+  it('a socket that answers pings but never sends a snapshot is given up on', async () => {
+    const h = harness();
+    h.store.register(page());
+    await settle();
+    h.last().open();
+    for (let t = 0; t < SILENCE_LIMIT_MS + HEARTBEAT_MS; t += HEARTBEAT_MS) {
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+      h.last().receive('pong');
+    }
+    expect(h.sockets[0].closedWith).toBe(4000);
+  });
+
+  it('a first snapshot it cannot read (a newer protocol) fails the connect, then polls', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    const h = harness();
+    const p = page();
+    h.store.register(p);
+    await settle();
+
+    for (let failure = 1; failure <= FAILURES_BEFORE_POLLING; failure++) {
+      h.last().open();
+      h.last().receive({ ...snapshot([]), v: 2 });
+      expect(h.last().closedWith).toBe(4000);
+      if (failure < FAILURES_BEFORE_POLLING) {
+        await vi.advanceTimersByTimeAsync(RECONNECT_DELAYS_MS[failure - 1]);
+      }
+    }
+    expect(h.store.connection).toBe('polling');
+    expect(warn).toHaveBeenCalledWith('media_status.polling', {
+      failures: FAILURES_BEFORE_POLLING,
+      stage: 'connect',
+      closeCode: 4000,
+      reason: 'unreadable',
+    });
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    expect(p.refresh).toHaveBeenCalledTimes(1);
   });
 
   it('backs off when the ticket is rate limited', async () => {

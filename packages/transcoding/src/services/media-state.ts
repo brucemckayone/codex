@@ -19,8 +19,8 @@ import { sql } from 'drizzle-orm';
 /** The SET of every move to `failed`; the detail is cut to fit the column. */
 /**
  * Progress lives in the status object now (Codex-l2c48.9). Until the columns
- * are dropped (Codex-32sym), every lifecycle write clears them, so the
- * polling status endpoints report no progress rather than a stale %.
+ * are dropped (Codex-32sym), every lifecycle write clears them, so a read of
+ * the row reports no progress rather than a stale %.
  */
 export const NO_PROGRESS = {
   transcodingProgress: null,

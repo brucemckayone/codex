@@ -7,9 +7,7 @@
 import { listMedia } from '$lib/remote/media.remote';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ url, depends }) => {
-  // +page.svelte's refresh invalidates this key: this load alone re-runs.
-  depends('app:studio-media');
+export const load: PageServerLoad = async ({ url }) => {
   const page = Number(url.searchParams.get('page') ?? '1');
   const limit = 12;
 
@@ -40,9 +38,11 @@ export const load: PageServerLoad = async ({ url, depends }) => {
       total: 0,
       totalPages: 0,
     },
+    // `as const`: a bare 'all' widens to string, and the page's refetch
+    // passes these back to listMedia.
     filters: {
-      status: status ?? 'all',
-      mediaType: mediaType ?? 'all',
+      status: status ?? ('all' as const),
+      mediaType: mediaType ?? ('all' as const),
     },
   };
 };

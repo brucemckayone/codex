@@ -48,6 +48,7 @@ import type {
   Category,
   CourseSubscriptionPlan,
   MediaItem,
+  ServedMediaItem,
 } from '@codex/database/schema';
 import type { AvatarUploadResponse } from '@codex/identity';
 import type { NotificationPreferencesResponse } from '@codex/notifications';
@@ -2624,10 +2625,14 @@ export function createServerApi(
        * @returns Created media item
        */
       create: (data: Record<string, unknown>) =>
-        request<MediaItem>('content', '/api/media', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        }),
+        request<ServedMediaItem & { presignedUrl: string | null }>(
+          'content',
+          '/api/media',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
 
       /**
        * List media items with filters and pagination
@@ -2656,7 +2661,7 @@ export function createServerApi(
        * Update media item metadata
        */
       update: (id: string, data: unknown) =>
-        request<MediaItem>('content', `/api/media/${id}`, {
+        request<ServedMediaItem>('content', `/api/media/${id}`, {
           method: 'PATCH',
           body: JSON.stringify(data),
         }),

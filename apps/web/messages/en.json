@@ -705,6 +705,7 @@
   "media_live_live": "Live",
   "media_live_reconnecting": "Reconnecting",
   "media_live_polling": "Updates every minute",
+  "media_live_stopped": "Reload for live updates",
   "media_announce_ready": "{title} is ready.",
   "media_announce_failed": "{title} couldn't be processed.",
   "media_empty": "No media files yet",

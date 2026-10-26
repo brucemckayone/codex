@@ -1001,6 +1001,7 @@ describe('MediaItemService', () => {
 
     it('keeps the detail in the row, and no read serves it', async () => {
       const created = await makeMedia();
+      expect(created).not.toHaveProperty('transcodingError');
       await service.recordTranscodingTriggerFailure(
         created.id,
         creatorId,

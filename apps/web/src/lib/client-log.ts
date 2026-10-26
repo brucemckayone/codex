@@ -12,10 +12,13 @@
  *   redaction pass, and again on the server;
  * - the path only, never the query (a token, or a visitor's search text);
  * - at most CLIENT_LOG_MAX_BYTES per record; larger metadata is cut down;
- * - per tab, at most CLIENT_LOG_PER_MINUTE records a minute, the same message
- *   once per CLIENT_LOG_REPEAT_MS, and CLIENT_LOG_PER_PAGE in all, so an
- *   error inside a render loop cannot flood the logs. A record carries how
- *   many were dropped before it.
+ * - per tab, at most CLIENT_LOG_PER_MINUTE records a minute and
+ *   CLIENT_LOG_PER_HOUR an hour, and the same error once per
+ *   CLIENT_LOG_REPEAT_MS, so an error inside a render loop cannot flood the
+ *   logs. "The same" is the message AND what was thrown: the uncaught-error
+ *   hooks log every fault under one message. A record carries how many were
+ *   dropped before it. (An hour, not a page: a studio tab stays open for
+ *   days.)
  *
  * The sink never throws and never logs: it runs inside the logger, so either
  * would recurse or break the code that logged.
@@ -37,8 +40,11 @@ export const CLIENT_LOG_ROUTE = '/api/client-log';
 export const CLIENT_LOG_MAX_BYTES = 8 * 1024;
 export const CLIENT_LOG_PER_MINUTE = 10;
 export const CLIENT_LOG_REPEAT_MS = 5 * 60_000;
-export const CLIENT_LOG_PER_PAGE = 100;
+export const CLIENT_LOG_PER_HOUR = 100;
+const HOUR_MS = 60 * 60_000;
 const MESSAGE_MAX = 500;
+/** How much of what was thrown tells two records with one message apart. */
+const REPEAT_KEY_DETAIL_MAX = 200;
 
 /** One record, as the browser sends it and the server accepts it. */
 export const clientLogEntrySchema = z.object({
@@ -117,10 +123,32 @@ function sized(entry: ClientLogEntry): string {
   }
 }
 
+/** The message, and what was thrown under it (hooks share one message). */
+function repeatKey(message: string, metadata: LogEvent['metadata']): string {
+  const detail = (key: string) =>
+    String(metadata?.[key] ?? '').slice(0, REPEAT_KEY_DETAIL_MAX);
+  return [message, detail('name'), detail('error'), detail('route')].join(
+    '\u0000'
+  );
+}
+
+/** An Error in metadata keeps what describes it; redaction would empty it. */
+function withThrownDescribed(
+  metadata: Record<string, unknown>
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(metadata).map(([key, value]) => [
+      key,
+      value instanceof Error ? describeThrown(value) : value,
+    ])
+  );
+}
+
 export function createClientLogSink(deps: SinkDeps) {
   const windowStarts: number[] = [];
   const lastSentAt = new Map<string, number>();
-  let sent = 0;
+  let hourStartedAt = -Infinity;
+  let sentThisHour = 0;
   let dropped = 0;
 
   return {
@@ -136,12 +164,21 @@ export function createClientLogSink(deps: SinkDeps) {
         ) {
           windowStarts.shift();
         }
+        if (now - hourStartedAt >= HOUR_MS) {
+          hourStartedAt = now;
+          sentThisHour = 0;
+          // Keys past the repeat window decide nothing: keep the map small.
+          for (const [key, at] of lastSentAt) {
+            if (now - at >= CLIENT_LOG_REPEAT_MS) lastSentAt.delete(key);
+          }
+        }
+        const key = repeatKey(message, event.metadata);
         const repeated =
-          now - (lastSentAt.get(message) ?? -Infinity) < CLIENT_LOG_REPEAT_MS;
+          now - (lastSentAt.get(key) ?? -Infinity) < CLIENT_LOG_REPEAT_MS;
         if (
           repeated ||
           windowStarts.length >= CLIENT_LOG_PER_MINUTE ||
-          sent >= CLIENT_LOG_PER_PAGE
+          sentThisHour >= CLIENT_LOG_PER_HOUR
         ) {
           dropped += 1;
           return;
@@ -149,7 +186,7 @@ export function createClientLogSink(deps: SinkDeps) {
 
         const metadata = event.metadata
           ? (redactSensitiveData(
-              event.metadata,
+              withThrownDescribed(event.metadata),
               REDACTION_PRESETS.production
             ) as Record<string, unknown>)
           : undefined;
@@ -163,12 +200,14 @@ export function createClientLogSink(deps: SinkDeps) {
         });
 
         windowStarts.push(now);
-        lastSentAt.set(message, now);
-        sent += 1;
+        lastSentAt.set(key, now);
+        sentThisHour += 1;
         dropped = 0;
         deps.send(body);
       } catch {
-        // Never let reporting a failure become one.
+        // Never let reporting a failure become one; the next record says a
+        // record was lost (metadata that would not serialise: a BigInt).
+        dropped += 1;
       }
     },
   };

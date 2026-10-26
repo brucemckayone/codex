@@ -48,10 +48,11 @@
     /** Optional class forwarded to the root for layout composition (R13) */
     class?: string;
     /**
-     * Refresh the media list after a mutation. The media route has no
-     * +page.server.ts, so `invalidateAll()` does NOT re-run the `listMedia`
-     * remote query — the parent passes `() => mediaQuery.refresh()` here so
-     * upload/edit/delete actually update the grid without a hard reload.
+     * Refetch the media list: after an upload, edit or delete, and whenever
+     * the live status channel says the list is stale. Resolves once the new
+     * list has landed and REJECTS when it fails, so the page keeps its grid
+     * and the failure is logged. Never `invalidate()`: a load that throws
+     * there swaps in +error.svelte, unmounting a running upload.
      */
     onRefresh?: () => void | Promise<void>;
   }
@@ -235,8 +236,17 @@
   const gridStartOrdinal = $derived(featureMedia ? 2 : 1);
 
   // ── Event handlers ────────────────────────────────────────────────────
+  /** After this page's own change; a refetch that fails keeps the grid. */
+  function refreshAfterChange() {
+    Promise.resolve(onRefresh?.()).catch((error) => {
+      logger.warn('studio_media.refresh_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
   function handleUploadComplete() {
-    void onRefresh?.();
+    refreshAfterChange();
   }
 
   function handleEdit(id: string) {
@@ -248,7 +258,7 @@
 
   async function handleSave(id: string, updateData: { title?: string; description?: string | null }) {
     await updateMedia({ id, data: updateData });
-    void onRefresh?.();
+    refreshAfterChange();
   }
 
   function handleDelete(id: string) {
@@ -263,7 +273,7 @@
       await deleteMedia(deleteTargetId);
       showDeleteConfirm = false;
       deleteTargetId = null;
-      void onRefresh?.();
+      refreshAfterChange();
     } catch (error) {
       logger.error('Failed to delete media', {
         error: error instanceof Error ? error.message : String(error),

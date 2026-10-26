@@ -16,6 +16,7 @@
 -->
 <script lang="ts">
   import { mediaStatus } from '$lib/client/media-status.svelte';
+  import { describeThrown } from '$lib/client-log';
   import { retryTranscoding } from '$lib/remote/media.remote';
   import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
@@ -156,12 +157,17 @@
     retrying = true;
     try {
       await retryTranscoding(media.id);
-      // What happens next arrives over the socket; without one, the list.
+      // What happens next arrives over the socket; without one, the list
+      // (and its refetch drops the held `failed` this tile still shows).
       if (mediaStatus.connection !== 'live') mediaStatus.refreshList();
     } catch (error) {
       const status = remoteErrorStatus(error);
-      if (status !== 429) {
-        logger.warn('media_tile.retry_refused', { mediaId: media.id, status });
+      // A 4xx refused this retry (the state moved, no tries left); anything
+      // else is an outage, or a network that never answered.
+      if (status === undefined || status >= 500) {
+        logger.error('media_tile.retry_failed', { mediaId: media.id, ...describeThrown(error) });
+      } else if (status !== 429) {
+        logger.warn('media_tile.retry_refused', { mediaId: media.id, ...describeThrown(error) });
       }
       toast.error(
         status === 429 ? m.media_tile_retry_rate_limited() : m.media_tile_retry_failed()

@@ -14,8 +14,11 @@
  *   - A drop reconnects after 1, 2, 5, 10, then 30 s, jittered. Five failed
  *     connects in a row (a proxy that blocks WebSockets) fall back to
  *     refetching the list every 60 s, with one socket attempt every 5 min.
- *   - A session that ended (a 401/403 ticket, close 4401, `bye`) stops: a
- *     reconnect would be refused the same way.
+ *     A connect that hangs, or a socket that never sends a snapshot this
+ *     page can read (a newer protocol after a deploy), counts as failed.
+ *   - A session that ended (two 401/403 tickets in a row, close 4401, `bye`)
+ *     stops: a reconnect would be refused the same way. One refusal tries
+ *     again, because a session lookup that failed also answers 401.
  *
  * When the list itself is stale, the store asks its subscribers to refetch
  * it (debounced): an item reached ready or failed (its thumbnail and duration
@@ -37,7 +40,7 @@ import {
 } from '@codex/validation';
 import { SvelteMap } from 'svelte/reactivity';
 import { logger } from '$lib/observability';
-import { remoteErrorStatus } from '$lib/remote/query-result';
+import { remoteErrorCode, remoteErrorStatus } from '$lib/remote/query-result';
 import { registerUserScopedReset } from './user-scoped-state';
 
 /** Waits before each reconnect, by consecutive failures (then the last). */
@@ -60,10 +63,14 @@ export const LINGER_MS = 30_000;
 export const UPLOAD_REPORT_INTERVAL_MS = 1_200;
 /** Changes arrive in bursts (a deploy, a resync): one list refetch each. */
 export const REFRESH_DEBOUNCE_MS = 750;
+/** A ticket fetch that has not answered by then failed. */
+export const TICKET_TIMEOUT_MS = 15_000;
+/** 401/403 tickets in a row before the store believes the session ended. */
+export const AUTH_REFUSALS_BEFORE_STOP = 2;
 
 /** The object's close code for a socket whose session ended. */
 const SESSION_EXPIRED_CLOSE = 4401;
-/** Ours, for a socket we close as silent. */
+/** Ours, for a socket we give up on (silent, or nothing readable). */
 const SILENT_CLOSE = 4000;
 
 const TERMINAL = new Set(['ready', 'failed']);
@@ -80,7 +87,10 @@ export type MediaStatusConnection =
 export interface MediaStatusSubscriber {
   /** Every item the page lists, with the lifecycle the list has for it. */
   listed(): ReadonlyMap<string, string>;
-  /** Refetch the list. Debounced by the store; a rejection is logged. */
+  /**
+   * Refetch the list, resolving once it has landed: the terminal states the
+   * store holds until then are dropped. Debounced; a rejection is logged.
+   */
   refresh(): void | Promise<void>;
   /** An item reached ready or failed while the page was open. */
   settled?(mediaId: string, lifecycle: 'ready' | 'failed'): void;
@@ -107,6 +117,31 @@ export interface MediaStatusTransport {
 
 const OPEN = 1;
 
+/** Why the last connect failed, for the logs that say the store gave up. */
+interface ConnectFailure {
+  stage: 'ticket' | 'open' | 'connect' | 'socket';
+  status?: number;
+  code?: string;
+  closeCode?: number;
+  reason?: string;
+}
+
+function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timed out')), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
 export function createMediaStatus(transport: MediaStatusTransport) {
   /** Per item, the latest state the object sent. Read by the media tiles. */
   const items = new SvelteMap<string, MediaItemState>();
@@ -119,8 +154,15 @@ export function createMediaStatus(transport: MediaStatusTransport) {
   /** Bumped by every connect and disconnect: stale callbacks see a new one. */
   let generation = 0;
   let failures = 0;
+  let authRefusals = 0;
+  let lastFailure: ConnectFailure | null = null;
   /** A snapshot after a drop refetches the list: changes may have been missed. */
   let wasLive = false;
+  /** This connection's socket was opened at; it has sent a snapshot. */
+  let openedAt = 0;
+  let snapshotSeen = false;
+  /** Why we are closing this connection's socket ourselves. */
+  let closingBecause: string | null = null;
   let lastHeardAt = 0;
   let warnedUnreadable = false;
   /**
@@ -178,15 +220,28 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     if (refreshTimer !== null) return;
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
-      for (const subscriber of subscribers) {
-        Promise.resolve()
-          .then(() => subscriber.refresh())
-          .catch((error) => {
-            logger.warn('media_status.refresh_failed', {
-              error: error instanceof Error ? error.message : String(error),
-            });
+      // A terminal state is held only until the list catches up. Once every
+      // refetch lands, the list is the newer source for the ones held now:
+      // after a Try again with no socket, it alone knows the item left
+      // `failed`. A state that arrives meanwhile is newer still, and stays.
+      const heldTerminal = [...items].filter(([, held]) =>
+        TERMINAL.has(held.lifecycle)
+      );
+      const refetches = [...subscribers].map((subscriber) =>
+        Promise.resolve().then(() => subscriber.refresh())
+      );
+      Promise.all(refetches).then(
+        () => {
+          for (const [mediaId, held] of heldTerminal) {
+            if (items.get(mediaId) === held) items.delete(mediaId);
+          }
+        },
+        (error) => {
+          logger.warn('media_status.refresh_failed', {
+            error: error instanceof Error ? error.message : String(error),
           });
-      }
+        }
+      );
     }, REFRESH_DEBOUNCE_MS);
   }
 
@@ -255,28 +310,37 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     if (stale) scheduleRefresh();
   }
 
-  function onMessage(data: unknown): void {
+  function onMessage(ws: StatusSocket, data: unknown): void {
     lastHeardAt = Date.now();
-    if (typeof data !== 'string' || data === 'pong') return;
+    if (data === 'pong') return;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(data);
+      parsed = typeof data === 'string' ? JSON.parse(data) : undefined;
     } catch {
-      return;
+      parsed = undefined;
     }
     const message = mediaStatusServerMessageSchema.safeParse(parsed);
-    if (!message.success) {
-      // A newer protocol (a deploy mid-session) or a bug: the list still
-      // works. Once per connection, not once per message.
-      if (!warnedUnreadable) {
-        warnedUnreadable = true;
-        logger.warn('media_status.message_unreadable', {
-          type: (parsed as { type?: unknown } | null)?.type,
-        });
-      }
+    if (message.success) {
+      handle(message.data);
       return;
     }
-    handle(message.data);
+    // A newer protocol (a deploy mid-session) or a bug. Once per connection,
+    // not once per message.
+    if (!warnedUnreadable) {
+      warnedUnreadable = true;
+      logger.warn('media_status.message_unreadable', {
+        type: (parsed as { type?: unknown } | null)?.type,
+        live: snapshotSeen,
+      });
+    }
+    if (snapshotSeen) {
+      // Something changed that this page cannot apply: the list can.
+      scheduleRefresh();
+    } else {
+      // No snapshot it can read, so nothing it sends will be: give up on
+      // this socket like any failed connect (five in a row poll the list).
+      closeAs(ws, 'unreadable');
+    }
   }
 
   function handle(message: MediaStatusServerMessage): void {
@@ -284,6 +348,8 @@ export function createMediaStatus(transport: MediaStatusTransport) {
       case 'snapshot':
         applySnapshot(message.items);
         failures = 0;
+        lastFailure = null;
+        snapshotSeen = true;
         wasLive = true;
         connection = 'live';
         stopPolling();
@@ -296,7 +362,7 @@ export function createMediaStatus(transport: MediaStatusTransport) {
         scheduleRefresh();
         break;
       case 'bye':
-        if (message.reason === 'session_expired') stop();
+        if (message.reason === 'session_expired') end('session_expired');
         // shutting_down: the close that follows reconnects.
         break;
     }
@@ -314,18 +380,31 @@ export function createMediaStatus(transport: MediaStatusTransport) {
 
     let ticket: MediaStatusTicket;
     try {
-      ticket = await transport.ticket();
+      ticket = await withDeadline(transport.ticket(), TICKET_TIMEOUT_MS);
     } catch (error) {
       if (mine !== generation) return;
       const status = remoteErrorStatus(error);
+      lastFailure = {
+        stage: 'ticket',
+        status,
+        code:
+          remoteErrorCode(error) ??
+          (status === undefined && error instanceof Error
+            ? error.message
+            : undefined),
+      };
       if (status === 401 || status === 403) {
-        stop();
-        return;
+        authRefusals += 1;
+        if (authRefusals >= AUTH_REFUSALS_BEFORE_STOP) {
+          end('ticket_refused');
+          return;
+        }
       }
       failed();
       return;
     }
     if (mine !== generation) return;
+    authRefusals = 0;
 
     let ws: StatusSocket;
     try {
@@ -335,18 +414,21 @@ export function createMediaStatus(transport: MediaStatusTransport) {
       ]);
     } catch (error) {
       // A URL the browser refuses (mixed content): no socket will ever open.
-      logger.warn('media_status.socket_refused', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      lastFailure = {
+        stage: 'open',
+        code: error instanceof Error ? error.message : String(error),
+      };
       failed();
       return;
     }
     socket = ws;
-    lastHeardAt = Date.now();
+    openedAt = lastHeardAt = Date.now();
+    snapshotSeen = false;
+    closingBecause = null;
     warnedUnreadable = false;
 
     ws.onmessage = (event) => {
-      if (mine === generation) onMessage(event.data);
+      if (mine === generation) onMessage(ws, event.data);
     };
     // An error is always followed by a close, which decides what happens.
     ws.onclose = (event) => {
@@ -354,12 +436,23 @@ export function createMediaStatus(transport: MediaStatusTransport) {
       socket = null;
       stopHeartbeat();
       if (event.code === SESSION_EXPIRED_CLOSE) {
-        stop();
+        end('session_closed');
         return;
       }
+      lastFailure = {
+        stage: snapshotSeen ? 'socket' : 'connect',
+        closeCode: event.code,
+        reason: closingBecause ?? (event.reason || undefined),
+      };
       failed();
     };
     startHeartbeat(ws, mine);
+  }
+
+  /** Close this connection's socket ourselves; its onclose reconnects. */
+  function closeAs(ws: StatusSocket, reason: string): void {
+    closingBecause = reason;
+    ws.close(SILENT_CLOSE, reason);
   }
 
   /** A connect that did not reach a snapshot, or a socket that dropped. */
@@ -387,13 +480,15 @@ export function createMediaStatus(transport: MediaStatusTransport) {
   function startHeartbeat(ws: StatusSocket, mine: number): void {
     stopHeartbeat();
     heartbeatTimer = setInterval(() => {
-      if (mine !== generation || ws.readyState !== OPEN) return;
-      if (Date.now() - lastHeardAt > SILENCE_LIMIT_MS) {
-        // onclose runs the reconnect.
-        ws.close(SILENT_CLOSE, 'silent');
+      if (mine !== generation) return;
+      // Until a snapshot, pongs prove nothing: a handshake that hangs, or a
+      // socket that answers pings but never sends a snapshot, is dead too.
+      const since = snapshotSeen ? lastHeardAt : openedAt;
+      if (Date.now() - since > SILENCE_LIMIT_MS) {
+        closeAs(ws, snapshotSeen ? 'silent' : 'no_snapshot');
         return;
       }
-      ws.send('ping');
+      if (ws.readyState === OPEN) ws.send('ping');
     }, HEARTBEAT_MS);
   }
 
@@ -403,7 +498,7 @@ export function createMediaStatus(transport: MediaStatusTransport) {
 
   function startPolling(): void {
     if (connection !== 'polling') {
-      logger.warn('media_status.polling', { failures });
+      logger.warn('media_status.polling', { failures, ...lastFailure });
     }
     connection = 'polling';
     scheduleRefresh();
@@ -432,12 +527,18 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     }
   }
 
-  /** The session ended: nothing reconnects until a page registers again. */
+  /** Nothing reconnects until a page registers again. */
   function stop(): void {
     closeSocket();
     reconnectTimer = clear(reconnectTimer);
     stopPolling();
     connection = 'stopped';
+  }
+
+  /** The session ended (or so the object or the ticket says): say why. */
+  function end(reason: string): void {
+    logger.warn('media_status.stopped', { reason, ...lastFailure });
+    stop();
   }
 
   function disconnect(): void {
@@ -453,6 +554,8 @@ export function createMediaStatus(transport: MediaStatusTransport) {
       refreshWhenVisible = false;
     }
     failures = 0;
+    authRefusals = 0;
+    lastFailure = null;
     wasLive = false;
     connection = 'idle';
     syncClock();
@@ -513,6 +616,7 @@ export function createMediaStatus(transport: MediaStatusTransport) {
       lingerTimer = clear(lingerTimer);
       if (connection === 'idle' || connection === 'stopped') {
         failures = 0;
+        authRefusals = 0;
         void connect();
       }
       return () => {

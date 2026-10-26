@@ -141,7 +141,7 @@ export class MediaItemService extends BaseService {
   async create(
     input: CreateMediaItemInput,
     creatorId: string
-  ): Promise<MediaItem & { presignedUrl: string | null }> {
+  ): Promise<ServedMediaItem & { presignedUrl: string | null }> {
     const validated = createMediaItemSchema.parse(input);
 
     // Resolve file extension from MIME type using the validation schema's enum as SSOT.
@@ -221,7 +221,7 @@ export class MediaItemService extends BaseService {
         }
       }
 
-      return { ...newMediaItem, presignedUrl };
+      return { ...withoutTranscodingDetail(newMediaItem), presignedUrl };
     } catch (error) {
       this.handleError(error, 'create');
     }
@@ -729,8 +729,9 @@ export class MediaItemService extends BaseService {
    * The upload-complete handler makes the media-api transcode call in the
    * background (ctx.background) and returns immediately, so a failed hop
    * (media-api unreachable or down, worker auth refusing it) would otherwise
-   * be invisible — the media row sits in 'uploaded' with no signal. Persisting the error makes it diagnosable: the transcoding-status
-   * endpoint surfaces `transcodingError`, and the row stays in 'uploaded' so
+   * be invisible — the media row sits in 'uploaded' with no signal. Persisting the error makes it diagnosable: the row records
+   * `transcodingError` (for the logs and the owner, never served; the studio
+   * shows the sentence for the code), and the row stays in 'uploaded' so
    * re-POSTing /upload-complete re-dispatches (the existing idempotent recovery
    * path). The code TRANSCODER_UNAVAILABLE marks the row as waiting, so the
    * maintenance cron re-dispatches it too. The transcoding service's claim

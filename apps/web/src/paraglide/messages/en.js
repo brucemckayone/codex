@@ -5659,6 +5659,14 @@ export const media_live_polling = () => `Updates every minute`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_live_stopped = () => `Reload for live updates`
+
+
+/**
  * @param {{ title: NonNullable<unknown> }} params
  * @returns {string}
  */

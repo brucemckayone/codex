@@ -86,9 +86,10 @@ function rejectionCode(
 /**
  * Classify a `/run` HTTP answer.
  *
- * `detail` is shown to the creator (transcodingError reaches the status
- * endpoint), so it names the status and RunPod's machine code only; the body
- * belongs in the logs.
+ * `detail` becomes `transcodingError`, which only the logs and the owner's
+ * failure email read (no API serves it; the creator sees the sentence for the
+ * code). It names the status and RunPod's machine code only; the body belongs
+ * in the logs.
  */
 export function classifyRunPodAnswer(
   status: number,

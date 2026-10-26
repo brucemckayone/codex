@@ -98,8 +98,9 @@ app.post(
 );
 
 /**
- * A ticket is good for a minute and may be presented more than once, so
- * connects count against the creator's `api` bucket, as their API calls do.
+ * A ticket is single-use, but the object refuses a replay only once the
+ * request reaches it: connects count against the creator's `api` bucket, as
+ * their API calls do, so presenting one over and over costs the same.
  */
 async function limitConnects(
   c: Context<HonoEnv>,

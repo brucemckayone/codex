@@ -343,20 +343,27 @@
    * is deleted first, or it would sit in 'uploading' until the hourly check
    * fails it.
    */
+  /**
+   * A failed attempt's row, once the dock lets go of it: left alone, it would
+   * show in the library as an upload still running.
+   */
+  function discardAttempt(mediaId: string | null) {
+    if (!mediaId) return;
+    deleteMedia(mediaId).catch((error) => {
+      logger.warn('Media upload: could not remove the failed attempt', {
+        mediaId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
   function retryItem(item: UploadItem) {
     const failedAttempt = item.id;
     item.id = null;
     item.progress = 0;
     item.error = null;
     item.status = 'queued';
-    if (failedAttempt) {
-      deleteMedia(failedAttempt).catch((error) => {
-        logger.warn('Media upload: could not remove the failed attempt', {
-          mediaId: failedAttempt,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-    }
+    discardAttempt(failedAttempt);
     processQueue();
   }
 
@@ -376,7 +383,8 @@
    * Remove an item from the queue
    */
   function removeItem(index: number) {
-    queue.splice(index, 1);
+    const [removed] = queue.splice(index, 1);
+    if (removed?.status === 'error') discardAttempt(removed.id);
   }
 
   function clearCompleted() {

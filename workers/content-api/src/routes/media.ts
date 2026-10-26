@@ -179,7 +179,9 @@ app.post(
     },
     input: { params: createIdParamsSchema() },
     file: {
-      // Cloudflare refuses a body over 100 MB: say so before reading it.
+      // Cloudflare refuses a body over 100 MB outright. Under that, a file
+      // past this limit gets a clear 400, though only after the body is
+      // buffered (binaryUploadProcedure reads it before it checks the size).
       maxSize: FILE_SIZES.WORKER_UPLOAD_MAX_BYTES,
       minSize: FILE_SIZES.MEDIA_MIN_BYTES,
       allowedMimeTypes: SUPPORTED_MEDIA_MIME_TYPES,

@@ -113,4 +113,35 @@ describe('POST /api/client-log', () => {
     expect((await call({ body })).status).toBe(400);
     expect(logger.error).not.toHaveBeenCalled();
   });
+  it('says it refused, once a minute, with how many it refused since', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      // Far past any refusal an earlier test logged.
+      vi.setSystemTime(new Date('2100-01-01T00:00:00Z'));
+      await call({ origin: 'https://preview.example' });
+      expect(logger.warn).toHaveBeenLastCalledWith(
+        'client.log_refused',
+        expect.objectContaining({
+          reason: 'origin',
+          origin: 'https://preview.example',
+        })
+      );
+
+      logger.warn.mockReset();
+      vi.setSystemTime(new Date('2100-01-01T00:00:01Z'));
+      await call({ body: JSON.stringify({ ...record, level: 'info' }) });
+      await call({ body: JSON.stringify({ ...record, level: 'info' }) });
+      expect(logger.warn).not.toHaveBeenCalled();
+
+      vi.setSystemTime(new Date('2100-01-01T00:01:01Z'));
+      await call({ body: JSON.stringify({ ...record, level: 'info' }) });
+      expect(logger.warn).toHaveBeenCalledWith('client.log_refused', {
+        reason: 'schema',
+        field: 'level',
+        refused: 3,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

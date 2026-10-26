@@ -31,8 +31,8 @@ This test suite verifies the media transcoding lifecycle orchestrated by the `me
 ### 2. Transcoding Status Check
 **Goal:** Verify users can check status.
 *   **Setup:** Manually update media item status to `transcoding`.
-*   **Action:** Call `GET /api/transcoding/status/:id` as the creator.
-*   **Assert:** 200 OK, body contains `status: 'transcoding'`.
+*   **Action:** Call `GET /api/media/:id` as the creator (the per-item status route was retired in Codex-l2c48; live state comes over the media-status socket).
+*   **Assert:** 200 OK, body contains `status: 'transcoding'` and no `transcodingError`.
 *   **Security Test:** Call as a different user.
     *   *Assert:* **403 Forbidden** (or 404).
 

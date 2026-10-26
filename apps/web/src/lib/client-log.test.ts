@@ -6,8 +6,8 @@ import type { LogEvent } from '@codex/observability';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CLIENT_LOG_MAX_BYTES,
+  CLIENT_LOG_PER_HOUR,
   CLIENT_LOG_PER_MINUTE,
-  CLIENT_LOG_PER_PAGE,
   CLIENT_LOG_REPEAT_MS,
   clientLogEntrySchema,
   createClientLogSink,
@@ -105,13 +105,56 @@ describe('createClientLogSink', () => {
     expect(s.parsed().at(-1)).toMatchObject({ message: 'after', dropped: 3 });
   });
 
-  it('stops after 100 on one page', () => {
+  it('sends at most 100 an hour, then again with the count it dropped', () => {
     const s = sink();
-    for (let i = 0; i < CLIENT_LOG_PER_PAGE + 5; i++) {
+    // 6 a minute: under the per-minute limit, so only the hour's budget bites.
+    for (let i = 0; i < CLIENT_LOG_PER_HOUR + 5; i++) {
       s.forward({ message: `m${i}` });
-      s.advance(60_000);
+      s.advance(10_000);
     }
-    expect(s.sent).toHaveLength(CLIENT_LOG_PER_PAGE);
+    expect(s.sent).toHaveLength(CLIENT_LOG_PER_HOUR);
+    s.advance(60 * 60_000);
+    s.forward({ message: 'next hour' });
+    expect(s.parsed().at(-1)).toMatchObject({
+      message: 'next hour',
+      dropped: 5,
+    });
+  });
+
+  it('tells apart different errors logged under one message', () => {
+    const s = sink();
+    const thrown = (error: string) => ({
+      message: 'client.unhandled_error',
+      metadata: { name: 'TypeError', error, route: '/studio/media' },
+    });
+    s.forward(thrown('a is undefined'));
+    s.forward(thrown('b is not a function'));
+    s.forward(thrown('a is undefined'));
+    expect(s.parsed().map((e) => e.metadata?.error)).toEqual([
+      'a is undefined',
+      'b is not a function',
+    ]);
+  });
+
+  it('counts a record it could not send in the next one', () => {
+    const s = sink();
+    s.forward({ message: 'bigint', metadata: { size: 10n } });
+    s.forward({ message: 'after' });
+    expect(s.parsed()).toEqual([
+      expect.objectContaining({ message: 'after', dropped: 1 }),
+    ]);
+  });
+
+  it('describes an Error in metadata instead of sending it empty', () => {
+    const s = sink();
+    s.forward({
+      message: 'with error',
+      metadata: { cause: new RangeError('out') },
+    });
+    expect(s.parsed()[0]?.metadata?.cause).toMatchObject({
+      name: 'RangeError',
+      error: 'out',
+    });
   });
 
   it('cuts oversized metadata down to a preview the route still accepts', () => {

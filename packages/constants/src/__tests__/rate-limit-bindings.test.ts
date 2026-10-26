@@ -105,12 +105,15 @@ function collectBindings(): RateLimitBinding[] {
 /**
  * Source with its comments removed, so the probes below see code only. A
  * comment that merely names `procedure()` (workers/auth/src/user-fields.ts
- * does) made a worker with no procedure route "need" the api binding. The
- * `[^:]` keeps a URL's `//` (https://…) from reading as a line comment.
+ * does) made a worker with no procedure route "need" the api binding. A
+ * block comment must open a line or follow whitespace: a route glob such as
+ * `'/api/*'` holds a comment opener that would otherwise swallow the code up
+ * to the next comment's close. The `[^:]` keeps a URL's `//` (https://…) from
+ * reading as a line comment.
  */
 function withoutComments(source: string): string {
   return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|\s)\/\*[\s\S]*?\*\//gm, '$1')
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
