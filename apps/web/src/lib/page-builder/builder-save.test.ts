@@ -14,10 +14,12 @@
  */
 
 import type { PageBuilderState } from '@codex/shared-types';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as m from '$paraglide/messages';
 import {
   type BuilderRefreshScope,
   type BuilderSaveResult,
+  coursePlanRetryMessage,
   type DerivedOfferPresentation,
   remoteErrorMessage,
   saveBuilderDraft,
@@ -361,6 +363,93 @@ describe('saveBuilderDraft · monetisation leg', () => {
     // Not marked saved ⇒ the draft stays dirty and a retry re-sends the leg.
     expect(deps.markSaved).not.toHaveBeenCalled();
     expect(deps.refresh).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A course plan Stripe refuses until the hour turns (owner decision
+   * 2026-10-26, "Quote the time"). Its keys carry the UTC hour, so a 503
+   * STRIPE_UNAVAILABLE or a 409 COURSE_PLAN_KEY_REUSED fails the same way
+   * until then, and "Try again" alone sent the creator round the same refusal.
+   * The remote forwards `code` and `retryAfter`; the copy quotes that instant
+   * in the creator's LOCAL time.
+   *
+   * The zone is Asia/Kolkata (UTC+5:30), so a UTC rendering (15:00) and a
+   * local one (20:30) cannot be confused.
+   */
+  describe('a course plan refused until the hour turns', () => {
+    const RETRY_AFTER = '2026-10-26T15:00:00.000Z';
+    const SERVER_TEXT =
+      "Stripe couldn't save this plan, and nothing was saved. You can try again after the top of the hour.";
+    const realTz = process.env.TZ;
+
+    beforeEach(() => {
+      process.env.TZ = 'Asia/Kolkata';
+    });
+    afterEach(() => {
+      process.env.TZ = realTz;
+    });
+
+    const refusal = (status: number, code: string, retryAfter?: unknown) => ({
+      status,
+      body: {
+        message: SERVER_TEXT,
+        code,
+        ...(retryAfter !== undefined && { retryAfter }),
+      },
+    });
+
+    async function saveRefusedWith(err: unknown) {
+      const deps = makeDeps({
+        monetisation: makeMonetisation({
+          save: vi.fn<() => Promise<unknown>>().mockRejectedValue(err),
+        }),
+      });
+      return saveBuilderDraft(deps);
+    }
+
+    it.each([
+      [503, 'STRIPE_UNAVAILABLE'],
+      [409, 'COURSE_PLAN_KEY_REUSED'],
+    ])('a %i %s quotes the next top of the hour in local time', async (status, code) => {
+      const result = await saveRefusedWith(refusal(status, code, RETRY_AFTER));
+
+      expect(result).toEqual({
+        outcome: 'failed',
+        stage: 'monetisation',
+        message: `Page saved, but the pricing was not: ${m.course_plan_retry_after({ time: '20:30' })}`,
+      });
+    });
+
+    it('shows the server text when retryAfter does not parse', async () => {
+      const result = await saveRefusedWith(
+        refusal(503, 'STRIPE_UNAVAILABLE', 'not a date')
+      );
+
+      expect(result).toMatchObject({
+        message: `Page saved, but the pricing was not: ${SERVER_TEXT}`,
+      });
+    });
+
+    it('shows the server text when there is no retryAfter', async () => {
+      const result = await saveRefusedWith(refusal(503, 'STRIPE_UNAVAILABLE'));
+
+      expect(result).toMatchObject({
+        message: `Page saved, but the pricing was not: ${SERVER_TEXT}`,
+      });
+    });
+
+    it('leaves every other refusal to its own text, even with a retryAfter', () => {
+      expect(
+        coursePlanRetryMessage(
+          refusal(409, 'COURSE_PLAN_IN_PROGRESS', RETRY_AFTER)
+        )
+      ).toBeUndefined();
+      expect(
+        coursePlanRetryMessage(remoteError('Set a monthly price'))
+      ).toBeUndefined();
+      expect(coursePlanRetryMessage(new Error('boom'))).toBeUndefined();
+      expect(coursePlanRetryMessage(null)).toBeUndefined();
+    });
   });
 
   it('names the leg when the refusal carries no message', async () => {

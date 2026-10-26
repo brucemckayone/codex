@@ -27,7 +27,8 @@
   import { browser } from '$app/environment';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { formatAgreementShare } from '$lib/components/agreements/agreement-share';
+  import AgreementShare from '$lib/components/agreements/AgreementShare.svelte';
+  import { isShareMissing } from '$lib/components/agreements/agreement-share';
   import CounterProposalDialog from '$lib/components/agreements/CounterProposalDialog.svelte';
   import NegotiationThread from '$lib/components/agreements/NegotiationThread.svelte';
   import RevenueSplitPie from '$lib/components/agreements/RevenueSplitPie.svelte';
@@ -130,12 +131,13 @@
   // priority:
   //   1. Active agreement row: its own `creatorSharePercent`, never
   //      `10000 - organizationFeePercentage` (Codex-fazy6). `null` when its
-  //      accepted proposal link is missing: shown as "—", counted as 0.
+  //      accepted proposal link is missing: shown as "—", counted as 0. An
+  //      older payload without the field gives `undefined`, folded to `null`.
   //   2. Latest open proposal's proposed share (proposal-only thread)
   //   3. Latest proposal in thread (for past states)
   const mySharePercent = $derived.by((): number | null => {
     if (activeAgreement) {
-      return activeAgreement.creatorSharePercent;
+      return activeAgreement.creatorSharePercent ?? null;
     }
     if (latestProposal) {
       return latestProposal.proposedCreatorSharePercent;
@@ -158,7 +160,7 @@
     );
 
     const slices: RevenueSplitSlice[] = [];
-    if (mySharePercent !== null) {
+    if (!isShareMissing(mySharePercent)) {
       slices.push({
         id: '__me__',
         label: 'Your share',
@@ -397,7 +399,7 @@
         readOnly
       />
       <p class="agreement-detail__split-summary">
-        Your share: <strong>{formatAgreementShare(mySharePercent)}</strong>
+        Your share: <strong><AgreementShare bps={mySharePercent} /></strong>
         of post-platform {revenueLabel} revenue.
         {#if peersForPool && peersForPool.count > 0}
           {peersForPool.count}

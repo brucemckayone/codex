@@ -36,6 +36,7 @@ vi.mock(
 import {
   ACTIVE_ACCOUNT,
   fail,
+  httpError,
   land,
   NO_ACCOUNT,
   orgPayoutSlot,
@@ -77,6 +78,14 @@ const text = () => document.body.textContent?.replace(/\s+/g, ' ') ?? '';
 const loadError = () => q('[data-testid="payout-status-load-error"]');
 const retryButton = () =>
   loadError()?.querySelector('button') as HTMLButtonElement | null;
+const loadErrorFocus = () => q('.load-error-focus');
+/** Lets a Retry run to its end: the refresh, `tick()`, then the focus move. */
+const settle = async () => {
+  for (let turn = 0; turn < 3; turn++) {
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  flushSync();
+};
 
 describe('a failed payout-status read', () => {
   test('says it could not load the account, with Retry', () => {
@@ -175,5 +184,87 @@ describe('a read that succeeded is still believed', () => {
       m.money_setup_stripe_missing_subscribers_title({ count: '2' })
     );
     expect(text()).toContain(m.subscribers_empty_pending_setup_description());
+  });
+});
+
+/** As on the monetisation page (Codex-2hxff.66 review, MED-1). */
+describe('Retry feedback', () => {
+  /** A refresh that settles when the test says, the way kit's does. */
+  function holdRefresh(slot: ReturnType<typeof orgPayoutSlot>) {
+    let finish: (outcome: 'ok' | 'failed') => void = () => {};
+    slot.refresh.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          finish = (outcome) => {
+            if (outcome === 'ok') {
+              land(slot, ACTIVE_ACCOUNT);
+              resolve();
+            } else {
+              fail(slot);
+              reject(httpError());
+            }
+          };
+        })
+    );
+    return (outcome: 'ok' | 'failed') => finish(outcome);
+  }
+
+  test('shows "Retrying…" while in flight and marks the alert busy', async () => {
+    mountPage();
+    const slot = orgPayoutSlot();
+    fail(slot);
+    flushSync();
+    const finish = holdRefresh(slot);
+
+    retryButton()?.click();
+    flushSync();
+    expect(retryButton()?.textContent?.trim()).toBe(
+      m.money_setup_load_failed_retrying()
+    );
+    expect(retryButton()?.disabled).toBe(false);
+    expect(loadError()?.getAttribute('aria-busy')).toBe('true');
+
+    finish('failed');
+    await settle();
+    expect(retryButton()?.textContent?.trim()).toBe(
+      m.money_setup_load_failed_retry()
+    );
+  });
+
+  test('a repeat failure says so, and puts focus back on the alert', async () => {
+    mountPage();
+    const slot = orgPayoutSlot();
+    fail(slot);
+    flushSync();
+    const finish = holdRefresh(slot);
+
+    retryButton()?.focus();
+    retryButton()?.click();
+    finish('failed');
+    await settle();
+
+    expect(loadError()?.textContent).toContain(
+      m.money_setup_load_failed_again()
+    );
+    expect(document.activeElement).toBe(loadErrorFocus());
+  });
+
+  test('a success moves focus to a status line that says the account loaded', async () => {
+    mountPage();
+    const slot = orgPayoutSlot();
+    fail(slot);
+    flushSync();
+    const finish = holdRefresh(slot);
+
+    retryButton()?.focus();
+    retryButton()?.click();
+    finish('ok');
+    await settle();
+
+    expect(loadError()).toBeNull();
+    const focused = document.activeElement as HTMLElement | null;
+    expect(focused).not.toBe(document.body);
+    expect(focused?.getAttribute('role')).toBe('status');
+    expect(focused?.textContent?.trim()).toBe(m.money_setup_load_retry_ok());
   });
 });

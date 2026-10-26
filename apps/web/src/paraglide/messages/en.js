@@ -11503,6 +11503,30 @@ export const money_setup_load_failed_retry = () => `Retry`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const money_setup_load_failed_retrying = () => `Retrying…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const money_setup_load_failed_again = () => `We still couldn't load your payout account.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const money_setup_load_retry_ok = () => `Payout account loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const monetisation_connect_disabled = () => `Disabled by Stripe`
 
 
@@ -11592,6 +11616,30 @@ export const monetisation_tier_save_error = () => `Could not save the tier`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const monetisation_tier_save_in_progress = () => `This tier is still being created. Try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_save_unknown = () => `We couldn't confirm the tier was saved. Check your tiers before trying again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_share_missing = () => `No share recorded`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const course_plan_retry_after = (params) => `Stripe couldn't save this plan, and nothing was saved. You can try again after ${params.time}.`
 
 
 /**

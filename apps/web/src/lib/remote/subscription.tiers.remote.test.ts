@@ -9,11 +9,18 @@
  * `SUBMISSION_IN_PROGRESS` keeps it. A thrown error would reach the browser as
  * a sanitised 500 with no code, so the command must return it.
  *
+ * A failure that is NOT an `ApiError` had no worker answer behind it (the
+ * fetch threw, the success body would not parse), so the worker may still have
+ * made the tier. Returning it skips the server's `handleError` hook, so the
+ * command logs it itself and answers with fixed copy, never the raw message
+ * (Codex-2hxff.66 review, silent MED-4).
+ *
  * `$app/server` is stubbed so a command is just its handler.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/errors';
+import { logger } from '$lib/observability';
 
 const tiersApi = vi.hoisted(() => ({ create: vi.fn() }));
 
@@ -88,5 +95,50 @@ describe('createTier', () => {
       code,
       detailsCode,
     });
+  });
+});
+
+describe('createTier with no API answer', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('logs the cause on the server and sends fixed copy, never the raw message', async () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    tiersApi.create.mockRejectedValueOnce(
+      new TypeError('fetch failed: http://organization-api.internal/tiers')
+    );
+
+    const result = (await run(INPUT)) as { message: string };
+
+    expect(result).toEqual({
+      success: false,
+      code: undefined,
+      detailsCode: undefined,
+      message: 'An unexpected error occurred',
+      status: 500,
+    });
+    expect(result.message).not.toContain('fetch failed');
+    expect(error).toHaveBeenCalledWith(
+      'subscription command createTier failed with no API answer',
+      expect.objectContaining({
+        organizationId: ORG_ID,
+        errorName: 'TypeError',
+        reason: 'fetch failed: http://organization-api.internal/tiers',
+      })
+    );
+  });
+
+  it('does not log a worker refusal, which the worker logged itself', async () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    tiersApi.create.mockRejectedValueOnce(
+      new ApiError(409, 'refused', 'CONFLICT', {
+        code: 'SUBMISSION_IN_PROGRESS',
+      })
+    );
+
+    await run(INPUT);
+
+    expect(error).not.toHaveBeenCalled();
   });
 });

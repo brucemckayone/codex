@@ -32,6 +32,10 @@ import {
   reset,
   setPortfolio,
 } from '$lib/components/agreements/__fixtures__/agreements-remote.mock.svelte';
+import {
+  MISSING_SHARE_PARTS,
+  missingShareParts,
+} from '$lib/components/agreements/__fixtures__/missing-share';
 import NegotiationsPage from '../+page.svelte';
 
 let component: ReturnType<typeof mount> | null = null;
@@ -69,6 +73,11 @@ describe('an active agreement', () => {
   test('a missing share shows an em dash, never 0%', () => {
     mountWith([portfolioActiveRow({ creatorSharePercent: null })]);
     expect(share().startsWith('—')).toBe(true);
+    expect(
+      missingShareParts(
+        document.querySelector('.negotiations-page__item-share')
+      )
+    ).toEqual(MISSING_SHARE_PARTS);
     expect(share()).not.toContain('0%');
     expect(share()).not.toContain(LEGACY_SHARE);
   });

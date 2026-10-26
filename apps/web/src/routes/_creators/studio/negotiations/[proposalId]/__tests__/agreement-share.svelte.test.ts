@@ -40,6 +40,10 @@ import {
   setMyThread,
   setPortfolio,
 } from '$lib/components/agreements/__fixtures__/agreements-remote.mock.svelte';
+import {
+  MISSING_SHARE_PARTS,
+  missingShareParts,
+} from '$lib/components/agreements/__fixtures__/missing-share';
 import { setPage } from '$lib/components/support/__fixtures__/app-state.mock.svelte';
 import DetailPage from '../+page.svelte';
 
@@ -84,8 +88,14 @@ describe('an active agreement', () => {
 
   test('a missing share shows an em dash and gets no pie slice', () => {
     mountWith([portfolioActiveRow({ creatorSharePercent: null })]);
-    expect(text(yourShare())).toBe('—');
+    expect(missingShareParts(yourShare())).toEqual(MISSING_SHARE_PARTS);
     expect(text(pie())).not.toContain('Your share');
     expect(text(pie())).not.toContain(LEGACY_SHARE);
+  });
+
+  test('an older payload without the share (undefined) is missing too: no NaN slice', () => {
+    mountWith([portfolioActiveRow({ creatorSharePercent: undefined })]);
+    expect(missingShareParts(yourShare())).toEqual(MISSING_SHARE_PARTS);
+    expect(text(pie())).not.toContain('Your share');
   });
 });

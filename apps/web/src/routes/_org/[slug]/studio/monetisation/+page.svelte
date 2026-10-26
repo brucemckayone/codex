@@ -59,7 +59,11 @@
     isConnectReady,
     moneyReadiness,
   } from '$lib/utils/connect-readiness';
-  import { queryErrorMessage, type QueryResult } from '$lib/remote/query-result';
+  import {
+    isFirstLoad,
+    queryErrorMessage,
+    type QueryResult,
+  } from '$lib/remote/query-result';
   import type {
     ConnectRequirements,
     SubscriptionStats,
@@ -130,14 +134,43 @@
     }
   });
 
+  let connectRetrying = $state(false);
+  /** Outcome of the last Retry, for the copy and for where focus goes. */
+  let connectRetryOutcome = $state<'ok' | 'failed' | null>(null);
+  let connectLoadErrorNode = $state<HTMLElement | null>(null);
+  let connectRetryStatusNode = $state<HTMLElement | null>(null);
+
   /**
    * Retry the status read. No `loading` on the button: `Button` disables
-   * itself while loading, which drops focus to <body>. The rejection stays on
-   * the query's own `.error`, which keeps the card failed and is logged above,
-   * so the catch only stops an unhandled rejection.
+   * itself while loading, which drops focus to <body>. Its label says
+   * "Retrying…" instead, and a second click while one runs does nothing.
+   *
+   * The outcome is read from the query, not from whether `refresh()` threw:
+   * a failure stays on the query's own `.error`, which keeps the card failed
+   * and is logged above.
+   *
+   * Focus follows the OUTCOME, as in `handleRecheckStatus`. On success the
+   * alert unmounts with the focused Retry inside it, so focus goes to the
+   * status line that says the account loaded. A failed Retry changes the
+   * alert to "We still couldn't…", which a second one leaves as it is, so
+   * `role="alert"` alone would say nothing: focus goes back to the alert,
+   * which reads it out again.
    */
-  function retryConnectStatus() {
-    void connectQuery.refresh().catch(() => {});
+  async function retryConnectStatus() {
+    if (connectRetrying) return;
+    connectRetrying = true;
+    try {
+      await connectQuery.refresh();
+    } catch {
+      // Kept on `connectQuery.error`; see above.
+    }
+    connectRetryOutcome = connectFailed ? 'failed' : 'ok';
+    connectRetrying = false;
+    await tick();
+    (connectRetryOutcome === 'ok'
+      ? connectRetryStatusNode
+      : connectLoadErrorNode
+    )?.focus();
   }
 
   /**
@@ -192,10 +225,15 @@
     }
   );
 
+  // FIRST loads only, as on the subscribers page. A query's own `loading` is
+  // also true during every refresh: a Connect Retry, the post-create tier
+  // re-read and each `invalidateAll()` used to flip the Tiers card to
+  // skeletons and show the toggle OFF for the round trip. Connect counts
+  // through `connectState`, which stays `failed` while a Retry is in flight.
   const dataLoading = $derived(
-    (tiersQuery as QueryResult<unknown> | null)?.loading
-    || (connectQuery as QueryResult<unknown> | null)?.loading
-    || (settingsQuery as QueryResult<unknown> | null)?.loading
+    connectState.kind === 'loading'
+    || isFirstLoad(tiersQuery as QueryResult<unknown> | null)
+    || isFirstLoad(settingsQuery as QueryResult<unknown> | null)
   );
 
   /**
@@ -306,9 +344,15 @@
    * Cleared when a create succeeds.
    */
   let unsettledCreate: TierCreateValues | null = null;
-  /** When `tierSubmissionId` was minted. Stripe's 24h key window runs from
-      its first use, so this, not the latest send, bounds a resume. */
-  let tierSubmissionMintedAt = 0;
+  /**
+   * When `tierSubmissionId` was first SENT. Stripe's 24h key window runs from
+   * the key's first use, so this, not the mint (the dialog opening) and not
+   * the latest send, bounds a resume: an owner who spends an hour on the copy
+   * before the first Save still gets the resume.
+   */
+  let tierFirstSentAt = 0;
+  /** The `tierSubmissionId` of a create still awaiting its answer, or null. */
+  let createInFlightId: string | null = null;
   /**
    * How long a reopen may resume an unsettled attempt. Stripe keeps a key for
    * 24h and a repeat after that would make a SECOND tier, so stop well short.
@@ -319,17 +363,21 @@
     // `randomUuid`, not `crypto.randomUUID`: the latter is undefined on
     // http://*.lvh.me (local dev and e2e), which is not a secure context.
     tierSubmissionId = randomUuid();
-    tierSubmissionMintedAt = Date.now();
+    tierFirstSentAt = 0;
     tierSubmittedValues = null;
   }
 
   /**
-   * Whether a reopen should resume the unsettled attempt: not once it is an
-   * hour old, and not once the tier list shows it, because then the first
-   * attempt landed.
+   * Whether a reopen should resume the unsettled attempt: not once an hour
+   * has passed since its first send, and not once the tier list shows it,
+   * because then the first attempt landed. An id re-minted after a refusal
+   * has not been sent (`tierFirstSentAt` 0), so no key window runs yet and
+   * the typed values are kept.
    */
   function resumable(values: TierCreateValues): boolean {
-    if (Date.now() - tierSubmissionMintedAt > UNSETTLED_CREATE_TTL_MS) return false;
+    if (tierFirstSentAt !== 0 && Date.now() - tierFirstSentAt > UNSETTLED_CREATE_TTL_MS) {
+      return false;
+    }
     return !tiers.some(
       (t) =>
         t.name === values.name &&
@@ -415,10 +463,16 @@
   /**
    * Every money path on this page funnels its real error here rather than into
    * the DOM. `ObservabilityClient` redacts (emails in production, secrets
-   * always); the surface only ever renders a fixed i18n string.
+   * always); the surface only ever renders a fixed i18n string. `warn` is for
+   * an expected refusal the owner can act on, so it stays out of the error
+   * stream.
    */
-  function logRawError(what: string, error: unknown) {
-    logger.error(`studio/monetisation: ${what}`, {
+  function logRawError(
+    what: string,
+    error: unknown,
+    level: 'error' | 'warn' = 'error'
+  ) {
+    logger[level](`studio/monetisation: ${what}`, {
       organizationId: orgId,
       reason: error instanceof Error ? error.message : String(error),
     });
@@ -513,6 +567,11 @@
       tierPriceAnnual = 4990;
       mintTierSubmission();
     }
+    // Busy only while a send of THIS attempt is still out, i.e. a reopen that
+    // resumed it. A send of any other attempt answers into a dialog that has
+    // moved on (see `submitCreate`).
+    tierFormLoading =
+      createInFlightId !== null && createInFlightId === tierSubmissionId;
     tierDialogOpen = true;
   }
 
@@ -523,6 +582,8 @@
     tierPriceMonthly = tier.priceMonthly;
     tierPriceAnnual = tier.priceAnnual;
     tierFormError = '';
+    // A create still in flight does not hold up this dialog's Save.
+    tierFormLoading = false;
     tierDialogOpen = true;
   }
 
@@ -533,46 +594,21 @@
   }
 
   async function handleTierSubmit() {
+    if (!editingTier) {
+      await submitCreate();
+      return;
+    }
     tierFormLoading = true;
     tierFormError = '';
-    const creating = !editingTier;
     try {
-      if (editingTier) {
-        await updateTier({
-          orgId,
-          tierId: editingTier.id,
-          name: tierName,
-          description: tierDescription || undefined,
-          priceMonthly: tierPriceMonthly,
-          priceAnnual: tierPriceAnnual,
-        });
-      } else {
-        const values: TierCreateValues = {
-          name: tierName,
-          description: tierDescription || undefined,
-          priceMonthly: tierPriceMonthly,
-          priceAnnual: tierPriceAnnual,
-        };
-        // Stripe refuses a reused key with different parameters, so values
-        // that changed since the last send are a new attempt with a new id.
-        // Unchanged values keep the id: that is the retry the server dedupes.
-        const sent = JSON.stringify(values);
-        if (tierSubmittedValues !== null && tierSubmittedValues !== sent) {
-          mintTierSubmission();
-        }
-        tierSubmittedValues = sent;
-        // Unsettled from the moment it is sent, so closing the dialog while
-        // it is in flight still resumes this attempt.
-        unsettledCreate = values;
-        const result = await createTier({ orgId, submissionId: tierSubmissionId, ...values });
-        // `in`, not `result.success`: a boolean discriminant does not narrow
-        // with strictNullChecks off.
-        if (!('tier' in result)) {
-          refuseCreate(result);
-          return;
-        }
-        unsettledCreate = null;
-      }
+      await updateTier({
+        orgId,
+        tierId: editingTier.id,
+        name: tierName,
+        description: tierDescription || undefined,
+        priceMonthly: tierPriceMonthly,
+        priceAnnual: tierPriceAnnual,
+      });
       tierDialogOpen = false;
       await invalidateAll();
     } catch (error) {
@@ -581,14 +617,73 @@
       // email — and every one of these renders inside `<Alert variant="error">`,
       // which sets role="alert", so it would be spoken verbatim and swept into
       // any DOM-scraping error pipeline. Generic copy in the DOM, real error to
-      // the logger (which redacts).
-      if (creating) failCreate(m.monetisation_tier_save_error(), error);
-      else {
-        tierFormError = m.monetisation_tier_save_error();
-        logRawError('tier save failed', error);
-      }
+      // the logger (which redacts). The same holds for a create below.
+      tierFormError = m.monetisation_tier_save_error();
+      logRawError('tier save failed', error);
     } finally {
       tierFormLoading = false;
+    }
+  }
+
+  /**
+   * Send a create, and act on its answer.
+   *
+   * The answer can land after the owner closed the dialog and opened another:
+   * closing while in flight is a designed path (a reopen resumes the attempt),
+   * and Edit on another tier shares this dialog. So the dialog is touched only
+   * while it still shows THIS attempt (open, creating, the same id); a late
+   * answer must not close an Edit or put this create's error in it. Whatever
+   * the dialog shows, the answer still settles the attempt: a success clears
+   * `unsettledCreate`, a refusal re-mints a spent id, and both re-read the list.
+   */
+  async function submitCreate() {
+    const values: TierCreateValues = {
+      name: tierName,
+      description: tierDescription || undefined,
+      priceMonthly: tierPriceMonthly,
+      priceAnnual: tierPriceAnnual,
+    };
+    // Stripe refuses a reused key with different parameters, so values
+    // that changed since the last send are a new attempt with a new id.
+    // Unchanged values keep the id: that is the retry the server dedupes.
+    const sent = JSON.stringify(values);
+    if (tierSubmittedValues !== null && tierSubmittedValues !== sent) {
+      mintTierSubmission();
+    }
+    if (tierSubmittedValues === null) tierFirstSentAt = Date.now();
+    tierSubmittedValues = sent;
+    // Unsettled from the moment it is sent, so closing the dialog while
+    // it is in flight still resumes this attempt.
+    unsettledCreate = values;
+    const attemptId = tierSubmissionId;
+    createInFlightId = attemptId;
+    tierFormLoading = true;
+    tierFormError = '';
+
+    let result: Awaited<ReturnType<typeof createTier>> | undefined;
+    let thrown: unknown;
+    try {
+      result = await createTier({ orgId, submissionId: attemptId, ...values });
+    } catch (error) {
+      thrown = error;
+    }
+    if (createInFlightId === attemptId) createInFlightId = null;
+    // Read once, before anything below re-mints the id or closes the dialog.
+    const shown = tierDialogOpen && !editingTier && tierSubmissionId === attemptId;
+    if (shown) tierFormLoading = false;
+
+    if (!result) {
+      // Thrown: the request may have reached the worker, so the outcome is
+      // unknown. Never the raw message; see `handleTierSubmit`.
+      failCreate(m.monetisation_tier_save_unknown(), thrown, shown);
+    } else if (!('tier' in result)) {
+      // `in`, not `result.success`: a boolean discriminant does not narrow
+      // with strictNullChecks off.
+      refuseCreate(result, attemptId, shown);
+    } else {
+      if (tierSubmissionId === attemptId) unsettledCreate = null;
+      if (shown) tierDialogOpen = false;
+      await invalidateAll();
     }
   }
 
@@ -604,34 +699,67 @@
    * - Anything else keeps the id. A 500 repeat reuses the first attempt's
    *   Stripe objects, and our own 400/403/404/422 gates run before any Stripe
    *   call.
+   *
+   * A 408 timeout or any other 5xx is an UNKNOWN outcome: the worker may have
+   * made the tier, so the copy says so and sends the owner to the list, which
+   * is re-read behind it. "Could not save" is kept for a definite refusal. A
+   * changed resubmit after "Could not save" mints a new id, which for a tier
+   * that did land is a second tier.
+   *
+   * A definite 4xx refusal is logged at warn, as the worker logs it: it is
+   * the expected answer to a double click or a slow Stripe. An unknown outcome
+   * and Stripe failing stay at error.
    */
-  function refuseCreate(failure: {
-    status: number;
-    code: string | undefined;
-    detailsCode: string | undefined;
-  }) {
+  function refuseCreate(
+    failure: {
+      status: number;
+      code: string | undefined;
+      detailsCode: string | undefined;
+    },
+    attemptId: string,
+    shown: boolean
+  ) {
     const code = failure.detailsCode;
-    if (code === 'STRIPE_UNAVAILABLE' || code === 'SUBMISSION_ID_REUSED') {
+    // Only while the refused id is still the dialog's: a reopen since may
+    // have minted a new one, which this refusal says nothing about.
+    if (
+      (code === 'STRIPE_UNAVAILABLE' || code === 'SUBMISSION_ID_REUSED') &&
+      tierSubmissionId === attemptId
+    ) {
       mintTierSubmission();
     }
+    const unknownOutcome =
+      failure.status === 408 ||
+      (failure.status >= 500 && code !== 'STRIPE_UNAVAILABLE');
+    let copy = m.monetisation_tier_save_error();
+    if (code === 'SUBMISSION_IN_PROGRESS') copy = m.monetisation_tier_save_in_progress();
+    else if (unknownOutcome) copy = m.monetisation_tier_save_unknown();
     failCreate(
-      code === 'SUBMISSION_IN_PROGRESS'
-        ? m.monetisation_tier_save_in_progress()
-        : m.monetisation_tier_save_error(),
-      `${failure.status} ${code ?? failure.code ?? 'unknown'}`
+      copy,
+      `${failure.status} ${code ?? failure.code ?? 'unknown'}`,
+      shown,
+      unknownOutcome || failure.status >= 500 ? 'error' : 'warn'
     );
   }
 
   /**
    * Every failed create, refused or thrown. It may still have made the tier,
    * so re-read the list: a tier the first attempt made then shows, and the
-   * creator does not make a second one. The catch only stops an unhandled
-   * rejection; a failed read stays on the query's own `.error`.
+   * creator does not make a second one. A failed re-read is logged, since the
+   * copy may have just sent the owner to that list. The copy goes into the
+   * dialog only while it shows this attempt (`shown`, see `submitCreate`).
    */
-  function failCreate(copy: string, reason: unknown) {
-    void tiersQuery?.refresh().catch(() => {});
-    tierFormError = copy;
-    logRawError('tier create failed', reason);
+  function failCreate(
+    copy: string,
+    reason: unknown,
+    shown: boolean,
+    level: 'error' | 'warn' = 'error'
+  ) {
+    void tiersQuery
+      ?.refresh()
+      .catch((error) => logRawError('tier list refresh after a failed create failed', error));
+    if (shown) tierFormError = copy;
+    logRawError('tier create failed', reason, level);
   }
 
   async function handleDeleteTier() {
@@ -860,20 +988,41 @@
       <Card.Description>{m.monetisation_connect_description()}</Card.Description>
     </Card.Header>
     <Card.Content>
+      <!-- Where focus goes after a Retry that loaded the account (see
+           `retryConnectStatus`): the alert holding the focused button has just
+           unmounted. Persistent, so its text change is announced too. -->
+      <p
+        bind:this={connectRetryStatusNode}
+        class="sr-only"
+        role="status"
+        aria-live="polite"
+        tabindex="-1"
+      >
+        {connectRetryOutcome === 'ok' ? m.money_setup_load_retry_ok() : ''}
+      </p>
       {#if connectFailed}
         <!-- Ahead of `dataLoading`, so the Retry button stays mounted (and
              focused) while its own retry is in flight. No set-up or continue
              button: we can't tell which one this owner needs, and "Connect
              Stripe Account" would restart onboarding for an account that may
-             be fully set up (Codex-2hxff.45). -->
-        <Alert variant="error" data-testid="connect-load-error">
-          <div class="return-alert">
-            <p class="return-alert__description">{m.money_setup_load_failed()}</p>
-            <Button variant="secondary" size="sm" onclick={retryConnectStatus}>
-              {m.money_setup_load_failed_retry()}
-            </Button>
-          </div>
-        </Alert>
+             be fully set up (Codex-2hxff.45). The wrapper takes focus after a
+             Retry that failed again, so the alert is read out again. -->
+        <div bind:this={connectLoadErrorNode} class="load-error-focus" tabindex="-1">
+          <Alert variant="error" data-testid="connect-load-error" aria-busy={connectRetrying}>
+            <div class="return-alert">
+              <p class="return-alert__description">
+                {connectRetryOutcome === 'failed'
+                  ? m.money_setup_load_failed_again()
+                  : m.money_setup_load_failed()}
+              </p>
+              <Button variant="secondary" size="sm" onclick={retryConnectStatus}>
+                {connectRetrying
+                  ? m.money_setup_load_failed_retrying()
+                  : m.money_setup_load_failed_retry()}
+              </Button>
+            </div>
+          </Alert>
+        </div>
       {:else if dataLoading}
         <Skeleton width="200px" height="var(--space-5)" />
       {:else}
@@ -1259,6 +1408,13 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: var(--space-4);
+  }
+
+  /* Takes focus after a Retry that failed again; shown for keyboard users. */
+  .load-error-focus:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+    border-radius: var(--radius-md);
   }
 
   /* Return-from-Stripe / readiness alerts: text and CTA side by side, the CTA

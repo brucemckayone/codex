@@ -86,6 +86,21 @@ export function formatSentenceDate(
     : dayMonthYearFormatter.format(date);
 }
 
+/**
+ * Format an instant as a 24-hour clock time in the RUNTIME's zone: `16:00`.
+ *
+ * For copy built in the browser about a moment the reader acts on ("try again
+ * after 16:00"), so it reads in their local time. Unlike the sentence dates
+ * above it is not pinned to London, so never render it on the server. The
+ * formatter is made per call, so it reads the zone at call time.
+ */
+export function formatLocalClockTime(date: Date): string {
+  return new Intl.DateTimeFormat(LOCALE, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
 const rtf = new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' });
 
 /**

@@ -59,6 +59,7 @@ import {
   reset,
   setActiveAgreements,
 } from '$lib/components/agreements/__fixtures__/agreements-remote.mock.svelte';
+import * as m from '$paraglide/messages';
 import TeamPage from '../+page.svelte';
 
 let component: ReturnType<typeof mount> | null = null;
@@ -97,5 +98,21 @@ describe('the revenue-share column', () => {
     expect(shareCell()).toContain('— subs');
     expect(shareCell()).not.toContain('0% subs');
     expect(shareCell()).not.toContain(LEGACY_SHARE);
+  });
+
+  test('a screen reader hears "No share recorded subs" in place of the dash', () => {
+    mountWith([agreementRow({ creatorSharePercent: null })]);
+    const badge = document.querySelector('.rev-cell');
+    expect(
+      badge?.querySelector('[aria-hidden="true"]')?.textContent?.trim()
+    ).toBe('— subs');
+    expect(badge?.querySelector('.sr-only')?.textContent?.trim()).toBe(
+      `${m.agreement_share_missing()} subs`
+    );
+  });
+
+  test('a recorded share needs no separate spoken label', () => {
+    mountWith([agreementRow()]);
+    expect(document.querySelector('.rev-cell .sr-only')).toBeNull();
   });
 });

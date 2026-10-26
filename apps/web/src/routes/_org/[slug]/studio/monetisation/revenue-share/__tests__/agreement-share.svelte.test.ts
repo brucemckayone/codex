@@ -55,6 +55,10 @@ import {
   reset,
   setActiveAgreements,
 } from '$lib/components/agreements/__fixtures__/agreements-remote.mock.svelte';
+import {
+  MISSING_SHARE_PARTS,
+  missingShareParts,
+} from '$lib/components/agreements/__fixtures__/missing-share';
 import RevenueSharePage from '../+page.svelte';
 
 let component: ReturnType<typeof mount> | null = null;
@@ -114,14 +118,20 @@ describe('a creator with a 40% agreement whose legacy column says 70%', () => {
 describe('an agreement whose share is missing', () => {
   test('shows an em dash in the active list and on the card', () => {
     mountWith([agreementRow({ creatorSharePercent: null })]);
-    expect(text(activeShare()).startsWith('—')).toBe(true);
+    expect(missingShareParts(activeShare())).toEqual(MISSING_SHARE_PARTS);
     expect(text(activeShare())).not.toContain(LEGACY_SHARE);
-    expect(text(cardShare())).toBe('—');
+    expect(missingShareParts(cardShare())).toEqual(MISSING_SHARE_PARTS);
   });
 
   test('gets no pie slice, so the legend never says 0% for it', () => {
     mountWith([agreementRow({ creatorSharePercent: null })]);
     expect(text(pie())).not.toContain('Maya Lin');
     expect(text(pie())).not.toContain(LEGACY_SHARE);
+  });
+
+  test('an older payload without the share (undefined) gets no slice either', () => {
+    mountWith([agreementRow({ creatorSharePercent: undefined })]);
+    expect(text(pie())).not.toContain('Maya Lin');
+    expect(missingShareParts(activeShare())).toEqual(MISSING_SHARE_PARTS);
   });
 });

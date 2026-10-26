@@ -25,7 +25,10 @@
     removeMember,
   } from '$lib/remote/org.remote';
   import { listActiveAgreements } from '$lib/remote/agreements.remote';
-  import { formatAgreementShare } from '$lib/components/agreements/agreement-share';
+  import {
+    formatAgreementShare,
+    spokenAgreementShare,
+  } from '$lib/components/agreements/agreement-share';
   import type { AgreementWithShare } from '@codex/agreements';
 
   let { data } = $props();
@@ -69,20 +72,31 @@
   // share is the agreement's own `creatorSharePercent`, matching the
   // revenue-share page; a missing one reads "— subs" (Codex-fazy6). Both
   // revenue types fold into one label, e.g. "30% subs · 20% sales". Undefined
-  // when not owner → column hidden.
+  // when not owner → column hidden. A label with a missing share also gets
+  // `srLabel`, the same words with "No share recorded" for the dash, which
+  // says nothing to a screen reader.
   const revenueShareByUser = $derived.by(() => {
     if (!isOwner) return undefined;
     const rows = (agreementsQuery?.current?.items ??
       []) as AgreementWithShare[];
-    const map = new Map<string, { label: string; active: boolean }>();
+    const map = new Map<
+      string,
+      { label: string; srLabel?: string; active: boolean }
+    >();
+    const partOf = (share: string, revenueType: string) =>
+      revenueType === 'subscription' ? `${share} subs` : `${share} sales`;
     for (const a of rows) {
-      const share = formatAgreementShare(a.creatorSharePercent);
-      const part =
-        a.revenueType === 'subscription' ? `${share} subs` : `${share} sales`;
+      const part = partOf(formatAgreementShare(a.creatorSharePercent), a.revenueType);
+      const spoken = partOf(spokenAgreementShare(a.creatorSharePercent), a.revenueType);
       const existing = map.get(a.creatorId);
+      const label = existing ? `${existing.label} · ${part}` : part;
+      const srLabel = existing
+        ? `${existing.srLabel ?? existing.label} · ${spoken}`
+        : spoken;
       map.set(a.creatorId, {
         active: true,
-        label: existing ? `${existing.label} · ${part}` : part,
+        label,
+        ...(srLabel !== label && { srLabel }),
       });
     }
     return map;

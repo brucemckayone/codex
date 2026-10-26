@@ -26,7 +26,8 @@
   } from '@codex/agreements';
   import { FEES } from '@codex/constants';
   import AgreementCard from '$lib/components/agreements/AgreementCard.svelte';
-  import { formatAgreementShare } from '$lib/components/agreements/agreement-share';
+  import AgreementShare from '$lib/components/agreements/AgreementShare.svelte';
+  import { isShareMissing } from '$lib/components/agreements/agreement-share';
   import Avatar from '$lib/components/ui/Avatar/Avatar.svelte';
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
@@ -209,13 +210,15 @@
    * Content-purchase agreements are NOT pooled (Decision Q1 — creator's
    * own content), so they aren't shown in the team-budget pie.
    *
-   * An agreement whose share is missing (`creatorSharePercent: null`) gets no
+   * An agreement whose share is missing (`creatorSharePercent: null`, or
+   * `undefined` from an older payload: `isShareMissing` covers both) gets no
    * slice: it is paid nothing, so it counts as 0 in the allocated sum, and a
    * 0-width slice would label it "0%" in the legend.
    */
   const pieSlices = $derived.by((): RevenueSplitSlice[] => {
     const subscriptionRows = activeAgreements.filter(
-      (a) => a.revenueType === 'subscription' && a.creatorSharePercent !== null
+      (a) =>
+        a.revenueType === 'subscription' && !isShareMissing(a.creatorSharePercent)
     );
     const memberById = new Map(teamMembers.map((m) => [m.id, m]));
 
@@ -813,9 +816,6 @@
         <ul class="revenue-share-page__active-list">
           {#each activeAgreements as agreement (agreement.id)}
             {@const creatorName = getCreatorName(agreement.creatorId)}
-            {@const sharePctDisplay = formatAgreementShare(
-              agreement.creatorSharePercent
-            )}
             {@const revLabel = formatRevenueTypeLabel(
               agreement.revenueType as RevenueType
             )}
@@ -826,7 +826,7 @@
                   {revLabel}
                 </span>
                 <span class="revenue-share-page__active-share">
-                  {sharePctDisplay}
+                  <AgreementShare bps={agreement.creatorSharePercent} />
                   <span class="revenue-share-page__active-share-hint">
                     {m.monetisation_revshare_share_hint({ type: revLabel })}
                   </span>

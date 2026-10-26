@@ -61,3 +61,19 @@ export function queryErrorMessage(
 
   return fallback;
 }
+
+/**
+ * Whether a query is on its FIRST load: no value yet, and no failure.
+ *
+ * Not the query's own `loading`, which is also true during every refresh (a
+ * Retry, an `invalidateAll()`). A surface gated on `loading` flips its loaded
+ * content back to skeletons for each round trip; one gated on this keeps it,
+ * because kit's `Query` keeps `current` through a refresh. A query that was
+ * never made (`null`) is not loading.
+ */
+export function isFirstLoad(
+  query: QueryResult<unknown> | null | undefined
+): boolean {
+  if (!query) return false;
+  return query.current === undefined && queryErrorMessage(query.error) === null;
+}

@@ -29,7 +29,7 @@
     type AgreementWithShare,
     formatRevenueTypeLabel,
   } from '@codex/agreements';
-  import { formatAgreementShare } from './agreement-share';
+  import AgreementShare from './AgreementShare.svelte';
 
   interface Creator {
     id: string;
@@ -237,7 +237,7 @@
               <div class="agreement-card__row-detail-cell">
                 <dt>Share</dt>
                 <dd>
-                  <strong>{formatAgreementShare(row.state.sharePercent)}</strong>
+                  <strong><AgreementShare bps={row.state.sharePercent} /></strong>
                   <span class="agreement-card__row-detail-hint">
                     of post-platform {row.copyLabel} revenue
                   </span>
@@ -259,7 +259,7 @@
                 <div class="agreement-card__row-detail-cell">
                   <dt>Pending share</dt>
                   <dd>
-                    <strong>{formatAgreementShare(row.state.pendingShare)}</strong>
+                    <strong><AgreementShare bps={row.state.pendingShare} /></strong>
                     <span class="agreement-card__row-detail-hint">
                       of post-platform {row.copyLabel} revenue
                     </span>
@@ -272,7 +272,7 @@
               <div class="agreement-card__row-detail-cell">
                 <dt>Proposed share</dt>
                 <dd>
-                  <strong>{formatAgreementShare(row.state.sharePercent)}</strong>
+                  <strong><AgreementShare bps={row.state.sharePercent} /></strong>
                   <span class="agreement-card__row-detail-hint">
                     of post-platform {row.copyLabel} revenue
                   </span>

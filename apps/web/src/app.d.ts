@@ -52,6 +52,12 @@ declare global {
     interface Error {
       message: string;
       code?: string;
+      /**
+       * An ISO-8601 instant after which a refused write can succeed. Set by
+       * `updateCourseMonetisation` for a course plan Stripe refuses until the
+       * hour turns (Codex-2hxff.66); the browser shows it in local time.
+       */
+      retryAfter?: string;
     }
 
     interface PageData {

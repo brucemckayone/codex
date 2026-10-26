@@ -19,6 +19,10 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import {
+  MISSING_SHARE_PARTS,
+  missingShareParts,
+} from './__fixtures__/missing-share';
 import AgreementCard from './AgreementCard.svelte';
 
 function makeActiveAgreement(
@@ -165,7 +169,10 @@ describe('AgreementCard', () => {
       '[aria-label="Subscription agreement"]'
     ) as HTMLElement;
     expect(row.dataset.state).toBe('active');
-    expect(row.querySelector('dd strong')?.textContent).toBe('—');
+    // The dash, and words for a screen reader, which reads nothing for it.
+    expect(missingShareParts(row.querySelector('dd strong'))).toEqual(
+      MISSING_SHARE_PARTS
+    );
     expect(row.textContent).not.toContain('0%');
     expect(row.textContent).not.toContain('70%');
     expect(row.textContent).not.toContain('No agreement');
