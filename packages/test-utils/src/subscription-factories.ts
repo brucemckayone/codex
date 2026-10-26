@@ -158,11 +158,38 @@ export function createMockStripeSubscription(
 }
 
 /**
+ * A card-paid invoice's `payments`, as Stripe sends it: the PaymentIntent and
+ * NO `charge`. Stripe surfaces `charge` only for a charge without a
+ * PaymentIntent (sandbox invoice in_1USC217wyGmo4sh63iTqUPkW, 2026-10-19).
+ * A default that set both hid Codex-2hxff.50: the course path read only
+ * `charge`, so a real invoice recorded no payouts.
+ *
+ * The PaymentIntent is named after `chargeId` (`ch_x` → `pi_x`), and
+ * `createMockStripe`'s `paymentIntents.retrieve` maps it back, so the invoice
+ * resolves to `chargeId` through `resolveInvoiceCharge`, on every delivery.
+ */
+export function paidByCard(chargeId: string) {
+  return {
+    data: [
+      {
+        payment: {
+          type: 'payment_intent',
+          payment_intent: chargeId.replace(/^ch_/, 'pi_'),
+        },
+      },
+    ],
+  };
+}
+
+/**
  * Create a mock Stripe Invoice object (v19 shape).
  *
  * IMPORTANT: Stripe v19 uses:
  * - parent.subscription_details.subscription for subscription ID
  * - payments.data[] array (not direct charge field)
+ *
+ * The default payment is card-paid (`paidByCard`): it names only the
+ * PaymentIntent, whose `latest_charge` is the invoice's charge.
  */
 export function createMockStripeInvoice(
   overrides: Record<string, unknown> = {}
@@ -182,16 +209,7 @@ export function createMockStripeInvoice(
       },
     },
     // v19: payments array instead of direct charge field
-    payments: {
-      data: [
-        {
-          payment: {
-            payment_intent: `pi_test_${randomUUID().slice(0, 8)}`,
-            charge: `ch_test_${randomUUID().slice(0, 8)}`,
-          },
-        },
-      ],
-    },
+    payments: paidByCard(`ch_test_${randomUUID().slice(0, 8)}`),
     lines: {
       data: [
         {

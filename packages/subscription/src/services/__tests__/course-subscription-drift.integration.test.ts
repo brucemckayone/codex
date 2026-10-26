@@ -36,6 +36,7 @@ import {
   createTestConnectAccountInput,
   createUniqueSlug,
   type Database,
+  paidByCard,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -50,36 +51,18 @@ import {
 
 const DAY_SECONDS = 24 * 3600;
 
-/**
- * createMockStripe's paymentIntents.retrieve mints a fresh `latest_charge` on
- * every call. Real Stripe returns the same one: pi_<x> → ch_<x>.
- */
-function stripeWithStableCharges(): Stripe {
-  const stripe = createMockStripe();
-  vi.mocked(stripe.paymentIntents.retrieve).mockImplementation((async (
-    id: string
-  ) => ({ id, latest_charge: id.replace(/^pi_/, 'ch_') })) as never);
-  return stripe;
-}
-
 /** The duplicate's one paid invoice, paid by card as Stripe sends it. */
 function duplicatePaidInvoice(stripe: Stripe) {
   const invoiceId = `in_${randomUUID().slice(0, 8)}`;
-  const piId = `pi_${randomUUID().slice(0, 8)}`;
+  const chargeId = `ch_${randomUUID().slice(0, 8)}`;
   vi.mocked(stripe.invoices.list).mockResolvedValue({
     object: 'list',
     data: [
-      {
-        id: invoiceId,
-        amount_paid: 5000,
-        payments: {
-          data: [{ payment: { type: 'payment_intent', payment_intent: piId } }],
-        },
-      },
+      { id: invoiceId, amount_paid: 5000, payments: paidByCard(chargeId) },
     ],
     has_more: false,
   } as never);
-  return { invoiceId, chargeId: piId.replace(/^pi_/, 'ch_') };
+  return { invoiceId, chargeId };
 }
 
 describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
@@ -190,7 +173,7 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
    */
   function serviceRacing(
     first: () => Promise<unknown>,
-    stripe: Stripe = stripeWithStableCharges()
+    stripe: Stripe = createMockStripe()
   ) {
     let raced = false;
     const racing = new Proxy(db, {
@@ -215,7 +198,7 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
     return { service, raced: () => raced };
   }
 
-  function serviceWith(stripe: Stripe = stripeWithStableCharges()) {
+  function serviceWith(stripe: Stripe = createMockStripe()) {
     return {
       stripe,
       service: new CourseSubscriptionService(
@@ -350,7 +333,7 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
       expect(settled?.duplicateSettledAt).not.toBeNull();
       expect(stripe.refunds.create).not.toHaveBeenCalled();
 
-      const piId = `pi_${randomUUID().slice(0, 8)}`;
+      const chargeId = `ch_${randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 5000,
         currency: 'gbp',
@@ -360,9 +343,7 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
             metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
           },
         },
-        payments: {
-          data: [{ payment: { type: 'payment_intent', payment_intent: piId } }],
-        },
+        payments: paidByCard(chargeId),
       }) as unknown as Stripe.Invoice;
       const result = await service.handleCourseInvoicePaymentSucceeded(
         invoice,
@@ -373,7 +354,7 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
       expect(stripe.refunds.create).toHaveBeenCalledTimes(1);
       expect(stripe.refunds.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          charge: piId.replace(/^pi_/, 'ch_'),
+          charge: chargeId,
           reason: 'duplicate',
         }),
         { idempotencyKey: `refund_duplicate_${invoice.id}` }
@@ -694,10 +675,10 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
   // open invoice is paid after the buyer took a newer one. The newer one
   // stays; the old one is cancelled and only the reviving invoice refunded.
   describe('an old subscription paid back to life next to a newer one', () => {
-    /** A paid invoice for `sub`, paid by card: pi_<x> resolves to ch_<x>. */
+    /** A paid invoice for `sub`, paid by card. */
     function paidInvoiceFor(sub: Stripe.Subscription) {
       const invoiceId = `in_${randomUUID().slice(0, 8)}`;
-      const piId = `pi_${randomUUID().slice(0, 8)}`;
+      const chargeId = `ch_${randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         id: invoiceId,
         status: 'paid',
@@ -709,11 +690,9 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
             metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
           },
         },
-        payments: {
-          data: [{ payment: { type: 'payment_intent', payment_intent: piId } }],
-        },
+        payments: paidByCard(chargeId),
       }) as unknown as Stripe.Invoice;
-      return { invoice, chargeId: piId.replace(/^pi_/, 'ch_') };
+      return { invoice, chargeId };
     }
 
     /**
@@ -722,7 +701,7 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
      * refunded, and a refund replayed under its key is the same refund.
      */
     function statefulStripe() {
-      const stripe = stripeWithStableCharges();
+      const stripe = createMockStripe();
       const subs = new Map<string, Stripe.Subscription>();
       const invoices = new Map<string, Stripe.Invoice>();
       const refundsByKey = new Map<string, { id: string; charge: string }>();
@@ -1139,7 +1118,6 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
       await ctx.service.handleCourseSubscriptionDeleted(as(sub, 'canceled'));
       const row = await rowFor(sub.id);
       if (!row) throw new Error('course subscription not recorded');
-      const piId = `pi_${randomUUID().slice(0, 8)}`;
       const invoice = createMockStripeInvoice({
         amount_paid: 5000,
         currency: 'gbp',
@@ -1148,9 +1126,6 @@ describe('Course-plan subscription drift (Codex-2hxff.15)', () => {
             subscription: sub.id,
             metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
           },
-        },
-        payments: {
-          data: [{ payment: { type: 'payment_intent', payment_intent: piId } }],
         },
       }) as unknown as Stripe.Invoice;
       const slices = () =>

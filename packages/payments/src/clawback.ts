@@ -54,6 +54,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import type Stripe from 'stripe';
 import {
   cancelUnpaidPayout,
+  isTransferFullyReversed,
   type LedgerDeps,
   PAYOUT_ATTEMPT_LEASE_MINUTES,
 } from './payout-ledger';
@@ -1317,6 +1318,18 @@ async function reverseTransfer(
       }
     );
   } catch (error) {
+    if (
+      record.kind === 'cancellation' &&
+      amountCents === undefined &&
+      (await isTransferFullyReversed(deps, transferId))
+    ) {
+      // The late transfer's own settle found it too and reversed it first
+      // (Codex-pqsfg). Stripe refuses a second full reversal, but the money is
+      // back, so the step is done, whoever reversed it.
+      await markDone(deps, record);
+      await recordCancelledSliceReversed(deps, row, transferId);
+      return {};
+    }
     const code = errorCodeOf(error);
     if (code === 'insufficient_funds' || code === 'balance_insufficient') {
       await recordDebt(ctx, row, record, error);
@@ -1339,21 +1352,31 @@ async function reverseTransfer(
 
   await markDone(deps, record, reversal.id);
   if (record.kind === 'cancellation') {
-    // A cancelled slice whose transfer went out anyway: the money moved and
-    // is now back, so the row is reversed, with its transfer recorded.
-    await deps.db
-      .update(payouts)
-      .set({
-        status: 'reversed',
-        stripeTransferId: transferId,
-        resolvedAt: row.resolvedAt ?? new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(payouts.id, row.id));
+    await recordCancelledSliceReversed(deps, row, transferId);
   } else {
     await settleIfFullyReversed(deps, row.id);
   }
   return {};
+}
+
+/**
+ * A cancelled slice whose transfer went out anyway: the money moved and is
+ * now back, so the row is reversed, with its transfer recorded.
+ */
+async function recordCancelledSliceReversed(
+  deps: ClawbackDeps,
+  row: Payout,
+  transferId: string
+): Promise<void> {
+  await deps.db
+    .update(payouts)
+    .set({
+      status: 'reversed',
+      stripeTransferId: transferId,
+      resolvedAt: row.resolvedAt ?? new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(payouts.id, row.id));
 }
 
 /**

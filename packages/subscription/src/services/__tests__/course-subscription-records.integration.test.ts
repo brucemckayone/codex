@@ -56,10 +56,6 @@ describe('course subscription records, currency and errors', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     stripe = createMockStripe();
-    // A redelivered invoice resolves the same charge, as at Stripe.
-    vi.mocked(stripe.paymentIntents.retrieve).mockImplementation((async (
-      id: string
-    ) => ({ id, latest_charge: id.replace(/^pi_/, 'ch_') })) as never);
     Object.assign(stripe.checkout.sessions, { retrieve: vi.fn() });
     service = new CourseSubscriptionService(
       { db, environment: 'test' },
@@ -225,6 +221,7 @@ describe('course subscription records, currency and errors', () => {
     );
   }
 
+  /** Paid by card, the factory's default: it names only the PaymentIntent. */
   const invoiceFor = (sub: Stripe.Subscription, currency: string) =>
     createMockStripeInvoice({
       amount_paid: 5000,
@@ -234,16 +231,6 @@ describe('course subscription records, currency and errors', () => {
           subscription: sub.id,
           metadata: { type: COURSE_SUBSCRIPTION_METADATA_TYPE },
         },
-      },
-      payments: {
-        data: [
-          {
-            payment: {
-              type: 'payment_intent',
-              payment_intent: `pi_${randomUUID().slice(0, 8)}`,
-            },
-          },
-        ],
       },
     }) as unknown as Stripe.Invoice;
 
@@ -311,7 +298,7 @@ describe('course subscription records, currency and errors', () => {
         stripe
       );
 
-    /** The charge `invoiceFor` settles on (paymentIntents.retrieve, above). */
+    /** The charge `invoiceFor` settles on: createMockStripe maps pi_x to ch_x. */
     const chargeOf = (invoice: Stripe.Invoice) => {
       const [paid] = (
         invoice as unknown as {
