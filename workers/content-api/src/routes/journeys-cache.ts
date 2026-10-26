@@ -27,6 +27,7 @@
 import { CacheType, VersionedCache } from '@codex/cache';
 import type { ObservabilityClient } from '@codex/observability';
 import type { HonoEnv } from '@codex/shared-types';
+import { cdnBaseSlot } from './cdn-base-slot';
 
 /**
  * TTL for cached portal discovery lists (seconds).
@@ -78,14 +79,19 @@ const PUBLIC_JOURNEYS_CACHE_TTL = 7200;
  * portals rail — so a key omitting it would have the two rails serving each
  * other's rows (the exact latent bug `buildPublicContentCacheType` records for
  * content's `featured`).
+ *
+ * `cdnBase` is the base the cards' cover URLs are built with. Keyed on it, a
+ * fixed binding shows on the next read, not after the TTL (`cdnBaseSlot`,
+ * Codex-yjyju).
  */
 export function buildPublishedJourneysCacheType(query: {
   featured?: boolean | null;
   limit?: number | null;
+  cdnBase?: string;
 }): string {
   return `journeys:published:${query.featured ? 'featured' : 'all'}:${
     query.limit ?? 'default'
-  }`;
+  }:${cdnBaseSlot(query.cdnBase)}`;
 }
 
 /**
@@ -95,7 +101,7 @@ export function buildPublishedJourneysCacheType(query: {
 export async function getCachedPublishedJourneys<T>(
   cache: VersionedCache,
   orgId: string,
-  query: { featured?: boolean | null; limit?: number | null },
+  query: { featured?: boolean | null; limit?: number | null; cdnBase?: string },
   fetcher: () => Promise<T>,
   opts: { ttl?: number } = {}
 ): Promise<T> {
@@ -117,16 +123,19 @@ export async function getCachedPublishedJourneys<T>(
  * landing rails and the explore rail together. Unifying the two endpoints is a
  * separate concern; sharing the key means they can never disagree about
  * freshness in the meantime.
+ *
+ * `opts.cdnBase` keys the slot on the base the cover URLs are built with, as
+ * {@link buildPublishedJourneysCacheType} does.
  */
 export async function getCachedPublishedCourses<T>(
   cache: VersionedCache,
   orgId: string,
   fetcher: () => Promise<T>,
-  opts: { ttl?: number } = {}
+  opts: { ttl?: number; cdnBase?: string } = {}
 ): Promise<T> {
   return cache.get(
     CacheType.COLLECTION_ORG_JOURNEYS(orgId),
-    'journeys:courses:published',
+    `journeys:courses:published:${cdnBaseSlot(opts.cdnBase)}`,
     fetcher,
     { ttl: opts.ttl ?? PUBLIC_JOURNEYS_CACHE_TTL }
   );

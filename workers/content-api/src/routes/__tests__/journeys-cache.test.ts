@@ -82,13 +82,35 @@ function createMockKV(): KVNamespace & {
 describe('buildPublishedJourneysCacheType', () => {
   it('is deterministic and includes both variant dimensions', () => {
     expect(buildPublishedJourneysCacheType({ featured: true, limit: 4 })).toBe(
-      'journeys:published:featured:4'
+      'journeys:published:featured:4:cdn:none'
     );
   });
 
   it('names the absent case explicitly rather than emitting an empty segment', () => {
     expect(buildPublishedJourneysCacheType({})).toBe(
-      'journeys:published:all:default'
+      'journeys:published:all:default:cdn:none'
+    );
+  });
+
+  it('keys the slot on the CDN base the covers are built with (Codex-yjyju)', () => {
+    const query = { featured: true, limit: 4 };
+    const fixed = buildPublishedJourneysCacheType({
+      ...query,
+      cdnBase: 'https://cdn-assets.revelations.studio',
+    });
+
+    expect(fixed).not.toBe(buildPublishedJourneysCacheType(query));
+    expect(fixed).not.toBe(
+      buildPublishedJourneysCacheType({
+        ...query,
+        cdnBase: 'https://cdn-assets.revelations.studi',
+      })
+    );
+    expect(fixed).toBe(
+      buildPublishedJourneysCacheType({
+        ...query,
+        cdnBase: 'https://cdn-assets.revelations.studio',
+      })
     );
   });
 
@@ -346,6 +368,24 @@ describe('portal discovery cache-aside', () => {
     expect(journeys).toHaveBeenCalledTimes(1);
     expect(courses).toHaveBeenCalledTimes(1);
   });
+
+  // Codex-yjyju: a slot built with no base (or a wrong one) used to serve its
+  // null covers for the whole TTL after the binding was fixed.
+  it('reads the courses rail afresh once the CDN base changes, and serves it from cache after', async () => {
+    const before = vi.fn().mockResolvedValue(['no-cover']);
+    const after = vi.fn().mockResolvedValue(['cover']);
+    const cdnBase = 'https://cdn-assets.revelations.studio';
+
+    await getCachedPublishedCourses(cache, 'org-1', before);
+    const fixed = await getCachedPublishedCourses(cache, 'org-1', after, {
+      cdnBase,
+    });
+    await getCachedPublishedCourses(cache, 'org-1', after, { cdnBase });
+
+    expect(fixed).toEqual(['cover']);
+    expect(before).toHaveBeenCalledTimes(1);
+    expect(after).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('TTL coupling with the public content list', () => {
@@ -424,10 +464,10 @@ describe('cache type vs telemetry label', () => {
     ]);
   });
 
-  it('leaves the static courses type intact — nothing to collapse', () => {
-    // The one composer that is already a constant. If the label rule ever
+  it('leaves the courses type intact — only its CDN-base suffix drops', () => {
+    // The one composer with no variant of its own. If the label rule ever
     // truncated a legitimate three-segment name this is what would break.
-    expect(cacheStatsLabel('journeys:courses:published')).toBe(
+    expect(cacheStatsLabel('journeys:courses:published:cdn:3f1d2a9c')).toBe(
       'journeys:courses:published'
     );
   });

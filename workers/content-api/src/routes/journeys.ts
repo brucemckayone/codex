@@ -43,6 +43,7 @@ import {
 } from '@codex/validation';
 import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import { warnOnMissingCdnBase } from './cdn-base-slot';
 import {
   bumpOrgJourneysVersion,
   getCachedPublishedCourses,
@@ -146,11 +147,13 @@ app.get(
     },
     handler: async (ctx): Promise<CourseCardSummary[]> => {
       const { organizationId } = ctx.input.query;
+      const cdnBase = ctx.env.R2_PUBLIC_URL_BASE;
+      warnOnMissingCdnBase(cdnBase, ctx.obs, 'journeys:courses');
 
       const fetchCourses = () =>
         ctx.services.courseJourney.listPublishedCourses(
           organizationId,
-          ctx.env.R2_PUBLIC_URL_BASE
+          cdnBase
         );
 
       if (!ctx.env.CACHE_KV) return fetchCourses();
@@ -163,10 +166,13 @@ app.get(
         waitUntil: (p) => ctx.executionCtx.waitUntil(p),
         obs: ctx.obs,
       });
+      // Keyed on the base the covers are built with, so a fixed binding shows
+      // on the next read (Codex-yjyju).
       const courses = await getCachedPublishedCourses(
         cache,
         organizationId,
-        fetchCourses
+        fetchCourses,
+        { cdnBase }
       );
       if (ctx.obs) {
         logCacheStats(cache, ctx.obs, { cacheType: 'journeys:courses' });
@@ -552,12 +558,14 @@ app.get(
     handler: async (ctx): Promise<JourneyCardView[]> => {
       const { organizationId, featured, limit } = ctx.input.query;
       const isFeatured = featured === 'true';
+      const cdnBase = ctx.env.R2_PUBLIC_URL_BASE;
+      warnOnMissingCdnBase(cdnBase, ctx.obs, 'journeys:published');
 
       const fetchJourneys = () =>
         ctx.services.courseJourney.listPublishedJourneys(organizationId, {
           featured: isFeatured,
           limit,
-          r2PublicUrlBase: ctx.env.R2_PUBLIC_URL_BASE,
+          r2PublicUrlBase: cdnBase,
         });
 
       if (!ctx.env.CACHE_KV) return fetchJourneys();
@@ -571,7 +579,7 @@ app.get(
       const journeys = await getCachedPublishedJourneys(
         cache,
         organizationId,
-        { featured: isFeatured, limit },
+        { featured: isFeatured, limit, cdnBase },
         fetchJourneys
       );
       if (ctx.obs) {

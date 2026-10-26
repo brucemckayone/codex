@@ -46,6 +46,13 @@ the builder needs a bump there.
 A key with no CDN base is sent as a null URL and logged once per request as
 `r2_public_base.missing`, by `toPublicItems` and the single `toPublicItem`
 alike; both take `ctx.obs` as a required argument.
+Three other KV-cached reads store URLs BUILT from `R2_PUBLIC_URL_BASE`: the
+topic categories (`/public/categories`) and the journey card lists
+(`/api/journeys/courses`, `/api/journeys/published`). Their slot types end in
+`cdnBaseSlot(base)` (`cdn-base-slot.ts`, Codex-yjyju), so a fixed or changed
+base reads a fresh slot at once instead of serving the old URLs for the 2h
+TTL; a new cached read that bakes in the base needs the same suffix. They log
+`r2_public_base.missing` on every request with no base.
 `GET /api/content/browse` (signed-in) sends the same item (Codex-1bdx0).
 
 | Method | Path | Policy | Notes |

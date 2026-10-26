@@ -300,6 +300,39 @@ describe('GET /api/content/public/categories — cache write survives', () => {
     expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(1);
   });
 
+  // Codex-yjyju: a slot cached with no base kept its null covers for the 2h
+  // TTL after the binding was set.
+  it('builds the covers afresh once the CDN base is set, not after the TTL', async () => {
+    categorySpies.listPublicForOrg.mockResolvedValue([
+      {
+        id: '4d000000-0000-4000-8000-0000000000c2',
+        name: 'Breath',
+        slug: 'breath',
+        description: null,
+        icon: null,
+        sortOrder: 0,
+        coverImageKey: 'categories/c2/cover',
+      },
+    ]);
+    const path = `/api/content/public/categories?orgId=${ORG_ID}`;
+    const coverOf = async (res: Response) =>
+      ((await res.json()) as { data: Array<{ coverImageUrl: string | null }> })
+        .data[0]?.coverImageUrl;
+
+    const unset = await dispatch(path, { R2_PUBLIC_URL_BASE: undefined });
+    const set = await dispatch(path);
+    const again = await dispatch(path);
+
+    expect(await coverOf(unset)).toBeNull();
+    expect(await coverOf(set)).toBe(
+      `${R2_PUBLIC_URL_BASE}/categories/c2/cover/md.webp`
+    );
+    expect(await coverOf(again)).toBe(
+      `${R2_PUBLIC_URL_BASE}/categories/c2/cover/md.webp`
+    );
+    expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(2);
+  });
+
   // Org delete invalidates under the lowercase DB id, so an uppercase read must
   // key the same slot, or it caches where no invalidation reaches.
   it('keys an uppercase org id as the lowercase one', async () => {
