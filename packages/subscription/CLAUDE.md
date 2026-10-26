@@ -65,7 +65,11 @@ payout-released email — the open defects `Codex-2hxff.7` and `Codex-2hxff.13`.
   `subscriptions.update` on a price change — go through `schedulePriceChange`
   (`pending-price-change.ts`): same interval only, no proration, first renewal
   ≥ 30 days after the email (`Codex-2hxff.3`).
-- If the DB insert fails, the new Stripe Product is archived (orphan prevention).
+- If the DB insert fails, the new Stripe Product is archived (orphan prevention),
+  unless a live row already uses it. Create keys survive a retry — a tier keys
+  on the dialog's `submissionId`, a course plan on course + generation + UTC
+  hour — and a repeat returns the row the first attempt made; the same key with
+  different values is a typed 409 (`Codex-2hxff.66`).
 - One `isRecommended` tier per organisation (enforced in a transaction).
 - `sortOrder` **is** the access hierarchy. Soft delete only; a tier with
   subscribers who have not cancelled cannot be deleted (`TierHasSubscribersError`).

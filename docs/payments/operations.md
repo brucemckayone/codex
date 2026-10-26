@@ -105,7 +105,7 @@ There is no event-id table; safety on redelivery comes from unique keys
 | `STRIPE_SECRET_KEY` | secret | Also needed by organization-api, which creates tier Products and Prices |
 | `STRIPE_WEBHOOK_SECRET_BOOKING`, `_PAYMENT`, `_DISPUTE`, `_SUBSCRIPTION`, `_CONNECT` | secret | One per endpoint |
 | `STRIPE_WEBHOOK_SECRET_CUSTOMER` | secret | To be removed — **gap**: `Codex-2hxff.24` |
-| `STRIPE_PORTAL_CONFIGURATION_ID` | secret | The locked billing-portal configuration — `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` in the sandbox. Optional at boot; without it the billing portal refuses to open |
+| `STRIPE_PORTAL_CONFIGURATION_ID` | secret | The locked billing-portal configuration — `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` in the sandbox. Optional at boot; without it the billing portal refuses to open. The deploy uploads it only when it is set and is a `bpc_` id; otherwise the run warns (unset) or errors (wrong shape) and keeps the current value (`Codex-2hxff.41`) |
 | `ENVIRONMENT` | var | `production` disables the dev webhook route |
 | `WEB_APP_URL` | var | Required — agreement emails need it — **gap**: `Codex-2hxff.7` (declared optional) |
 | `API_URL` | var | Must be declared under `env.production` — **gap**: `Codex-2hxff.24` |

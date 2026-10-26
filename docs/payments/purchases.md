@@ -167,9 +167,14 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
      its next owner. A transfer that fails gets a **failed** row that keeps its
      charge id and is retried.
 6. Then, without holding up the response: the buyer's library version is
-   bumped, a receipt email is sent once per purchase (not once per webhook
-   delivery) — **gap**: `Codex-mat01` (a redelivery sends it again) — and a creator whose slice went
-   pending is emailed to finish payouts setup — **gap**: `Codex-2hxff.7`.
+   bumped, and a receipt email is sent once per purchase, not once per webhook
+   delivery (owner decision 2026-10-25, "One receipt per purchase";
+   `Codex-mat01`). The first delivery to find the purchase completed claims
+   `purchases.receipt_sent_at` and sends it; a later one finds it claimed and
+   sends nothing. A purchase refunded in full before its checkout is recorded
+   gets none, and a claim that fails transiently returns 500 so Stripe
+   redelivers. A creator whose slice went pending is emailed to finish payouts
+   setup — **gap**: `Codex-2hxff.7`.
 
 **Errors.** A transient failure (database connection, Stripe outage) returns
 500 and Stripe retries. A failure writing the slices after the purchase has
@@ -299,8 +304,8 @@ alone.
 Refunds are issued by **platform support only** — never by creators, and never
 self-served by customers (owner decision 2026-10-13, "Platform support") — from
 an admin screen that calls Stripe and then lets the `charge.refunded` webhook do
-the rest, so there is one refund path — **gap**: `Codex-2hxff.28` (today refunds
-can only be started in the Stripe Dashboard). Support can refund up to **14 days**
+the rest, so there is one refund path: the Refunds screen in the platform
+admin (`(platform)/admin/refunds`, `Codex-2hxff.28`). Support can refund up to **14 days**
 after the purchase (owner decision 2026-10-13, "14 days"): 14 × 24 hours from
 Stripe's `charge.created`, for a purchase and a subscription invoice alike, so a
 renewal's window runs from that renewal (owner decision 2026-10-24, Q1). The
@@ -390,8 +395,7 @@ the purchase's refunded amount, id and reason from the refunds still standing
 count only money the buyer got back. A failed full refund keeps the purchase
 `refunded` until support settles it.
 
-The screen and its two actions are **gap**: `Codex-2hxff.28`; until it ships, a
-person settles a failed refund by hand. A
+Support settles a failed refund on the same Refunds screen (`Codex-2hxff.28`). A
 `canceled` refund paid nothing out and is never clawed back. A purchase it
 refunded in part stops counting it, restated as for a failed refund (owner
 decision 2026-10-25, "same as failed"); one it refunded in full stays
@@ -410,7 +414,11 @@ refunded, so it is logged for a person to check the buyer's access.
   (in flight when the refund came, or made but never recorded), so Stripe is
   then asked; a transfer found is reversed in full and the slice becomes
   `reversed`. A transfer that lands after the cancel is reversed by whoever
-  sent it ([the ledger](connect-and-payouts.md#the-payouts-ledger)).
+  sent it ([the ledger](connect-and-payouts.md#the-payouts-ledger)). Both the
+  refund and the sender may find it; Stripe refuses whichever full reversal
+  comes second, and that side, seeing the transfer `reversed`, treats it as
+  done. Either way the slice ends `reversed`, recording the transfer
+  (`Codex-pqsfg`).
 - an organisation slice held for no owner is cancelled the same way, and is
   never handed to the next owner.
 
@@ -451,7 +459,7 @@ far and the newest refund's id and reason.
   ([payout timing](connect-and-payouts.md#payout-timing)), a refund normally finds
   the money still in the payee's Stripe balance; debts mostly come from disputes,
   which can arrive later. Refund reviews need an operations screen — **gap**:
-  `Codex-2hxff.28` (no reader today).
+  `Codex-2hxff.73` (no reader today).
 - Any other reversal failure is retried, and nothing is marked done until it
   succeeds. A database or Stripe outage makes the webhook return 500, so Stripe
   redelivers. A request Stripe refused is retried by the hourly cron with the
