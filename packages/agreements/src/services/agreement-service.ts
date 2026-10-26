@@ -54,6 +54,7 @@ import {
   NotFoundError,
   type ServiceConfig,
 } from '@codex/service-errors';
+import type { EnvName } from '@codex/urls';
 import {
   and,
   asc,
@@ -77,6 +78,11 @@ import type {
   CreatorOrganizationAgreement,
   RevenueType,
 } from '../types';
+import {
+  type AgreementEmailRecipient,
+  buildAgreementEmailLink,
+  isEnvName,
+} from './agreement-links';
 import {
   formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,
@@ -196,14 +202,12 @@ export type AgreementWaitUntilFn = (promise: Promise<unknown>) => void;
  * When absent (narrow unit tests, legacy harnesses), all mutations
  * still succeed — only the email side-effect is skipped.
  *
- * `webAppUrl` is MANDATORY (per WP-5 polish — Codex-0omga). It is the
- * absolute base used to construct deep links into the negotiation /
- * agreement pages embedded in the email body. The previous "relative
- * fallback" never worked in practice — `z.string().url()` in the
- * validation schema rejects relative paths, so a mailer call dispatched
- * without `webAppUrl` would have failed downstream anyway. Failing fast
- * at construction surfaces misconfiguration during wiring rather than at
- * the first lifecycle notification.
+ * The email links are built from `environment`, which must therefore be an
+ * env name `@codex/urls` can route (`production`, `staging`, `dev`,
+ * `development`, `test`); the constructor throws otherwise, so a
+ * misconfigured worker fails at wiring, not at the first notification. It
+ * replaced a mandatory `webAppUrl` (Codex-2hxff.20 AGR-10): that apex host
+ * has no Studio, so every link built on it was dead.
  *
  * `waitUntil` (per Codex-0omga) is the optional `ExecutionContext.waitUntil`
  * hook used to push the entire lifecycle dispatch (user / org lookups +
@@ -214,11 +218,6 @@ export type AgreementWaitUntilFn = (promise: Promise<unknown>) => void;
  */
 export interface AgreementServiceConfig extends ServiceConfig {
   mailer?: AgreementLifecycleMailer;
-  /**
-   * Absolute base URL used to build email deep-links. Mandatory; the
-   * service throws at construction if unset.
-   */
-  webAppUrl: string;
   /**
    * Optional `ExecutionContext.waitUntil` (or equivalent). Production
    * code threads the worker `ExecutionContext.waitUntil` through here so
@@ -296,26 +295,43 @@ function withShare(
  */
 type Tx = Parameters<Parameters<AgreementService['db']['transaction']>[0]>[0];
 
+/** One lifecycle email, as a mutation hands it to the dispatcher. */
+interface LifecycleEmailParams {
+  recipientUserId: string;
+  /** Which side the recipient is on: it picks the page their link opens. */
+  recipientSide: 'owner' | 'creator';
+  organizationId: string;
+  templateName: AgreementTemplateName;
+  extraContext: Record<string, string>;
+  /**
+   * A proposal id in the thread, for the creator's link. `null` sends the
+   * creator to their negotiations list. The owner's link never uses it.
+   */
+  threadId: string | null;
+  /** `null` when there is nobody to name: the email says "The other party". */
+  counterpartyUserId: string | null;
+  revenueType: RevenueType;
+  sharePercent: number;
+  termMonths: number | null;
+  note?: string | null;
+}
+
 export class AgreementService extends BaseService {
   private readonly mailer: AgreementLifecycleMailer | undefined;
-  private readonly webAppUrl: string;
+  private readonly envName: EnvName;
   private readonly waitUntil: AgreementWaitUntilFn | undefined;
 
   constructor(config: AgreementServiceConfig) {
     super(config);
-    if (!config.webAppUrl) {
-      // Fail-fast on misconfiguration. The deep-link is validated
-      // downstream via `urlSchema` (HTTP/HTTPS only), so an empty /
-      // relative base would have surfaced as a 500 in the first
-      // lifecycle notification anyway — better to crash the worker at
-      // boot than silently lose a real notification.
-      throw new Error(
-        'AgreementService requires `webAppUrl` to be set for notification deep-links. ' +
-          'Check `env.WEB_APP_URL` in wrangler.jsonc and the service registry wiring.'
+    if (!isEnvName(config.environment)) {
+      // Fail fast: every email link is built from the env name, and an
+      // unknown one has no host to send a recipient to.
+      throw new InternalServiceError(
+        'AgreementService requires a known `environment` to build email links'
       );
     }
     this.mailer = config.mailer;
-    this.webAppUrl = config.webAppUrl;
+    this.envName = config.environment;
     this.waitUntil = config.waitUntil;
   }
 
@@ -416,6 +432,7 @@ export class AgreementService extends BaseService {
       // back the (already committed) agreement state.
       await this.dispatchLifecycleEmail({
         recipientUserId: proposal.creatorId,
+        recipientSide: 'creator',
         organizationId: proposal.organizationId,
         templateName: 'agreement-proposed-by-owner',
         extraContext: {},
@@ -570,6 +587,7 @@ export class AgreementService extends BaseService {
         : result.child.creatorId;
       await this.dispatchLifecycleEmail({
         recipientUserId,
+        recipientSide: isCreatorCounter ? 'owner' : 'creator',
         organizationId: result.child.organizationId,
         templateName: isCreatorCounter
           ? 'agreement-countered-by-creator'
@@ -797,6 +815,7 @@ export class AgreementService extends BaseService {
       await Promise.all([
         this.dispatchLifecycleEmail({
           recipientUserId: creatorSideUserId,
+          recipientSide: 'creator',
           organizationId: result.agreement.organizationId,
           templateName: 'agreement-accepted',
           extraContext: { effectiveFromDate },
@@ -809,6 +828,7 @@ export class AgreementService extends BaseService {
         }),
         this.dispatchLifecycleEmail({
           recipientUserId: ownerSideUserId,
+          recipientSide: 'owner',
           organizationId: result.agreement.organizationId,
           templateName: 'agreement-accepted',
           extraContext: { effectiveFromDate },
@@ -900,10 +920,15 @@ export class AgreementService extends BaseService {
       await Promise.all([
         this.dispatchLifecycleEmail({
           recipientUserId: creatorSideUserId,
+          recipientSide: 'creator',
           organizationId: declined.organizationId,
           templateName: 'agreement-declined',
           extraContext: { declineReason },
-          threadId: declined.id,
+          // The creator's negotiations list, not the thread: the creator
+          // thread route finds a thread only through an open, countered or
+          // accepted proposal, so a round-1 decline has none and its link
+          // would 404. The list shows it under "Past" (Codex-2hxff.20 AGR-10).
+          threadId: null,
           counterpartyUserId: ownerSideUserId,
           revenueType: declined.revenueType as RevenueType,
           sharePercent,
@@ -912,6 +937,7 @@ export class AgreementService extends BaseService {
         }),
         this.dispatchLifecycleEmail({
           recipientUserId: ownerSideUserId,
+          recipientSide: 'owner',
           organizationId: declined.organizationId,
           templateName: 'agreement-declined',
           extraContext: { declineReason },
@@ -1098,6 +1124,7 @@ export class AgreementService extends BaseService {
 
       await this.dispatchLifecycleEmail({
         recipientUserId,
+        recipientSide: terminatorIsCreator ? 'owner' : 'creator',
         organizationId: terminated.organizationId,
         templateName: 'agreement-terminated',
         extraContext: {
@@ -1106,7 +1133,9 @@ export class AgreementService extends BaseService {
             terminated.terminatedAt ?? new Date()
           ),
         },
-        threadId: terminated.id,
+        // The thread's id is a PROPOSAL id: the creator page reads one, and
+        // the agreement's own id there was a 404 (Codex-2hxff.20 AGR-10).
+        threadId: terminated.currentProposalId,
         counterpartyUserId: input.terminatedByUserId,
         revenueType: terminated.revenueType as RevenueType,
         // From the accepted proposal, not the legacy org-fee column
@@ -1333,8 +1362,8 @@ export class AgreementService extends BaseService {
    *   - `expiringSoonEmailSentAt IS NULL` — idempotency gate; once the cron
    *     has fired for this row, it does not refire
    *
-   * Returns enriched rows: agreement + creator contact + org name. The
-   * cron handler iterates this list and dispatches one email per recipient
+   * Returns enriched rows: agreement + creator contact + org name and slug
+   * (the slug builds the owner's email link). The cron handler iterates this list and dispatches one email per recipient
    * (creator + the first active owner of the org) per agreement.
    *
    * Soft-deleted users (creator or owner) are filtered out — there is
@@ -1353,6 +1382,7 @@ export class AgreementService extends BaseService {
       agreement: AgreementWithShare;
       creator: { id: string; email: string; name: string };
       orgName: string;
+      orgSlug: string;
     }>
   > {
     try {
@@ -1368,6 +1398,7 @@ export class AgreementService extends BaseService {
           creatorEmail: users.email,
           creatorName: users.name,
           orgName: organizations.name,
+          orgSlug: organizations.slug,
         })
         .from(creatorOrganizationAgreements)
         .leftJoin(
@@ -1410,6 +1441,7 @@ export class AgreementService extends BaseService {
             name: r.creatorName,
           },
           orgName: r.orgName,
+          orgSlug: r.orgSlug,
         };
       });
     } catch (error) {
@@ -1673,17 +1705,6 @@ export class AgreementService extends BaseService {
   }
 
   /**
-   * Build the absolute deep link to the negotiation thread + agreement.
-   * `webAppUrl` is mandatory at construction (Codex-0omga polish) so the
-   * resulting URL always validates against the project's `urlSchema`
-   * (HTTP/HTTPS only).
-   */
-  private buildNegotiationDeepLink(orgId: string, threadId: string): string {
-    const path = `/studio/negotiations/${threadId}?orgId=${orgId}`;
-    return `${this.webAppUrl}${path}`;
-  }
-
-  /**
    * Locate the email + display name for a given user. Returns `null`
    * when the user has been hard-deleted (e.g. GDPR erasure happened
    * between transaction commit and mailer fire — rare but possible).
@@ -1708,12 +1729,23 @@ export class AgreementService extends BaseService {
    * recently-archived org is still useful audit information.
    */
   private async lookupOrgName(organizationId: string): Promise<string | null> {
+    return (await this.lookupOrg(organizationId))?.name ?? null;
+  }
+
+  /**
+   * The org's name, for the email body, and its slug, for the owner's
+   * link to their organisation Studio. Soft-deleted orgs are included, as
+   * in `lookupOrgName`.
+   */
+  private async lookupOrg(
+    organizationId: string
+  ): Promise<{ name: string; slug: string } | null> {
     const [row] = await this.db
-      .select({ name: organizations.name })
+      .select({ name: organizations.name, slug: organizations.slug })
       .from(organizations)
       .where(eq(organizations.id, organizationId))
       .limit(1);
-    return row?.name ?? null;
+    return row ?? null;
   }
 
   /**
@@ -1739,19 +1771,9 @@ export class AgreementService extends BaseService {
    * commercial parties, both of whom can see them via the negotiation
    * UI anyway. They DO get HTML-escaped by the renderer.
    */
-  private async dispatchLifecycleEmail(params: {
-    recipientUserId: string;
-    organizationId: string;
-    templateName: AgreementTemplateName;
-    extraContext: Record<string, string>;
-    threadId: string;
-    /** `null` when there is nobody to name: the email says "The other party". */
-    counterpartyUserId: string | null;
-    revenueType: RevenueType;
-    sharePercent: number;
-    termMonths: number | null;
-    note?: string | null;
-  }): Promise<void> {
+  private async dispatchLifecycleEmail(
+    params: LifecycleEmailParams
+  ): Promise<void> {
     const work = this.dispatchLifecycleEmailImpl(params).catch((err) => {
       // We deliberately log + swallow. Mailer transport failures should
       // not prevent the agreement from existing — the agreement row is
@@ -1776,19 +1798,9 @@ export class AgreementService extends BaseService {
     await work;
   }
 
-  private async dispatchLifecycleEmailImpl(params: {
-    recipientUserId: string;
-    organizationId: string;
-    templateName: AgreementTemplateName;
-    extraContext: Record<string, string>;
-    threadId: string;
-    /** `null` when there is nobody to name: the email says "The other party". */
-    counterpartyUserId: string | null;
-    revenueType: RevenueType;
-    sharePercent: number;
-    termMonths: number | null;
-    note?: string | null;
-  }): Promise<void> {
+  private async dispatchLifecycleEmailImpl(
+    params: LifecycleEmailParams
+  ): Promise<void> {
     if (!this.mailer) {
       // Narrow unit tests / legacy harnesses without a mailer wired —
       // silently no-op. The agreement mutation has already succeeded;
@@ -1796,12 +1808,12 @@ export class AgreementService extends BaseService {
       return;
     }
 
-    const [recipient, counterparty, orgName] = await Promise.all([
+    const [recipient, counterparty, org] = await Promise.all([
       this.lookupUserContact(params.recipientUserId),
       params.counterpartyUserId
         ? this.lookupUserContact(params.counterpartyUserId)
         : null,
-      this.lookupOrgName(params.organizationId),
+      this.lookupOrg(params.organizationId),
     ]);
 
     if (!recipient) {
@@ -1817,17 +1829,33 @@ export class AgreementService extends BaseService {
       return;
     }
 
+    let link: AgreementEmailRecipient;
+    if (params.recipientSide === 'owner') {
+      if (!org) {
+        // The owner's link is their organisation's Studio, so without the
+        // org row there is no page to send them to.
+        this.obs.warn(
+          'agreement notification skipped: organisation not found',
+          {
+            organizationId: params.organizationId,
+            templateName: params.templateName,
+          }
+        );
+        return;
+      }
+      link = { side: 'owner', orgSlug: org.slug };
+    } else {
+      link = { side: 'creator', proposalId: params.threadId };
+    }
+
     const data: Record<string, string | number | boolean> = {
       recipientName: recipient.name,
-      orgName: orgName ?? 'Your organization',
+      orgName: org?.name ?? 'Your organization',
       otherPartyName: counterparty?.name ?? 'The other party',
       revenueTypeLabel: formatRevenueTypeLabel(params.revenueType),
       sharePercentDisplay: this.formatSharePercent(params.sharePercent),
       termMonthsDisplay: this.formatTermMonths(params.termMonths),
-      deepLinkUrl: this.buildNegotiationDeepLink(
-        params.organizationId,
-        params.threadId
-      ),
+      deepLinkUrl: buildAgreementEmailLink(this.envName, link),
       // Empty string keeps the renderer's missing-token list clean —
       // the template still includes the `<em>Note:</em>` block but it
       // renders as empty when no note was supplied.

@@ -11,6 +11,7 @@
   import { browser } from '$app/environment';
   import { goto } from '$app/navigation';
   import * as m from '$paraglide/messages';
+  import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
   import MemberTable from '$lib/components/studio/MemberTable.svelte';
   import InviteMemberDialog from '$lib/components/studio/InviteMemberDialog.svelte';
   import { Alert, Button, PageHeader } from '$lib/components/ui';
@@ -30,6 +31,9 @@
     spokenAgreementShare,
   } from '$lib/components/agreements/agreement-share';
   import type { AgreementWithShare } from '@codex/agreements';
+  import { logger } from '$lib/observability';
+  import { queryErrorMessage } from '$lib/remote/query-result';
+  import { connectQueryState } from '$lib/utils/connect-readiness';
 
   let { data } = $props();
 
@@ -68,17 +72,34 @@
     isOwner ? listActiveAgreements({ organizationId: data.org.id }) : null
   );
 
+  // A failed agreements read is not "no agreements" (Codex-2hxff.74): every
+  // member's cell used to read "Set up", including creators with an
+  // agreement, and clicking it sent the owner off to propose one again. The
+  // column now waits for the read; a failure shows the alert above the table
+  // and the column stays hidden. Members, roles and Remove do not depend on
+  // it, so they stay.
+  const agreementsState = $derived(connectQueryState(agreementsQuery));
+
+  // The real error goes to the logger (which redacts), never into the DOM.
+  $effect(() => {
+    if (agreementsState.kind === 'failed') {
+      logger.error('studio/team: agreements failed to load', {
+        organizationId: data.org.id,
+        reason: queryErrorMessage(agreementsQuery?.error),
+      });
+    }
+  });
+
   // Map userId → compact active-agreement summary for the table column. The
   // share is the agreement's own `creatorSharePercent`, matching the
   // revenue-share page; a missing one reads "— subs" (Codex-fazy6). Both
   // revenue types fold into one label, e.g. "30% subs · 20% sales". Undefined
-  // when not owner → column hidden. A label with a missing share also gets
-  // `srLabel`, the same words with "No share recorded" for the dash, which
-  // says nothing to a screen reader.
+  // (column hidden) when not owner, and until the agreements have loaded. A
+  // label with a missing share also gets `srLabel`, the same words with "No
+  // share recorded" for the dash, which says nothing to a screen reader.
   const revenueShareByUser = $derived.by(() => {
-    if (!isOwner) return undefined;
-    const rows = (agreementsQuery?.current?.items ??
-      []) as AgreementWithShare[];
+    if (!isOwner || agreementsState.kind !== 'ok') return undefined;
+    const rows = (agreementsState.status.items ?? []) as AgreementWithShare[];
     const map = new Map<
       string,
       { label: string; srLabel?: string; active: boolean }
@@ -205,6 +226,16 @@
 
   {#if memberError}
     <Alert variant="error">{memberError}</Alert>
+  {/if}
+
+  {#if isOwner}
+    <LoadFailedAlert
+      query={agreementsQuery}
+      message={m.agreement_load_failed()}
+      againMessage={m.agreement_load_failed_again()}
+      loadedMessage={m.agreement_load_retry_ok()}
+      data-testid="team-agreements-load-error"
+    />
   {/if}
 
   <section class="members-section">

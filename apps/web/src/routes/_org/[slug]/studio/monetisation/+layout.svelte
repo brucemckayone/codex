@@ -6,7 +6,7 @@
   layout pattern. Active tab is derived from the current URL pathname.
 
   Tabs:
-  - Subscriptions  → /studio/monetisation              (Stripe Connect, tiers)
+  - Subscriptions  → /studio/monetisation              (Stripe Connect, tiers; owner only)
   - Revenue share  → /studio/monetisation/revenue-share (creator agreements)
   - Pricing FAQ    → /studio/monetisation/pricing-faq   (public pricing-page FAQ)
 
@@ -52,12 +52,25 @@
           : null
   );
 
+  // The Subscriptions tab is owner-only: its page sends anyone else to
+  // /studio. An admin on Revenue share (which they may read) was offered it
+  // and then redirected away. Same test as that page's guard, so the tab
+  // shows while the role is still loading (ssr=false) and an owner never
+  // sees it pop in.
+  const showSubscriptionsTab = $derived(
+    page.data.userRole === undefined || page.data.userRole === 'owner'
+  );
+
   const tabs = $derived([
-    {
-      value: 'subscriptions',
-      href: '/studio/monetisation',
-      label: m.monetisation_subscriptions_title(),
-    },
+    ...(showSubscriptionsTab
+      ? [
+          {
+            value: 'subscriptions',
+            href: '/studio/monetisation',
+            label: m.monetisation_subscriptions_title(),
+          },
+        ]
+      : []),
     {
       value: 'revenue-share',
       href: '/studio/monetisation/revenue-share',

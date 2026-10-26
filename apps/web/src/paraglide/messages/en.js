@@ -943,6 +943,30 @@ export const account_payments_kind_course = () => `Course`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const account_payments_load_failed = () => `We couldn't load your purchases.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_payments_load_failed_again = () => `We still couldn't load your purchases.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_payments_load_retry_ok = () => `Purchases loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const account_settings_title = () => `Account Settings`
 
 
@@ -3727,6 +3751,30 @@ export const billing_top_content_column_purchases = () => `Purchases`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const billing_top_content_note = () => `Course sales, portal sales and subscription payments count towards the totals above but are not listed here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const billing_fee_description = () => `Codex takes a percentage of each sale and of each subscription payment. Nothing else is billed to this organisation; there is no plan fee.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const billing_gross_kinds_label = () => `Gross by kind`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const billing_error_title = () => `Billing Error`
 
 
@@ -4248,6 +4296,86 @@ export const pricing_resume_plan = () => `Resume plan`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const pricing_manage_plan = () => `Manage plan`
+
+
+/**
+ * @param {{ org: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_already_subscribed = (params) => `You're already subscribed to ${params.org}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_manage_subscription = () => `Manage subscription`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_plan_gone = () => `That plan is no longer available. We've refreshed the plans below.`
+
+
+/**
+ * @param {{ org: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_not_taking_subscriptions = (params) => `${params.org} isn't taking subscriptions yet. Please check back later.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_checkout_problem = () => `We couldn't start checkout. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_checkout_refused = () => `We couldn't start checkout for this plan.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_change_refused = () => `We couldn't change your plan.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_subscription_unknown = () => `We couldn't check your current subscription, so checkout can't start. Reload the page to check again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_payment_declined = () => `Payment was declined. Update your payment method and try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_close = () => `Close`
 
 
 /**
@@ -8575,7 +8703,7 @@ export const analytics_creator_revenue_loading_label = () => `Loading creator re
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const analytics_creator_revenue_empty = () => `No active creator agreements yet.`
+export const analytics_creator_revenue_empty = () => `No creator holds an agreement or has earned yet.`
 
 
 /**
@@ -8591,7 +8719,7 @@ export const analytics_creator_revenue_col_creator = () => `Creator`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const analytics_creator_revenue_col_revenue = () => `Total revenue`
+export const analytics_creator_revenue_col_earned = () => `Earned`
 
 
 /**
@@ -8599,7 +8727,15 @@ export const analytics_creator_revenue_col_revenue = () => `Total revenue`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const analytics_creator_revenue_col_split = () => `Split`
+export const analytics_creator_revenue_col_subscription_share = () => `Subscription share`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_col_sales_share = () => `Sales share`
 
 
 /**
@@ -8624,6 +8760,150 @@ export const analytics_creator_revenue_col_pending = () => `Pending`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const analytics_creator_revenue_no_payout = () => `No payouts drained yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_share_none = () => `None`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_share_missing = () => `No share recorded`
+
+
+/**
+ * @param {{ share: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_inline_subscription = (params) => `Subs ${params.share}`
+
+
+/**
+ * @param {{ share: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_inline_sales = (params) => `Sales ${params.share}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_revenue_kinds_label = () => `Revenue by kind`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_revenue_kind_one_off = () => `One-off`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_revenue_kind_course = () => `Courses`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_revenue_kind_subscription = () => `Subscriptions`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_revenue_kind_course_plan = () => `Course plans`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_revenue_load_failed = () => `We couldn't load your revenue.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_revenue_load_failed_again = () => `We still couldn't load your revenue.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_revenue_load_retry_ok = () => `Revenue loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_revenue_load_failed = () => `We couldn't load your revenue.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_revenue_load_failed_again = () => `We still couldn't load your revenue.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_revenue_load_retry_ok = () => `Revenue loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_activity_load_failed = () => `We couldn't load your recent activity.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_activity_load_failed_again = () => `We still couldn't load your recent activity.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_activity_load_retry_ok = () => `Recent activity loaded.`
 
 
 /**
@@ -9064,6 +9344,70 @@ export const checkout_duplicate_description = () => `This second payment is bein
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const checkout_duplicate_go_to = (params) => `Go to ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_arrival_title = () => `Payment received`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_arrival_unlocking = () => `Unlocking your content…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_late_title = () => `Your payment went through`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_late_description = () => `We're still finishing up; check again in a minute.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_check_again = () => `Check again`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_checking = () => `Checking…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_inactive_title = () => `This purchase is no longer active.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_inactive_payment_history = () => `See your payment history`
 
 
 /**
@@ -11527,6 +11871,54 @@ export const money_setup_load_retry_ok = () => `Payout account loaded.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tiers_load_failed = () => `We couldn't load your tiers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tiers_load_failed_again = () => `We still couldn't load your tiers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tiers_load_retry_ok = () => `Tiers loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_settings_load_failed = () => `We couldn't load your subscription settings.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_settings_load_failed_again = () => `We still couldn't load your subscription settings.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_settings_load_retry_ok = () => `Subscription settings loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const monetisation_connect_disabled = () => `Disabled by Stripe`
 
 
@@ -12231,7 +12623,7 @@ export const monetisation_revshare_budget_title = () => `Team budget — subscri
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const monetisation_revshare_budget_lede = () => `How subscription revenue is currently split across the platform fee, active creator agreements, and the org residual.`
+export const monetisation_revshare_budget_lede = () => `How the subscription revenue left after Codex's fee is split between your creators and the organisation.`
 
 
 /**
@@ -12592,6 +12984,166 @@ export const monetisation_revshare_type_content = () => `Content purchase`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const monetisation_revshare_propose_aria = (params) => `Propose a ${params.type} revenue split with ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_readonly_note = () => `You can see every agreement and negotiation here. Only the owner can propose, change or end an agreement.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_group_attention_readonly = () => `Waiting on the owner`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_group_attention_readonly_lede = () => `These creators are waiting on the owner to accept, counter or decline.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_default_split_readonly = () => `Where there is no agreement the org keeps 100% of post-platform revenue.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_active_lede_readonly = () => `Review the full negotiation thread for each active agreement.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_proposals_load_failed = () => `We couldn't load your pending proposals.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_proposals_load_failed_again = () => `We still couldn't load your pending proposals.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_proposals_load_retry_ok = () => `Pending proposals loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_team_load_failed = () => `We couldn't load your team.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_team_load_failed_again = () => `We still couldn't load your team.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_team_load_retry_ok = () => `Team loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_load_failed = () => `We couldn't load your agreements.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_load_failed_again = () => `We still couldn't load your agreements.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_load_retry_ok = () => `Agreements loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_split_basis = () => `100% is what's left after Codex's fee.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_split_organisation = () => `Organisation`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_split_other_creators = (params) => `Other creators (${params.count})`
+
+
+/**
+ * @param {{ number: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_split_other_creator_numbered = (params) => `Other creator ${params.number}`
+
+
+/**
+ * @param {{ total: NonNullable<unknown>, over: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_split_over = (params) => `Shares add up to ${params.total} of what's left after Codex's fee, ${params.over} more than there is.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_split_over_amend = () => `Amend one or more agreements.`
 
 
 /**

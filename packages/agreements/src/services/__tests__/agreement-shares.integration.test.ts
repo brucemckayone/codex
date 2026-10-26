@@ -50,7 +50,6 @@ describe('agreement shares (AGR-04, AGR-08, AGR-13)', () => {
     service = new AgreementService({
       db,
       environment: 'test',
-      webAppUrl: 'https://app.test',
     });
   });
 
@@ -262,7 +261,6 @@ describe('agreement shares (AGR-04, AGR-08, AGR-13)', () => {
     const withMailer = new AgreementService({
       db,
       environment: 'test',
-      webAppUrl: 'https://app.test',
       mailer,
     });
     const proposal = await propose(fx, fx.creatorA, 3000);

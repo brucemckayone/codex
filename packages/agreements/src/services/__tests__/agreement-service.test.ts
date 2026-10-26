@@ -182,14 +182,9 @@ describe('AgreementService', () => {
     // FeeConfigService — share-validation reasons purely about the
     // post-platform pool. WP-4's payout pipeline reads the platform
     // fee fresh at invoice time elsewhere.
-    //
-    // Codex-0omga (WP-5 polish): `webAppUrl` is now mandatory at
-    // construction. Tests use a fixed sentinel so deep-link assertions
-    // are stable.
     service = new AgreementService({
       db,
       environment: 'test',
-      webAppUrl: 'https://app.example.test',
     });
   });
 
@@ -1762,7 +1757,6 @@ describe('AgreementService', () => {
         db,
         environment: 'test',
         mailer,
-        webAppUrl: 'https://app.example.test',
       });
       return { serviceWithMailer, mailer };
     }
@@ -1770,7 +1764,7 @@ describe('AgreementService', () => {
     it('proposeAgreement triggers agreement-proposed-by-owner addressed to the creator', async () => {
       const fx = await seedOrgFixture(db);
       const { serviceWithMailer, mailer } = buildServiceWithMailer();
-      await serviceWithMailer.proposeAgreement({
+      const proposal = await serviceWithMailer.proposeAgreement({
         organizationId: fx.orgId,
         creatorId: fx.creatorAId,
         revenueType: 'subscription',
@@ -1791,11 +1785,11 @@ describe('AgreementService', () => {
       expect(data.termMonthsDisplay).toBe('6 months');
       expect(data.revenueTypeLabel).toBe('subscription');
       expect(data.note).toBe('A note for the recipient.');
-      // Deep link includes the absolute base + org id
-      expect(data.deepLinkUrl).toContain(
-        'https://app.example.test/studio/negotiations/'
+      // The creator's thread, on the creators subdomain (Codex-2hxff.20
+      // AGR-10). Built from the env name: 'test' is the lvh.me host.
+      expect(data.deepLinkUrl).toBe(
+        `http://creators.lvh.me:3000/studio/negotiations/${proposal.id}`
       );
-      expect(data.deepLinkUrl).toContain(`orgId=${fx.orgId}`);
     });
 
     it('counterPropose by creator triggers agreement-countered-by-creator addressed to the proposing owner', async () => {
@@ -2008,7 +2002,6 @@ describe('AgreementService', () => {
         db,
         environment: 'test',
         mailer: throwingMailer,
-        webAppUrl: 'https://app.example.test',
       });
       // Should NOT throw — the dispatcher catches + logs the mailer
       // failure. Returned proposal is the persisted row.
@@ -2082,28 +2075,13 @@ describe('AgreementService', () => {
 
     // ─── Construction-time guards (Codex-0omga WP-5 polish) ──────────────
 
-    it('throws at construction if webAppUrl is missing (mandatory)', () => {
-      // Codex-0omga: `webAppUrl` is mandatory at construction. Failing
-      // fast surfaces misconfigured workers at boot rather than at the
-      // first lifecycle notification.
+    it('throws at construction on an environment it cannot build links for', () => {
+      // The email links come from the env name (Codex-2hxff.20 AGR-10).
+      // Failing fast surfaces a misconfigured worker at wiring rather
+      // than at the first lifecycle notification.
       expect(() => {
-        new AgreementService({
-          db,
-          environment: 'test',
-          // @ts-expect-error — deliberately omitting required field
-          webAppUrl: undefined,
-        });
-      }).toThrow(/webAppUrl/i);
-    });
-
-    it('throws at construction if webAppUrl is the empty string', () => {
-      expect(() => {
-        new AgreementService({
-          db,
-          environment: 'test',
-          webAppUrl: '',
-        });
-      }).toThrow(/webAppUrl/i);
+        new AgreementService({ db, environment: 'prod-typo' });
+      }).toThrow(/environment/i);
     });
 
     // ─── Dispatcher latency offload (Codex-0omga WP-5 polish) ────────────
@@ -2124,7 +2102,6 @@ describe('AgreementService', () => {
         db,
         environment: 'test',
         mailer,
-        webAppUrl: 'https://app.example.test',
         waitUntil,
       });
 
@@ -2166,7 +2143,6 @@ describe('AgreementService', () => {
         db,
         environment: 'test',
         mailer,
-        webAppUrl: 'https://app.example.test',
       });
       await serviceWithoutWaitUntil.proposeAgreement({
         organizationId: fx.orgId,

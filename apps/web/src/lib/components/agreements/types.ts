@@ -16,7 +16,7 @@ export type RevenueSplitMode = 'owner' | 'creator';
 export interface RevenueSplitSlice {
   /** Stable identity for keyed iteration + onChange diffing. */
   id: string;
-  /** Human-readable label (e.g. 'Platform Fee', 'Org owner', 'Alex Rivera'). */
+  /** Human-readable label (e.g. 'Organisation', 'Alex Rivera'). */
   label: string;
   /** Share in basis points (0–10_000). 100 bp = 1 %. */
   percent: number;
@@ -26,7 +26,7 @@ export interface RevenueSplitSlice {
    */
   color: string;
   /**
-   * Locked slices cannot be dragged (e.g. platform fee, computed residual).
+   * Locked slices cannot be dragged (e.g. a computed residual).
    * The boundary AFTER a locked slice is not focusable.
    */
   locked: boolean;
@@ -35,6 +35,12 @@ export interface RevenueSplitSlice {
    * identity. The owning slice (`anonymous: false`) renders normally.
    */
   anonymous: boolean;
+  /**
+   * For an anonymous slice that stands for several peers: how many. Creator
+   * mode then labels it "Other creators (N)" from this count, never from
+   * `label`.
+   */
+  peerCount?: number;
 }
 
 /** Basis-points ceiling (100 %). */

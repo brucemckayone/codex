@@ -12,6 +12,11 @@ export {
   withdrawProposalsOnDeparture,
 } from './agreement-departure';
 export {
+  type AgreementEmailRecipient,
+  buildAgreementEmailLink,
+  isEnvName,
+} from './agreement-links';
+export {
   type ActiveAgreementShareView,
   creatorShareFromLegacyOrgFee,
   formatRevenueTypeLabel,

@@ -1,10 +1,17 @@
 <!--
   @component RevenueSplitPie
 
-  Stacked horizontal bar visualising revenue-share splits between the platform
-  fee, the org/owner residual, and any number of creator slices. Used in both
-  the owner surface (full visibility) and the creator surface (self-visible,
-  peers anonymised).
+  Stacked horizontal bar visualising revenue-share splits between the org/owner
+  residual and any number of creator slices. Used in both the owner surface
+  (full visibility) and the creator surface (self-visible, peers anonymised).
+
+  The whole bar is the POST-PLATFORM pool: 100% is what's left after Codex's
+  fee, the unit every share is agreed in (Codex-2hxff.20 AGR-11). It used to
+  start with a hard-coded 10% "Platform fee" slice and draw each share against
+  the whole sale, so a 30% creator looked like 30% of a sale when they got
+  27%, and two valid shares adding to 95% of the pool were flagged as over
+  budget. There is no fee slice, so a changed fee cannot make the bar wrong,
+  and the warning shows only once the shares pass 100%.
 
   Despite the name (kept for parity with the epic plan), the component is a
   stacked bar — better for many slices and far more accessible than a radial
@@ -19,6 +26,7 @@
 -->
 <script lang="ts">
   import { tick } from 'svelte';
+  import * as m from '$paraglide/messages';
   import {
     BP_MAX,
     BP_STEP,
@@ -30,42 +38,59 @@
   interface Props {
     /** `owner` = full visibility; `creator` = self + anonymised peers. */
     mode: RevenueSplitMode;
-    /** Platform fee in basis points. Forms the locked first slice. */
-    platformFeePercent: number;
-    /** Ordered slices following the platform fee. */
+    /** Ordered slices of the post-platform pool, in basis points of it. */
     slices: RevenueSplitSlice[];
     /** Fires only when the user produces a value distinct from current props. */
     onChange?: (next: RevenueSplitSlice[]) => void;
     /** Read-only renders the bar without handles or inputs. */
     readOnly?: boolean;
+    /**
+     * Whether the viewer can amend an agreement, so the over-100% warning
+     * tells them to. Defaults to owner mode; a creator, or an admin on the
+     * owner's page, gets the first sentence only.
+     */
+    canAmend?: boolean;
     /** Optional class forwarded to the root element (composition seam per R13). */
     class?: string;
   }
 
   const {
     mode,
-    platformFeePercent,
     slices,
     onChange,
     readOnly = false,
+    canAmend,
     class: className,
   }: Props = $props();
 
   // -- Derived state ---------------------------------------------------------
 
-  /** Sum of creator/owner slice basis points (excludes platform fee). */
+  /** Sum of the slices, in basis points of the post-platform pool. */
   const sliceTotalBp = $derived(
     slices.reduce((sum, s) => sum + s.percent, 0)
   );
 
-  /** Maximum non-platform basis points available. */
-  const availableBp = $derived(BP_MAX - platformFeePercent);
+  /** The whole pool: what's left after Codex's fee. */
+  const availableBp = BP_MAX;
 
-  /** True when slices over-allocate (sum > 100% minus platform fee). */
+  /** True when slices over-allocate (sum > 100% of the pool). */
   const isOverAllocated = $derived(sliceTotalBp > availableBp);
 
-  /** True when slices under-allocate (sum < 100% minus platform fee). */
+  /** True when slices under-allocate (sum < 100% of the pool). */
   const isUnderAllocated = $derived(sliceTotalBp < availableBp);
+
+  const showAmendHint = $derived(canAmend ?? mode === 'owner');
+
+  /**
+   * How far past the pool the shares go, rounded UP to a tenth of a percent
+   * (10 bp). `formatPercent` prints one decimal, so 3334 × 3 = 10 002 bp
+   * would otherwise read "100.0% …, 0.0% more than there is". The total the
+   * warning quotes is the pool plus this, so the two figures agree.
+   */
+  const BP_TENTH = 10;
+  const overBp = $derived(
+    Math.ceil((sliceTotalBp - availableBp) / BP_TENTH) * BP_TENTH
+  );
 
   // -- SR live-region (debounced) -------------------------------------------
 
@@ -96,9 +121,20 @@
     return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
   }
 
+  /**
+   * In creator mode an anonymous slice NEVER shows its `label`, even if a
+   * caller put a peer's name there. One slice standing for several peers is
+   * named from its `peerCount` ("Other creators (2)"); it used to read
+   * "Other creator 2", a per-peer numbering that made two people sound like
+   * one.
+   */
   function displayLabel(slice: RevenueSplitSlice, index: number): string {
     if (mode === 'creator' && slice.anonymous) {
-      return `Other creator ${index + 1}`;
+      return slice.peerCount !== undefined
+        ? m.agreement_split_other_creators({ count: String(slice.peerCount) })
+        : m.agreement_split_other_creator_numbered({
+            number: String(index + 1),
+          });
     }
     return slice.label;
   }
@@ -173,12 +209,12 @@
     );
     // The handle sits at the trailing boundary of `slice`. Its new cumulative
     // position controls the slice's value:
-    //   sliceBp = cumulativeBp - platformFee - sum(earlier slices)
+    //   sliceBp = cumulativeBp - sum(earlier slices)
     const cumulativeBp = Math.round(ratio * BP_MAX);
     const earlierSliceBp = slices
       .slice(0, slices.indexOf(slice))
       .reduce((sum, s) => sum + s.percent, 0);
-    const wantedSliceBp = cumulativeBp - platformFeePercent - earlierSliceBp;
+    const wantedSliceBp = cumulativeBp - earlierSliceBp;
     const max = maxForSlice(slice.id);
     const clamped = Math.min(max, Math.max(0, wantedSliceBp));
     // Snap to nearest BP_STEP for predictable values.
@@ -218,19 +254,6 @@
       target.value = String(bpToPercent(next));
     }
   }
-
-  // -- Platform-fee slice (always first, always locked) ---------------------
-
-  const platformSlice = $derived<RevenueSplitSlice>({
-    id: '__platform__',
-    label: 'Platform fee',
-    percent: platformFeePercent,
-    color: 'var(--color-text-muted)',
-    locked: true,
-    anonymous: false,
-  });
-
-  const renderedSlices = $derived([platformSlice, ...slices]);
 </script>
 
 <div
@@ -238,31 +261,30 @@
   data-mode={mode}
   data-state={isOverAllocated ? 'over' : isUnderAllocated ? 'under' : 'balanced'}
 >
+  <p class="revenue-split-pie__basis">{m.agreement_split_basis()}</p>
+
   <div
     class="revenue-split-pie__bar"
     role="presentation"
     bind:this={barEl}
   >
-    {#each renderedSlices as slice, index (slice.id)}
+    {#each slices as slice, index (slice.id)}
       {@const widthPct = bpToPercent(slice.percent)}
       <div
         class="revenue-split-pie__slice"
         data-locked={slice.locked ? 'true' : 'false'}
         style="--slice-width: {widthPct}%; --slice-color: {slice.color};"
-        title="{displayLabel(slice, index - 1)}: {formatPercent(slice.percent)}"
+        title="{displayLabel(slice, index)}: {formatPercent(slice.percent)}"
       >
         <span class="revenue-split-pie__slice-fill"></span>
       </div>
     {/each}
 
-    <!--
-      Handles sit at the trailing boundary of each non-platform slice. The
-      platform fee is locked and does not get a handle.
-    -->
+    <!-- Handles sit at the trailing boundary of each slice. -->
     {#each slices as slice, index (`handle-${slice.id}`)}
-      {@const cumulativeBp =
-        platformFeePercent +
-        slices.slice(0, index + 1).reduce((sum, s) => sum + s.percent, 0)}
+      {@const cumulativeBp = slices
+        .slice(0, index + 1)
+        .reduce((sum, s) => sum + s.percent, 0)}
       {@const handlePct = bpToPercent(cumulativeBp)}
       {@const max = maxForSlice(slice.id)}
       {@const interactive = !slice.locked && !readOnly}
@@ -291,9 +313,7 @@
   </div>
 
   <ul class="revenue-split-pie__legend">
-    {#each renderedSlices as slice, index (slice.id)}
-      {@const isPlatform = slice.id === '__platform__'}
-      {@const sliceIndex = index - 1}
+    {#each slices as slice, sliceIndex (slice.id)}
       <li
         class="revenue-split-pie__legend-item"
         data-locked={slice.locked ? 'true' : 'false'}
@@ -322,7 +342,6 @@
               step="1"
               value={bpToPercent(slice.percent)}
               oninput={(e) => onPercentInput(e, slice)}
-              disabled={isPlatform}
             />
             <span aria-hidden="true">%</span>
           </label>
@@ -331,10 +350,16 @@
     {/each}
   </ul>
 
+  <!-- A safety net: the server refuses an accept that would pass 100%
+       (agreements.md §Negotiating), so only data older than that check can
+       get here. -->
   {#if isOverAllocated}
     <p class="revenue-split-pie__warning" role="status">
-      Splits exceed available budget by
-      {formatPercent(sliceTotalBp - availableBp)}. Reduce one or more shares.
+      {m.agreement_split_over({
+        total: formatPercent(availableBp + overBp),
+        over: formatPercent(overBp),
+      })}
+      {#if showAmendHint}{m.agreement_split_over_amend()}{/if}
     </p>
   {/if}
 
@@ -356,6 +381,12 @@
     container-name: revenue-split-pie;
   }
 
+  .revenue-split-pie__basis {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
   /* -- Bar ---------------------------------------------------------------- */
 
   .revenue-split-pie__bar {
@@ -372,7 +403,7 @@
 
   .revenue-split-pie[data-state='over'] .revenue-split-pie__bar {
     border-color: var(--color-error);
-    box-shadow: 0 0 0 var(--border-width) var(--color-error-200);
+    box-shadow: 0 0 0 var(--border-width) var(--color-status-error-border);
   }
 
   .revenue-split-pie__slice {
@@ -556,12 +587,15 @@
 
   /* -- Warning state ------------------------------------------------------ */
 
+  /* The status triple, not the raw --color-error-50/-700/-200 steps: those
+     are fixed light-mode values, so the -50 tint turned into the brightest
+     box on a dark page. See styles/themes/status.css. */
   .revenue-split-pie__warning {
     margin: 0;
     padding: var(--space-2) var(--space-3);
-    background: var(--color-error-50);
-    color: var(--color-error-700);
-    border: var(--border-width) solid var(--color-error-200);
+    background: var(--color-status-error-surface);
+    color: var(--color-status-error-text);
+    border: var(--border-width) solid var(--color-status-error-border);
     border-radius: var(--radius-sm);
     font-size: var(--text-sm);
   }

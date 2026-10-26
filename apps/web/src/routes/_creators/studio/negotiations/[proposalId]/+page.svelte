@@ -7,7 +7,8 @@
   so we can show:
     - Org name + revenue type + thread status
     - Anonymised revenue split (creator's slice + peer aggregate +
-      platform fee) via RevenueSplitPie in `mode='creator'`
+      organisation, of what's left after Codex's fee) via RevenueSplitPie in
+      `mode='creator'`
     - Full chronological NegotiationThread, role-agnostic
     - Action bar appropriate to current state (accept / counter /
       decline / withdraw / terminate)
@@ -32,7 +33,10 @@
   import CounterProposalDialog from '$lib/components/agreements/CounterProposalDialog.svelte';
   import NegotiationThread from '$lib/components/agreements/NegotiationThread.svelte';
   import RevenueSplitPie from '$lib/components/agreements/RevenueSplitPie.svelte';
-  import type { RevenueSplitSlice } from '$lib/components/agreements/types';
+  import {
+    BP_MAX,
+    type RevenueSplitSlice,
+  } from '$lib/components/agreements/types';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import {
@@ -44,13 +48,9 @@
     terminateAgreement,
     withdrawAgreement,
   } from '$lib/remote/agreements.remote';
+  import * as m from '$paraglide/messages';
 
   type RevenueType = 'subscription' | 'content_purchase';
-
-  // Platform fee — read fresh from constants. Matches FEES.PLATFORM_PERCENT.
-  // Per Decision Q2, platform fee is the platform's operational lever; agreements
-  // don't snapshot it. WP-7 mirror.
-  const PLATFORM_FEE_BP = 1000;
 
   // ─── URL state ────────────────────────────────────────────────────────────
   const proposalId = $derived(page.params.proposalId ?? '');
@@ -145,18 +145,19 @@
     return 0;
   });
 
-  // Build the anonymised pie slices for `mode='creator'`. Slice order:
-  // platform fee (locked, handled by component) → my slice → anonymised
-  // peer aggregate (single slice) → org residual. No peer identifiers
-  // present anywhere in this array — defensive against any future
-  // server-side leak. A missing share gets no slice: the legend would
-  // label it "0%".
+  // Build the anonymised pie slices for `mode='creator'`, as shares of the
+  // post-platform pool: 100% is what's left after Codex's fee, the unit every
+  // share is agreed in, so no fee slice (Codex-2hxff.20 AGR-11). This used to
+  // hard-code a 10% fee and draw the shares against the whole sale. Slice
+  // order: my slice → anonymised peer aggregate (single slice) → org
+  // residual. No peer identifiers present anywhere in this array — defensive
+  // against any future server-side leak. A missing share gets no slice: the
+  // legend would label it "0%".
   const pieSlices = $derived.by((): RevenueSplitSlice[] => {
-    const availableBp = 10000 - PLATFORM_FEE_BP;
     const peerAggregate = peersForPool?.aggregateSharePercent ?? 0;
     const orgResidual = Math.max(
       0,
-      availableBp - (mySharePercent ?? 0) - peerAggregate
+      BP_MAX - (mySharePercent ?? 0) - peerAggregate
     );
 
     const slices: RevenueSplitSlice[] = [];
@@ -173,17 +174,22 @@
     if (peersForPool && peersForPool.count > 0) {
       slices.push({
         id: '__peers__',
-        label: `Other creators (${peersForPool.count})`,
+        // Creator mode labels it from `peerCount` ("Other creators (2)"),
+        // never from `label`.
+        label: m.agreement_split_other_creators({
+          count: String(peersForPool.count),
+        }),
         percent: peerAggregate,
         color: 'var(--color-info-600)',
         locked: true,
         anonymous: true,
+        peerCount: peersForPool.count,
       });
     }
     if (orgResidual > 0) {
       slices.push({
         id: '__org_residual__',
-        label: 'Org residual',
+        label: m.agreement_split_organisation(),
         percent: orgResidual,
         color: 'var(--color-surface-tertiary)',
         locked: true,
@@ -392,12 +398,7 @@
         How {revenueLabel} revenue is split with this org. The platform fee is
         taken first; your share applies to what remains.
       </p>
-      <RevenueSplitPie
-        mode="creator"
-        platformFeePercent={PLATFORM_FEE_BP}
-        slices={pieSlices}
-        readOnly
-      />
+      <RevenueSplitPie mode="creator" slices={pieSlices} readOnly />
       <p class="agreement-detail__split-summary">
         Your share: <strong><AgreementShare bps={mySharePercent} /></strong>
         of post-platform {revenueLabel} revenue.
