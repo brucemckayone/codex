@@ -28,6 +28,15 @@ const NAMES = [
   'progress',
 ] as const;
 
+/** A completed fixture's output, as the service parses it. */
+function completedOutput(name: (typeof NAMES)[number]) {
+  const body = parse(name);
+  if (body.status !== 'completed' || !body.output) {
+    throw new Error(`${name} is not a completed report with an output`);
+  }
+  return body.output;
+}
+
 /** The fixture as the handler sent it, before the schema strips anything. */
 function raw(name: (typeof NAMES)[number]): Record<string, unknown> {
   return JSON.parse(readFileSync(new URL(`${name}.json`, FIXTURES), 'utf8'));
@@ -54,15 +63,11 @@ describe('transcoding handler contract fixtures', () => {
   });
 
   it('names a sized poster folder by the picture as shown, with all four sizes', () => {
-    const body = parse('completed-video-sized');
-    if (body.status !== 'completed') throw new Error(body.status);
-    const key = body.output.thumbnailKey ?? '';
+    const output = completedOutput('completed-video-sized');
+    const key = output.thumbnailKey ?? '';
     const folder = key.slice(0, key.lastIndexOf('/'));
     const size = readStillFolderName(folder.slice(folder.lastIndexOf('/') + 1));
-    expect(size).toEqual({
-      width: body.output.width,
-      height: body.output.height,
-    });
+    expect(size).toEqual({ width: output.width, height: output.height });
     // Read off the raw body: the schema strips a key it doesn't know, so a
     // size added in Python would pass a check of the parsed one.
     const sent = raw('completed-video-sized').output as {
@@ -77,12 +82,9 @@ describe('transcoding handler contract fixtures', () => {
   });
 
   it('keeps the flat layout without the sized folder or xl', () => {
-    const body = parse('completed-video-flat');
-    if (body.status !== 'completed') throw new Error(body.status);
-    expect(body.output.thumbnailVariants?.xl).toBeUndefined();
-    expect(body.output.thumbnailKey).toMatch(
-      /\/media-thumbnails\/[^/]+\/lg\.webp$/
-    );
+    const output = completedOutput('completed-video-flat');
+    expect(output.thumbnailVariants?.xl).toBeUndefined();
+    expect(output.thumbnailKey).toMatch(/\/media-thumbnails\/[^/]+\/lg\.webp$/);
   });
 
   it.each([
