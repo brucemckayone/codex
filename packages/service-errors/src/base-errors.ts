@@ -211,8 +211,12 @@ export class AfterCommitError<T = unknown> extends InternalServiceError {
  * (Codex-2hxff.8).
  */
 export class ServiceUnavailableError extends ServiceError {
-  constructor(message: string, context?: Record<string, unknown>) {
-    super(message, 'SERVICE_UNAVAILABLE', 503, context);
+  constructor(
+    message: string,
+    context?: Record<string, unknown>,
+    options?: ErrorOptions
+  ) {
+    super(message, 'SERVICE_UNAVAILABLE', 503, context, options);
   }
 }
 

@@ -25,7 +25,11 @@ import {
   organizations,
   stripeConnectAccounts,
 } from '@codex/database/schema';
-import { ConflictError, NotFoundError } from '@codex/service-errors';
+import {
+  ConflictError,
+  NotFoundError,
+  ServiceUnavailableError,
+} from '@codex/service-errors';
 import {
   createMockStripe,
   createTestConnectAccountInput,
@@ -332,12 +336,12 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
   it.each([
     ['their own live amount, not the list price', 1200, '£12.00', 0],
     [
-      'the list price, with a warning, when the live price has no amount',
+      'the list price, with an error logged, when the live price has no amount',
       null,
       '£15.00',
       1,
     ],
-  ] as const)('3c. a grandfathered subscriber is quoted %s', async (_label, unitAmount, quoted, warnings) => {
+  ] as const)('3c. a grandfathered subscriber is quoted %s', async (_label, unitAmount, quoted, errors) => {
     const courseId = await newCourse();
     const plan = await service.upsertPlan(orgId, courseId, {
       priceMonthly: 1500,
@@ -390,13 +394,13 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
       { db, environment: 'test', mailer, webAppUrl: 'https://app.test' },
       fanOutStripe
     );
-    const warn = vi.spyOn(
+    const logError = vi.spyOn(
       (
         fanOutService as unknown as {
-          obs: { warn: (message: string, data?: unknown) => void };
+          obs: { error: (message: string, data?: unknown) => void };
         }
       ).obs,
-      'warn'
+      'error'
     );
 
     try {
@@ -409,11 +413,15 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
       expect(mailer.mock.calls[0]?.[0]).toMatchObject({
         data: { oldPriceFormatted: quoted, newPriceFormatted: '£18.00' },
       });
-      expect(
-        warn.mock.calls.filter(([message]) =>
-          String(message).includes('live price has no unit amount')
-        )
-      ).toHaveLength(warnings);
+      // An error, with an errorId: the email may quote a figure this
+      // subscriber is not billed (LOW-7).
+      const fallbacks = logError.mock.calls.filter(([message]) =>
+        String(message).includes('live price has no unit amount')
+      );
+      expect(fallbacks).toHaveLength(errors);
+      for (const [, data] of fallbacks) {
+        expect(data).toMatchObject({ errorId: expect.any(String) });
+      }
     } finally {
       await db.delete(courseSubscriptions).where(
         inArray(
@@ -636,6 +644,8 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
     // Mid-hour, so no test's keys straddle an hour by accident. Only Date is
     // faked: the database driver's timers stay real.
     const HOUR = '2026-10-26T14';
+    const UNTIL_THE_HOUR =
+      "Stripe couldn't save this plan, and nothing was saved. You can try again after the top of the hour.";
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ['Date'] });
       vi.setSystemTime(new Date(`${HOUR}:30:00Z`));
@@ -732,9 +742,11 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
       const productKeys = keyedSpies.products.create.mock.calls.map(
         ([, options]) => options?.idempotencyKey
       );
+      // The environment is in the key: production, dev and CI share one
+      // Stripe sandbox, and seeded course ids repeat across them.
       expect(productKeys).toEqual([
-        `course-plan-product-${courseId}-0-${HOUR}`,
-        `course-plan-product-${courseId}-0-${HOUR}`,
+        `course-plan-product-test-${courseId}-0-${HOUR}`,
+        `course-plan-product-test-${courseId}-0-${HOUR}`,
       ]);
       expect(archiveCalls(keyedSpies)).toHaveLength(0);
     });
@@ -781,8 +793,8 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
         ([, options]) => options?.idempotencyKey
       );
       expect(productKeys).toEqual([
-        `course-plan-product-${courseId}-0-2026-10-26T13`,
-        `course-plan-product-${courseId}-0-2026-10-26T14`,
+        `course-plan-product-test-${courseId}-0-2026-10-26T13`,
+        `course-plan-product-test-${courseId}-0-2026-10-26T14`,
       ]);
       // Exactly one Product archived: the one the plan does not use.
       const archived = archiveCalls(keyedSpies).map(([id]) => id);
@@ -819,10 +831,11 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
         .map(([, options]) => options?.idempotencyKey as string)
         .filter((key) => key.includes('-monthly-'));
       expect(monthlyKeys).toEqual([
-        `course-plan-price-monthly-${courseId}-0-${HOUR}--1`,
-        `course-plan-price-monthly-${courseId}-0-${HOUR}-1100`,
+        `course-plan-price-monthly-test-${courseId}-0-${HOUR}--1`,
+        `course-plan-price-monthly-test-${courseId}-0-${HOUR}-1100`,
       ]);
-      // Archived by the failed attempt, then put back on sale by the retry.
+      // Archived by the failed attempt, then put back on sale by the retry,
+      // before its insert and again once the row commits.
       const updates = keyedSpies.products.update.mock.calls
         .filter(([id]) => id === failedProductId)
         .map(([, params]) => params);
@@ -830,7 +843,125 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
         { active: true },
         { active: false },
         { active: true },
+        { active: true },
       ]);
+    });
+
+    // Review L1: two saves in one hour share a Product, and the loser's
+    // insert fails for its own reason. Its look-up runs before the twin
+    // commits, so it archives; the twin's row then lands. Whichever side acts
+    // last must leave the Product on sale, so each re-lists once it sees, or
+    // makes, a live row.
+    it("a twin's plan that lands after the clean-up archived is returned, and its Product put back on sale", async () => {
+      const { keyedSpies, keyedService } = keyHonouringStripe();
+      const courseId = await newCourse();
+      const proceed = keyedSpies.products.update.getMockImplementation();
+      // The archive: the twin's insert commits as it lands.
+      let twinId: string | undefined;
+      keyedSpies.products.update.mockImplementation(
+        async (productId: string, params: { active?: boolean }) => {
+          if (params.active === false) {
+            const twin = takeFirst(
+              await db
+                .insert(courseSubscriptionPlans)
+                .values({
+                  courseId,
+                  priceMonthly: 1100,
+                  priceAnnual: 11000,
+                  stripeProductId: productId,
+                  stripePriceMonthlyId: 'price_twin_month',
+                  stripePriceAnnualId: 'price_twin_year',
+                })
+                .returning()
+            );
+            twinId = twin.id;
+          }
+          return proceed?.(productId, params);
+        }
+      );
+
+      // A negative price breaks the row's CHECK: a failure of its own.
+      const plan = await keyedService.createPlan(orgId, courseId, {
+        priceMonthly: -1,
+        priceAnnual: 11000,
+      });
+
+      expect(twinId).toBeDefined();
+      expect(plan.id).toBe(twinId);
+      const updates = keyedSpies.products.update.mock.calls
+        .filter(([id]) => id === plan.stripeProductId)
+        .map(([, params]) => params);
+      expect(updates).toEqual([
+        { active: true },
+        { active: false },
+        { active: true },
+      ]);
+    });
+
+    // The winner's half of the same race: a twin can archive the Product
+    // between this save's put-on-sale and its insert, so it re-lists once its
+    // own row has committed.
+    it('a create puts its Product on sale again once its row has committed', async () => {
+      const { keyedSpies, keyedService } = keyHonouringStripe();
+      const courseId = await newCourse();
+      const proceed = keyedSpies.products.update.getMockImplementation();
+      const rowCommitted: boolean[] = [];
+      keyedSpies.products.update.mockImplementation(
+        async (productId: string, params: unknown) => {
+          const rows = await planRows(courseId);
+          rowCommitted.push(rows.some((r) => r.stripeProductId === productId));
+          return proceed?.(productId, params);
+        }
+      );
+
+      const plan = await keyedService.createPlan(orgId, courseId, {
+        priceMonthly: 1100,
+        priceAnnual: 11000,
+      });
+
+      const updates = keyedSpies.products.update.mock.calls
+        .filter(([id]) => id === plan.stripeProductId)
+        .map(([, params]) => params);
+      expect(updates).toEqual([{ active: true }, { active: true }]);
+      expect(rowCommitted).toEqual([false, true]);
+    });
+
+    // LOW-6: the look-up after the archive decides whether a live plan's
+    // Product goes back on sale, so its failure is never silent.
+    it("a failed look-up after the clean-up archived is logged, and the insert's own error stands", async () => {
+      const { keyedService } = keyHonouringStripe();
+      const courseId = await newCourse();
+      const logError = vi.spyOn(
+        (
+          keyedService as unknown as {
+            obs: { error: (...a: unknown[]) => void };
+          }
+        ).obs,
+        'error'
+      );
+      const lookUp = vi
+        .spyOn(
+          keyedService as unknown as { findPlanRow: () => Promise<unknown> },
+          'findPlanRow'
+        )
+        .mockRejectedValueOnce(new Error('connection reset'));
+
+      const error = await keyedService
+        .createPlan(orgId, courseId, { priceMonthly: -1, priceAnnual: 11000 })
+        .catch((e: unknown) => e)
+        .finally(() => lookUp.mockRestore());
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(CourseSubscriptionPlanExistsError);
+      expect(logError).toHaveBeenCalledWith(
+        'Archived a course plan product, then could not check for a live plan',
+        expect.objectContaining({
+          errorId: expect.any(String),
+          courseId,
+          error: 'connection reset',
+        })
+      );
+      expect(await planRows(courseId)).toHaveLength(0);
     });
 
     it("a save that misses the plan a racing save just made saves onto it, rather than failing 'exists'", async () => {
@@ -878,13 +1009,82 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
         .catch((e: unknown) => e);
 
       expect(error).toBeInstanceOf(ConflictError);
+      // A refresh changes nothing in the key, so the copy says when it
+      // changes: the top of the key's hour (owner decision 2026-10-26).
       expect(error).toMatchObject({
         statusCode: 409,
-        context: { code: 'COURSE_PLAN_KEY_REUSED', courseId },
+        message: UNTIL_THE_HOUR,
+        context: {
+          code: 'COURSE_PLAN_KEY_REUSED',
+          courseId,
+          retryAfter: '2026-10-26T15:00:00.000Z',
+        },
       });
       expect(
         Object.keys((error as ConflictError).context ?? {}).sort()
-      ).toEqual(['code', 'courseId']);
+      ).toEqual(['code', 'courseId', 'retryAfter']);
+      expect(await planRows(courseId)).toHaveLength(0);
+    });
+
+    // Stripe saves a failure under the key and replays it until the hour
+    // turns, so the copy says when to try again (owner decision 2026-10-26).
+    it("Stripe failing is a 503 that keeps Stripe's error and says when to try again", async () => {
+      const { keyedSpies, keyedService } = keyHonouringStripe();
+      const courseId = await newCourse();
+      const stripeError = new StripeSdk.errors.StripeAPIError({
+        message: 'An unknown error occurred',
+        type: 'api_error',
+        requestId: 'req_plan_down',
+        statusCode: 500,
+      });
+      // Stripe answers once the hour has turned: retryAfter comes from the
+      // hour in the key, never the clock at the refusal.
+      keyedSpies.products.create.mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date('2026-10-26T15:00:05Z'));
+        throw stripeError;
+      });
+      const logError = vi.spyOn(
+        (
+          keyedService as unknown as {
+            obs: { error: (...a: unknown[]) => void };
+          }
+        ).obs,
+        'error'
+      );
+
+      const error = await keyedService
+        .upsertPlan(orgId, courseId, { priceMonthly: 1100, priceAnnual: 11000 })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ServiceUnavailableError);
+      expect(error).toMatchObject({
+        statusCode: 503,
+        message: UNTIL_THE_HOUR,
+        context: {
+          code: 'STRIPE_UNAVAILABLE',
+          courseId,
+          retryAfter: '2026-10-26T15:00:00.000Z',
+        },
+      });
+      // Stripe's error is kept as the cause. The context, which is sent to
+      // the client, holds ids and retryAfter only.
+      expect((error as Error).cause).toBe(stripeError);
+      expect(
+        Object.keys((error as ServiceUnavailableError).context ?? {}).sort()
+      ).toEqual(['code', 'courseId', 'retryAfter']);
+      // The one line logged carries what Stripe's request log is searched by.
+      expect(logError).toHaveBeenCalledWith(
+        'Stripe refused a course plan create',
+        expect.objectContaining({
+          errorId: expect.any(String),
+          courseId,
+          code: 'STRIPE_UNAVAILABLE',
+          stripeType: 'StripeAPIError',
+          stripeMessage: 'An unknown error occurred',
+          stripeRequestId: 'req_plan_down',
+          statusCode: 500,
+        })
+      );
       expect(await planRows(courseId)).toHaveLength(0);
     });
 
@@ -932,7 +1132,7 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
       expect(second.stripeProductId).not.toBe(first.stripeProductId);
       expect(
         keyedSpies.products.create.mock.calls.at(-1)?.[1]?.idempotencyKey
-      ).toBe(`course-plan-product-${courseId}-1-${HOUR}`);
+      ).toBe(`course-plan-product-test-${courseId}-1-${HOUR}`);
     });
 
     it('a retry in the next hour gets fresh keys, so a failure Stripe stored blocks saves for at most the hour', async () => {
@@ -969,7 +1169,7 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
       expect(plan.courseId).toBe(courseId);
       expect(
         keyedSpies.products.create.mock.calls.at(-1)?.[1]?.idempotencyKey
-      ).toBe(`course-plan-product-${courseId}-0-2026-10-26T15`);
+      ).toBe(`course-plan-product-test-${courseId}-0-2026-10-26T15`);
     });
   });
 

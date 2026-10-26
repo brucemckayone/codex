@@ -19,7 +19,8 @@
  * - On update: if DB update fails, archive new Prices and restore old ones
  * - Create keys are built from the dialog's submissionId, so a retry or a
  *   double submit makes one Product and one tier (Codex-2hxff.66)
- * - Clean-up never archives a Product a live tier uses
+ * - Clean-up never leaves a live tier's Product archived: it looks again
+ *   after archiving, and a create re-lists its Product once its row commits
  * - Cleanup failures are logged but never mask the original error
  *
  * All queries scoped by organizationId. Soft delete only.
@@ -47,7 +48,11 @@ import {
   TierHasSubscribersError,
   TierNotFoundError,
 } from '../errors';
-import { type CreateKeySubject, createKeyRefusal } from './create-key-refusal';
+import {
+  type CreateKeySubject,
+  createKeyRefusal,
+  stripeRefusalDetail,
+} from './create-key-refusal';
 
 type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
 
@@ -224,8 +229,10 @@ export class TierService extends BaseService {
       // submissionId per create, so a double submit or a retry after a lost
       // response gets back the Product and Prices the first attempt made,
       // and below, the tier it made. A random key per call protected nothing
-      // the SDK's own retries do not.
-      const keyBase = `${orgId}-${input.submissionId}`;
+      // the SDK's own retries do not. The environment is in the keys because
+      // production, dev and CI share one Stripe sandbox, and their ids can
+      // repeat (a copied database, seeded rows).
+      const keyBase = `${this.environment}-${orgId}-${input.submissionId}`;
 
       // Create Stripe Product
       const product = await this.stripe.products.create(
@@ -377,14 +384,44 @@ export class TierService extends BaseService {
                 ? cleanupError.message
                 : String(cleanupError),
           });
+          throw dbError;
         }
 
-        throw dbError;
+        // Look again: a twin's insert can commit after the look-up above and
+        // before the archive. If one did, put the Product back on sale and
+        // return its tier. The twin re-lists after its insert too, so
+        // whichever side acts last leaves a live tier's Product on sale.
+        let lateTwin: SubscriptionTier | null;
+        try {
+          lateTwin = await this.findLiveTierWithProduct(orgId, product.id);
+        } catch (lookupError) {
+          this.obs.error(
+            'Archived a tier product, then could not check for a live tier on it',
+            {
+              errorId: crypto.randomUUID(),
+              stripeProductId: product.id,
+              organizationId: orgId,
+              error:
+                lookupError instanceof Error
+                  ? lookupError.message
+                  : String(lookupError),
+            }
+          );
+          throw dbError;
+        }
+        if (!lateTwin) throw dbError;
+        await this.relistTierProduct(lateTwin.id, orgId, product.id);
+        return lateTwin;
       }
 
       if (!tier) {
         throw new InternalServiceError('Failed to insert tier record');
       }
+
+      // The other half of the clean-up's second look: a twin whose insert
+      // failed may have archived the Product since this call put it on sale
+      // above. Now this row is committed, put it on sale again.
+      await this.relistTierProduct(tier.id, orgId, product.id);
 
       this.obs.info('Subscription tier created', {
         tierId: tier.id,
@@ -403,10 +440,10 @@ export class TierService extends BaseService {
       if (refusal) {
         const log = refusal.statusCode >= 500 ? 'error' : 'warn';
         this.obs[log]('Stripe refused a tier create', {
+          errorId: crypto.randomUUID(),
           organizationId: orgId,
           code: refusal.context?.code,
-          stripeType: (error as { type?: unknown }).type,
-          stripeCode: (error as { code?: unknown }).code,
+          ...stripeRefusalDetail(error),
         });
       }
       this.handleError(refusal ?? error, 'createTier');
@@ -1054,6 +1091,31 @@ export class TierService extends BaseService {
       )
       .limit(1);
     return tier ?? null;
+  }
+
+  /**
+   * Put a live tier's Product on sale (Codex-2hxff.66). A create calls this
+   * once its row is committed, and its clean-up when a twin's row appeared
+   * after the archive, so whichever acts last leaves the Product on sale.
+   * Never throws: the tier is saved, so the create succeeded. A failure is
+   * logged, because a tier on an archived Product can never be billed.
+   */
+  private async relistTierProduct(
+    tierId: string,
+    organizationId: string,
+    stripeProductId: string
+  ): Promise<void> {
+    try {
+      await this.stripe.products.update(stripeProductId, { active: true });
+    } catch (error) {
+      this.obs.error("Could not put a live tier's Stripe product on sale", {
+        errorId: crypto.randomUUID(),
+        tierId,
+        organizationId,
+        stripeProductId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**

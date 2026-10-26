@@ -401,9 +401,11 @@ describe('TierService', () => {
       const productKeys = (stripe.products.create as Mock).mock.calls.map(
         ([, options]) => options?.idempotencyKey
       );
+      // The environment is in the key: production, dev and CI share one
+      // Stripe sandbox, and their ids can repeat.
       expect(productKeys).toEqual([
-        `tier-product-${org.id}-${submissionId}`,
-        `tier-product-${org.id}-${submissionId}`,
+        `tier-product-test-${org.id}-${submissionId}`,
+        `tier-product-test-${org.id}-${submissionId}`,
       ]);
       expect(archiveCalls()).toHaveLength(0);
     });
@@ -507,7 +509,8 @@ describe('TierService', () => {
       const tier = await service.createTier(org.id, input(submissionId));
 
       expect(tier.stripeProductId).toBe(failedProductId);
-      // Archived by the failed attempt, then put back on sale by the retry.
+      // Archived by the failed attempt, then put back on sale by the retry,
+      // before its insert and again once the row commits.
       const updates = (stripe.products.update as Mock).mock.calls
         .filter(([id]) => id === failedProductId)
         .map(([, params]) => params);
@@ -515,7 +518,90 @@ describe('TierService', () => {
         { active: true },
         { active: false },
         { active: true },
+        { active: true },
       ]);
+    });
+
+    // Review L1: a double submit where the loser's insert fails for its own
+    // reason. Its look-up runs before the twin commits, so it archives; the
+    // twin's row then lands. Whichever side acts last must leave the Product
+    // on sale, so each re-lists once it sees, or makes, a live row.
+    it("a twin's row that lands after the clean-up archived is returned, and its Product put back on sale", async () => {
+      const org = await orgForRepeats('repeat-late-twin');
+      const update = stripe.products.update as Mock;
+      // This call's put-on-sale: another tier takes its sort order, with a
+      // Product of its own, so the insert fails and no twin is found yet.
+      update.mockImplementationOnce(async (productId: string) => {
+        await db.insert(subscriptionTiers).values({
+          organizationId: org.id,
+          name: 'Other',
+          sortOrder: 1,
+          priceMonthly: 900,
+          priceAnnual: 9000,
+          stripeProductId: `prod_other_${crypto.randomUUID()}`,
+        });
+        return { id: productId, active: true };
+      });
+      // The archive: the twin's insert commits as it lands.
+      let twinId: string | undefined;
+      update.mockImplementationOnce(async (productId: string) => {
+        const twin = takeFirst(
+          await db
+            .insert(subscriptionTiers)
+            .values({
+              organizationId: org.id,
+              name: 'Repeat',
+              sortOrder: 2,
+              priceMonthly: 500,
+              priceAnnual: 5000,
+              stripeProductId: productId,
+              stripePriceMonthlyId: 'price_twin_month',
+              stripePriceAnnualId: 'price_twin_year',
+            })
+            .returning()
+        );
+        twinId = twin.id;
+        return { id: productId, active: false };
+      });
+
+      const tier = await service.createTier(org.id, input(crypto.randomUUID()));
+
+      expect(twinId).toBeDefined();
+      expect(tier.id).toBe(twinId);
+      const updates = update.mock.calls
+        .filter(([id]) => id === tier.stripeProductId)
+        .map(([, params]) => params);
+      expect(updates).toEqual([
+        { active: true },
+        { active: false },
+        { active: true },
+      ]);
+    });
+
+    // The winner's half of the same race: a twin can archive the Product
+    // between this call's put-on-sale and its insert, so it re-lists once
+    // its own row has committed.
+    it('a create puts its Product on sale again once its row has committed', async () => {
+      const org = await orgForRepeats('repeat-relist');
+      const update = stripe.products.update as Mock;
+      const proceed = update.getMockImplementation();
+      const rowCommitted: boolean[] = [];
+      update.mockImplementation(async (productId: string, params: unknown) => {
+        const rows = await db
+          .select({ id: subscriptionTiers.id })
+          .from(subscriptionTiers)
+          .where(eq(subscriptionTiers.stripeProductId, productId));
+        rowCommitted.push(rows.length > 0);
+        return proceed?.(productId, params);
+      });
+
+      const tier = await service.createTier(org.id, input(crypto.randomUUID()));
+
+      const updates = update.mock.calls
+        .filter(([id]) => id === tier.stripeProductId)
+        .map(([, params]) => params);
+      expect(updates).toEqual([{ active: true }, { active: true }]);
+      expect(rowCommitted).toEqual([false, true]);
     });
 
     // Never a 500: a retry from elsewhere can reuse an id with other values,
@@ -571,11 +657,17 @@ describe('TierService', () => {
 
     it('Stripe failing is a 503 STRIPE_UNAVAILABLE, and no tier is saved', async () => {
       const org = await orgForRepeats('repeat-stripe-down');
-      (stripe.prices.create as Mock).mockRejectedValueOnce(
-        new StripeSdk.errors.StripeAPIError({
-          message: 'An unknown error occurred',
-          type: 'api_error',
-        })
+      const stripeError = new StripeSdk.errors.StripeAPIError({
+        message: 'An unknown error occurred',
+        type: 'api_error',
+        requestId: 'req_tier_down',
+        statusCode: 500,
+      });
+      (stripe.prices.create as Mock).mockRejectedValueOnce(stripeError);
+      const logError = vi.spyOn(
+        (service as unknown as { obs: { error: (...a: unknown[]) => void } })
+          .obs,
+        'error'
       );
 
       const error = await service
@@ -587,6 +679,29 @@ describe('TierService', () => {
         statusCode: 503,
         context: { code: 'STRIPE_UNAVAILABLE' },
       });
+      // The tier dialog mints a new id, so its copy stays "Try again".
+      expect((error as Error).message).toBe(
+        'Stripe could not create the tier, so nothing was saved. Try again.'
+      );
+      // Stripe's error is kept as the cause. The context, which is sent to
+      // the client, holds ids only.
+      expect((error as Error).cause).toBe(stripeError);
+      expect(
+        Object.keys((error as ServiceUnavailableError).context ?? {}).sort()
+      ).toEqual(['code', 'organizationId', 'submissionId']);
+      // The one line logged carries what Stripe's request log is searched by.
+      expect(logError).toHaveBeenCalledWith(
+        'Stripe refused a tier create',
+        expect.objectContaining({
+          errorId: expect.any(String),
+          organizationId: org.id,
+          code: 'STRIPE_UNAVAILABLE',
+          stripeType: 'StripeAPIError',
+          stripeMessage: 'An unknown error occurred',
+          stripeRequestId: 'req_tier_down',
+          statusCode: 500,
+        })
+      );
       expect(await service.listTiers(org.id)).toHaveLength(0);
     });
   });
