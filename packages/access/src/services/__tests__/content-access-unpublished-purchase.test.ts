@@ -39,8 +39,10 @@ import { createMockObservability } from '@codex/test-utils';
 import type { GetStreamingUrlInput } from '@codex/validation';
 import { and, eq, isNull } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AccessDeniedError } from '../../errors';
+import { AccessDeniedError, ContentNotFoundError } from '../../errors';
+import type { AccessRevocation } from '../access-revocation';
 import { ContentAccessService } from '../ContentAccessService';
+import { resolveDisputePause } from '../content-access/access-decision';
 
 type FindFirstFn = ReturnType<typeof vi.fn>;
 
@@ -82,7 +84,14 @@ function createStubDb() {
   return { mocks, transaction };
 }
 
-function buildService(stub: ReturnType<typeof createStubDb>) {
+function buildService(
+  stub: ReturnType<typeof createStubDb>,
+  /**
+   * Wire the KV revocation check (Codex-7ncbh cases): reporting the
+   * `revokedFor` block, or none when only `kvWired`.
+   */
+  options: { revokedFor?: string; kvWired?: boolean } = {}
+) {
   const { obs } = createMockObservability();
   const dbForService = {
     query: stub.mocks,
@@ -91,6 +100,9 @@ function buildService(stub: ReturnType<typeof createStubDb>) {
   } as unknown as ServiceConfig['db'];
 
   const verifyPurchase = vi.fn(async () => false);
+  const isRevoked = vi.fn(async () =>
+    options.revokedFor ? { reason: options.revokedFor } : null
+  );
   const service = new ContentAccessService({
     db: dbForService,
     environment: 'test',
@@ -101,9 +113,12 @@ function buildService(stub: ReturnType<typeof createStubDb>) {
     purchaseService: { verifyPurchase } as unknown as PurchaseService,
     contentApiBaseUrl: 'https://api.revelations.studio',
     hlsTokenSecret: 'test-worker-shared-secret',
+    ...(options.revokedFor || options.kvWired
+      ? { revocation: { isRevoked } as unknown as AccessRevocation }
+      : {}),
   });
   (service as unknown as { obs: typeof obs }).obs = obs;
-  return { service, verifyPurchase };
+  return { service, verifyPurchase, isRevoked, db: dbForService };
 }
 
 const userId = 'user_abc';
@@ -121,12 +136,18 @@ const mediaItem = {
   readyVariants: ['1080p', '720p'],
 };
 
-/** A PAID item, `status` overridable — the shape the tx self-fetch returns. */
+/**
+ * A PAID item, `status` overridable — the shape the tx self-fetch returns.
+ * Released once, so an unpublished one is an item WITHDRAWN after it was on
+ * offer, the case this file is about. A draft never released opens to no arm
+ * at all, and has its own cases below (Codex-nacky).
+ */
 function paidRow(status: string) {
   return {
     id: contentId,
     organizationId: orgId,
     status,
+    publishedAt: new Date('2026-01-01T00:00:00.000Z'),
     isFree: false,
     isPurchasable: true,
     priceCents: 2499,
@@ -298,6 +319,194 @@ describe('Codex-p3m5j: a one-off purchase outlives unpublication', () => {
       // The purchase is never consulted, because there is nothing to consult
       // it about — proving the deletedAt filter runs ahead of the rule.
       expect(verifyPurchase).not.toHaveBeenCalled();
+    });
+
+    // Owner decision, 2026-10-25: "Nobody" (Codex-7ncbh). Deleting an org
+    // leaves its content published, so the fetch reads the org's deletedAt.
+    const ofDeletedOrg = () => ({
+      ...paidRow('published'),
+      organization: { deletedAt: new Date('2026-10-01T00:00:00.000Z') },
+    });
+
+    it("a deleted organisation's item is not found even WITH a purchase", async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(ofDeletedOrg());
+      noRelationships(stub);
+      // A disputed purchase too: the refusal must never read as a paused
+      // dispute (Codex-2hxff.60), because the item is gone.
+      stub.mocks.purchases.findFirst.mockResolvedValue({ id: 'purchase_1' });
+      const { service, verifyPurchase } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+
+      await expect(
+        service.getStreamingUrl(userId, streamingInput, { includeBody: true })
+      ).rejects.toThrow(ContentNotFoundError);
+      expect(verifyPurchase).not.toHaveBeenCalled();
+      expect(stub.mocks.purchases.findFirst).not.toHaveBeenCalled();
+    });
+
+    // The KV revocation check runs first. Answered there, a deleted org's
+    // item would be a 403 naming the block's reason (a paused dispute
+    // included) and the org, not the uniform 404.
+    it("a revoked reader of a deleted organisation's item gets the 404, not the revocation", async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(ofDeletedOrg());
+      noRelationships(stub);
+      const { service, isRevoked } = buildService(stub, {
+        revokedFor: 'purchase_dispute',
+      });
+
+      await expect(
+        service.getStreamingUrl(userId, streamingInput)
+      ).rejects.toThrow(ContentNotFoundError);
+      expect(isRevoked).not.toHaveBeenCalled();
+    });
+
+    it("hasContentAccess is false for a deleted organisation's item, even to its buyer", async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(ofDeletedOrg());
+      noRelationships(stub);
+      const { service, verifyPurchase } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+
+      await expect(service.hasContentAccess(userId, contentId)).resolves.toBe(
+        false
+      );
+      expect(verifyPurchase).not.toHaveBeenCalled();
+    });
+
+    it("the library's dispute pause is null for a deleted organisation's item", async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(ofDeletedOrg());
+      noRelationships(stub);
+      stub.mocks.purchases.findFirst.mockResolvedValue({ id: 'purchase_1' });
+      const verifyPurchase = vi.fn(async () => false);
+
+      await expect(
+        resolveDisputePause(
+          {
+            db: buildService(stub).db,
+            purchaseService: { verifyPurchase } as unknown as PurchaseService,
+          },
+          userId,
+          contentId
+        )
+      ).resolves.toBeNull();
+      expect(stub.mocks.purchases.findFirst).not.toHaveBeenCalled();
+    });
+
+    // The stub returns whatever row it is given, so the cases above pass
+    // whether or not a fetch asks for the org. This pins that EVERY content
+    // read does: with KV wired, getStreamingUrl reads twice (the revocation
+    // pre-check, then the transaction).
+    it.each([
+      ['getStreamingUrl', 'stream', 1],
+      ['getStreamingUrl with the KV pre-check', 'stream-kv', 2],
+      ['hasContentAccess', 'boolean', 1],
+    ])("%s's content reads ask for the organisation's deletedAt", async (_name, path, reads) => {
+      stub.mocks.content.findFirst.mockResolvedValue(paidRow('published'));
+      noRelationships(stub);
+      const { service, verifyPurchase } = buildService(stub, {
+        kvWired: path === 'stream-kv',
+      });
+      verifyPurchase.mockResolvedValue(true);
+
+      if (path === 'boolean') {
+        await service.hasContentAccess(userId, contentId);
+      } else {
+        await service.getStreamingUrl(userId, streamingInput);
+      }
+
+      const calls = stub.mocks.content.findFirst.mock.calls.map(
+        ([arg]) => arg as { with?: unknown }
+      );
+      expect(calls).toHaveLength(reads);
+      for (const call of calls) {
+        expect(call.with).toMatchObject({
+          organization: { columns: { deletedAt: true } },
+        });
+      }
+    });
+  });
+
+  describe('a draft never released opens to no arm (Codex-nacky)', () => {
+    const neverReleased = () => ({ ...paidRow('draft'), publishedAt: null });
+
+    it('refuses its buyer, and never returns its body', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue({
+        ...neverReleased(),
+        contentBody: 'the draft text',
+      });
+      noRelationships(stub);
+      const { service, verifyPurchase } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+
+      const outcome = await service
+        .getStreamingUrl(userId, streamingInput, { includeBody: true })
+        .catch((error: unknown) => error);
+
+      expect(outcome).toBeInstanceOf(AccessDeniedError);
+      expect((outcome as AccessDeniedError).context?.reason).toBe(
+        'never_released'
+      );
+      expect(JSON.stringify(outcome)).not.toContain('the draft text');
+    });
+
+    it('is never named a paused dispute when its purchase is disputed', async () => {
+      // A disputed purchase fails verifyPurchase, so the branch refuses with
+      // its own reason. Unpaused, it would still be refused (never released),
+      // so a dispute does not explain the refusal (Codex-2hxff.60 copy).
+      stub.mocks.content.findFirst.mockResolvedValue(neverReleased());
+      noRelationships(stub);
+      stub.mocks.purchases.findFirst.mockResolvedValue({ id: 'purchase_1' });
+      const { service } = buildService(stub);
+
+      const outcome = await service
+        .getStreamingUrl(userId, streamingInput)
+        .catch((error: unknown) => error);
+
+      expect(outcome).toBeInstanceOf(AccessDeniedError);
+      expect((outcome as AccessDeniedError).context?.reason).toBe('paid');
+    });
+
+    it('hasContentAccess is false for its buyer', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(neverReleased());
+      noRelationships(stub);
+      const { service, verifyPurchase } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+
+      await expect(service.hasContentAccess(userId, contentId)).resolves.toBe(
+        false
+      );
+    });
+
+    it('a published row with no publishedAt is still released (the OR)', async () => {
+      // A legacy or seeded row: published now, its date never stamped.
+      stub.mocks.content.findFirst.mockResolvedValue({
+        ...paidRow('published'),
+        publishedAt: null,
+      });
+      noRelationships(stub);
+      const { service, verifyPurchase } = buildService(stub);
+      verifyPurchase.mockResolvedValue(true);
+
+      await expect(
+        service.getStreamingUrl(userId, streamingInput)
+      ).resolves.toMatchObject({ streamingUrl: expect.any(String) });
+    });
+
+    it('a published row with no publishedAt still names its disputed purchase', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue({
+        ...paidRow('published'),
+        publishedAt: null,
+      });
+      noRelationships(stub);
+      stub.mocks.purchases.findFirst.mockResolvedValue({ id: 'purchase_1' });
+      const { service } = buildService(stub);
+
+      const outcome = await service
+        .getStreamingUrl(userId, streamingInput)
+        .catch((error: unknown) => error);
+
+      expect((outcome as AccessDeniedError).context?.reason).toBe(
+        'purchase_dispute'
+      );
     });
   });
   /**

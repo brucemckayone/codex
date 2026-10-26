@@ -6,18 +6,11 @@
  */
 
 import type { ContentWithRelations } from '@codex/content';
-import type { ProgressData } from '@codex/shared-types';
+import type { ContentBodySource, ProgressData } from '@codex/shared-types';
 
-/**
- * A content body as it is stored: TipTap JSON, or legacy markdown. Either may
- * be null, and a piece may have neither. One shape from the service through
- * the wire to the web, so "the body was not returned" (no `body`) never reads
- * as "the piece has no body" (both null).
- */
-export interface ContentBodySource {
-  contentBody: string | null;
-  contentBodyJson: Record<string, unknown> | null;
-}
+// Defined in @codex/shared-types, which the in-course payload also carries it
+// through; re-exported so this package's consumers keep one import.
+export type { ContentBodySource };
 
 /**
  * Response for GET /api/access/content/:id/stream

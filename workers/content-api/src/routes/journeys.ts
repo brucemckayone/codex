@@ -418,7 +418,7 @@ app.get(
  * In-course player payload (SPEC §14): the practice + ordered playlist +
  * server-known completions + resume position, plus a SIGNED streaming URL for
  * media (minted by `ContentAccessService.getStreamingUrl`, which enforces
- * `canView` + signs — the single authority). Written practices carry `bodyHtml`
+ * `canView` + signs — the single authority). Written practices carry `body`
  * and null stream URLs. Gated on `canEnterCourse` — deny → `null`.
  * @returns {InCoursePracticeData | null}
  */
@@ -428,6 +428,9 @@ app.get(
     policy: {
       auth: 'required',
       rateLimit: 'api', // 100 req/min
+      // `private, no-store`, as /stream: this carries a written practice's
+      // stored body or a per-user HLS token (Codex-hyz1c).
+      cache: 'fresh',
     },
     input: {
       params: inCoursePracticeParamsSchema,
@@ -452,7 +455,7 @@ app.get(
 
       // Media practices get a signed HLS URL from the SAME signing authority the
       // /stream route uses (getStreamingUrl also re-checks canView). Written
-      // practices render from bodyHtml — no stream, URLs stay null.
+      // practices render from body — no stream, URLs stay null.
       if (data.practice.contentType !== 'written') {
         const stream = await ctx.services.access.getStreamingUrl(userId, {
           contentId: data.practice.contentId,

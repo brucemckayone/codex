@@ -102,6 +102,7 @@ export type {
   AuthenticatedContext,
   Bindings,
   CheckoutResponse,
+  ContentBodySource,
   EnrichedAuthContext,
   ErrorResponse,
   HonoEnv,

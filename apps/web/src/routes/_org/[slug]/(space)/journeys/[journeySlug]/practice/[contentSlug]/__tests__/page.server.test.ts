@@ -30,6 +30,7 @@ const MOCK_PRACTICE = {
   streamingUrl: null,
   waveformUrl: null,
   bodyHtml: '<p>Lesson</p>',
+  bodyUnavailable: false,
   initialProgressSeconds: 0,
   playlist: [],
   completions: [],
@@ -51,6 +52,13 @@ const {
   fetchInCoursePracticeMock: vi.fn(),
 }));
 
+const mockLogger = vi.hoisted(() => ({
+  warn: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+}));
+vi.mock('$lib/observability', () => ({ logger: mockLogger }));
+
 vi.mock('$lib/server/journeys/round-d-seam', () => ({
   resolveCourseBySlug: resolveCourseBySlugMock,
   resolveCourseEntry: resolveCourseEntryMock,
@@ -61,11 +69,14 @@ vi.mock('$lib/server/journeys/round-d-seam', () => ({
 
 type LoadInput = Parameters<typeof import('../+page.server').load>[0];
 
+const setHeadersMock = vi.fn();
+
 function makeEvent(user: { id: string } | null) {
   return {
     params: { slug: 'acme', journeySlug: 'rootwork', contentSlug: 'grounding' },
     parent: async () => ({ org: { id: 'org-1', slug: 'acme' }, user }),
     depends: vi.fn(),
+    setHeaders: setHeadersMock,
     url: new URL(
       'http://acme.lvh.me:3000/journeys/rootwork/practice/grounding'
     ),
@@ -139,5 +150,31 @@ describe('in-course player +page.server load: a payment dispute', () => {
       practice: typeof MOCK_PRACTICE;
     };
     expect(data.practice.practice.contentId).toBe('content-1');
+    // A paid lesson is stored nowhere (Codex-hyz1c).
+    expect(setHeadersMock).toHaveBeenCalledWith({
+      'Cache-Control': 'private, no-store',
+    });
+  });
+
+  it('a failed dashboard read still plays the lesson, and is logged', async () => {
+    resolveCourseEntryMock.mockResolvedValueOnce({
+      canEnter: true,
+      disputeHold: null,
+    });
+    fetchCourseDashboardMock.mockRejectedValueOnce(new Error('dashboard down'));
+    const { load } = await import('../+page.server');
+
+    const data = (await load(makeEvent({ id: 'user-1' }))) as {
+      stageGloss: string | null;
+    };
+
+    expect(data.stageGloss).toBeNull();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Course dashboard not loaded',
+      expect.objectContaining({
+        courseId: MOCK_COURSE.id,
+        error: 'dashboard down',
+      })
+    );
   });
 });

@@ -32,14 +32,18 @@
  * This module extracts the shared logic:
  * - `loadAccessAndProgress` — parallel fetch of streaming URL + playback progress
  * - `loadAccessWithBody`    — the same, plus the body once access is granted
- *                             (for a released row)
+ *                             (a row never released is granted to no one)
  * - `loadWithdrawnDetail`   — the public lookup missed: an item withdrawn from
  *                             sale, for a reader who still has it
  * - `resolveAccessGranted`  — THE access-grant seam (WP-2 swap point)
  * - `handlePurchaseAction`  — Stripe checkout session creation with error handling
  */
 
-import type { ContentBodySource, ContentHeld } from '@codex/access';
+import type {
+  ContentBodySource,
+  ContentHeld,
+  PlaybackProgressResponse,
+} from '@codex/access';
 import {
   type ContentPublicnessPolicy,
   isPublicContent,
@@ -50,6 +54,7 @@ import { error, fail } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
 import { createServerApi, type PublicContentListItem } from './api';
+import { CACHE_HEADERS } from './cache';
 import { ApiError } from './errors';
 import { logReadFailure } from './read-failure';
 
@@ -144,9 +149,9 @@ function extractRevocationReason(
  * shape can only drift in one place. Truth-source for the field set is
  * `SubscriptionContext` in `$lib/types`.
  *
- * The `.catch` branch of the gated `loadSubscriptionContext()` call computes
- * `requiresSubscription` from content state, so it stays inline rather than
- * sharing this constant.
+ * The `.catch` on the gated `loadSubscriptionContext()` call is
+ * `subscriptionContextFault`: this shape with `requiresSubscription` true,
+ * since only tier-gated content makes that call.
  *
  * Shape pinned by `content-detail.test.ts` so the field set can only drift in
  * one place (originally the removed iter-027 F3 denoise proof).
@@ -220,6 +225,59 @@ export function withoutRawBody<
   T extends { contentBody?: string | null; contentBodyJson?: unknown },
 >(content: T): T {
   return { ...content, contentBody: null, contentBodyJson: null };
+}
+
+/**
+ * A detail page's cache headers once it knows whether it carries a GATED
+ * grant. Always private: the page varies by viewer. And stored nowhere when
+ * access to a gated piece was granted, so a reader who later loses it (a
+ * refund, a lapsed subscription, an unfollow) keeps no copy on their own disk
+ * or in the back/forward cache (owner decision, 2026-10-25: "Yes, don't store
+ * paid pages"; Codex-hyz1c). Keyed on the grant, not the text: a paid video
+ * page carries no body but a signed stream URL whose token outlives a refund.
+ * A free, denied or failed page keeps `private, no-cache`, so Back still
+ * restores it. `setHeaders` covers the page's `__data.json` too: the same load
+ * answers both.
+ */
+export function detailPageCacheHeaders(gatedAccessGranted: boolean) {
+  return gatedAccessGranted ? CACHE_HEADERS.FRESH : CACHE_HEADERS.PRIVATE;
+}
+
+/**
+ * The detail pages' page-level catch on their access load. `fetchAccess`
+ * catches a failed request itself, so what reaches here is a fault in our own
+ * code: logged at error with its stack, never at the warn an outage gets, or
+ * a code bug would read as a flaky worker (Codex-uuz1g).
+ */
+export function logAccessCheckFault(contentId: string, error: unknown): void {
+  logger.error('Content access check threw', {
+    contentId,
+    ...faultFields(error),
+  });
+}
+
+/**
+ * The detail pages' catch on `loadSubscriptionContext`. Its two reads catch
+ * and log their own failures, so what reaches here is a fault in our own
+ * code: logged at error with its stack (Codex-7ms7h). The page still offers
+ * the tier, as it did before.
+ */
+export function subscriptionContextFault(
+  contentId: string,
+  error: unknown
+): SubscriptionContext {
+  logger.error('Subscription context threw', {
+    contentId,
+    ...faultFields(error),
+  });
+  return { ...EMPTY_SUB_CONTEXT, requiresSubscription: true };
+}
+
+function faultFields(error: unknown): { error: string; stack?: string } {
+  return {
+    error: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  };
 }
 
 /** The server-side API surface returned by `createServerApi`. */
@@ -366,20 +424,15 @@ export async function loadAccessAndProgress(
  * (`accessAndProgress`), which needs only the rendered HTML, never the raw
  * body.
  *
- * Three grants come back without a body:
+ * Two grants come back without a body:
  * - A granted response with no `body` at all, which is logged as an error and
  *   never read as "the piece has no body" (that is `body` with both fields
- *   null). Two causes:
- *   - The worker didn't honour the flag (a content-api rolled back behind this
- *     web build drops the unknown query key), so this would be the empty page
- *     again. The reader gets no note, by choice: it takes a worker older than
- *     this flag (a window of one deploy after it ships), and a broken flag on
- *     either side fails `api-stream-include.test.ts` first.
- *   - The row was never released (never published), so the worker withholds
- *     its body and logs a warn saying so, which is what tells this cause from
- *     the first. These pages can barely reach it: they read published rows
- *     only, and `publishedAt` is never cleared, so it takes a legacy row
- *     published without one, then unpublished, read from a stale list slot.
+ *   null). One cause: the worker didn't honour the flag (a content-api rolled
+ *   back behind this web build drops the unknown query key), so this would be
+ *   the empty page again. The reader gets no note, by choice: it takes a
+ *   worker older than this flag (a window of one deploy after it ships), and a
+ *   broken flag on either side fails `api-stream-include.test.ts` first. A row
+ *   never released is no longer a cause: no one is granted it (Codex-nacky).
  * - Media not ready (a 422 the worker raises after access passed). The call
  *   threw, so it carried nothing: the page reads as granted, with no body
  *   until the media is ready. Narrow, since publishing needs ready media.
@@ -507,6 +560,18 @@ async function fetchAccess(
   let streamResult: StreamResult | null = null;
   let streamError: unknown = null;
 
+  // Typed explicitly: inside the tuple below this read came back as `any`, so
+  // the mapping that read `positionSeconds` off the ENVELOPE, not off its
+  // `progress`, compiled, and every reader resumed at 0.
+  const progressRead: Promise<PlaybackProgressResponse | null> = api.access
+    .getProgress(contentId)
+    // No progress is `{ progress: null }`, not a rejection, so a rejection is
+    // a failed read: the player starts at 0, which must not pass unlogged
+    // (Codex-uuz1g).
+    .catch((err: unknown) => {
+      logReadFailure('Playback progress not loaded', { contentId }, err);
+      return null;
+    });
   const [, progressResult] = await Promise.all([
     api.access
       .getStreamingUrl(contentId, options)
@@ -516,7 +581,7 @@ async function fetchAccess(
       .catch((err: unknown) => {
         streamError = err;
       }),
-    api.access.getProgress(contentId).catch(() => null),
+    progressRead,
   ]);
 
   // A successful response from /stream means the access check passed,
@@ -554,11 +619,12 @@ async function fetchAccess(
   const revocationReason = accessGranted
     ? null
     : extractRevocationReason(streamError);
-  const progress = progressResult
+  const saved = progressResult?.progress ?? null;
+  const progress = saved
     ? {
-        positionSeconds: progressResult.positionSeconds,
-        durationSeconds: progressResult.durationSeconds,
-        completed: progressResult.completed,
+        positionSeconds: saved.positionSeconds,
+        durationSeconds: saved.durationSeconds,
+        completed: saved.completed,
       }
     : null;
 
@@ -582,12 +648,19 @@ async function fetchAccess(
  *
  * Fetches the user's current subscription + org tiers in parallel.
  * Compares tier sortOrder to determine if subscription covers the content.
+ *
+ * A visitor who is not signed in has no subscription, so it is not asked for:
+ * the route is auth-required, and its certain 401 was a wasted round-trip that
+ * would now be logged. With that gone, a failed read is a real failure, logged
+ * (Codex-7ms7h): without the log, a subscriber below the tier saw Subscribe
+ * instead of Upgrade and nobody knew why.
  */
 export async function loadSubscriptionContext(
   orgId: string,
   includedInTierId: string | null,
   platform: App.Platform | undefined,
-  cookies: Cookies
+  cookies: Cookies,
+  signedIn: boolean
 ): Promise<SubscriptionContext> {
   // Content requires a subscription when it is tier-gated — the WP-1
   // successor of accessType 'subscribers' is a non-null includedInTierId.
@@ -607,8 +680,16 @@ export async function loadSubscriptionContext(
   const api = createServerApi(platform, cookies);
 
   const [currentSubscription, tiers] = await Promise.all([
-    api.subscription.getCurrent(orgId).catch(() => null),
-    api.tiers.list(orgId).catch(() => [] as SubscriptionTier[]),
+    signedIn
+      ? api.subscription.getCurrent(orgId).catch((error) => {
+          logReadFailure('Current subscription not loaded', { orgId }, error);
+          return null;
+        })
+      : null,
+    api.tiers.list(orgId).catch((error) => {
+      logReadFailure('Subscription tiers not loaded', { orgId }, error);
+      return [] as SubscriptionTier[];
+    }),
   ]);
 
   // hasSubscription must mirror the backend access filter: the @codex/access

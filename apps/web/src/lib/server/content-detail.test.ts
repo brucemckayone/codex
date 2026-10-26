@@ -30,10 +30,12 @@ const mockLogger = vi.hoisted(() => ({
 vi.mock('$lib/observability', () => ({ logger: mockLogger }));
 
 import { createServerApi } from './api';
+import { CACHE_HEADERS } from './cache';
 import {
   ACCESS_CHECK_FAILED_RESULT,
   type ContentPublicnessPolicy,
   classifyStreamFailure,
+  detailPageCacheHeaders,
   EMPTY_SUB_CONTEXT,
   isPublicContent,
   loadAccessAndProgress,
@@ -42,6 +44,7 @@ import {
   loadSubscriptionContext,
   loadWithdrawnDetail,
   resolveAccessGranted,
+  subscriptionContextFault,
 } from './content-detail';
 import { ApiError } from './errors';
 
@@ -276,9 +279,137 @@ describe('loadSubscriptionContext (non-subscriber early return)', () => {
       'org-1',
       null,
       undefined,
-      unusedCookies
+      unusedCookies,
+      true
     );
     expect(ctx).toEqual(EMPTY_SUB_CONTEXT);
+  });
+});
+
+// A tier-gated piece's reads (Codex-7ms7h): a failure is logged, never dropped,
+// and a visitor who is not signed in is never asked for a subscription, whose
+// route is auth-required (its certain 401 would log as our own bad request).
+describe('loadSubscriptionContext (tier-gated)', () => {
+  type Cookies = Parameters<typeof loadSubscriptionContext>[3];
+  const cookies = {} as unknown as Cookies;
+  const tier = { id: 'tier-2', sortOrder: 2 };
+
+  function apiReturns(
+    getCurrent: () => Promise<unknown>,
+    list: () => Promise<unknown> = () => Promise.resolve([tier])
+  ) {
+    const current = vi.fn(getCurrent);
+    vi.mocked(createServerApi).mockReturnValue({
+      subscription: { getCurrent: current },
+      tiers: { list },
+    } as unknown as ReturnType<typeof createServerApi>);
+    return current;
+  }
+
+  beforeEach(() => {
+    mockLogger.error.mockClear();
+    mockLogger.warn.mockClear();
+  });
+
+  it('a covering subscription opens the piece to a signed-in reader', async () => {
+    apiReturns(() =>
+      Promise.resolve({ status: 'active', tier: { sortOrder: 2 } })
+    );
+
+    const ctx = await loadSubscriptionContext(
+      'org-1',
+      'tier-2',
+      undefined,
+      cookies,
+      true
+    );
+
+    expect(ctx).toMatchObject({
+      requiresSubscription: true,
+      hasSubscription: true,
+      subscriptionCoversContent: true,
+    });
+  });
+
+  it('never asks for the subscription of a visitor who is not signed in', async () => {
+    const getCurrent = apiReturns(() =>
+      Promise.reject(new ApiError(401, 'Unauthorized'))
+    );
+
+    const ctx = await loadSubscriptionContext(
+      'org-1',
+      'tier-2',
+      undefined,
+      cookies,
+      false
+    );
+
+    expect(getCurrent).not.toHaveBeenCalled();
+    expect(ctx).toMatchObject({
+      requiresSubscription: true,
+      hasSubscription: false,
+      tiers: [tier],
+    });
+    expect(mockLogger.error).not.toHaveBeenCalled();
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+
+  it('logs a failed subscription read and offers the tier', async () => {
+    apiReturns(() => Promise.reject(new ApiError(503, 'unavailable')));
+
+    const ctx = await loadSubscriptionContext(
+      'org-1',
+      'tier-2',
+      undefined,
+      cookies,
+      true
+    );
+
+    expect(ctx).toMatchObject({ hasSubscription: false, tiers: [tier] });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Current subscription not loaded',
+      expect.objectContaining({ orgId: 'org-1', status: 503 })
+    );
+  });
+
+  it('logs a failed tier read', async () => {
+    apiReturns(
+      () => Promise.resolve(null),
+      () => Promise.reject(new ApiError(503, 'unavailable'))
+    );
+
+    const ctx = await loadSubscriptionContext(
+      'org-1',
+      'tier-2',
+      undefined,
+      cookies,
+      true
+    );
+
+    expect(ctx.tiers).toEqual([]);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Subscription tiers not loaded',
+      expect.objectContaining({ orgId: 'org-1', status: 503 })
+    );
+  });
+
+  it('the page-level fault logs at error with its stack and still offers the tier', () => {
+    const fault = new TypeError(
+      "Cannot read properties of undefined (reading 'sortOrder')"
+    );
+
+    expect(subscriptionContextFault('content-1', fault)).toEqual({
+      ...EMPTY_SUB_CONTEXT,
+      requiresSubscription: true,
+    });
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Subscription context threw',
+      expect.objectContaining({
+        contentId: 'content-1',
+        error: fault.message,
+        stack: fault.stack,
+      })
+    );
   });
 });
 
@@ -358,6 +489,92 @@ describe('loadAccessAndProgress reads WHY /stream failed (Codex-h3ipg)', () => {
       policy()
     );
     expect(result).toMatchObject({ hasAccess: true, accessCheckFailed: true });
+  });
+
+  // A lost progress read resets the resume position to 0 (Codex-uuz1g).
+  it('logs a failed progress read, and still answers access', async () => {
+    mockLogger.warn.mockClear();
+    vi.mocked(createServerApi).mockReturnValue({
+      access: {
+        getStreamingUrl: () =>
+          Promise.resolve({ streamingUrl: null, contentType: 'written' }),
+        getProgress: () => Promise.reject(new Error('progress read timed out')),
+      },
+    } as unknown as ReturnType<typeof createServerApi>);
+
+    const result = await loadAccessAndProgress('c1', undefined, cookies, paid);
+
+    expect(result).toMatchObject({ hasAccess: true, progress: null });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Playback progress not loaded',
+      expect.objectContaining({
+        contentId: 'c1',
+        error: 'progress read timed out',
+      })
+    );
+  });
+
+  // The worker answers `{ progress: {...} }` (PlaybackProgressResponse). The
+  // mapping read the fields off the envelope, so every reader resumed at 0.
+  it('reads the saved position from the response’s `progress`', async () => {
+    vi.mocked(createServerApi).mockReturnValue({
+      access: {
+        getStreamingUrl: () =>
+          Promise.resolve({ streamingUrl: null, contentType: 'written' }),
+        getProgress: () =>
+          Promise.resolve({
+            progress: {
+              positionSeconds: 312,
+              durationSeconds: 900,
+              completed: false,
+              updatedAt: '2026-10-25T10:00:00.000Z',
+            },
+          }),
+      },
+    } as unknown as ReturnType<typeof createServerApi>);
+
+    const result = await loadAccessAndProgress('c1', undefined, cookies, paid);
+
+    expect(result.progress).toEqual({
+      positionSeconds: 312,
+      durationSeconds: 900,
+      completed: false,
+    });
+  });
+
+  it('no saved position is no progress', async () => {
+    vi.mocked(createServerApi).mockReturnValue({
+      access: {
+        getStreamingUrl: () =>
+          Promise.resolve({ streamingUrl: null, contentType: 'written' }),
+        getProgress: () => Promise.resolve({ progress: null }),
+      },
+    } as unknown as ReturnType<typeof createServerApi>);
+
+    const result = await loadAccessAndProgress('c1', undefined, cookies, paid);
+
+    expect(result.progress).toBeNull();
+  });
+});
+
+describe('detailPageCacheHeaders (Codex-hyz1c)', () => {
+  it('stores a page carrying a gated grant nowhere', () => {
+    expect(detailPageCacheHeaders(true)).toEqual(CACHE_HEADERS.FRESH);
+  });
+
+  it('keeps a page with no gated grant private, no-cache', () => {
+    expect(detailPageCacheHeaders(false)).toEqual(CACHE_HEADERS.PRIVATE);
+  });
+
+  // Pins the presets this rule leans on: if either changed meaning, the
+  // detail pages would silently send the wrong header.
+  it('the two presets mean what the rule says', () => {
+    expect(CACHE_HEADERS.FRESH).toEqual({
+      'Cache-Control': 'private, no-store',
+    });
+    expect(CACHE_HEADERS.PRIVATE).toEqual({
+      'Cache-Control': 'private, no-cache',
+    });
   });
 });
 

@@ -9,6 +9,7 @@
  */
 
 import type {
+  ContentBodySource,
   ContentHeld,
   CourseEntryResponse,
   PlaybackProgressResponse,
@@ -120,6 +121,8 @@ import type { JourneyInsightsData } from '$lib/components/studio/journey-insight
 // Journey member-surface view shapes (Codex-2pryk Round-D). Structurally
 // identical to @codex/shared-types' cross-worker mirror the content-api routes
 // serialise; imported from the FE $lib bag so callers get the exact FE types.
+// One exception: InCoursePracticeData is the PAGE shape, whose wire form is
+// InCoursePracticeResponse below (Codex-woj7k).
 import type {
   CompletionSource,
   ContentCourseLinks,
@@ -209,10 +212,30 @@ export type PublicContentListItem = Omit<
  * R2 keys the way the public list does, so the page draws an item withdrawn
  * from sale exactly as it drew it on the storefront.
  */
-export interface WithdrawnContentItem {
+interface WithdrawnContentItem {
   content: PublicContentListItem;
   held: ContentHeld;
 }
+
+/**
+ * `GET /api/journeys/courses/:courseId/practices/:contentSlug`: the player's
+ * {@link InCoursePracticeData} with a written practice's body AS STORED in
+ * place of its HTML. `fetchInCoursePractice` renders it (Codex-woj7k), so the
+ * page only ever sees `bodyHtml`.
+ *
+ * `body` is optional on the wire because a content-api older than this web
+ * (a rollback) sends only `bodyHtml`, the markdown column, which the seam
+ * then renders and logs. Drop both halves with the worker's legacy field
+ * (Codex-sb3sr).
+ */
+export type InCoursePracticeResponse = Omit<
+  InCoursePracticeData,
+  'bodyHtml' | 'bodyUnavailable'
+> & {
+  body?: ContentBodySource | null;
+  /** @deprecated The pre-Codex-woj7k markdown column; read `body`. */
+  bodyHtml?: string | null;
+};
 
 /**
  * Resolve API URL for a worker
@@ -1096,9 +1119,10 @@ export function createServerApi(
     access: {
       /**
        * Get streaming URL for content. `includeBody` also returns the body
-       * once access is granted, for a released row: the detail pages' body
-       * source for a gated piece (Codex-039vo). Never set it from a remote
-       * query, whose result SvelteKit ships to the browser.
+       * once access is granted (a row never released is granted to no one):
+       * the detail pages' body source for a gated piece (Codex-039vo). Never
+       * set it from a remote query, whose result SvelteKit ships to the
+       * browser.
        */
       getStreamingUrl: (
         contentId: string,
@@ -1298,7 +1322,7 @@ export function createServerApi(
 
       /** In-course player payload (practice + playlist + signed stream URL). */
       inCoursePractice: (courseId: string, contentSlug: string) =>
-        request<InCoursePracticeData | null>(
+        request<InCoursePracticeResponse | null>(
           'access',
           `/api/journeys/courses/${courseId}/practices/${encodeURIComponent(
             contentSlug

@@ -985,8 +985,8 @@ export class CourseJourneyService extends BaseService {
    * ordered playlist, the user's course-wide completions, and the resume
    * position. `streamingUrl` / `waveformUrl` are left `null` — the route fills
    * them for media via `ContentAccessService.getStreamingUrl` (the single
-   * signing + `canView` authority). `bodyHtml` carries the stored body for
-   * `written` practices.
+   * signing + `canView` authority). `body` carries the stored body for
+   * `written` practices, both columns, for the web to render.
    *
    * Returns `null` when the practice is not a released, non-deleted practice of
    * the course.
@@ -1017,13 +1017,18 @@ export class CourseJourneyService extends BaseService {
       }
       if (!stageMatch || !practiceMatch) return null;
 
-      const [completions, progressSeconds, bodyHtml] = await Promise.all([
+      const [completions, progressSeconds, body] = await Promise.all([
         this.loadCompletions(userId, stages),
         this.loadResumeSeconds(userId, practiceMatch.contentId),
         practiceMatch.contentType === 'written'
           ? this.loadContentBody(practiceMatch.contentId)
           : Promise.resolve(null),
       ]);
+      // A written practice's row deleted between the curriculum read and this
+      // one is gone, not "a practice with no text": the player 404s.
+      if (practiceMatch.contentType === 'written' && body === null) {
+        return null;
+      }
 
       return {
         course,
@@ -1032,7 +1037,9 @@ export class CourseJourneyService extends BaseService {
         // Signed URLs are minted by the route via ContentAccessService.
         streamingUrl: null,
         waveformUrl: null,
-        bodyHtml,
+        body,
+        // For one release only, for a web older than this worker (Codex-sb3sr).
+        bodyHtml: body?.contentBody ?? null,
         initialProgressSeconds: progressSeconds,
         playlist: flattenPlaylist(stages),
         completions,
@@ -4256,6 +4263,13 @@ export class CourseJourneyService extends BaseService {
    * but the player then refused to open it). "Released" is `publishedAt` set
    * (it is never cleared when a course goes back to draft), or `published` for
    * a legacy row without one. A course that was never released does not open.
+   *
+   * Nor does a course of a deleted organisation, to anyone (owner decision,
+   * 2026-10-25: "Nobody"; Codex-7ncbh). Soft-deleting an org leaves its
+   * courses and their entitlements in place, and a written practice reaches
+   * its reader through this read alone (no stream), so the dashboard and the
+   * player both stop here. `courses.organization_id` is NOT NULL, so the join
+   * always finds the org row.
    */
   private async loadCourseSummaryById(
     courseId: string
@@ -4277,7 +4291,8 @@ export class CourseJourneyService extends BaseService {
             eq(courses.status, CONTENT_STATUS.PUBLISHED),
             isNotNull(courses.publishedAt)
           ),
-          isNull(courses.deletedAt)
+          isNull(courses.deletedAt),
+          isNull(organizations.deletedAt)
         )
       )
       .limit(1);
@@ -4619,16 +4634,24 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * Stored body for a `written` practice. Returned verbatim — HTML sanitisation
-   * for the rendered body is deferred to Phase 2 (the FE renderer / a
-   * server-side sanitizer); there is no content-body renderer to reuse today.
+   * Stored body for a `written` practice: BOTH columns, because the editor
+   * writes TipTap JSON to `contentBodyJson` and leaves `contentBody` null, so
+   * the markdown column alone rendered an editor-written practice empty
+   * (Codex-woj7k). Returned as stored; the web renders and sanitises it with
+   * the standalone content page's `renderContentBody`.
    */
-  private async loadContentBody(contentId: string): Promise<string | null> {
+  private async loadContentBody(
+    contentId: string
+  ): Promise<InCoursePracticeData['body']> {
     const row = await this.db.query.content.findFirst({
-      where: eq(content.id, contentId),
-      columns: { contentBody: true },
+      where: and(eq(content.id, contentId), isNull(content.deletedAt)),
+      columns: { contentBody: true, contentBodyJson: true },
     });
-    return row?.contentBody ?? null;
+    if (!row) return null;
+    return {
+      contentBody: row.contentBody,
+      contentBodyJson: row.contentBodyJson,
+    };
   }
 }
 

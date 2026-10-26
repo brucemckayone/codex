@@ -1,25 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { InCoursePracticeData } from '$lib/journeys/types';
+import type { InCoursePracticeResponse } from '$lib/server/api';
 
 /**
- * Round-D member seam — stored-XSS guard.
+ * Round-D member seam — the written body's render and stored-XSS guard.
  *
- * The in-course player emits a written practice's `bodyHtml` via `{@html}`. That
- * HTML is stored content the worker returns UNSANITISED, so `fetchInCoursePractice`
- * MUST scrub it before it leaves the server. Here we mock ONLY the server API
- * client (no real worker fetch) and let the REAL sanitizer run — so the test
- * proves the SEAM wires the scrub, not just that the sanitizer exists. Removing
- * the `sanitizeContentHtml` call from the seam makes these assertions fail.
+ * The in-course player emits a written practice's `bodyHtml` via `{@html}`. The
+ * worker returns the body AS STORED (TipTap JSON or markdown), so
+ * `fetchInCoursePractice` MUST render and scrub it before it leaves the server
+ * (Codex-woj7k). Here we mock ONLY the server API client (no real worker
+ * fetch) and let the REAL renderer run, so the test proves the SEAM wires the
+ * render, not just that the renderer exists.
  */
 
-const { inCoursePractice, courseEntry } = vi.hoisted(() => ({
+const { inCoursePractice, courseEntry, mockLogger } = vi.hoisted(() => ({
   inCoursePractice: vi.fn(),
   courseEntry: vi.fn(),
+  mockLogger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
 vi.mock('$lib/server/api', () => ({
   createServerApi: () => ({ access: { inCoursePractice, courseEntry } }),
 }));
+
+vi.mock('$lib/observability', () => ({ logger: mockLogger }));
 
 import {
   fetchInCoursePractice,
@@ -29,7 +32,7 @@ import {
 
 const ctx = {} as Parameters<typeof fetchInCoursePractice>[0];
 
-const basePractice: InCoursePracticeData = {
+const basePractice: InCoursePracticeResponse = {
   course: {
     id: '2c000000-0000-4000-8000-000000000001',
     slug: 'rootwork',
@@ -48,47 +51,155 @@ const basePractice: InCoursePracticeData = {
   },
   streamingUrl: null,
   waveformUrl: null,
-  bodyHtml: null,
+  body: null,
   initialProgressSeconds: 0,
   playlist: [],
   completions: [],
 };
+
+function fetchFieldNotes() {
+  return fetchInCoursePractice(
+    ctx,
+    'user-1',
+    basePractice.course.id,
+    'field-notes'
+  );
+}
 
 describe('fetchInCoursePractice', () => {
   beforeEach(() => {
     inCoursePractice.mockReset();
   });
 
-  it('sanitises a stored-XSS bodyHtml before returning it', async () => {
+  it('renders an editor-written (TipTap JSON) body, which the markdown column alone left empty', async () => {
     inCoursePractice.mockResolvedValue({
       ...basePractice,
-      bodyHtml:
-        '<p>safe</p><script>alert(1)</script><img src="x" onerror="alert(2)">',
+      body: {
+        contentBody: null,
+        contentBodyJson: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Set your intention.' }],
+            },
+          ],
+        },
+      },
     });
 
-    const result = await fetchInCoursePractice(
-      ctx,
-      'user-1',
-      basePractice.course.id,
-      'field-notes'
-    );
+    const result = await fetchFieldNotes();
 
-    expect(result?.bodyHtml).not.toContain('<script');
-    expect(result?.bodyHtml).not.toContain('onerror');
-    expect(result?.bodyHtml).toContain('<p>safe</p>');
+    expect(result?.bodyHtml).toContain('<p>Set your intention.</p>');
   });
 
-  it('leaves a null bodyHtml (media practice) untouched', async () => {
-    inCoursePractice.mockResolvedValue({ ...basePractice, bodyHtml: null });
+  it('renders a legacy markdown body and scrubs a stored-XSS payload', async () => {
+    inCoursePractice.mockResolvedValue({
+      ...basePractice,
+      body: {
+        contentBody:
+          '**safe**\n\n<script>alert(1)</script><img src="x" onerror="alert(2)">',
+        contentBodyJson: null,
+      },
+    });
 
-    const result = await fetchInCoursePractice(
-      ctx,
-      'user-1',
-      basePractice.course.id,
-      'field-notes'
-    );
+    const result = await fetchFieldNotes();
+
+    expect(result?.bodyHtml).toContain('<strong>safe</strong>');
+    expect(result?.bodyHtml).not.toContain('<script');
+    expect(result?.bodyHtml).not.toContain('onerror');
+  });
+
+  it('never hands the stored body to the page', async () => {
+    inCoursePractice.mockResolvedValue({
+      ...basePractice,
+      body: { contentBody: 'text', contentBodyJson: null },
+    });
+
+    const result = await fetchFieldNotes();
+
+    expect(result).not.toHaveProperty('body');
+  });
+
+  it('a media practice (no body) has no bodyHtml', async () => {
+    inCoursePractice.mockResolvedValue(basePractice);
+
+    const result = await fetchFieldNotes();
 
     expect(result?.bodyHtml).toBeNull();
+    expect(result).not.toHaveProperty('body');
+    expect(result?.bodyUnavailable).toBe(false);
+  });
+
+  it('a written practice with no text is not "unavailable": the pane says it has none', async () => {
+    inCoursePractice.mockResolvedValue({
+      ...basePractice,
+      body: { contentBody: null, contentBodyJson: null },
+    });
+
+    const result = await fetchFieldNotes();
+
+    expect(result?.bodyHtml).toBeNull();
+    expect(result?.bodyUnavailable).toBe(false);
+  });
+
+  // A render failure used to read as "no written guidance yet", with Mark
+  // complete offered for text the learner never saw.
+  it('stored text that fails to render is flagged unavailable', async () => {
+    inCoursePractice.mockResolvedValue({
+      ...basePractice,
+      body: {
+        contentBody: null,
+        contentBodyJson: {
+          type: 'doc',
+          content: [{ type: '__no_such_node__' }],
+        },
+      },
+    });
+
+    const result = await fetchFieldNotes();
+
+    expect(result?.bodyHtml).toBeNull();
+    expect(result?.bodyUnavailable).toBe(true);
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Failed to render content body',
+      expect.objectContaining({
+        contentId: basePractice.practice.contentId,
+        surface: 'course-player',
+      })
+    );
+  });
+
+  // A content-api older than this web (a rollback) sends only the markdown
+  // column, as `bodyHtml` (Codex-sb3sr).
+  it('a worker without `body` still renders its markdown, and the skew is logged', async () => {
+    mockLogger.error.mockClear();
+    const { body: _omitted, ...olderWorker } = basePractice;
+    inCoursePractice.mockResolvedValue({
+      ...olderWorker,
+      bodyHtml: 'from an **older** worker',
+    });
+
+    const result = await fetchFieldNotes();
+
+    expect(result?.bodyHtml).toContain('<strong>older</strong>');
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'In-course practice arrived without its stored body',
+      expect.objectContaining({ contentId: basePractice.practice.contentId })
+    );
+  });
+
+  // The older worker's markdown column is empty for an editor-written
+  // practice: its text is JSON this web cannot see, so "no written guidance"
+  // would be false.
+  it('a worker without `body` and an empty markdown column says the text did not load', async () => {
+    const { body: _omitted, ...olderWorker } = basePractice;
+    inCoursePractice.mockResolvedValue({ ...olderWorker, bodyHtml: null });
+
+    const result = await fetchFieldNotes();
+
+    expect(result?.bodyHtml).toBeNull();
+    expect(result?.bodyUnavailable).toBe(true);
   });
 
   it('passes through a null payload (no such practice)', async () => {

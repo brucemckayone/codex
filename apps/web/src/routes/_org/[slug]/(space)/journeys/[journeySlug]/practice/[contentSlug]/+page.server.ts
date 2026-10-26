@@ -20,6 +20,7 @@
  */
 import { error, redirect } from '@sveltejs/kit';
 import { evaluateCourseGate } from '$lib/journeys/gate';
+import { CACHE_HEADERS } from '$lib/server/cache';
 import {
   fetchCourseDashboard,
   fetchInCoursePractice,
@@ -27,6 +28,7 @@ import {
   resolveCourseBySlug,
   resolveCourseEntry,
 } from '$lib/server/journeys/round-d-seam';
+import { logReadFailure } from '$lib/server/read-failure';
 import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
 import type { PageServerLoad } from './$types';
 
@@ -86,7 +88,15 @@ export const load: PageServerLoad = async (event) => {
   // parallel; the dashboard degrades to null without affecting the practice gate.
   const [practice, dashboard] = await Promise.all([
     fetchInCoursePractice(event, user.id, course.id, params.contentSlug),
-    fetchCourseDashboard(event, user.id, course.id).catch(() => null),
+    // Survivable (only the stage gloss is lost), so logged, not thrown.
+    fetchCourseDashboard(event, user.id, course.id).catch((err: unknown) => {
+      logReadFailure(
+        'Course dashboard not loaded',
+        { courseId: course.id },
+        err
+      );
+      return null;
+    }),
   ]);
   if (!practice) error(404, 'Practice not found');
 
@@ -101,6 +111,14 @@ export const load: PageServerLoad = async (event) => {
   // it — surfaced as the working pane's "why". Absent → the line just doesn't render.
   const stageGloss =
     dashboard?.stages.find((s) => s.id === practice.stage.id)?.gloss ?? null;
+
+  // A course lesson is a paid page: its text, or a signed stream URL whose
+  // token outlives a refund, is stored nowhere (owner decision, 2026-10-25:
+  // "Yes, don't store paid pages"; Codex-hyz1c). SvelteKit already sends this
+  // ssr=false page's __data.json `private, no-store`; said here so it never
+  // rests on a default. A parent layout must not set Cache-Control: SvelteKit
+  // throws on a header set twice, which would fail every lesson.
+  event.setHeaders(CACHE_HEADERS.FRESH);
 
   return {
     practice: {

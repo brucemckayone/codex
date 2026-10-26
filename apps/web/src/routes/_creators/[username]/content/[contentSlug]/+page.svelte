@@ -157,6 +157,7 @@
   revocationReason={accessState.revocationReason}
   accessCheckFailed={accessState.accessCheckFailed}
   withdrawnHeld={data.withdrawnHeld ?? null}
+  contentBodyUnavailable={data.contentBodyUnavailable ?? false}
   onaccessrestored={() => {
     accessState.revocationReason = null;
     void invalidate('app:auth');

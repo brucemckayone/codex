@@ -340,6 +340,30 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
     expect((await library(customer)).items).toHaveLength(0);
   });
 
+  // Owner decision, 2026-10-25: "Nobody" (Codex-7ncbh). Deleting an org leaves
+  // its content published, so the shelf must ask the org itself, or the item
+  // lingers as a card that 404s.
+  it("a grant on a deleted organisation's content leaves the shelf, and no longer opens", async () => {
+    const [customer] = await seedTestUsers(db, 1);
+    const [doomedOrg] = await db
+      .insert(organizations)
+      .values({ name: 'Doomed Org', slug: createUniqueSlug('grant-doomed') })
+      .returning();
+    if (!doomedOrg) throw new Error('Failed to seed org');
+    const item = await createPaidContent('doomed-granted', doomedOrg.id);
+    await grant(customer, item.id, doomedOrg.id);
+    expect((await library(customer)).items).toHaveLength(1);
+    expect(await accessService.canView(customer, item.id)).toBe(true);
+
+    await db
+      .update(organizations)
+      .set({ deletedAt: new Date() })
+      .where(eq(organizations.id, doomedOrg.id));
+
+    expect((await library(customer)).items).toHaveLength(0);
+    expect(await accessService.canView(customer, item.id)).toBe(false);
+  });
+
   it("honours the library's organization filter", async () => {
     const [customer] = await seedTestUsers(db, 1);
     const item = await createPaidContent('org-filtered-grant');

@@ -37,6 +37,7 @@ function emptySelect() {
 const paidItem: StreamingAccessContent = {
   organizationId: 'org-guard',
   status: 'published',
+  publishedAt: new Date('2026-01-01T00:00:00.000Z'),
   isFree: false,
   isPurchasable: true,
   priceCents: 1500,

@@ -37,7 +37,7 @@ const { service, cleanup } = createContentAccessService(env);
 
 | Method | Signature | Notes |
 |---|---|---|
-| `getStreamingUrl` | `(userId: string, input: GetStreamingUrlInput, options?: { includeBody?: boolean })` | Verifies access (KV revocation short-circuit first when wired). For video/audio returns an HLS master-playlist PROXY URL on the content-api origin carrying a signed HLS token; `streamingUrl` is `null` for written content. The waveform is a presigned R2 URL. Returns `{ streamingUrl, waveformUrl, expiresAt, contentType, readyVariants?, body? }`. `body` (`{ contentBody, contentBodyJson }`) only with `includeBody`, taken from the row the access decision read, after it granted, and only for a released row (published now, or once; `publishedAt` is never cleared): the detail pages' body for a gated piece (Codex-039vo). |
+| `getStreamingUrl` | `(userId: string, input: GetStreamingUrlInput, options?: { includeBody?: boolean })` | Verifies access (KV revocation short-circuit first when wired). For video/audio returns an HLS master-playlist PROXY URL on the content-api origin carrying a signed HLS token; `streamingUrl` is `null` for written content. The waveform is a presigned R2 URL. Returns `{ streamingUrl, waveformUrl, expiresAt, contentType, readyVariants?, body? }`. `body` (`{ contentBody, contentBodyJson }`) only with `includeBody`, taken from the row the access decision read, after it granted: the detail pages' body for a gated piece (Codex-039vo). A row never released is granted to no one (Codex-nacky), so it needs no check of its own. A deleted organisation's content is a `ContentNotFoundError`, before the decision (Codex-7ncbh). |
 | `getWithdrawnContent` | `(userId: string, query: WithdrawnContentQuery)` | An item withdrawn from sale that this reader still has, by its detail URL's key: `{ orgId, slug }` or a personal piece's `{ creatorId, slug }` (Codex-ov2ii). Only a row released once (`publishedAt` set), not published now, not deleted, in a live org. Same revocation check, read-only snapshot and `decideContentAccess` as `getStreamingUrl`, through `resolveContentGrant`. Returns `{ content, held }`: the public row's shape with NO body (that is `/stream?include=body`'s) and `held: { by: 'purchase' \| 'entitlement' \| 'course' \| 'subscription', until }` from the arm that granted (`until`: the granting subscription's period end, always set for `subscription`, null for any other hold). Every miss (no row, deleted org, revoked, denied) is the SAME `ContentNotFoundError`, keyed on the slug the caller sent, so a reader without access never learns the item exists. |
 | `savePlaybackProgress` | `(userId: string, input: SavePlaybackProgressInput)` | Upserts position/duration. Auto-marks `completed = true` at 95% (`VIDEO_PROGRESS` constant). |
 | `getPlaybackProgress` | `(userId: string, input: GetPlaybackProgressInput)` | Returns `{ positionSeconds, durationSeconds, completed, updatedAt }` or null. |
@@ -128,6 +128,44 @@ granted, so both the boolean and streaming adapters inherit it. Neither
 self-fetch filters on `content.status` any more; both still filter
 `isNull(deletedAt)`.
 
+The table below applies only to a row RELEASED once: published now, or
+`publishedAt` set (the course player's curriculum read and the withdrawn-item
+read use the same rule in SQL). A row never released was never sold, so the
+rule denies it to EVERY arm with `never_released`, the `true` ones included
+(Codex-nacky): an editor may put a draft practice in a curriculum, and its
+course's buyers must not stream it by id. `disputeHold` returns `null` for such
+a row, so its refusal is never named a paused dispute. Note that
+`publishedAt` IS cleared in one place: migration 0004's
+`trigger_unpublish_on_org_delete` sets `status` draft and nulls `published_at`
+when `organization_id` goes to NULL (an org hard-delete's cascade), so such a
+row reads as never released.
+
+A **deleted organisation's** content is gone to every arm, like a deleted item
+(owner decision, 2026-10-25: "Nobody"; Codex-7ncbh). Soft-deleting an org leaves
+its content, courses and entitlements in place, so every read that opens or
+lists content asks the org itself:
+- the content self-fetches, via `isOfDeletedOrg`: `findPolicyRow` (false on
+  the boolean path, a `null` library pause) and `getStreamingUrl`'s KV
+  revocation pre-check and transaction read (a `ContentNotFoundError`), each
+  before the decision, any dispute lookup and any revocation answer.
+  `getWithdrawnContent` answers its revocation check first, but with the same
+  uniform 404, so the order is not observable there;
+- the library listing (`buildContentFilters`, an `orgIsLive`-style
+  anti-join), so the item leaves the shelf rather than linger as a card that
+  404s;
+- `CourseJourneyService.loadCourseSummaryById`, so a deleted org's course
+  dashboard and in-course player both answer `null`: a written practice
+  reaches its reader through that read alone, with no stream to refuse it.
+
+Not yet covered, and tracked by Codex-62chf: the course-level public and shelf
+reads (`getCoursePage`, `getCourseBySlug`, `getCourseSellPreview`,
+`getContentCourses`, the published and enrolled lists) and
+`hasCourseEntitlement`. They expose no body and no signed stream, and the web
+never reaches them for a deleted org (its site no longer resolves).
+
+`isOfDeletedOrg` takes `organization` as a REQUIRED key, so a self-fetch that
+forgets the `with` fails to compile rather than reading every org as live.
+
 | Grant arm | Survives unpublication |
 |---|---|
 | `paid_purchase`, `paid_entitlement`, `subscribers_purchase`, `subscribers_entitlement` | **yes** — they paid for this item |
@@ -207,6 +245,7 @@ Results are merged, deduplicated, and enriched with progress data.
 - **MUST** check access before generating signed URLs — never generate URLs without access verification
 - **MUST** scope all library and progress queries to the authenticated `userId`
 - **MUST** keep the `isNull(deletedAt)` filter on every content self-fetch — deleted is gone, not withdrawn
+- **MUST** keep the org's `deletedAt` read (`with: { organization: { columns: { deletedAt: true } } }` + `isOfDeletedOrg`) on those self-fetches — a deleted org's content is gone too (Codex-7ncbh). The stub suites cannot see a dropped `with`; `content-access-unpublished-purchase.test.ts` asserts the fetch asks for it
 - **MUST NOT** re-add a `content.status` predicate to those self-fetches. It would 404 a buyer before their purchase is considered, and silently make the publication rule dead code. Pinned by `content-access-unpublished-purchase.test.ts`, which inspects the WHERE the code actually builds
 - **NEVER** expose raw R2 keys or bucket names to clients — only return signed URLs
 - Access check uses a transaction for snapshot consistency

@@ -785,6 +785,14 @@ describe('paused by a payment dispute (Codex-2hxff.60)', () => {
         .update(content)
         .set({ organizationId: null })
         .where(eq(content.id, item.id));
+      // Detaching the org fires trigger_unpublish_on_org_delete (migration
+      // 0004), which sets status draft AND nulls publishedAt. A row never
+      // released opens to no arm (Codex-nacky), so republish: this models a
+      // released personal piece, not a draft.
+      await db
+        .update(content)
+        .set({ status: 'published', publishedAt: new Date() })
+        .where(eq(content.id, item.id));
       await buy(buyer, item.id, {
         organizationId: null,
         disputedAt: new Date(),

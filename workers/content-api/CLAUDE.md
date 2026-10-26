@@ -48,7 +48,7 @@ gate rejects it.
 
 | Method | Path | Policy | Rate Limit | Notes |
 |---|---|---|---|---|
-| GET | `/api/access/content/:id/stream` | `auth: 'required'` | `streaming` (60/min) | Returns signed streaming URL + waveformUrl + contentType; `private, no-store`. `?include=body` also returns `body: { contentBody, contentBodyJson }` once access is granted, for a released row (published now, or once): the detail pages' body for a gated piece (Codex-039vo). No `body` means not returned; a piece with no body is both fields null. Never pass it from a remote query or the player refresh |
+| GET | `/api/access/content/:id/stream` | `auth: 'required'` | `streaming` (60/min) | Returns signed streaming URL + waveformUrl + contentType; `private, no-store`. `?include=body` also returns `body: { contentBody, contentBodyJson }` once access is granted (a row never released is granted to no one, Codex-nacky): the detail pages' body for a gated piece (Codex-039vo). No `body` means not returned; a piece with no body is both fields null. Never pass it from a remote query or the player refresh |
 | GET | `/api/access/content/withdrawn` | `auth: 'required'` | `api` | `?slug` + exactly one of `orgId` or `creatorId` (`withdrawnContentQuerySchema`, strict). An item withdrawn from sale that this reader still has: `{ content, held }`, the row with R2 keys resolved as `/api/content/public` resolves them (`r2-public-urls.ts`) and no body. Every other case is the same 404; `private, no-store`. The detail pages ask for it when the public lookup misses for a signed-in reader (Codex-ov2ii) |
 | POST | `/api/access/content/:id/progress` | `auth: 'required'` | `api` | Save playback progress; 204 |
 | GET | `/api/access/content/:id/progress` | `auth: 'required'` | `api` | Get playback progress |
@@ -75,7 +75,8 @@ GET /api/access/content/:id/stream[?include=body]
   → mint an HLS token + master-playlist proxy URL; presign the waveform
   → return { streamingUrl, waveformUrl, expiresAt, contentType, readyVariants? }
     (+ body: { contentBody, contentBodyJson } with include=body, from the row
-    the access decision read, after it granted, for a released row only);
+    the access decision read, after it granted; a row never released is
+    granted to no one);
     Cache-Control private, no-store
 ```
 

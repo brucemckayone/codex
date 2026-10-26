@@ -166,8 +166,8 @@ app.get(
  *   course-only), as for every other content read
  * - Works from both org subdomains and root domain (revelations.studio)
  *
- * `?include=body` also returns the content's body once access is granted, for
- * a released row (published now, or once): the body source for an entitled
+ * `?include=body` also returns the content's body once access is granted (a row
+ * never released is granted to no one, Codex-nacky): the body source for an entitled
  * reader of a gated piece, whose public row carries none (Codex-039vo). Only
  * the detail pages send it.
  * @returns {StreamingUrlResponse}
@@ -182,7 +182,8 @@ app.get(
       // a per-user HLS token, and with `include=body` a gated piece's body, so
       // no copy of IT may outlive the request on any disk. That covers this
       // response only: the detail page that renders the body sends its own
-      // header (`CACHE_HEADERS.PRIVATE`), which keeps it out of shared caches.
+      // header, `private, no-store` too when it carries a gated body
+      // (`detailPageCacheHeaders`, Codex-hyz1c).
       cache: 'fresh',
     },
     input: {

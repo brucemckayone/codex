@@ -23,6 +23,8 @@
  * the live brand-editor precedents this build clones.
  */
 
+import type { ContentBodySource } from './worker-types';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Page model (D1 — SPEC §4 + §4.1)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -694,7 +696,7 @@ export interface PlaylistEntry {
 /**
  * Everything the in-course player needs after `canEnterCourse` (+ `canView` for
  * the stream) pass. `streamingUrl` / `waveformUrl` are signed R2 URLs for media;
- * `null` for `written` practices (their body renders from `bodyHtml`).
+ * `null` for `written` practices (their body renders from `body`).
  */
 export interface InCoursePracticeData {
   course: JourneyCourseSummary;
@@ -703,7 +705,19 @@ export interface InCoursePracticeData {
   /** Signed HLS URL — media only; null for written / when stream not viewable. */
   streamingUrl: string | null;
   waveformUrl: string | null;
-  /** Rendered body HTML for `written` practices; null for media. */
+  /**
+   * A `written` practice's body AS STORED: TipTap JSON (what the editor
+   * writes) or legacy markdown. The web renders it as the standalone content
+   * page does (Codex-woj7k). `null` for media.
+   */
+  body: ContentBodySource | null;
+  /**
+   * @deprecated The pre-Codex-woj7k field: the markdown column alone, which
+   * the web only sanitised. Still sent for ONE release so a web build older
+   * than this worker (content-api deploys first) keeps showing what it
+   * showed. Read `body`. Remove once the matching web has shipped
+   * (Codex-sb3sr).
+   */
   bodyHtml: string | null;
   /** Resume position for media (seconds). */
   initialProgressSeconds: number;

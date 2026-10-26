@@ -183,6 +183,12 @@
      * badge, and keeps every purchase offer off the page.
      */
     withdrawnHeld?: ContentHeld | null;
+    /**
+     * The piece has stored text that failed to render (logged server-side).
+     * Shown as a note in the body's place, never as a page with no body
+     * (Codex-uuz1g).
+     */
+    contentBodyUnavailable?: boolean;
     creatorAttribution?: Snippet;
     purchaseForm?: Snippet;
   }
@@ -209,6 +215,7 @@
     onaccessrestored,
     journeyLink = null,
     withdrawnHeld = null,
+    contentBodyUnavailable = false,
     creatorAttribution,
     purchaseForm,
   }: Props = $props();
@@ -1415,6 +1422,11 @@
           </div>
         </div>
       {/if}
+    {:else if contentBodyUnavailable}
+      <!-- Stored text that failed to render (Codex-uuz1g): said, not blank. -->
+      <Alert variant="warning" class="content-detail__body-unavailable">
+        <p>{m.content_detail_body_unavailable()}</p>
+      </Alert>
     {/if}
   </div>
 </article>

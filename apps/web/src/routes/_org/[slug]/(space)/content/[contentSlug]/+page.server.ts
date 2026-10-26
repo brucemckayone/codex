@@ -9,11 +9,12 @@
  */
 import { publicContentSlugSchema } from '@codex/validation';
 import { error } from '@sveltejs/kit';
-import { renderContentBody } from '$lib/editor/render';
+import { hasStoredText, renderContentBody } from '$lib/editor/render';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
   ACCESS_CHECK_FAILED_RESULT,
+  detailPageCacheHeaders,
   EMPTY_SUB_CONTEXT,
   handlePurchaseAction,
   isPublicContent,
@@ -22,6 +23,8 @@ import {
   loadRelatedContent,
   loadSubscriptionContext,
   loadWithdrawnDetail,
+  logAccessCheckFault,
+  subscriptionContextFault,
   withoutRawBody,
 } from '$lib/server/content-detail';
 import { logReadFailure } from '$lib/server/read-failure';
@@ -49,7 +52,8 @@ export const load: PageServerLoad = async ({
   // for owners. PRIVATE keeps every auth-varying page out of shared caches. The
   // DB stays shielded: the public content list (incl. this slug lookup) is
   // KV-cached in content-api, so PRIVATE costs an SSR render, not a query.
-  // See docs/caching-strategy.md §HTTP/CDN caching.
+  // See docs/caching-strategy.md §HTTP/CDN caching. A response carrying a
+  // gated body is stored nowhere at all (`detailPageCacheHeaders`).
   const successCacheHeaders = CACHE_HEADERS.PRIVATE;
 
   // Fetch content via public endpoint with org.id + slug — 1 API call.
@@ -108,7 +112,17 @@ export const load: PageServerLoad = async ({
   // access check below — this is what prevents a non-follower from reading
   // the article text through view-source or the SvelteKit load payload.
   const isPublic = isPublicContent(content);
-  const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
+  const renderContext = {
+    contentId: content.id,
+    surface: 'content-detail' as const,
+  };
+  const publicBodyHtml = isPublic
+    ? await renderContentBody(content, renderContext)
+    : null;
+  // Stored text that rendered to nothing is a failure the reader is told
+  // about, never "no body" (Codex-uuz1g); the view shows a note.
+  const publicBodyUnavailable =
+    isPublic && hasStoredText(content) && publicBodyHtml == null;
 
   // Fetch related content — returned as a bare promise (streamed, below fold)
   const relatedPromise = loadRelatedContent(api, { orgId: org.id });
@@ -134,12 +148,20 @@ export const load: PageServerLoad = async ({
   // renders the body and player that check returned, with the note in place
   // of any offer (there is nothing left to buy or subscribe to).
   if (withdrawn) {
-    setHeaders(successCacheHeaders);
+    // Always a gated grant: a public piece never takes this path, and the
+    // withdrawn read answered only because access was granted.
+    const withdrawnBodyHtml = withdrawn.body
+      ? await renderContentBody(withdrawn.body, renderContext)
+      : null;
+    const withdrawnBodyUnavailable =
+      withdrawn.body != null &&
+      hasStoredText(withdrawn.body) &&
+      withdrawnBodyHtml == null;
+    setHeaders(detailPageCacheHeaders(true));
     return {
       content: pageContent,
-      contentBodyHtml: withdrawn.body
-        ? await renderContentBody(withdrawn.body)
-        : null,
+      contentBodyHtml: withdrawnBodyHtml,
+      contentBodyUnavailable: withdrawnBodyUnavailable,
       hasAccess: null,
       streamingUrl: null,
       progress: null,
@@ -162,11 +184,9 @@ export const load: PageServerLoad = async ({
         org.id,
         content.includedInTierId ?? null,
         platform,
-        cookies
-      ).catch(() => ({
-        ...EMPTY_SUB_CONTEXT,
-        requiresSubscription: content.includedInTierId != null,
-      }))
+        cookies,
+        locals.user != null
+      ).catch((error) => subscriptionContextFault(content.id, error))
     : Promise.resolve(EMPTY_SUB_CONTEXT);
 
   // For unauthenticated visitors — no streaming possible, but body unlocks
@@ -177,6 +197,7 @@ export const load: PageServerLoad = async ({
     return {
       content: pageContent,
       contentBodyHtml: publicBodyHtml,
+      contentBodyUnavailable: publicBodyUnavailable,
       hasAccess: isPublic,
       streamingUrl: null,
       progress: null,
@@ -194,15 +215,21 @@ export const load: PageServerLoad = async ({
     return {
       content: pageContent,
       contentBodyHtml: publicBodyHtml,
+      contentBodyUnavailable: publicBodyUnavailable,
       hasAccess: null,
       streamingUrl: null,
       progress: null,
+      // fetchAccess catches a failed request itself, so this sees only a
+      // fault in our own code; it fails closed, and logs (Codex-uuz1g).
       accessAndProgress: loadAccessAndProgress(
         content.id,
         platform,
         cookies,
         content
-      ).catch(() => ({ ...ACCESS_CHECK_FAILED_RESULT, hasAccess: isPublic })),
+      ).catch((error: unknown) => {
+        logAccessCheckFault(content.id, error);
+        return { ...ACCESS_CHECK_FAILED_RESULT, hasAccess: isPublic };
+      }),
       subscriptionContext,
       relatedContent: relatedPromise,
       parentCourses: parentCoursesPromise,
@@ -220,15 +247,26 @@ export const load: PageServerLoad = async ({
     platform,
     cookies,
     content
-  ).catch(() => ({ access: ACCESS_CHECK_FAILED_RESULT, body: null }));
+  ).catch((error: unknown) => {
+    logAccessCheckFault(content.id, error);
+    return { access: ACCESS_CHECK_FAILED_RESULT, body: null };
+  });
 
   const gatedBodyHtml =
-    accessResult.hasAccess && body ? await renderContentBody(body) : null;
+    accessResult.hasAccess && body
+      ? await renderContentBody(body, renderContext)
+      : null;
+  const gatedBodyUnavailable =
+    accessResult.hasAccess &&
+    body != null &&
+    hasStoredText(body) &&
+    gatedBodyHtml == null;
 
-  setHeaders(successCacheHeaders);
+  setHeaders(detailPageCacheHeaders(accessResult.hasAccess));
   return {
     content: pageContent,
     contentBodyHtml: gatedBodyHtml,
+    contentBodyUnavailable: gatedBodyUnavailable,
     hasAccess: null,
     streamingUrl: null,
     progress: null,
