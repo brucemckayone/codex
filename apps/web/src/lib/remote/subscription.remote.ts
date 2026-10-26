@@ -277,6 +277,12 @@ export const resumeSubscription = command(
 
 const createTierCommandSchema = z.object({
   orgId: z.string().uuid(),
+  /**
+   * One id per create attempt, minted by the tier dialog (Codex-2hxff.66). The
+   * server keys the Stripe product and prices on it, so a retry or a double
+   * submit with the same id gets back the tier the first attempt made.
+   */
+  submissionId: z.string().uuid(),
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
   priceMonthly: z.number().int().min(100),
@@ -286,13 +292,26 @@ const createTierCommandSchema = z.object({
 
 /**
  * Create a new subscription tier for an org.
+ *
+ * A refusal is RETURNED, not thrown (Codex-2hxff.66). The dialog has to tell
+ * the worker's typed refusals apart, and they sit in `details.code`: 409
+ * `SUBMISSION_IN_PROGRESS` / `SUBMISSION_ID_REUSED` and 503
+ * `STRIPE_UNAVAILABLE`. A thrown error reaches the browser as a sanitised 500
+ * with no code: a 4xx unless forwarded, and a 5xx always.
  */
 export const createTier = command(
   createTierCommandSchema,
   async ({ orgId, ...data }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.tiers.create(orgId, data);
+    try {
+      return {
+        success: true as const,
+        tier: await api.tiers.create(orgId, data),
+      };
+    } catch (error) {
+      return toCommandFailure(error);
+    }
   }
 );
 

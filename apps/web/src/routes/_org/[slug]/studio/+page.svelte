@@ -206,7 +206,6 @@
             id: a.id,
             creatorId: a.creatorId,
             revenueType: a.revenueType,
-            organizationFeePercentage: a.organizationFeePercentage,
             effectiveUntil: a.effectiveUntil,
           })),
           pendingCreatorCounters: pendingCounters.map((p) => ({

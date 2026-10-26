@@ -25,7 +25,8 @@
     removeMember,
   } from '$lib/remote/org.remote';
   import { listActiveAgreements } from '$lib/remote/agreements.remote';
-  import type { CreatorOrganizationAgreement } from '@codex/agreements';
+  import { formatAgreementShare } from '$lib/components/agreements/agreement-share';
+  import type { AgreementWithShare } from '@codex/agreements';
 
   let { data } = $props();
 
@@ -64,21 +65,20 @@
     isOwner ? listActiveAgreements({ organizationId: data.org.id }) : null
   );
 
-  // Map userId → compact active-agreement summary for the table column. Share
-  // derives from the legacy org-fee column (10000 - fee, in basis points),
-  // matching the revenue-share page. Both revenue types fold into one label,
-  // e.g. "30% subs · 20% sales". Undefined when not owner → column hidden.
+  // Map userId → compact active-agreement summary for the table column. The
+  // share is the agreement's own `creatorSharePercent`, matching the
+  // revenue-share page; a missing one reads "— subs" (Codex-fazy6). Both
+  // revenue types fold into one label, e.g. "30% subs · 20% sales". Undefined
+  // when not owner → column hidden.
   const revenueShareByUser = $derived.by(() => {
     if (!isOwner) return undefined;
     const rows = (agreementsQuery?.current?.items ??
-      []) as CreatorOrganizationAgreement[];
+      []) as AgreementWithShare[];
     const map = new Map<string, { label: string; active: boolean }>();
     for (const a of rows) {
-      const sharePercent = (10000 - a.organizationFeePercentage) / 100;
+      const share = formatAgreementShare(a.creatorSharePercent);
       const part =
-        a.revenueType === 'subscription'
-          ? `${sharePercent}% subs`
-          : `${sharePercent}% sales`;
+        a.revenueType === 'subscription' ? `${share} subs` : `${share} sales`;
       const existing = map.get(a.creatorId);
       map.set(a.creatorId, {
         active: true,

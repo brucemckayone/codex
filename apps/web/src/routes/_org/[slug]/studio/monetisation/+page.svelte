@@ -52,20 +52,20 @@
   } from '$lib/remote/subscription.remote';
   import { getOrgSettings } from '$lib/remote/org.remote';
   import { formatDate, formatPrice } from '$lib/utils/format';
+  import { randomUuid } from '$lib/utils/random-uuid';
   import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
-  import { isConnectReady, moneyReadiness } from '$lib/utils/connect-readiness';
+  import {
+    connectQueryState,
+    isConnectReady,
+    moneyReadiness,
+  } from '$lib/utils/connect-readiness';
+  import { queryErrorMessage, type QueryResult } from '$lib/remote/query-result';
   import type {
     ConnectRequirements,
     SubscriptionStats,
     SubscriptionTier,
   } from '$lib/types';
   import { logger } from '$lib/observability';
-
-  /** Shape returned by SvelteKit's query() when called client-side */
-  interface QueryResult<T> {
-    current: T | undefined;
-    loading?: boolean;
-  }
 
   let { data } = $props();
 
@@ -95,17 +95,50 @@
   const tiers = $derived(
     ((tiersQuery as QueryResult<SubscriptionTier[]> | null)?.current ?? [])
   );
-  const connectStatus = $derived(
-    (connectQuery as QueryResult<{
-      isConnected: boolean; accountId: string | null;
-      chargesEnabled: boolean; payoutsEnabled: boolean; status: string | null;
-      requirements: ConnectRequirements | null;
-      requirementsFetchFailed?: boolean;
-    }> | null)?.current ?? {
-      isConnected: false, accountId: null, chargesEnabled: false, payoutsEnabled: false, status: null, requirements: null,
-      requirementsFetchFailed: false,
-    }
+
+  type ConnectStatusPayload = {
+    isConnected: boolean; accountId: string | null;
+    chargesEnabled: boolean; payoutsEnabled: boolean; status: string | null;
+    requirements: ConnectRequirements | null;
+    requirementsFetchFailed?: boolean;
+  };
+
+  // A read that FAILED is not "no account" (Codex-2hxff.45). The default below
+  // only fills the gap while loading or failed, and every surface that would
+  // read it as a verdict (the badge, the set-up button, the two needs-Connect
+  // hints and the readiness prompt) checks `connectFailed` first.
+  const connectState = $derived(
+    connectQueryState(connectQuery as QueryResult<ConnectStatusPayload>)
   );
+  const connectFailed = $derived(connectState.kind === 'failed');
+  const connectStatus = $derived<ConnectStatusPayload>(
+    connectState.kind === 'ok'
+      ? connectState.status
+      : {
+          isConnected: false, accountId: null, chargesEnabled: false, payoutsEnabled: false, status: null, requirements: null,
+          requirementsFetchFailed: false,
+        }
+  );
+
+  // The real error goes to the logger (which redacts), never into the DOM.
+  $effect(() => {
+    if (connectFailed) {
+      logRawError(
+        'payout account status failed to load',
+        queryErrorMessage((connectQuery as QueryResult<unknown>).error)
+      );
+    }
+  });
+
+  /**
+   * Retry the status read. No `loading` on the button: `Button` disables
+   * itself while loading, which drops focus to <body>. The rejection stays on
+   * the query's own `.error`, which keeps the card failed and is logged above,
+   * so the catch only stops an unhandled rejection.
+   */
+  function retryConnectStatus() {
+    void connectQuery.refresh().catch(() => {});
+  }
 
   /**
    * Connect readiness gate for tier creation. Mirrors the backend guard
@@ -189,10 +222,14 @@
    *
    * Every other blocking state is fully described 200px below. Rendering the
    * prompt for those too would restate it — the duplication this pass removes.
+   *
+   * Never on a failed read: `readiness` is then computed from the "no account"
+   * default, so it would warn a set-up owner that money has nowhere to land.
    */
   const showReadinessPrompt = $derived(
-    (readiness.blocking && readiness.hasSubscribers) ||
-      readiness.state === 'stripe_unknown'
+    !connectFailed &&
+      ((readiness.blocking && readiness.hasSubscribers) ||
+        readiness.state === 'stripe_unknown')
   );
 
   /** Per-tier subscriber counts, so each row carries its own number instead of
@@ -244,6 +281,63 @@
   let tierPriceAnnual = $state(4990);
   let tierFormError = $state('');
   let tierFormLoading = $state(false);
+  /**
+   * One id per create attempt, minted when the dialog opens (Codex-2hxff.66).
+   * The server keys the Stripe product and prices on it, so resubmitting the
+   * SAME values (a retry after a dropped response, a double submit) gets back
+   * the tier the first attempt made instead of making a second one. Plain
+   * `let`, not `$state`: nothing renders it.
+   */
+  let tierSubmissionId = '';
+  /** The values last sent under `tierSubmissionId`; null before the first send. */
+  let tierSubmittedValues: string | null = null;
+  type TierCreateValues = {
+    name: string;
+    description: string | undefined;
+    priceMonthly: number;
+    priceAnnual: number;
+  };
+  /**
+   * A create whose outcome is unknown: it was sent and did not answer with
+   * success. The server may still have made the tier (a lost response, a
+   * timeout). It outlives the dialog closing, so a reopen resumes the SAME
+   * attempt: the same values under the same `tierSubmissionId`, and an
+   * unchanged Save gets back the first tier instead of making a second.
+   * Cleared when a create succeeds.
+   */
+  let unsettledCreate: TierCreateValues | null = null;
+  /** When `tierSubmissionId` was minted. Stripe's 24h key window runs from
+      its first use, so this, not the latest send, bounds a resume. */
+  let tierSubmissionMintedAt = 0;
+  /**
+   * How long a reopen may resume an unsettled attempt. Stripe keeps a key for
+   * 24h and a repeat after that would make a SECOND tier, so stop well short.
+   */
+  const UNSETTLED_CREATE_TTL_MS = 60 * 60 * 1000;
+
+  function mintTierSubmission() {
+    // `randomUuid`, not `crypto.randomUUID`: the latter is undefined on
+    // http://*.lvh.me (local dev and e2e), which is not a secure context.
+    tierSubmissionId = randomUuid();
+    tierSubmissionMintedAt = Date.now();
+    tierSubmittedValues = null;
+  }
+
+  /**
+   * Whether a reopen should resume the unsettled attempt: not once it is an
+   * hour old, and not once the tier list shows it, because then the first
+   * attempt landed.
+   */
+  function resumable(values: TierCreateValues): boolean {
+    if (Date.now() - tierSubmissionMintedAt > UNSETTLED_CREATE_TTL_MS) return false;
+    return !tiers.some(
+      (t) =>
+        t.name === values.name &&
+        (t.description ?? '') === (values.description ?? '') &&
+        t.priceMonthly === values.priceMonthly &&
+        t.priceAnnual === values.priceAnnual
+    );
+  }
 
   // Delete dialog state
   let deleteLoading = $state(false);
@@ -403,11 +497,22 @@
     // would only fail on submit.
     if (!connectReady) return;
     editingTier = null;
-    tierName = '';
-    tierDescription = '';
-    tierPriceMonthly = 499;
-    tierPriceAnnual = 4990;
     tierFormError = '';
+    if (unsettledCreate && !resumable(unsettledCreate)) unsettledCreate = null;
+    if (unsettledCreate) {
+      // Resume the unsettled attempt: its values and its id are kept, so an
+      // unchanged Save repeats it and the server returns the first tier.
+      tierName = unsettledCreate.name;
+      tierDescription = unsettledCreate.description ?? '';
+      tierPriceMonthly = unsettledCreate.priceMonthly;
+      tierPriceAnnual = unsettledCreate.priceAnnual;
+    } else {
+      tierName = '';
+      tierDescription = '';
+      tierPriceMonthly = 499;
+      tierPriceAnnual = 4990;
+      mintTierSubmission();
+    }
     tierDialogOpen = true;
   }
 
@@ -430,6 +535,7 @@
   async function handleTierSubmit() {
     tierFormLoading = true;
     tierFormError = '';
+    const creating = !editingTier;
     try {
       if (editingTier) {
         await updateTier({
@@ -441,13 +547,31 @@
           priceAnnual: tierPriceAnnual,
         });
       } else {
-        await createTier({
-          orgId,
+        const values: TierCreateValues = {
           name: tierName,
           description: tierDescription || undefined,
           priceMonthly: tierPriceMonthly,
           priceAnnual: tierPriceAnnual,
-        });
+        };
+        // Stripe refuses a reused key with different parameters, so values
+        // that changed since the last send are a new attempt with a new id.
+        // Unchanged values keep the id: that is the retry the server dedupes.
+        const sent = JSON.stringify(values);
+        if (tierSubmittedValues !== null && tierSubmittedValues !== sent) {
+          mintTierSubmission();
+        }
+        tierSubmittedValues = sent;
+        // Unsettled from the moment it is sent, so closing the dialog while
+        // it is in flight still resumes this attempt.
+        unsettledCreate = values;
+        const result = await createTier({ orgId, submissionId: tierSubmissionId, ...values });
+        // `in`, not `result.success`: a boolean discriminant does not narrow
+        // with strictNullChecks off.
+        if (!('tier' in result)) {
+          refuseCreate(result);
+          return;
+        }
+        unsettledCreate = null;
       }
       tierDialogOpen = false;
       await invalidateAll();
@@ -458,11 +582,56 @@
       // which sets role="alert", so it would be spoken verbatim and swept into
       // any DOM-scraping error pipeline. Generic copy in the DOM, real error to
       // the logger (which redacts).
-      tierFormError = m.monetisation_tier_save_error();
-      logRawError('tier save failed', error);
+      if (creating) failCreate(m.monetisation_tier_save_error(), error);
+      else {
+        tierFormError = m.monetisation_tier_save_error();
+        logRawError('tier save failed', error);
+      }
     } finally {
       tierFormLoading = false;
     }
+  }
+
+  /**
+   * A create the worker refused, by its `details.code` (Codex-2hxff.66):
+   * - `STRIPE_UNAVAILABLE` (503): nothing was saved, but Stripe replays a
+   *   failure stored under a key for 24h, so the same id could keep failing.
+   *   Mint a new one.
+   * - `SUBMISSION_ID_REUSED` (409): the id was already used with other values
+   *   (only a retry from elsewhere can do that). Mint a new one.
+   * - `SUBMISSION_IN_PROGRESS` (409): the first is still at Stripe. Keep the
+   *   id; a retry in a moment returns its tier.
+   * - Anything else keeps the id. A 500 repeat reuses the first attempt's
+   *   Stripe objects, and our own 400/403/404/422 gates run before any Stripe
+   *   call.
+   */
+  function refuseCreate(failure: {
+    status: number;
+    code: string | undefined;
+    detailsCode: string | undefined;
+  }) {
+    const code = failure.detailsCode;
+    if (code === 'STRIPE_UNAVAILABLE' || code === 'SUBMISSION_ID_REUSED') {
+      mintTierSubmission();
+    }
+    failCreate(
+      code === 'SUBMISSION_IN_PROGRESS'
+        ? m.monetisation_tier_save_in_progress()
+        : m.monetisation_tier_save_error(),
+      `${failure.status} ${code ?? failure.code ?? 'unknown'}`
+    );
+  }
+
+  /**
+   * Every failed create, refused or thrown. It may still have made the tier,
+   * so re-read the list: a tier the first attempt made then shows, and the
+   * creator does not make a second one. The catch only stops an unhandled
+   * rejection; a failed read stays on the query's own `.error`.
+   */
+  function failCreate(copy: string, reason: unknown) {
+    void tiersQuery?.refresh().catch(() => {});
+    tierFormError = copy;
+    logRawError('tier create failed', reason);
   }
 
   async function handleDeleteTier() {
@@ -658,7 +827,9 @@
     <Card.Header>
       <div class="card-header-row">
         <Card.Title level={3}>{m.monetisation_connect_title()}</Card.Title>
-        {#if dataLoading}
+        {#if connectFailed}
+          <!-- No badge: we don't know the status, so we claim none. -->
+        {:else if dataLoading}
           <Skeleton width="var(--space-20)" height="var(--space-6)" class="skeleton-circle" />
         {:else}
           <!-- `stripe_unknown` means the stored status is `active` but the live
@@ -689,7 +860,21 @@
       <Card.Description>{m.monetisation_connect_description()}</Card.Description>
     </Card.Header>
     <Card.Content>
-      {#if dataLoading}
+      {#if connectFailed}
+        <!-- Ahead of `dataLoading`, so the Retry button stays mounted (and
+             focused) while its own retry is in flight. No set-up or continue
+             button: we can't tell which one this owner needs, and "Connect
+             Stripe Account" would restart onboarding for an account that may
+             be fully set up (Codex-2hxff.45). -->
+        <Alert variant="error" data-testid="connect-load-error">
+          <div class="return-alert">
+            <p class="return-alert__description">{m.money_setup_load_failed()}</p>
+            <Button variant="secondary" size="sm" onclick={retryConnectStatus}>
+              {m.money_setup_load_failed_retry()}
+            </Button>
+          </div>
+        </Alert>
+      {:else if dataLoading}
         <Skeleton width="200px" height="var(--space-5)" />
       {:else}
         {#if connectStatus.isConnected}
@@ -797,7 +982,7 @@
       {#if featureToggleError}
         <Alert variant="error" style="margin-top: var(--space-3)">{featureToggleError}</Alert>
       {/if}
-      {#if !dataLoading && (!connectStatus.isConnected || connectStatus.status !== 'active')}
+      {#if !dataLoading && !connectFailed && (!connectStatus.isConnected || connectStatus.status !== 'active')}
         <p class="feature-toggle-disabled-hint">{m.monetisation_feature_requires_connect()}</p>
       {/if}
     </Card.Content>
@@ -826,7 +1011,7 @@
       </div>
     </Card.Header>
     <Card.Content>
-      {#if !dataLoading && !connectReady}
+      {#if !dataLoading && !connectFailed && !connectReady}
         <Alert variant="info" style="margin-bottom: var(--space-4)">
           {m.monetisation_tiers_requires_connect()}
         </Alert>
