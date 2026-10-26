@@ -32,6 +32,13 @@
  * `session_id` separates "came back from Stripe" (poll, reassure) from "typed
  * this URL" (nothing to confirm), so a stray visit is not left waiting on a
  * payment that never happened.
+ *
+ * UNLOCK ON ARRIVAL (Codex-2hxff.22; owner decision 2026-10-26, Q-A)
+ * A course purchase Stripe says is paid, with no record of ours yet, is
+ * recorded by this load, with the webhook's own completion
+ * (`POST /checkout/complete`), and the entitlement read again, so the buyer
+ * is forwarded at once. A purchase no longer active (refunded, or paused by a
+ * dispute) gets one plain notice instead of a wait.
  */
 import { error, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
@@ -63,6 +70,10 @@ type JourneyDuplicate =
 interface SessionRecord {
   settled: boolean;
   duplicate: JourneyDuplicate | null;
+  /** A course purchase no longer active: refunded, or paused by a dispute. */
+  inactive?: boolean;
+  /** This load recorded it (unlock on arrival): the entitlement is new. */
+  recordedNow?: boolean;
 }
 
 const OFFER_PATH_KINDS: readonly OfferPathKind[] = [
@@ -87,11 +98,18 @@ async function readSession(
 ): Promise<SessionRecord> {
   switch (kind) {
     case 'purchase': {
-      const v = await api.checkout.verify(sessionId);
+      const verified = await api.checkout.verify(sessionId);
+      // Unlock on arrival (Codex-2hxff.22, Q-A "Yes, same call"): Stripe says
+      // paid and our record is not there yet, so record it now, with the
+      // webhook's own completion, and forward as usual.
+      const recordedNow = verified.state === 'recording';
+      const v = recordedNow ? await api.checkout.complete(sessionId) : verified;
       const ours = v.course?.id === courseId;
       return {
         settled: v.sessionStatus !== 'complete' || !!v.course,
         duplicate: ours && v.duplicatePayment ? { kind: 'purchase' } : null,
+        inactive: ours && (v.state === 'refunded' || v.state === 'paused'),
+        recordedNow: recordedNow && v.state !== 'recording',
       };
     }
     case 'subscription': {
@@ -155,7 +173,7 @@ export const load: PageServerLoad = async (event) => {
   // Both reads keep the buyer in the waiting room on failure (where the next
   // poll can succeed) instead of erroring them out of a flow they have already
   // paid for. A failed session read is NOT settled, so it never forwards.
-  const [offer, record] = await Promise.all([
+  const [offerRead, record] = await Promise.all([
     api.courses.offer(course.id).catch(() => null),
     sessionId && kind
       ? readSession(api, kind, sessionId, course.id).catch(
@@ -171,6 +189,10 @@ export const load: PageServerLoad = async (event) => {
         )
       : null,
   ]);
+  // Recorded by this load: the offer read beside it may predate the grant.
+  const offer = record?.recordedNow
+    ? await api.courses.offer(course.id).catch(() => null)
+    : offerRead;
 
   const base = {
     courseTitle: course.title,
@@ -182,7 +204,13 @@ export const load: PageServerLoad = async (event) => {
   };
 
   if (record?.duplicate) {
-    return { ...base, duplicate: record.duplicate };
+    return { ...base, duplicate: record.duplicate, inactive: false };
+  }
+
+  // Refunded, or paused by a bank dispute: one plain notice, and nothing
+  // more to wait for (owner decision 2026-10-26).
+  if (record?.inactive) {
+    return { ...base, duplicate: null, inactive: true };
   }
 
   // The grant has landed — hand them straight to the journey. With a record to
@@ -192,5 +220,5 @@ export const load: PageServerLoad = async (event) => {
     redirect(303, base.dashboardPath);
   }
 
-  return { ...base, duplicate: null };
+  return { ...base, duplicate: null, inactive: false };
 };

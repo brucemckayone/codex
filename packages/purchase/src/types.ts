@@ -188,6 +188,43 @@ export interface SalesStats {
 }
 
 /**
+ * The charge behind a checkout's PaymentIntent, as the payouts pipeline needs
+ * it (`PurchaseService.retrievePaymentIntentCharge`).
+ */
+export interface PaymentIntentCharge {
+  /** `latest_charge`: every payout slice's `source_transaction`. */
+  stripeChargeId: string | null;
+  /** The application fee Stripe was told to collect, for reconciliation. */
+  stripeApplicationFeeCents: number | null;
+  /** When the charge was made, when the lookup expanded it. */
+  chargedAt?: Date;
+}
+
+/**
+ * Where a checkout session stands, from Stripe's session and our purchase row
+ * for it together (Codex-2hxff.22). The success page acts on this alone:
+ * Stripe's `complete` only says the buyer paid, not that we recorded it.
+ *
+ * - `open` / `expired`: Stripe's own status; nothing was paid.
+ * - `unpaid`: complete but not paid. Unreachable while checkout is card-only.
+ * - `recording`: paid, and our row is not there yet (or is an old `pending` /
+ *   `failed` one). The page asks for it to be recorded.
+ * - `unlocked`: our completed, undisputed purchase.
+ * - `duplicate`: a second payment for an item the buyer owns, being refunded.
+ * - `refunded` / `paused`: no longer active, refunded or held by an open bank
+ *   dispute. The page says so once and stops checking.
+ */
+export type CheckoutSessionState =
+  | 'open'
+  | 'expired'
+  | 'unpaid'
+  | 'recording'
+  | 'unlocked'
+  | 'duplicate'
+  | 'refunded'
+  | 'paused';
+
+/**
  * Checkout session verification result
  *
  * Session status values from Stripe API (2025):
@@ -200,6 +237,14 @@ export interface SalesStats {
 export interface CheckoutSessionVerifyResult {
   /** Stripe session status: open | complete | expired */
   sessionStatus: 'complete' | 'expired' | 'open';
+  /** Where the session stands once our record is read too. */
+  state: CheckoutSessionState;
+  /**
+   * What Stripe says the buyer paid for the session (`amount_total`, pence),
+   * once it is complete. The success page shows it while our record is on
+   * its way, before `purchase` exists.
+   */
+  amountTotalCents?: number;
   /** Purchase record (if payment completed) */
   purchase?: {
     /** Purchase record ID */
@@ -211,7 +256,10 @@ export interface CheckoutSessionVerifyResult {
     /** ISO 8601 timestamp of purchase */
     purchasedAt: string;
   };
-  /** Content details (for success page display) */
+  /**
+   * Content details (for success page display). From our row; while a
+   * content session is still `recording`, from the item the session names.
+   */
   content?: {
     /** Content ID */
     id: string;

@@ -5,17 +5,24 @@
  * own 408 timeout) or a 429 rate limit is transient: the page stays pending
  * and retries. Any other 4xx will not change on retry, so the load reports
  * `verifyFailed` and the page shows its error state.
+ *
+ * Unlock on arrival (Codex-2hxff.22): a paid session with no record of ours
+ * (`recording`) also streams the completion (`unlock`); any other state does
+ * not call it. A failed completion is logged and resolves to null.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/server/errors';
 
-const { verifyMock, warnMock } = vi.hoisted(() => ({
+const { verifyMock, completeMock, warnMock } = vi.hoisted(() => ({
   verifyMock: vi.fn(),
+  completeMock: vi.fn(),
   warnMock: vi.fn(),
 }));
 
 vi.mock('$lib/server/api', () => ({
-  createServerApi: () => ({ checkout: { verify: verifyMock } }),
+  createServerApi: () => ({
+    checkout: { verify: verifyMock, complete: completeMock },
+  }),
 }));
 vi.mock('$lib/observability', () => ({ logger: { warn: warnMock } }));
 
@@ -86,7 +93,7 @@ describe('org checkout success load — a failed verify', () => {
   });
 
   it('a successful verify is passed through, not failed', async () => {
-    const verification = { sessionStatus: 'open' };
+    const verification = { sessionStatus: 'open', state: 'open' };
     verifyMock.mockResolvedValueOnce(verification);
     const { load } = await import('../+page.server');
 
@@ -95,5 +102,75 @@ describe('org checkout success load — a failed verify', () => {
     expect(data.verification).toEqual(verification);
     expect(data.verifyFailed).toBe(false);
     expect(warnMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('org checkout success load — unlock on arrival (Codex-2hxff.22)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('paid with no record of ours: the completion is asked for once, and streamed', async () => {
+    const unlocked = { sessionStatus: 'complete', state: 'unlocked' };
+    verifyMock.mockResolvedValueOnce({
+      sessionStatus: 'complete',
+      state: 'recording',
+    });
+    completeMock.mockResolvedValueOnce(unlocked);
+    const { load } = await import('../+page.server');
+
+    const data = (await load(makeEvent())) as LoadData;
+
+    expect(data.verification?.state).toBe('recording');
+    expect(completeMock).toHaveBeenCalledOnce();
+    expect(completeMock).toHaveBeenCalledWith('cs_test_abc');
+    await expect(data.unlock).resolves.toEqual(unlocked);
+  });
+
+  it.each([
+    'unlocked',
+    'duplicate',
+    'refunded',
+    'paused',
+    'open',
+    'expired',
+    'unpaid',
+  ])('%s: nothing to record, so no completion', async (state) => {
+    verifyMock.mockResolvedValueOnce({ sessionStatus: 'complete', state });
+    const { load } = await import('../+page.server');
+
+    const data = (await load(makeEvent())) as LoadData;
+
+    expect(data.unlock).toBeNull();
+    expect(completeMock).not.toHaveBeenCalled();
+  });
+
+  it('a failed completion is logged and resolves to null, never a rejection', async () => {
+    verifyMock.mockResolvedValueOnce({
+      sessionStatus: 'complete',
+      state: 'recording',
+    });
+    completeMock.mockRejectedValueOnce(new ApiError(503, 'Not yet'));
+    const { load } = await import('../+page.server');
+
+    const data = (await load(makeEvent())) as LoadData;
+
+    await expect(data.unlock).resolves.toBeNull();
+    expect(warnMock).toHaveBeenCalledWith(
+      'checkout-success: completion on arrival failed',
+      {
+        sessionId: 'cs_test_abc',
+        status: 503,
+        transient: true,
+        error: 'Not yet',
+      }
+    );
+  });
+
+  it('a failed verify asks for no completion', async () => {
+    const data = await loadWith(new ApiError(503, 'Service unavailable'));
+
+    expect(data.unlock).toBeNull();
+    expect(completeMock).not.toHaveBeenCalled();
   });
 });

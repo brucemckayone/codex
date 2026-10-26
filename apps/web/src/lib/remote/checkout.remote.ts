@@ -9,6 +9,7 @@
 import { isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, form, getRequestEvent } from '$app/server';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,9 +29,45 @@ const checkoutInputSchema = z.object({
 type CheckoutInput = z.infer<typeof checkoutInputSchema>;
 
 /**
+ * A return URL the client sent, kept only on this request's own origin.
+ * ecom-api allowlists the platform's domains, so another org's subdomain would
+ * pass there and send the buyer to a page that isn't this one. Anything else
+ * falls back to the default, with a warn naming the host only. Kept verbatim:
+ * re-serialising it would encode Stripe's `{CHECKOUT_SESSION_ID}`.
+ */
+function sameOriginOr(
+  sent: string | undefined,
+  origin: string,
+  fallback: string,
+  field: 'successUrl' | 'cancelUrl'
+): string {
+  if (!sent) return fallback;
+  const parsed = parseUrl(sent);
+  if (parsed?.origin === origin) return sent;
+  logger.warn('checkout: a return URL on another origin was replaced', {
+    field,
+    host: parsed?.host,
+  });
+  return fallback;
+}
+
+function parseUrl(value: string): URL | null {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Calls the ecom-api checkout endpoint with sensible default URLs.
  * Both `createCheckout` (form) and `createCheckoutSession` (command) delegate
  * here so the request shape and default URL logic live in one place.
+ *
+ * The default return is the verifying success page (Codex-2hxff.22 WEB-03),
+ * which records the purchase on arrival and confirms against our record. It
+ * used to be `/library?purchase=success`, which nothing read: a buyer from
+ * the player paywall landed on a library that might not have the item yet.
  */
 async function createStripeCheckoutSession({
   contentId,
@@ -42,8 +79,18 @@ async function createStripeCheckoutSession({
 
   const result = await api.checkout.create({
     contentId,
-    successUrl: successUrl || `${url.origin}/library?purchase=success`,
-    cancelUrl: cancelUrl || `${url.origin}/content/${contentId}`,
+    successUrl: sameOriginOr(
+      successUrl,
+      url.origin,
+      `${url.origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      'successUrl'
+    ),
+    cancelUrl: sameOriginOr(
+      cancelUrl,
+      url.origin,
+      `${url.origin}/content/${contentId}`,
+      'cancelUrl'
+    ),
   });
 
   return { sessionUrl: result.sessionUrl };

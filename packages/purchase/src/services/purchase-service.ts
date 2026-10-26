@@ -30,6 +30,7 @@ import {
   DISPUTE_CHARGEBACK_OPEN_STATUSES,
   DISPUTE_CLOSED_STATUSES,
   FEES,
+  isForeignStripeEnvironment,
   PRICE_LIMITS,
   PURCHASE_STATUS,
   STRIPE_REQUESTED_BY_METADATA_KEY,
@@ -95,6 +96,7 @@ import {
   purchaseQuerySchema,
   salesQuerySchema,
   salesStatsQuerySchema,
+  uuidSchema,
 } from '@codex/validation';
 import {
   and,
@@ -241,9 +243,11 @@ function disputeRank(status: SQL): SQL {
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
   CheckoutSessionResult,
+  CheckoutSessionState,
   CheckoutSessionVerifyResult,
   CompleteCoursePurchaseMetadata,
   CompletePurchaseMetadata,
+  PaymentIntentCharge,
   Purchase,
   PurchaseListItem,
   PurchaseWithItem,
@@ -377,6 +381,30 @@ export function isDuplicatePayment(
   purchase: Pick<Purchase, 'duplicateOfPurchaseId'>
 ): boolean {
   return purchase.duplicateOfPurchaseId != null;
+}
+
+/**
+ * Where a checkout session stands (Codex-2hxff.22). Our row, once there is
+ * one, is the truth; until then Stripe's session is. A completed purchase
+ * with an open bank dispute grants no access, as in `verifyPurchase`.
+ */
+function checkoutSessionState(
+  session: Pick<Stripe.Checkout.Session, 'payment_status'>,
+  sessionStatus: CheckoutSessionVerifyResult['sessionStatus'],
+  purchase:
+    | Pick<Purchase, 'status' | 'disputedAt' | 'duplicateOfPurchaseId'>
+    | undefined
+): CheckoutSessionState {
+  if (purchase) {
+    if (isDuplicatePayment(purchase)) return 'duplicate';
+    if (purchase.status === PURCHASE_STATUS.COMPLETED) {
+      return purchase.disputedAt ? 'paused' : 'unlocked';
+    }
+    if (purchase.status === PURCHASE_STATUS.REFUNDED) return 'refunded';
+    return 'recording';
+  }
+  if (sessionStatus !== 'complete') return sessionStatus;
+  return session.payment_status === 'paid' ? 'recording' : 'unpaid';
 }
 
 /**
@@ -3757,42 +3785,35 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Verify Stripe checkout session status
+   * Retrieve the signed-in buyer's own Checkout Session from Stripe: the
+   * check both success-page routes make before they read or write anything
+   * (`GET /checkout/verify`, `POST /checkout/complete`; Codex-2hxff.22). Only
+   * the id comes from the client. The item, the amount and the payment status
+   * are read from Stripe's own session.
    *
-   * Queries Stripe API for session details and checks for completed purchase.
-   * Used by success page to show purchase confirmation.
+   * - Another environment's session is not found. Local development and
+   *   production share one Stripe sandbox, so its buyer id means nothing
+   *   here (Codex-2hxff.5).
+   * - Another buyer's session is refused. Our server wrote `customerId` into
+   *   its metadata when it created the session, and the buyer cannot change
+   *   it.
    *
-   * Stripe API Best Practices (2025):
-   * - Use stripe.checkout.sessions.retrieve() with session ID
-   * - Session.status can be: 'open' | 'complete' | 'expired'
-   * - Session.payment_intent contains payment intent ID when complete
-   * - Session.metadata.customer_id contains our customerId (set during createCheckoutSession)
-   * - Handle StripeInvalidRequestError for invalid session IDs (404)
-   *
-   * Security:
-   * - Validates session belongs to authenticated user (metadata.customer_id)
-   * - Returns 403 if session exists but belongs to different user
-   *
-   * @param sessionId - Stripe checkout session ID (cs_xxx format)
-   * @param customerId - Authenticated user ID (for ownership check)
-   * @returns Session status with optional purchase and content details
-   * @throws {PaymentProcessingError} If Stripe API fails
-   * @throws {ForbiddenError} If session belongs to different user
-   *
-   * @example
-   * const result = await purchaseService.verifyCheckoutSession('cs_xxx', 'user-123');
-   * // Returns: { sessionStatus: 'complete', purchase: {...}, content: {...} }
+   * @throws {NotFoundError} Stripe does not know the session, or another
+   *   environment created it
+   * @throws {ForbiddenError} The session belongs to another buyer
+   * @throws {PaymentProcessingError} Stripe failed or could not be reached
    */
-  async verifyCheckoutSession(
+  async retrieveCheckoutSession(
     sessionId: string,
     customerId: string
-  ): Promise<CheckoutSessionVerifyResult> {
+  ): Promise<Stripe.Checkout.Session> {
     try {
-      // Query Stripe API for session details
       const session = await this.stripe.checkout.sessions.retrieve(sessionId);
 
-      // Verify session belongs to user (metadata.customerId)
-      // Note: We set customerId in metadata during createCheckoutSession (line 227)
+      if (isForeignStripeEnvironment(session.metadata, this.environment)) {
+        throw new NotFoundError('Checkout session not found', { sessionId });
+      }
+      // We set customerId in metadata during createCheckoutSession.
       if (session.metadata?.customerId !== customerId) {
         throw new ForbiddenError(
           'Checkout session does not belong to authenticated user',
@@ -3801,89 +3822,26 @@ export class PurchaseService extends BaseService {
           }
         );
       }
-
-      const result: CheckoutSessionVerifyResult = {
-        // Stripe API may return null for status, default to 'open' for safety
-        sessionStatus:
-          (session.status as 'complete' | 'expired' | 'open') ?? 'open',
-      };
-
-      // If payment complete, query purchase record with content join
-      // payment_intent is only present when session status is 'complete'
-      if (result.sessionStatus === 'complete' && session.payment_intent) {
-        const purchase = await this.db.query.purchases.findFirst({
-          where: and(
-            eq(
-              purchases.stripePaymentIntentId,
-              session.payment_intent as string
-            ),
-            eq(purchases.customerId, customerId)
-          ),
-          with: {
-            content: {
-              columns: {
-                id: true,
-                title: true,
-                thumbnailUrl: true,
-                contentType: true,
-              },
-            },
-            course: { columns: { id: true, title: true } },
-          },
-        });
-
-        // A second payment for an item the buyer owns: the page says it is
-        // being refunded rather than confirming a purchase (Codex-o4jvw).
-        if (purchase && isDuplicatePayment(purchase)) {
-          result.duplicatePayment = true;
-        }
-
-        // Course-purchase sessions populate the course block only: the
-        // journey success page needs to know our row exists, not a receipt.
-        if (purchase?.course) {
-          result.course = {
-            id: purchase.course.id,
-            title: purchase.course.title,
-          };
-        }
-
-        // Content-purchase sessions populate the purchase + content blocks.
-        if (purchase?.purchasedAt && purchase.content) {
-          result.purchase = {
-            id: purchase.id,
-            contentId: purchase.content.id,
-            amountPaidCents: purchase.amountPaidCents,
-            purchasedAt: purchase.purchasedAt.toISOString(),
-          };
-          result.content = {
-            id: purchase.content.id,
-            title: purchase.content.title,
-            thumbnailUrl: purchase.content.thumbnailUrl ?? undefined,
-            contentType: purchase.content.contentType,
-          };
-        }
-      }
-
-      return result;
+      return session;
     } catch (error) {
-      // Re-throw ForbiddenError
-      if (error instanceof ForbiddenError) {
-        throw error;
-      }
-
-      // Stripe-specific error handling (2025 patterns)
-      // StripeInvalidRequestError: Invalid session ID (404)
-      // StripeConnectionError: Network failure (500)
-      // StripeAPIError: Other Stripe errors
       // Stripe's own message is logged, never sent (SEC-02). A session id
       // Stripe does not know came from the client (a stale or invented
-      // success URL), so it is a warning; an outage or API failure is an
-      // error.
+      // success URL), so it is a warning and a 404: retrying will not find
+      // it. An outage or API failure is an error.
       if (isStripeError(error)) {
-        const notFound = error.type === 'StripeInvalidRequestError';
-        const message = notFound
-          ? 'Checkout session not found'
-          : error.type === 'StripeConnectionError'
+        if (error.type === 'StripeInvalidRequestError') {
+          throw new NotFoundError('Checkout session not found', {
+            sessionId,
+            errorId: this.logStripeFailure(
+              'Stripe checkout session verify failed: Checkout session not found',
+              error,
+              { sessionId, customerId },
+              'warn'
+            ),
+          });
+        }
+        const message =
+          error.type === 'StripeConnectionError'
             ? 'Failed to connect to Stripe API'
             : 'Failed to verify checkout session';
         throw new PaymentProcessingError(message, {
@@ -3891,13 +3849,204 @@ export class PurchaseService extends BaseService {
           errorId: this.logStripeFailure(
             `Stripe checkout session verify failed: ${message}`,
             error,
-            { sessionId, customerId },
-            notFound ? 'warn' : 'error'
+            { sessionId, customerId }
           ),
         });
       }
 
-      this.handleError(error, 'verifyCheckoutSession');
+      this.handleError(error, 'retrieveCheckoutSession');
+    }
+  }
+
+  /**
+   * What a buyer's checkout session stands for: Stripe's session, read with
+   * our purchase row for its PaymentIntent, and `state`, the one field the
+   * success page acts on (Codex-2hxff.22). `recorded` says whether we hold a
+   * row for it at all. The success page's completion runs only while we
+   * don't.
+   *
+   * Takes a session {@link retrieveCheckoutSession} returned; the row is read
+   * for this buyer only all the same.
+   */
+  async readCheckoutSession(
+    session: Stripe.Checkout.Session,
+    customerId: string
+  ): Promise<{ result: CheckoutSessionVerifyResult; recorded: boolean }> {
+    try {
+      // Stripe API may return null for status, default to 'open' for safety
+      const sessionStatus =
+        (session.status as 'complete' | 'expired' | 'open') ?? 'open';
+      const paymentIntentId =
+        typeof session.payment_intent === 'string'
+          ? session.payment_intent
+          : session.payment_intent?.id;
+
+      // If payment complete, query purchase record with content join
+      // payment_intent is only present when session status is 'complete'
+      const purchase =
+        sessionStatus === 'complete' && paymentIntentId
+          ? await this.db.query.purchases.findFirst({
+              where: and(
+                eq(purchases.stripePaymentIntentId, paymentIntentId),
+                eq(purchases.customerId, customerId)
+              ),
+              with: {
+                content: {
+                  columns: {
+                    id: true,
+                    title: true,
+                    thumbnailUrl: true,
+                    contentType: true,
+                  },
+                },
+                course: { columns: { id: true, title: true } },
+              },
+            })
+          : undefined;
+
+      const result: CheckoutSessionVerifyResult = {
+        sessionStatus,
+        state: checkoutSessionState(session, sessionStatus, purchase),
+      };
+      if (sessionStatus === 'complete' && session.amount_total !== null) {
+        result.amountTotalCents = session.amount_total;
+      }
+
+      // Paid, and our row not there yet: the page says "Payment received"
+      // and shows the item meanwhile, the one our server named in the
+      // session's metadata when it created it.
+      if (!purchase && result.state === 'recording') {
+        const named = uuidSchema.safeParse(session.metadata?.contentId);
+        const item =
+          named.success && session.metadata?.kind !== 'course'
+            ? await this.db.query.content.findFirst({
+                where: and(
+                  eq(content.id, named.data),
+                  isNull(content.deletedAt)
+                ),
+                columns: {
+                  id: true,
+                  title: true,
+                  thumbnailUrl: true,
+                  contentType: true,
+                },
+              })
+            : undefined;
+        if (item) {
+          result.content = {
+            id: item.id,
+            title: item.title,
+            thumbnailUrl: item.thumbnailUrl ?? undefined,
+            contentType: item.contentType,
+          };
+        }
+      }
+
+      // A second payment for an item the buyer owns: the page says it is
+      // being refunded rather than confirming a purchase (Codex-o4jvw).
+      if (purchase && isDuplicatePayment(purchase)) {
+        result.duplicatePayment = true;
+      }
+
+      // Course-purchase sessions populate the course block only: the
+      // journey success page needs to know our row exists, not a receipt.
+      if (purchase?.course) {
+        result.course = {
+          id: purchase.course.id,
+          title: purchase.course.title,
+        };
+      }
+
+      // Content-purchase sessions populate the purchase + content blocks.
+      if (purchase?.purchasedAt && purchase.content) {
+        result.purchase = {
+          id: purchase.id,
+          contentId: purchase.content.id,
+          amountPaidCents: purchase.amountPaidCents,
+          purchasedAt: purchase.purchasedAt.toISOString(),
+        };
+        result.content = {
+          id: purchase.content.id,
+          title: purchase.content.title,
+          thumbnailUrl: purchase.content.thumbnailUrl ?? undefined,
+          contentType: purchase.content.contentType,
+        };
+      }
+
+      if (purchase && result.state === 'recording') {
+        // Nothing writes a `pending` or `failed` row that is not a duplicate
+        // today, so one is an old row. The page keeps checking; this says why.
+        this.obs.warn('Checkout session has a purchase it cannot confirm', {
+          sessionId: session.id,
+          purchaseId: purchase.id,
+          status: purchase.status,
+        });
+      }
+
+      return { result, recorded: purchase !== undefined };
+    } catch (error) {
+      this.handleError(error, 'readCheckoutSession');
+    }
+  }
+
+  /**
+   * Verify Stripe checkout session status: the success page's read
+   * (`GET /checkout/verify`). Stripe's session for this buyer, with our
+   * purchase row for it and the `state` the page acts on.
+   *
+   * @param sessionId - Stripe checkout session ID (cs_xxx format)
+   * @param customerId - Authenticated user ID (for ownership check)
+   * @returns Session status with optional purchase and content details
+   * @throws {NotFoundError} Stripe does not know the session, or another
+   *   environment created it
+   * @throws {ForbiddenError} If session belongs to different user
+   * @throws {PaymentProcessingError} If Stripe API fails
+   *
+   * @example
+   * const result = await purchaseService.verifyCheckoutSession('cs_xxx', 'user-123');
+   * // Returns: { sessionStatus: 'complete', state: 'unlocked', purchase: {...}, content: {...} }
+   */
+  async verifyCheckoutSession(
+    sessionId: string,
+    customerId: string
+  ): Promise<CheckoutSessionVerifyResult> {
+    const session = await this.retrieveCheckoutSession(sessionId, customerId);
+    const { result } = await this.readCheckoutSession(session, customerId);
+    return result;
+  }
+
+  /**
+   * The charge behind a PaymentIntent, for the payouts ledger: its id (every
+   * slice's `source_transaction`), the application fee Stripe was told to
+   * collect, and when the charge was made, which is the payment time on the
+   * success page's path (Codex-2hxff.22). The webhook reads the same with its
+   * own verified Stripe client; a route has no client of its own.
+   *
+   * A failure is thrown, with Stripe's error as its cause, and the caller
+   * judges whether a retry can fix it.
+   */
+  async retrievePaymentIntentCharge(
+    paymentIntentId: string
+  ): Promise<PaymentIntentCharge> {
+    try {
+      const paymentIntent = await this.stripe.paymentIntents.retrieve(
+        paymentIntentId,
+        { expand: ['latest_charge'] }
+      );
+      const charge = paymentIntent.latest_charge;
+      return {
+        stripeApplicationFeeCents: paymentIntent.application_fee_amount ?? null,
+        stripeChargeId:
+          typeof charge === 'string' ? charge : (charge?.id ?? null),
+        chargedAt:
+          charge &&
+          typeof charge !== 'string' &&
+          Number.isFinite(charge.created)
+            ? new Date(charge.created * 1000)
+            : undefined,
+      };
+    } catch (error) {
+      this.handleError(error, 'retrievePaymentIntentCharge');
     }
   }
 

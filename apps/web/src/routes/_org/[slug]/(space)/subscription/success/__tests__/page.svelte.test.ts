@@ -22,8 +22,17 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 
-const { invalidateMock } = vi.hoisted(() => ({ invalidateMock: vi.fn() }));
+const { invalidateMock, invalidateCollectionMock, loadSubscriptionMock } =
+  vi.hoisted(() => ({
+    invalidateMock: vi.fn(() => Promise.resolve()),
+    invalidateCollectionMock: vi.fn(() => Promise.resolve()),
+    loadSubscriptionMock: vi.fn(() => Promise.resolve()),
+  }));
 vi.mock('$app/navigation', () => ({ invalidate: invalidateMock }));
+vi.mock('$lib/collections', () => ({
+  invalidateCollection: invalidateCollectionMock,
+  loadSubscriptionFromServer: loadSubscriptionMock,
+}));
 
 import SubscriptionSuccessPage from '../+page.svelte';
 
@@ -43,6 +52,8 @@ afterEach(() => {
   if (component) unmount(component);
   component = null;
   document.body.innerHTML = '';
+  invalidateCollectionMock.mockClear();
+  loadSubscriptionMock.mockClear();
 });
 
 function mountWith(duplicateOf?: {
@@ -119,6 +130,122 @@ describe('subscription success page', () => {
       'Pro · Of Blood and Bones'
     );
     expect(links()).toEqual([[m.nav_library(), '/library']]);
+  });
+
+  test('a first subscription refreshes its org subscription and the library, once (WEB-04)', () => {
+    mountWith();
+
+    expect(loadSubscriptionMock).toHaveBeenCalledOnce();
+    expect(loadSubscriptionMock).toHaveBeenCalledWith(
+      'org-1',
+      'of-blood-and-bones'
+    );
+    expect(invalidateCollectionMock).toHaveBeenCalledOnce();
+    expect(invalidateCollectionMock).toHaveBeenCalledWith('library');
+  });
+
+  test('a duplicate refreshes nothing', () => {
+    mountWith({ id: 'sub-kept', tierId: 'tier-pro', tierName: 'Pro' });
+
+    expect(loadSubscriptionMock).not.toHaveBeenCalled();
+    expect(invalidateCollectionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('subscription success page — capped, then a button (Codex-2hxff.22)', () => {
+  let visibility: DocumentVisibilityState = 'visible';
+
+  // The getter outlives this block; leave the tab visible for the next one.
+  afterEach(() => {
+    visibility = 'visible';
+  });
+
+  function mountWaiting(sessionStatus: 'complete' | 'open' | null) {
+    visibility = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+    component = mount(SubscriptionSuccessPage, {
+      target: document.body,
+      props: {
+        data: {
+          verification: sessionStatus ? { sessionStatus } : null,
+          verifyFailed: false,
+          org: { name: 'Of Blood and Bones' },
+        } as never,
+      },
+    });
+    flushSync();
+  }
+
+  test('paid but our row is late: six checks over the first minute, then the owner copy, Check again and Go to library', async () => {
+    vi.useFakeTimers();
+    try {
+      mountWaiting('complete');
+      expect(clean(document.querySelector('h1'))).toBe(
+        m.checkout_success_confirming()
+      );
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      flushSync();
+      expect(invalidateMock).toHaveBeenCalledTimes(6);
+      expect(invalidateMock).toHaveBeenCalledWith('subscription:verify');
+
+      expect(clean(document.querySelector('h1'))).toBe(m.checkout_late_title());
+      expect(paragraphs()).toEqual([m.checkout_late_description()]);
+      expect(clean(document.querySelector('button'))).toBe(
+        m.checkout_check_again()
+      );
+      expect(links()).toEqual([
+        [m.checkout_success_go_to_library(), '/library'],
+      ]);
+
+      // An hour on an open tab: nothing more, until a click; then one.
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(invalidateMock).toHaveBeenCalledTimes(6);
+      document.querySelector('button')?.click();
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(invalidateMock).toHaveBeenCalledTimes(7);
+    } finally {
+      vi.useRealTimers();
+      invalidateMock.mockClear();
+    }
+  });
+
+  test('no answer at all: Almost there, with Check again', async () => {
+    vi.useFakeTimers();
+    try {
+      mountWaiting(null);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      flushSync();
+
+      expect(clean(document.querySelector('h1'))).toBe(
+        m.checkout_success_almost_there()
+      );
+      expect(clean(document.querySelector('button'))).toBe(
+        m.checkout_check_again()
+      );
+    } finally {
+      vi.useRealTimers();
+      invalidateMock.mockClear();
+    }
+  });
+
+  test('a hidden tab runs no checks', async () => {
+    vi.useFakeTimers();
+    try {
+      mountWaiting('complete');
+      visibility = 'hidden';
+
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+
+      expect(invalidateMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      invalidateMock.mockClear();
+    }
   });
 });
 

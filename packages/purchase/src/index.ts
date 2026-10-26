@@ -146,10 +146,12 @@ export {
 // Types
 export type {
   CheckoutSessionResult,
+  CheckoutSessionState,
   CheckoutSessionVerifyResult,
   CompleteCoursePurchaseMetadata,
   CompletePurchaseMetadata,
   NewPurchaseInput,
+  PaymentIntentCharge,
   Purchase,
   PurchaseListItem,
   PurchaseWithItem,

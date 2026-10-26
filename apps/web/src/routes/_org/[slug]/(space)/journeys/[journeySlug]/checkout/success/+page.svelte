@@ -5,28 +5,31 @@
   forwards to the dashboard the moment the entitlement exists, so reaching this
   markup at all means the grant has not landed YET.
 
-  It therefore re-polls by invalidating the load's `journey:entitlement`
-  dependency. The poll is capped — a webhook that never arrives must resolve into
-  an honest "we're still working on it, here's what to do" rather than an
-  indefinite spinner that quietly implies the purchase failed.
+  It therefore re-checks by invalidating the load's `journey:entitlement`
+  dependency, capped: about six checks over the first minute, only while the
+  tab is visible, then it stops (owner decision 2026-10-26, "Capped, then a
+  button"; Codex-2hxff.22). A webhook that never arrives resolves into "Your
+  payment went through. We're still finishing up; check again in a minute."
+  with Check again (one check per click) and Go to library, rather than an
+  indefinite spinner — or an open-ended loop on a tab left open.
 
   A second payment for access the buyer already held (`data.duplicate`,
   Codex-o4jvw) is final: a calm notice that it is being refunded, the way in,
-  and no more polling.
+  and no more polling. So is a course purchase no longer active
+  (`data.inactive`: refunded, or paused by a dispute).
 -->
 <script lang="ts">
   import { invalidate } from '$app/navigation';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
+  import { CappedChecks } from '$lib/utils/capped-checks.svelte';
+  import { buildPlatformUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
 
-  /** 2s × 15 ≈ 30s — long enough for a Stripe webhook, short enough to not strand. */
-  const POLL_INTERVAL_MS = 2000;
-  const MAX_POLLS = 15;
-
-  let polls = $state(0);
-  const givenUp = $derived(polls >= MAX_POLLS);
+  const checks = new CappedChecks(() => invalidate('journey:entitlement'));
+  const givenUp = $derived(checks.exhausted);
 
   /** The duplicate-payment notice, or null for every other state. */
   const notice = $derived.by(() => {
@@ -69,24 +72,26 @@
     }
   });
 
+  // Only check when a payment actually happened; a direct visit has nothing
+  // pending and checking it would be a pointless request loop. A duplicate
+  // notice, or a purchase no longer active, is final. A boolean, so the
+  // effect restarts only when it flips: every check hands the page a new
+  // `data`, and an effect reading `data` itself would restart on each one.
+  const waiting = $derived(
+    Boolean(data.arrivedFromStripe && !notice && !data.inactive)
+  );
+
   $effect(() => {
-    // Only poll when a payment actually happened; a direct visit has nothing
-    // pending and polling it would be a pointless request loop. A duplicate
-    // notice is final.
-    if (!data.arrivedFromStripe || givenUp || notice) return;
-
-    const timer = setInterval(() => {
-      polls += 1;
-      invalidate('journey:entitlement');
-    }, POLL_INTERVAL_MS);
-
-    return () => clearInterval(timer);
+    if (!waiting) return;
+    return checks.start();
   });
 </script>
 
 <svelte:head>
   {#if notice}
     <title>{notice.title}</title>
+  {:else if data.inactive}
+    <title>{m.checkout_inactive_title()}</title>
   {:else}
     <title>Confirming your place in {data.courseTitle}</title>
   {/if}
@@ -108,6 +113,15 @@
         <a class="ret__link" href="/pricing">{m.subscription_duplicate_change_plan()}</a>
       {/if}
     </div>
+  {:else if data.inactive}
+    <!-- Refunded, or paused by a bank dispute: one plain notice and the way
+         to the payment history (owner decision 2026-10-26). -->
+    <h1 class="ret__title">{m.checkout_inactive_title()}</h1>
+    <div class="ret__actions">
+      <a class="ret__cta" href={buildPlatformUrl(page.url, '/account/payment')}>
+        {m.checkout_inactive_payment_history()}
+      </a>
+    </div>
   {:else if !data.arrivedFromStripe}
     <h1 class="ret__title">Nothing to confirm here</h1>
     <p class="ret__body">
@@ -118,17 +132,22 @@
       See the ways in <span aria-hidden="true">→</span>
     </a>
   {:else if givenUp}
-    <h1 class="ret__title">Still confirming your payment</h1>
-    <p class="ret__body">
-      Your payment went through, but the confirmation is taking longer than usual
-      to reach us. Nothing is lost — {data.courseTitle} will appear in your
-      library as soon as it lands, usually within a few minutes.
-    </p>
+    <h1 class="ret__title">{m.checkout_late_title()}</h1>
+    <p class="ret__body">{m.checkout_late_description()}</p>
     <div class="ret__actions">
-      <a class="ret__cta" href={data.dashboardPath}>
-        Try the journey <span aria-hidden="true">→</span>
+      <!-- No `disabled` while it runs: that would drop focus to <body>. The
+           label says so, and a second click sends nothing (CappedChecks). -->
+      <button
+        type="button"
+        class="ret__cta"
+        aria-busy={checks.checking}
+        onclick={() => checks.checkOnce()}
+      >
+        {checks.checking ? m.checkout_checking() : m.checkout_check_again()}
+      </button>
+      <a class="ret__link" href={data.libraryPath}>
+        {m.checkout_success_go_to_library()}
       </a>
-      <a class="ret__link" href={data.libraryPath}>Go to your library</a>
     </div>
   {:else}
     <div class="ret__pulse" aria-hidden="true"></div>
@@ -191,12 +210,20 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-3) var(--space-6);
+    border: none;
     border-radius: var(--radius-full);
+    font-family: inherit;
+    font-size: inherit;
     font-weight: var(--font-semibold);
     text-decoration: none;
     color: var(--color-text-on-brand);
     background: var(--color-brand-primary);
+    cursor: pointer;
     transition: var(--transition-colors);
+  }
+
+  .ret__cta[aria-busy='true'] {
+    cursor: progress;
   }
 
   .ret__cta:hover {

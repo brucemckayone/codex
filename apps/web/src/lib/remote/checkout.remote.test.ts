@@ -26,6 +26,10 @@ import { ApiError } from '$lib/api/errors';
 
 // Hoisted mocks — must be initialised before vi.mock() factories execute.
 const checkoutCreateMock = vi.hoisted(() => vi.fn());
+const loggerWarnMock = vi.hoisted(() => vi.fn());
+vi.mock('$lib/observability', () => ({
+  logger: { warn: loggerWarnMock, error: vi.fn(), info: vi.fn() },
+}));
 const getRequestEventMock = vi.hoisted(() =>
   vi.fn(() => ({
     platform: { env: {} },
@@ -92,6 +96,7 @@ describe('remote/checkout.remote', () => {
     redirectMock.mockReset();
     isRedirectMock.mockReset().mockReturnValue(false);
     getRequestEventMock.mockClear();
+    loggerWarnMock.mockClear();
   });
 
   describe('createCheckout (form, progressive enhancement)', () => {
@@ -134,21 +139,24 @@ describe('remote/checkout.remote', () => {
         successUrl: string;
         cancelUrl: string;
       };
-      // Origin comes from getRequestEventMock above.
+      // Origin comes from getRequestEventMock above. The verifying success
+      // page, which Stripe fills in; `/library?purchase=success` was read by
+      // nothing (Codex-2hxff.22 WEB-03).
       expect(args.successUrl).toBe(
-        'https://studio-alpha.lvh.me:3000/library?purchase=success'
+        'https://studio-alpha.lvh.me:3000/checkout/success?session_id={CHECKOUT_SESSION_ID}'
       );
       expect(args.cancelUrl).toBe(
         `https://studio-alpha.lvh.me:3000/content/${VALID_CONTENT_ID}`
       );
     });
 
-    it('forwards caller-supplied successUrl / cancelUrl verbatim', async () => {
+    it('forwards caller-supplied successUrl / cancelUrl on its own origin verbatim', async () => {
       checkoutCreateMock.mockResolvedValueOnce({
         sessionUrl: 'https://checkout.stripe.com/y',
       });
-      const successUrl = 'https://example.com/thanks';
-      const cancelUrl = 'https://example.com/cancelled';
+      const successUrl =
+        'https://studio-alpha.lvh.me:3000/checkout/success?session_id={CHECKOUT_SESSION_ID}&contentSlug=abc';
+      const cancelUrl = 'https://studio-alpha.lvh.me:3000/content/abc';
 
       const { createCheckout } = await import('./checkout.remote');
       await (createCheckout as unknown as (input: unknown) => Promise<unknown>)(
@@ -164,6 +172,43 @@ describe('remote/checkout.remote', () => {
         successUrl,
         cancelUrl,
       });
+      expect(loggerWarnMock).not.toHaveBeenCalled();
+    });
+
+    // ecom-api allowlists every *.revelations.studio and lvh.me host, so another
+    // org's subdomain would pass there.
+    it('replaces a successUrl / cancelUrl on another origin with the default, and warns with the host only', async () => {
+      checkoutCreateMock.mockResolvedValueOnce({
+        sessionUrl: 'https://checkout.stripe.com/z',
+      });
+
+      const { createCheckout } = await import('./checkout.remote');
+      await (createCheckout as unknown as (input: unknown) => Promise<unknown>)(
+        {
+          contentId: VALID_CONTENT_ID,
+          successUrl:
+            'https://other-org.lvh.me:3000/checkout/success?session_id={CHECKOUT_SESSION_ID}&secret=1',
+          cancelUrl: 'http://studio-alpha.lvh.me:3000/content/abc',
+        }
+      );
+
+      expect(checkoutCreateMock).toHaveBeenCalledWith({
+        contentId: VALID_CONTENT_ID,
+        successUrl:
+          'https://studio-alpha.lvh.me:3000/checkout/success?session_id={CHECKOUT_SESSION_ID}',
+        cancelUrl: `https://studio-alpha.lvh.me:3000/content/${VALID_CONTENT_ID}`,
+      });
+      expect(loggerWarnMock).toHaveBeenCalledTimes(2);
+      expect(loggerWarnMock).toHaveBeenCalledWith(expect.any(String), {
+        field: 'successUrl',
+        host: 'other-org.lvh.me:3000',
+      });
+      // Same host, other scheme: another origin all the same.
+      expect(loggerWarnMock).toHaveBeenCalledWith(expect.any(String), {
+        field: 'cancelUrl',
+        host: 'studio-alpha.lvh.me:3000',
+      });
+      expect(JSON.stringify(loggerWarnMock.mock.calls)).not.toContain('secret');
     });
 
     it('rethrows the SvelteKit redirect signal (isRedirect → true must propagate)', async () => {

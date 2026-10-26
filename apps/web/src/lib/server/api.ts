@@ -2340,6 +2340,20 @@ export function createServerApi(
         ),
 
       /**
+       * Record the purchase a paid Checkout session stands for, on arrival
+       * (`POST /checkout/complete`; Codex-2hxff.22, "Unlock on arrival").
+       * It runs the webhook's own completion, so whichever comes second finds
+       * it done. Answers as `verify` does, read after.
+       *
+       * @param sessionId - Stripe checkout session ID (cs_xxx)
+       */
+      complete: (sessionId: string) =>
+        request<CheckoutSessionVerifyResult>('ecom', '/checkout/complete', {
+          method: 'POST',
+          body: JSON.stringify({ sessionId }),
+        }),
+
+      /**
        * Verify a course-plan Checkout session
        * (`GET /checkout/course-subscription/verify`). The journey success
        * page reads `subscription` once our row exists, and its `duplicateOf`
@@ -2556,25 +2570,24 @@ export function createServerApi(
         ),
 
       /**
-       * Get per-creator revenue split rows for org-owner visibility on the
-       * studio analytics page (Codex-mtv05).
+       * Get "Revenue by creator" for Studio > Analytics (Codex-zsh2p, owner
+       * decisions 2026-10-26).
        *
-       * One row per ACTIVE creator-organization agreement, annotated with:
-       *  - `totalRevenueCents` — SUM of purchase `creatorPayoutCents` joined
-       *    via `content.creatorId`. Subscription invoice revenue is NOT
-       *    included in Phase 1 (no per-creator immutable invoice row).
-       *  - `splitPercent` — CURRENT creator share as a display percentage
-       *    (0..100), already converted from basis points by the service.
+       * One row per creator who holds an active agreement in the
+       * organisation, earned a slice in the window, or is still owed money:
+       *  - `earnedCents` — their cut of the window's sales, every kind, sent
+       *    or not, after refunds. The owner pool is not a creator's cut.
+       *  - `subscriptionShare` / `salesShare` — an `AgreementShare`: `none`
+       *    (no agreement, shown "None"), `unreadable` (shown "—") or a
+       *    display percentage.
        *  - `lastPayoutAt` — ISO string or null.
-       *  - `pendingPayoutCents` — SUM of unresolved pending-payout amounts
-       *    scoped by BOTH userId AND organizationId (multi-org safety).
+       *  - `pendingPayoutCents` — owed from this organisation, not yet sent.
        *
-       * Single-creator orgs receive `items: []` and the page hides the
-       * section entirely.
+       * An organisation with no such creator receives `items: []`.
        *
        * Query parameters (from `adminRevenueByCreatorQuerySchema`):
-       * - `startDate` / `endDate` — ISO strings (optional, both-or-neither
-       *   for chronological order; max 365-day range)
+       * - `startDate` / `endDate` — ISO strings (optional, both-or-neither;
+       *   without them, the last 30 days; max 365-day range)
        */
       getRevenueByCreator: (params?: URLSearchParams) =>
         request<PaginatedListResponse<CreatorRevenueSplitItem>>(
