@@ -101,6 +101,13 @@ docker run --rm \
   tests/integration/verify_quicktime_outputs.py
 ```
 
+#### 4. Damaged Sources End to End (Docker, or any ffmpeg >= 4.4)
+Makes damaged copies of a healthy source (cut short, scattered holes, a
+broken audio track under a perfect picture, an undecodable picture, a lost
+moov index, broken audio-only) and checks each completes, or fails with the
+code in its `EXPECTED` table. Same command, with
+`tests/integration/verify_damaged_sources.py`.
+
 ## CI/CD Pipeline
 
 Two workflows share the work: the image is built where the transcoder changed,
@@ -159,6 +166,14 @@ The repo-level `RUNPOD_*` secrets are a different thing: the E2E workflows pass 
 - **Mezzanine**: CRF 18 (archive quality)
 - **Every encode**: `format=yuv420p` and `-profile:v high` (browsers play 8-bit
   4:2:0 H.264 only), audio at 48 kHz
+- **HDR sources** (PQ, HLG): tone-mapped to SDR BT.709 with `zscale` +
+  `tonemap` (operator `TONEMAP_OPERATOR`), after scaling to the rung's size
+- **Damaged frames**: a video job decodes with `-max_error_rate 1.0`, so bad
+  frames are concealed instead of failing the file; a rung with no decodable
+  picture fails as `CORRUPT_INPUT`. Audio jobs keep ffmpeg's 2/3 limit
+  (exit 69 → `CORRUPT_INPUT`)
+- **Progress**: the ladder's encodes write `-progress` to a file; ticks go out
+  about every 5 points between 17% and 72%
 
 ### HLS Variants
 | Quality | Height | Video Bitrate | Audio Bitrate |
@@ -179,6 +194,7 @@ The service parses these with `runpodWebhookUnionSchema`
 {
   "jobId": "runpod-job-id",
   "status": "completed",
+  "creatorId": "creator-user-id",
   "output": {
     "mediaId": "uuid",
     "type": "video",
@@ -203,7 +219,8 @@ The service parses these with `runpodWebhookUnionSchema`
   "status": "failed",
   "error": "ffprobe failed (exit 1): moov atom not found…",
   "errorCode": "CORRUPT_INPUT",
-  "mediaId": "uuid"
+  "mediaId": "uuid",
+  "creatorId": "creator-user-id"
 }
 ```
 
@@ -212,14 +229,20 @@ The service parses these with `runpodWebhookUnionSchema`
 `INFRA_ERROR` (the service treats anything else as `INFRA_ERROR`). `mediaId`
 is `null` when the job's own value is not a UUID.
 
+Every payload (completed, failed, progress) carries `creatorId`, so the
+service can route it to the creator's live status without a database read.
+It is `null` when the job's value would fail the service's `userIdSchema`
+(letters and digits only).
+
 If the completed report cannot be delivered, the handler keeps the outputs and
 finishes the job COMPLETED with `{"status": "webhook_undelivered"}`; the
 maintenance run then finds it via RunPod's job status.
 
 ### Progress
 
-`{"jobId", "status": "progress", "progress": 0-100, "step", "mediaId"}`, one
-attempt each, never retried.
+`{"jobId", "status": "progress", "progress": 0-100, "step", "mediaId",
+"creatorId"}`, one attempt each, never retried. Every new step is sent;
+within a step, no closer than 5 points apart.
 
 ### Webhook Signature
 

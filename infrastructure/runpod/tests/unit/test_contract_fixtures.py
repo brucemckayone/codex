@@ -22,15 +22,17 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "contract"
 UPDATE = os.environ.get("UPDATE_CONTRACT_FIXTURES") == "1"
 
 MEDIA_ID = "550e8400-e29b-41d4-a716-446655440000"
+# A real user id's shape (userIdSchema: letters and digits), so the echo shows.
+CREATOR_ID = "k9Xq2LmVt7RzP4wN"
 NONCE = "0f1e2d3c"
 
 
 def _job(**fields):
     return {
         "mediaId": MEDIA_ID,
-        "creatorId": "user-123",
+        "creatorId": CREATOR_ID,
         "type": "video",
-        "inputKey": f"user-123/originals/{MEDIA_ID}/clip.mov",
+        "inputKey": f"{CREATOR_ID}/originals/{MEDIA_ID}/clip.mov",
         "webhookUrl": "https://media-api.example.com/api/transcoding/webhook",
         **fields,
     }
@@ -90,7 +92,7 @@ def test_completed_video_in_the_flat_layout():
 
 def test_completed_audio():
     job = _job(
-        contract=2, type="audio", inputKey=f"user-123/originals/{MEDIA_ID}/talk.m4a"
+        contract=2, type="audio", inputKey=f"{CREATOR_ID}/originals/{MEDIA_ID}/talk.m4a"
     )
     _, posts = run_job(job, AUDIO, job_id="job-audio")
     _check("completed-audio", _final(posts, "completed"))

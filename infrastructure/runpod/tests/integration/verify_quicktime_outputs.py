@@ -7,11 +7,14 @@ sized posters with the handler's own functions, then checks every output with
 ffprobe (Codex-l2c48.8):
 
 - every video stream is H.264 High, yuv420p (browsers play nothing else);
+- an HDR source (HLG, PQ) comes out tone-mapped, tagged BT.709, and no
+  output of an SDR source is tagged HDR;
 - every audio stream is 48 kHz;
 - each rung's short side is its name (a portrait 720p is 720x1280), and no
   rung or preview is larger than the source;
 - the master playlist's RESOLUTION is each rung's real size, with CODECS;
-- each poster is webp, min(nominal, picture width) wide, picture-shaped.
+- each poster is webp, min(nominal, picture width) wide, picture-shaped;
+- the ladder's progress, read from ffmpeg's -progress file, rises to the end.
 
 Exit status 1 on any failure.
 """
@@ -114,6 +117,29 @@ def make_sources(work: str) -> dict:
         "lavfi",
         "-i",
         "testsrc2=s=1920x1080:d=4:r=30",
+        "-c:v",
+        "libx265",
+        "-x265-params",
+        "log-level=error",
+        "-pix_fmt",
+        "yuv420p10le",
+        "-tag:v",
+        "hvc1",
+        "-color_primaries",
+        "bt2020",
+        "-color_trc",
+        "smpte2084",
+        "-colorspace",
+        "bt2020nc",
+        p("hevc10_pq"),
+    )
+    sources["hevc10_pq"] = (p("hevc10_pq"), False, (1920, 1080))
+
+    ffmpeg(
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=s=1920x1080:d=4:r=30",
         *tone,
         "-c:v",
         "prores_ks",
@@ -194,7 +220,8 @@ def streams(path: str) -> list:
             "-v",
             "error",
             "-show_entries",
-            "stream=codec_type,codec_name,profile,pix_fmt,width,height,sample_rate",
+            "stream=codec_type,codec_name,profile,pix_fmt,width,height,sample_rate,"
+            "color_transfer,color_primaries",
             "-of",
             "json",
             path,
@@ -206,10 +233,16 @@ def streams(path: str) -> list:
     return json.loads(out)["streams"]
 
 
-def check_encode(path: str, has_audio: bool, problems: list, what: str):
+HDR = ("smpte2084", "arib-std-b67")
+
+
+def check_encode(path: str, has_audio: bool, hdr: bool, problems: list, what: str):
     """The shape of one encoded stream.ts; returns its (w, h)."""
     found = {s["codec_type"]: s for s in streams(path)}
     video = found.get("video", {})
+    colour = (video.get("color_transfer"), video.get("color_primaries"))
+    if (hdr and colour != ("bt709", "bt709")) or colour[0] in HDR:
+        problems.append(f"{what}: tagged {colour}")
     if (video.get("codec_name"), video.get("profile"), video.get("pix_fmt")) != (
         "h264",
         "High",
@@ -227,18 +260,32 @@ def check_encode(path: str, has_audio: bool, problems: list, what: str):
 def verify(name, path, has_audio, picture, work, problems):
     out = os.path.join(work, f"out_{name}")
     os.makedirs(out)
-    duration, width, height = h.get_media_info(h.probe_media(path))
+    probe = h.probe_media(path)
+    duration, width, height = h.get_media_info(probe)
+    tonemap = h.tonemap_filter(probe)
+    hdr = name.startswith("hevc10_")
+    if (tonemap is not None) != hdr:
+        problems.append(f"{name}: tone-map {'missing' if hdr else 'unwanted'}")
     if (width, height) != picture:
         problems.append(
             f"{name}: reported {width}x{height}, picture is {picture[0]}x{picture[1]}"
         )
     short = min(width, height)
 
-    rungs = h.transcode_video_hls(path, out, short, use_gpu=False)
+    heard: list = []
+    rungs = h.transcode_video_hls(
+        path, out, short, False, tonemap, duration, on_progress=heard.append
+    )
+    if not heard or heard != sorted(heard) or heard[-1] < 0.95:
+        problems.append(f"{name}: ladder progress {heard}")
     master = open(os.path.join(out, "master.m3u8")).read()
     for rung in rungs:
         w, hgt = check_encode(
-            os.path.join(out, rung, "stream.ts"), has_audio, problems, f"{name} {rung}"
+            os.path.join(out, rung, "stream.ts"),
+            has_audio,
+            hdr,
+            problems,
+            f"{name} {rung}",
         )
         expected_short = int(rung[:-1]) if rung.endswith("p") else h.even_floor(short)
         if (
@@ -253,10 +300,11 @@ def verify(name, path, has_audio, picture, work, problems):
             problems.append(f"{name} {rung}: master says {attrs!r}")
 
     if duration > 0:
-        h.create_preview(path, out, duration, False, short)
+        h.create_preview(path, out, duration, False, short, tonemap)
         w, hgt = check_encode(
             os.path.join(out, "preview", "stream.ts"),
             has_audio,
+            hdr,
             problems,
             f"{name} preview",
         )
@@ -264,7 +312,7 @@ def verify(name, path, has_audio, picture, work, problems):
             problems.append(f"{name} preview upscaled: {w}x{hgt}")
 
     posters = h.extract_thumbnail_variants(
-        path, out, max(duration, 1), list(h.POSTER_SIZES)
+        path, out, max(duration, 1), list(h.POSTER_SIZES), tonemap
     )
     for size, poster in posters.items():
         [s] = streams(poster)

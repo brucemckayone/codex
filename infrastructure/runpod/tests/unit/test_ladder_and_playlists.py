@@ -94,7 +94,7 @@ class TestRungChoice:
     def _rungs(self, tmp_path, short_side):
         encoded = []
 
-        def encode(input_path, variant_dir, playlist_path, settings, name, use_gpu):
+        def encode(input_path, variant_dir, playlist_path, settings, name, *rest):
             encoded.append((name, settings["height"]))
 
         with (

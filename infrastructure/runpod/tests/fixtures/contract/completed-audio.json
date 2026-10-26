@@ -1,9 +1,10 @@
 {
+  "creatorId": "k9Xq2LmVt7RzP4wN",
   "jobId": "job-audio",
   "output": {
     "durationSeconds": 180,
     "height": null,
-    "hlsMasterKey": "user-123/hls/550e8400-e29b-41d4-a716-446655440000/master.m3u8",
+    "hlsMasterKey": "k9Xq2LmVt7RzP4wN/hls/550e8400-e29b-41d4-a716-446655440000/master.m3u8",
     "hlsPreviewKey": null,
     "loudnessIntegrated": -1400,
     "loudnessPeak": -50,
@@ -14,8 +15,8 @@
     "thumbnailKey": null,
     "thumbnailVariants": null,
     "type": "audio",
-    "waveformImageKey": "user-123/waveforms/550e8400-e29b-41d4-a716-446655440000/waveform.png",
-    "waveformKey": "user-123/waveforms/550e8400-e29b-41d4-a716-446655440000/waveform.json",
+    "waveformImageKey": "k9Xq2LmVt7RzP4wN/waveforms/550e8400-e29b-41d4-a716-446655440000/waveform.png",
+    "waveformKey": "k9Xq2LmVt7RzP4wN/waveforms/550e8400-e29b-41d4-a716-446655440000/waveform.json",
     "width": null
   },
   "status": "completed"

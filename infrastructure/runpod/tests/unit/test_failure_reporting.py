@@ -135,6 +135,7 @@ class TestEarlyFailuresAreReported:
             "error": "'creatorId'",
             "errorCode": "INFRA_ERROR",
             "mediaId": None,  # test-media-123 is no UUID: the service would refuse it
+            "creatorId": None,
         }
 
     def test_a_real_media_id_is_reported(

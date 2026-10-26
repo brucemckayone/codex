@@ -32,8 +32,9 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
-from typing import Any, TypedDict
+from typing import Any, Callable, TypedDict
 from urllib.parse import urlparse
 
 import boto3
@@ -114,8 +115,18 @@ _CORRUPT_INPUT_MARKERS = (
 _MISSING_DECODER = re.compile(r"Decoder \(codec [^)]*\) not found|Unknown decoder")
 
 
-def classify_ffmpeg_failure(stderr: str) -> str:
-    """Map a failed ffmpeg/ffprobe run's stderr to a code."""
+# ffmpeg's exit status when more of the decoded frames failed than
+# -max_error_rate allows (2/3 unless TOLERANT_DECODE): the input is damaged.
+# Each failed frame usually also prints "Invalid data found when processing
+# input" (376 times for a broken AAC file on 4.4.2), so the marker below
+# agrees; the status covers a decoder that fails with other words.
+FFMPEG_ERROR_RATE_EXIT = 69
+
+
+def classify_ffmpeg_failure(stderr: str, returncode: int | None = None) -> str:
+    """Map a failed ffmpeg/ffprobe run's stderr (and exit status) to a code."""
+    if returncode == FFMPEG_ERROR_RATE_EXIT:
+        return TranscodeErrorCode.CORRUPT_INPUT
     if _MISSING_DECODER.search(stderr):
         return TranscodeErrorCode.UNSUPPORTED_CODEC
     if any(marker in stderr for marker in _CORRUPT_INPUT_MARKERS):
@@ -148,6 +159,22 @@ _UUID = re.compile(
 def reportable_media_id(value: Any) -> str | None:
     """`value` if the service would accept it as a mediaId, else None."""
     if isinstance(value, str) and _UUID.match(value):
+        return value
+    return None
+
+
+# The service's userIdSchema (packages/validation/src/primitives.ts), which is
+# stricter than validate_path_component: no `_` or `-`.
+_USER_ID = re.compile(r"^[a-zA-Z0-9]{1,64}$")
+
+
+def reportable_creator_id(value: Any) -> str | None:
+    """`value` if the service would accept it as a creatorId, else None.
+
+    Every webhook echoes it, so the service can route a report to the
+    creator's live status without reading the database (Codex-l2c48.9).
+    """
+    if isinstance(value, str) and _USER_ID.match(value):
         return value
     return None
 
@@ -234,20 +261,73 @@ VIDEO_PROFILE = ["-profile:v", "high"]
 # supports (96 kHz came out). Every audio output is pinned to 48 kHz.
 AUDIO_SAMPLE_RATE = ["-ar", "48000"]
 
+# A video job is encoded past damaged frames (owner's choice, 2026-10-26).
+# ffmpeg already conceals a bad frame and carries on; what fails the file is
+# its error-rate check, exit 69 once 2/3 of ALL decoded frames failed, audio
+# included. A 10 fps screen recording with a broken audio track crosses that
+# with every video frame intact (checked on 4.4.2). A picture that cannot be
+# decoded at all is still caught, by _validate_hls_rung. Audio jobs keep the
+# check: there the audio is the content.
+TOLERANT_DECODE = ["-max_error_rate", "1.0"]
 
-def ladder_filter(short_side: int) -> str:
+# iPhones record HLG HDR by default, and editors hand over PQ. Browsers here
+# show SDR, and an HDR picture squeezed into 8-bit H.264 still tagged HDR
+# looks washed out, so it is tone-mapped to BT.709. Which operator is judged
+# on a real iPhone clip (owner's choice, 2026-10-26); hable until then.
+HDR_TRANSFERS = ("smpte2084", "arib-std-b67")
+TONEMAP_OPERATOR = "hable"
+# What zscale can take as the source's primaries and matrix (ffprobe's names).
+_ZSCALE_PRIMARIES = ("bt709", "bt2020", "smpte431", "smpte432")
+_ZSCALE_MATRICES = ("bt709", "bt2020nc", "bt2020c")
+
+
+def tonemap_filter(probe_data: dict[str, Any]) -> str | None:
+    """The filters that bring an HDR (PQ or HLG) picture to SDR BT.709, or
+    None when the first video stream is SDR.
+
+    The source's transfer, primaries and matrix are given to zscale outright
+    rather than read from each frame. The encoder is tagged BT.709 by the
+    frames this leaves (checked on 4.4.2), so no output option is needed.
+    """
+    video = next(
+        (s for s in probe_data.get("streams", []) if s.get("codec_type") == "video"),
+        {},
+    )
+    transfer = video.get("color_transfer")
+    if transfer not in HDR_TRANSFERS:
+        return None
+    primaries = video.get("color_primaries")
+    if primaries not in _ZSCALE_PRIMARIES:
+        primaries = "bt2020"
+    matrix = video.get("color_space")
+    if matrix not in _ZSCALE_MATRICES:
+        matrix = "bt2020nc"
+    return (
+        f"zscale=tin={transfer}:pin={primaries}:min={matrix}:t=linear:npl=100,"
+        "format=gbrpf32le,zscale=p=bt709,"
+        f"tonemap=tonemap={TONEMAP_OPERATOR}:desat=0,"
+        "zscale=t=bt709:m=bt709:r=tv"
+    )
+
+
+def ladder_filter(short_side: int, tonemap: str | None = None) -> str:
     """The -vf of every video encode: square the pixels, scale the picture's
-    SHORT side to `short_side`, then 8-bit 4:2:0.
+    SHORT side to `short_side`, tone-map an HDR source, then 8-bit 4:2:0.
 
     A rung's name is its short side, so a portrait 720p is 720x1280, not the
     406x720 that `scale=-2:720` made. ffmpeg autorotates before this chain
     runs, so iw/ih are already upright here. The callers never pass a
-    short_side above the source's, so nothing is upscaled.
+    short_side above the source's, so nothing is upscaled. Tone-mapping runs
+    in float after the scale, at the rung's size: about 2.5x the plain
+    encode's time for 1080p -> 720p, against far more at the source's.
     """
-    return (
-        "scale='trunc(iw*sar/2)*2':ih,setsar=1,"
-        f"scale='if(gte(iw,ih),-2,{short_side})':'if(gte(iw,ih),{short_side},-2)',"
-        f"{VIDEO_PIXEL_FORMAT}"
+    return ",".join(
+        [
+            "scale='trunc(iw*sar/2)*2':ih,setsar=1",
+            f"scale='if(gte(iw,ih),-2,{short_side})':'if(gte(iw,ih),{short_side},-2)'",
+            *([tonemap] if tonemap else []),
+            VIDEO_PIXEL_FORMAT,
+        ]
     )
 
 
@@ -262,13 +342,45 @@ def even_floor(value: int) -> int:
 
 
 def run_ffmpeg(
-    cmd: list[str], timeout: int = 3600, description: str = "ffmpeg"
+    cmd: list[str],
+    timeout: int = 3600,
+    description: str = "ffmpeg",
+    on_seconds: Callable[[float], None] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run an ffmpeg/ffprobe command with proper error capture.
 
     On failure, raises TranscodeError with the last 2KB of stderr so the actual
     ffmpeg error message is preserved for debugging, coded from the whole of it.
+
+    With `on_seconds`, ffmpeg also writes `-progress` to a file, and each new
+    position it reports there (seconds of output so far) is passed on while
+    the command runs.
     """
+    if on_seconds is None:
+        return _run_ffmpeg(cmd, timeout, description)
+    with tempfile.TemporaryDirectory(prefix="ffmpeg_progress_") as progress_dir:
+        progress_path = os.path.join(progress_dir, "progress")
+        done = threading.Event()
+        watcher = threading.Thread(
+            target=_follow_progress,
+            args=(progress_path, on_seconds, done),
+            daemon=True,
+        )
+        watcher.start()
+        try:
+            return _run_ffmpeg(
+                [cmd[0], "-progress", progress_path, "-nostats", *cmd[1:]],
+                timeout,
+                description,
+            )
+        finally:
+            done.set()
+            watcher.join()
+
+
+def _run_ffmpeg(
+    cmd: list[str], timeout: int, description: str
+) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
             cmd, check=True, capture_output=True, text=True, timeout=timeout
@@ -276,9 +388,46 @@ def run_ffmpeg(
     except subprocess.CalledProcessError as e:
         stderr = e.stderr or ""
         raise TranscodeError(
-            classify_ffmpeg_failure(stderr),
+            classify_ffmpeg_failure(stderr, e.returncode),
             f"{description} failed (exit {e.returncode}): {stderr[-2000:]}",
         ) from e
+
+
+PROGRESS_POLL_SECONDS = 1.0
+
+
+def _follow_progress(
+    path: str, on_seconds: Callable[[float], None], done: threading.Event
+) -> None:
+    """Each poll, pass on the latest `out_time_us` ffmpeg has appended to
+    `path` if it moved forward; after `done`, poll once more so the last
+    position is never missed."""
+    offset = 0
+    reported = -1.0
+    while True:
+        finished = done.wait(PROGRESS_POLL_SECONDS)
+        try:
+            with open(path, "rb") as progress:
+                progress.seek(offset)
+                chunk = progress.read()
+        except OSError:  # ffmpeg has not opened it yet
+            chunk = b""
+        # Only whole lines: ffmpeg may be part-way through writing one.
+        complete = chunk[: chunk.rfind(b"\n") + 1]
+        offset += len(complete)
+        positions = [
+            int(value)
+            for key, _, value in (
+                line.partition("=")
+                for line in complete.decode(errors="replace").splitlines()
+            )
+            if key == "out_time_us" and value.isdigit()
+        ]
+        if positions and max(positions) / 1_000_000 > reported:
+            reported = max(positions) / 1_000_000
+            on_seconds(reported)
+        if finished:
+            return
 
 
 # =============================================================================
@@ -618,46 +767,72 @@ def check_gpu_available() -> bool:
 # =============================================================================
 
 
-def _build_mezzanine_cmd(input_path: str, output_path: str, use_gpu: bool) -> list[str]:
-    """Build ffmpeg command for mezzanine creation."""
+def _input_args(
+    input_path: str, use_gpu: bool, seek_seconds: int | None = None
+) -> list[str]:
+    """How a video job opens its source: tolerant of damaged frames, decoded
+    on the GPU when there is one, optionally from `seek_seconds`."""
+    return [
+        *TOLERANT_DECODE,
+        *(["-hwaccel", "cuda"] if use_gpu else []),
+        *(["-ss", str(seek_seconds)] if seek_seconds is not None else []),
+        "-i",
+        input_path,
+    ]
+
+
+def _video_codec(use_gpu: bool, quality: int, cpu_preset: str) -> list[str]:
+    """NVENC at constant quality `quality`, or libx264 at CRF `quality`."""
     if use_gpu:
         return [
-            "ffmpeg",
-            "-y",
-            "-hwaccel",
-            "cuda",
-            "-i",
-            input_path,
-            "-vf",
-            VIDEO_PIXEL_FORMAT,
             "-c:v",
             "h264_nvenc",
             *VIDEO_PROFILE,
             "-preset",
             "p4",
             "-cq",
-            "18",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "256k",
-            *AUDIO_SAMPLE_RATE,
-            output_path,
+            str(quality),
         ]
     return [
-        "ffmpeg",
-        "-y",
-        "-i",
-        input_path,
-        "-vf",
-        VIDEO_PIXEL_FORMAT,
         "-c:v",
         "libx264",
         *VIDEO_PROFILE,
         "-preset",
-        "slow",
+        cpu_preset,
         "-crf",
-        "18",
+        str(quality),
+    ]
+
+
+def _hls_output(segment_path: str, playlist_path: str) -> list[str]:
+    """VOD HLS in one file: every segment is a byte range of `segment_path`
+    (see _build_hls_variant_cmd)."""
+    return [
+        "-f",
+        "hls",
+        "-hls_time",
+        str(HLS_SEGMENT_DURATION),
+        "-hls_playlist_type",
+        "vod",
+        "-hls_flags",
+        "single_file",
+        "-hls_segment_filename",
+        segment_path,
+        playlist_path,
+    ]
+
+
+def _build_mezzanine_cmd(
+    input_path: str, output_path: str, use_gpu: bool, tonemap: str | None = None
+) -> list[str]:
+    """Build ffmpeg command for mezzanine creation."""
+    return [
+        "ffmpeg",
+        "-y",
+        *_input_args(input_path, use_gpu),
+        "-vf",
+        ",".join([*([tonemap] if tonemap else []), VIDEO_PIXEL_FORMAT]),
+        *_video_codec(use_gpu, 18, cpu_preset="slow"),
         "-c:a",
         "aac",
         "-b:a",
@@ -667,7 +842,9 @@ def _build_mezzanine_cmd(input_path: str, output_path: str, use_gpu: bool) -> li
     ]
 
 
-def create_mezzanine(input_path: str, output_path: str, use_gpu: bool) -> None:
+def create_mezzanine(
+    input_path: str, output_path: str, use_gpu: bool, tonemap: str | None = None
+) -> None:
     """Create high-quality mezzanine file (CRF 18 for archival).
 
     Falls back to CPU if GPU encoding fails (e.g. OOM).
@@ -677,7 +854,7 @@ def create_mezzanine(input_path: str, output_path: str, use_gpu: bool) -> None:
     if use_gpu:
         try:
             run_ffmpeg(
-                _build_mezzanine_cmd(input_path, output_path, use_gpu=True),
+                _build_mezzanine_cmd(input_path, output_path, True, tonemap),
                 timeout=3600,
                 description="mezzanine (GPU)",
             )
@@ -687,7 +864,7 @@ def create_mezzanine(input_path: str, output_path: str, use_gpu: bool) -> None:
             print(f"GPU mezzanine failed, falling back to CPU: {e}")
 
     run_ffmpeg(
-        _build_mezzanine_cmd(input_path, output_path, use_gpu=False),
+        _build_mezzanine_cmd(input_path, output_path, False, tonemap),
         timeout=3600,
         description="mezzanine (CPU)",
     )
@@ -754,6 +931,7 @@ def _build_hls_variant_cmd(
     playlist_path: str,
     settings: dict,
     use_gpu: bool,
+    tonemap: str | None = None,
 ) -> list[str]:
     """Build ffmpeg command for a single HLS variant.
 
@@ -762,64 +940,13 @@ def _build_hls_variant_cmd(
     proxy then presigns ONE R2 URL per variant regardless of duration, keeping
     it under the Workers Free 10ms CPU budget (Codex-bpjg5).
     """
-    segment_path = os.path.join(variant_dir, "stream.ts")
-
-    if use_gpu:
-        return [
-            "ffmpeg",
-            "-y",
-            "-hwaccel",
-            "cuda",
-            "-i",
-            input_path,
-            "-vf",
-            ladder_filter(settings["height"]),
-            "-c:v",
-            "h264_nvenc",
-            *VIDEO_PROFILE,
-            "-preset",
-            "p4",
-            "-cq",
-            "23",
-            "-b:v",
-            settings["video_bitrate"],
-            "-maxrate",
-            settings["video_bitrate"],
-            "-bufsize",
-            f"{int(settings['video_bitrate'][:-1]) * 2}k",
-            "-c:a",
-            "aac",
-            "-b:a",
-            settings["audio_bitrate"],
-            *AUDIO_SAMPLE_RATE,
-            "-af",
-            "loudnorm=I=-16:TP=-1.5:LRA=11",
-            "-f",
-            "hls",
-            "-hls_time",
-            str(HLS_SEGMENT_DURATION),
-            "-hls_playlist_type",
-            "vod",
-            "-hls_flags",
-            "single_file",
-            "-hls_segment_filename",
-            segment_path,
-            playlist_path,
-        ]
     return [
         "ffmpeg",
         "-y",
-        "-i",
-        input_path,
+        *_input_args(input_path, use_gpu),
         "-vf",
-        ladder_filter(settings["height"]),
-        "-c:v",
-        "libx264",
-        *VIDEO_PROFILE,
-        "-preset",
-        "fast",
-        "-crf",
-        "23",
+        ladder_filter(settings["height"], tonemap),
+        *_video_codec(use_gpu, 23, cpu_preset="fast"),
         "-b:v",
         settings["video_bitrate"],
         "-maxrate",
@@ -833,17 +960,7 @@ def _build_hls_variant_cmd(
         *AUDIO_SAMPLE_RATE,
         "-af",
         "loudnorm=I=-16:TP=-1.5:LRA=11",
-        "-f",
-        "hls",
-        "-hls_time",
-        str(HLS_SEGMENT_DURATION),
-        "-hls_playlist_type",
-        "vod",
-        "-hls_flags",
-        "single_file",
-        "-hls_segment_filename",
-        segment_path,
-        playlist_path,
+        *_hls_output(os.path.join(variant_dir, "stream.ts"), playlist_path),
     ]
 
 
@@ -854,36 +971,57 @@ def _encode_hls_variant(
     settings: dict,
     variant_name: str,
     use_gpu: bool,
+    tonemap: str | None = None,
+    on_seconds: Callable[[float], None] | None = None,
 ) -> None:
     """Encode a single HLS variant with GPU → CPU fallback."""
     if use_gpu:
         try:
             run_ffmpeg(
                 _build_hls_variant_cmd(
-                    input_path, variant_dir, playlist_path, settings, use_gpu=True
+                    input_path, variant_dir, playlist_path, settings, True, tonemap
                 ),
                 timeout=3600,
                 description=f"HLS {variant_name} (GPU)",
+                on_seconds=on_seconds,
             )
-            _validate_hls_rung(variant_dir, playlist_path, f"HLS {variant_name}")
+            _validate_hls_rung(
+                variant_dir, playlist_path, f"HLS {variant_name}", picture=True
+            )
             return
         except RuntimeError as e:
             print(f"GPU failed for {variant_name}, falling back to CPU: {e}")
 
     run_ffmpeg(
         _build_hls_variant_cmd(
-            input_path, variant_dir, playlist_path, settings, use_gpu=False
+            input_path, variant_dir, playlist_path, settings, False, tonemap
         ),
         timeout=3600,
         description=f"HLS {variant_name} (CPU)",
+        on_seconds=on_seconds,
     )
-    _validate_hls_rung(variant_dir, playlist_path, f"HLS {variant_name}")
+    _validate_hls_rung(variant_dir, playlist_path, f"HLS {variant_name}", picture=True)
 
 
-def _validate_hls_rung(variant_dir: str, playlist_path: str, what: str) -> None:
-    """A single-file HLS rung is its playlist plus one stream.ts; both must exist."""
+def _validate_hls_rung(
+    variant_dir: str, playlist_path: str, what: str, picture: bool = False
+) -> None:
+    """A single-file HLS rung is its playlist plus one stream.ts; both must exist.
+
+    With `picture`, the stream must also hold video. A source whose every
+    video frame is undecodable still exits 0 with the audio alone (an HEVC
+    file with scrambled video, on 4.4.2), so this is where a video that
+    "can't be read at all" fails: as CORRUPT_INPUT, since nothing in the
+    source can be shown. On the GPU path the CPU gets a try first.
+    """
     validate_output(playlist_path, f"{what} playlist")
-    validate_output(os.path.join(variant_dir, "stream.ts"), f"{what} stream")
+    stream_path = os.path.join(variant_dir, "stream.ts")
+    validate_output(stream_path, f"{what} stream")
+    if picture and encoded_stream_tags(stream_path)[0] is None:
+        raise TranscodeError(
+            TranscodeErrorCode.CORRUPT_INPUT,
+            f"{what}: no picture could be decoded from the source",
+        )
 
 
 # H.264 profile_idc and constraint byte, for an RFC 6381 `avc1.PPCCLL` string.
@@ -998,77 +1136,100 @@ def _bps(bitrate: str) -> int:
     return int(bitrate[:-1]) * 1000
 
 
+Progress = Callable[[float], None]
+"""Told how much of a stage is done, from 0.0 to 1.0."""
+
+
+def _rung_seconds(
+    on_progress: Progress | None, rung: int, rungs: int, duration: float
+) -> Callable[[float], None] | None:
+    """For rung `rung` of `rungs` (each an equal share of the stage), turn
+    ffmpeg's seconds-encoded into the stage's fraction done."""
+    if on_progress is None or duration <= 0:
+        return None
+    return lambda seconds: on_progress((rung + min(seconds / duration, 1.0)) / rungs)
+
+
 def transcode_video_hls(
     input_path: str,
     output_dir: str,
     source_short_side: int | None,
     use_gpu: bool,
+    tonemap: str | None = None,
+    duration: float = 0,
+    on_progress: Progress | None = None,
 ) -> list[str]:
     """Transcode video to multi-quality HLS variants.
 
     A rung is encoded when the source's short side reaches it (portrait and
     landscape alike). If the source is smaller than every rung, one 'source'
     rung keeps its own size, so the master playlist is never empty.
+    `on_progress` hears the whole ladder's progress when `duration` is known.
     """
     print("Transcoding video to HLS variants...")
 
-    ready_variants = []
-    variant_playlists = []
-
+    ladder: list[tuple[str, dict]] = []
     for variant_name, settings in HLS_VARIANTS.items():
         if source_short_side and settings["height"] > source_short_side:
             print(
                 f"Skipping {variant_name} (source short side {source_short_side} < {settings['height']})"
             )
             continue
+        ladder.append((variant_name, settings))
 
+    # Fallback: if source is smaller than all standard variants, encode at native resolution
+    if not ladder and source_short_side is not None:
+        print(
+            f"No standard variants fit source ({source_short_side}p). Encoding 'source' variant..."
+        )
+        ladder.append(
+            (
+                "source",
+                {
+                    "height": even_floor(source_short_side),
+                    "video_bitrate": "800k",
+                    "audio_bitrate": "64k",
+                },
+            )
+        )
+
+    for rung, (variant_name, settings) in enumerate(ladder):
         variant_dir = os.path.join(output_dir, variant_name)
         os.makedirs(variant_dir, exist_ok=True)
         playlist_path = os.path.join(variant_dir, "index.m3u8")
 
         print(f"Encoding {variant_name}...")
         _encode_hls_variant(
-            input_path, variant_dir, playlist_path, settings, variant_name, use_gpu
+            input_path,
+            variant_dir,
+            playlist_path,
+            settings,
+            variant_name,
+            use_gpu,
+            tonemap,
+            _rung_seconds(on_progress, rung, len(ladder), duration),
         )
-        ready_variants.append(variant_name)
-        variant_playlists.append((variant_name, settings))
-
-    # Fallback: if source is smaller than all standard variants, encode at native resolution
-    if not ready_variants and source_short_side is not None:
-        print(
-            f"No standard variants fit source ({source_short_side}p). Encoding 'source' variant..."
-        )
-        settings = {
-            "height": even_floor(source_short_side),
-            "video_bitrate": "800k",
-            "audio_bitrate": "64k",
-        }
-        variant_dir = os.path.join(output_dir, "source")
-        os.makedirs(variant_dir, exist_ok=True)
-        playlist_path = os.path.join(variant_dir, "index.m3u8")
-
-        _encode_hls_variant(
-            input_path, variant_dir, playlist_path, settings, "source", use_gpu
-        )
-        ready_variants.append("source")
-        variant_playlists.append(("source", settings))
 
     write_master_playlist(
         os.path.join(output_dir, "master.m3u8"),
-        [(name, os.path.join(output_dir, name)) for name, _ in variant_playlists],
+        [(name, os.path.join(output_dir, name)) for name, _ in ladder],
         {
             name: _bps(settings["video_bitrate"]) + _bps(settings["audio_bitrate"])
-            for name, settings in variant_playlists
+            for name, settings in ladder
         },
     )
 
-    return ready_variants
+    return [name for name, _ in ladder]
 
 
 def _build_audio_hls_cmd(
     input_path: str, variant_dir: str, playlist_path: str, settings: dict
 ) -> list[str]:
-    """Build ffmpeg command for one audio-only HLS rung (single-file HLS)."""
+    """Build ffmpeg command for one audio-only HLS rung (single-file HLS).
+
+    Not TOLERANT_DECODE: with the audio the whole content, a file whose
+    frames mostly fail to decode is damaged (exit 69 → CORRUPT_INPUT).
+    """
     return [
         "ffmpeg",
         "-y",
@@ -1082,27 +1243,22 @@ def _build_audio_hls_cmd(
         *AUDIO_SAMPLE_RATE,
         "-af",
         "loudnorm=I=-16:TP=-1.5:LRA=11",
-        "-f",
-        "hls",
-        "-hls_time",
-        str(HLS_SEGMENT_DURATION),
-        "-hls_playlist_type",
-        "vod",
-        "-hls_flags",
-        "single_file",
-        "-hls_segment_filename",
-        os.path.join(variant_dir, "stream.ts"),
-        playlist_path,
+        *_hls_output(os.path.join(variant_dir, "stream.ts"), playlist_path),
     ]
 
 
-def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
-    """Transcode audio to HLS variants."""
+def transcode_audio_hls(
+    input_path: str,
+    output_dir: str,
+    duration: float = 0,
+    on_progress: Progress | None = None,
+) -> list[str]:
+    """Transcode audio to HLS variants; `on_progress` as for video."""
     print("Transcoding audio to HLS variants...")
 
     variant_playlists = []
 
-    for variant_name, settings in AUDIO_VARIANTS.items():
+    for rung, (variant_name, settings) in enumerate(AUDIO_VARIANTS.items()):
         variant_dir = os.path.join(output_dir, variant_name)
         os.makedirs(variant_dir, exist_ok=True)
         playlist_path = os.path.join(variant_dir, "index.m3u8")
@@ -1112,6 +1268,7 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
             _build_audio_hls_cmd(input_path, variant_dir, playlist_path, settings),
             timeout=600,
             description=f"audio HLS {variant_name}",
+            on_seconds=_rung_seconds(on_progress, rung, len(AUDIO_VARIANTS), duration),
         )
         _validate_hls_rung(variant_dir, playlist_path, f"audio {variant_name}")
         variant_playlists.append((variant_name, settings))
@@ -1140,83 +1297,27 @@ def _build_preview_cmd(
     preview_duration: int,
     use_gpu: bool,
     short_side: int = PREVIEW_HEIGHT,
+    tonemap: str | None = None,
 ) -> list[str]:
     """Build ffmpeg command for preview clip (single-file HLS, see variant cmd)."""
-    segment_path = os.path.join(preview_dir, "stream.ts")
-    playlist_path = os.path.join(preview_dir, "preview.m3u8")
-
-    if use_gpu:
-        return [
-            "ffmpeg",
-            "-y",
-            "-hwaccel",
-            "cuda",
-            "-ss",
-            str(start_time),
-            "-i",
-            input_path,
-            "-t",
-            str(preview_duration),
-            "-vf",
-            ladder_filter(short_side),
-            "-c:v",
-            "h264_nvenc",
-            *VIDEO_PROFILE,
-            "-preset",
-            "p4",
-            "-cq",
-            "23",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "128k",
-            *AUDIO_SAMPLE_RATE,
-            "-f",
-            "hls",
-            "-hls_time",
-            str(HLS_SEGMENT_DURATION),
-            "-hls_playlist_type",
-            "vod",
-            "-hls_flags",
-            "single_file",
-            "-hls_segment_filename",
-            segment_path,
-            playlist_path,
-        ]
     return [
         "ffmpeg",
         "-y",
-        "-ss",
-        str(start_time),
-        "-i",
-        input_path,
+        *_input_args(input_path, use_gpu, seek_seconds=start_time),
         "-t",
         str(preview_duration),
         "-vf",
-        ladder_filter(short_side),
-        "-c:v",
-        "libx264",
-        *VIDEO_PROFILE,
-        "-preset",
-        "fast",
-        "-crf",
-        "23",
+        ladder_filter(short_side, tonemap),
+        *_video_codec(use_gpu, 23, cpu_preset="fast"),
         "-c:a",
         "aac",
         "-b:a",
         "128k",
         *AUDIO_SAMPLE_RATE,
-        "-f",
-        "hls",
-        "-hls_time",
-        str(HLS_SEGMENT_DURATION),
-        "-hls_playlist_type",
-        "vod",
-        "-hls_flags",
-        "single_file",
-        "-hls_segment_filename",
-        segment_path,
-        playlist_path,
+        *_hls_output(
+            os.path.join(preview_dir, "stream.ts"),
+            os.path.join(preview_dir, "preview.m3u8"),
+        ),
     ]
 
 
@@ -1226,6 +1327,7 @@ def create_preview(
     duration: int,
     use_gpu: bool,
     source_short_side: int | None = None,
+    tonemap: str | None = None,
 ) -> None:
     """Create a 30-second preview clip with GPU → CPU fallback: 720p, or the
     source's own size when it is smaller (never upscaled)."""
@@ -1251,6 +1353,7 @@ def create_preview(
                     preview_duration,
                     use_gpu=True,
                     short_side=short_side,
+                    tonemap=tonemap,
                 ),
                 timeout=120,
                 description="preview (GPU)",
@@ -1268,6 +1371,7 @@ def create_preview(
             preview_duration,
             use_gpu=False,
             short_side=short_side,
+            tonemap=tonemap,
         ),
         timeout=120,
         description="preview (CPU)",
@@ -1329,11 +1433,13 @@ def extract_thumbnail_variants(
     output_dir: str,
     duration: int,
     sizes: tuple[str, ...] | list[str],
+    tonemap: str | None = None,
 ) -> dict[str, str]:
     """Extract a poster at the 10% mark in each of `sizes` (POSTER_SIZES keys).
 
     Pixels are squared first, as in every rung, so the poster has the shape
-    the picture is shown at.
+    the picture is shown at. One frame is decoded, so a damaged one at that
+    point would be 100% of the error rate: tolerant decode keeps it a glitch.
     """
     unknown = [size for size in sizes if size not in POSTER_SIZES]
     if unknown or not sizes:
@@ -1352,15 +1458,17 @@ def extract_thumbnail_variants(
         cmd = [
             "ffmpeg",
             "-y",
-            "-ss",
-            str(timestamp),
-            "-i",
-            input_path,
+            *_input_args(input_path, use_gpu=False, seek_seconds=timestamp),
             "-vframes",
             "1",
             "-vf",
-            "scale='trunc(iw*sar/2)*2':ih,setsar=1,"
-            f"scale='min({config['width']},iw)':-1",
+            ",".join(
+                [
+                    "scale='trunc(iw*sar/2)*2':ih,setsar=1",
+                    *([tonemap] if tonemap else []),
+                    f"scale='min({config['width']},iw)':-1",
+                ]
+            ),
             "-c:v",
             "libwebp",
             "-quality",
@@ -1481,7 +1589,13 @@ def send_webhook(url: str, secret: str, result: dict) -> None:
 
 
 def send_progress(
-    url: str, secret: str, job_id: str, step: str, percent: int, media_id: str = ""
+    url: str,
+    secret: str,
+    job_id: str,
+    step: str,
+    percent: int,
+    media_id: str = "",
+    creator_id: str | None = None,
 ) -> None:
     """Send a progress update webhook. Fire-and-forget: failures are logged but don't stop the job."""
     payload_dict: dict[str, Any] = {
@@ -1489,6 +1603,7 @@ def send_progress(
         "status": "progress",
         "progress": percent,
         "step": step,
+        "creatorId": creator_id,
     }
     if media_id:
         payload_dict["mediaId"] = media_id
@@ -1504,6 +1619,56 @@ def send_progress(
         requests.post(url, data=payload, headers=headers, timeout=5)
     except Exception as e:
         print(f"Progress webhook failed (non-fatal): {e}")
+
+
+# Ticks within a step go no closer than this (owner's choice, 2026-10-26:
+# about every 5%), so a long encode sends a dozen, not one a second.
+PROGRESS_INTERVAL_POINTS = 5
+
+
+class ProgressReporter:
+    """One job's progress webhooks.
+
+    A new step is always reported. Within a step a tick goes once it is
+    PROGRESS_INTERVAL_POINTS past the last one sent, never backwards (a GPU
+    encode that falls back to the CPU starts again from zero).
+    """
+
+    def __init__(
+        self,
+        url: str,
+        secret: str,
+        job_id: str,
+        media_id: str,
+        creator_id: str | None,
+    ):
+        self.url = url
+        self.secret = secret
+        self.job_id = job_id
+        self.media_id = media_id
+        self.creator_id = creator_id
+        self._step: str | None = None
+        self._percent = 0
+
+    def report(self, step: str, percent: int) -> None:
+        if step == self._step and percent < self._percent + PROGRESS_INTERVAL_POINTS:
+            return
+        self._step, self._percent = step, percent
+        send_progress(
+            self.url,
+            self.secret,
+            self.job_id,
+            step,
+            percent,
+            self.media_id,
+            self.creator_id,
+        )
+
+    def stage(self, step: str, start: int, end: int) -> Progress:
+        """Report `step` at `start`; the callback returned maps the stage's
+        0.0-1.0 onto start..end."""
+        self.report(step, start)
+        return lambda done: self.report(step, start + int((end - start) * done))
 
 
 # =============================================================================
@@ -1556,6 +1721,14 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 f"Invalid media type: '{media_type}'. Must be 'video' or 'audio'."
             )
+
+        progress = ProgressReporter(
+            webhook_url,
+            webhook_secret,
+            job_id,
+            media_id,
+            reportable_creator_id(creator_id),
+        )
 
         print(f"Starting transcoding job for {media_type}: {media_id}")
         print(f"Active features: {FEATURES}")
@@ -1610,13 +1783,13 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         work_dir = tempfile.mkdtemp(prefix="transcoding_")
 
         # Step 1: Download original from R2
-        send_progress(webhook_url, webhook_secret, job_id, "downloading", 0, media_id)
+        progress.report("downloading", 0)
         input_ext = os.path.splitext(input_key)[1] or ".mp4"
         input_path = os.path.join(work_dir, f"input{input_ext}")
         download_file(r2_client, r2_bucket_name, input_key, input_path)
 
         # Step 2: Probe metadata
-        send_progress(webhook_url, webhook_secret, job_id, "probing", 5, media_id)
+        progress.report("probing", 5)
         probe_data = probe_media(input_path)
         duration, width, height = get_media_info(probe_data)
         print(f"Media info: duration={duration}s, width={width}, height={height}")
@@ -1628,14 +1801,17 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             )
 
         validate_streams(probe_data, media_type)
+        tonemap = tonemap_filter(probe_data) if media_type == "video" else None
+        if tonemap:
+            print("HDR source: tone-mapping to SDR (BT.709)")
 
         # Step 3: Create mezzanine → Upload to B2 (gated)
         mezzanine_key = None
         if FEATURES["mezzanine"] and media_type == "video":
-            send_progress(webhook_url, webhook_secret, job_id, "mezzanine", 6, media_id)
+            progress.report("mezzanine", 6)
             mezzanine_path = os.path.join(work_dir, "mezzanine.mp4")
             mezzanine_key = f"{creator_id}/mezzanine/{media_id}/mezzanine.mp4"
-            create_mezzanine(input_path, mezzanine_path, use_gpu)
+            create_mezzanine(input_path, mezzanine_path, use_gpu, tonemap)
             upload_file(
                 b2_client, b2_bucket_name, mezzanine_key, mezzanine_path, "video/mp4"
             )
@@ -1646,7 +1822,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         loudness_peak: int | None = None
         loudness_range: int | None = None
         if FEATURES["loudness_analysis"]:
-            send_progress(webhook_url, webhook_secret, job_id, "loudness", 15, media_id)
+            progress.report("loudness", 15)
             loudness = analyze_loudness(input_path)
             print(f"Loudness: {loudness}")
             if loudness is not None:
@@ -1657,9 +1833,8 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
                 loudness_range = max(0, min(50000, int(loudness["input_lra"] * 100)))
 
         # Step 5: Transcode HLS variants
-        send_progress(
-            webhook_url, webhook_secret, job_id, "encoding_variants", 17, media_id
-        )
+        # The ladder reports as it encodes: 17% → 72%.
+        on_encode = progress.stage("encoding_variants", 17, 72)
         hls_dir = os.path.join(work_dir, "hls")
         os.makedirs(hls_dir, exist_ok=True)
 
@@ -1667,17 +1842,19 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         short_side = min(width, height) if width and height else None
         if media_type == "video":
             ready_variants = transcode_video_hls(
-                input_path, hls_dir, short_side, use_gpu
+                input_path, hls_dir, short_side, use_gpu, tonemap, duration, on_encode
             )
         else:
-            ready_variants = transcode_audio_hls(input_path, hls_dir)
+            ready_variants = transcode_audio_hls(
+                input_path, hls_dir, duration, on_encode
+            )
 
         # Step 6: Create preview BEFORE uploading HLS dir (preview goes into hls_dir)
         hls_preview_key = None
         preview_generated = False
         if FEATURES["video_preview"] and media_type == "video" and duration > 0:
-            send_progress(webhook_url, webhook_secret, job_id, "preview", 72, media_id)
-            create_preview(input_path, hls_dir, duration, use_gpu, short_side)
+            progress.report("preview", 72)
+            create_preview(input_path, hls_dir, duration, use_gpu, short_side, tonemap)
             preview_generated = True
 
         # Upload HLS to R2 (includes preview if generated above)
@@ -1691,7 +1868,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             hls_preview_key = f"{hls_prefix}preview/preview.m3u8"
 
         # Step 7: Extract thumbnail variants (video only)
-        send_progress(webhook_url, webhook_secret, job_id, "thumbnails", 77, media_id)
+        progress.report("thumbnails", 77)
         thumbnail_key = None
         thumbnail_variants = None
         if media_type == "video" and duration > 0:
@@ -1712,6 +1889,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
                 work_dir,
                 duration,
                 list(POSTER_SIZES) if sized else FLAT_POSTER_SIZES,
+                tonemap,
             )
 
             thumbnail_variants = {}
@@ -1726,13 +1904,8 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             thumbnail_key = thumbnail_variants.get("lg")
 
         # Step 8: Generate waveform (audio only)
-        send_progress(
-            webhook_url,
-            webhook_secret,
-            job_id,
-            "waveform" if media_type == "audio" else "uploading_outputs",
-            80,
-            media_id,
+        progress.report(
+            "waveform" if media_type == "audio" else "uploading_outputs", 80
         )
         waveform_key = None
         waveform_image_key = None
@@ -1787,10 +1960,11 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         }
 
         # Step 10: Send completion webhook
-        send_progress(webhook_url, webhook_secret, job_id, "finalizing", 95, media_id)
+        progress.report("finalizing", 95)
         completion = {
             "jobId": job_id,
             "status": "completed",
+            "creatorId": reportable_creator_id(creator_id),
             "output": result,
         }
         send_webhook(webhook_url, webhook_secret, completion)
@@ -1832,6 +2006,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
                 "error": error_msg[:2000],
                 "errorCode": error_code,
                 "mediaId": reportable_media_id(job_input.get("mediaId")),
+                "creatorId": reportable_creator_id(job_input.get("creatorId")),
             }
             send_webhook(webhook_url, webhook_secret, webhook_payload)
         except Exception as webhook_error:

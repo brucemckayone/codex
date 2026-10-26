@@ -16,6 +16,9 @@ import pytest
 from handler import main as handler_module
 from handler.main import TranscodeError, TranscodeErrorCode
 
+# What ffprobe says of an encoded rung that holds a picture.
+PICTURE = {"codec_type": "video", "width": 1280, "height": 720}
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TS_CONSTANTS = REPO_ROOT / "packages/constants/src/transcoding.ts"
 
@@ -160,12 +163,15 @@ class TestRungValidation:
 
     def test_an_empty_gpu_encode_falls_back_to_the_cpu(self, tmp_path):
         def run(cmd, **kwargs):
+            if cmd[0] == "ffprobe":  # the rung's picture check
+                return MagicMock(stdout=json.dumps({"streams": [PICTURE]}))
             if "libx264" in cmd:  # only the CPU encode writes its rung
                 (tmp_path / "720p" / "index.m3u8").write_text("#EXTM3U\n")
                 (tmp_path / "720p" / "stream.ts").write_bytes(b"\x47" * 188)
 
         run_ffmpeg = self._encode(tmp_path, True, run)
-        assert run_ffmpeg.call_count == 2
+        encodes = [c for c in run_ffmpeg.call_args_list if c.args[0][0] == "ffmpeg"]
+        assert len(encodes) == 2
 
 
 class TestReportableMediaId:

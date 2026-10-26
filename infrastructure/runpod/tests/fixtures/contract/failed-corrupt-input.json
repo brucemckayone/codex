@@ -1,4 +1,5 @@
 {
+  "creatorId": "k9Xq2LmVt7RzP4wN",
   "error": "ffprobe failed (exit 1): moov atom not found",
   "errorCode": "CORRUPT_INPUT",
   "jobId": "job-corrupt",

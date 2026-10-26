@@ -1,21 +1,22 @@
 {
+  "creatorId": "k9Xq2LmVt7RzP4wN",
   "jobId": "job-flat",
   "output": {
     "durationSeconds": 61,
     "height": 1080,
-    "hlsMasterKey": "user-123/hls/550e8400-e29b-41d4-a716-446655440000/master.m3u8",
-    "hlsPreviewKey": "user-123/hls/550e8400-e29b-41d4-a716-446655440000/preview/preview.m3u8",
+    "hlsMasterKey": "k9Xq2LmVt7RzP4wN/hls/550e8400-e29b-41d4-a716-446655440000/master.m3u8",
+    "hlsPreviewKey": "k9Xq2LmVt7RzP4wN/hls/550e8400-e29b-41d4-a716-446655440000/preview/preview.m3u8",
     "loudnessIntegrated": -1400,
     "loudnessPeak": -50,
     "loudnessRange": 500,
     "mediaId": "550e8400-e29b-41d4-a716-446655440000",
     "mezzanineKey": null,
     "readyVariants": ["720p", "480p"],
-    "thumbnailKey": "user-123/media-thumbnails/550e8400-e29b-41d4-a716-446655440000/lg.webp",
+    "thumbnailKey": "k9Xq2LmVt7RzP4wN/media-thumbnails/550e8400-e29b-41d4-a716-446655440000/lg.webp",
     "thumbnailVariants": {
-      "lg": "user-123/media-thumbnails/550e8400-e29b-41d4-a716-446655440000/lg.webp",
-      "md": "user-123/media-thumbnails/550e8400-e29b-41d4-a716-446655440000/md.webp",
-      "sm": "user-123/media-thumbnails/550e8400-e29b-41d4-a716-446655440000/sm.webp"
+      "lg": "k9Xq2LmVt7RzP4wN/media-thumbnails/550e8400-e29b-41d4-a716-446655440000/lg.webp",
+      "md": "k9Xq2LmVt7RzP4wN/media-thumbnails/550e8400-e29b-41d4-a716-446655440000/md.webp",
+      "sm": "k9Xq2LmVt7RzP4wN/media-thumbnails/550e8400-e29b-41d4-a716-446655440000/sm.webp"
     },
     "type": "video",
     "waveformImageKey": null,
