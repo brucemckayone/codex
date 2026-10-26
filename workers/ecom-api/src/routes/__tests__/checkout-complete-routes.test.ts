@@ -562,22 +562,122 @@ describe('POST /checkout/complete', () => {
     expect(purchase.completePurchase).not.toHaveBeenCalled();
   });
 
-  it('a temporary failure before the commit is a 503', async () => {
+  it('a temporary failure before the commit is a 503, logged at warn with the errorId it carries', async () => {
     const purchase = purchaseServiceOver(createStore(), sessionFor('content'));
     purchase.completePurchase.mockRejectedValueOnce(
       wrapError(
         Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
       )
     );
-    const { app } = buildApp(purchase);
+    const { app, obs } = buildApp(purchase);
 
     const res = await complete(app);
 
     expect(res.status).toBe(503);
     expect(purchase.claimReceipt).not.toHaveBeenCalled();
+    expect(obs.warn).toHaveBeenCalledWith(
+      'The success page could not record a paid session yet',
+      expect.objectContaining({
+        sessionId: 'cs_landing_1',
+        errorId: expect.any(String),
+        cause: expect.objectContaining({ code: 'ECONNRESET' }),
+      })
+    );
+    const [, line] =
+      vi
+        .mocked(obs.warn)
+        .mock.calls.find(([message]) => message.includes('yet')) ?? [];
+    expect(JSON.stringify(await res.json())).toContain(
+      (line as { errorId: string }).errorId
+    );
   });
 
-  describe('a failure after the purchase committed', () => {
+  // mapErrorToResponse logs no ServiceError: without the route's own line, a
+  // paid session that is never recorded left no trace in ecom.
+  it('a permanent refusal before the commit: an error line with an errorId and the root cause', async () => {
+    const purchase = purchaseServiceOver(createStore(), sessionFor('content'));
+    purchase.completePurchase.mockRejectedValueOnce(
+      new NotFoundError('Content not found', { contentId: CONTENT_ID })
+    );
+    const { app, obs } = buildApp(purchase);
+
+    const res = await complete(app);
+
+    expect(res.status).toBe(404);
+    expect(obs.error).toHaveBeenCalledWith(
+      'The success page could not record a paid session',
+      expect.objectContaining({
+        sessionId: 'cs_landing_1',
+        errorId: expect.any(String),
+        cause: expect.objectContaining({ message: 'Content not found' }),
+      })
+    );
+  });
+
+  it('a paid session the completion skips (bad metadata): an error line with the reason', async () => {
+    const purchase = purchaseServiceOver(
+      createStore(),
+      sessionFor('content', { metadata: { customerId: BUYER } })
+    );
+    const { app, obs } = buildApp(purchase);
+
+    const res = await complete(app);
+
+    expect(res.status).toBe(200);
+    expect(await stateOf(res)).toBe('recording');
+    expect(purchase.completePurchase).not.toHaveBeenCalled();
+    expect(obs.error).toHaveBeenCalledWith(
+      'The success page could not record a paid session',
+      expect.objectContaining({
+        sessionId: 'cs_landing_1',
+        errorId: expect.any(String),
+        reason: 'bad_metadata',
+      })
+    );
+  });
+
+  it('a failure whose re-read fails too: both logged under one errorId, and the original error answers', async () => {
+    const purchase = purchaseServiceOver(createStore(), sessionFor('content'));
+    purchase.completePurchase.mockRejectedValueOnce(
+      wrapError(
+        Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
+      )
+    );
+    const { app, obs } = buildApp(purchase);
+    // The arrival read answers; the re-read after the failure does not.
+    purchase.readCheckoutSession
+      .mockImplementationOnce(async () => ({
+        recorded: false,
+        result: { sessionStatus: 'complete', state: 'recording' },
+      }))
+      .mockRejectedValueOnce(
+        wrapError(
+          Object.assign(new Error('read ETIMEDOUT'), { code: 'ETIMEDOUT' })
+        )
+      );
+
+    const res = await complete(app);
+
+    expect(res.status).toBe(503);
+    const lines = vi.mocked(obs.warn).mock.calls;
+    const reread = lines.find(([message]) =>
+      message.startsWith('Could not re-read')
+    );
+    const yet = lines.find(([message]) => message.endsWith('session yet'));
+    expect(reread?.[1]).toEqual(
+      expect.objectContaining({
+        sessionId: 'cs_landing_1',
+        cause: expect.objectContaining({ code: 'ETIMEDOUT' }),
+      })
+    );
+    expect((reread?.[1] as { errorId: string }).errorId).toBe(
+      (yet?.[1] as { errorId: string }).errorId
+    );
+  });
+
+  describe('a completion that fails while our row records the purchase', () => {
+    const RECORDED =
+      'The purchase is recorded; a completion from the success page failed';
     const transient = () =>
       Object.assign(new Error('Connection to Stripe failed'), {
         type: 'StripeConnectionError',
@@ -587,17 +687,16 @@ describe('POST /checkout/complete', () => {
         type: 'StripeInvalidRequestError',
         statusCode: 404,
       });
-
-    const FINISHED_BY = {
-      temporary:
-        'Recorded from the success page; the webhook finishes the rest',
-      permanent: 'Recorded from the success page; support must finish the rest',
-    } as const;
+    /** The level a cause is logged at: a permanent one is a bug or bad data. */
+    const levelOf = (
+      obs: ReturnType<typeof buildApp>['obs'],
+      label: 'temporary' | 'permanent'
+    ) => (label === 'temporary' ? obs.warn : obs.error);
 
     it.each([
       ['temporary', transient, 0],
       ['permanent', permanent, 1],
-    ] as const)('%s clawback failure: 200, the page unlocks, a warn line, and the receipt only when no retry will send it', async (label, cause, receipts) => {
+    ] as const)('%s clawback failure: 200, the page unlocks, the line, and the receipt only when no retry will send it', async (label, cause, receipts) => {
       const store = createStore();
       const purchase = purchaseServiceOver(store, sessionFor('content'));
       purchase.completePurchase.mockImplementationOnce(
@@ -612,15 +711,58 @@ describe('POST /checkout/complete', () => {
 
       expect(res.status).toBe(200);
       expect(await stateOf(res)).toBe('unlocked');
-      expect(obs.warn).toHaveBeenCalledWith(
-        FINISHED_BY[label],
+      expect(levelOf(obs, label)).toHaveBeenCalledWith(
+        RECORDED,
         expect.objectContaining({
           purchaseId: 'purchase_landing_1',
           errorId: expect.any(String),
+          stage: 'after_commit',
           transient: label === 'temporary',
         })
       );
       expect(sendEmailToWorker).toHaveBeenCalledTimes(receipts);
+    });
+
+    // A webhook can commit while the page's own completion fails before its
+    // commit (here, a statement timeout on the lock the webhook holds). From
+    // the route that looks exactly like a slice write failing after the page's
+    // own commit, so the line names no recorder and asks no one to act.
+    it('a pre-commit failure while the webhook commits: the neutral line, never "support must finish"', async () => {
+      const store = createStore();
+      const purchase = purchaseServiceOver(store, sessionFor('content'));
+      purchase.completePurchase.mockImplementationOnce(
+        async (paymentIntentId, metadata) => {
+          await store.complete(paymentIntentId, metadata); // the webhook's
+          throw wrapError(
+            Object.assign(
+              new Error('canceling statement due to statement timeout'),
+              {
+                code: '57014',
+              }
+            )
+          );
+        }
+      );
+      const { app, obs } = buildApp(purchase);
+
+      const res = await complete(app);
+
+      expect(res.status).toBe(200);
+      expect(await stateOf(res)).toBe('unlocked');
+      expect(obs.warn).toHaveBeenCalledWith(
+        RECORDED,
+        expect.objectContaining({ stage: 'unknown', transient: true })
+      );
+      const said = JSON.stringify([
+        ...vi.mocked(obs.warn).mock.calls,
+        ...vi.mocked(obs.error).mock.calls,
+        ...vi.mocked(obs.info).mock.calls,
+      ]);
+      expect(said).not.toMatch(/support|Recorded from the success page/);
+      expect(obs.info).toHaveBeenCalledWith(
+        'Checkout completed from the success page',
+        expect.objectContaining({ outcome: 'recorded_despite_failure' })
+      );
     });
 
     // A payout slice that could not be written is thrown raw, not returned as
@@ -645,7 +787,7 @@ describe('POST /checkout/complete', () => {
             })
           ),
       ],
-    ] as const)('%s slice-write failure: 200 unlocked, a warn with its errorId and root cause, the outcome line, and a bump', async (label, rootCode, failure) => {
+    ] as const)('%s slice-write failure: 200 unlocked, the line with its errorId and root cause, the outcome line, and a bump', async (label, rootCode, failure) => {
       const store = createStore();
       const purchase = purchaseServiceOver(store, sessionFor('content'));
       purchase.completePurchase.mockImplementationOnce(
@@ -660,12 +802,13 @@ describe('POST /checkout/complete', () => {
 
       expect(res.status).toBe(200);
       expect(await stateOf(res)).toBe('unlocked');
-      expect(obs.warn).toHaveBeenCalledWith(
-        FINISHED_BY[label],
+      expect(levelOf(obs, label)).toHaveBeenCalledWith(
+        RECORDED,
         expect.objectContaining({
           sessionId: 'cs_landing_1',
           purchaseId: 'purchase_landing_1',
           errorId: expect.any(String),
+          stage: 'unknown',
           transient: label === 'temporary',
           cause: expect.objectContaining({ code: rootCode }),
         })
@@ -673,7 +816,7 @@ describe('POST /checkout/complete', () => {
       expect(obs.info).toHaveBeenCalledWith(
         'Checkout completed from the success page',
         expect.objectContaining({
-          outcome: 'recorded',
+          outcome: 'recorded_despite_failure',
           purchaseId: 'purchase_landing_1',
         })
       );

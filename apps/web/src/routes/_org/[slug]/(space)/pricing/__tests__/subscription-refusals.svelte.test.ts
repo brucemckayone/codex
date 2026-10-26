@@ -36,6 +36,15 @@ const remote = vi.hoisted(() => ({
 const { invalidateAllMock } = vi.hoisted(() => ({
   invalidateAllMock: vi.fn(async () => {}),
 }));
+const { loggerWarnMock } = vi.hoisted(() => ({ loggerWarnMock: vi.fn() }));
+vi.mock('$lib/observability', () => ({
+  logger: {
+    warn: loggerWarnMock,
+    error: vi.fn(),
+    info: vi.fn(),
+    debug: vi.fn(),
+  },
+}));
 
 vi.mock('$app/state', () => ({
   page: {
@@ -119,6 +128,7 @@ beforeEach(() => {
   remote.previewSubscriptionTierChange.mockReset();
   remote.changeSubscriptionTier.mockReset();
   invalidateAllMock.mockClear();
+  loggerWarnMock.mockClear();
   // jsdom has no layout: the banner is scrolled into view after a refusal.
   Element.prototype.scrollIntoView = vi.fn();
 });
@@ -340,6 +350,38 @@ describe('Change plan refused', () => {
     expect(clean(document.body)).not.toContain('Failed to fetch');
     expect(clean(document.body)).toContain(m.subscription_checkout_error());
     expect(byTestId('tier-change-dialog-retry')).not.toBeNull();
+    expect(loggerWarnMock).toHaveBeenCalledWith(
+      'pricing: a plan-change preview got no answer',
+      expect.objectContaining({ error: expect.any(String) })
+    );
+  });
+
+  // No answer is not "it failed": the change and its proration may have gone
+  // through. The page re-reads the plan instead of restoring the old one, and
+  // offers no retry that could charge again.
+  test('a switch that gets no answer: logged, the plan re-read, Close only, and no retry', async () => {
+    remote.previewSubscriptionTierChange.mockResolvedValueOnce({
+      success: true,
+      data: PREVIEW,
+    });
+    remote.changeSubscriptionTier.mockRejectedValueOnce(
+      new TypeError('Failed to fetch')
+    );
+    await openPreview();
+    byTestId('tier-change-dialog-confirm')?.click();
+    await settle();
+
+    expect(loggerWarnMock).toHaveBeenCalledWith(
+      'pricing: a plan change got no answer',
+      { error: 'Failed to fetch' }
+    );
+    expect(invalidateAllMock).toHaveBeenCalledOnce();
+    expect(clean(document.body)).toContain(
+      m.pricing_refusal_change_unconfirmed()
+    );
+    expect(clean(document.body)).not.toMatch(/please try again/i);
+    expect(byTestId('tier-change-dialog-confirm')).toBeNull();
+    expect(byTestId('tier-change-dialog-close')).not.toBeNull();
   });
 
   test('a switch refused at Confirm for a lasting reason: the reason, and Close in place of Confirm', async () => {

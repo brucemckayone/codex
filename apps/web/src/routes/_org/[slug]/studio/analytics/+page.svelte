@@ -192,18 +192,40 @@
     return q.current === undefined && q.error === undefined;
   }
 
+  // A read that FAILED is not a zero or an empty list (Codex-2hxff.74's
+  // pattern; review N-3, M4, H1). What it feeds gives way to "We couldn't
+  // load your …" with Retry: its KPIs and chart tab, the leaderboard, the
+  // by-creator table, and any summary sentence from it. The remotes log the
+  // raw error.
+  function readFailed(q: { current?: unknown; error?: unknown } | null) {
+    return connectQueryState(q as QueryResult<unknown> | null).kind === 'failed';
+  }
+
   const revenueLoading = $derived(isLoading(revenueQuery));
-  // A failed revenue read is not £0 (Codex-2hxff.74's pattern, review N-3):
-  // the Revenue and Purchases KPIs give way to "We couldn't load your
-  // revenue." with Retry, the chart drops its Revenue tab and the summary
-  // makes no revenue claim. The remote logs the raw error.
-  const revenueFailed = $derived(
-    connectQueryState(revenueQuery as QueryResult<RevenueStats> | null).kind ===
-      'failed'
-  );
+  const revenueFailed = $derived(readFailed(revenueQuery));
   const subscribersLoading = $derived(isLoading(subscribersQuery));
+  const subscribersFailed = $derived(readFailed(subscribersQuery));
   const followersLoading = $derived(isLoading(followersQuery));
+  const followersFailed = $derived(readFailed(followersQuery));
   const topContentLoading = $derived(isLoading(topContentQuery));
+  const topContentFailed = $derived(readFailed(topContentQuery));
+
+  type Series = 'revenue' | 'subscribers' | 'followers';
+
+  /** The chart's series whose read failed: no tab for them. */
+  const seriesUnavailable = $derived.by(() => {
+    const keys: Series[] = [];
+    if (revenueFailed) keys.push('revenue');
+    if (subscribersFailed) keys.push('subscribers');
+    if (followersFailed) keys.push('followers');
+    return keys;
+  });
+  /** The summary's reads that failed: no sentence from them. */
+  const summaryUnavailable = $derived<Array<Series | 'topContent'>>(
+    topContentFailed
+      ? [...seriesUnavailable, 'topContent']
+      : seriesUnavailable
+  );
   const contentPerformanceLoading = $derived(isLoading(contentPerformanceQuery));
 
   // Codex-mtv05 derivations — kept alongside their peers for consistency.
@@ -215,6 +237,8 @@
   const revenueByCreatorLoading = $derived(
     isLoading(revenueByCreatorQuery)
   );
+  // A failed read hides the section as a one-creator org's would be hidden,
+  // so the alert takes its place (review H1).
   const showRevenueByCreator = $derived(revenueByCreatorItems.length > 1);
 
   // Zero-state gating waits for every query to settle (success or error).
@@ -238,6 +262,8 @@
   // TopContentLeaderboard's inline empty state instead.
   const isZeroState = $derived.by(() => {
     if (!allResolved || !revenue || !subscribers || !followers) return false;
+    // An unread leaderboard is not an empty one.
+    if (topContentFailed) return false;
     const noRevenue = revenue.totalRevenueCents === 0;
     const noSubs =
       subscribers.activeSubscribers === 0 &&
@@ -338,17 +364,31 @@
         topPerformance={contentPerformance}
         {hasCompareWindow}
         loading={narrativeLoading}
-        revenueUnavailable={revenueFailed}
+        unavailable={summaryUnavailable}
       />
 
-      <!-- Mounted unconditionally (see LoadFailedAlert); visible only when
-           the revenue read failed, in place of the two KPIs it feeds. -->
+      <!-- Mounted unconditionally (see LoadFailedAlert); each is visible only
+           when its read failed, in place of the KPIs it feeds. -->
       <LoadFailedAlert
         query={revenueQuery}
         message={m.analytics_revenue_load_failed()}
         againMessage={m.analytics_revenue_load_failed_again()}
         loadedMessage={m.analytics_revenue_load_retry_ok()}
         data-testid="analytics-revenue-load-error"
+      />
+      <LoadFailedAlert
+        query={subscribersQuery}
+        message={m.analytics_subscribers_load_failed()}
+        againMessage={m.analytics_subscribers_load_failed_again()}
+        loadedMessage={m.analytics_subscribers_load_retry_ok()}
+        data-testid="analytics-subscribers-load-error"
+      />
+      <LoadFailedAlert
+        query={followersQuery}
+        message={m.analytics_followers_load_failed()}
+        againMessage={m.analytics_followers_load_failed_again()}
+        loadedMessage={m.analytics_followers_load_retry_ok()}
+        data-testid="analytics-followers-load-error"
       />
       <section
         class="kpi-row"
@@ -367,22 +407,26 @@
             detail={revenue ? revenueKinds : undefined}
           />
         {/if}
-        <KPICard
-          label={m.analytics_kpi_subscribers_label()}
-          value={subscribers?.activeSubscribers ?? 0}
-          format="number"
-          previousValue={subscribers?.previous?.activeSubscribers ?? null}
-          sparkline={subscriberSparkline}
-          loading={subscribersLoading}
-        />
-        <KPICard
-          label={m.analytics_kpi_followers_label()}
-          value={followers?.totalFollowers ?? 0}
-          format="number"
-          previousValue={followers?.previous?.totalFollowers ?? null}
-          sparkline={followerSparkline}
-          loading={followersLoading}
-        />
+        {#if !subscribersFailed}
+          <KPICard
+            label={m.analytics_kpi_subscribers_label()}
+            value={subscribers?.activeSubscribers ?? 0}
+            format="number"
+            previousValue={subscribers?.previous?.activeSubscribers ?? null}
+            sparkline={subscriberSparkline}
+            loading={subscribersLoading}
+          />
+        {/if}
+        {#if !followersFailed}
+          <KPICard
+            label={m.analytics_kpi_followers_label()}
+            value={followers?.totalFollowers ?? 0}
+            format="number"
+            previousValue={followers?.previous?.totalFollowers ?? null}
+            sparkline={followerSparkline}
+            loading={followersLoading}
+          />
+        {/if}
         {#if !revenueFailed}
           <KPICard
             label={m.analytics_kpi_purchases_label()}
@@ -395,19 +439,22 @@
         {/if}
       </section>
 
-      <section
-        class="chart-section"
-        aria-label={m.analytics_section_chart_label()}
-      >
-        <HeroAnalyticsChart
-          revenue={revenue ?? EMPTY_REVENUE}
-          subscribers={subscribers ?? EMPTY_SUBSCRIBERS}
-          followers={followers ?? EMPTY_FOLLOWERS}
-          {hasCompareWindow}
-          loading={revenueLoading || subscribersLoading || followersLoading}
-          revenueUnavailable={revenueFailed}
-        />
-      </section>
+      <!-- No chart when every series failed: the alerts above say so. -->
+      {#if seriesUnavailable.length < 3}
+        <section
+          class="chart-section"
+          aria-label={m.analytics_section_chart_label()}
+        >
+          <HeroAnalyticsChart
+            revenue={revenue ?? EMPTY_REVENUE}
+            subscribers={subscribers ?? EMPTY_SUBSCRIBERS}
+            followers={followers ?? EMPTY_FOLLOWERS}
+            {hasCompareWindow}
+            loading={revenueLoading || subscribersLoading || followersLoading}
+            unavailable={seriesUnavailable}
+          />
+        </section>
+      {/if}
 
       <section
         class="leaderboard-section"
@@ -419,12 +466,30 @@
         >
           {m.analytics_section_leaderboard_heading()}
         </h2>
-        <TopContentLeaderboard
-          items={topContent}
-          {hasCompareWindow}
-          loading={topContentLoading}
+        <LoadFailedAlert
+          query={topContentQuery}
+          message={m.analytics_top_content_load_failed()}
+          againMessage={m.analytics_top_content_load_failed_again()}
+          loadedMessage={m.analytics_top_content_load_retry_ok()}
+          data-testid="analytics-top-content-load-error"
         />
+        {#if !topContentFailed}
+          <TopContentLeaderboard
+            items={topContent}
+            {hasCompareWindow}
+            loading={topContentLoading}
+          />
+        {/if}
       </section>
+
+      <!-- Where the section would be (review H1); mounted unconditionally. -->
+      <LoadFailedAlert
+        query={revenueByCreatorQuery}
+        message={m.analytics_creator_revenue_load_failed()}
+        againMessage={m.analytics_creator_revenue_load_failed_again()}
+        loadedMessage={m.analytics_creator_revenue_load_retry_ok()}
+        data-testid="analytics-creator-revenue-load-error"
+      />
 
       {#if showRevenueByCreator}
         <section

@@ -46,6 +46,7 @@ import {
   fail,
   httpError,
   ORG_ID,
+  orgThreadSlot,
   pendingSlot,
   reset,
   setActiveAgreements,
@@ -348,5 +349,29 @@ describe('before the role is known (ssr=false first render)', () => {
 
     expect(q('[data-testid="revenue-share-readonly-note"]')).toBeNull();
     expect(document.querySelectorAll('button')).toHaveLength(0);
+  });
+});
+
+describe('the thread dialog', () => {
+  test('a failed thread read says so with Retry, and is logged; the dialog is never left empty', async () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    setActiveAgreements([agreementRow({ creatorSharePercent: 3000 })]);
+    setPendingProposals([]);
+    fail(orgThreadSlot());
+    mountPage('owner');
+
+    const viewThread = [...document.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === 'View thread'
+    );
+    viewThread?.click();
+    await settle();
+
+    expect(alertIn('thread-load-error')?.textContent).toContain(
+      m.agreement_thread_load_failed()
+    );
+    expect(error).toHaveBeenCalledWith(
+      'studio/revenue-share: thread failed to load',
+      expect.objectContaining({ organizationId: ORG_ID })
+    );
   });
 });

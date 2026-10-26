@@ -15,6 +15,8 @@
  * tab shown again after a long while does not fire the rest at once.
  */
 
+import { logger } from '$lib/observability';
+
 /** When each scheduled check runs, in ms after the wait began. */
 export const CHECK_SCHEDULE_MS: readonly number[] = [
   2_000, 5_000, 10_000, 20_000, 40_000, 60_000,
@@ -41,6 +43,8 @@ export class CappedChecks {
    */
   #startedAt: number | undefined;
   #lastRanAt = 0;
+  /** A failed check has been logged: one line per wait, however many fail. */
+  #warned = false;
 
   /**
    * @param check - One check, e.g. `() => invalidate('checkout:verify')`.
@@ -120,9 +124,18 @@ export class CappedChecks {
     this.checking = true;
     try {
       await this.#check();
-    } catch {
+    } catch (error) {
       // The page's load logs its own failure, and its answer is what the
-      // page shows. A check that could not run is one fewer, not an error.
+      // page shows: to the buyer, a check that could not run is one fewer,
+      // not an error. The check rejecting is a failure no load reported (a
+      // bug in the check itself, say), so it is logged, once per wait, so
+      // six failing checks are not six lines.
+      if (!this.#warned) {
+        this.#warned = true;
+        logger.warn('capped-checks: a check failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     } finally {
       this.checking = false;
     }

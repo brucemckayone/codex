@@ -1833,12 +1833,17 @@ export class AgreementService extends BaseService {
     if (params.recipientSide === 'owner') {
       if (!org) {
         // The owner's link is their organisation's Studio, so without the
-        // org row there is no page to send them to.
-        this.obs.warn(
+        // org row there is no page to send them to. At error with an
+        // errorId: an owner misses an email, and an agreement whose org row
+        // is gone (orgs are soft-deleted, and `lookupOrg` reads those too)
+        // is a data-integrity fault to chase.
+        this.obs.error(
           'agreement notification skipped: organisation not found',
           {
+            errorId: crypto.randomUUID(),
             organizationId: params.organizationId,
             templateName: params.templateName,
+            recipientUserId: params.recipientUserId,
           }
         );
         return;

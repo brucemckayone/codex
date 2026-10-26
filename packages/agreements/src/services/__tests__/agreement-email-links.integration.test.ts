@@ -249,4 +249,37 @@ describe('agreement email links (AGR-10)', () => {
       `https://${fx.slug}-staging.revelations.studio/studio/monetisation/revenue-share`
     );
   });
+
+  it('an owner whose organisation row is gone gets no email, logged at ERROR with an errorId', async () => {
+    // Orgs are soft-deleted and `lookupOrg` reads those too, so a missing
+    // row is a data-integrity fault: without it there is no Studio to link
+    // the owner to, and someone misses an email.
+    const fx = await team();
+    const { service, mailer } = withMailer();
+    const internals = service as unknown as {
+      lookupOrg: (id: string) => Promise<unknown>;
+      obs: { error: (msg: string, ctx: unknown) => void };
+    };
+    const proposal = await propose(service, fx);
+    mailer.mockClear();
+    vi.spyOn(internals, 'lookupOrg').mockResolvedValue(null);
+    const error = vi.spyOn(internals.obs, 'error');
+
+    await service.counterPropose({
+      proposalId: proposal.id,
+      sharePercent: 3500,
+      termMonths: 6,
+      counteredByUserId: fx.creatorId,
+    });
+
+    expect(mailer).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      'agreement notification skipped: organisation not found',
+      expect.objectContaining({
+        errorId: expect.any(String),
+        organizationId: fx.orgId,
+        recipientUserId: fx.ownerId,
+      })
+    );
+  });
 });

@@ -80,6 +80,29 @@
   // creators host (Codex-2hxff.78).
   const cancelUrl = $derived(page.url.href);
 
+  // A refused Buy says so in plain words, never the worker's message (the
+  // pricing page's rule, Codex-2hxff.69): already owned, then reload; a
+  // failure a retry can fix, then the Buy button is the retry; anything else,
+  // plainly, with no "try again". The remote logs it.
+  const refusal = $derived.by(() => {
+    const result = createCheckout.result;
+    if (!result || result.success !== false || createCheckout.pending > 0) {
+      return null;
+    }
+    if (result.code === 'ALREADY_PURCHASED') {
+      return { message: m.checkout_refusal_owned(), reload: true };
+    }
+    const status = result.status;
+    const retryable =
+      status === undefined || status >= 500 || status === 408 || status === 429;
+    return {
+      message: retryable
+        ? m.checkout_refusal_problem()
+        : m.checkout_refusal_refused(),
+      reload: false,
+    };
+  });
+
   // Reactive video state mirrors DOM so template reads flip when the user
   // pauses/mutes/enters fullscreen via any path (button OR native controls).
   // Mirrors the VideoPlayer pattern (ref 03 §"Reactive state driven by DOM events").
@@ -364,6 +387,16 @@
                   {createCheckout.pending ? m.common_loading() : m.purchase_cta_title()}
                 </button>
               </form>
+              {#if refusal}
+                <p class="preview-player__cta-refusal" role="alert">
+                  {refusal.message}
+                  {#if refusal.reload}
+                    <a href={cancelUrl} class="preview-player__cta-refusal-link">
+                      {m.checkout_refusal_reload()}
+                    </a>
+                  {/if}
+                </p>
+              {/if}
             {/if}
           </div>
         </div>
@@ -586,6 +619,23 @@
   .preview-player__cta-button:disabled {
     opacity: var(--opacity-60);
     cursor: not-allowed;
+  }
+
+  .preview-player__cta-refusal {
+    font-size: var(--text-sm);
+    color: var(--color-text-inverse);
+    margin: 0;
+    line-height: var(--leading-normal);
+  }
+
+  .preview-player__cta-refusal-link {
+    color: inherit;
+    text-decoration: underline;
+  }
+
+  .preview-player__cta-refusal-link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   /* Responsive */

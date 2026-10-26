@@ -16,12 +16,16 @@ export function utcDay(date: Date = new Date()): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** What came in on `day` (`YYYY-MM-DD`); 0 when the list has no such day. */
+/**
+ * What came in on `day` (`YYYY-MM-DD`); `null` when the list has no such day.
+ * The list has one entry per day, today included, so a missing day is a broken
+ * read (a window or clock skew), not a quiet day: never "£0" (review L7).
+ */
 export function revenueOnDay(
   days: readonly DailyRevenue[],
   day: string
-): number {
-  return days.find((entry) => entry.date === day)?.revenueCents ?? 0;
+): number | null {
+  return days.find((entry) => entry.date === day)?.revenueCents ?? null;
 }
 
 /** The sparkline: the last `count` calendar days, oldest first. */

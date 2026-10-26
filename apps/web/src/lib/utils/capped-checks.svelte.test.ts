@@ -5,6 +5,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+
+const { warnMock } = vi.hoisted(() => ({ warnMock: vi.fn() }));
+vi.mock('$lib/observability', () => ({
+  logger: { warn: warnMock, error: vi.fn(), info: vi.fn() },
+}));
+
 import { CappedChecks, CHECK_SCHEDULE_MS } from './capped-checks.svelte';
 
 let visibility: DocumentVisibilityState = 'visible';
@@ -25,6 +31,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  warnMock.mockClear();
 });
 
 describe('CappedChecks', () => {
@@ -182,5 +189,33 @@ describe('CappedChecks', () => {
 
     expect(check).toHaveBeenCalledTimes(1);
     expect(checks.checking).toBe(false);
+  });
+
+  test('checks that answer log nothing', async () => {
+    const checks = new CappedChecks(vi.fn().mockResolvedValue(undefined));
+    const stop = checks.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    stop();
+
+    expect(warnMock).not.toHaveBeenCalled();
+  });
+
+  // A check that rejects is a failure no load reported. To the buyer it is
+  // one check fewer; to us, one warn line per wait, however many fail.
+  test('a check that rejects is logged once per wait at warn, and the checks carry on', async () => {
+    const check = vi.fn().mockRejectedValue(new TypeError('boom'));
+    const checks = new CappedChecks(check);
+    const stop = checks.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await checks.checkOnce();
+    stop();
+
+    expect(check).toHaveBeenCalledTimes(7);
+    expect(checks.exhausted).toBe(true);
+    expect(checks.checking).toBe(false);
+    expect(warnMock).toHaveBeenCalledOnce();
+    expect(warnMock).toHaveBeenCalledWith('capped-checks: a check failed', {
+      error: 'boom',
+    });
   });
 });

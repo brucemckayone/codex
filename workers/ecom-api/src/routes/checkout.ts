@@ -58,28 +58,56 @@ interface CheckoutSessionResponse {
 }
 
 /**
- * The success page recorded the purchase, and something after the commit
- * failed. The webhook's redelivery finishes it when a retry can help (its
- * transient failure is a 500, which Stripe redelivers); a permanent one is
- * acknowledged there too, so no retry is coming and support must finish it.
+ * The purchase is recorded, and a completion from the success page failed.
+ * Only what is known is said:
+ * - `stage: 'after_commit'`: the completion returned the purchase and a step
+ *   after it failed (a clawback).
+ * - `stage: 'unknown'`: it threw, and our row reads `unlocked` after. It may
+ *   have failed after its own commit (a payout slice not written), or before
+ *   it while the webhook committed. The line names no one as the recorder.
+ * A transient cause is a warn. A permanent one is a bug or a data problem
+ * whoever committed, so it is an error.
  */
-function warnFinishedLater(
+function logRecordedDespiteFailure(
   obs: ObservabilityClient | undefined,
-  fields: { sessionId: string; purchaseId?: string; failure: unknown }
+  fields: {
+    errorId: string;
+    sessionId: string;
+    purchaseId?: string;
+    stage: 'after_commit' | 'unknown';
+    failure: unknown;
+  }
 ) {
   const transient = isTransientError(fields.failure);
-  obs?.warn(
-    transient
-      ? 'Recorded from the success page; the webhook finishes the rest'
-      : 'Recorded from the success page; support must finish the rest',
-    {
-      errorId: crypto.randomUUID(),
-      sessionId: fields.sessionId,
-      purchaseId: fields.purchaseId,
-      transient,
-      cause: describeRootCause(fields.failure),
-    }
-  );
+  const line = {
+    errorId: fields.errorId,
+    sessionId: fields.sessionId,
+    purchaseId: fields.purchaseId,
+    stage: fields.stage,
+    transient,
+    cause: causeOf(fields.failure),
+  };
+  const message =
+    'The purchase is recorded; a completion from the success page failed';
+  if (transient) obs?.warn(message, line);
+  else obs?.error(message, line);
+}
+
+/**
+ * What failed, for a log line: the innermost error under `error`, or the error
+ * itself when it wraps nothing (a ServiceError thrown as is, whose message is
+ * fixed text, not data).
+ */
+function causeOf(error: unknown) {
+  const root = describeRootCause(error);
+  if (root) return root;
+  if (!(error instanceof Error)) return { name: typeof error };
+  const code = (error as { code?: unknown }).code;
+  return {
+    name: error.name,
+    message: error.message,
+    code: typeof code === 'string' ? code : undefined,
+  };
 }
 
 // ============================================================================
@@ -253,10 +281,13 @@ checkout.post(
  * - Our row already there (the usual case: Stripe holds the redirect while
  *   our webhook answers), or nothing paid: nothing is written.
  * - Paid with no row: recorded, then read again.
- * - A failure after the purchase committed (a payout slice not written, a
- *   clawback not sent) is logged, never answered as an error: the purchase
- *   and its access stand, so the page gets `unlocked` (purchases.md, Errors).
- *   The webhook finishes what is left when a retry can; otherwise support.
+ * - A completion that fails while our row records the purchase (a payout
+ *   slice not written, a clawback not sent, or a webhook that committed
+ *   first) is logged, never answered as an error: the purchase and its access
+ *   stand, so the page gets `unlocked` (purchases.md, Errors). The webhook's
+ *   own delivery replays the slices and the clawback.
+ * - Every failure is logged here with an errorId: the error mapper logs no
+ *   ServiceError. A paid session nothing records is an error.
  *
  * Error Responses:
  * - 400 Bad Request: Invalid body
@@ -312,17 +343,32 @@ checkout.post(
           withPurchaseService: (run) => run(purchase),
         });
       } catch (error) {
+        // mapErrorToResponse logs no ServiceError, so every way out of here
+        // writes its own line, under one errorId.
+        const errorId = crypto.randomUUID();
+        const cause = causeOf(error);
         // Only a clawback's failure comes back as `completion.failure`; a
         // payout slice that could not be written is thrown, after the
-        // purchase committed. Our row tells the two apart. If the read fails
-        // too, the original error is the answer.
-        const after = await purchase
-          .readCheckoutSession(session, ctx.user.id)
-          .catch(() => undefined);
+        // purchase committed. Whatever threw, a purchase our row records is
+        // the buyer's, and it must not reach them as an error (purchases.md,
+        // Errors). If the read fails too, the original error is the answer.
+        let after:
+          | Awaited<ReturnType<typeof purchase.readCheckoutSession>>
+          | undefined;
+        try {
+          after = await purchase.readCheckoutSession(session, ctx.user.id);
+        } catch (readError) {
+          ctx.obs?.warn(
+            'Could not re-read a checkout session after its completion failed',
+            { errorId, sessionId, cause: causeOf(readError) }
+          );
+        }
         if (after?.result.state === 'unlocked') {
-          warnFinishedLater(ctx.obs, {
+          logRecordedDespiteFailure(ctx.obs, {
+            errorId,
             sessionId,
             purchaseId: after.result.purchase?.id,
+            stage: 'unknown',
             failure: error,
           });
           // The completion threw before its own library bump.
@@ -335,30 +381,56 @@ checkout.post(
           ctx.obs?.info('Checkout completed from the success page', {
             sessionId,
             trigger: 'landing',
-            outcome: 'recorded',
+            outcome: 'recorded_despite_failure',
             purchaseId: after.result.purchase?.id,
             durationMs: Date.now() - startedAt,
           });
           return after.result;
         }
-        // Nothing committed. A failure a retry can fix (an outage, the
+        // Not recorded. A failure a retry can fix (an outage, the
         // duplicate's refund still in flight) is "not yet" to the page,
         // which checks again; the webhook records it meanwhile.
         if (isTransientError(error)) {
+          ctx.obs?.warn(
+            'The success page could not record a paid session yet',
+            {
+              errorId,
+              sessionId,
+              cause,
+            }
+          );
           throw new ServiceUnavailableError(
             'The purchase could not be recorded yet',
-            { sessionId },
+            { sessionId, errorId },
             { cause: error }
           );
         }
+        // A refusal no retry changes (an unsupported currency, an item gone):
+        // the buyer has paid and nothing records it.
+        ctx.obs?.error('The success page could not record a paid session', {
+          errorId,
+          sessionId,
+          cause,
+        });
         throw error;
       }
 
       if (completion.kind === 'completed' && completion.failure) {
-        warnFinishedLater(ctx.obs, {
+        logRecordedDespiteFailure(ctx.obs, {
+          errorId: crypto.randomUUID(),
           sessionId,
           purchaseId: completion.purchase.id,
+          stage: 'after_commit',
           failure: completion.failure,
+        });
+      }
+      if (completion.kind === 'skipped') {
+        // Only a paid session with no row reaches the completion, so a skip
+        // is a paid session nothing records (bad metadata, no amount).
+        ctx.obs?.error('The success page could not record a paid session', {
+          errorId: crypto.randomUUID(),
+          sessionId,
+          reason: completion.reason,
         });
       }
 

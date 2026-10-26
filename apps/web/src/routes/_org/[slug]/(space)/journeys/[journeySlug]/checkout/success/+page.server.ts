@@ -45,6 +45,7 @@ import { logger } from '$lib/observability';
 import type { OfferPathKind } from '$lib/page-builder/offer-paths';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { completeOnArrival } from '$lib/server/checkout-verify';
 import { ApiError } from '$lib/server/errors';
 import { resolveCourseBySlug } from '$lib/server/journeys/round-d-seam';
 import type { PageServerLoad } from './$types';
@@ -86,6 +87,21 @@ function parseKind(value: string | null): OfferPathKind | null {
   return OFFER_PATH_KINDS.find((kind) => kind === value) ?? null;
 }
 
+/** The buyer's offer for the course, or null, logged, when it can't be read. */
+function offerOrNull(
+  api: ReturnType<typeof createServerApi>,
+  courseId: string
+) {
+  return api.courses.offer(courseId).catch((err: unknown) => {
+    logger.warn('journey-checkout-success: offer read failed', {
+      courseId,
+      status: err instanceof ApiError ? err.status : undefined,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  });
+}
+
 /**
  * Read the session from the endpoint that owns its path. A course purchase or
  * plan recorded for ANOTHER course reports nothing: the notice names this one.
@@ -101,9 +117,14 @@ async function readSession(
       const verified = await api.checkout.verify(sessionId);
       // Unlock on arrival (Codex-2hxff.22, Q-A "Yes, same call"): Stripe says
       // paid and our record is not there yet, so record it now, with the
-      // webhook's own completion, and forward as usual.
+      // webhook's own completion, and forward as usual. A completion that
+      // fails is logged as one, and the verify stands as the answer: still
+      // recording, so not settled, and the next check tries again.
       const recordedNow = verified.state === 'recording';
-      const v = recordedNow ? await api.checkout.complete(sessionId) : verified;
+      const completed = recordedNow
+        ? await completeOnArrival(api, sessionId, 'journey-checkout-success')
+        : null;
+      const v = completed ?? verified;
       const ours = v.course?.id === courseId;
       return {
         settled: v.sessionStatus !== 'complete' || !!v.course,
@@ -173,8 +194,9 @@ export const load: PageServerLoad = async (event) => {
   // Both reads keep the buyer in the waiting room on failure (where the next
   // poll can succeed) instead of erroring them out of a flow they have already
   // paid for. A failed session read is NOT settled, so it never forwards.
+  // Each failure is logged: the offer is the only gate that forwards.
   const [offerRead, record] = await Promise.all([
-    api.courses.offer(course.id).catch(() => null),
+    offerOrNull(api, course.id),
     sessionId && kind
       ? readSession(api, kind, sessionId, course.id).catch(
           (err: unknown): SessionRecord => {
@@ -191,7 +213,7 @@ export const load: PageServerLoad = async (event) => {
   ]);
   // Recorded by this load: the offer read beside it may predate the grant.
   const offer = record?.recordedNow
-    ? await api.courses.offer(course.id).catch(() => null)
+    ? await offerOrNull(api, course.id)
     : offerRead;
 
   const base = {

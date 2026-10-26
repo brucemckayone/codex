@@ -117,6 +117,16 @@
     connectQueryState(settingsQuery as QueryResult<unknown> | null)
   );
   const settingsFailed = $derived(settingsState.kind === 'failed');
+  // A failed stats read is an UNKNOWN subscriber count, not 0. Read as 0 it
+  // turned off the "money arriving with nowhere to land" prompt, hid the
+  // band and left every tier with no subscribers, all silently. The alert
+  // stands in for the band and says the numbers are missing; the stranded-
+  // money prompt can't be shown honestly without them, and the Connect card
+  // still states the account's own status.
+  const statsState = $derived(
+    connectQueryState(statsQuery as QueryResult<SubscriptionStats> | null)
+  );
+  const statsFailed = $derived(statsState.kind === 'failed');
 
   type ConnectStatusPayload = {
     isConnected: boolean; accountId: string | null;
@@ -164,6 +174,14 @@
       logRawError(
         'settings failed to load',
         queryErrorMessage((settingsQuery as QueryResult<unknown> | null)?.error)
+      );
+    }
+  });
+  $effect(() => {
+    if (statsFailed) {
+      logRawError(
+        'subscription stats failed to load',
+        queryErrorMessage((statsQuery as QueryResult<unknown> | null)?.error)
       );
     }
   });
@@ -1195,7 +1213,14 @@
        behind the number — there was previously no path at all from the stats to
        /studio/subscribers. Treatment matches studio/customers' band rather than
        StatCard, which measures visibly flatter on a dark page. -->
-  {#if stats.totalSubscribers > 0}
+  <LoadFailedAlert
+    query={statsQuery}
+    message={m.monetisation_stats_load_failed()}
+    againMessage={m.monetisation_stats_load_failed_again()}
+    loadedMessage={m.monetisation_stats_load_retry_ok()}
+    data-testid="stats-load-error"
+  />
+  {#if statsState.kind === 'ok' && stats.totalSubscribers > 0}
     <MoneyStatBand stats={statBand} label={m.monetisation_stats_title()} />
   {/if}
 

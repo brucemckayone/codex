@@ -50,7 +50,9 @@ import {
   httpError,
   land,
   myConnectSlot,
+  NO_ACCOUNT,
   reset,
+  statsSlot,
   tiersSlot,
 } from '$lib/components/studio/__fixtures__/subscription-remote.mock.svelte';
 import { setPage } from '$lib/components/support/__fixtures__/app-state.mock.svelte';
@@ -248,4 +250,48 @@ test('a settings read that loaded shows the switch as it is (negative control)',
 
   expect(q('[data-testid="settings-load-error"]')).toBeNull();
   expect(q('#enable-subscriptions')?.getAttribute('aria-checked')).toBe('true');
+});
+
+/**
+ * A failed subscription-stats read is an UNKNOWN subscriber count, not 0
+ * (Codex-2hxff.74). Read as 0, it turned off the "money arriving with nowhere
+ * to land" prompt for an org with subscribers and no payout account, and hid
+ * the band, with nothing said.
+ */
+describe('a failed subscription-stats read', () => {
+  function mountFailed(connect = NO_ACCOUNT) {
+    mountPage();
+    land(myConnectSlot(), connect);
+    land(tiersSlot(), [FOUNDING]);
+    fail(statsSlot());
+    flushSync();
+  }
+
+  test('says the subscriber numbers could not be loaded, with Retry', () => {
+    mountFailed();
+    const alert = q('[data-testid="stats-load-error"]');
+    expect(alert?.getAttribute('role')).toBe('alert');
+    expect(alert?.textContent).toContain(m.monetisation_stats_load_failed());
+    expect(q('.money-stats')).toBeNull();
+  });
+
+  test('logs the failure', () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    mountFailed();
+    expect(error).toHaveBeenCalledWith(
+      'studio/monetisation: subscription stats failed to load',
+      expect.objectContaining({ organizationId: ORG.id })
+    );
+  });
+});
+
+test('loaded stats with subscribers and no account still raise the stranded-money prompt (negative control)', () => {
+  mountPage();
+  land(myConnectSlot(), NO_ACCOUNT);
+  land(tiersSlot(), [FOUNDING]);
+  flushSync();
+
+  expect(q('[data-testid="stats-load-error"]')).toBeNull();
+  expect(q('.money-prompt')).not.toBeNull();
+  expect(q('.money-stats')).not.toBeNull();
 });

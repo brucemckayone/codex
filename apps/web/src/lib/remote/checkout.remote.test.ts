@@ -252,10 +252,38 @@ describe('remote/checkout.remote', () => {
       expect(result).toEqual({
         success: false,
         error: 'You already own this content',
+        status: 409,
+        code: 'ALREADY_PURCHASED',
       });
       // redirect() must not be called when checkout fails — otherwise the user
       // is bounced to Stripe with a stale / missing sessionUrl.
       expect(redirectMock).not.toHaveBeenCalled();
+    });
+
+    // The paywall's Buy form shows fixed copy keyed on these (M7), and the
+    // refusal is logged: before, nothing was, web-side.
+    it("a refusal carries the worker's details.code and status, and is logged without its message", async () => {
+      checkoutCreateMock.mockRejectedValueOnce(
+        new ApiError(409, 'Content already purchased', 'CONFLICT', {
+          code: 'ALREADY_PURCHASED',
+          contentId: VALID_CONTENT_ID,
+        })
+      );
+
+      const { createCheckout } = await import('./checkout.remote');
+      const result = await (
+        createCheckout as unknown as (input: unknown) => Promise<unknown>
+      )({ contentId: VALID_CONTENT_ID });
+
+      expect(result).toMatchObject({
+        success: false,
+        status: 409,
+        code: 'ALREADY_PURCHASED',
+      });
+      expect(loggerWarnMock).toHaveBeenCalledWith(
+        'checkout: the paywall checkout was refused',
+        { status: 409, code: 'ALREADY_PURCHASED' }
+      );
     });
 
     it('does not leak Stripe-internal details for unknown errors (no stack, no raw cause)', async () => {

@@ -38,8 +38,16 @@ describe('revenueOnDay', () => {
     expect(revenueOnDay(list, '2026-10-26')).toBe(4250);
   });
 
-  it('is 0 for a day with no entry (a window that does not reach today)', () => {
+  it('is null, not 0, for a day with no entry (a window that does not reach today)', () => {
+    // The list has one entry per day, today included: a missing day is a
+    // broken read, not a quiet day (review L7). It used to read as £0.
     const list = days('2026-10-20', 30, () => 500);
+
+    expect(revenueOnDay(list, '2026-10-26')).toBeNull();
+  });
+
+  it('is 0 for a day whose entry is 0 (a quiet day)', () => {
+    const list = days('2026-10-26', 30, (i) => (i === 29 ? 0 : 500));
 
     expect(revenueOnDay(list, '2026-10-26')).toBe(0);
   });

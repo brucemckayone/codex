@@ -9,6 +9,7 @@
 import { isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, form, getRequestEvent } from '$app/server';
+import { ApiError } from '$lib/api/errors';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 
@@ -125,11 +126,25 @@ export const createCheckout = form(checkoutInputSchema, async (input) => {
     // SvelteKit redirect() throws - let it propagate
     if (isRedirect(error)) throw error;
 
-    // Return error for form display
+    // The form shows fixed copy keyed on these (PreviewPlayer), never
+    // `error`: the worker's message is written for developers.
+    const status = error instanceof ApiError ? error.status : undefined;
+    const code =
+      error instanceof ApiError
+        ? (detailsCodeOf(error.details) ?? error.code)
+        : undefined;
+    logger.warn('checkout: the paywall checkout was refused', { status, code });
     const message = error instanceof Error ? error.message : 'Checkout failed';
-    return { success: false, error: message };
+    return { success: false, error: message, status, code };
   }
 });
+
+/** The worker's own code, which most refusals put in `details.code`. */
+function detailsCodeOf(details: unknown): string | undefined {
+  if (!details || typeof details !== 'object') return undefined;
+  const code = (details as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Checkout Command (SPA Style)

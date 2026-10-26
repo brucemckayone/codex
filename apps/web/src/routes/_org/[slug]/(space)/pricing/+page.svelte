@@ -36,6 +36,7 @@
   import type { PricingFaqItem } from '@codex/validation';
   import { formatDate, formatPrice } from '$lib/utils/format';
   import { buildJourneyUrl, buildPlatformUrl } from '$lib/utils/subdomain';
+  import { logger } from '$lib/observability';
   import {
     getEffectiveStatus,
     type SubscriptionStatus,
@@ -684,12 +685,15 @@
         return;
       }
       tierChangePreview = result.data;
-    } catch {
+    } catch (error) {
+      logger.warn('pricing: a plan-change preview got no answer', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       if (!tierChangeDialogOpen || tierChangeDialogTier?.id !== tier.id) {
         return;
       }
       // No answer (the network dropped): fixed copy, never the error's own
-      // text, and a retry can work.
+      // text, and a retry can work: a preview changes nothing.
       tierChangePreviewError = m.subscription_checkout_error();
       tierChangePreviewRetryable = true;
     } finally {
@@ -776,15 +780,17 @@
         invalidateCollection('library'),
         invalidateCollection('subscription'),
       ]);
-    } catch {
-      // Rollback all optimistic mutations.
-      currentTierId = previousTierId;
-      currentCancelAtPeriodEnd = previousCancelAtPeriodEnd;
-      currentBillingInterval = previousBillingInterval;
-      currentStatus = previousStatus;
-      // Fixed copy, never the error's own text (Codex-2hxff.69).
-      switchTierError = m.subscription_checkout_error();
-      switchTierRetryable = true;
+    } catch (error) {
+      logger.warn('pricing: a plan change got no answer', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // No answer is not "it failed": the change, and its proration charge,
+      // may have gone through. So neither roll back nor offer a retry that
+      // could charge again: say so, and re-read the plan, which the page
+      // re-seeds from the fresh payload. Fixed copy (Codex-2hxff.69).
+      switchTierError = m.pricing_refusal_change_unconfirmed();
+      switchTierRetryable = false;
+      await invalidateAll();
     } finally {
       switchTierLoading = null;
     }

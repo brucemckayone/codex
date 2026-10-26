@@ -57,11 +57,26 @@
     isAuthorized ? getOrgMembers({ orgId: data.org.id, limit: 50 }) : null
   );
 
+  // A failed members read is not "no members" (Codex-2hxff.74): it used to
+  // show "No team members yet" with Invite, to an owner or admin who is a
+  // member themselves. The alert stands in for the table, and Invite waits.
+  const membersState = $derived(connectQueryState(membersQuery));
+  $effect(() => {
+    if (membersState.kind === 'failed') {
+      logger.error('studio/team: members failed to load', {
+        organizationId: data.org.id,
+        reason: queryErrorMessage(membersQuery?.error),
+      });
+    }
+  });
+
   // Subscribers are not team members — the table filters them out, so the
   // header count must too. Named `member` rather than `m` so it does not
   // shadow the paraglide namespace inside the callback.
   const teamMembers = $derived(
-    (membersQuery?.current?.items ?? []).filter((member) => member.role !== 'subscriber')
+    (membersState.kind === 'ok' ? membersState.status.items : []).filter(
+      (member) => member.role !== 'subscriber'
+    )
   );
 
   // Revenue-share lives in the owner-only Monetisation hub, so the per-member
@@ -201,7 +216,7 @@
     description={m.team_description()}
   >
     {#snippet meta()}
-      {#if !membersQuery?.loading && teamMembers.length > 0}
+      {#if membersState.kind === 'ok' && teamMembers.length > 0}
         <!-- Labelled stat, not "{n} members": paraglide-js 1.x has no plural
              form (zero ICU plurals repo-wide), so an interpolated noun would
              read "1 members". Matches the customers header's shape. -->
@@ -217,16 +232,26 @@
           Manage revenue share
         </a>
       {/if}
-      <Button onclick={() => (inviteDialogOpen = true)}>
-        <UserPlusIcon size={16} />
-        {m.team_invite()}
-      </Button>
+      {#if membersState.kind !== 'failed'}
+        <Button onclick={() => (inviteDialogOpen = true)}>
+          <UserPlusIcon size={16} />
+          {m.team_invite()}
+        </Button>
+      {/if}
     {/snippet}
   </PageHeader>
 
   {#if memberError}
     <Alert variant="error">{memberError}</Alert>
   {/if}
+
+  <LoadFailedAlert
+    query={membersQuery}
+    message={m.team_load_failed()}
+    againMessage={m.team_load_failed_again()}
+    loadedMessage={m.team_load_retry_ok()}
+    data-testid="team-members-load-error"
+  />
 
   {#if isOwner}
     <LoadFailedAlert
@@ -238,8 +263,9 @@
     />
   {/if}
 
+  {#if membersState.kind !== 'failed'}
   <section class="members-section">
-    {#if membersQuery?.loading}
+    {#if membersState.kind === 'loading'}
       <div class="table-skeleton">
         <Skeleton class="table-skeleton-header" width="100%" height="var(--space-10)" />
         {#each Array(5) as _, i (i)}
@@ -264,6 +290,7 @@
       />
     {/if}
   </section>
+  {/if}
 
   {#if browser}
     <InviteMemberDialog

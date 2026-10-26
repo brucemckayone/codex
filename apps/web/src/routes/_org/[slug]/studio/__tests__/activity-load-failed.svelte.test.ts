@@ -10,6 +10,10 @@
  * The feed is the org's activity, owners' and admins' only (its route
  * requires org management), so other roles get no stream and no request.
  *
+ * Also here, on the same harness: a revenue series with no entry for today
+ * is unknown, not £0, so the header never says "Quiet so far" on it
+ * (review L7).
+ *
  * Mounts the real `+page.svelte`; `$app/*`, the remote modules and the
  * dismissals collection are mocked. Each read is a plain
  * `{ current, error, loading, refresh }` object.
@@ -31,7 +35,7 @@ type Read = {
 };
 
 const reads = vi.hoisted(() => {
-  const state = { activity: null as unknown };
+  const state = { activity: null as unknown, todayCents: 0 as number | null };
   return { state, getActivityFeed: vi.fn(() => state.activity) };
 });
 
@@ -52,7 +56,11 @@ vi.mock('$lib/collections/dismissals', () => ({
   isDismissed: () => false,
 }));
 vi.mock('$lib/remote/admin.remote', () => ({
-  getDashboardStats: () => ok(STATS),
+  getDashboardStats: () =>
+    ok({
+      ...STATS,
+      revenue: { ...STATS.revenue, todayCents: reads.state.todayCents },
+    }),
   getActivityFeed: reads.getActivityFeed,
 }));
 vi.mock('$lib/remote/agreements.remote', () => ({
@@ -116,6 +124,7 @@ const emptyStream = () => document.querySelector('.stream-empty');
 beforeEach(() => {
   setPage('http://studio-alpha.lvh.me:3000/studio');
   reads.getActivityFeed.mockClear();
+  reads.state.todayCents = 0;
 });
 
 afterEach(() => {
@@ -155,5 +164,25 @@ describe('Dashboard: the activity stream is owners’ and admins’ only', () =>
     expect(
       document.querySelector('.below-fold')?.hasAttribute('data-single')
     ).toBe(true);
+  });
+});
+
+describe('Dashboard: no figure for today (L7)', () => {
+  const QUIET = 'Quiet so far. A good time to publish something new.';
+
+  test('a series with no entry for today is not "Quiet so far"', () => {
+    reads.state.activity = ok({ items: [] });
+    reads.state.todayCents = null;
+    mountPage('admin');
+
+    expect(document.body.textContent).not.toContain(QUIET);
+    expect(document.body.textContent).not.toContain('earned today');
+  });
+
+  test('a quiet today (an entry of £0) is still "Quiet so far"', () => {
+    reads.state.activity = ok({ items: [] });
+    mountPage('admin');
+
+    expect(document.body.textContent).toContain(QUIET);
   });
 });

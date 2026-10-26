@@ -157,10 +157,11 @@
     const parts: string[] = [];
     const drafts = data.badgeCounts?.draftContent ?? 0;
     // Today's UTC date, never "the last day that had a sale" (Codex-2hxff.75).
-    const todayRevenue = stats?.revenue.todayCents ?? 0;
+    // `null` when the series has no entry for today: unknown, not £0 (L7).
+    const todayRevenue = stats?.revenue.todayCents ?? null;
     const newCustomers = stats?.customers.newThisWeek ?? 0;
 
-    if (isAdmin && todayRevenue > 0) {
+    if (isAdmin && todayRevenue !== null && todayRevenue > 0) {
       parts.push(`${formatPrice(todayRevenue)} earned today`);
     }
     if (drafts > 0) {
@@ -176,8 +177,8 @@
 
     if (parts.length === 0) {
       // "Quiet so far" is a claim about today's sales: never make it on
-      // figures that failed to load.
-      return isAdmin && !statsFailed
+      // figures that failed to load, or with no figure for today.
+      return isAdmin && !statsFailed && todayRevenue !== null
         ? 'Quiet so far. A good time to publish something new.'
         : 'Nothing pressing — plenty of room to create.';
     }

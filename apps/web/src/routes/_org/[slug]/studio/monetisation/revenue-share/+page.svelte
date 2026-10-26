@@ -397,6 +397,16 @@
       : null
   );
 
+  // A failed thread read used to leave the dialog empty and unlogged; every
+  // countered-by-creator email lands on this page, and Review counter opens
+  // this dialog (Codex-2hxff.74).
+  const threadState = $derived(connectQueryState(threadQuery));
+  $effect(() => {
+    if (threadState.kind === 'failed') {
+      logLoadFailure('thread', threadQuery?.error);
+    }
+  });
+
   function openThreadDialog(
     creatorId: string,
     creatorName: string,
@@ -1057,7 +1067,14 @@
           </Dialog.Description>
         </Dialog.Header>
         <Dialog.Body>
-          {#if threadQuery?.loading}
+          <LoadFailedAlert
+            query={threadQuery}
+            message={m.agreement_thread_load_failed()}
+            againMessage={m.agreement_thread_load_failed_again()}
+            loadedMessage={m.agreement_thread_load_retry_ok()}
+            data-testid="thread-load-error"
+          />
+          {#if threadState.kind === 'loading'}
             <Skeleton width="100%" height="var(--space-32)" />
           {:else if threadQuery?.current}
             {@const thread = threadQuery.current}

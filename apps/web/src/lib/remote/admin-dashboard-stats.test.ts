@@ -17,6 +17,7 @@ import { ApiError } from '$lib/api/errors';
 
 const dashboardMock = vi.hoisted(() => vi.fn());
 const loggerError = vi.hoisted(() => vi.fn());
+const loggerWarn = vi.hoisted(() => vi.fn());
 
 vi.mock('$lib/server/api', () => ({
   createServerApi: vi.fn(() => ({
@@ -26,7 +27,12 @@ vi.mock('$lib/server/api', () => ({
 }));
 
 vi.mock('$lib/observability', () => ({
-  logger: { error: loggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+  logger: {
+    error: loggerError,
+    warn: loggerWarn,
+    info: vi.fn(),
+    debug: vi.fn(),
+  },
 }));
 
 // The global `$app/server` mock is one-arg; these remotes are (schema, fn).
@@ -52,7 +58,7 @@ interface DashboardFigures {
     value: number;
     byKind: Record<string, number>;
     change: number | null;
-    todayCents: number;
+    todayCents: number | null;
     revenueByDay: Array<{ date: string; revenueCents: number }>;
   };
   customers: { value: number; change: number | null; newThisWeek: number };
@@ -107,6 +113,7 @@ function apiStats(days: ReturnType<typeof revenueByDay>) {
 beforeEach(() => {
   dashboardMock.mockReset();
   loggerError.mockReset();
+  loggerWarn.mockReset();
   vi.useFakeTimers();
   vi.setSystemTime(new Date(`${TODAY}T14:30:00.000Z`));
 });
@@ -146,6 +153,31 @@ describe('getDashboardStats', () => {
       subscription: 78860,
       course_plan: 4998,
     });
+  });
+
+  it('a series with no entry for today: today is unknown (null, warned), not £0', async () => {
+    // A list that stops at yesterday: a window or clock skew, not a quiet day.
+    const days = revenueByDay(() => 700).slice(0, -1);
+    dashboardMock.mockResolvedValue(apiStats(days));
+
+    const figures = await getDashboardStats(ORG_ID);
+
+    expect(figures.revenue.todayCents).toBeNull();
+    expect(loggerWarn).toHaveBeenCalledWith(
+      '[Dashboard] Revenue series has no entry for today',
+      { today: TODAY, lastDay: '2026-10-25' }
+    );
+  });
+
+  it('a quiet today is £0 (an entry of 0), and nothing is warned', async () => {
+    dashboardMock.mockResolvedValue(
+      apiStats(revenueByDay((i) => (i === 29 ? 0 : 500)))
+    );
+
+    const figures = await getDashboardStats(ORG_ID);
+
+    expect(figures.revenue.todayCents).toBe(0);
+    expect(loggerWarn).not.toHaveBeenCalled();
   });
 
   it('gives no change (null, not 0%) when last week had nothing', async () => {

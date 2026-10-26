@@ -189,6 +189,8 @@ export function setPendingProposals(rows: Partial<AgreementProposal>[]) {
 export const activeSlot = () => active;
 export const pendingSlot = () => pending;
 export const portfolioSlot = () => portfolio;
+export const orgThreadSlot = () => orgThread;
+export const myThreadSlot = () => myThread;
 
 /** Answer the creator's portfolio with these active rows. */
 export function setPortfolio(rows: ReturnType<typeof portfolioActiveRow>[]) {

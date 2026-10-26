@@ -139,6 +139,7 @@ export function reset() {
 export const myConnectSlot = () => myConnect;
 export const orgPayoutSlot = () => orgPayout;
 export const tiersSlot = () => tiers;
+export const statsSlot = () => stats;
 
 // ── query() ─────────────────────────────────────────────────────────────
 export const getMyConnectStatus = vi.fn(() => myConnect);

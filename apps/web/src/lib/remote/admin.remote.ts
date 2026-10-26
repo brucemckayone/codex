@@ -68,12 +68,21 @@ export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
   }
 
   const revenueByDay = stats.revenue.revenueByDay;
+  const today = utcDay();
+  const todayCents = revenueOnDay(revenueByDay, today);
+  if (todayCents === null) {
+    // Unknown, not £0: the dashboard makes no claim about today.
+    logger.warn('[Dashboard] Revenue series has no entry for today', {
+      today,
+      lastDay: revenueByDay.at(-1)?.date ?? null,
+    });
+  }
   return {
     revenue: {
       value: stats.revenue.totalRevenueCents,
       byKind: stats.revenue.revenueByKind,
       change: weekOverWeekChange(revenueByDay),
-      todayCents: revenueOnDay(revenueByDay, utcDay()),
+      todayCents,
       revenueByDay,
     },
     customers: {
@@ -120,6 +129,23 @@ function setDateRangeParams(
   if (params.compareTo) searchParams.set('compareTo', params.compareTo);
 }
 
+/**
+ * Run a read that the page shows as "We couldn't load …" when it fails: log
+ * the raw error here, because the alert never shows it, then reject (the .74
+ * pattern). Never a fallback value: a read that failed is not an empty one.
+ */
+async function loggedRead<T>(
+  label: string,
+  read: () => Promise<T>
+): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    logger.error(label, { reason: String(error) });
+    throw error;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Analytics Revenue
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,16 +180,9 @@ export const getAnalyticsRevenue = query(revenueQuerySchema, async (params) => {
   searchParams.set('organizationId', params.organizationId);
   setDateRangeParams(searchParams, params);
 
-  // A failure rejects (the page shows "We couldn't load your revenue."),
-  // logged here because the alert never shows the raw error.
-  try {
-    return await api.analytics.getRevenue(searchParams);
-  } catch (error) {
-    logger.error('[Analytics] Failed to fetch revenue', {
-      reason: String(error),
-    });
-    throw error;
-  }
+  return loggedRead('[Analytics] Failed to fetch revenue', () =>
+    api.analytics.getRevenue(searchParams)
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -200,7 +219,9 @@ export const getAnalyticsTopContent = query(
     searchParams.set('limit', String(params.limit));
     setDateRangeParams(searchParams, params);
 
-    return api.analytics.getTopContent(searchParams);
+    return loggedRead('[Analytics] Failed to fetch top content', () =>
+      api.analytics.getTopContent(searchParams)
+    );
   }
 );
 
@@ -227,7 +248,9 @@ export const getAnalyticsSubscribers = query(
     searchParams.set('organizationId', params.organizationId);
     setDateRangeParams(searchParams, params);
 
-    return api.analytics.getSubscribers(searchParams);
+    return loggedRead('[Analytics] Failed to fetch subscribers', () =>
+      api.analytics.getSubscribers(searchParams)
+    );
   }
 );
 
@@ -257,7 +280,9 @@ export const getAnalyticsFollowers = query(
     searchParams.set('organizationId', params.organizationId);
     setDateRangeParams(searchParams, params);
 
-    return api.analytics.getFollowers(searchParams);
+    return loggedRead('[Analytics] Failed to fetch followers', () =>
+      api.analytics.getFollowers(searchParams)
+    );
   }
 );
 
@@ -324,7 +349,9 @@ export const getAnalyticsRevenueByCreator = query(
     if (params.startDate) searchParams.set('startDate', params.startDate);
     if (params.endDate) searchParams.set('endDate', params.endDate);
 
-    return api.analytics.getRevenueByCreator(searchParams);
+    return loggedRead('[Analytics] Failed to fetch revenue by creator', () =>
+      api.analytics.getRevenueByCreator(searchParams)
+    );
   }
 );
 
@@ -456,18 +483,9 @@ export const getActivityFeed = query(
       searchParams.set('organizationId', params.organizationId);
     if (params.type !== 'all') searchParams.set('type', params.type);
 
-    // A failure rejects (the dashboard shows "We couldn't load your recent
-    // activity."), logged here because the alert never shows the raw error.
-    try {
-      return await api.admin.getActivity(
-        searchParams.toString() ? searchParams : undefined
-      );
-    } catch (error) {
-      logger.error('[Dashboard] Failed to fetch activity feed', {
-        reason: String(error),
-      });
-      throw error;
-    }
+    return loggedRead('[Dashboard] Failed to fetch activity feed', () =>
+      api.admin.getActivity(searchParams.toString() ? searchParams : undefined)
+    );
   }
 );
 

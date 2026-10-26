@@ -143,6 +143,11 @@ describe('journey checkout success load', () => {
     const data = (await load(event)) as LoadData;
 
     expect(data.arrivedFromStripe).toBe(true);
+    // The offer is the only gate that forwards: a failed read is logged.
+    expect(warnMock).toHaveBeenCalledWith(
+      'journey-checkout-success: offer read failed',
+      { courseId: COURSE_ID, status: undefined, error: 'ecom down' }
+    );
   });
 
   it('distinguishes a direct visit from a return from Stripe', async () => {
@@ -447,7 +452,9 @@ describe('journey checkout success load', () => {
       expect(offerMock).toHaveBeenCalledOnce();
     });
 
-    it('a failed completion is not settled: the buyer waits, and it is logged', async () => {
+    // The verify succeeded; only the completion failed, and the log says so.
+    // It used to reject the whole read and log "session verify failed".
+    it('a failed completion is not settled: the buyer waits, and it is logged as a completion', async () => {
       offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
       purchaseVerifyMock.mockResolvedValueOnce({
         sessionStatus: 'complete',
@@ -463,8 +470,38 @@ describe('journey checkout success load', () => {
       expect(data.duplicate).toBeNull();
       expect(data.inactive).toBe(false);
       expect(warnMock).toHaveBeenCalledWith(
+        'journey-checkout-success: completion on arrival failed',
+        expect.objectContaining({ sessionId: 'cs_test_abc', status: 503 })
+      );
+      expect(warnMock).not.toHaveBeenCalledWith(
         'journey-checkout-success: session verify failed',
-        expect.objectContaining({ kind: 'purchase', status: 503 })
+        expect.anything()
+      );
+    });
+
+    it('recorded, but the grant read after fails: logged, and the buyer waits for the next check', async () => {
+      offerMock.mockResolvedValueOnce(OFFER);
+      offerMock.mockRejectedValueOnce(new ApiError(502, 'Bad gateway'));
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'recording',
+      });
+      purchaseCompleteMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'unlocked',
+        course: COURSE,
+      });
+      const { load } = await import('../+page.server');
+
+      const data = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+
+      expect(data.arrivedFromStripe).toBe(true);
+      expect(offerMock).toHaveBeenCalledTimes(2);
+      expect(warnMock).toHaveBeenCalledWith(
+        'journey-checkout-success: offer read failed',
+        expect.objectContaining({ courseId: COURSE_ID, status: 502 })
       );
     });
 

@@ -4359,6 +4359,14 @@ export const pricing_refusal_change_refused = () => `We couldn't change your pla
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_change_unconfirmed = () => `We couldn't confirm the change. We've refreshed the page to show your current plan.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const pricing_refusal_subscription_unknown = () => `We couldn't check your current subscription, so checkout can't start. Reload the page to check again.`
 
 
@@ -8887,6 +8895,102 @@ export const analytics_revenue_load_retry_ok = () => `Revenue loaded.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const analytics_subscribers_load_failed = () => `We couldn't load your subscribers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_subscribers_load_failed_again = () => `We still couldn't load your subscribers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_subscribers_load_retry_ok = () => `Subscribers loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_followers_load_failed = () => `We couldn't load your followers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_followers_load_failed_again = () => `We still couldn't load your followers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_followers_load_retry_ok = () => `Followers loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_top_content_load_failed = () => `We couldn't load your top content.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_top_content_load_failed_again = () => `We still couldn't load your top content.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_top_content_load_retry_ok = () => `Top content loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_load_failed = () => `We couldn't load revenue by creator.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_load_failed_again = () => `We still couldn't load revenue by creator.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_load_retry_ok = () => `Revenue by creator loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const dashboard_activity_load_failed = () => `We couldn't load your recent activity.`
 
 
@@ -9408,6 +9512,38 @@ export const checkout_inactive_title = () => `This purchase is no longer active.
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const checkout_inactive_payment_history = () => `See your payment history`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_refusal_owned = () => `You already own this. Reload the page to watch it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_refusal_reload = () => `Reload`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_refusal_problem = () => `We couldn't start checkout. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_refusal_refused = () => `We couldn't start checkout for this item.`
 
 
 /**
@@ -11607,6 +11743,30 @@ export const team_meta_members = () => `Members`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const team_load_failed = () => `We couldn't load your team.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_load_failed_again = () => `We still couldn't load your team.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_load_retry_ok = () => `Team loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const monetisation_subscriptions_title = () => `Subscriptions`
 
 
@@ -11912,6 +12072,30 @@ export const monetisation_settings_load_failed_again = () => `We still couldn't 
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const monetisation_settings_load_retry_ok = () => `Subscription settings loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_stats_load_failed = () => `We couldn't load your subscriber numbers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_stats_load_failed_again = () => `We still couldn't load your subscriber numbers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_stats_load_retry_ok = () => `Subscriber numbers loaded.`
 
 
 /**
@@ -13144,6 +13328,78 @@ export const agreement_split_over = (params) => `Shares add up to ${params.total
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const agreement_split_over_amend = () => `Amend one or more agreements.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_thread_load_failed = () => `We couldn't load this negotiation.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_thread_load_failed_again = () => `We still couldn't load this negotiation.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_thread_load_retry_ok = () => `Negotiation loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_detail_load_failed = () => `We couldn't load this agreement.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_detail_load_failed_again = () => `We still couldn't load this agreement.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_detail_load_retry_ok = () => `Agreement loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_ended = () => `Ended`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_ended_on = (params) => `Ended on ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_ended_note = () => `This agreement has ended, so its split no longer applies to new revenue. Earnings already recorded under it are unaffected.`
 
 
 /**
