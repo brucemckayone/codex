@@ -12,6 +12,8 @@
  * Keep this the single definition of "ready to take money" so every surface
  * stays consistent with the backend.
  */
+import { type QueryResult, queryErrorMessage } from '$lib/remote/query-result';
+
 export interface ConnectReadinessStatus {
   isConnected: boolean;
   chargesEnabled: boolean;
@@ -37,6 +39,38 @@ export function isConnectReady(status: ConnectReadinessStatus): boolean {
     status.payoutsEnabled &&
     status.status === 'active'
   );
+}
+
+/**
+ * What a page knows about the payout account, read from its remote query.
+ *
+ * `failed` is its own state because a rejected query has `current: undefined`,
+ * and every page used to cover `undefined` with a "no account" default. A
+ * fully set-up owner whose status read failed was shown "Not connected", a
+ * set-up button and a "set up payments" warning (Codex-2hxff.45). A page renders
+ * `failed` as a load error with Retry, never as a verdict on the account.
+ */
+export type ConnectQueryState<T> =
+  | { kind: 'loading' }
+  | { kind: 'failed' }
+  | { kind: 'ok'; status: T };
+
+/**
+ * Resolve a payout-status query to one of the three states.
+ *
+ * ORDER IS LOAD-BEARING, and follows SvelteKit's `Query`:
+ * - A value wins. A failed REFRESH keeps the last good value in `current`, so
+ *   a status we already showed is not replaced by an error.
+ * - `error` comes before loading. `Query` clears `error` only on success, so
+ *   it stays set while a Retry is in flight, and the failed state (with its
+ *   Retry button) stays mounted instead of flickering back to skeletons.
+ */
+export function connectQueryState<T>(
+  query: QueryResult<T> | null | undefined
+): ConnectQueryState<T> {
+  if (query?.current != null) return { kind: 'ok', status: query.current };
+  if (queryErrorMessage(query?.error) !== null) return { kind: 'failed' };
+  return { kind: 'loading' };
 }
 
 /**

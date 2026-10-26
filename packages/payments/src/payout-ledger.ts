@@ -609,13 +609,13 @@ async function sendReservedSlice(
       {
         payoutId: reserved.id,
         destination: account.stripeAccountId,
+        amountCents: input.amountCents,
         idempotencyKey: input.idempotencyKey,
       },
       error,
       {
         payoutType: input.payoutType,
         organizationId: input.organizationId,
-        amountCents: input.amountCents,
       }
     );
     if (
@@ -729,11 +729,82 @@ export type SettleOutcome =
   | 'surplus_unreversed';
 
 /**
+ * Whether Stripe has reversed this transfer in full, under any key. A refund's
+ * own lookup and the late transfer's settle can both find a transfer that
+ * landed for a cancelled row, and both reverse it in full: Stripe refuses
+ * whichever is second, though the money is back (Codex-pqsfg). False when
+ * Stripe cannot be asked, so the caller reports the refusal as before.
+ */
+export async function isTransferFullyReversed(
+  deps: Pick<LedgerDeps, 'stripe' | 'obs'>,
+  transferId: string
+): Promise<boolean> {
+  try {
+    const transfer = await deps.stripe.transfers.retrieve(transferId);
+    return transfer.reversed === true;
+  } catch (error) {
+    deps.obs.warn('Stripe could not say whether a transfer is reversed', {
+      stripeTransferId: transferId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * A cancelled row whose transfer went out anyway and is now back in full: the
+ * row is `reversed`, with its transfer recorded, as the refund's own reversal
+ * leaves it (clawback.ts `reverseTransfer`). Never a row another transfer
+ * paid, nor one that records a transfer already.
+ *
+ * Only the record is behind if this fails, not the money: logged, not thrown.
+ */
+async function recordCancelledRowReversed(
+  deps: LedgerDeps,
+  payoutId: string,
+  transferId: string,
+  now: Date
+): Promise<void> {
+  try {
+    await deps.db
+      .update(payouts)
+      .set({
+        status: 'reversed',
+        stripeTransferId: transferId,
+        resolvedAt: sql`coalesce(${payouts.resolvedAt}, ${now.toISOString()}::timestamptz)`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(payouts.id, payoutId),
+          inArray(payouts.status, [
+            'cancelled_by_refund',
+            'cancelled_by_dispute',
+          ]),
+          isNull(payouts.stripeTransferId)
+        )
+      );
+  } catch (error) {
+    deps.obs.error(
+      'A transfer for a cancelled payout was reversed, but its row could not record it',
+      {
+        errorId: crypto.randomUUID(),
+        payoutId,
+        stripeTransferId: transferId,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
+  }
+}
+
+/**
  * Record a transfer that has just been made against its row. If the row has
  * moved on while the transfer was in flight — a refund cancelled it, or a
  * concurrent attempt paid it — nothing will ever account for this money, so
  * it is taken back with a full reversal. Its key is deterministic, so a
- * retry never reverses twice.
+ * retry never reverses twice. If Stripe refuses because the transfer is
+ * already reversed in full (the refund found it too), that is the same
+ * outcome. A cancelled row then records the transfer, `reversed`.
  *
  * Throws only if the database does: the caller treats that as unsettled.
  */
@@ -776,15 +847,22 @@ export async function settleTransfer(
       { idempotencyKey: `${transferId}_reversal_surplus` }
     );
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (await isTransferFullyReversed(deps, transferId)) {
+      await recordCancelledRowReversed(deps, payoutId, transferId, now);
+      deps.obs.warn(
+        'A transfer landed on a payout that no longer wanted it; it was already reversed in full',
+        { ...context, error: message }
+      );
+      return 'surplus_reversed';
+    }
     deps.obs.error(
       'A transfer landed on a payout that no longer wanted it, and could NOT be reversed. Reverse it by hand',
-      {
-        ...context,
-        error: error instanceof Error ? error.message : String(error),
-      }
+      { ...context, error: message }
     );
     return 'surplus_unreversed';
   }
+  await recordCancelledRowReversed(deps, payoutId, transferId, now);
   deps.obs.error(
     'A transfer landed on a payout that no longer wanted it; reversed it',
     context
@@ -938,7 +1016,8 @@ const PERMANENT_REFUSALS: ReadonlyArray<{ code: string; param?: string }> = [
 /**
  * Refusals that are about the platform's own Stripe account, not the row: its
  * balance (a person may need to top it up), its keys, or its Connect setup.
- * They are retried without using an attempt, and logged at error every time.
+ * They are retried without using an attempt. A drain reports them once per
+ * run (`PlatformFailureTally`); the write path's own attempt, at error.
  */
 const PLATFORM_REFUSAL_CODES: ReadonlySet<string> = new Set([
   'balance_insufficient',
@@ -959,7 +1038,7 @@ export type TransferFailureKind =
   /**
    * The platform's side: its balance, keys or Connect setup, or a fault
    * that is not Stripe's at all. Retried, no attempt used, and a person is
-   * told every time.
+   * told: once per drain run, or at once for the write path's own attempt.
    */
   | 'platform';
 
@@ -1090,11 +1169,69 @@ export async function markPayoutFailed(
   };
 }
 
-/** The transfer attempt that failed: its row, where it went, and its key. */
+/** The transfer attempt that failed: its row, where it went, how much, and its key. */
 export interface TransferAttempt {
   payoutId: string;
   destination: string;
+  amountCents: number;
   idempotencyKey: string;
+}
+
+/**
+ * A drain run's platform-side failures (Codex-r094t). A short platform
+ * balance fails every owed row on every drain: logged at error per row, 200
+ * rows made 200 error lines an hour and buried the one a person needs. Given
+ * a tally, `recordTransferFailure` logs the run's ONE error at its first
+ * platform failure and each row at warn, all with the run's errorId, and the
+ * drain ends with a summary at warn (`reportPlatformFailures`).
+ *
+ * The error comes at the first failure, not the end: a run the runtime cuts
+ * short (a CPU limit, an eviction, a deploy) would otherwise leave only warns.
+ */
+export interface PlatformFailureTally {
+  /** The run's errorId: on its one error, each row's warning and the summary. */
+  readonly errorId: string;
+  count: number;
+  totalCents: number;
+  codes: Set<string>;
+  /**
+   * The first row's error message. A `platform` failure also covers a fault
+   * that is not Stripe's (code `unknown`), and only the message says which.
+   */
+  firstError: string | undefined;
+}
+
+export function platformFailureTally(): PlatformFailureTally {
+  return {
+    errorId: crypto.randomUUID(),
+    count: 0,
+    totalCents: 0,
+    codes: new Set(),
+    firstError: undefined,
+  };
+}
+
+/**
+ * The summary of a drain run's platform-side failures, if it had any: at
+ * warn, under the errorId of the error its first failure raised.
+ */
+export function reportPlatformFailures(
+  deps: Pick<LedgerDeps, 'obs'>,
+  tally: PlatformFailureTally,
+  context: Record<string, unknown>
+): void {
+  if (tally.count === 0) return;
+  deps.obs.warn(
+    'Payout transfers failed on the platform side this run; they are retried, and its first failure raised the error',
+    {
+      errorId: tally.errorId,
+      ...context,
+      count: tally.count,
+      totalCents: tally.totalCents,
+      codes: [...tally.codes].sort(),
+      error: tally.firstError,
+    }
+  );
 }
 
 /** A transfer that landed for a row a refund cancelled while it was in flight. */
@@ -1117,7 +1254,10 @@ function mayHaveLanded(failure: TransferFailure): boolean {
  * Record a failed transfer on its row and log it at the level it deserves:
  * - flagged for support by this failure: ONE error, with an errorId;
  * - the platform's side (`balance_insufficient`, keys, setup, or a fault of
- *   ours): an error with an errorId every time, as a person must act;
+ *   ours), as a person must act: given a drain's `platformFailures`, a
+ *   warning with the run's errorId, added to its tally, and the run's one
+ *   error if it is the run's first; without one (the write path's own
+ *   attempt), an error with an errorId;
  * - anything else (an outage, a refusal below the cap): a warning, as the
  *   drains retry it.
  *
@@ -1135,7 +1275,8 @@ export async function recordTransferFailure(
   deps: LedgerDeps,
   attempt: TransferAttempt,
   error: unknown,
-  context: Record<string, unknown>
+  context: Record<string, unknown>,
+  platformFailures?: PlatformFailureTally
 ): Promise<LandedAfterCancel | null> {
   const { payoutId } = attempt;
   const message = error instanceof Error ? error.message : String(error);
@@ -1179,6 +1320,23 @@ export async function recordTransferFailure(
         ? 'Stripe refused a payout transfer for good; it waits for support'
         : `Stripe refused a payout transfer ${MAX_PAYOUT_FAILURES} times; it waits for support`,
       { errorId: crypto.randomUUID(), ...fields }
+    );
+    return null;
+  }
+  if (failure.kind === 'platform' && platformFailures) {
+    platformFailures.count++;
+    platformFailures.totalCents += attempt.amountCents;
+    platformFailures.codes.add(failure.code);
+    if (platformFailures.count === 1) {
+      platformFailures.firstError = message;
+      deps.obs.error(
+        'Payout transfers are failing on the platform side; they are retried, but a person must act',
+        { errorId: platformFailures.errorId, ...fields }
+      );
+    }
+    deps.obs.warn(
+      'A payout transfer failed on the platform side; it is retried, under the one error of its run',
+      { errorId: platformFailures.errorId, ...fields }
     );
     return null;
   }

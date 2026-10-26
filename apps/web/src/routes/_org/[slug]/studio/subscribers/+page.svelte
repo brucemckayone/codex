@@ -26,6 +26,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
+  import { tick } from 'svelte';
   import { Alert, Badge, Button, EmptyState, PageHeader, Skeleton } from '$lib/components/ui';
   import DataTable from '$lib/components/ui/DataTable/DataTable.svelte';
   import ActionLink from '$lib/components/studio/ActionLink.svelte';
@@ -48,6 +49,7 @@
   import type { SubscriberListItem } from '@codex/subscription';
   import { queryErrorMessage, type QueryResult } from '$lib/remote/query-result';
   import {
+    connectQueryState,
     moneyReadiness,
     type ConnectReadinessStatus,
   } from '$lib/utils/connect-readiness';
@@ -124,14 +126,67 @@
   const connectQuery = $derived(
     isOwner && orgId ? getOrganizationPayoutStatus(orgId) : null
   );
-  const connectStatus = $derived<ConnectReadinessStatus>(
-    (connectQuery as QueryResult<ConnectReadinessStatus> | null)?.current ?? {
-      isConnected: false,
-      chargesEnabled: false,
-      payoutsEnabled: false,
-      status: null,
-    }
+  // A read that FAILED is not "no account" (Codex-2hxff.45): the default below
+  // only fills the gap, and the prompt and the empty state check
+  // `connectFailed` before reading it as a verdict.
+  const connectState = $derived(
+    connectQueryState(
+      connectQuery as QueryResult<ConnectReadinessStatus> | null
+    )
   );
+  const connectFailed = $derived(connectState.kind === 'failed');
+  const connectStatus = $derived<ConnectReadinessStatus>(
+    connectState.kind === 'ok'
+      ? connectState.status
+      : {
+          isConnected: false,
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          status: null,
+        }
+  );
+
+  $effect(() => {
+    if (connectFailed) {
+      logger.error('studio/subscribers payout status query failed', {
+        organizationId: orgId,
+        reason: queryErrorMessage(
+          (connectQuery as QueryResult<unknown> | null)?.error
+        ),
+      });
+    }
+  });
+
+  let connectRetrying = $state(false);
+  /** Outcome of the last Retry, for the copy and for where focus goes. */
+  let connectRetryOutcome = $state<'ok' | 'failed' | null>(null);
+  let connectLoadErrorNode = $state<HTMLElement | null>(null);
+  let connectRetryStatusNode = $state<HTMLElement | null>(null);
+
+  /**
+   * As on the monetisation page: no `loading` on the button, so it never
+   * disables and drops focus; it reads "Retrying…" instead. The outcome is
+   * read from the query, where a failure stays on `.error`. Focus follows it:
+   * on success to the status line (the alert holding the focused button has
+   * unmounted), on a repeat failure back to the alert, whose unchanged text
+   * `role="alert"` would not read out again.
+   */
+  async function retryConnectStatus() {
+    if (!connectQuery || connectRetrying) return;
+    connectRetrying = true;
+    try {
+      await connectQuery.refresh();
+    } catch {
+      // Kept on `connectQuery.error`, which the effect above logs.
+    }
+    connectRetryOutcome = connectFailed ? 'failed' : 'ok';
+    connectRetrying = false;
+    await tick();
+    (connectRetryOutcome === 'ok'
+      ? connectRetryStatusNode
+      : connectLoadErrorNode
+    )?.focus();
+  }
 
   const statsQuery = $derived(
     isOwner && orgId ? getSubscriptionStats(orgId) : null
@@ -161,12 +216,14 @@
   );
   // Fold Connect + tiers loading into the gate so the empty state resolves to
   // the correct prerequisite message once, rather than flashing "set up
-  // payments" before Connect status and tier count have landed.
+  // payments" before Connect status and tier count have landed. Connect counts
+  // through `connectState`, not the query's raw `loading`: a Retry after a
+  // failed read stays `failed` while in flight, so the table doesn't flash
+  // back to skeletons.
   const loading = $derived(
     ((subscribersQuery as QueryResult<SubscribersPage> | null)?.loading ??
       true) ||
-      ((connectQuery as QueryResult<ConnectReadinessStatus> | null)?.loading ??
-        false) ||
+      connectState.kind === 'loading' ||
       ((tiersQuery as QueryResult<TierRow[]> | null)?.loading ?? false)
   );
   // Via `queryErrorMessage` — SvelteKit rejects with `HttpError`, whose text is
@@ -383,8 +440,40 @@
     </PageHeader>
 
     <!-- ABOVE the table, so a blocked org is warned whether or not it has
-         rows. This is the studio-alpha case: real payers, no payout account. -->
-    {#if !loading}
+         rows. This is the studio-alpha case: real payers, no payout account.
+         A failed status read takes the prompt's place: `readiness` is then
+         computed from the "no account" default, and would tell a set-up
+         owner to set up payments (Codex-2hxff.45). -->
+    <!-- Where focus goes after a Retry that loaded the account. `.sr-only`
+         takes it out of the flex flow, so it adds no gap. -->
+    <p
+      bind:this={connectRetryStatusNode}
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+      tabindex="-1"
+    >
+      {connectRetryOutcome === 'ok' ? m.money_setup_load_retry_ok() : ''}
+    </p>
+    {#if connectFailed}
+      <!-- The wrapper takes focus after a Retry that failed again. -->
+      <div bind:this={connectLoadErrorNode} class="load-error-focus" tabindex="-1">
+        <Alert variant="error" data-testid="payout-status-load-error" aria-busy={connectRetrying}>
+          <div class="load-error">
+            <p class="load-error__text">
+              {connectRetryOutcome === 'failed'
+                ? m.money_setup_load_failed_again()
+                : m.money_setup_load_failed()}
+            </p>
+            <Button variant="secondary" size="sm" onclick={retryConnectStatus}>
+              {connectRetrying
+                ? m.money_setup_load_failed_retrying()
+                : m.money_setup_load_failed_retry()}
+            </Button>
+          </div>
+        </Alert>
+      </div>
+    {:else if !loading}
       <MoneySetupPrompt
         {readiness}
         subscriberCount={stats.activeSubscribers}
@@ -502,6 +591,16 @@
               </Button>
             {/snippet}
           </EmptyState>
+        {:else if connectFailed}
+          <!-- Neither "your tiers are live" nor "once the setup above is
+               done": the status is unknown, and the alert above owns Retry. -->
+          <EmptyState
+            size="lg"
+            headingLevel={2}
+            title={m.subscribers_empty_title()}
+            description={m.subscribers_empty_status_unknown_description()}
+            icon={HeartIcon}
+          />
         {:else if readiness.blocking || readiness.state === 'no_tiers'}
           <!-- No CTA: the prompt above already owns the one next action, and a
                second competing button is how the duplication started. -->
@@ -660,6 +759,35 @@
   .chip:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--focus-offset, var(--space-0-5));
+  }
+
+  /* Takes focus after a Retry that failed again; shown for keyboard users. */
+  .load-error-focus:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+    border-radius: var(--radius-md);
+  }
+
+  /* Text and Retry side by side, the button right after the prose (the same
+     shape as MoneySetupPrompt, whose place this takes). */
+  .load-error {
+    display: grid;
+    gap: var(--space-3);
+    align-items: start;
+  }
+
+  @media (--breakpoint-sm) {
+    .load-error {
+      grid-template-columns: minmax(0, auto) auto;
+      justify-content: start;
+      align-items: center;
+      column-gap: var(--space-5);
+    }
+  }
+
+  .load-error__text {
+    margin: 0;
+    color: inherit;
   }
 
   .cancelled-toggle {

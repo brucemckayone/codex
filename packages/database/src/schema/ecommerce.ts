@@ -480,6 +480,13 @@ export const purchases = pgTable(
     // Purchase completion timestamp (when status became 'completed')
     purchasedAt: timestamp('purchased_at', { withTimezone: true }),
 
+    // When the buyer's receipt was claimed: one receipt per purchase, not one
+    // per checkout delivery (Codex-mat01). The first delivery to find the
+    // purchase `completed` claims it (`PurchaseService.claimReceipt`); later
+    // ones find it set. A purchase refunded in full before its checkout
+    // landed is never claimed. Rows before migration 0115 were backfilled.
+    receiptSentAt: timestamp('receipt_sent_at', { withTimezone: true }),
+
     // Refund tracking
     refundedAt: timestamp('refunded_at', { withTimezone: true }),
     refundReason: text('refund_reason'),

@@ -60,13 +60,21 @@ const baseTierSchema = z.object({
   isRecommended: z.boolean().optional(),
 });
 
-export const createTierSchema = baseTierSchema.refine(
-  (data) => data.priceAnnual <= data.priceMonthly * 12,
-  {
+export const createTierSchema = baseTierSchema
+  .extend({
+    /**
+     * One id per create attempt, minted by the dialog when it opens
+     * (Codex-2hxff.66). The Stripe keys are built from it, so a retry or a
+     * double submit with the same id gets back the tier the first attempt made.
+     * The dialog mints a new one when the values change after a failed submit:
+     * Stripe refuses a reused key with different parameters.
+     */
+    submissionId: uuidSchema,
+  })
+  .refine((data) => data.priceAnnual <= data.priceMonthly * 12, {
     message: 'Annual price must offer equal or better value than monthly',
     path: ['priceAnnual'],
-  }
-);
+  });
 
 export const updateTierSchema = baseTierSchema.partial().refine(
   (data) => {

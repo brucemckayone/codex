@@ -28,8 +28,11 @@ set -e
 #     any other value an ::error:: and not sent. Either way the deploy still
 #     succeeds and only the support refund routes fail.
 #   - STRIPE_WEBHOOK_SECRET_* (secrets, ecom-api only — it owns all Stripe webhooks)
-#   - STRIPE_PORTAL_CONFIGURATION_ID (ecom-api only — the locked Billing Portal
-#     configuration, bpc_...; without it the portal refuses to open)
+#   - STRIPE_PORTAL_CONFIGURATION_ID (secret, ecom-api only — the locked Billing
+#     Portal configuration, bpc_...; without it the portal refuses to open).
+#     Sent only when set and a bpc_ id (Codex-2hxff.41); unset is a
+#     ::warning::, any other value an ::error:: and not sent. Either way the
+#     deploy carries on and ecom-api keeps the value it already holds.
 #   - BETTER_AUTH_SECRET, SESSION_SECRET (secrets, auth only)
 #   - RUNPOD_* (secrets, media-api only)
 #   - WORKER_SHARED_SECRET (secret, every worker that makes or receives a
@@ -97,6 +100,26 @@ echo "📤 Uploading secrets to ${WORKER_NAME}..."
 # Note: R2_BUCKET_* are passed as --var during deploy, not as secrets
 case "$WORKER" in
   ecom-api)
+    # STRIPE_PORTAL_CONFIGURATION_ID is sent ONLY when set and a bpc_ id
+    # (Codex-2hxff.41), the admin-api key pattern below. An empty value would
+    # overwrite the working configuration with "", and the portal then refuses
+    # every subscriber's "Manage billing". Leaving the key out keeps what
+    # ecom-api already holds. Never ${VAR:?}: ecom-api is DEPLOYED before this
+    # step runs, so an abort would leave its new code on stale secrets and skip
+    # every worker deployed after it. Unset is a warning; any other value an
+    # error and not sent. A bpc_ id carries no live/test mode, so there is no
+    # mode check like admin-api's. The whole value must be bpc_ and letters or
+    # digits: a prefix glob let a trailing space or a quote through, which the
+    # JSON below carries to ecom-api and the portal then refuses.
+    PORTAL_JSON=""
+    if [ -z "${STRIPE_PORTAL_CONFIGURATION_ID:-}" ]; then
+      echo "::warning title=ecom-api portal config::STRIPE_PORTAL_CONFIGURATION_ID is not set: ecom-api's value is left as it is, and the billing portal refuses to open without one"
+    elif [[ ! "$STRIPE_PORTAL_CONFIGURATION_ID" =~ ^bpc_[A-Za-z0-9]+$ ]]; then
+      echo "::error title=ecom-api portal config::STRIPE_PORTAL_CONFIGURATION_ID is not a bpc_ id (bpc_ then letters and digits only): not uploaded, ecom-api's value is left as it is"
+    else
+      PORTAL_JSON=",
+  \"STRIPE_PORTAL_CONFIGURATION_ID\":\"${STRIPE_PORTAL_CONFIGURATION_ID}\""
+    fi
     SECRETS_JSON=$(cat <<EOF
 {
   "DATABASE_URL":"${DATABASE_URL}",
@@ -107,8 +130,7 @@ case "$WORKER" in
   "STRIPE_WEBHOOK_SECRET_CUSTOMER":"${STRIPE_WEBHOOK_SECRET_CUSTOMER}",
   "STRIPE_WEBHOOK_SECRET_BOOKING":"${STRIPE_WEBHOOK_SECRET_BOOKING}",
   "STRIPE_WEBHOOK_SECRET_DISPUTE":"${STRIPE_WEBHOOK_SECRET_DISPUTE}",
-  "STRIPE_PORTAL_CONFIGURATION_ID":"${STRIPE_PORTAL_CONFIGURATION_ID:-}",
-  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"${PORTAL_JSON}
 }
 EOF
 )

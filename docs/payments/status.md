@@ -34,19 +34,15 @@ fixed by PR 2 below. The production checks to run around these releases
 |---|---|---|---|
 | `Codex-2hxff.16` | P2 | Downgrades at period end; tier reorders warn first | [subscriptions](subscriptions.md#changing-tier) |
 | `Codex-2hxff.20` | P2 | Revenue screens and agreement emails show the real numbers and working links | [fees-and-splits](fees-and-splits.md#reporting) |
-| `Codex-fazy6` | P3 | The web app shows a creator's share from the accepted proposal, not the legacy column | [agreements](agreements.md#what-an-agreement-is) |
-| `Codex-mat01` | P3 | A redelivered checkout event sends no second receipt | [purchases](purchases.md) |
 | `Codex-2hxff.22` | P2 | Success pages wait for our record | [purchases](purchases.md) |
 | `Codex-2hxff.24` | P3 | Dev and CI Stripe setup mirrors production; customer stub removed | [operations](operations.md#local-development) |
 | `Codex-2hxff.25` | P2 | CI exercises real webhook round trips | [operations](operations.md#testing) |
-| `Codex-2hxff.28` | P2 | Support issues refunds from an admin screen, not the Stripe Dashboard, within 14 days | [purchases](purchases.md#refunds) |
 | `Codex-2hxff.29` | P2 | Creators' bank payouts are held for the 14-day refund window | [connect-and-payouts](connect-and-payouts.md#payout-timing) |
 | `Codex-2hxff.30` | P2 | A clawback shortfall is recovered from the creator's future earnings | [connect-and-payouts](connect-and-payouts.md#reversals) |
 | `Codex-2hxff.33` | P2 | A fee increase applies 30 days after an email; a decrease at once | [fees-and-splits](fees-and-splits.md#fee-configuration) |
 | `Codex-2hxff.34` | P3 | Creators are reminded monthly about money waiting for them | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
 | `Codex-2hxff.52` | P2 | Pausing, resuming, a failed payment and a trial ending work for course subscriptions as for tiers | [subscriptions](subscriptions.md#lifecycle-and-access) |
 | `Codex-2hxff.55` | P2 | A service built without its money dependencies (fee configuration) cannot compile | [architecture](architecture.md) |
-| `Codex-2hxff.60` | P3 | A subscriber is told when a dispute pauses their access | [subscription disputes](subscription-disputes.md) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
 
@@ -83,8 +79,32 @@ one pull request with migration `0113`, and so are not listed above:
 - an early partial refund no longer under-pays the creator, and a course refund
   that arrives before its purchase is recorded too.
 
-The web app's agreement pages still read the legacy share column (the API now
-also returns `creatorSharePercent`): `Codex-fazy6`.
+`Codex-2hxff.28` (support refunds) and `.60` (the dispute notice) are fixed in
+one pull request, #644, with migration `0114`, and so are not listed above:
+- support refunds from the admin Refunds screen within 14 days, and settles a
+  refund Stripe failed there: re-pay the creators, or mark it refunded
+  elsewhere (owner decisions 2026-10-24 and 2026-10-25);
+- a subscriber, or a learner whose course access is paused, is told a dispute
+  paused it (owner, "Notice for courses too").
+
+`Codex-mat01`, `Codex-fazy6`, `Codex-r094t`, `Codex-pqsfg` and
+`Codex-2hxff.40`, `.41`, `.42`, `.44`, `.45`, `.53` and `.66` (the bug sweep)
+are fixed in one pull request with migration `0115`, and so are not listed
+above:
+- one receipt per purchase (owner, "One receipt per purchase");
+- the web reads an agreement's own share, and a missing one shows "—" (owner,
+  "Show '—'");
+- a repeated tier or course-plan create returns what the first made (owner,
+  "Quietly return the first"; a plan's key changes hourly, "Hourly key");
+- the price-change email quotes what each subscriber is billed today;
+- a failed payout-account read says so, with Retry (owner, "'Couldn't load' +
+  Retry");
+- a failed ownership-offer read no longer keeps an owner out of the studio
+  (owner, "Let them in, no banner");
+- the deploy keeps the working portal configuration id (owner, "Keep old
+  value + warn");
+- a refused platform-side payout raises one error per drain, not one per row;
+  a transfer both sides reversed ends `reversed`.
 
 `Codex-2hxff.7` (fee configuration on every sale path, including the 25p
 minimum), `.8` (partial refunds) and `.9` (disputes) were merged to `dev` and

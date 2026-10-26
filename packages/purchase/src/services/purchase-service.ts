@@ -802,6 +802,34 @@ export class PurchaseService extends BaseService {
     }
   }
 
+  /**
+   * Claim the purchase's receipt email: one per purchase, not one per checkout
+   * delivery (Codex-mat01; owner decision 2026-10-25). True for exactly one
+   * caller, the first to find the purchase live (`completed`) and unclaimed;
+   * every later delivery gets false. A purchase refunded in full before its
+   * checkout landed gets none, and one partly refunded first is still
+   * completed and gets one. The claim is made before the email is sent, so a
+   * send that then fails is not retried, as for refund emails.
+   */
+  async claimReceipt(purchaseId: string): Promise<boolean> {
+    try {
+      const claimed = await this.db
+        .update(purchases)
+        .set({ receiptSentAt: new Date() })
+        .where(
+          and(
+            eq(purchases.id, purchaseId),
+            eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+            isNull(purchases.receiptSentAt)
+          )
+        )
+        .returning();
+      return claimed.length > 0;
+    } catch (error) {
+      this.handleError(error, 'claimReceipt');
+    }
+  }
+
   // ─── A second payment for an owned item (Codex-2hxff.14) ───────────────────
 
   /**

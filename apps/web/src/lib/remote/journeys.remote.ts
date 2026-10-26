@@ -851,6 +851,44 @@ export const getCourseOffer = query(
 );
 
 /**
+ * The course plan's typed Stripe refusals (`course-subscription-service.ts`,
+ * Codex-2hxff.66): a 503 when Stripe failed, a 409 when the plan's key was
+ * reused with other values or is still in flight.
+ */
+const COURSE_PLAN_REFUSAL_CODES = new Set([
+  'STRIPE_UNAVAILABLE',
+  'COURSE_PLAN_KEY_REUSED',
+  'COURSE_PLAN_IN_PROGRESS',
+]);
+
+/**
+ * A course plan refusal as the error body the browser gets: the worker's
+ * message, its `details.code` and, when set, `details.retryAfter`. Null for
+ * any other error. Only those two fields of `details` go on, never the rest.
+ */
+function coursePlanRefusal(
+  err: unknown
+): { status: number; body: App.Error } | null {
+  if (!ApiError.isApiError(err)) return null;
+  if (!err.details || typeof err.details !== 'object') return null;
+  const { code, retryAfter } = err.details as {
+    code?: unknown;
+    retryAfter?: unknown;
+  };
+  if (typeof code !== 'string' || !COURSE_PLAN_REFUSAL_CODES.has(code)) {
+    return null;
+  }
+  return {
+    status: err.status,
+    body: {
+      message: err.message,
+      code,
+      ...(typeof retryAfter === 'string' && { retryAfter }),
+    },
+  };
+}
+
+/**
  * Persist the course's ways-in that live OUTSIDE the page row: the subscription
  * plan and the tier-access set. A TOTAL write — `subscriptionEnabled: false`
  * withdraws the plan and `tierIds: []` clears tier access, because an
@@ -938,6 +976,13 @@ export const updateCourseMonetisation = command(
           'Connect a payout account before selling a course subscription — finish Stripe onboarding in Studio → Monetisation.'
         );
       }
+      // The plan's own Stripe refusals (Codex-2hxff.66) go on with their code
+      // and, for the two that hold until the hour turns, `retryAfter`, so the
+      // builder can say when to try again in the creator's local time. This
+      // includes the 503: its text is written to be shown and its details hold
+      // only ids. Any other 5xx still propagates below.
+      const planRefusal = coursePlanRefusal(err);
+      if (planRefusal) error(planRefusal.status, planRefusal.body);
       // Everything else 4xx is the service's own guidance (a price below £1, an
       // annual price worse than 12× monthly, a tier from another org). Forward
       // the text; 5xx may carry internals, so it propagates untouched.

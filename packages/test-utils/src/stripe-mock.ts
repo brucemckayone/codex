@@ -228,6 +228,24 @@ export function createMockStripe(): Stripe {
             return transfer;
           }
         ),
+      // With what its reversals here took back: `reversed` once they cover
+      // it, as Stripe reports a transfer reversed in full (Codex-pqsfg). An
+      // id this mock never made is a transfer nothing has reversed.
+      retrieve: vi.fn().mockImplementation(async (transferId: string) => {
+        const transfer = createdTransfers.find((t) => t.id === transferId);
+        const amountReversed = createdReversals
+          .filter((r) => r.transfer === transferId)
+          .reduce((sum, r) => sum + r.amount, 0);
+        return {
+          object: 'transfer',
+          ...transfer,
+          id: transferId,
+          amount_reversed: amountReversed,
+          reversed:
+            transfer !== undefined &&
+            amountReversed >= Number(transfer.amount ?? 0),
+        };
+      }),
       // Newest first, like Stripe; honours destination, created.gte, limit
       // (Stripe's default 10) and starting_after.
       list: vi
@@ -312,10 +330,13 @@ export function createMockStripe(): Stripe {
         ),
     },
 
+    // One charge per PaymentIntent, as at Stripe (pi_x → ch_x): a redelivered
+    // invoice must resolve the charge its first delivery did, or its payouts
+    // are keyed twice. `paidByCard` names its PaymentIntent to match.
     paymentIntents: {
-      retrieve: vi.fn().mockImplementation(async (_piId: string) => ({
-        id: _piId,
-        latest_charge: nextId('ch'),
+      retrieve: vi.fn().mockImplementation(async (piId: string) => ({
+        id: piId,
+        latest_charge: `ch_${piId.replace(/^pi_/, '')}`,
       })),
     },
 

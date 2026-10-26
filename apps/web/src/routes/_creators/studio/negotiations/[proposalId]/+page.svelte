@@ -27,6 +27,8 @@
   import { browser } from '$app/environment';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import AgreementShare from '$lib/components/agreements/AgreementShare.svelte';
+  import { isShareMissing } from '$lib/components/agreements/agreement-share';
   import CounterProposalDialog from '$lib/components/agreements/CounterProposalDialog.svelte';
   import NegotiationThread from '$lib/components/agreements/NegotiationThread.svelte';
   import RevenueSplitPie from '$lib/components/agreements/RevenueSplitPie.svelte';
@@ -127,12 +129,15 @@
 
   // The creator's own current share (BP) in this pool. Source of truth
   // priority:
-  //   1. Active agreement row (`10000 - organizationFeePercentage`)
+  //   1. Active agreement row: its own `creatorSharePercent`, never
+  //      `10000 - organizationFeePercentage` (Codex-fazy6). `null` when its
+  //      accepted proposal link is missing: shown as "—", counted as 0. An
+  //      older payload without the field gives `undefined`, folded to `null`.
   //   2. Latest open proposal's proposed share (proposal-only thread)
   //   3. Latest proposal in thread (for past states)
-  const mySharePercent = $derived.by(() => {
+  const mySharePercent = $derived.by((): number | null => {
     if (activeAgreement) {
-      return 10000 - activeAgreement.organizationFeePercentage;
+      return activeAgreement.creatorSharePercent ?? null;
     }
     if (latestProposal) {
       return latestProposal.proposedCreatorSharePercent;
@@ -144,25 +149,27 @@
   // platform fee (locked, handled by component) → my slice → anonymised
   // peer aggregate (single slice) → org residual. No peer identifiers
   // present anywhere in this array — defensive against any future
-  // server-side leak.
+  // server-side leak. A missing share gets no slice: the legend would
+  // label it "0%".
   const pieSlices = $derived.by((): RevenueSplitSlice[] => {
     const availableBp = 10000 - PLATFORM_FEE_BP;
     const peerAggregate = peersForPool?.aggregateSharePercent ?? 0;
     const orgResidual = Math.max(
       0,
-      availableBp - mySharePercent - peerAggregate
+      availableBp - (mySharePercent ?? 0) - peerAggregate
     );
 
-    const slices: RevenueSplitSlice[] = [
-      {
+    const slices: RevenueSplitSlice[] = [];
+    if (!isShareMissing(mySharePercent)) {
+      slices.push({
         id: '__me__',
         label: 'Your share',
         percent: mySharePercent,
         color: 'var(--color-interactive)',
         locked: true,
         anonymous: false,
-      },
-    ];
+      });
+    }
     if (peersForPool && peersForPool.count > 0) {
       slices.push({
         id: '__peers__',
@@ -392,7 +399,7 @@
         readOnly
       />
       <p class="agreement-detail__split-summary">
-        Your share: <strong>{formatPercent(mySharePercent)}</strong>
+        Your share: <strong><AgreementShare bps={mySharePercent} /></strong>
         of post-platform {revenueLabel} revenue.
         {#if peersForPool && peersForPool.count > 0}
           {peersForPool.count}

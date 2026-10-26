@@ -53,9 +53,11 @@ has no current proposal; it pays nothing", each with an errorId:
 - the admin revenue-by-creator view.
 
 The legacy column `organization_fee_percentage` holds `10000 − share` and is
-still written; new code must not read it — **gap**: `Codex-fazy6` (the web
-pages that rebuild the share from it still do; while the dual-write holds they
-show the right number).
+still written; new code must not read it. The web app reads only
+`creatorSharePercent` (`agreement-share.ts`): a missing share shows "—", never
+0%, and adds nothing to a total (owner decision 2026-10-25, "Show '—'";
+`Codex-fazy6`). Nothing on the web reads the legacy column any more, so the
+dual-write can stop once nothing on the server needs it.
 
 ## Negotiating
 

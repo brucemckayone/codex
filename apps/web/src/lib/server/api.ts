@@ -40,6 +40,7 @@ import type {
 } from '@codex/admin';
 import type {
   AgreementProposal,
+  AgreementWithShare,
   CreatorOrganizationAgreement,
 } from '@codex/agreements';
 import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
@@ -3283,6 +3284,10 @@ export function createServerApi(
        * Owner-view list of active agreements for an org. Worker re-derives
        * scope from authenticated membership — `organizationId` in the
        * query is used only to resolve the `procedure()` membership gate.
+       *
+       * Each row carries `creatorSharePercent`, its accepted proposal's
+       * share (`null` when that link is missing). Display reads that, never
+       * the legacy `organizationFeePercentage` (Codex-fazy6).
        */
       list: (
         organizationId: string,
@@ -3290,7 +3295,7 @@ export function createServerApi(
       ) => {
         const search = new URLSearchParams();
         if (params?.revenueType) search.set('revenueType', params.revenueType);
-        return request<PaginatedListResponse<CreatorOrganizationAgreement>>(
+        return request<PaginatedListResponse<AgreementWithShare>>(
           'ecom',
           withOrg('/agreements', organizationId, search)
         );
@@ -3339,6 +3344,10 @@ export function createServerApi(
       /**
        * Creator-view: my agreements across every org, with anonymised peer
        * aggregates. Worker scopes on `ctx.user.id`.
+       *
+       * The worker also still sends the legacy `organizationFeePercentage`.
+       * It is left out of this type, and of `getCreatorPortfolio`'s, so
+       * nothing here can rebuild a share from it (Codex-fazy6).
        */
       listForCreator: () =>
         request<
@@ -3350,7 +3359,8 @@ export function createServerApi(
             status: string;
             effectiveFrom: string | Date;
             effectiveUntil: string | Date | null;
-            organizationFeePercentage: number;
+            /** Basis points, from the accepted proposal; `null` = missing. */
+            creatorSharePercent: number | null;
             currentProposalId: string | null;
             terminatedAt: string | Date | null;
             peers: { count: number; aggregateSharePercent: number };
@@ -3374,7 +3384,8 @@ export function createServerApi(
             status: string;
             effectiveFrom: string | Date;
             effectiveUntil: string | Date | null;
-            organizationFeePercentage: number;
+            /** Basis points, from the accepted proposal; `null` = missing. */
+            creatorSharePercent: number | null;
             currentProposalId: string | null;
             terminatedAt: string | Date | null;
             peers: { count: number; aggregateSharePercent: number };

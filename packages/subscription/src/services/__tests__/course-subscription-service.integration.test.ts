@@ -31,6 +31,7 @@ import {
   createTestConnectAccountInput,
   createUniqueSlug,
   type Database,
+  paidByCard,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -46,39 +47,6 @@ import {
   COURSE_SUBSCRIPTION_METADATA_TYPE,
   CourseSubscriptionService,
 } from '../course-subscription-service';
-
-/**
- * A card-paid invoice's payment as Stripe sends it: the PaymentIntent and NO
- * `charge`. Stripe surfaces `charge` only for a charge without a PaymentIntent
- * (sandbox invoice in_1USC217wyGmo4sh63iTqUPkW, 2026-10-19). These fixtures
- * used to set both, which hid Codex-2hxff.50: the course path read only
- * `charge`, so a real invoice recorded no payouts.
- */
-function paidByCard(chargeId: string) {
-  return {
-    data: [
-      {
-        payment: {
-          type: 'payment_intent',
-          payment_intent: chargeId.replace(/^ch_/, 'pi_'),
-        },
-      },
-    ],
-  };
-}
-
-/**
- * createMockStripe's paymentIntents.retrieve mints a fresh `latest_charge` on
- * every call. Real Stripe returns the same one, so a redelivered invoice
- * resolves the same charge: pi_<x> → ch_<x>.
- */
-function stripeWithStableCharges(): Stripe {
-  const stripe = createMockStripe();
-  vi.mocked(stripe.paymentIntents.retrieve).mockImplementation((async (
-    id: string
-  ) => ({ id, latest_charge: id.replace(/^pi_/, 'ch_') })) as never);
-  return stripe;
-}
 
 describe('CourseSubscriptionService lifecycle (WP-6)', () => {
   let db: Database;
@@ -141,7 +109,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
 
     service = new CourseSubscriptionService(
       { db, environment: 'test' },
-      stripeWithStableCharges()
+      createMockStripe()
     );
   });
 
@@ -461,7 +429,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     if (!row) throw new Error('course sub not recorded');
 
     const chargeId = `ch_${randomUUID().slice(0, 8)}`;
-    const stripe = stripeWithStableCharges();
+    const stripe = createMockStripe();
     vi.mocked(stripe.invoices.retrieve).mockImplementation((async (
       id: string
     ) => ({ id, payments: paidByCard(chargeId) })) as never);
@@ -567,7 +535,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
     const failing = dropsOnCreatorSlice(db);
     const dying = new CourseSubscriptionService(
       { db: failing, environment: 'test' },
-      stripeWithStableCharges()
+      createMockStripe()
     );
     await expect(
       dying.handleCourseInvoicePaymentSucceeded(invoice, sub)

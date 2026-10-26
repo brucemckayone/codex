@@ -236,7 +236,10 @@ subscribers on that interval are then each handled by `schedulePriceChange`
 - A tier change clears a pending price change; cancelling and reactivating
   keep it.
 - Each subscriber is emailed (`subscription-tier-price-change`) with the date
-  of the renewal that first bills the new price.
+  of the renewal that first bills the new price. The "from" figure is what that
+  subscriber is billed today, not the previous list price: a tier quotes the
+  subscription's own snapshot, a course plan its live Stripe item
+  (`Codex-2hxff.40`).
 - A Price created in the Stripe Dashboard is logged as drift
   (`TierService.recordStripePriceDrift`); the tier keeps its own Price and no
   subscriber moves.
@@ -316,8 +319,11 @@ Q-B):
   cancellation email.
 - **Inquiry:** nothing changes for the subscriber.
 
-The subscriber is not told why access is paused: the account page still says
-Active (Q-B). A notice is planned, to be mocked up first: `Codex-2hxff.60`.
+The subscriber is told why access is paused (`Codex-2hxff.60`): the content
+page says "Access paused" with no Buy button, and the account page shows a
+"Paused: payment dispute" badge and hides Change Plan. A course lesson paused
+by a dispute shows the same notice (owner decision 2026-10-24, "Notice for
+courses too"). The detail is in [subscription disputes](subscription-disputes.md).
 
 ## Billing portal
 

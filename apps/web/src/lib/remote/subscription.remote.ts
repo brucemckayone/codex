@@ -17,6 +17,7 @@ import {
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import { ApiError } from '$lib/api/errors';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 
 type SubscriptionCommandFailure = {
@@ -40,7 +41,21 @@ function detailsCodeOf(details: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
-function toCommandFailure(error: unknown): SubscriptionCommandFailure {
+/**
+ * A failed command as the answer the page reads.
+ *
+ * An `ApiError` is the worker's own answer, and goes on as it is. Anything
+ * else had no answer behind it: the fetch to the worker threw (a dropped
+ * connection) or the success body would not parse, so the worker may still
+ * have acted. Returning it skips the `handleError` hook a throw would reach,
+ * so it is logged here, where its cause is (Codex-2hxff.66), and the browser
+ * gets fixed copy, never `error.message`.
+ */
+function toCommandFailure(
+  error: unknown,
+  commandName: string,
+  organizationId: string
+): SubscriptionCommandFailure {
   if (ApiError.isApiError(error)) {
     return {
       success: false,
@@ -50,11 +65,19 @@ function toCommandFailure(error: unknown): SubscriptionCommandFailure {
       status: error.status,
     };
   }
+  logger.error(
+    `subscription command ${commandName} failed with no API answer`,
+    {
+      organizationId,
+      errorName: error instanceof Error ? error.name : typeof error,
+      reason: error instanceof Error ? error.message : String(error),
+    }
+  );
   return {
     success: false,
     code: undefined,
     detailsCode: undefined,
-    message: error instanceof Error ? error.message : 'Unexpected error',
+    message: 'An unexpected error occurred',
     status: 500,
   };
 }
@@ -136,7 +159,11 @@ export const createSubscriptionCheckoutSession = command(
 
       return { success: true as const, sessionUrl: result.sessionUrl };
     } catch (error) {
-      return toCommandFailure(error);
+      return toCommandFailure(
+        error,
+        'createSubscriptionCheckoutSession',
+        organizationId
+      );
     }
   }
 );
@@ -171,7 +198,11 @@ export const previewSubscriptionTierChange = command(
       const result = await api.subscription.previewTierChange(input);
       return { success: true as const, data: result };
     } catch (error) {
-      return toCommandFailure(error);
+      return toCommandFailure(
+        error,
+        'previewSubscriptionTierChange',
+        input.organizationId
+      );
     }
   }
 );
@@ -188,7 +219,11 @@ export const changeSubscriptionTier = command(
       const result = await api.subscription.changeTier(input);
       return { success: true as const, data: result };
     } catch (error) {
-      return toCommandFailure(error);
+      return toCommandFailure(
+        error,
+        'changeSubscriptionTier',
+        input.organizationId
+      );
     }
   }
 );
@@ -220,7 +255,11 @@ export const cancelSubscription = command(
       const result = await api.subscription.cancel(input);
       return { success: true as const, data: result };
     } catch (error) {
-      return toCommandFailure(error);
+      return toCommandFailure(
+        error,
+        'cancelSubscription',
+        input.organizationId
+      );
     }
   }
 );
@@ -241,7 +280,11 @@ export const reactivateSubscription = command(
       const result = await api.subscription.reactivate(input);
       return { success: true as const, data: result };
     } catch (error) {
-      return toCommandFailure(error);
+      return toCommandFailure(
+        error,
+        'reactivateSubscription',
+        input.organizationId
+      );
     }
   }
 );
@@ -266,7 +309,11 @@ export const resumeSubscription = command(
       const result = await api.subscription.resume(input);
       return { success: true as const, data: result };
     } catch (error) {
-      return toCommandFailure(error);
+      return toCommandFailure(
+        error,
+        'resumeSubscription',
+        input.organizationId
+      );
     }
   }
 );
@@ -277,6 +324,12 @@ export const resumeSubscription = command(
 
 const createTierCommandSchema = z.object({
   orgId: z.string().uuid(),
+  /**
+   * One id per create attempt, minted by the tier dialog (Codex-2hxff.66). The
+   * server keys the Stripe product and prices on it, so a retry or a double
+   * submit with the same id gets back the tier the first attempt made.
+   */
+  submissionId: z.string().uuid(),
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
   priceMonthly: z.number().int().min(100),
@@ -286,13 +339,26 @@ const createTierCommandSchema = z.object({
 
 /**
  * Create a new subscription tier for an org.
+ *
+ * A refusal is RETURNED, not thrown (Codex-2hxff.66). The dialog has to tell
+ * the worker's typed refusals apart, and they sit in `details.code`: 409
+ * `SUBMISSION_IN_PROGRESS` / `SUBMISSION_ID_REUSED` and 503
+ * `STRIPE_UNAVAILABLE`. A thrown error reaches the browser as a sanitised 500
+ * with no code: a 4xx unless forwarded, and a 5xx always.
  */
 export const createTier = command(
   createTierCommandSchema,
   async ({ orgId, ...data }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.tiers.create(orgId, data);
+    try {
+      return {
+        success: true as const,
+        tier: await api.tiers.create(orgId, data),
+      };
+    } catch (error) {
+      return toCommandFailure(error, 'createTier', orgId);
+    }
   }
 );
 

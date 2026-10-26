@@ -246,7 +246,10 @@ Rules:
   any account the payee has had ([replaced accounts](#transfers)), and
   reverses that like a paid row's. A transfer that lands after the cancel is
   reversed by whoever sent it: its row is no longer payable, so nothing would
-  ever account for the money. That includes a transfer whose call failed
+  ever account for the money. Both the refund and the sender may find it;
+  Stripe refuses whichever full reversal comes second, and that side, seeing
+  the transfer `reversed`, treats it as done. Either way the row ends
+  `reversed`, recording the transfer (`Codex-pqsfg`). That includes a transfer whose call failed
   without an answer from Stripe: the sender looks it up by its `payout_id` and
   reverses it, and if it cannot be found, logs an error with the row and the
   transfer's idempotency key for a person to check. Stripe does not reverse
@@ -402,7 +405,7 @@ failed (`classifyTransferFailure` in `packages/payments/src/payout-ledger.ts`):
 | Failure | Uses an attempt | What happens |
 |---|---|---|
 | Stripe could not answer: a connection error, a 5xx, a rate limit, a lock or key conflict | No | Retried by the next drain; a warning |
-| The platform's side: `balance_insufficient`, the platform's keys or Connect setup, or a fault of ours | No | Retried by the next drain; an **error every time**, because a person may need to act (top up the balance, fix a key) |
+| The platform's side: `balance_insufficient`, the platform's keys or Connect setup, or a fault of ours | No | Retried by the next drain. A warning per row and **one error per drain run** (for the hourly sweep, one per sweep), because a person may need to act (top up the balance, fix a key). The error is raised at the run's first platform failure, with its errorId, code and message, so a run cut short still alerts; the end of the run logs a summary at warn under the same errorId (row count, total pence, codes, the first message). The write path's own attempt is an error at once (`Codex-r094t`) |
 | A refusal no retry can fix: `transfers_not_allowed`, or `resource_missing` on the `destination` (the payee's account no longer exists) | No | **Flagged at once** |
 | Any other refusal | Yes (`failure_count`) | Retried; the **fifth** (`MAX_PAYOUT_FAILURES`, the same cap as refund clawbacks) flags it |
 

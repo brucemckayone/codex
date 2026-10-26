@@ -201,6 +201,45 @@ const emailDate = new Intl.DateTimeFormat('en-GB', {
 const notTheActiveOwner = () =>
   sql`not (${organizationMemberships.role} = 'owner' and ${organizationMemberships.status} = 'active')`;
 
+/** How far down a cause chain to look (and the guard against a cycle). */
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * The innermost error under `error`, for a log line: its name, its message
+ * and the deepest string `code` on the way down (a SQLSTATE or socket code).
+ * Drizzle wraps a failed query in an error whose message is the SQL and its
+ * bound values; the driver's error under it says what went wrong. A
+ * `Failed query:` message is never logged. The same reading as payments'
+ * clawback `rootCauseOf` and ecom-api's `describeRootCause`.
+ */
+function rootCauseOf(error: unknown): {
+  errorName: string;
+  errorMessage: string;
+  code: string | undefined;
+} {
+  let current: unknown = error;
+  let code: string | undefined;
+  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+    if (!(current instanceof Error)) break;
+    const own = (current as { code?: unknown }).code;
+    if (typeof own === 'string') code = own;
+    const inner =
+      current.cause ?? (current as { sourceError?: unknown }).sourceError;
+    if (!(inner instanceof Error)) break;
+    current = inner;
+  }
+  if (!(current instanceof Error)) {
+    return { errorName: typeof current, errorMessage: String(current), code };
+  }
+  return {
+    errorName: current.name,
+    errorMessage: current.message.startsWith('Failed query:')
+      ? '(query omitted)'
+      : current.message,
+    code,
+  };
+}
+
 export class OrganizationService extends BaseService {
   /**
    * Narrowed `logoUrl` schema, bound to this worker's asset CDN base.
@@ -944,6 +983,12 @@ export class OrganizationService extends BaseService {
    * Returns null for role/joinedAt if not a member (graceful degradation).
    * Does not throw errors for "not found" - this is intentional for frontend convenience.
    *
+   * The ownership-offer banner is read apart from the membership it decorates
+   * (Codex-2hxff.42): a failed offer read is logged and answered as "no
+   * offer", so the owner still gets their studio and the next load brings
+   * the banner back. A failed MEMBERSHIP read still throws: that is the
+   * access check, and the studio layout turns it into a retry page.
+   *
    * @param organizationId - Organization ID
    * @param userId - User ID to check membership for
    * @returns Membership lookup response with role and joinedAt (both null if not a member)
@@ -983,7 +1028,18 @@ export class OrganizationService extends BaseService {
               organizationId,
               userId,
               new Date()
-            )
+            ).catch((error: unknown) => {
+              this.obs.error(
+                'Ownership offer read failed; membership answered without it',
+                {
+                  errorId: crypto.randomUUID(),
+                  organizationId,
+                  userId,
+                  ...rootCauseOf(error),
+                }
+              );
+              return null;
+            })
           : null,
       };
     } catch (error) {

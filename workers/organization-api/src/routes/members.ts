@@ -24,16 +24,14 @@ import {
   uuidSchema,
 } from '@codex/validation';
 import {
+  dispatchOrgSlugInvalidation,
+  invalidateMembershipCache,
   PaginatedResult,
   procedure,
   sendEmailToWorker,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import {
-  dispatchOrgSlugInvalidation,
-  invalidateMembershipCache,
-} from '../utils/membership-invalidation';
 
 const app = new Hono<HonoEnv>();
 
@@ -90,7 +88,12 @@ app.post(
       // Bust the per-user membership cache so the new member's next
       // `requireOrgMembership` check sees them, then invalidate public
       // org caches (creators / stats) that reflect membership.
-      invalidateMembershipCache(ctx, ctx.input.params.id, result.userId);
+      invalidateMembershipCache(
+        ctx,
+        ctx.input.params.id,
+        result.userId,
+        ctx.obs
+      );
       dispatchOrgSlugInvalidation(ctx, ctx.input.params.id, ctx.obs);
       // Invalidate invited user's library cache (Codex-c01do) — gaining a
       // management role unlocks team-only content in their library UI.
@@ -148,7 +151,8 @@ app.patch(
       invalidateMembershipCache(
         ctx,
         ctx.input.params.id,
-        ctx.input.params.userId
+        ctx.input.params.userId,
+        ctx.obs
       );
       dispatchOrgSlugInvalidation(ctx, ctx.input.params.id, ctx.obs);
       // Invalidate the role-target user's library cache (Codex-c01do) — role
@@ -197,7 +201,8 @@ app.delete(
       invalidateMembershipCache(
         ctx,
         ctx.input.params.id,
-        ctx.input.params.userId
+        ctx.input.params.userId,
+        ctx.obs
       );
       dispatchOrgSlugInvalidation(ctx, ctx.input.params.id, ctx.obs);
       // Invalidate the removed user's library cache (Codex-c01do) — they

@@ -114,6 +114,11 @@ import {
   ForbiddenError,
   SubscriptionCheckoutError,
 } from '../errors';
+import {
+  type CreateKeySubject,
+  createKeyRefusal,
+  stripeRefusalDetail,
+} from './create-key-refusal';
 import { schedulePriceChange } from './pending-price-change';
 import { resolveStatus } from './stripe-status-mapper';
 import {
@@ -124,6 +129,13 @@ import type { TierPriceChangeMailer } from './subscription-service';
 
 /** Marks a Stripe subscription as a course sub (vs. an org tier sub). */
 export const COURSE_SUBSCRIPTION_METADATA_TYPE = 'course_subscription';
+
+/** Codes for Stripe's refusals of a course plan create (Codex-2hxff.66). */
+const COURSE_PLAN_CREATE_KEY: CreateKeySubject = {
+  noun: 'plan',
+  reusedCode: 'COURSE_PLAN_KEY_REUSED',
+  inProgressCode: 'COURSE_PLAN_IN_PROGRESS',
+};
 
 type Tx = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
 
@@ -145,6 +157,11 @@ interface CourseSubscriptionServiceConfig extends ServiceConfig {
 interface PlanPriceMove {
   interval: 'month' | 'year';
   newPriceId: string;
+  /**
+   * The plan's previous LIST price. Not what a subscriber pays: the notice
+   * quotes their live item (`PriceChangeOutcome.currentAmountCents`), and
+   * this is only the fallback when that has no unit amount (Codex-2hxff.40).
+   */
   oldAmountCents: number;
   newAmountCents: number;
 }
@@ -266,12 +283,23 @@ export class CourseSubscriptionService extends BaseService {
    * Prefer {@link upsertPlan} from a management surface — this throws
    * {@link CourseSubscriptionPlanExistsError} on a second call, which makes it
    * unusable directly behind a "save" button.
+   *
+   * Two creates racing for a course make one plan (Codex-2hxff.66; owner
+   * decisions 2026-10-25 and 2026-10-26). The keys are the course, its plan
+   * generation and the UTC hour, so racers in one hour share one Product and
+   * clean-up never leaves it archived. Racers either side of an hour boundary
+   * make two Products: the loser archives its spare and throws
+   * {@link CourseSubscriptionPlanExistsError}, so {@link upsertPlan} returns
+   * the plan that won.
    */
   async createPlan(
     organizationId: string,
     courseId: string,
     input: { priceMonthly: number; priceAnnual: number }
   ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
+    // Read once: the keys' UTC hour, and a refusal's retryAfter, both come
+    // from this instant.
+    const keyedAt = Date.now();
     try {
       const course = await this.getCourseInOrgOrThrow(organizationId, courseId);
 
@@ -295,7 +323,22 @@ export class CourseSubscriptionService extends BaseService {
         throw new CourseSubscriptionPlanExistsError(courseId);
       }
 
-      const idempotencyBase = crypto.randomUUID();
+      // Keys that survive a retry (Codex-2hxff.66): the course, its plan
+      // generation and the UTC hour, so a concurrent twin of this create, or a
+      // retry of one that failed after Stripe, gets back the same Product and
+      // Prices instead of making new ones. The generation counts deleted
+      // plans too, so a plan made after one was deleted gets fresh keys. The
+      // hour (owner decision 2026-10-26) bounds a Stripe failure that Stripe
+      // stores and replays under a key: plan saves are blocked for at most
+      // the rest of the hour, not 24 hours. A race across the hour boundary
+      // makes a spare Product, which the clean-up below archives. The amounts
+      // are in the Price keys: Stripe refuses a reused key with new
+      // parameters, so a retry at new prices must make new Prices. The
+      // environment is in the keys because production, dev and CI share one
+      // Stripe sandbox, and seeded course ids repeat across them.
+      const generation = await this.planGeneration(courseId);
+      const hour = new Date(keyedAt).toISOString().slice(0, 13);
+      const keyBase = `${this.environment}-${courseId}-${generation}-${hour}`;
       const product = await this.stripe.products.create(
         {
           name: `${course.title} — Subscription`,
@@ -306,7 +349,7 @@ export class CourseSubscriptionService extends BaseService {
             ...stripeEnvMetadata(this.environment),
           },
         },
-        { idempotencyKey: `course-plan-product-${idempotencyBase}` }
+        { idempotencyKey: `course-plan-product-${keyBase}` }
       );
 
       const [monthlyPrice, annualPrice] = await Promise.all([
@@ -322,7 +365,9 @@ export class CourseSubscriptionService extends BaseService {
               ...stripeEnvMetadata(this.environment),
             },
           },
-          { idempotencyKey: `course-plan-price-monthly-${idempotencyBase}` }
+          {
+            idempotencyKey: `course-plan-price-monthly-${keyBase}-${input.priceMonthly}`,
+          }
         ),
         this.stripe.prices.create(
           {
@@ -336,12 +381,20 @@ export class CourseSubscriptionService extends BaseService {
               ...stripeEnvMetadata(this.environment),
             },
           },
-          { idempotencyKey: `course-plan-price-annual-${idempotencyBase}` }
+          {
+            idempotencyKey: `course-plan-price-annual-${keyBase}-${input.priceAnnual}`,
+          }
         ),
       ]);
 
+      // A retry of an attempt that failed after Stripe gets that attempt's
+      // Product back, archived by its clean-up below. Put it on sale, or the
+      // plan this call saves could never be billed.
+      await this.stripe.products.update(product.id, { active: true });
+
+      let plan: typeof courseSubscriptionPlans.$inferSelect;
       try {
-        const [plan] = await this.db
+        const [inserted] = await this.db
           .insert(courseSubscriptionPlans)
           .values({
             courseId,
@@ -352,13 +405,38 @@ export class CourseSubscriptionService extends BaseService {
             stripePriceAnnualId: annualPrice.id,
           })
           .returning();
-        if (!plan) {
+        if (!inserted) {
           throw new InternalServiceError('Failed to insert course plan', {
             courseId,
           });
         }
-        return plan;
+        plan = inserted;
       } catch (dbError) {
+        // A concurrent twin of this create took the course's one plan row
+        // (uq_course_sub_plans_course) with the same Product, since the keys
+        // match. It is the plan this call was making: return it, and never
+        // archive a Product a live plan sells with.
+        let twin: typeof courseSubscriptionPlans.$inferSelect | null;
+        try {
+          twin = await this.findLivePlanWithProduct(courseId, product.id);
+        } catch (lookupError) {
+          // Unknown whether a live plan uses it: leave the Product on sale
+          // rather than risk archiving one that does. A retry reuses it.
+          this.obs.error(
+            'Could not check for a live course plan on the product; left it on sale',
+            {
+              stripeProductId: product.id,
+              courseId,
+              error:
+                lookupError instanceof Error
+                  ? lookupError.message
+                  : String(lookupError),
+            }
+          );
+          throw dbError;
+        }
+        if (twin) return twin;
+
         // Archive the Stripe Product so a failed DB insert leaves no orphan.
         await this.stripe.products
           .update(product.id, { active: false })
@@ -372,10 +450,93 @@ export class CourseSubscriptionService extends BaseService {
                   : String(cleanupErr),
             })
           );
+        // Look again. A twin's insert can commit after the look-up above and
+        // before the archive: if one did, put the Product back on sale and
+        // return its plan. The twin re-lists after its insert too, so
+        // whichever side acts last leaves a live plan's Product on sale.
+        // Otherwise a racing create under the next (or last) hour's keys won
+        // the course's one plan row with a Product of its own: this one was
+        // the spare. Say so, and upsertPlan saves onto the plan that won. If
+        // the look-up fails, the insert's own error stands.
+        const winner = await this.findPlanRow(courseId).catch((lookupError) => {
+          // Error, as for the look-up above: this one decides whether a
+          // live plan's Product, archived just now, goes back on sale.
+          this.obs.error(
+            'Archived a course plan product, then could not check for a live plan',
+            {
+              errorId: crypto.randomUUID(),
+              stripeProductId: product.id,
+              courseId,
+              error:
+                lookupError instanceof Error
+                  ? lookupError.message
+                  : String(lookupError),
+            }
+          );
+          return null;
+        });
+        if (winner?.stripeProductId === product.id) {
+          await this.relistPlanProduct(winner.id, courseId, product.id);
+          return winner;
+        }
+        if (winner) throw new CourseSubscriptionPlanExistsError(courseId);
         throw dbError;
       }
+
+      // The other half of the clean-up's second look: a twin whose insert
+      // failed may have archived the Product since this call put it on sale
+      // above. Now this row is committed, put it on sale again.
+      await this.relistPlanProduct(plan.id, courseId, product.id);
+      return plan;
     } catch (error) {
-      this.handleError(error, 'createPlan');
+      // A refusal under the plan's keys is typed, never a 500. The generation
+      // and the amounts are IN the keys, so "other values under one key" is the
+      // Product's name: a course retitled between a failed create and its
+      // retry within the same hour.
+      const refusal = createKeyRefusal(
+        error,
+        COURSE_PLAN_CREATE_KEY,
+        { courseId },
+        keyedAt
+      );
+      if (refusal) {
+        const log = refusal.statusCode >= 500 ? 'error' : 'warn';
+        this.obs[log]('Stripe refused a course plan create', {
+          errorId: crypto.randomUUID(),
+          courseId,
+          code: refusal.context?.code,
+          ...stripeRefusalDetail(error),
+        });
+      }
+      this.handleError(refusal ?? error, 'createPlan');
+    }
+  }
+
+  /**
+   * Put a live plan's Product on sale (Codex-2hxff.66). A create calls this
+   * once its row is committed, and its clean-up when a twin's row appeared
+   * after the archive, so whichever acts last leaves the Product on sale.
+   * Never throws: the plan is saved, so the create succeeded. A failure is
+   * logged, because a plan on an archived Product can never be billed.
+   */
+  private async relistPlanProduct(
+    planId: string,
+    courseId: string,
+    stripeProductId: string
+  ): Promise<void> {
+    try {
+      await this.stripe.products.update(stripeProductId, { active: true });
+    } catch (error) {
+      this.obs.error(
+        "Could not put a live course plan's Stripe product on sale",
+        {
+          errorId: crypto.randomUUID(),
+          planId,
+          courseId,
+          stripeProductId,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
     }
   }
 
@@ -412,6 +573,33 @@ export class CourseSubscriptionService extends BaseService {
     return plan ?? null;
   }
 
+  /** The course's live plan when it sells with `stripeProductId`, or null. */
+  private async findLivePlanWithProduct(
+    courseId: string,
+    stripeProductId: string
+  ) {
+    const plan = await this.db.query.courseSubscriptionPlans.findFirst({
+      where: and(
+        eq(courseSubscriptionPlans.courseId, courseId),
+        eq(courseSubscriptionPlans.stripeProductId, stripeProductId),
+        isNull(courseSubscriptionPlans.deletedAt)
+      ),
+    });
+    return plan ?? null;
+  }
+
+  /**
+   * How many plans the course has had, deleted ones included: the generation
+   * its next plan's Stripe idempotency keys carry (Codex-2hxff.66).
+   */
+  private async planGeneration(courseId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ plans: count() })
+      .from(courseSubscriptionPlans)
+      .where(eq(courseSubscriptionPlans.courseId, courseId));
+    return row?.plans ?? 0;
+  }
+
   /**
    * Create the plan if the course has never had one, otherwise save the prices
    * onto the existing row (re-listing it if it had been withdrawn).
@@ -434,9 +622,19 @@ export class CourseSubscriptionService extends BaseService {
     input: { priceMonthly: number; priceAnnual: number }
   ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
     const existing = await this.findPlanRow(courseId);
-    return existing
-      ? this.savePlanPrices(organizationId, courseId, input)
-      : this.createPlan(organizationId, courseId, input);
+    if (existing) return this.savePlanPrices(organizationId, courseId, input);
+    try {
+      return await this.createPlan(organizationId, courseId, input);
+    } catch (error) {
+      // A concurrent save made the plan: between the look-up above and the
+      // create's own check, or by winning the unique index under another
+      // hour's keys. Save onto it, as a repeat of the save that made it
+      // (Codex-2hxff.66). A race inside one hour returns the plan already.
+      if (error instanceof CourseSubscriptionPlanExistsError) {
+        return this.savePlanPrices(organizationId, courseId, input);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -720,6 +918,24 @@ export class CourseSubscriptionService extends BaseService {
           if (outcome.kind !== 'applied' && outcome.kind !== 'pending')
             continue;
           if (!this.mailer || !row.userEmail) continue;
+          // The "from" figure is what this subscriber is billed today, read
+          // off their live item: subscribers grandfathered before #589 pay
+          // something other than the plan's previous list price
+          // (Codex-2hxff.40).
+          let currentAmountCents = outcome.currentAmountCents;
+          if (currentAmountCents === null) {
+            // An error: the email may quote a figure this subscriber is not
+            // billed, and PriceChangeOutcome says this never happens.
+            this.obs.error(
+              'Course plan price notice: live price has no unit amount; quoting the plan list price',
+              {
+                errorId: crypto.randomUUID(),
+                planId,
+                courseSubscriptionId: row.id,
+              }
+            );
+            currentAmountCents = move.oldAmountCents;
+          }
           try {
             this.mailer({
               to: row.userEmail,
@@ -731,7 +947,7 @@ export class CourseSubscriptionService extends BaseService {
               data: {
                 userName: row.userName || 'there',
                 planName: row.courseTitle || 'your subscription',
-                oldPriceFormatted: `£${(move.oldAmountCents / 100).toFixed(2)}`,
+                oldPriceFormatted: `£${(currentAmountCents / 100).toFixed(2)}`,
                 newPriceFormatted: `£${(move.newAmountCents / 100).toFixed(2)}`,
                 billingInterval: move.interval,
                 effectiveDate: outcome.effectiveAt.toLocaleDateString('en-GB', {

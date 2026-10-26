@@ -26,9 +26,10 @@
   import { getThumbnailUrl } from '$lib/utils/image';
   import {
     type AgreementProposal,
-    type CreatorOrganizationAgreement,
+    type AgreementWithShare,
     formatRevenueTypeLabel,
   } from '@codex/agreements';
+  import AgreementShare from './AgreementShare.svelte';
 
   interface Creator {
     id: string;
@@ -48,19 +49,20 @@
   interface Props {
     creator: Creator;
     /** Active agreement for subscription, if any. */
-    subscriptionAgreement?: CreatorOrganizationAgreement | null;
+    subscriptionAgreement?: AgreementWithShare | null;
     /** Active agreement for content_purchase, if any. */
-    contentPurchaseAgreement?: CreatorOrganizationAgreement | null;
+    contentPurchaseAgreement?: AgreementWithShare | null;
     /** Open / countered proposal for subscription, if any. */
     pendingSubscriptionProposal?: PendingProposalSummary | null;
     /** Open / countered proposal for content_purchase, if any. */
     pendingContentPurchaseProposal?: PendingProposalSummary | null;
     /** Triggers ProposeAgreementDialog at the parent. */
     onPropose: (revenueType: 'subscription' | 'content_purchase') => void;
-    /** Triggers amend flow (a fresh round-1) at the parent. */
+    /** Triggers amend flow (a fresh round-1) at the parent. `null` when the
+      * agreement's share is missing: the parent opens on its own default. */
     onAmend: (
       revenueType: 'subscription' | 'content_purchase',
-      currentShareBp: number
+      currentShareBp: number | null
     ) => void;
     /** Opens the negotiation thread drawer. */
     onViewThread: (
@@ -92,24 +94,6 @@
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
-  function formatPercent(bp: number): string {
-    const pct = bp / 100;
-    return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
-  }
-
-  /**
-   * Reconstruct the creator share from the legacy `organization_fee_percentage`
-   * column. WP-4 introduced the via-proposal read path for the payout
-   * pipeline; the active agreement row still carries the legacy dual-write
-   * for narrow consumers (this card included).
-   */
-  function shareFromAgreement(
-    a: CreatorOrganizationAgreement | null | undefined
-  ): number | null {
-    if (!a) return null;
-    return 10000 - a.organizationFeePercentage;
-  }
-
   function formatDate(date: Date | string | null | undefined): string {
     if (!date) return '—';
     const d = typeof date === 'string' ? new Date(date) : date;
@@ -126,30 +110,33 @@
 
   // ─── Row state derivation ─────────────────────────────────────────────────
 
+  // An active row's share is the agreement's own `creatorSharePercent`, never
+  // `10000 - organizationFeePercentage` (Codex-fazy6). `null` = the accepted
+  // proposal link is missing: the row is still Active (it IS an agreement)
+  // and shows "—" for the share.
   type RowState =
     | { kind: 'none' }
-    | { kind: 'active'; sharePercent: number; effectiveFrom: Date | string; effectiveUntil: Date | string | null }
+    | { kind: 'active'; sharePercent: number | null; effectiveFrom: Date | string; effectiveUntil: Date | string | null }
     | { kind: 'pending-owner-waiting'; sharePercent: number; roundNumber: number }
     | { kind: 'pending-counter-received'; sharePercent: number; roundNumber: number }
-    | { kind: 'active-with-pending'; sharePercent: number; pendingShare: number; pendingWaitingOnCreator: boolean };
+    | { kind: 'active-with-pending'; sharePercent: number | null; pendingShare: number; pendingWaitingOnCreator: boolean };
 
   function deriveRowState(
-    active: CreatorOrganizationAgreement | null,
+    active: AgreementWithShare | null,
     pending: PendingProposalSummary | null
   ): RowState {
-    const activeShare = shareFromAgreement(active);
-    if (active && activeShare != null && pending) {
+    if (active && pending) {
       return {
         kind: 'active-with-pending',
-        sharePercent: activeShare,
+        sharePercent: active.creatorSharePercent,
         pendingShare: pending.sharePercent,
         pendingWaitingOnCreator: pending.waitingOnRole === 'creator',
       };
     }
-    if (active && activeShare != null) {
+    if (active) {
       return {
         kind: 'active',
-        sharePercent: activeShare,
+        sharePercent: active.creatorSharePercent,
         effectiveFrom: active.effectiveFrom,
         effectiveUntil: active.effectiveUntil,
       };
@@ -250,7 +237,7 @@
               <div class="agreement-card__row-detail-cell">
                 <dt>Share</dt>
                 <dd>
-                  <strong>{formatPercent(row.state.sharePercent)}</strong>
+                  <strong><AgreementShare bps={row.state.sharePercent} /></strong>
                   <span class="agreement-card__row-detail-hint">
                     of post-platform {row.copyLabel} revenue
                   </span>
@@ -272,7 +259,7 @@
                 <div class="agreement-card__row-detail-cell">
                   <dt>Pending share</dt>
                   <dd>
-                    <strong>{formatPercent(row.state.pendingShare)}</strong>
+                    <strong><AgreementShare bps={row.state.pendingShare} /></strong>
                     <span class="agreement-card__row-detail-hint">
                       of post-platform {row.copyLabel} revenue
                     </span>
@@ -285,7 +272,7 @@
               <div class="agreement-card__row-detail-cell">
                 <dt>Proposed share</dt>
                 <dd>
-                  <strong>{formatPercent(row.state.sharePercent)}</strong>
+                  <strong><AgreementShare bps={row.state.sharePercent} /></strong>
                   <span class="agreement-card__row-detail-hint">
                     of post-platform {row.copyLabel} revenue
                   </span>

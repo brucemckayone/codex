@@ -18,7 +18,7 @@
 
 import { error } from '@sveltejs/kit';
 import { describe, expect, it } from 'vitest';
-import { queryErrorMessage } from './query-result';
+import { isFirstLoad, queryErrorMessage } from './query-result';
 
 /** A genuine SvelteKit `HttpError` instance, not a look-alike literal. */
 function realHttpError(status: number, message: string): unknown {
@@ -93,5 +93,35 @@ describe('queryErrorMessage', () => {
     expect(queryErrorMessage('', 'Insights unavailable')).toBe(
       'Insights unavailable'
     );
+  });
+});
+
+/**
+ * `isFirstLoad` (Codex-2hxff.66 review, LOW-2): a query's own `loading` is
+ * also true during a refresh, so a page gated on it flashed its loaded content
+ * back to skeletons for every Retry and `invalidateAll()`.
+ */
+describe('isFirstLoad', () => {
+  it('is true before the first value or failure lands', () => {
+    expect(isFirstLoad({ current: undefined, loading: true })).toBe(true);
+  });
+
+  it('is false during a refresh that keeps the last value', () => {
+    expect(isFirstLoad({ current: [], loading: true })).toBe(false);
+  });
+
+  it('is false once the read failed, even while a retry runs', () => {
+    expect(
+      isFirstLoad({
+        current: undefined,
+        loading: true,
+        error: { status: 500, body: { message: 'Internal Error' } },
+      })
+    ).toBe(false);
+  });
+
+  it('is false for a query that was never made', () => {
+    expect(isFirstLoad(null)).toBe(false);
+    expect(isFirstLoad(undefined)).toBe(false);
   });
 });

@@ -67,14 +67,17 @@ import {
   listClawableRefunds,
   type OrganisationPayee,
   type PayeeAccounts,
+  type PlatformFailureTally,
   payeeAccountIds,
   pendingReductionsFor,
+  platformFailureTally,
   type RecordSliceInput,
   type RecordSliceOutcome,
   recordPlatformFee,
   recordSplitOnce,
   recordTransferFailure,
   renewPayoutAttempt,
+  reportPlatformFailures,
   resolveInvoiceCharge,
   resolveOrganisationPayee,
   retryFailedClawbacks,
@@ -4579,11 +4582,16 @@ export class SubscriptionService extends BaseService {
    * attempt before it is sent, so a concurrent drain skips it, and a row
    * already paid is not drainable. Sends at most one payout-released email,
    * from what was actually paid.
+   *
+   * `platformFailures` is the hourly sweep's tally, so a short platform
+   * balance is one error per sweep, not one per payee (Codex-r094t). Any
+   * other caller leaves it out, and the drain reports its own run.
    */
   async resolvePendingPayoutsForAccount(
-    stripeAccountId: string
+    stripeAccountId: string,
+    platformFailures?: PlatformFailureTally
   ): Promise<{ resolved: number; failed: number }> {
-    return this.drainPayee(stripeAccountId, 'all');
+    return this.drainPayee(stripeAccountId, 'all', platformFailures);
   }
 
   /**
@@ -4594,12 +4602,19 @@ export class SubscriptionService extends BaseService {
    *
    * `scope` is `'all'` for the payee-wide drain, or `{ orgId }` for that
    * organisation plus the payee's orgless rows (`null`: orgless only).
+   *
+   * Platform-side failures (a short balance, a bad key) are each a warning
+   * and ONE error for the run, raised at its first (Codex-r094t): this
+   * drain's run, or the sweep's when it passes `sweepFailures`, which then
+   * logs the run's summary itself.
    */
   private async drainPayee(
     stripeAccountId: string,
-    scope: 'all' | { orgId: string | null }
+    scope: 'all' | { orgId: string | null },
+    sweepFailures?: PlatformFailureTally
   ): Promise<{ resolved: number; failed: number }> {
     const scopeOrgId = scope === 'all' ? null : scope.orgId;
+    const platformFailures = sweepFailures ?? platformFailureTally();
     let resolved = 0;
     let failed = 0;
     // What transferPendingGroup ACTUALLY paid to this user's creator slices —
@@ -4711,7 +4726,8 @@ export class SubscriptionService extends BaseService {
         groupOrgId,
         stripeAccountId,
         connectAccount.userId,
-        accounts
+        accounts,
+        platformFailures
       ).catch((error: unknown) => {
         this.obs.error('resolvePendingPayouts: group failed', {
           errorId: crypto.randomUUID(),
@@ -4732,6 +4748,15 @@ export class SubscriptionService extends BaseService {
       creatorPaidCents += groupResult.creatorPaidCents;
       creatorPaidCount += groupResult.creatorPaidCount;
       if (groupResult.creatorPaidCount > 0) creatorPaidOrgs.add(groupOrgId);
+    }
+
+    if (!sweepFailures) {
+      reportPlatformFailures(this.ledger(), platformFailures, {
+        organizationId: scopeOrgId,
+        payeeWide: scope === 'all',
+        stripeAccountId,
+        userId: connectAccount.userId,
+      });
     }
 
     this.obs.info('Pending payout resolution complete', {
@@ -4825,7 +4850,8 @@ export class SubscriptionService extends BaseService {
     orgId: string | null,
     stripeAccountId: string,
     userId: string,
-    accounts: PayeeAccounts
+    accounts: PayeeAccounts,
+    platformFailures: PlatformFailureTally
   ): Promise<{
     resolved: number;
     failed: number;
@@ -5001,21 +5027,27 @@ export class SubscriptionService extends BaseService {
         // Codex-vv77x: per-row error isolation — one Stripe failure never
         // blocks the remaining rows. The row stays payable for the next
         // drain, unless Stripe has refused it for good or too often: then it
-        // waits for support, logged once (Codex-2hxff.48). A refund that
+        // waits for support, logged once (Codex-2hxff.48). A platform-side
+        // failure goes on the run's tally (Codex-r094t). A refund that
         // cancelled the row meanwhile gets any transfer that landed reversed.
         await recordTransferFailure(
           this.ledger(),
-          { payoutId: payout.id, destination: stripeAccountId, idempotencyKey },
+          {
+            payoutId: payout.id,
+            destination: stripeAccountId,
+            amountCents,
+            idempotencyKey,
+          },
           error,
           {
             organizationId: orgId,
             subscriptionId: payout.subscriptionId,
             purchaseId: payout.purchaseId,
             payoutType: payout.payoutType,
-            amountCents,
             sourceType,
             attempt,
-          }
+          },
+          platformFailures
         );
         continue;
       }
@@ -6194,6 +6226,9 @@ export class SubscriptionService extends BaseService {
     let groupsResolved = 0;
     let groupsSkipped = 0;
     let errors = 0;
+    // A short platform balance fails every payee's rows alike: one error for
+    // the sweep, at its first failure, not one per payee (Codex-r094t).
+    const platformFailures = platformFailureTally();
 
     if (groupsScanned === 0) {
       this.obs.info('sweepUnresolvedPayouts: no pending groups', {
@@ -6282,7 +6317,10 @@ export class SubscriptionService extends BaseService {
         }
 
         // The whole payee, every organisation (Codex-2hxff.13).
-        await this.resolvePendingPayoutsForAccount(connect.stripeAccountId);
+        await this.resolvePendingPayoutsForAccount(
+          connect.stripeAccountId,
+          platformFailures
+        );
         groupsResolved++;
       } catch (error) {
         errors++;
@@ -6294,6 +6332,12 @@ export class SubscriptionService extends BaseService {
         // Continue to next group — don't fail the whole sweep
       }
     }
+
+    reportPlatformFailures(this.ledger(), platformFailures, {
+      sweep: true,
+      olderThanMinutes,
+      groupsResolved,
+    });
 
     this.obs.info('sweepUnresolvedPayouts: complete', {
       olderThanMinutes,

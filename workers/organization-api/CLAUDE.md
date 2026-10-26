@@ -41,7 +41,7 @@ One owner per organisation; it moves only by the owner's offer being accepted. W
 | GET | `/api/organizations/:id/ownership` | `required`, `requireOrgMembership` | params | 200 | Owner/admin/creator. Composes `activeAgreements` (+ owner's `ownerHasSubscriptionAgreement`) from `ctx.services.agreements` for the owner and the recipient |
 | POST | `/api/organizations/:id/ownership/offers` | same, `rateLimit: 'strict'` | body: `offerOwnershipSchema` | 201 | Owner only. Emails the recipient |
 | POST | `/api/organizations/:id/ownership/offers/:offerId/withdraw` | same, `strict` | params | 200 | Owner only |
-| POST | `/api/organizations/:id/ownership/offers/:offerId/accept` | same, `strict` | params | 200 | Recipient only. Busts BOTH users' membership caches (`utils/membership-invalidation.ts`) |
+| POST | `/api/organizations/:id/ownership/offers/:offerId/accept` | same, `strict` | params | 200 | Recipient only. Busts BOTH users' membership caches (`invalidateMemberCaches`, `@codex/worker-utils` cache-fanout.ts) |
 | POST | `/api/organizations/:id/ownership/offers/:offerId/decline` | same, `strict` | params | 200 | Recipient only. Emails the owner |
 
 ### Settings Routes (`/api/organizations/:id/settings/*`)

@@ -10246,9 +10246,13 @@ describe('SubscriptionService', () => {
       // One Stripe accounts.retrieve per Connect account, not per row
       expect(retrieveSpy).toHaveBeenCalledTimes(1);
       expect(retrieveSpy).toHaveBeenCalledWith(stripeAccountId);
-      // One drain per payee, not per row, and for every organisation
+      // One drain per payee, not per row, and for every organisation, on the
+      // sweep's one platform-failure tally (Codex-r094t)
       expect(resolveSpy).toHaveBeenCalledTimes(1);
-      expect(resolveSpy).toHaveBeenCalledWith(stripeAccountId);
+      expect(resolveSpy).toHaveBeenCalledWith(
+        stripeAccountId,
+        expect.objectContaining({ errorId: expect.any(String), count: 0 })
+      );
       // Three transfers because the drain processes 3 rows
       expect(transferSpy).toHaveBeenCalledTimes(3);
 
@@ -12400,12 +12404,14 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
           })
           .returning()
       );
+      // Unique per run: the row now records it, and stripe_transfer_id is.
+      const lateTransfer = `tr_drain_late_${createUniqueSlug('t')}`;
       vi.mocked(stripe.transfers.create).mockImplementationOnce(async () => {
         await db
           .update(payoutsTable)
           .set({ status: 'cancelled_by_refund', resolvedAt: new Date() })
           .where(eq(payoutsTable.id, pending.id));
-        return { id: 'tr_drain_late', amount: 1750 } as never;
+        return { id: lateTransfer, amount: 1750 } as never;
       });
 
       const result = await service.resolvePendingPayouts(
@@ -12415,9 +12421,9 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
 
       expect(result).toEqual({ resolved: 0, failed: 0 });
       expect(stripe.transfers.createReversal).toHaveBeenCalledWith(
-        'tr_drain_late',
+        lateTransfer,
         expect.anything(),
-        { idempotencyKey: 'tr_drain_late_reversal_surplus' }
+        { idempotencyKey: `${lateTransfer}_reversal_surplus` }
       );
       const after = takeFirst(
         await db
@@ -12425,7 +12431,12 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
           .from(payoutsTable)
           .where(eq(payoutsTable.id, pending.id))
       );
-      expect(after.status).toBe('cancelled_by_refund');
+      // The money moved and is back: the row records its transfer, reversed
+      // (Codex-pqsfg).
+      expect(after).toMatchObject({
+        status: 'reversed',
+        stripeTransferId: lateTransfer,
+      });
     });
 
     // Codex-2hxff.11 (PAY-07): this test used to pin "failed rows are left

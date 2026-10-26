@@ -21,6 +21,7 @@
 -->
 <script lang="ts">
   import { browser } from '$app/environment';
+  import AgreementShare from '$lib/components/agreements/AgreementShare.svelte';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import {
     acceptAgreement,
@@ -331,7 +332,6 @@
         <ul class="negotiations-page__list">
           {#each active as row (row.id)}
             {@const revLabel = revenueLabel(row.revenueType)}
-            {@const myShareBp = 10000 - row.organizationFeePercentage}
             <li class="negotiations-page__item" data-tone="success">
               <div class="negotiations-page__item-info">
                 <a
@@ -344,7 +344,9 @@
                   {revLabel}
                 </span>
                 <span class="negotiations-page__item-share">
-                  {formatPercent(myShareBp)}
+                  <!-- The agreement's own share; "—" when its accepted
+                       proposal link is missing (Codex-fazy6). -->
+                  <AgreementShare bps={row.creatorSharePercent} />
                   <span class="negotiations-page__item-hint">
                     of post-platform {revLabel} revenue · effective from
                     {formatDate(row.effectiveFrom)}{row.effectiveUntil

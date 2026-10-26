@@ -64,9 +64,14 @@
      * Optional per-member active revenue-share summary, keyed by userId.
      * When provided, a "Revenue share" column is rendered with a deep-link
      * into the Monetisation > Revenue share tab. Owner-only (Codex-dhxjz);
-     * callers pass undefined to hide the column entirely.
+     * callers pass undefined to hide the column entirely. `srLabel`, when
+     * set, is what a screen reader reads in place of `label` (a missing
+     * share's "—" reads as "No share recorded").
      */
-    revenueShareByUser?: Map<string, { label: string; active: boolean }>;
+    revenueShareByUser?: Map<
+      string,
+      { label: string; srLabel?: string; active: boolean }
+    >;
     ownerAction?: { href: string; label: string };
   }
 
@@ -287,7 +292,14 @@
                        for {name}". Listed for the orchestrator; en.json belongs
                        to another worktree this round. -->
                   {#if rs?.active}
-                    <Badge variant="success">{rs.label}</Badge>
+                    <Badge variant="success">
+                      {#if rs.srLabel}
+                        <span aria-hidden="true">{rs.label}</span>
+                        <span class="sr-only">{rs.srLabel}</span>
+                      {:else}
+                        {rs.label}
+                      {/if}
+                    </Badge>
                     <a
                       class="rev-link"
                       href={`/studio/monetisation/revenue-share?focus=${member.userId}`}

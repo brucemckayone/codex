@@ -744,7 +744,11 @@ describe('payouts ledger', () => {
         { idempotencyKey: 'tr_late_landing_reversal_surplus' }
       );
       const [row] = await rowsFor(input.stripeChargeId);
-      expect(row?.status).toBe('cancelled_by_refund');
+      // Not a regression: the transfer landed and came back, so the row records it, reversed (Codex-pqsfg).
+      expect(row).toMatchObject({
+        status: 'reversed',
+        stripeTransferId: 'tr_late_landing',
+      });
     });
 
     it('a transfer its row already records is never reversed', async () => {

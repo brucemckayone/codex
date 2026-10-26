@@ -11487,6 +11487,46 @@ export const money_setup_refresh_cta = () => `Resume Stripe setup`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const money_setup_load_failed = () => `We couldn't load your payout account.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const money_setup_load_failed_retry = () => `Retry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const money_setup_load_failed_retrying = () => `Retrying…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const money_setup_load_failed_again = () => `We still couldn't load your payout account.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const money_setup_load_retry_ok = () => `Payout account loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const monetisation_connect_disabled = () => `Disabled by Stripe`
 
 
@@ -11568,6 +11608,38 @@ export const monetisation_tier_update_error = () => `Could not update the tier`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const monetisation_tier_save_error = () => `Could not save the tier`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_save_in_progress = () => `This tier is still being created. Try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tier_save_unknown = () => `We couldn't confirm the tier was saved. Check your tiers before trying again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_share_missing = () => `No share recorded`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const course_plan_retry_after = (params) => `Stripe couldn't save this plan, and nothing was saved. You can try again after ${params.time}.`
 
 
 /**
@@ -11856,6 +11928,14 @@ export const subscribers_empty_description = () => `Your tiers are live and read
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const subscribers_empty_pending_setup_description = () => `Once the setup above is done, everyone who subscribes appears here with their tier, what they pay and when they renew.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscribers_empty_status_unknown_description = () => `Everyone who subscribes appears here with their tier, what they pay and when they renew.`
 
 
 /**

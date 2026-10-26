@@ -21,11 +21,13 @@
   import { browser } from '$app/environment';
   import { goto } from '$app/navigation';
   import {
-    type CreatorOrganizationAgreement,
+    type AgreementWithShare,
     formatRevenueTypeLabel,
   } from '@codex/agreements';
   import { FEES } from '@codex/constants';
   import AgreementCard from '$lib/components/agreements/AgreementCard.svelte';
+  import AgreementShare from '$lib/components/agreements/AgreementShare.svelte';
+  import { isShareMissing } from '$lib/components/agreements/agreement-share';
   import Avatar from '$lib/components/ui/Avatar/Avatar.svelte';
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
@@ -111,7 +113,9 @@
   // conditional `infer` chain collapsed to `never` under Vite SSR module-load
   // cascades (see [[vite_ssr_module_load_cascade]]) when one of the
   // intermediate imports failed; the explicit import is robust to that.
-  type ActiveAgreementRow = CreatorOrganizationAgreement;
+  // `AgreementWithShare`: each row's share is its own `creatorSharePercent`,
+  // never `10000 - organizationFeePercentage` (Codex-fazy6).
+  type ActiveAgreementRow = AgreementWithShare;
 
   const activeAgreements = $derived(
     (agreementsQuery?.current?.items ?? []) as ActiveAgreementRow[]
@@ -205,17 +209,23 @@
    * subscription pool gets one slice; the org residual is the remainder.
    * Content-purchase agreements are NOT pooled (Decision Q1 — creator's
    * own content), so they aren't shown in the team-budget pie.
+   *
+   * An agreement whose share is missing (`creatorSharePercent: null`, or
+   * `undefined` from an older payload: `isShareMissing` covers both) gets no
+   * slice: it is paid nothing, so it counts as 0 in the allocated sum, and a
+   * 0-width slice would label it "0%" in the legend.
    */
   const pieSlices = $derived.by((): RevenueSplitSlice[] => {
     const subscriptionRows = activeAgreements.filter(
-      (a) => a.revenueType === 'subscription'
+      (a) =>
+        a.revenueType === 'subscription' && !isShareMissing(a.creatorSharePercent)
     );
     const memberById = new Map(teamMembers.map((m) => [m.id, m]));
 
     // Pool of available basis points after platform fee
     const availableBp = 10000 - platformFeeBp;
     const slices: RevenueSplitSlice[] = subscriptionRows.map((a, i) => {
-      const share = 10000 - a.organizationFeePercentage;
+      const share = a.creatorSharePercent ?? 0;
       const member = memberById.get(a.creatorId);
       const colorTokens = [
         'var(--color-info-600)',
@@ -777,7 +787,8 @@
                       creator.name,
                       revType,
                       'amend',
-                      currentShare
+                      // A missing share opens on the dialog's default.
+                      currentShare ?? undefined
                     )}
                   onViewThread={(revType) =>
                     openThreadDialog(creator.id, creator.name, revType)}
@@ -805,10 +816,6 @@
         <ul class="revenue-share-page__active-list">
           {#each activeAgreements as agreement (agreement.id)}
             {@const creatorName = getCreatorName(agreement.creatorId)}
-            {@const sharePct = (10000 - agreement.organizationFeePercentage) / 100}
-            {@const sharePctDisplay = Number.isInteger(sharePct)
-              ? `${sharePct}%`
-              : `${sharePct.toFixed(1)}%`}
             {@const revLabel = formatRevenueTypeLabel(
               agreement.revenueType as RevenueType
             )}
@@ -819,7 +826,7 @@
                   {revLabel}
                 </span>
                 <span class="revenue-share-page__active-share">
-                  {sharePctDisplay}
+                  <AgreementShare bps={agreement.creatorSharePercent} />
                   <span class="revenue-share-page__active-share-hint">
                     {m.monetisation_revshare_share_hint({ type: revLabel })}
                   </span>
