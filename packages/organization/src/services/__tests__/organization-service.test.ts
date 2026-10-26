@@ -237,6 +237,35 @@ describe('OrganizationService', () => {
     });
   });
 
+  // Their routes check sign-in, not membership, so a whole row let any free
+  // account list every org's payee.
+  describe("get, getBySlug and list never return the payee's user id (Codex-kk6zx)", () => {
+    it('leaves primaryConnectAccountUserId out and keeps the other columns', async () => {
+      const slug = createUniqueSlug('payee');
+      const created = await service.create(
+        { name: `Payee ${slug}`, slug, description: 'Our studio' },
+        defaultTestUserId
+      );
+      await db
+        .update(schema.organizations)
+        .set({ primaryConnectAccountUserId: defaultTestUserId })
+        .where(eq(schema.organizations.id, created.id));
+
+      const byId = await service.get(created.id);
+      const bySlug = await service.getBySlug(slug);
+      const listed = await service.list({ search: slug });
+
+      expect(listed.items).toHaveLength(1);
+      for (const org of [byId, bySlug, listed.items[0]]) {
+        expect(org).not.toHaveProperty('primaryConnectAccountUserId');
+        expect(org).toMatchObject({
+          id: created.id,
+          description: 'Our studio',
+        });
+      }
+    });
+  });
+
   describe('getBySlug', () => {
     it('should retrieve organization by slug', async () => {
       const slug = createUniqueSlug('test-slug');

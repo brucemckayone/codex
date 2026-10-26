@@ -37,6 +37,19 @@ export interface OrganizationFilters {
 export type { Organization, NewOrganization };
 export type { PaginationParams, SortOrder };
 
+/**
+ * An organisation as `get`, `getBySlug` and `list` return it: every column but
+ * `primaryConnectAccountUserId`, the payee's user id (Codex-kk6zx). Their
+ * routes check sign-in, not membership, so a whole row let any free account
+ * list every org's payee. Nothing reads the column (payee resolution retired
+ * it, see packages/payments/src/resolve-organisation-payee.ts), so no reader
+ * loses anything.
+ */
+export type ReadableOrganization = Omit<
+  Organization,
+  'primaryConnectAccountUserId'
+>;
+
 // ============================================================================
 // API Response Types
 // ============================================================================
@@ -45,19 +58,21 @@ export type { PaginationParams, SortOrder };
  * Response for GET /api/organizations/:id
  * Returns a single organization
  */
-export type OrganizationResponse = SingleItemResponse<Organization>;
+export type OrganizationResponse = SingleItemResponse<ReadableOrganization>;
 
 /**
  * Response for GET /api/organizations
  * Returns paginated list of organizations
  */
-export type OrganizationListResponse = PaginatedListResponse<Organization>;
+export type OrganizationListResponse =
+  PaginatedListResponse<ReadableOrganization>;
 
 /**
  * Response for GET /api/organizations/slug/:slug
  * Returns organization by slug
  */
-export type OrganizationBySlugResponse = SingleItemResponse<Organization>;
+export type OrganizationBySlugResponse =
+  SingleItemResponse<ReadableOrganization>;
 
 /**
  * Response for POST /api/organizations

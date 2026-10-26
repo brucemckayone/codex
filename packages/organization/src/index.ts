@@ -89,6 +89,7 @@ export type {
   OrganizationListResponse,
   OrganizationResponse,
   PaginationParams,
+  ReadableOrganization,
   SortOrder,
   UpdateOrganizationResponse,
 } from './types';
