@@ -11,6 +11,7 @@ import type {
   MediaItem,
   NewContent,
   NewMediaItem,
+  ServedMediaItem,
 } from '@codex/database/schema';
 import type { ReadableOrganization } from '@codex/organization';
 
@@ -105,11 +106,7 @@ export interface ContentWithRelations extends Content {
   categoryIds?: string[];
 }
 
-/**
- * A media item as a response carries it: without the transcoder's raw
- * detail (MEDIA_ITEM_RESPONSE_COLUMNS in @codex/database).
- */
-export type ServedMediaItem = Omit<MediaItem, 'transcodingError'>;
+export type { ServedMediaItem };
 
 /**
  * Media item with populated relations

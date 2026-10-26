@@ -179,7 +179,8 @@ app.post(
     },
     input: { params: createIdParamsSchema() },
     file: {
-      maxSize: FILE_SIZES.MEDIA_MAX_BYTES,
+      // Cloudflare refuses a body over 100 MB: say so before reading it.
+      maxSize: FILE_SIZES.WORKER_UPLOAD_MAX_BYTES,
       minSize: FILE_SIZES.MEDIA_MIN_BYTES,
       allowedMimeTypes: SUPPORTED_MEDIA_MIME_TYPES,
     },

@@ -8,23 +8,12 @@
  * handles every rejection shape SvelteKit produces.
  */
 
-import { queryErrorMessage } from '$lib/remote/query-result';
+import { queryErrorMessage, remoteErrorCode } from '$lib/remote/query-result';
 import * as m from '$paraglide/messages';
 
-/**
- * The worker's `error.code`, wherever the rejection carries it: under `body`
- * for an `HttpError`, at the top for anything code-bearing.
- */
-export function remoteErrorCode(error: unknown): string | undefined {
-  if (error === null || typeof error !== 'object') return undefined;
-  const body = (error as { body?: unknown }).body;
-  if (body !== null && typeof body === 'object') {
-    const nested = (body as { code?: unknown }).code;
-    if (typeof nested === 'string') return nested;
-  }
-  const direct = (error as { code?: unknown }).code;
-  return typeof direct === 'string' ? direct : undefined;
-}
+// Moved to query-result (Codex-l2c48.7) so the browser logger can read it
+// without loading paraglide; re-exported for this module's callers.
+export { remoteErrorCode };
 
 export function ownershipErrorMessage(error: unknown): string {
   switch (remoteErrorCode(error)) {

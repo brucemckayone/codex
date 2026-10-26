@@ -37,13 +37,8 @@
   import { getThumbnailSrcset } from '$lib/utils/image';
   import * as m from '$paraglide/messages';
   import { MAX_TRANSCODING_ATTEMPTS } from '@codex/constants';
-  import {
-    describeTile,
-    formatCountdown,
-    tilePill,
-    type TileFailure,
-    type TilePill,
-  } from './tile-state';
+  import { remoteErrorStatus } from '$lib/remote/query-result';
+  import { describeTile, tilePill, type TileFailure, type TilePill } from './tile-state';
 
   // MediaItemWithRelations doesn't declare thumbnailUrl on the base schema
   // (only thumbnailKey) — but the public content API resolves keys to CDN
@@ -96,35 +91,27 @@
   };
 
   /**
-   * The bar over the thumbnail. `pct` null draws it indeterminate. `kind`
-   * picks its colour: an upload or a wait is informational, encoding is
-   * work in progress.
+   * The bar over the thumbnail; `pct` null draws it indeterminate. Its
+   * colour and icon follow the tile's `data-status` (the pill).
    */
-  type Overlay = {
-    kind: 'upload' | 'wait' | 'transcode';
-    label: string;
-    pct: number | null;
-  };
+  type Overlay = { label: string; pct: number | null };
 
   const overlay = $derived.by((): Overlay | null => {
     switch (view.kind) {
       case 'uploading':
         return {
-          kind: 'upload',
           label: view.elsewhere ? m.media_tile_upload_elsewhere() : m.media_status_uploading(),
           pct: view.pct,
         };
       case 'starting':
-        return { kind: 'transcode', label: m.media_tile_starting(), pct: null };
+        return { label: m.media_tile_starting(), pct: null };
       case 'processing':
         return {
-          kind: 'transcode',
           label: view.step ? getStepLabel(view.step) : m.media_status_processing(),
           pct: view.pct,
         };
       case 'waiting':
         return {
-          kind: 'wait',
           label:
             view.cause === 'config'
               ? m.media_tile_waiting_config_step()
@@ -137,41 +124,29 @@
   });
 
   /** The sentence under the title: why it waits, stopped or failed. */
-  const reason = $derived.by((): { text: string; tone: 'info' | 'warning' | 'error' } | null => {
+  const reason = $derived.by((): string | null => {
     switch (view.kind) {
       case 'stopped':
-        return { text: m.media_tile_stopped(), tone: 'warning' };
+        return m.media_tile_stopped();
       case 'waiting':
-        if (view.cause === 'config') {
-          return { text: m.media_tile_waiting_config(), tone: 'info' };
-        }
-        return {
-          text: view.retryInSeconds
-            ? m.media_tile_waiting_service({ time: formatCountdown(view.retryInSeconds) })
-            : m.media_tile_waiting_service_later(),
-          tone: 'info',
-        };
+        if (view.cause === 'config') return m.media_tile_waiting_config();
+        return view.retryInSeconds
+          ? m.media_tile_waiting_service({ time: formatDuration(view.retryInSeconds) })
+          : m.media_tile_waiting_service_later();
       case 'failed':
-        return { text: failureText(view.reason), tone: 'error' };
+        return FAILURE_TEXT[view.reason]();
       default:
         return null;
     }
   });
 
-  function failureText(failure: TileFailure): string {
-    switch (failure) {
-      case 'file':
-        return m.media_tile_failed_file();
-      case 'upload':
-        return m.media_tile_stopped();
-      case 'exhausted':
-        return m.media_tile_failed_exhausted({ count: MAX_TRANSCODING_ATTEMPTS });
-      case 'timeout':
-        return m.media_tile_failed_timeout();
-      default:
-        return m.media_tile_failed_internal();
-    }
-  }
+  const FAILURE_TEXT: Record<TileFailure, () => string> = {
+    file: () => m.media_tile_failed_file(),
+    upload: () => m.media_tile_stopped(),
+    exhausted: () => m.media_tile_failed_exhausted({ count: MAX_TRANSCODING_ATTEMPTS }),
+    timeout: () => m.media_tile_failed_timeout(),
+    internal: () => m.media_tile_failed_internal(),
+  };
 
   // ── Try again ───────────────────────────────────────────────────────────
   let retrying = $state(false);
@@ -184,7 +159,7 @@
       // What happens next arrives over the socket; without one, the list.
       if (mediaStatus.connection !== 'live') mediaStatus.refreshList();
     } catch (error) {
-      const status = (error as { status?: unknown } | null)?.status;
+      const status = remoteErrorStatus(error);
       if (status !== 429) {
         logger.warn('media_tile.retry_refused', { mediaId: media.id, status });
       }
@@ -263,7 +238,6 @@
     {#if overlay}
       <div
         class="thumb-progress"
-        data-kind={overlay.kind}
         role="progressbar"
         aria-label={overlay.label}
         aria-valuenow={overlay.pct ?? undefined}
@@ -272,9 +246,9 @@
       >
         <div class="thumb-progress-meta">
           <span class="thumb-progress-step">
-            {#if overlay.kind === 'upload'}
+            {#if pill === 'uploading'}
               <UploadIcon size={12} />
-            {:else if overlay.kind === 'wait'}
+            {:else if pill === 'waiting'}
               <ClockIcon size={12} />
             {/if}
             {overlay.label}
@@ -338,7 +312,7 @@
     </div>
 
     {#if reason}
-      <p class="tile-reason" data-tone={reason.tone}>{reason.text}</p>
+      <p class="tile-reason">{reason}</p>
     {/if}
 
     {#if view.kind === 'failed' && view.canRetry}
@@ -548,8 +522,8 @@
   }
 
   /* An upload or a wait is informational; encoding keeps the warning ink. */
-  .thumb-progress[data-kind='upload'],
-  .thumb-progress[data-kind='wait'] {
+  .tile[data-status='uploading'] .thumb-progress,
+  .tile[data-status='waiting'] .thumb-progress {
     --progress-ink: var(--color-status-info-text);
     --progress-fill: var(--color-info);
   }
@@ -739,23 +713,22 @@
     border-color: var(--color-status-info-border);
   }
 
-  /* Neutral, but text-secondary: muted ink read 2.3:1 on this fill. */
+  /* Neutral: the base pill's text-secondary ink (muted read 2.3:1 here). */
   .tile-status-pill[data-status='uploading'] {
-    color: var(--color-text-secondary);
     background: var(--color-surface-secondary);
   }
 
   /* ── Reason + Try again ───────────────────────────────── */
+  /* Its colour comes from the tile's state, below: every reason has one. */
   .tile-reason {
     margin: 0;
     font-size: var(--text-xs);
     line-height: var(--leading-snug);
-    color: var(--color-text-secondary);
   }
 
-  .tile-reason[data-tone='error'] { color: var(--color-status-error-text); }
-  .tile-reason[data-tone='info'] { color: var(--color-status-info-text); }
-  .tile-reason[data-tone='warning'] { color: var(--color-status-warning-text); }
+  .tile[data-status='failed'] .tile-reason { color: var(--color-status-error-text); }
+  .tile[data-status='waiting'] .tile-reason { color: var(--color-status-info-text); }
+  .tile[data-status='stopped'] .tile-reason { color: var(--color-status-warning-text); }
 
   .tile-cta {
     display: flex;

@@ -155,7 +155,15 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  setVisibility('visible');
 });
+
+function setVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => state,
+  });
+}
 
 describe('connecting', () => {
   it('opens one socket for every page, offering a fresh ticket', async () => {
@@ -356,6 +364,38 @@ describe('asking the page to refetch its list', () => {
     await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
     expect(p.refresh).toHaveBeenCalledTimes(1);
     expect(h.store.connection).toBe('live');
+  });
+});
+
+describe('a refetch the page does not need', () => {
+  it('none for an upload this tab started: its ghost tile shows it', async () => {
+    const h = harness();
+    const p = page();
+    h.store.register(p);
+    await goLive(h);
+
+    h.store.beginUpload(ID_A);
+    h.last().receive(item(state(ID_A, { lifecycle: 'uploading' })));
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    expect(p.refresh).not.toHaveBeenCalled();
+  });
+
+  it('a hidden tab refetches once, when shown, not on every change', async () => {
+    const h = harness();
+    const p = page({ [ID_A]: 'transcoding', [ID_B]: 'transcoding' });
+    h.store.register(p);
+    await goLive(h, [state(ID_A), state(ID_B)]);
+
+    setVisibility('hidden');
+    h.last().receive(item(state(ID_A, { version: 2, lifecycle: 'ready' })));
+    h.last().receive(item(state(ID_B, { version: 2, lifecycle: 'ready' })));
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS * 4);
+    expect(p.refresh).not.toHaveBeenCalled();
+
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    expect(p.refresh).toHaveBeenCalledTimes(1);
   });
 });
 

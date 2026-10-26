@@ -4,12 +4,7 @@
  */
 import type { MediaItemState } from '@codex/validation';
 import { describe, expect, it } from 'vitest';
-import {
-  describeTile,
-  formatCountdown,
-  type TileMedia,
-  tilePill,
-} from './tile-state';
+import { describeTile, type TileMedia, tilePill } from './tile-state';
 
 const NOW = 1_800_000_000_000;
 const MEDIA_ID = '4d000000-0000-4000-8000-000000000001';
@@ -326,17 +321,5 @@ describe('describeTile', () => {
         )
       ).toEqual({ kind: 'starting' });
     });
-  });
-});
-
-describe('formatCountdown', () => {
-  it.each([
-    [161, '2:41'],
-    [60, '1:00'],
-    [9, '0:09'],
-    [0, '0:00'],
-    [-3, '0:00'],
-  ])('%i s reads %s', (seconds, text) => {
-    expect(formatCountdown(seconds)).toBe(text);
   });
 });

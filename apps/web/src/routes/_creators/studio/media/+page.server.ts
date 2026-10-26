@@ -7,7 +7,9 @@
 import { listMedia } from '$lib/remote/media.remote';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ url }) => {
+export const load: PageServerLoad = async ({ url, depends }) => {
+  // +page.svelte's refresh invalidates this key: this load alone re-runs.
+  depends('app:studio-media');
   const page = Number(url.searchParams.get('page') ?? '1');
   const limit = 12;
 

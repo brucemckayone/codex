@@ -37,6 +37,7 @@ import {
 } from '@codex/validation';
 import { SvelteMap } from 'svelte/reactivity';
 import { logger } from '$lib/observability';
+import { remoteErrorStatus } from '$lib/remote/query-result';
 import { registerUserScopedReset } from './user-scoped-state';
 
 /** Waits before each reconnect, by consecutive failures (then the last). */
@@ -106,13 +107,6 @@ export interface MediaStatusTransport {
 
 const OPEN = 1;
 
-/** The HTTP status a remote command's rejection carries, if any. */
-function statusOf(error: unknown): number | undefined {
-  if (error === null || typeof error !== 'object') return undefined;
-  const status = (error as { status?: unknown }).status;
-  return typeof status === 'number' ? status : undefined;
-}
-
 export function createMediaStatus(transport: MediaStatusTransport) {
   /** Per item, the latest state the object sent. Read by the media tiles. */
   const items = new SvelteMap<string, MediaItemState>();
@@ -129,8 +123,13 @@ export function createMediaStatus(transport: MediaStatusTransport) {
   let wasLive = false;
   let lastHeardAt = 0;
   let warnedUnreadable = false;
-  /** Unlisted ids that already asked for a refetch: once each. */
+  /**
+   * Ids not in the list that need no refetch for that: one that already
+   * asked (once each), or one this tab is uploading (its ghost tile shows it).
+   */
   const unlistedSeen = new Set<string>();
+  /** A refetch asked for while the tab was hidden: it runs once it is shown. */
+  let refreshWhenVisible = false;
 
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -150,9 +149,32 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     return null;
   }
 
+  function clearEvery(timer: ReturnType<typeof setInterval> | null): null {
+    if (timer !== null) clearInterval(timer);
+    return null;
+  }
+
   // ── Refetching the list ─────────────────────────────────────────────────
 
+  function onVisible(): void {
+    if (document.visibilityState !== 'visible') return;
+    document.removeEventListener('visibilitychange', onVisible);
+    refreshWhenVisible = false;
+    scheduleRefresh();
+  }
+
   function scheduleRefresh(): void {
+    // A hidden tab refetches once, when shown, not on every change meanwhile.
+    if (
+      typeof document !== 'undefined' &&
+      document.visibilityState === 'hidden'
+    ) {
+      if (!refreshWhenVisible) {
+        refreshWhenVisible = true;
+        document.addEventListener('visibilitychange', onVisible);
+      }
+      return;
+    }
     if (refreshTimer !== null) return;
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
@@ -295,7 +317,7 @@ export function createMediaStatus(transport: MediaStatusTransport) {
       ticket = await transport.ticket();
     } catch (error) {
       if (mine !== generation) return;
-      const status = statusOf(error);
+      const status = remoteErrorStatus(error);
       if (status === 401 || status === 403) {
         stop();
         return;
@@ -376,8 +398,7 @@ export function createMediaStatus(transport: MediaStatusTransport) {
   }
 
   function stopHeartbeat(): void {
-    if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
+    heartbeatTimer = clearEvery(heartbeatTimer);
   }
 
   function startPolling(): void {
@@ -394,8 +415,7 @@ export function createMediaStatus(transport: MediaStatusTransport) {
   }
 
   function stopPolling(): void {
-    if (pollTimer !== null) clearInterval(pollTimer);
-    pollTimer = null;
+    pollTimer = clearEvery(pollTimer);
   }
 
   function closeSocket(): void {
@@ -426,9 +446,12 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     unlistedSeen.clear();
     uploads.clear();
     sentPct.clear();
-    if (uploadTimer !== null) clearInterval(uploadTimer);
-    uploadTimer = null;
+    uploadTimer = clearEvery(uploadTimer);
     refreshTimer = clear(refreshTimer);
+    if (refreshWhenVisible) {
+      document.removeEventListener('visibilitychange', onVisible);
+      refreshWhenVisible = false;
+    }
     failures = 0;
     wasLive = false;
     connection = 'idle';
@@ -448,8 +471,7 @@ export function createMediaStatus(transport: MediaStatusTransport) {
         now = Date.now();
       }, 1_000);
     } else if (!counting && clockTimer !== null) {
-      clearInterval(clockTimer);
-      clockTimer = null;
+      clockTimer = clearEvery(clockTimer);
     }
   }
 
@@ -458,8 +480,7 @@ export function createMediaStatus(transport: MediaStatusTransport) {
   function flushUpload(): void {
     const next = uploads.entries().next();
     if (next.done) {
-      if (uploadTimer !== null) clearInterval(uploadTimer);
-      uploadTimer = null;
+      uploadTimer = clearEvery(uploadTimer);
       return;
     }
     const [mediaId, pct] = next.value;
@@ -524,6 +545,14 @@ export function createMediaStatus(transport: MediaStatusTransport) {
       scheduleRefresh();
     },
 
+    /**
+     * This tab created `mediaId` and shows it as its own upload: the object's
+     * first state for it is no reason to refetch the list.
+     */
+    beginUpload(mediaId: string): void {
+      unlistedSeen.add(mediaId);
+    },
+
     /** This tab's upload of `mediaId` finished or failed: stop reporting it. */
     endUpload(mediaId: string): void {
       uploads.delete(mediaId);
@@ -537,8 +566,6 @@ export function createMediaStatus(transport: MediaStatusTransport) {
     },
   };
 }
-
-export type MediaStatusStore = ReturnType<typeof createMediaStatus>;
 
 /** The browser's transport; the ticket command loads only when first used. */
 const browserTransport: MediaStatusTransport = {

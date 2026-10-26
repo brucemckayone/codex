@@ -47,6 +47,15 @@ const EXTENSION_TO_MIME: Readonly<Record<string, string>> = {
   oga: 'audio/ogg',
 };
 
+/**
+ * The file picker's `accept`: every type and extension `checkMediaFile`
+ * takes, so the picker and drag-and-drop accept the same files.
+ */
+export const MEDIA_FILE_ACCEPT = [
+  ...SUPPORTED_MEDIA_MIME_TYPES,
+  ...Object.keys(EXTENSION_TO_MIME).map((extension) => `.${extension}`),
+].join(',');
+
 export type MediaFileCheck =
   | { ok: true; mimeType: string; mediaType: 'video' | 'audio' }
   | { ok: false; reason: 'type' | 'empty' | 'too_large' };

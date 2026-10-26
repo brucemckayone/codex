@@ -27,7 +27,9 @@
 <script lang="ts">
   import { createMedia, completeUpload, deleteMedia } from '$lib/remote/media.remote';
   import { mediaStatus } from '$lib/client/media-status.svelte';
-  import { checkMediaFile } from './media-upload-file';
+  import { checkMediaFile, MEDIA_FILE_ACCEPT } from './media-upload-file';
+  import { guardUnload } from '$lib/page-builder/autosave.svelte';
+  import { FILE_SIZES } from '@codex/constants';
   import { Button } from '$lib/components/ui';
   import { measureMediaDuration } from '$lib/utils/media-duration';
   import { logger } from '$lib/observability';
@@ -112,42 +114,9 @@
   const dropSub = 'Video or audio · up to 5 GB each';
 
   /**
-   * Accepted MIME types for media uploads
-   */
-  const ACCEPTED_TYPES = [
-    // MIME types
-    'video/mp4',
-    'video/quicktime',
-    'video/x-msvideo',
-    'video/webm',
-    'audio/mpeg',
-    'audio/mp4',
-    'audio/wav',
-    'audio/webm',
-    'audio/ogg',
-    // File extensions (some browsers need these instead of MIME types)
-    '.mp4',
-    '.m4v',
-    '.mov',
-    '.avi',
-    '.webm',
-    '.mp3',
-    '.m4a',
-    '.wav',
-    '.ogg',
-  ];
-
-  /**
    * Max concurrent uploads
    */
   const MAX_CONCURRENT = 2;
-
-  /**
-   * The largest file the worker fallback takes. A Worker refuses a request
-   * body over 100 MB, so past this a failed direct upload is reported (with
-   * Try again) instead of being sent somewhere that cannot accept it.
-   */
-  const WORKER_UPLOAD_MAX_BYTES = 90 * 1024 * 1024;
 
   function rejectionReason(file: File, reason: 'type' | 'empty' | 'too_large'): string {
     switch (reason) {
@@ -226,6 +195,8 @@
       const mediaId = result.id;
       const presignedUrl = result.presignedUrl;
       item.id = mediaId;
+      // Shown here as its ghost tile: no list refetch for it.
+      mediaStatus.beginUpload(mediaId);
 
       // Step 2: PUT file directly to R2 via presigned URL with progress tracking.
       // Falls back to worker upload if presigned URL fails (e.g. CORS in local dev
@@ -234,7 +205,7 @@
         try {
           await uploadToR2(item, presignedUrl);
         } catch (error) {
-          if (item.file.size > WORKER_UPLOAD_MAX_BYTES) {
+          if (item.file.size > FILE_SIZES.WORKER_UPLOAD_MAX_BYTES) {
             directFailed = true;
             throw error;
           }
@@ -243,7 +214,7 @@
           });
           await uploadViaWorker(item, mediaId);
         }
-      } else if (item.file.size > WORKER_UPLOAD_MAX_BYTES) {
+      } else if (item.file.size > FILE_SIZES.WORKER_UPLOAD_MAX_BYTES) {
         directFailed = true;
         throw new Error('No direct upload URL, and the file is too large for the worker');
       } else {
@@ -397,12 +368,9 @@
     )
   );
 
-  $effect(() => {
-    if (!uploadsPending) return;
-    const handler = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  });
+  // Registered only while needed: a beforeunload listener costs the page its
+  // back/forward cache.
+  $effect(() => (uploadsPending ? guardUnload(() => true) : undefined));
 
   /**
    * Remove an item from the queue
@@ -484,7 +452,7 @@
   bind:this={fileInput}
   id="media-file-input"
   type="file"
-  accept={ACCEPTED_TYPES.join(',')}
+  accept={MEDIA_FILE_ACCEPT}
   multiple
   class="sr-only"
   onchange={handleFileInputChange}

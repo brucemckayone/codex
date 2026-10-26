@@ -115,6 +115,14 @@ function withoutComments(source: string): string {
 }
 
 /**
+ * A file that imports `procedure` (not as a type) from @codex/worker-utils
+ * declares procedure routes. Keyed on the import, not on `procedure(`, which
+ * a string or a comment can contain without any route behind it.
+ */
+const PROCEDURE_IMPORT =
+  /import\s*\{[^}]*(?<!type\s)\bprocedure\b[^}]*\}\s*from\s*['"]@codex\/worker-utils['"]/;
+
+/**
  * Presets a worker's own source declares on a `procedure()` policy, plus the
  * `api` fallback whenever that worker has any procedure route at all — an
  * omitted `rateLimit` is enforced as `api`, not as "unlimited".
@@ -148,7 +156,7 @@ function declaredPresets(worker: string): Set<string> {
       for (const match of source.matchAll(/rateLimit:\s*'([a-z]+)'/g)) {
         presets.add(match[1] as string);
       }
-      if (/\bprocedure\s*\(/.test(source)) hasProcedureRoute = true;
+      if (PROCEDURE_IMPORT.test(source)) hasProcedureRoute = true;
     }
   };
 

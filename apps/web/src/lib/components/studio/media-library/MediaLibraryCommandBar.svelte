@@ -20,6 +20,8 @@
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import { UploadIcon, SearchIcon, XIcon } from '$lib/components/ui/Icon';
+  import Badge from '$lib/components/ui/Badge/Badge.svelte';
+  import type { MediaStatusConnection } from '$lib/client/media-status.svelte';
 
   type MediaTypeFilter = 'all' | 'video' | 'audio';
   type StatusFilter = 'all' | 'ready' | 'transcoding' | 'failed';
@@ -30,10 +32,10 @@
     /** Whether the list is currently loading (dims the count) */
     loading?: boolean;
     /**
-     * The live status socket (Codex-l2c48.7): `live`, or why the tiles may
-     * lag. Absent while connecting or when the socket is not in use.
+     * The live status socket (Codex-l2c48.7). Shown while it is live, or
+     * while the tiles may lag (reconnecting, polling); hidden otherwise.
      */
-    live?: 'live' | 'reconnecting' | 'polling' | null;
+    live?: MediaStatusConnection;
     /** Active media-type filter */
     mediaType: MediaTypeFilter;
     /** Active status filter */
@@ -55,7 +57,7 @@
   const {
     total,
     loading = false,
-    live = null,
+    live = 'idle',
     mediaType,
     status,
     searchValue,
@@ -89,6 +91,13 @@
   const ordinalText = $derived(
     Math.max(0, Math.min(total, 999)).toString().padStart(3, '0')
   );
+  const LIVE_LABELS: Partial<Record<MediaStatusConnection, () => string>> = {
+    live: () => m.media_live_live(),
+    reconnecting: () => m.media_live_reconnecting(),
+    polling: () => m.media_live_polling(),
+  };
+  const liveLabel = $derived(LIVE_LABELS[live]);
+
   // TODO i18n — studio_media_count_label = "items"
   const countLabel = 'items';
   // TODO i18n — studio_media_search_placeholder = "Search library..."
@@ -112,14 +121,10 @@
       <span class="count-num">{ordinalText}</span>
       <span class="count-label">{countLabel}</span>
     </span>
-    {#if live}
-      <span class="live-chip" data-state={live}>
-        {live === 'live'
-          ? m.media_live_live()
-          : live === 'reconnecting'
-            ? m.media_live_reconnecting()
-            : m.media_live_polling()}
-      </span>
+    {#if liveLabel}
+      <Badge class="live-chip" variant={live === 'live' ? 'success' : 'warning'} data-state={live}>
+        {liveLabel()}
+      </Badge>
     {/if}
   </div>
 
@@ -317,40 +322,18 @@
     letter-spacing: var(--tracking-wider);
   }
 
-  /* Live status socket: green while live, amber while it lags. */
-  .live-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1-5);
-    padding: 2px var(--space-2);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-wider);
-    white-space: nowrap;
-    border-radius: var(--radius-full);
-    border: var(--border-width) var(--border-style) var(--color-status-success-border);
-    background: var(--color-status-success-surface);
-    color: var(--color-status-success-text);
-  }
-
-  .live-chip::before {
+  /* The live chip is a Badge (its colours); this adds the dot and the blink. */
+  .bar-identity :global(.live-chip)::before {
     content: '';
     width: var(--space-1-5);
     height: var(--space-1-5);
+    margin-right: var(--space-1-5);
     border-radius: var(--radius-full);
     background: currentColor;
   }
 
-  .live-chip[data-state='reconnecting'],
-  .live-chip[data-state='polling'] {
-    border-color: var(--color-status-warning-border);
-    background: var(--color-status-warning-surface);
-    color: var(--color-status-warning-text);
-  }
-
   @media (prefers-reduced-motion: no-preference) {
-    .live-chip[data-state='reconnecting']::before {
+    .bar-identity :global(.live-chip[data-state='reconnecting'])::before {
       animation: live-chip-blink 1s steps(2) infinite;
     }
   }

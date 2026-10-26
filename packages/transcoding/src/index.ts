@@ -106,7 +106,6 @@ export {
 
 // Types
 export {
-  type HlsVariant,
   hlsVariantSchema,
   type MediaStatus,
   // Package-specific types

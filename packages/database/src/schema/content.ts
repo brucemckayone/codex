@@ -445,6 +445,11 @@ export type OrganizationMembership =
 export type NewOrganizationMembership =
   typeof organizationMemberships.$inferInsert;
 export type MediaItem = typeof mediaItems.$inferSelect;
+/**
+ * A media row as a response carries it: without the transcoder's raw detail
+ * (MEDIA_ITEM_RESPONSE_COLUMNS, utils/media-item-columns.ts, Codex-l2c48).
+ */
+export type ServedMediaItem = Omit<MediaItem, 'transcodingError'>;
 export type NewMediaItem = typeof mediaItems.$inferInsert;
 export type Content = typeof content.$inferSelect;
 export type NewContent = typeof content.$inferInsert;

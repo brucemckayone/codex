@@ -15,8 +15,8 @@ export type {
 
 import type {
   Content,
-  MediaItem,
   Organization,
+  ServedMediaItem,
   Subscription,
   SubscriptionTier,
 } from '@codex/database/schema';
@@ -31,12 +31,11 @@ export interface ContentWithRelations extends Content {
     name: string | null;
   };
   organization?: Organization | null;
-  mediaItem?: MediaItem | null;
+  mediaItem?: ServedMediaItem | null;
 }
 
 /** As content-api serves it: never the transcoder's raw detail. */
-export interface MediaItemWithRelations
-  extends Omit<MediaItem, 'transcodingError'> {
+export interface MediaItemWithRelations extends ServedMediaItem {
   creator?: {
     id: string;
     email: string;

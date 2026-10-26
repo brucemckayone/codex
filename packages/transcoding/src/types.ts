@@ -48,17 +48,6 @@ export type MediaStatus =
   | 'failed';
 
 /**
- * HLS variant quality levels
- */
-export type HlsVariant =
-  | '1080p'
-  | '720p'
-  | '480p'
-  | '360p'
-  | 'source'
-  | 'audio';
-
-/**
  * RunPod job request payload
  * Sent when triggering a new transcoding job
  *

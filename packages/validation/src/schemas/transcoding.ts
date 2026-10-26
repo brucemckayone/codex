@@ -331,7 +331,3 @@ export const triggerTranscodingSchema = z.object({
 });
 
 export type TriggerTranscodingInput = z.infer<typeof triggerTranscodingSchema>;
-
-// ============================================================================
-// Response Types (for documentation/type safety)
-// ============================================================================

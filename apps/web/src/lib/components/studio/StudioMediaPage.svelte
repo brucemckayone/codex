@@ -113,12 +113,6 @@
     })
   );
 
-  const liveChip = $derived.by(() => {
-    const connection = mediaStatus.connection;
-    return connection === 'live' || connection === 'reconnecting' || connection === 'polling'
-      ? connection
-      : null;
-  });
 
   // ── Delete state ──────────────────────────────────────────────────────
   let showDeleteConfirm = $state(false);
@@ -299,7 +293,7 @@
 <div class="media-page {className ?? ''}">
   <MediaLibraryCommandBar
     total={totalItems}
-    live={liveChip}
+    live={mediaStatus.connection}
     mediaType={activeMediaType}
     status={activeStatus}
     searchValue={searchValue}

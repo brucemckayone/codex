@@ -21,8 +21,17 @@
  * would recurse or break the code that logged.
  */
 
-import { type LogEvent, redactSensitiveData } from '@codex/observability';
+import {
+  type LogEvent,
+  REDACTION_PRESETS,
+  redactSensitiveData,
+} from '@codex/observability';
 import { z } from 'zod';
+import {
+  queryErrorMessage,
+  remoteErrorCode,
+  remoteErrorStatus,
+} from '$lib/remote/query-result';
 
 export const CLIENT_LOG_ROUTE = '/api/client-log';
 export const CLIENT_LOG_MAX_BYTES = 8 * 1024;
@@ -59,15 +68,12 @@ export function describeThrown(thrown: unknown): Record<string, unknown> {
     };
   }
   // A remote function's HttpError: `{ status, body: { message, code } }`.
-  if (thrown !== null && typeof thrown === 'object' && 'status' in thrown) {
-    const { status, body } = thrown as {
-      status: unknown;
-      body?: { message?: unknown; code?: unknown };
-    };
+  const status = remoteErrorStatus(thrown);
+  if (status !== undefined) {
     return {
       status,
-      error: String(body?.message ?? '').slice(0, THROWN_MESSAGE_MAX),
-      code: body?.code,
+      error: (queryErrorMessage(thrown, '') ?? '').slice(0, THROWN_MESSAGE_MAX),
+      code: remoteErrorCode(thrown),
     };
   }
   return { error: String(thrown).slice(0, THROWN_MESSAGE_MAX) };
@@ -79,14 +85,14 @@ interface SinkDeps {
   path(): string;
 }
 
-/** The production redaction the server logger applies too. */
-const REDACTION = { mode: 'hash', redactEmails: true } as const;
-
 const encoder = new TextEncoder();
 
 /** UTF-8 bytes, as the route counts them: `length` undercounts non-ASCII. */
 function byteLength(text: string): number {
-  return encoder.encode(text).length;
+  // A UTF-16 unit is at most 3 UTF-8 bytes: most records need no encode.
+  return text.length * 3 <= CLIENT_LOG_MAX_BYTES
+    ? text.length
+    : encoder.encode(text).length;
 }
 
 function sized(entry: ClientLogEntry): string {
@@ -96,7 +102,7 @@ function sized(entry: ClientLogEntry): string {
   // record the server would refuse whole. The preview is JSON, so its quotes
   // and newlines are escaped again inside the record: shrink until it fits.
   const { metadata, ...rest } = entry;
-  let preview = JSON.stringify(metadata ?? {});
+  let preview = JSON.stringify(metadata ?? {}).slice(0, CLIENT_LOG_MAX_BYTES);
   for (;;) {
     const candidate = JSON.stringify({
       ...rest,
@@ -142,10 +148,10 @@ export function createClientLogSink(deps: SinkDeps) {
         }
 
         const metadata = event.metadata
-          ? (redactSensitiveData(event.metadata, REDACTION) as Record<
-              string,
-              unknown
-            >)
+          ? (redactSensitiveData(
+              event.metadata,
+              REDACTION_PRESETS.production
+            ) as Record<string, unknown>)
           : undefined;
         const body = sized({
           level: event.level,

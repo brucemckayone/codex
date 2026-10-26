@@ -13,6 +13,13 @@ export const FILE_SIZES = {
   IMAGE_MAX_BYTES: 5 * 1024 * 1024, // 5MB (for avatars, thumbnails, etc.)
   MEDIA_MAX_BYTES: 5 * 1024 * 1024 * 1024, // 5GB (video/audio uploads)
   MEDIA_MIN_BYTES: 1024, // 1KB minimum (reject empty/corrupt uploads)
+  /**
+   * The most content-api's worker upload route takes: Cloudflare refuses a
+   * request body over 100 MB, so a larger file uploads only to its presigned
+   * R2 URL (the studio reports a failed direct upload instead of retrying it
+   * through the worker).
+   */
+  WORKER_UPLOAD_MAX_BYTES: 90 * 1024 * 1024,
 } as const;
 
 export const VIDEO_PROGRESS = {

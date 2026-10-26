@@ -53,21 +53,11 @@ export type TileView =
       attemptsLeft: number;
     };
 
-export type TilePill =
-  | 'uploading'
-  | 'stopped'
-  | 'processing'
-  | 'waiting'
-  | 'ready'
-  | 'failed';
+/** The status pill: `starting` reads as processing. */
+export type TilePill = Exclude<TileView['kind'], 'starting'>;
 
 export function tilePill(view: TileView): TilePill {
-  switch (view.kind) {
-    case 'starting':
-      return 'processing';
-    default:
-      return view.kind;
-  }
+  return view.kind === 'starting' ? 'processing' : view.kind;
 }
 
 export function describeTile(
@@ -144,10 +134,4 @@ function failed(errorCode: string | null, attemptsLeft: number): TileView {
     canRetry: info.retryable && attemptsLeft > 0,
     attemptsLeft,
   };
-}
-
-/** A retry countdown as M:SS. */
-export function formatCountdown(seconds: number): string {
-  const whole = Math.max(0, Math.floor(seconds));
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
 }
