@@ -1,12 +1,14 @@
 /**
  * Admin Analytics Service
  *
- * Provides revenue and customer statistics for platform owner dashboard.
- * Uses SQL aggregation for efficient queries on purchases table.
+ * Revenue, subscriber, follower and customer statistics for an
+ * organisation's Studio. Revenue reads the payouts ledger, so it counts every
+ * kind of payment (Codex-2hxff.20); the other figures read their own tables.
  */
 
 import { ANALYTICS, PURCHASE_STATUS } from '@codex/constants';
 import { dateWindow, schema, toIso } from '@codex/database';
+import { STANDING_REFUND_STATUSES } from '@codex/purchase';
 import { BaseService, NotFoundError } from '@codex/service-errors';
 import type {
   PaginatedListResponse,
@@ -22,12 +24,15 @@ import {
   inArray,
   isNull,
   or,
+  type SQL,
   sql,
 } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { DEFAULT_TOP_CONTENT_LIMIT } from '../constants';
 import type {
   ActivityFeedItem,
   ActivityFeedResponse,
+  AgreementShare,
   ContentPerformanceItem,
   ContentPerformanceQueryOptions,
   CreatorRevenueQueryOptions,
@@ -42,6 +47,7 @@ import type {
   FollowerQueryOptions,
   FollowerStats,
   RevenueBlock,
+  RevenueKind,
   RevenueQueryOptions,
   RevenueStats,
   SubscriberBlock,
@@ -50,16 +56,48 @@ import type {
   TopContentItem,
   TopContentQueryOptions,
 } from '../types';
+import {
+  type AnalyticsWindow,
+  resolveAnalyticsWindow,
+  trailingDaysStart,
+  zeroFillDays,
+} from './analytics-window';
+
+const REVENUE_KINDS: readonly RevenueKind[] = [
+  'one_off',
+  'course',
+  'subscription',
+  'course_plan',
+];
+
+/** `column`'s UTC calendar day as `YYYY-MM-DD` (owner decision Q-D: UTC). */
+function utcDate(column: AnyPgColumn): SQL<string> {
+  return sql<string>`((${column}) AT TIME ZONE 'UTC')::date::text`;
+}
+
+/** One row of the revenue read: one kind of payment on one UTC day. */
+interface RevenueKindDayRow {
+  kind: RevenueKind;
+  day: string;
+  kept_payments: number | string;
+  revenue: number | string;
+  codex_fee: number | string;
+  creators: number | string;
+  legacy_charges: number | string;
+}
 
 export class AdminAnalyticsService extends BaseService {
   /**
    * Get revenue statistics for an organization.
    *
-   * Returns aggregate revenue metrics and a daily breakdown over the same
-   * requested range. Only counts completed purchases. Pass
-   * `compareFrom`/`compareTo` to get a `previous` block for delta-vs-previous
-   * KPIs — if either is absent the comparison is skipped and the result
-   * matches the original single-period shape.
+   * Returns aggregate revenue metrics, a per-kind split and a daily
+   * breakdown (one UTC day per day of the window) over the requested range.
+   * Reads the payouts ledger (`orgCharges`), so it counts every kind of
+   * payment (one-off sales, courses, subscriptions, course plans) whose
+   * charge was first recorded in the window, less standing refunds and lost
+   * disputes. Pass `compareFrom`/`compareTo` to get a `previous` block for
+   * delta-vs-previous KPIs — if either is absent the comparison is skipped
+   * and the result matches the single-period shape.
    */
   async getRevenueStats(
     organizationId: string,
@@ -102,81 +140,192 @@ export class AdminAnalyticsService extends BaseService {
   }
 
   /**
-   * Aggregate + daily breakdown for a single period. Daily rows use the same
-   * date window as the aggregate so the two views stay consistent — the
-   * previous implementation hardcoded the last 30 days for the daily query,
-   * which diverged from the aggregate once a caller passed `startDate`/`endDate`.
-   * When no range is provided we fall back to the trend-days default so the
-   * dashboard's zero-argument call still returns a sensible recent trend.
+   * The organisation's charges for one window, as a `WITH` clause that the
+   * revenue block and Revenue by creator both read, so they cannot disagree
+   * (data design §2.3).
+   *
+   * - `charges`: one row per Stripe charge of the organisation whose FIRST
+   *   ledger row falls in the window. That row's time is the payment's date:
+   *   it is the only time every source has (an invoice has no row of its
+   *   own). A charge first recorded before the window is left out whole,
+   *   even when a later replay adds a slice inside it. Its `gross` is the sum
+   *   of its slices, which add up to what the buyer paid.
+   * - `taken`: what went back to the buyer: its standing refunds and lost
+   *   chargebacks, never more than the charge (owner decision Q-C).
+   * - `slice_net`: each slice less its share of `taken`, by the clawback's own
+   *   rounding, floor(slice × taken / gross), so the figures match what the
+   *   ledger takes back without reading `payout_reversals`.
+   *
+   * Rows with no charge id are never a sale: support's re-pay rows and
+   * pre-ledger rows. Both reads of `payouts` are org-scoped.
+   */
+  private orgCharges(organizationId: string, window: AnalyticsWindow): SQL {
+    const start = window.start.toISOString();
+    const end = window.end.toISOString();
+    const standing = sql.join(
+      STANDING_REFUND_STATUSES.map((status) => sql`${status}`),
+      sql`, `
+    );
+    return sql`
+      WITH window_charges AS (
+        SELECT DISTINCT p.stripe_charge_id
+        FROM payouts p
+        WHERE p.organization_id = ${organizationId}
+          AND p.stripe_charge_id IS NOT NULL
+          AND p.created_at >= ${start}::timestamptz
+          AND p.created_at <= ${end}::timestamptz
+          AND NOT EXISTS (
+            SELECT 1 FROM payouts e
+            WHERE e.stripe_charge_id = p.stripe_charge_id
+              AND e.created_at < ${start}::timestamptz
+          )
+      ),
+      slices AS (
+        SELECT p.stripe_charge_id, p.payout_type, p.user_id, p.amount_cents,
+               p.created_at, p.purchase_id, p.subscription_id,
+               p.course_subscription_id, p.source_type, pu.course_id
+        FROM payouts p
+        JOIN window_charges w ON w.stripe_charge_id = p.stripe_charge_id
+        LEFT JOIN purchases pu ON pu.id = p.purchase_id
+        WHERE p.organization_id = ${organizationId}
+      ),
+      charges AS (
+        SELECT stripe_charge_id,
+               MIN(created_at) AS charged_at,
+               SUM(amount_cents)::bigint AS gross,
+               CASE
+                 WHEN bool_or(subscription_id IS NOT NULL) THEN 'subscription'
+                 WHEN bool_or(course_subscription_id IS NOT NULL) THEN 'course_plan'
+                 WHEN bool_or(course_id IS NOT NULL) THEN 'course'
+                 WHEN bool_or(purchase_id IS NOT NULL) THEN 'one_off'
+                 WHEN bool_or(source_type = 'subscription') THEN 'subscription'
+                 ELSE 'one_off'
+               END AS kind,
+               NOT bool_or(purchase_id IS NOT NULL
+                           OR subscription_id IS NOT NULL
+                           OR course_subscription_id IS NOT NULL) AS legacy
+        FROM slices
+        GROUP BY stripe_charge_id
+      ),
+      taken AS (
+        SELECT c.stripe_charge_id,
+               LEAST(
+                 c.gross,
+                 COALESCE((SELECT SUM(r.amount_cents) FROM refunds r
+                           WHERE r.stripe_charge_id = c.stripe_charge_id
+                             AND r.status IN (${standing})), 0)
+                 + COALESCE((SELECT SUM(d.amount_cents) FROM disputes d
+                             WHERE d.stripe_charge_id = c.stripe_charge_id
+                               AND d.status = 'lost'), 0)
+               )::bigint AS cents
+        FROM charges c
+      ),
+      slice_net AS (
+        SELECT s.stripe_charge_id, s.payout_type, s.user_id,
+               s.amount_cents - (s.amount_cents::bigint * t.cents / c.gross) AS net
+        FROM slices s
+        JOIN charges c ON c.stripe_charge_id = s.stripe_charge_id
+        JOIN taken t ON t.stripe_charge_id = s.stripe_charge_id
+      )
+    `;
+  }
+
+  /**
+   * One period's revenue, from the payouts ledger: every kind of payment,
+   * each counting what the buyer kept (data design §2.3, read A). The day
+   * list is one entry per UTC calendar day of the window, oldest first,
+   * zero-filled (Codex-2hxff.75), so no reader sorts or guesses.
    */
   private async computeRevenueBlock(
     organizationId: string,
     startDate?: Date,
     endDate?: Date
   ): Promise<RevenueBlock> {
-    const defaultStart = new Date();
-    defaultStart.setDate(defaultStart.getDate() - ANALYTICS.TREND_DAYS_DEFAULT);
-    const effectiveStart = startDate ?? defaultStart;
-    const effectiveEnd = endDate ?? new Date();
+    const window = resolveAnalyticsWindow(startDate, endDate);
+    const result = await this.db.execute(sql`
+      ${this.orgCharges(organizationId, window)}
+      SELECT c.kind,
+             (c.charged_at AT TIME ZONE 'UTC')::date::text AS day,
+             COUNT(*) FILTER (WHERE t.cents < c.gross)::int AS kept_payments,
+             COALESCE(SUM(c.gross - t.cents), 0)::bigint AS revenue,
+             COALESCE(SUM(n.fee), 0)::bigint AS codex_fee,
+             COALESCE(SUM(n.creators), 0)::bigint AS creators,
+             COUNT(*) FILTER (WHERE c.legacy)::int AS legacy_charges
+      FROM charges c
+      JOIN taken t ON t.stripe_charge_id = c.stripe_charge_id
+      LEFT JOIN (
+        SELECT stripe_charge_id,
+               SUM(net) FILTER (WHERE payout_type = 'platform_fee') AS fee,
+               SUM(net) FILTER (WHERE payout_type = 'creator_payout') AS creators
+        FROM slice_net
+        GROUP BY stripe_charge_id
+      ) n ON n.stripe_charge_id = c.stripe_charge_id
+      GROUP BY c.kind, day
+    `);
+    const rows = result.rows as unknown as RevenueKindDayRow[];
 
-    const baseConditions = [
-      eq(schema.purchases.organizationId, organizationId),
-      eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
-      ...dateWindow(schema.purchases.purchasedAt, effectiveStart, effectiveEnd),
-    ];
+    const revenueByKind = Object.fromEntries(
+      REVENUE_KINDS.map((kind) => [kind, 0])
+    ) as Record<RevenueKind, number>;
+    const days = new Map<string, DailyRevenue>();
+    let platformFeeCents = 0;
+    let creatorPayoutCents = 0;
+    let totalPurchases = 0;
+    let legacyCharges = 0;
+    for (const row of rows) {
+      const revenue = Number(row.revenue);
+      // Sales only (owner decision S1): a subscription payment is not an order.
+      const sales =
+        row.kind === 'one_off' || row.kind === 'course'
+          ? Number(row.kept_payments)
+          : 0;
+      revenueByKind[row.kind] += revenue;
+      platformFeeCents += Number(row.codex_fee);
+      creatorPayoutCents += Number(row.creators);
+      totalPurchases += sales;
+      legacyCharges += Number(row.legacy_charges);
+      const day = days.get(row.day) ?? {
+        date: row.day,
+        revenueCents: 0,
+        purchaseCount: 0,
+      };
+      day.revenueCents += revenue;
+      day.purchaseCount += sales;
+      days.set(row.day, day);
+    }
+    if (legacyCharges > 0) {
+      this.obs.warn(
+        'revenue read charges with no source; kind from source_type',
+        {
+          organizationId,
+          legacyCharges,
+        }
+      );
+    }
 
-    // Independent queries — neither consumes the other's value. Launch via
-    // Promise.all so the round-trip latency overlaps (R12 hard rule).
-    const [aggregateResult, dailyRows] = await Promise.all([
-      this.db
-        .select({
-          totalRevenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
-          totalPurchases: sql<number>`COUNT(*)::int`,
-          platformFeeCents: sql<number>`COALESCE(SUM(${schema.purchases.platformFeeCents}), 0)::int`,
-          organizationFeeCents: sql<number>`COALESCE(SUM(${schema.purchases.organizationFeeCents}), 0)::int`,
-          creatorPayoutCents: sql<number>`COALESCE(SUM(${schema.purchases.creatorPayoutCents}), 0)::int`,
-        })
-        .from(schema.purchases)
-        .where(and(...baseConditions)),
-      this.db
-        .select({
-          date: sql<string>`DATE(${schema.purchases.purchasedAt})::text`,
-          revenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
-          purchaseCount: sql<number>`COUNT(*)::int`,
-        })
-        .from(schema.purchases)
-        .where(and(...baseConditions))
-        .groupBy(sql`DATE(${schema.purchases.purchasedAt})`)
-        .orderBy(desc(sql`DATE(${schema.purchases.purchasedAt})`)),
-    ]);
-
-    const stats = aggregateResult[0] ?? {
-      totalRevenueCents: 0,
-      totalPurchases: 0,
-      platformFeeCents: 0,
-      organizationFeeCents: 0,
-      creatorPayoutCents: 0,
-    };
-
-    const averageOrderValueCents =
-      stats.totalPurchases > 0
-        ? Math.round(stats.totalRevenueCents / stats.totalPurchases)
-        : 0;
-
-    const revenueByDay: DailyRevenue[] = dailyRows.map((row) => ({
-      date: row.date,
-      revenueCents: row.revenueCents,
-      purchaseCount: row.purchaseCount,
-    }));
-
+    const totalRevenueCents = REVENUE_KINDS.reduce(
+      (sum, kind) => sum + revenueByKind[kind],
+      0
+    );
+    const salesRevenueCents = revenueByKind.one_off + revenueByKind.course;
     return {
-      totalRevenueCents: stats.totalRevenueCents,
-      totalPurchases: stats.totalPurchases,
-      averageOrderValueCents,
-      platformFeeCents: stats.platformFeeCents,
-      organizationFeeCents: stats.organizationFeeCents,
-      creatorPayoutCents: stats.creatorPayoutCents,
-      revenueByDay,
+      totalRevenueCents,
+      revenueByKind,
+      totalPurchases,
+      averageOrderValueCents:
+        totalPurchases > 0 ? Math.round(salesRevenueCents / totalPurchases) : 0,
+      platformFeeCents,
+      // The remainder, so the statement adds up to the penny: the
+      // organisation's slices, the owner pool, and a partial refund's
+      // rounding pennies (data design §2.3).
+      organizationFeeCents:
+        totalRevenueCents - platformFeeCents - creatorPayoutCents,
+      creatorPayoutCents,
+      revenueByDay: zeroFillDays(window, [...days.values()], (date) => ({
+        date,
+        revenueCents: 0,
+        purchaseCount: 0,
+      })),
     };
   }
 
@@ -228,20 +377,18 @@ export class AdminAnalyticsService extends BaseService {
 
   /**
    * Aggregate + daily breakdown for subscribers in a single period. Daily
-   * new-subscriber rows use the same date window as the aggregates so the
-   * two views stay consistent. When no range is provided we fall back to
-   * the trend-days default (matching the revenue helper) so zero-argument
-   * callers still get a sensible recent trend.
+   * new-subscriber rows use the same window as the aggregates, and the day
+   * list is one entry per UTC calendar day, oldest first, zero-filled, like
+   * the revenue block's (Codex-2hxff.75).
    */
   private async computeSubscriberBlock(
     organizationId: string,
     startDate?: Date,
     endDate?: Date
   ): Promise<SubscriberBlock> {
-    const defaultStart = new Date();
-    defaultStart.setDate(defaultStart.getDate() - ANALYTICS.TREND_DAYS_DEFAULT);
-    const effectiveStart = startDate ?? defaultStart;
-    const effectiveEnd = endDate ?? new Date();
+    const window = resolveAnalyticsWindow(startDate, endDate);
+    const effectiveStart = window.start;
+    const effectiveEnd = window.end;
 
     // A duplicate subscription (a second one to an org the user already
     // subscribed to) was refunded and never subscribed anyone, so it is
@@ -309,10 +456,10 @@ export class AdminAnalyticsService extends BaseService {
               )
             )
           ),
-        // Daily new subscribers, grouped by DATE(createdAt), most recent first
+        // Daily new subscribers, per UTC day of createdAt
         this.db
           .select({
-            date: sql<string>`DATE(${schema.subscriptions.createdAt})::text`,
+            date: utcDate(schema.subscriptions.createdAt),
             newSubscribers: sql<number>`COUNT(*)::int`,
           })
           .from(schema.subscriptions)
@@ -326,14 +473,14 @@ export class AdminAnalyticsService extends BaseService {
               )
             )
           )
-          .groupBy(sql`DATE(${schema.subscriptions.createdAt})`)
-          .orderBy(desc(sql`DATE(${schema.subscriptions.createdAt})`)),
+          .groupBy(utcDate(schema.subscriptions.createdAt)),
       ]);
 
-    const subscribersByDay: DailySubscribers[] = dailyRows.map((row) => ({
-      date: row.date,
-      newSubscribers: row.newSubscribers,
-    }));
+    const subscribersByDay: DailySubscribers[] = zeroFillDays(
+      window,
+      dailyRows,
+      (date) => ({ date, newSubscribers: 0 })
+    );
 
     return {
       activeSubscribers: activeResult[0]?.count ?? 0,
@@ -390,10 +537,9 @@ export class AdminAnalyticsService extends BaseService {
 
   /**
    * Aggregate + daily breakdown for followers in a single period. Daily
-   * new-follower rows use the same date window as the aggregates so the two
-   * views stay consistent. When no range is provided we fall back to the
-   * trend-days default (matching the revenue/subscriber helpers) so
-   * zero-argument callers still get a sensible recent trend.
+   * new-follower rows use the same window as the aggregates, and the day
+   * list is one entry per UTC calendar day, oldest first, zero-filled, like
+   * the revenue block's (Codex-2hxff.75).
    *
    * Limitation: `organizationFollowers` has no status or cancellation
    * column — unfollowing hard-deletes the row (intentional, see schema
@@ -409,10 +555,9 @@ export class AdminAnalyticsService extends BaseService {
     startDate?: Date,
     endDate?: Date
   ): Promise<FollowerBlock> {
-    const defaultStart = new Date();
-    defaultStart.setDate(defaultStart.getDate() - ANALYTICS.TREND_DAYS_DEFAULT);
-    const effectiveStart = startDate ?? defaultStart;
-    const effectiveEnd = endDate ?? new Date();
+    const window = resolveAnalyticsWindow(startDate, endDate);
+    const effectiveStart = window.start;
+    const effectiveEnd = window.end;
 
     // Three independent aggregates — none consumes another's value. Launch via
     // Promise.all so the round-trip latency overlaps (R12 hard rule).
@@ -448,10 +593,10 @@ export class AdminAnalyticsService extends BaseService {
             )
           )
         ),
-      // Daily new followers, grouped by DATE(createdAt), most recent first
+      // Daily new followers, per UTC day of createdAt
       this.db
         .select({
-          date: sql<string>`DATE(${schema.organizationFollowers.createdAt})::text`,
+          date: utcDate(schema.organizationFollowers.createdAt),
           newFollowers: sql<number>`COUNT(*)::int`,
         })
         .from(schema.organizationFollowers)
@@ -465,14 +610,14 @@ export class AdminAnalyticsService extends BaseService {
             )
           )
         )
-        .groupBy(sql`DATE(${schema.organizationFollowers.createdAt})`)
-        .orderBy(desc(sql`DATE(${schema.organizationFollowers.createdAt})`)),
+        .groupBy(utcDate(schema.organizationFollowers.createdAt)),
     ]);
 
-    const followersByDay: DailyFollowers[] = dailyRows.map((row) => ({
-      date: row.date,
-      newFollowers: row.newFollowers,
-    }));
+    const followersByDay: DailyFollowers[] = zeroFillDays(
+      window,
+      dailyRows,
+      (date) => ({ date, newFollowers: 0 })
+    );
 
     return {
       totalFollowers: totalResult[0]?.count ?? 0,
@@ -490,12 +635,13 @@ export class AdminAnalyticsService extends BaseService {
     try {
       // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
 
-      // Count new customers in default trend period
-      // A "new customer" is one whose FIRST purchase was in that period
-      const trendPeriodStartDate = new Date();
-      trendPeriodStartDate.setDate(
-        trendPeriodStartDate.getDate() - ANALYTICS.TREND_DAYS_DEFAULT
+      // A "new customer" is one whose FIRST purchase was in the period. Both
+      // periods are trailing UTC calendar days, today included, like the
+      // revenue block's default window.
+      const trendPeriodStartDate = trailingDaysStart(
+        ANALYTICS.TREND_DAYS_DEFAULT
       );
+      const weekStartDate = trailingDaysStart(7);
 
       // R12: parallelise independent reads — totalResult and newCustomersResult
       // are both aggregates over `purchases (organization_id, status=completed)`
@@ -524,19 +670,25 @@ export class AdminAnalyticsService extends BaseService {
               AND status = ${PURCHASE_STATUS.COMPLETED}
             GROUP BY customer_id
           )
-          SELECT COUNT(*) as count
+          SELECT
+            COUNT(*) FILTER (
+              WHERE first_purchase_at >= ${trendPeriodStartDate.toISOString()}::timestamptz
+            ) AS last_30,
+            COUNT(*) FILTER (
+              WHERE first_purchase_at >= ${weekStartDate.toISOString()}::timestamptz
+            ) AS last_7
           FROM first_purchases
-          WHERE first_purchase_at >= ${trendPeriodStartDate}
         `),
       ]);
 
-      const newCustomersLast30Days = Number(
-        (newCustomersResult.rows[0] as { count: string })?.count ?? 0
-      );
+      const newCustomers = newCustomersResult.rows[0] as
+        | { last_30: string | number; last_7: string | number }
+        | undefined;
 
       return {
         totalCustomers: totalResult[0]?.totalCustomers ?? 0,
-        newCustomersLast30Days,
+        newCustomersLast30Days: Number(newCustomers?.last_30 ?? 0),
+        newCustomersLast7Days: Number(newCustomers?.last_7 ?? 0),
       };
     } catch (error) {
       if (error instanceof NotFoundError) {
@@ -567,12 +719,14 @@ export class AdminAnalyticsService extends BaseService {
   ): Promise<PaginatedListResponse<TopContentItem>> {
     try {
       const limit = options?.limit ?? DEFAULT_TOP_CONTENT_LIMIT;
-      const defaultStart = new Date();
-      defaultStart.setDate(
-        defaultStart.getDate() - ANALYTICS.TREND_DAYS_DEFAULT
-      );
-      const effectiveStart = options?.startDate ?? defaultStart;
-      const effectiveEnd = options?.endDate ?? new Date();
+      // The same windows as the revenue block, so a leaderboard counts the
+      // end day (today, by default) as the KPIs above it do.
+      const { start: effectiveStart, end: effectiveEnd } =
+        resolveAnalyticsWindow(options?.startDate, options?.endDate);
+      const compare =
+        options?.compareFrom && options?.compareTo
+          ? resolveAnalyticsWindow(options.compareFrom, options.compareTo)
+          : null;
 
       // Correlates on `content.id`, NOT `purchases.contentId`. The two are equal
       // through the inner join, but only `content.id` is in the GROUP BY — and a
@@ -635,8 +789,7 @@ export class AdminAnalyticsService extends BaseService {
         trendDelta: null,
       }));
 
-      const wantsCompare = Boolean(options?.compareFrom && options?.compareTo);
-      if (wantsCompare && items.length > 0) {
+      if (compare && items.length > 0) {
         const contentIds = items.map((item) => item.contentId);
         const previousRows = await this.db
           .select({
@@ -648,12 +801,10 @@ export class AdminAnalyticsService extends BaseService {
             and(
               eq(schema.purchases.organizationId, organizationId),
               eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
-              // Helper's truthy checks make non-null asserts redundant — the
-              // outer wantsCompare guard still selects this code path.
               ...dateWindow(
                 schema.purchases.purchasedAt,
-                options?.compareFrom,
-                options?.compareTo
+                compare.start,
+                compare.end
               ),
               inArray(schema.purchases.contentId, contentIds)
             )
@@ -713,12 +864,13 @@ export class AdminAnalyticsService extends BaseService {
   ): Promise<PaginatedListResponse<ContentPerformanceItem>> {
     try {
       const limit = options?.limit ?? DEFAULT_TOP_CONTENT_LIMIT;
-      const defaultStart = new Date();
-      defaultStart.setDate(
-        defaultStart.getDate() - ANALYTICS.TREND_DAYS_DEFAULT
-      );
-      const effectiveStart = options?.startDate ?? defaultStart;
-      const effectiveEnd = options?.endDate ?? new Date();
+      // The revenue block's windows, as in getTopContent.
+      const { start: effectiveStart, end: effectiveEnd } =
+        resolveAnalyticsWindow(options?.startDate, options?.endDate);
+      const compare =
+        options?.compareFrom && options?.compareTo
+          ? resolveAnalyticsWindow(options.compareFrom, options.compareTo)
+          : null;
 
       const currentRows = await this.runContentPerformanceWindow(
         organizationId,
@@ -736,11 +888,8 @@ export class AdminAnalyticsService extends BaseService {
         trendDelta: null,
       }));
 
-      const wantsCompare = Boolean(options?.compareFrom && options?.compareTo);
-      if (wantsCompare && items.length > 0) {
+      if (compare && items.length > 0) {
         const contentIds = items.map((item) => item.contentId);
-        // Non-null assertions are safe: wantsCompare is only true when both
-        // compareFrom and compareTo are defined above.
         const previousWatchTime = await this.db
           .select({
             contentId: schema.videoPlayback.contentId,
@@ -750,12 +899,10 @@ export class AdminAnalyticsService extends BaseService {
           .where(
             and(
               inArray(schema.videoPlayback.contentId, contentIds),
-              // Helper's truthy checks make non-null asserts redundant — the
-              // outer wantsCompare guard still selects this code path.
               ...dateWindow(
                 schema.videoPlayback.updatedAt,
-                options?.compareFrom,
-                options?.compareTo
+                compare.start,
+                compare.end
               )
             )
           )
@@ -1018,76 +1165,188 @@ export class AdminAnalyticsService extends BaseService {
   }
 
   /**
-   * Per-creator revenue split for org-owner visibility on the studio
-   * analytics page (Codex-mtv05).
+   * Each creator's subscription and sales shares, from their active
+   * agreements. No agreement of a kind is `none`; one with no current
+   * proposal pays nothing, so it is `unreadable` ("—", never "0%", fazy6) and
+   * is alerted as the data fault it is.
+   */
+  private sharesByCreator(
+    organizationId: string,
+    agreements: ReadonlyArray<{
+      agreementId: string;
+      creatorId: string;
+      revenueType: string;
+      shareBps: number | null;
+    }>
+  ): Map<string, { subscription: AgreementShare; sales: AgreementShare }> {
+    const byCreator = new Map<
+      string,
+      { subscription: AgreementShare; sales: AgreementShare }
+    >();
+    for (const row of agreements) {
+      const shares = byCreator.get(row.creatorId) ?? {
+        subscription: { kind: 'none' },
+        sales: { kind: 'none' },
+      };
+      let share: AgreementShare;
+      if (row.shareBps === null) {
+        this.obs.error('agreement has no current proposal; it pays nothing', {
+          errorId: crypto.randomUUID(),
+          agreementId: row.agreementId,
+          organizationId,
+        });
+        share = { kind: 'unreadable' };
+      } else {
+        // Display percent at the service boundary: the DOM never sees basis
+        // points (10000 bps = 100%).
+        share = { kind: 'share', percent: row.shareBps / 100 };
+      }
+      if (row.revenueType === 'subscription') shares.subscription = share;
+      else shares.sales = share;
+      byCreator.set(row.creatorId, shares);
+    }
+    return byCreator;
+  }
+
+  /**
+   * Studio > Analytics "Revenue by creator" (Codex-zsh2p; owner decisions Q3
+   * and Q-E, 2026-10-26): one row per creator who holds an active agreement
+   * in the organisation, earned a slice in the window, or is still owed
+   * money by it.
    *
-   * Returns one row per ACTIVE creator-organization agreement (`status =
-   * 'active'`; the review date is not an expiry), annotated with:
-   *  - Purchase-revenue aggregated for content authored by that creator
-   *    within the org and the optional date window. Subscription invoice
-   *    revenue is NOT included in Phase 1 — there is no per-creator
-   *    immutable invoice row today, only dynamic transfer-time fan-out.
-   *  - The creator's CURRENT share, converted from basis points to a
-   *    display percentage (`bps / 100`). Historical splits are not surfaced.
-   *  - `lastPayoutAt` (MAX resolved drain) and `pendingPayoutCents` (SUM
-   *    of unresolved drains) joined by BOTH `userId` AND `organizationId`
-   *    — multi-org-membership safety per the bead STOP rule.
-   *
-   * The result mirrors the data contract `SubscriptionService.executeTransfers`
-   * uses at fan-out time, so the UI can faithfully visualise it.
-   *
-   * Empty agreements list (single-creator org or no agreements) returns
-   * `items: []` — the studio page hides the section in that case.
+   * - Earned is read B of the revenue block's read (`orgCharges`): their
+   *   `creator_payout` slices on the organisation's charges in the window,
+   *   every kind, sent or not, less the refund share. So Revenue by creator
+   *   adds up to the revenue block's `creatorPayoutCents` for the same window.
+   * - Each share from its active agreement's current proposal, as the payment
+   *   resolver reads it (never the legacy `organization_fee_percentage`, the
+   *   ORG's part, Codex-2hxff.19). There is at most one active agreement per
+   *   (organisation, creator, type): `uq_creator_org_agreement_active_per_type`.
+   * - Last payout and Pending are lifetime, and read their `creator_payout`
+   *   rows in this organisation only (multi-org membership safety). Pending
+   *   is money owed and not yet sent (data design §2.6): every `pending` or
+   *   `failed` row, those held for review or by an open dispute included,
+   *   less the partial refunds that already took from it (done
+   *   `pending_reduction` steps, the predicate `pendingReductionsFor` reads).
+   *   One aggregate, scoped to the organisation.
    */
   async getRevenueByCreator(
     organizationId: string,
     options?: CreatorRevenueQueryOptions
   ): Promise<PaginatedListResponse<CreatorRevenueSplitItem>> {
     try {
-      const startDate = options?.startDate;
-      const endDate = options?.endDate;
+      const window = resolveAnalyticsWindow(
+        options?.startDate,
+        options?.endDate
+      );
+      const creatorRows = and(
+        eq(schema.payouts.organizationId, organizationId),
+        eq(schema.payouts.payoutType, 'creator_payout')
+      );
 
-      // Active agreements + creator profile join. Drives the result-set
-      // shape — rows that exist here are the ones the executeTransfers
-      // fan-out will distribute to in production. `shareBps` is the
-      // creator's share from the accepted proposal, through
-      // `current_proposal_id` as the payment resolver reads it — never the
-      // legacy `organization_fee_percentage`, which holds the ORG's part
-      // (Codex-2hxff.19 AGR-08). With no proposal the agreement pays
-      // nothing, so it shows 0, and that is logged below.
-      const agreementRows = await this.db
-        .select({
-          agreementId: schema.creatorOrganizationAgreements.id,
-          creatorId: schema.creatorOrganizationAgreements.creatorId,
-          shareBps: schema.agreementProposals.proposedCreatorSharePercent,
-          name: schema.users.name,
-          avatarUrl: schema.users.avatarUrl,
-        })
-        .from(schema.creatorOrganizationAgreements)
-        .leftJoin(
-          schema.agreementProposals,
-          eq(
-            schema.agreementProposals.id,
-            schema.creatorOrganizationAgreements.currentProposalId
-          )
-        )
-        .innerJoin(
-          schema.users,
-          eq(schema.creatorOrganizationAgreements.creatorId, schema.users.id)
-        )
-        .where(
-          and(
-            eq(
-              schema.creatorOrganizationAgreements.organizationId,
-              organizationId
+      // Four independent reads, none consuming another's value (R12).
+      const [agreementRows, earnedResult, pendingRows, lastPayoutRows] =
+        await Promise.all([
+          this.db
+            .select({
+              agreementId: schema.creatorOrganizationAgreements.id,
+              creatorId: schema.creatorOrganizationAgreements.creatorId,
+              revenueType: schema.creatorOrganizationAgreements.revenueType,
+              shareBps: schema.agreementProposals.proposedCreatorSharePercent,
+            })
+            .from(schema.creatorOrganizationAgreements)
+            .leftJoin(
+              schema.agreementProposals,
+              eq(
+                schema.agreementProposals.id,
+                schema.creatorOrganizationAgreements.currentProposalId
+              )
+            )
+            .where(
+              and(
+                eq(
+                  schema.creatorOrganizationAgreements.organizationId,
+                  organizationId
+                ),
+                // Active, whatever the review date: it is not an expiry
+                // (owner decision AGR-01, Codex-2hxff.17).
+                eq(schema.creatorOrganizationAgreements.status, 'active')
+              )
             ),
-            // Active, whatever the review date: it is not an expiry (owner
-            // decision AGR-01, Codex-2hxff.17). Terminated ones are out.
-            eq(schema.creatorOrganizationAgreements.status, 'active')
-          )
-        );
+          this.db.execute(sql`
+            ${this.orgCharges(organizationId, window)}
+            SELECT user_id AS creator_id, COALESCE(SUM(net), 0)::bigint AS earned
+            FROM slice_net
+            WHERE payout_type = 'creator_payout' AND user_id IS NOT NULL
+            GROUP BY user_id
+          `),
+          this.db
+            .select({
+              creatorId: schema.payouts.userId,
+              // Drizzle renders a single-table select's fields unqualified,
+              // so the correlated subquery names its tables itself: a bare
+              // "id" there would be the reversal's own.
+              pendingCents: sql<number | string>`COALESCE(SUM(GREATEST(
+                payouts.amount_cents - COALESCE((
+                  SELECT SUM(r.amount_cents)
+                  FROM payout_reversals r
+                  WHERE r.payout_id = payouts.id
+                    AND r.kind = 'pending_reduction'
+                    AND r.status = 'done'
+                ), 0),
+                0
+              )), 0)::bigint`,
+            })
+            .from(schema.payouts)
+            .where(
+              and(
+                creatorRows,
+                inArray(schema.payouts.status, ['pending', 'failed'])
+              )
+            )
+            .groupBy(schema.payouts.userId),
+          this.db
+            .select({
+              creatorId: schema.payouts.userId,
+              lastPayoutAt: sql<
+                string | Date | null
+              >`MAX(${schema.payouts.resolvedAt})`,
+            })
+            .from(schema.payouts)
+            .where(and(creatorRows, eq(schema.payouts.status, 'paid')))
+            .groupBy(schema.payouts.userId),
+        ]);
 
-      if (agreementRows.length === 0) {
+      const earnedRows = earnedResult.rows as unknown as Array<{
+        creator_id: string;
+        earned: number | string;
+      }>;
+      const earnedByCreator = new Map(
+        earnedRows.map((row) => [row.creator_id, Number(row.earned)])
+      );
+
+      const pendingByCreator = new Map<string, number>();
+      for (const row of pendingRows) {
+        if (row.creatorId) {
+          pendingByCreator.set(row.creatorId, Number(row.pendingCents));
+        }
+      }
+
+      const sharesByCreator = this.sharesByCreator(
+        organizationId,
+        agreementRows
+      );
+
+      const creatorIds = [
+        ...new Set([
+          ...sharesByCreator.keys(),
+          ...earnedByCreator.keys(),
+          ...[...pendingByCreator]
+            .filter(([, cents]) => cents > 0)
+            .map(([creatorId]) => creatorId),
+        ]),
+      ];
+      if (creatorIds.length === 0) {
         const pagination: PaginationMetadata = {
           page: 1,
           limit: 0,
@@ -1096,113 +1355,40 @@ export class AdminAnalyticsService extends BaseService {
         };
         return { items: [], pagination };
       }
-      for (const row of agreementRows) {
-        if (row.shareBps === null) {
-          this.obs.error('agreement has no current proposal; it pays nothing', {
-            errorId: crypto.randomUUID(),
-            agreementId: row.agreementId,
-            organizationId,
-          });
-        }
-      }
 
-      const creatorIds = agreementRows.map((r) => r.creatorId);
-
-      // Purchase revenue per creator: SUM(purchases.creatorPayoutCents)
-      // joined to content for the creatorId mapping. ALL aggregates filtered
-      // by `purchases.organizationId = orgId` AND status=completed AND optional
-      // window. The join via `content.creatorId` is the canonical
-      // purchase→creator path (per `purchase-service.ts:249, 346, 481`).
-      const purchaseConditions = [
-        eq(schema.purchases.organizationId, organizationId),
-        eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
-        inArray(schema.content.creatorId, creatorIds),
-      ];
-      purchaseConditions.push(
-        ...dateWindow(schema.purchases.purchasedAt, startDate, endDate)
-      );
-
-      // Three independent aggregates over creator-keyed data — fire concurrently
-      // (R12 hard rule). Pending-payouts queries are scoped by BOTH userId AND
-      // organizationId to prevent cross-org bleed in multi-org membership cases.
-      const [revenueRows, lastPayoutRows, pendingPayoutRows] =
-        await Promise.all([
-          this.db
-            .select({
-              creatorId: schema.content.creatorId,
-              totalRevenueCents: sql<number>`COALESCE(SUM(${schema.purchases.creatorPayoutCents}), 0)::int`,
-            })
-            .from(schema.purchases)
-            .innerJoin(
-              schema.content,
-              eq(schema.purchases.contentId, schema.content.id)
-            )
-            .where(and(...purchaseConditions))
-            .groupBy(schema.content.creatorId),
-          this.db
-            .select({
-              creatorId: schema.payouts.userId,
-              lastPayoutAt: sql<
-                string | null
-              >`MAX(${schema.payouts.resolvedAt})`,
-            })
-            .from(schema.payouts)
-            .where(
-              and(
-                eq(schema.payouts.organizationId, organizationId),
-                inArray(schema.payouts.userId, creatorIds),
-                eq(schema.payouts.status, 'paid')
-              )
-            )
-            .groupBy(schema.payouts.userId),
-          this.db
-            .select({
-              creatorId: schema.payouts.userId,
-              pendingPayoutCents: sql<number>`COALESCE(SUM(${schema.payouts.amountCents}), 0)::int`,
-            })
-            .from(schema.payouts)
-            .where(
-              and(
-                eq(schema.payouts.organizationId, organizationId),
-                inArray(schema.payouts.userId, creatorIds),
-                inArray(schema.payouts.status, ['pending', 'failed'])
-              )
-            )
-            .groupBy(schema.payouts.userId),
-        ]);
-
-      const revenueByCreator = new Map(
-        revenueRows.map((r) => [r.creatorId, r.totalRevenueCents])
-      );
+      const profiles = await this.db
+        .select({
+          id: schema.users.id,
+          name: schema.users.name,
+          avatarUrl: schema.users.avatarUrl,
+        })
+        .from(schema.users)
+        .where(inArray(schema.users.id, creatorIds));
+      const profileById = new Map(profiles.map((user) => [user.id, user]));
       const lastPayoutByCreator = new Map(
-        lastPayoutRows.map((r) => [r.creatorId, r.lastPayoutAt])
-      );
-      const pendingByCreator = new Map(
-        pendingPayoutRows.map((r) => [r.creatorId, r.pendingPayoutCents])
+        lastPayoutRows.map((row) => [row.creatorId, row.lastPayoutAt])
       );
 
-      // sharePercent is converted at the service boundary so the frontend
-      // NEVER sees raw basis points — bead STOP rule explicitly forbids
-      // leaking bps to the DOM. Basis points: 10000 = 100%, so display
-      // percent = bps / 100 (e.g. 7500 bps → 75%).
-      const items: CreatorRevenueSplitItem[] = agreementRows
-        .map((row) => {
-          const lastPayoutRaw = lastPayoutByCreator.get(row.creatorId) ?? null;
-          // `lastPayoutRaw` is typed `string | null` by the SQL builder but
-          // drivers sometimes hand back a Date directly. `toIso()` handles
-          // both shapes (Date | string | null) at the service boundary.
-          const lastPayoutAt = toIso(lastPayoutRaw);
+      const items: CreatorRevenueSplitItem[] = creatorIds
+        .map((creatorId) => {
+          const profile = profileById.get(creatorId);
+          const shares = sharesByCreator.get(creatorId);
           return {
-            creatorId: row.creatorId,
-            name: row.name ?? '',
-            avatarUrl: row.avatarUrl ?? null,
-            totalRevenueCents: revenueByCreator.get(row.creatorId) ?? 0,
-            splitPercent: (row.shareBps ?? 0) / 100,
-            lastPayoutAt,
-            pendingPayoutCents: pendingByCreator.get(row.creatorId) ?? 0,
+            creatorId,
+            name: profile?.name ?? '',
+            avatarUrl: profile?.avatarUrl ?? null,
+            earnedCents: earnedByCreator.get(creatorId) ?? 0,
+            subscriptionShare: shares?.subscription ?? { kind: 'none' },
+            salesShare: shares?.sales ?? { kind: 'none' },
+            // Drivers hand back a Date or a string; `toIso` takes both.
+            lastPayoutAt: toIso(lastPayoutByCreator.get(creatorId) ?? null),
+            pendingPayoutCents: pendingByCreator.get(creatorId) ?? 0,
           };
         })
-        .sort((a, b) => b.totalRevenueCents - a.totalRevenueCents);
+        .sort(
+          (a, b) =>
+            b.earnedCents - a.earnedCents || a.name.localeCompare(b.name)
+        );
 
       const pagination: PaginationMetadata = {
         page: 1,

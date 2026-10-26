@@ -34,6 +34,79 @@ import {
 } from '../helpers/stripe-webhook';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
+/**
+ * The ledger rows a sale writes. Studio revenue reads the payouts ledger
+ * (Codex-2hxff.20), and these tests complete a purchase with a fake
+ * PaymentIntent, so the webhook's charge lookup fails and it records no
+ * slices. Seed them as a real sale would, unless the webhook wrote some.
+ */
+async function recordSaleSlices(opts: {
+  organizationId: string;
+  customerId: string;
+  contentId: string;
+  ownerId: string;
+  creatorId: string;
+  split: {
+    platformFeeCents: number;
+    organizationFeeCents: number;
+    creatorPayoutCents: number;
+  };
+}): Promise<void> {
+  const [purchase] = await dbWs
+    .select({ id: schema.purchases.id })
+    .from(schema.purchases)
+    .where(
+      and(
+        eq(schema.purchases.customerId, opts.customerId),
+        eq(schema.purchases.contentId, opts.contentId),
+        eq(schema.purchases.status, 'completed')
+      )
+    )
+    .limit(1);
+  if (!purchase) {
+    throw new Error('The webhook recorded no completed purchase');
+  }
+  const [recorded] = await dbWs
+    .select({ id: schema.payouts.id })
+    .from(schema.payouts)
+    .where(eq(schema.payouts.purchaseId, purchase.id))
+    .limit(1);
+  if (recorded) return;
+
+  const stripeChargeId = `ch_e2e_${purchase.id}`;
+  const resolvedAt = new Date();
+  const slices = [
+    {
+      payoutType: 'platform_fee',
+      userId: null,
+      amountCents: opts.split.platformFeeCents,
+    },
+    {
+      payoutType: 'organization_fee',
+      userId: opts.ownerId,
+      amountCents: opts.split.organizationFeeCents,
+    },
+    {
+      payoutType: 'creator_payout',
+      userId: opts.creatorId,
+      amountCents: opts.split.creatorPayoutCents,
+    },
+  ].filter((slice) => slice.amountCents > 0);
+  await dbWs.insert(schema.payouts).values(
+    slices.map((slice) => ({
+      ...slice,
+      organizationId: opts.organizationId,
+      purchaseId: purchase.id,
+      sourceType: 'purchase',
+      stripeChargeId,
+      transferGroup: `tg_${stripeChargeId}`,
+      // Sent, so no drain picks the row up.
+      status: 'paid',
+      resolvedAt,
+    }))
+  );
+}
+
 describe('Admin Dashboard', () => {
   // ============================================================================
   // 1. Authentication & Authorization
@@ -137,7 +210,13 @@ describe('Admin Dashboard', () => {
       expect(stats.averageOrderValueCents).toBe(0);
       expect(stats.platformFeeCents).toBe(0);
       expect(stats.creatorPayoutCents).toBe(0);
-      expect(stats.revenueByDay).toEqual([]);
+      // One zero entry per calendar day of the last 30 (Codex-2hxff.75).
+      expect(stats.revenueByDay).toHaveLength(30);
+      expect(
+        stats.revenueByDay.every(
+          (day: { revenueCents: number }) => day.revenueCents === 0
+        )
+      ).toBe(true);
     }, 60000);
     test(
       'should calculate revenue from completed purchases',
@@ -280,18 +359,27 @@ describe('Admin Dashboard', () => {
           process.env.STRIPE_WEBHOOK_SECRET_BOOKING as string
         );
 
-        // 4. Verify revenue stats
-        const stats = await adminFixture.getRevenueStats(admin);
-
-        expect(stats.totalRevenueCents).toBe(2999);
-        expect(stats.totalPurchases).toBe(1);
-        expect(stats.averageOrderValueCents).toBe(2999);
         // Three-bucket revenue split: platform → org → creator (Codex-h69cg)
         const expectedSplit = calculateRevenueSplit(
           2999,
           DEFAULT_PLATFORM_FEE_PERCENTAGE,
           DEFAULT_ORG_FEE_PERCENTAGE
         );
+        await recordSaleSlices({
+          organizationId: admin.organization.id,
+          customerId: buyer.id,
+          contentId: content.id,
+          ownerId: admin.user.id,
+          creatorId: creator.id,
+          split: expectedSplit,
+        });
+
+        // 4. Verify revenue stats
+        const stats = await adminFixture.getRevenueStats(admin);
+
+        expect(stats.totalRevenueCents).toBe(2999);
+        expect(stats.totalPurchases).toBe(1);
+        expect(stats.averageOrderValueCents).toBe(2999);
         expect(stats.platformFeeCents).toBe(expectedSplit.platformFeeCents);
         expect(stats.creatorPayoutCents).toBe(expectedSplit.creatorPayoutCents);
       },
@@ -437,6 +525,18 @@ describe('Admin Dashboard', () => {
           webhookEvent,
           process.env.STRIPE_WEBHOOK_SECRET_BOOKING as string
         );
+        await recordSaleSlices({
+          organizationId: admin1.organization.id,
+          customerId: buyer.id,
+          contentId: content.id,
+          ownerId: admin1.user.id,
+          creatorId: creator.id,
+          split: calculateRevenueSplit(
+            1999,
+            DEFAULT_PLATFORM_FEE_PERCENTAGE,
+            DEFAULT_ORG_FEE_PERCENTAGE
+          ),
+        });
 
         // Admin1 should see the purchase
         const admin1Stats = await adminFixture.getRevenueStats(admin1);

@@ -13,6 +13,12 @@
 import { createSearchQuerySchema } from '@codex/validation';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
+import {
+  customerGrowth,
+  revenueOnDay,
+  utcDay,
+  weekOverWeekChange,
+} from '$lib/components/studio/dashboard/dashboard-figures';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { forwardClientErrors } from '$lib/server/forward-client-errors';
@@ -22,18 +28,26 @@ import { forwardClientErrors } from '$lib/server/forward-client-errors';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Dashboard statistics combining revenue, customers, and content metrics
+ * The Studio dashboard's figures: revenue (every kind, from the payouts
+ * ledger, Codex-2hxff.20), customers, content and views. Owners and admins
+ * only: the route requires org management.
  *
- * Uses Promise.allSettled() for graceful degradation - if one endpoint fails,
- * others still return data. Errors are logged for monitoring.
+ * `revenue.revenueByDay` is one entry per UTC calendar day of the last 30,
+ * oldest first, zero-filled (Codex-2hxff.75), so "today", the sparkline and
+ * the weekly change are read by date and calendar position. A change is
+ * `null` when there is nothing to compare with: no badge, never "0%".
+ *
+ * A failed read REJECTS, after logging. It used to come back as zeros, which
+ * the dashboard showed as "£0.00" in silence; the page shows "We couldn't
+ * load your revenue." with Retry instead (the .74 pattern).
  *
  * Usage in Svelte:
  * ```svelte
  * <script>
- *   const stats = await getDashboardStats(orgId);
+ *   const stats = getDashboardStats(orgId);
  * </script>
  *
- * <StatCard label="Revenue" value={stats.revenue.value} change={stats.revenue.change} />
+ * <TodayStat label="Revenue" value={formatPrice(stats.current.revenue.value)} />
  * ```
  */
 export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
@@ -43,55 +57,39 @@ export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
   const searchParams = new URLSearchParams();
   searchParams.set('organizationId', orgId);
 
+  let stats: Awaited<ReturnType<typeof api.analytics.getDashboardStats>>;
   try {
-    const stats = await api.analytics.getDashboardStats(searchParams);
-
-    // Derive week-over-week revenue change (same logic as before)
-    const revenueByDay = stats.revenue.revenueByDay ?? [];
-    const recentRevenue = revenueByDay
-      .slice(0, 7)
-      .reduce((sum, day) => sum + day.revenueCents, 0);
-    const previousRevenue = revenueByDay
-      .slice(7, 14)
-      .reduce((sum, day) => sum + day.revenueCents, 0);
-    const revenueChange =
-      previousRevenue > 0
-        ? Math.round(
-            ((recentRevenue - previousRevenue) / previousRevenue) * 100
-          )
-        : 0;
-
-    return {
-      revenue: {
-        value: stats.revenue.totalRevenueCents,
-        change: revenueChange,
-        revenueByDay: stats.revenue.revenueByDay,
-      },
-      customers: {
-        value: stats.customers.totalCustomers,
-        change: 0, // Change % not provided by backend
-      },
-      contentCount: {
-        value: stats.topContent?.pagination?.total ?? 0,
-        change: 0,
-      },
-      views: {
-        value: 0, // Views not tracked by current backend
-        change: 0,
-      },
-    };
+    stats = await api.analytics.getDashboardStats(searchParams);
   } catch (error) {
     logger.error('[Dashboard] Failed to fetch dashboard stats', {
       reason: String(error),
     });
-
-    return {
-      revenue: { value: 0, change: 0, revenueByDay: [] },
-      customers: { value: 0, change: 0 },
-      contentCount: { value: 0, change: 0 },
-      views: { value: 0, change: 0 },
-    };
+    throw error;
   }
+
+  const revenueByDay = stats.revenue.revenueByDay;
+  return {
+    revenue: {
+      value: stats.revenue.totalRevenueCents,
+      byKind: stats.revenue.revenueByKind,
+      change: weekOverWeekChange(revenueByDay),
+      todayCents: revenueOnDay(revenueByDay, utcDay()),
+      revenueByDay,
+    },
+    customers: {
+      value: stats.customers.totalCustomers,
+      change: customerGrowth(stats.customers),
+      newThisWeek: stats.customers.newCustomersLast7Days,
+    },
+    contentCount: {
+      value: stats.topContent?.pagination?.total ?? 0,
+      change: 0,
+    },
+    views: {
+      value: 0, // Views not tracked by current backend
+      change: 0,
+    },
+  };
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,7 +154,16 @@ export const getAnalyticsRevenue = query(revenueQuerySchema, async (params) => {
   searchParams.set('organizationId', params.organizationId);
   setDateRangeParams(searchParams, params);
 
-  return api.analytics.getRevenue(searchParams);
+  // A failure rejects (the page shows "We couldn't load your revenue."),
+  // logged here because the alert never shows the raw error.
+  try {
+    return await api.analytics.getRevenue(searchParams);
+  } catch (error) {
+    logger.error('[Analytics] Failed to fetch revenue', {
+      reason: String(error),
+    });
+    throw error;
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -299,17 +306,12 @@ const revenueByCreatorQuerySchema = z.object({
 });
 
 /**
- * Per-creator revenue split rows for the studio analytics page. One row per
- * ACTIVE creator-organization agreement for the org, annotated with
- * purchase-derived revenue, current split % (display, not basis points),
- * last drained payout date, and unresolved pending payout amount.
- *
- * Single-creator orgs receive `items: []` — the page hides the section.
- *
- * Subscription invoice revenue is NOT included in Phase 1 — there is no
- * per-creator immutable invoice row today (only dynamic transfer-time
- * fan-out via `SubscriptionService.executeTransfers`). A future revenue
- * ledger will close that gap.
+ * Studio > Analytics "Revenue by creator" (Codex-zsh2p): one row per creator
+ * who holds an active agreement, earned in the window, or is still owed
+ * money. Earned is their cut of every kind from the payouts ledger, after
+ * refunds; each share is `none`, `unreadable` or a display percentage, never
+ * basis points. The page shows the section when more than one creator is
+ * listed.
  */
 export const getAnalyticsRevenueByCreator = query(
   revenueByCreatorQuerySchema,
@@ -454,9 +456,18 @@ export const getActivityFeed = query(
       searchParams.set('organizationId', params.organizationId);
     if (params.type !== 'all') searchParams.set('type', params.type);
 
-    return api.admin.getActivity(
-      searchParams.toString() ? searchParams : undefined
-    );
+    // A failure rejects (the dashboard shows "We couldn't load your recent
+    // activity."), logged here because the alert never shows the raw error.
+    try {
+      return await api.admin.getActivity(
+        searchParams.toString() ? searchParams : undefined
+      );
+    } catch (error) {
+      logger.error('[Dashboard] Failed to fetch activity feed', {
+        reason: String(error),
+      });
+      throw error;
+    }
   }
 );
 

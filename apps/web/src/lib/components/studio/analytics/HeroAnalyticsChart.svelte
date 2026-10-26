@@ -10,7 +10,11 @@
   The compare overlay is drawn on a normalised index-based time axis:
   main range day N aligns with compare range day N. The two windows may
   have different calendar dates but we guarantee equal duration upstream
-  (AnalyticsCommandBar's `previousPeriod`).
+  (`previousRange` in analytics-range.ts).
+
+  A failed revenue read is not a flat line (review N-3): with
+  `revenueUnavailable` the Revenue tab is not offered and the chart opens on
+  Subscribers. The page shows "We couldn't load your revenue." above.
 
   @prop {RevenueStats}    revenue            Current + previous revenue block
   @prop {SubscriberStats} subscribers        Current + previous subscribers block
@@ -18,6 +22,7 @@
   @prop {boolean}         hasCompareWindow   When true AND the active tab's block has `previous`, overlay renders
   @prop {boolean}         [loading=false]    Shimmer skeleton state
   @prop {'revenue'|'subscribers'|'followers'} [initialTab='revenue']  Initial active tab
+  @prop {boolean}         [revenueUnavailable=false]  The revenue read failed: no Revenue tab
 -->
 <script lang="ts">
   import type {
@@ -38,6 +43,7 @@
     hasCompareWindow: boolean;
     loading?: boolean;
     initialTab?: TabKey;
+    revenueUnavailable?: boolean;
   }
 
   const {
@@ -47,9 +53,16 @@
     hasCompareWindow,
     loading = false,
     initialTab = 'revenue',
+    revenueUnavailable = false,
   }: Props = $props();
 
-  let activeTab = $state<string | undefined>(initialTab);
+  // The tab the chart opens on, which is never Revenue when that read failed.
+  const openingTab = $derived<TabKey>(
+    revenueUnavailable && initialTab === 'revenue' ? 'subscribers' : initialTab
+  );
+
+  // The Tabs value; undefined until Tabs reports the tab it opened on.
+  let activeTab = $state<string | undefined>();
 
   // ─── Formatters ─────────────────────────────────────────────────────────
   const numberFormatter = new Intl.NumberFormat('en-GB');
@@ -111,18 +124,18 @@
       })) ?? null,
   });
 
+  const activeKey = $derived.by<TabKey>(() => {
+    const tab = activeTab ?? openingTab;
+    if (tab === 'subscribers' || tab === 'followers') return tab;
+    return revenueUnavailable ? 'subscribers' : 'revenue';
+  });
+
   const activeSeries = $derived<Series>(
-    activeTab === 'subscribers'
+    activeKey === 'subscribers'
       ? subscriberSeries
-      : activeTab === 'followers'
+      : activeKey === 'followers'
         ? followerSeries
         : revenueSeries
-  );
-
-  const activeKey = $derived<TabKey>(
-    activeTab === 'subscribers' || activeTab === 'followers'
-      ? activeTab
-      : 'revenue'
   );
 
   const isMoney = $derived(activeKey === 'revenue');
@@ -367,11 +380,17 @@
     </div>
     <div class="hero-chart__skeleton-body" aria-hidden="true"></div>
   {:else}
-    <Tabs.Root bind:value={activeTab} class="hero-chart__tabs">
+    <Tabs.Root
+      bind:value={activeTab}
+      defaultValue={openingTab}
+      class="hero-chart__tabs"
+    >
       <Tabs.List class="hero-chart__tabs-list">
-        <Tabs.Trigger value="revenue">
-          {m.analytics_chart_tab_revenue()}
-        </Tabs.Trigger>
+        {#if !revenueUnavailable}
+          <Tabs.Trigger value="revenue">
+            {m.analytics_chart_tab_revenue()}
+          </Tabs.Trigger>
+        {/if}
         <Tabs.Trigger value="subscribers">
           {m.analytics_chart_tab_subscribers()}
         </Tabs.Trigger>
@@ -380,11 +399,13 @@
         </Tabs.Trigger>
       </Tabs.List>
 
-      <Tabs.Content value="revenue" class="hero-chart__panel">
-        {#if activeKey === 'revenue'}
-          {@render chartBody()}
-        {/if}
-      </Tabs.Content>
+      {#if !revenueUnavailable}
+        <Tabs.Content value="revenue" class="hero-chart__panel">
+          {#if activeKey === 'revenue'}
+            {@render chartBody()}
+          {/if}
+        </Tabs.Content>
+      {/if}
       <Tabs.Content value="subscribers" class="hero-chart__panel">
         {#if activeKey === 'subscribers'}
           {@render chartBody()}

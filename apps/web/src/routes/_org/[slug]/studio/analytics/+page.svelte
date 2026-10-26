@@ -26,8 +26,13 @@
     HeroAnalyticsChart,
     KPICard,
     NarrativeSummary,
+    RevenueKindsLine,
     TopContentLeaderboard,
   } from '$lib/components/studio/analytics';
+  import { trailingRange } from '$lib/components/studio/analytics/analytics-range';
+  import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
+  import { connectQueryState } from '$lib/utils/connect-readiness';
+  import type { QueryResult } from '$lib/remote/query-result';
   import {
     getAnalyticsContentPerformance,
     getAnalyticsFollowers,
@@ -61,22 +66,20 @@
   // AnalyticsCommandBar writes these four params; we derive here and pass
   // the resolved values back into the bar (controlled component pattern).
   // Legacy `dateFrom` / `dateTo` params are accepted for backward-compat
-  // links that predate FE-1's rename.
-  const startDate = $derived.by(() => {
-    const now = new Date();
-    const defaultFrom = new Date(now);
-    defaultFrom.setDate(defaultFrom.getDate() - 30);
-    return (
-      page.url.searchParams.get('startDate') ??
+  // links that predate FE-1's rename. The default is the last 30 UTC calendar
+  // days, today included: the 30 days Billing and the dashboard read, since
+  // the API reads an end date as the whole of that day (review I-1).
+  const defaultRange = trailingRange(30);
+  const startDate = $derived(
+    page.url.searchParams.get('startDate') ??
       page.url.searchParams.get('dateFrom') ??
-      defaultFrom.toISOString().split('T')[0]
-    );
-  });
+      defaultRange.startDate
+  );
 
   const endDate = $derived(
     page.url.searchParams.get('endDate') ??
       page.url.searchParams.get('dateTo') ??
-      new Date().toISOString().split('T')[0]
+      defaultRange.endDate
   );
 
   const compareFrom = $derived(
@@ -153,11 +156,10 @@
       : null
   );
 
-  // Codex-mtv05: per-creator revenue split visibility. Only renders for
-  // multi-creator orgs (gated on items.length > 1) — single-creator orgs
-  // get items: [] from the server and the entire section is suppressed.
-  // Comparison windows are NOT applied (Phase 1 is a snapshot of current
-  // splits, not historical drift).
+  // Codex-mtv05 / zsh2p: Revenue by creator, one row per creator. Only
+  // renders when more than one creator is listed (items.length > 1, which
+  // now counts people, not agreements). Comparison windows are NOT applied:
+  // the shares are today's, not history.
   const revenueByCreatorQuery = $derived(
     isAuthorized
       ? getAnalyticsRevenueByCreator({
@@ -191,14 +193,22 @@
   }
 
   const revenueLoading = $derived(isLoading(revenueQuery));
+  // A failed revenue read is not £0 (Codex-2hxff.74's pattern, review N-3):
+  // the Revenue and Purchases KPIs give way to "We couldn't load your
+  // revenue." with Retry, the chart drops its Revenue tab and the summary
+  // makes no revenue claim. The remote logs the raw error.
+  const revenueFailed = $derived(
+    connectQueryState(revenueQuery as QueryResult<RevenueStats> | null).kind ===
+      'failed'
+  );
   const subscribersLoading = $derived(isLoading(subscribersQuery));
   const followersLoading = $derived(isLoading(followersQuery));
   const topContentLoading = $derived(isLoading(topContentQuery));
   const contentPerformanceLoading = $derived(isLoading(contentPerformanceQuery));
 
   // Codex-mtv05 derivations — kept alongside their peers for consistency.
-  // `showRevenueByCreator` gates the entire section render: single-creator
-  // orgs get items: [] from the server, length === 1 (or 0) → hidden.
+  // `showRevenueByCreator` gates the entire section render: one creator (or
+  // none) → hidden.
   const revenueByCreatorItems = $derived(
     revenueByCreatorQuery?.current?.items ?? []
   );
@@ -275,6 +285,7 @@
   // object every reactive tick and thrash its geometry derivations.
   const EMPTY_REVENUE: RevenueStats = {
     totalRevenueCents: 0,
+    revenueByKind: { one_off: 0, course: 0, subscription: 0, course_plan: 0 },
     totalPurchases: 0,
     averageOrderValueCents: 0,
     platformFeeCents: 0,
@@ -299,6 +310,12 @@
   <title>{m.analytics_title()} | {data.org.name}</title>
 </svelte:head>
 
+{#snippet revenueKinds()}
+  {#if revenue}
+    <RevenueKindsLine kinds={revenue.revenueByKind} format="compact" />
+  {/if}
+{/snippet}
+
 {#if !isAuthorized}
   <!-- Redirect in-flight — render nothing to avoid a flash of unauthorised UI. -->
 {:else}
@@ -321,20 +338,35 @@
         topPerformance={contentPerformance}
         {hasCompareWindow}
         loading={narrativeLoading}
+        revenueUnavailable={revenueFailed}
       />
 
+      <!-- Mounted unconditionally (see LoadFailedAlert); visible only when
+           the revenue read failed, in place of the two KPIs it feeds. -->
+      <LoadFailedAlert
+        query={revenueQuery}
+        message={m.analytics_revenue_load_failed()}
+        againMessage={m.analytics_revenue_load_failed_again()}
+        loadedMessage={m.analytics_revenue_load_retry_ok()}
+        data-testid="analytics-revenue-load-error"
+      />
       <section
         class="kpi-row"
         aria-label={m.analytics_section_kpis_label()}
       >
-        <KPICard
-          label={m.analytics_kpi_revenue_label()}
-          value={revenue?.totalRevenueCents ?? 0}
-          format="money"
-          previousValue={revenue?.previous?.totalRevenueCents ?? null}
-          sparkline={revenueSparkline}
-          loading={revenueLoading}
-        />
+        {#if !revenueFailed}
+          <!-- Every kind of payment, from the payouts ledger, with what it is
+               made of beneath (Codex-2hxff.20 WEB-02), rounded like the figure. -->
+          <KPICard
+            label={m.analytics_kpi_revenue_label()}
+            value={revenue?.totalRevenueCents ?? 0}
+            format="money"
+            previousValue={revenue?.previous?.totalRevenueCents ?? null}
+            sparkline={revenueSparkline}
+            loading={revenueLoading}
+            detail={revenue ? revenueKinds : undefined}
+          />
+        {/if}
         <KPICard
           label={m.analytics_kpi_subscribers_label()}
           value={subscribers?.activeSubscribers ?? 0}
@@ -351,14 +383,16 @@
           sparkline={followerSparkline}
           loading={followersLoading}
         />
-        <KPICard
-          label={m.analytics_kpi_purchases_label()}
-          value={revenue?.totalPurchases ?? 0}
-          format="number"
-          previousValue={revenue?.previous?.totalPurchases ?? null}
-          sparkline={purchaseSparkline}
-          loading={revenueLoading}
-        />
+        {#if !revenueFailed}
+          <KPICard
+            label={m.analytics_kpi_purchases_label()}
+            value={revenue?.totalPurchases ?? 0}
+            format="number"
+            previousValue={revenue?.previous?.totalPurchases ?? null}
+            sparkline={purchaseSparkline}
+            loading={revenueLoading}
+          />
+        {/if}
       </section>
 
       <section
@@ -371,6 +405,7 @@
           followers={followers ?? EMPTY_FOLLOWERS}
           {hasCompareWindow}
           loading={revenueLoading || subscribersLoading || followersLoading}
+          revenueUnavailable={revenueFailed}
         />
       </section>
 

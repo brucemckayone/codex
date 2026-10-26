@@ -1,10 +1,17 @@
 <!--
   @component CreatorRevenueTable
 
-  Per-creator revenue split visibility for the studio analytics page
-  (Codex-mtv05). Renders one row per active creator in a multi-creator
-  org with their current split, last drained payout, and unresolved
-  pending balance.
+  Studio > Analytics "Revenue by creator" (Codex-mtv05; reshaped by
+  Codex-zsh2p, owner decisions Q3 and Q-E of 2026-10-26). One row per
+  creator: what they earned in the window (their cut of every kind, sent or
+  not, after refunds), their subscription and sales shares, their last
+  payout and what is still owed to them.
+
+  A share reads its percentage, "None" when there is no agreement of that
+  kind, or "—" when the agreement has no share on record (it pays nothing;
+  never "0%", fazy6). At 560px and under (the table's own container query)
+  the two shares fold into a line under the name and Last payout is hidden;
+  Earned and Pending keep their columns.
 
   The page-level conditional (`items.length > 1`) determines whether the
   parent section renders at all — this component does NOT decide
@@ -18,7 +25,7 @@
   @prop {boolean}                   [loading] Skeleton state.
 -->
 <script lang="ts">
-  import type { CreatorRevenueSplitItem } from '@codex/admin';
+  import type { AgreementShare, CreatorRevenueSplitItem } from '@codex/admin';
   import * as m from '$paraglide/messages';
   import {
     Avatar,
@@ -43,15 +50,33 @@
   const skeletonRows = $derived(Array.from({ length: 3 }, (_, i) => i));
 
   /**
-   * Format split percent for display. Service layer already converts bps→%,
-   * so this is a presentation-only trim (drop trailing zeros, max 2 dp).
+   * Format a share for display. The service already converts bps→%, so this
+   * is a presentation-only trim (drop trailing zeros, max 2 dp).
    */
   function formatSplitPercent(value: number): string {
     // Avoid `12.50%` — render `12.5%` and `100%`.
     const fixed = Number(value.toFixed(2));
     return `${fixed}%`;
   }
+
+  /** A share as text, for the narrow-width line under the name. */
+  function shareText(share: AgreementShare): string {
+    if (share.kind === 'share') return formatSplitPercent(share.percent);
+    if (share.kind === 'none') return m.analytics_creator_revenue_share_none();
+    return '—';
+  }
 </script>
+
+{#snippet shareCell(share: AgreementShare)}
+  {#if share.kind === 'share'}
+    <Badge variant="info">{formatSplitPercent(share.percent)}</Badge>
+  {:else if share.kind === 'none'}
+    <span class="share-none">{m.analytics_creator_revenue_share_none()}</span>
+  {:else}
+    <span aria-hidden="true">—</span>
+    <span class="sr-only">{m.analytics_creator_revenue_share_missing()}</span>
+  {/if}
+{/snippet}
 
 <div
   class="creator-revenue"
@@ -67,8 +92,9 @@
           <div class="skeleton-avatar"></div>
           <div class="skeleton-text skeleton-text--title"></div>
           <div class="skeleton-text skeleton-text--short"></div>
-          <div class="skeleton-text skeleton-text--short"></div>
-          <div class="skeleton-text skeleton-text--short"></div>
+          <div class="skeleton-text skeleton-text--short col-hide-sm"></div>
+          <div class="skeleton-text skeleton-text--short col-hide-sm"></div>
+          <div class="skeleton-text skeleton-text--short col-hide-sm"></div>
           <div class="skeleton-text skeleton-text--short"></div>
         </div>
       {/each}
@@ -86,10 +112,13 @@
             {m.analytics_creator_revenue_col_creator()}
           </th>
           <th scope="col" class="col-numeric">
-            {m.analytics_creator_revenue_col_revenue()}
+            {m.analytics_creator_revenue_col_earned()}
           </th>
           <th scope="col" class="col-numeric col-hide-sm">
-            {m.analytics_creator_revenue_col_split()}
+            {m.analytics_creator_revenue_col_subscription_share()}
+          </th>
+          <th scope="col" class="col-numeric col-hide-sm">
+            {m.analytics_creator_revenue_col_sales_share()}
           </th>
           <th scope="col" class="col-date col-hide-sm">
             {m.analytics_creator_revenue_col_last_payout()}
@@ -112,14 +141,26 @@
             </td>
             <td class="col-name">
               <span class="name" title={item.name}>{item.name}</span>
+              <!-- Only shown where the share columns are hidden (≤560px),
+                   so assistive tech meets each share once. -->
+              <span class="shares-inline">
+                <span>{m.analytics_creator_revenue_inline_subscription({
+                  share: shareText(item.subscriptionShare),
+                })}</span>
+                ·
+                <span>{m.analytics_creator_revenue_inline_sales({
+                  share: shareText(item.salesShare),
+                })}</span>
+              </span>
             </td>
             <td class="col-numeric revenue">
-              {formatPrice(item.totalRevenueCents)}
+              {formatPrice(item.earnedCents)}
             </td>
             <td class="col-numeric col-hide-sm">
-              <Badge variant="info">
-                {formatSplitPercent(item.splitPercent)}
-              </Badge>
+              {@render shareCell(item.subscriptionShare)}
+            </td>
+            <td class="col-numeric col-hide-sm">
+              {@render shareCell(item.salesShare)}
             </td>
             <td class="col-date col-hide-sm muted">
               {#if item.lastPayoutAt}
@@ -244,6 +285,17 @@
     color: var(--color-text-secondary);
   }
 
+  /* "None": no agreement of that kind. Quieter than a share's Badge. */
+  .share-none {
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+  }
+
+  /* The shares under the name, only where their columns are hidden. */
+  .shares-inline {
+    display: none;
+  }
+
   /* ── Empty state ──────────────────────────────────────────── */
   .empty {
     margin: 0;
@@ -263,7 +315,7 @@
     display: grid;
     grid-template-columns:
       var(--space-10) minmax(0, 1fr) var(--space-16) var(--space-16)
-      var(--space-20) var(--space-16);
+      var(--space-16) var(--space-20) var(--space-16);
     gap: var(--space-3);
     align-items: center;
     padding: var(--space-3);
@@ -315,10 +367,25 @@
     }
   }
 
-  /* ── Responsive: drop split + payout columns on narrow widths ──── */
+  /* ── Responsive: fold the shares under the name, hide Last payout ─── */
   @container (max-width: 560px) {
     .col-hide-sm {
       display: none;
+    }
+    .shares-inline {
+      display: block;
+      margin-top: var(--space-0-5);
+      font-size: var(--text-xs);
+      color: var(--color-text-secondary);
+      font-variant-numeric: tabular-nums;
+    }
+    /* Each "Subs 30%" pair stays on one line when the two wrap. */
+    .shares-inline span {
+      white-space: nowrap;
+    }
+    .skeleton-row {
+      grid-template-columns:
+        var(--space-10) minmax(0, 1fr) var(--space-16) var(--space-16);
     }
   }
 

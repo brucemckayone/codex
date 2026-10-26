@@ -340,7 +340,7 @@ export async function seedCommerce(
   const adminSveltePlatformFee = Math.round(sveltePriceCents * 0.1);
   const adminSvelteCreatorPayout = sveltePriceCents - adminSveltePlatformFee;
 
-  await db.insert(schema.purchases).values([
+  const directPurchases = [
     {
       id: PURCHASES.viewerSvelte.id,
       customerId: USERS.viewer.id,
@@ -389,7 +389,8 @@ export async function seedCommerce(
       createdAt: now,
       updatedAt: now,
     },
-  ]);
+  ];
+  await db.insert(schema.purchases).values(directPurchases);
 
   // ── Additional purchases for customer filter testing ─────────────────────
   // Prices: advancedSvelte £19.99, tsDeepDive £14.99, cssMasterclass £4.99
@@ -428,7 +429,7 @@ export async function seedCommerce(
     updatedAt: now,
   });
 
-  await db.insert(schema.purchases).values([
+  const filterPurchases = [
     // customer1 (Maria): 3 purchases from Alpha, total £39.97
     makePurchase(
       PURCHASES.c1Svelte.id,
@@ -556,7 +557,54 @@ export async function seedCommerce(
       'viewer_cacao',
       daysAgo(1)
     ),
-  ]);
+  ];
+  await db.insert(schema.purchases).values(filterPurchases);
+
+  // The payouts-ledger rows each sale writes. Studio's revenue reads the
+  // ledger, not the purchase row (Codex-2hxff.20), so a purchase seeded
+  // without them reads £0. One charge per purchase, its slices summing to
+  // the amount paid: the platform fee and the creator's slice (every seeded
+  // sale has a 0 organisation fee, and a 0 slice is never written). Each is
+  // sent (`paid`, resolved, with a charge id: check_payouts_paid_invariant),
+  // so the drains, which read pending and failed rows only, never touch them.
+  const creatorOfContent = new Map<string, string>(
+    Object.values(CONTENT).map((item) => [item.id, item.creatorId])
+  );
+  await db.insert(schema.payouts).values(
+    [...directPurchases, ...filterPurchases].flatMap((purchase, index) => {
+      const creatorId = creatorOfContent.get(purchase.contentId);
+      if (!creatorId) {
+        throw new Error(`Seed content ${purchase.contentId} has no creator`);
+      }
+      const stripeChargeId = `ch_seed_${index + 1}`;
+      const slice = {
+        organizationId: purchase.organizationId,
+        purchaseId: purchase.id,
+        sourceType: 'purchase',
+        stripeChargeId,
+        transferGroup: `tg_seed_${index + 1}`,
+        currency: 'gbp',
+        status: 'paid',
+        resolvedAt: purchase.purchasedAt,
+        createdAt: purchase.purchasedAt,
+        updatedAt: now,
+      };
+      return [
+        {
+          ...slice,
+          payoutType: 'platform_fee',
+          userId: null,
+          amountCents: purchase.platformFeeCents,
+        },
+        {
+          ...slice,
+          payoutType: 'creator_payout',
+          userId: creatorId,
+          amountCents: purchase.creatorPayoutCents,
+        },
+      ];
+    })
+  );
 
   // Content access records
   await db.insert(schema.contentAccess).values([

@@ -244,16 +244,18 @@ app.get(
 
 /**
  * GET /api/admin/analytics/revenue-by-creator
- * Per-creator revenue split visibility (Codex-mtv05).
+ * Studio > Analytics "Revenue by creator" (Codex-mtv05; Codex-zsh2p).
  *
- * Returns one row per ACTIVE creator-organization agreement for the
- * org-owner's organization, annotated with totalRevenueCents (purchases
- * only in Phase 1), CURRENT splitPercent (display %, not basis points),
- * lastPayoutAt, and pendingPayoutCents.
+ * Returns one row per CREATOR who holds an active agreement in the
+ * organisation, earned in the window, or is still owed money by it:
+ * earnedCents (their cut of every kind from the payouts ledger, sent or not,
+ * after refunds), subscriptionShare and salesShare (`none`, `unreadable` or a
+ * display percentage, never basis points), lastPayoutAt, and
+ * pendingPayoutCents (money owed them and not yet sent: pending and failed
+ * rows, held ones included, less partial refunds).
  *
- * Section is hidden in the UI for single-creator orgs; this endpoint returns
- * the same shape regardless and the client renders conditionally on
- * `items.length > 1`.
+ * The UI shows the section when more than one creator is listed; this
+ * endpoint returns the same shape regardless.
  */
 app.get(
   '/api/admin/analytics/revenue-by-creator',

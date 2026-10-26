@@ -17,6 +17,11 @@
   @prop {ContentPerformanceItem[]} [topPerformance]  Per-content engagement rows.
   @prop {boolean} hasCompareWindow        True when both compareFrom/compareTo are set.
   @prop {boolean} [loading]               Shimmer skeleton state.
+  @prop {boolean} [revenueUnavailable]    The revenue read failed: no revenue sentence.
+
+  A failed revenue read says nothing about revenue (review N-3): no revenue
+  sentence, and not "Still early days" either, since an unread total is not
+  a zero one. The page shows "We couldn't load your revenue." beneath.
 -->
 <script lang="ts">
   import type {
@@ -37,6 +42,7 @@
     topPerformance?: ContentPerformanceItem[];
     hasCompareWindow: boolean;
     loading?: boolean;
+    revenueUnavailable?: boolean;
   }
 
   const {
@@ -47,6 +53,7 @@
     topPerformance,
     hasCompareWindow,
     loading = false,
+    revenueUnavailable = false,
   }: Props = $props();
 
   // ─── Thresholds ────────────────────────────────────────────────────────
@@ -76,7 +83,7 @@
 
   // ─── Revenue sentence ─────────────────────────────────────────────────
   const revenueSentence = $derived.by<Sentence | null>(() => {
-    if (!hasCompareWindow) return null;
+    if (revenueUnavailable || !hasCompareWindow) return null;
     const prev = revenue.previous;
     if (!prev) return null;
 
@@ -240,8 +247,10 @@
   // ─── Zero-data detection ────────────────────────────────────────────
   // An org with no revenue, subscribers, followers, and no top content is
   // genuinely brand-new. Render a friendly placeholder instead of silence.
+  // Not when the revenue read failed: there may well be revenue.
   const hasAnyData = $derived(
-    revenue.totalRevenueCents > 0 ||
+    revenueUnavailable ||
+      revenue.totalRevenueCents > 0 ||
       subscribers.activeSubscribers > 0 ||
       subscribers.newSubscribers > 0 ||
       followers.totalFollowers > 0 ||
