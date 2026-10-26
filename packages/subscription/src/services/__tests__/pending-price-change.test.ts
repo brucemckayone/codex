@@ -74,6 +74,8 @@ describe('schedulePriceChange', () => {
     expect(outcome).toEqual({
       kind: 'applied',
       effectiveAt: new Date(renewal * 1000),
+      // What they pay today, read before the swap (Codex-2hxff.40).
+      currentAmountCents: 500,
     });
     expect(update).toHaveBeenCalledWith(
       'sub_1',
@@ -92,7 +94,7 @@ describe('schedulePriceChange', () => {
 
     const outcome = await schedulePriceChange(stripe, target);
 
-    expect(outcome.kind).toBe('pending');
+    expect(outcome).toMatchObject({ kind: 'pending', currentAmountCents: 500 });
     const [, params] = update.mock.calls[0] ?? [];
     expect(params).toEqual({
       metadata: {
@@ -102,6 +104,16 @@ describe('schedulePriceChange', () => {
         ),
       },
     });
+  });
+
+  it('quotes a grandfathered subscriber their own amount, not the list price', async () => {
+    const { stripe } = fakeStripe(
+      fakeSub({ renewal: NOTICE_SEC + 40 * DAY, unitAmount: 350 })
+    );
+
+    const outcome = await schedulePriceChange(stripe, target);
+
+    expect(outcome).toMatchObject({ kind: 'applied', currentAmountCents: 350 });
   });
 
   it('never crosses intervals', async () => {

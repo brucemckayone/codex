@@ -25,7 +25,7 @@ import {
   organizations,
   stripeConnectAccounts,
 } from '@codex/database/schema';
-import { NotFoundError } from '@codex/service-errors';
+import { ConflictError, NotFoundError } from '@codex/service-errors';
 import {
   createMockStripe,
   createTestConnectAccountInput,
@@ -38,9 +38,12 @@ import {
 } from '@codex/test-utils';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type Stripe from 'stripe';
+import StripeSdk from 'stripe';
 import {
   afterAll,
+  afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   it,
@@ -80,6 +83,8 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
   let stripe: Stripe;
   let spies: StripeSpies;
   let service: CourseSubscriptionService;
+  /** Every course this file makes, so afterAll can take them and their plans. */
+  const courseIds: string[] = [];
 
   /** A fresh published course in `orgId`, sold by no path yet. */
   async function newCourse(orgOverride?: string, creatorOverride?: string) {
@@ -95,6 +100,7 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
       })
       .returning({ id: courses.id });
     if (!course) throw new Error('failed to seed course');
+    courseIds.push(course.id);
     return course.id;
   }
 
@@ -320,6 +326,104 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
     }
   });
 
+  // Codex-2hxff.40: subscribers grandfathered before #589 pay something other
+  // than the plan's previous list price. The notice's "from" figure is what
+  // the subscriber is billed today, read off their live Stripe item.
+  it.each([
+    ['their own live amount, not the list price', 1200, '£12.00', 0],
+    [
+      'the list price, with a warning, when the live price has no amount',
+      null,
+      '£15.00',
+      1,
+    ],
+  ] as const)('3c. a grandfathered subscriber is quoted %s', async (_label, unitAmount, quoted, warnings) => {
+    const courseId = await newCourse();
+    const plan = await service.upsertPlan(orgId, courseId, {
+      priceMonthly: 1500,
+      priceAnnual: 15000,
+    });
+    const [subscriber] = await seedTestUsers(db, 1);
+    const ns = createUniqueSlug('cpg');
+    const seeded = await db
+      .insert(courseSubscriptions)
+      .values({
+        userId: subscriber as string,
+        courseId,
+        planId: plan.id,
+        organizationId: orgId,
+        stripeSubscriptionId: `sub_${ns}`,
+        stripeCustomerId: `cus_${ns}`,
+        status: 'active',
+        billingInterval: 'month',
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: new Date(Date.now() + 10 * 86_400_000),
+      })
+      .returning({ id: courseSubscriptions.id });
+
+    const fanOutStripe = createMockStripe();
+    const renewal = Math.floor(Date.now() / 1000) + 10 * 86_400;
+    Object.assign(fanOutStripe.subscriptions, {
+      retrieve: vi.fn().mockImplementation(async (id: string) => ({
+        id,
+        status: 'active',
+        billing_cycle_anchor: renewal,
+        metadata: {},
+        items: {
+          data: [
+            {
+              id: `si_${id}`,
+              current_period_end: renewal,
+              price: {
+                id: 'price_grandfathered',
+                unit_amount: unitAmount,
+                recurring: { interval: 'month' },
+              },
+            },
+          ],
+        },
+      })),
+      update: vi.fn().mockResolvedValue({}),
+    });
+    const mailer = vi.fn();
+    const fanOutService = new CourseSubscriptionService(
+      { db, environment: 'test', mailer, webAppUrl: 'https://app.test' },
+      fanOutStripe
+    );
+    const warn = vi.spyOn(
+      (
+        fanOutService as unknown as {
+          obs: { warn: (message: string, data?: unknown) => void };
+        }
+      ).obs,
+      'warn'
+    );
+
+    try {
+      await fanOutService.upsertPlan(orgId, courseId, {
+        priceMonthly: 1800,
+        priceAnnual: 15000,
+      });
+
+      expect(mailer).toHaveBeenCalledTimes(1);
+      expect(mailer.mock.calls[0]?.[0]).toMatchObject({
+        data: { oldPriceFormatted: quoted, newPriceFormatted: '£18.00' },
+      });
+      expect(
+        warn.mock.calls.filter(([message]) =>
+          String(message).includes('live price has no unit amount')
+        )
+      ).toHaveLength(warnings);
+    } finally {
+      await db.delete(courseSubscriptions).where(
+        inArray(
+          courseSubscriptions.id,
+          seeded.map((row) => row.id)
+        )
+      );
+    }
+  });
+
   it('4. createPlan twice conflicts — the reason upsertPlan exists', async () => {
     const courseId = await newCourse();
     await service.createPlan(orgId, courseId, {
@@ -524,7 +628,358 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
     });
   });
 
+  // Codex-2hxff.66 (owner decisions 2026-10-25 and 2026-10-26): a repeat
+  // create quietly returns the plan the first attempt made. The keys are the
+  // course, its plan generation and the UTC hour; clean-up never archives a
+  // Product a live plan uses.
+  describe('10. a repeated create', () => {
+    // Mid-hour, so no test's keys straddle an hour by accident. Only Date is
+    // faked: the database driver's timers stay real.
+    const HOUR = '2026-10-26T14';
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(`${HOUR}:30:00Z`));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /**
+     * A Stripe mock that answers as Stripe does under an idempotency key: the
+     * same key returns the first response, also to a request made while the
+     * first is in flight (the SDK retries Stripe's 409 until it can replay).
+     * The same key with other parameters is refused with Stripe's own error.
+     */
+    function keyHonouringStripe() {
+      const keyed = createMockStripe();
+      const keyedSpies = keyed as unknown as StripeSpies;
+      for (const create of [
+        keyedSpies.products.create,
+        keyedSpies.prices.create,
+      ]) {
+        const first = create.getMockImplementation();
+        const responses = new Map<
+          string,
+          { params: string; response: Promise<unknown> }
+        >();
+        create.mockImplementation(
+          (params: unknown, options?: { idempotencyKey?: string }) => {
+            const key = options?.idempotencyKey;
+            if (!key) return first?.(params, options);
+            const seen = responses.get(key);
+            if (seen && seen.params !== JSON.stringify(params)) {
+              return Promise.reject(
+                new StripeSdk.errors.StripeIdempotencyError({
+                  message:
+                    'Keys for idempotent requests can only be used with the same parameters they were first used with.',
+                  type: 'idempotency_error',
+                })
+              );
+            }
+            if (seen) return seen.response;
+            const response = Promise.resolve(first?.(params, options));
+            responses.set(key, { params: JSON.stringify(params), response });
+            return response;
+          }
+        );
+      }
+      return {
+        keyedSpies,
+        keyedService: new CourseSubscriptionService(
+          { db, environment: 'test' },
+          keyed
+        ),
+      };
+    }
+
+    const archiveCalls = (s: StripeSpies) =>
+      s.products.update.mock.calls.filter(
+        ([, params]) => params?.active === false
+      );
+
+    /**
+     * Hold each products.create until `count` have arrived, so racing saves
+     * all pass their checks before any inserts: the race, every run.
+     */
+    function meetAtProductCreate(s: StripeSpies, count: number) {
+      const proceed = s.products.create.getMockImplementation();
+      let arrived = 0;
+      let release: () => void = () => {};
+      const allIn = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      s.products.create.mockImplementation(async (...args: unknown[]) => {
+        arrived += 1;
+        if (arrived === count) release();
+        await allIn;
+        return proceed?.(...args);
+      });
+    }
+
+    it('two saves racing on a fresh course make one Product and one plan, and archive nothing', async () => {
+      const { keyedSpies, keyedService } = keyHonouringStripe();
+      meetAtProductCreate(keyedSpies, 2);
+      const courseId = await newCourse();
+      const prices = { priceMonthly: 1100, priceAnnual: 11000 };
+
+      const [a, b] = await Promise.all([
+        keyedService.upsertPlan(orgId, courseId, prices),
+        keyedService.upsertPlan(orgId, courseId, prices),
+      ]);
+
+      expect(b.id).toBe(a.id);
+      expect(await planRows(courseId)).toHaveLength(1);
+      const productKeys = keyedSpies.products.create.mock.calls.map(
+        ([, options]) => options?.idempotencyKey
+      );
+      expect(productKeys).toEqual([
+        `course-plan-product-${courseId}-0-${HOUR}`,
+        `course-plan-product-${courseId}-0-${HOUR}`,
+      ]);
+      expect(archiveCalls(keyedSpies)).toHaveLength(0);
+    });
+
+    // The owner accepted this race for the hour bucket: two Products, one
+    // plan, and the spare archived.
+    it('two saves racing across an hour boundary make one plan, both get it, and the spare Product is archived', async () => {
+      const { keyedSpies, keyedService } = keyHonouringStripe();
+      const courseId = await newCourse();
+      const prices = { priceMonthly: 1100, priceAnnual: 11000 };
+      // Hold the first at Stripe until the second, made past the hour,
+      // arrives: both pass their checks before either inserts.
+      const proceed = keyedSpies.products.create.getMockImplementation();
+      let arrived = 0;
+      let firstIn: () => void = () => {};
+      let release: () => void = () => {};
+      const firstArrived = new Promise<void>((resolve) => {
+        firstIn = resolve;
+      });
+      const bothIn = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      keyedSpies.products.create.mockImplementation(
+        async (...args: unknown[]) => {
+          arrived += 1;
+          if (arrived === 1) firstIn();
+          if (arrived === 2) release();
+          await bothIn;
+          return proceed?.(...args);
+        }
+      );
+
+      vi.setSystemTime(new Date('2026-10-26T13:59:59Z'));
+      const early = keyedService.upsertPlan(orgId, courseId, prices);
+      await firstArrived;
+      vi.setSystemTime(new Date('2026-10-26T14:00:01Z'));
+      const late = keyedService.upsertPlan(orgId, courseId, prices);
+      const [a, b] = await Promise.all([early, late]);
+
+      expect(b.id).toBe(a.id);
+      const rows = await planRows(courseId);
+      expect(rows).toHaveLength(1);
+      const productKeys = keyedSpies.products.create.mock.calls.map(
+        ([, options]) => options?.idempotencyKey
+      );
+      expect(productKeys).toEqual([
+        `course-plan-product-${courseId}-0-2026-10-26T13`,
+        `course-plan-product-${courseId}-0-2026-10-26T14`,
+      ]);
+      // Exactly one Product archived: the one the plan does not use.
+      const archived = archiveCalls(keyedSpies).map(([id]) => id);
+      expect(archived).toHaveLength(1);
+      expect(archived[0]).toBeDefined();
+      expect(archived[0]).not.toBe(rows[0]?.stripeProductId);
+    });
+
+    it('a retry at new prices after a failed create reuses the Product, on sale again, with new Prices', async () => {
+      const { keyedSpies, keyedService } = keyHonouringStripe();
+      const courseId = await newCourse();
+
+      // The insert fails (a negative price breaks the row's CHECK), after
+      // Stripe made the Product: clean-up archives it, and no row is left.
+      await expect(
+        keyedService.upsertPlan(orgId, courseId, {
+          priceMonthly: -1,
+          priceAnnual: 11000,
+        })
+      ).rejects.toThrow();
+      expect(await planRows(courseId)).toHaveLength(0);
+      const [failedProductId] = archiveCalls(keyedSpies)[0] ?? [];
+      expect(failedProductId).toBeDefined();
+
+      const plan = await keyedService.upsertPlan(orgId, courseId, {
+        priceMonthly: 1100,
+        priceAnnual: 11000,
+      });
+
+      // Same generation, so the same Product; the Price keys carry the
+      // amounts, so the new monthly price is a new Price.
+      expect(plan.stripeProductId).toBe(failedProductId);
+      const monthlyKeys = keyedSpies.prices.create.mock.calls
+        .map(([, options]) => options?.idempotencyKey as string)
+        .filter((key) => key.includes('-monthly-'));
+      expect(monthlyKeys).toEqual([
+        `course-plan-price-monthly-${courseId}-0-${HOUR}--1`,
+        `course-plan-price-monthly-${courseId}-0-${HOUR}-1100`,
+      ]);
+      // Archived by the failed attempt, then put back on sale by the retry.
+      const updates = keyedSpies.products.update.mock.calls
+        .filter(([id]) => id === failedProductId)
+        .map(([, params]) => params);
+      expect(updates).toEqual([
+        { active: true },
+        { active: false },
+        { active: true },
+      ]);
+    });
+
+    it("a save that misses the plan a racing save just made saves onto it, rather than failing 'exists'", async () => {
+      const courseId = await newCourse();
+      const made = await service.upsertPlan(orgId, courseId, {
+        priceMonthly: 1100,
+        priceAnnual: 11000,
+      });
+      // Its look-up ran before the racing save inserted; the create's own
+      // check then finds the plan.
+      const lookUp = vi
+        .spyOn(
+          service as unknown as { findPlanRow: () => Promise<unknown> },
+          'findPlanRow'
+        )
+        .mockResolvedValueOnce(null);
+
+      const repeat = await service
+        .upsertPlan(orgId, courseId, { priceMonthly: 1100, priceAnnual: 11000 })
+        .finally(() => lookUp.mockRestore());
+
+      expect(repeat.id).toBe(made.id);
+      expect(await planRows(courseId)).toHaveLength(1);
+    });
+
+    // Never a 500. The generation and the amounts are in the keys, so other
+    // values under one key means the Product's name: a course retitled
+    // between a failed create and its retry.
+    it('a retry after the course was retitled is a 409 COURSE_PLAN_KEY_REUSED, with ids only', async () => {
+      const { keyedService } = keyHonouringStripe();
+      const courseId = await newCourse();
+      await expect(
+        keyedService.upsertPlan(orgId, courseId, {
+          priceMonthly: -1,
+          priceAnnual: 11000,
+        })
+      ).rejects.toThrow();
+      await db
+        .update(courses)
+        .set({ title: 'Plan Course, retitled' })
+        .where(eq(courses.id, courseId));
+
+      const error = await keyedService
+        .upsertPlan(orgId, courseId, { priceMonthly: 1100, priceAnnual: 11000 })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ConflictError);
+      expect(error).toMatchObject({
+        statusCode: 409,
+        context: { code: 'COURSE_PLAN_KEY_REUSED', courseId },
+      });
+      expect(
+        Object.keys((error as ConflictError).context ?? {}).sort()
+      ).toEqual(['code', 'courseId']);
+      expect(await planRows(courseId)).toHaveLength(0);
+    });
+
+    it('a create whose key is still in flight at Stripe is a 409 COURSE_PLAN_IN_PROGRESS', async () => {
+      const { keyedSpies, keyedService } = keyHonouringStripe();
+      const courseId = await newCourse();
+      keyedSpies.products.create.mockRejectedValueOnce(
+        new StripeSdk.errors.StripeInvalidRequestError({
+          message:
+            'There is currently another in-progress request using this Stripe API Idempotency Key.',
+          type: 'invalid_request_error',
+          code: 'idempotency_key_in_use',
+        })
+      );
+
+      await expect(
+        keyedService.upsertPlan(orgId, courseId, {
+          priceMonthly: 1100,
+          priceAnnual: 11000,
+        })
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        context: { code: 'COURSE_PLAN_IN_PROGRESS', courseId },
+      });
+    });
+
+    it('a plan made after one was deleted gets fresh keys', async () => {
+      const { keyedSpies, keyedService } = keyHonouringStripe();
+      const courseId = await newCourse();
+      const first = await keyedService.upsertPlan(orgId, courseId, {
+        priceMonthly: 1100,
+        priceAnnual: 11000,
+      });
+      await db
+        .update(courseSubscriptionPlans)
+        .set({ deletedAt: new Date() })
+        .where(eq(courseSubscriptionPlans.id, first.id));
+
+      const second = await keyedService.upsertPlan(orgId, courseId, {
+        priceMonthly: 1100,
+        priceAnnual: 11000,
+      });
+
+      expect(second.id).not.toBe(first.id);
+      expect(second.stripeProductId).not.toBe(first.stripeProductId);
+      expect(
+        keyedSpies.products.create.mock.calls.at(-1)?.[1]?.idempotencyKey
+      ).toBe(`course-plan-product-${courseId}-1-${HOUR}`);
+    });
+
+    it('a retry in the next hour gets fresh keys, so a failure Stripe stored blocks saves for at most the hour', async () => {
+      const { keyedSpies, keyedService } = keyHonouringStripe();
+      const courseId = await newCourse();
+      const prices = { priceMonthly: 1100, priceAnnual: 11000 };
+      // Stripe failed mid-create and stores that answer under the key: as
+      // the real API does, every repeat of the key gets it back.
+      const proceed = keyedSpies.products.create.getMockImplementation();
+      const stored = new StripeSdk.errors.StripeAPIError({
+        message: 'An unknown error occurred',
+        type: 'api_error',
+      });
+      keyedSpies.products.create.mockImplementation(
+        async (params: unknown, options?: { idempotencyKey?: string }) => {
+          if (options?.idempotencyKey?.endsWith(`-${HOUR}`)) throw stored;
+          return proceed?.(params, options);
+        }
+      );
+
+      for (const attempt of [1, 2]) {
+        await expect(
+          keyedService.upsertPlan(orgId, courseId, prices),
+          `attempt ${attempt} in the same hour`
+        ).rejects.toMatchObject({
+          statusCode: 503,
+          context: { code: 'STRIPE_UNAVAILABLE' },
+        });
+      }
+
+      vi.setSystemTime(new Date('2026-10-26T15:00:05Z'));
+      const plan = await keyedService.upsertPlan(orgId, courseId, prices);
+
+      expect(plan.courseId).toBe(courseId);
+      expect(
+        keyedSpies.products.create.mock.calls.at(-1)?.[1]?.idempotencyKey
+      ).toBe(`course-plan-product-${courseId}-0-2026-10-26T15`);
+    });
+  });
+
   afterAll(async () => {
+    if (courseIds.length > 0) {
+      await db
+        .delete(courseSubscriptionPlans)
+        .where(inArray(courseSubscriptionPlans.courseId, courseIds));
+      await db.delete(courses).where(inArray(courses.id, courseIds));
+    }
     await teardownTestDatabase();
   });
 });

@@ -291,10 +291,13 @@ export async function handleCheckoutCompleted(
     }
     rethrowIfTransient(failure);
 
-    // Send purchase receipt email (fire-and-forget)
+    // Send purchase receipt email (fire-and-forget), once per purchase.
     const customerEmail = session.customer_details?.email;
     const customerName = session.customer_details?.name || 'there';
-    if (customerEmail) {
+    if (
+      customerEmail &&
+      (await claimReceipt(purchaseService, purchase.id, obs))
+    ) {
       // Resolve content title from metadata or use fallback
       const contentTitle =
         metadata?.contentTitle || metadata?.contentName || 'Content purchase';
@@ -325,8 +328,7 @@ export async function handleCheckoutCompleted(
  * Mark the paid checkout session completed (Codex-2hxff.14). A record, not a
  * gate: the buyer's next checkout is refused because they own the item. So a
  * failure here is logged, not thrown: thrown after the purchase committed, a
- * transient one would resend the receipt on the redelivery, and a permanent
- * one would skip the receipt for good.
+ * permanent one would skip the receipt for good.
  */
 async function recordSessionPaid(
   purchaseService: { markCheckoutSessionCompleted(id: string): Promise<void> },
@@ -340,6 +342,36 @@ async function recordSessionPaid(
       sessionId,
       error: error instanceof Error ? error.message : String(error),
     });
+  }
+}
+
+/**
+ * Claim the purchase's one receipt (Codex-mat01; owner decision 2026-10-25).
+ * The first delivery to find the purchase live sends it, whether or not it
+ * created the purchase: the redelivery after a transient failure, or after a
+ * partial refund that arrived first, still sends it once. A purchase refunded
+ * in full first gets none. A failed claim a retry can fix is rethrown, so
+ * Stripe redelivers and the redelivery claims it; any other is logged and
+ * the receipt is not sent.
+ */
+async function claimReceipt(
+  purchaseService: { claimReceipt(purchaseId: string): Promise<boolean> },
+  purchaseId: string,
+  obs: ObservabilityClient | undefined
+): Promise<boolean> {
+  try {
+    const claimed = await purchaseService.claimReceipt(purchaseId);
+    if (!claimed) {
+      obs?.info('Purchase receipt already sent or not due', { purchaseId });
+    }
+    return claimed;
+  } catch (error) {
+    if (isTransientError(error)) throw error;
+    obs?.error('Purchase receipt could not be claimed, so it was not sent', {
+      purchaseId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
   }
 }
 
@@ -443,7 +475,10 @@ async function handleCourseCheckoutCompleted(
 
     const customerEmail = session.customer_details?.email;
     const customerName = session.customer_details?.name || 'there';
-    if (customerEmail) {
+    if (
+      customerEmail &&
+      (await claimReceipt(purchaseService, purchase.id, obs))
+    ) {
       const formatted = `£${(amountTotal / 100).toFixed(2)}`;
       sendEmailToWorker(c.env, c.executionCtx, {
         to: customerEmail,

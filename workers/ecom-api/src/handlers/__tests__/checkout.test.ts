@@ -114,6 +114,7 @@ describe('handleCheckoutCompleted', () => {
   let mockStripe: Stripe;
   let mockCompletePurchase: ReturnType<typeof vi.fn>;
   let mockMarkCheckoutSessionCompleted: ReturnType<typeof vi.fn>;
+  let mockClaimReceipt: ReturnType<typeof vi.fn>;
   let mockRelease: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -128,6 +129,15 @@ describe('handleCheckoutCompleted', () => {
       duplicateOfPurchaseId: null,
     });
     mockMarkCheckoutSessionCompleted = vi.fn().mockResolvedValue(undefined);
+    // As the database claim answers for a live purchase: true once per
+    // purchase, false after (Codex-mat01). Its SQL has its own test in
+    // @codex/purchase (purchase-receipt-claim.integration.test.ts).
+    const receiptsClaimed = new Set<string>();
+    mockClaimReceipt = vi.fn(async (purchaseId: string) => {
+      if (receiptsClaimed.has(purchaseId)) return false;
+      receiptsClaimed.add(purchaseId);
+      return true;
+    });
     mockRelease = vi.fn();
 
     // The registry's services, as the composition root hands them over.
@@ -137,6 +147,7 @@ describe('handleCheckoutCompleted', () => {
           completePurchase: mockCompletePurchase,
           completeCoursePurchase: mockCompletePurchase,
           markCheckoutSessionCompleted: mockMarkCheckoutSessionCompleted,
+          claimReceipt: mockClaimReceipt,
         },
       } as unknown as WebhookServices['services'],
       background: (promise) => promise,
@@ -895,11 +906,14 @@ describe('handleCheckoutCompleted', () => {
   // preceded its payout failed (`AfterCommitError`, carrying the purchase).
   // That must not cancel what follows from the purchase alone.
   describe('a clawback that fails after the purchase committed', () => {
+    // The refund that came first was partial, so the purchase is still live
+    // and its buyer is owed one receipt (Codex-mat01). One refunded in full
+    // gets none: see "one receipt per purchase" below.
     const purchase = {
       id: 'purchase_123',
       customerId: 'user_123',
       contentId: 'content_456',
-      status: 'refunded',
+      status: 'completed',
       duplicateOfPurchaseId: null,
     };
     const afterCommit = (cause: Error) =>
@@ -947,12 +961,15 @@ describe('handleCheckoutCompleted', () => {
       expect(mockRelease).toHaveBeenCalledOnce();
     });
 
-    it('transient → the session record and the library bump run, the receipt waits; the redelivery sends it once', async () => {
+    it.each([
+      ['content', { customerId: 'user_123', contentId: 'content_456' }],
+      ['course', { kind: 'course', customerId: 'user_123', courseId: 'c_1' }],
+    ])('transient (%s) → the session record and the library bump run, the receipt waits; the redelivery sends it once', async (_kind, metadata) => {
       const failure = afterCommit(transient());
       mockCompletePurchase.mockRejectedValueOnce(failure);
       const event = createMockStripeCheckoutEvent({
         sessionId: 'cs_after_commit_transient',
-        metadata: { customerId: 'user_123', contentId: 'content_456' },
+        metadata,
       }) as unknown as Stripe.Event;
       (event.data.object as Stripe.Checkout.Session).customer_details = {
         email: 'buyer@example.com',
@@ -971,7 +988,11 @@ describe('handleCheckoutCompleted', () => {
       expect(executionCtx.waitUntil).toHaveBeenCalled();
       expect(sendEmailToWorker).not.toHaveBeenCalled();
 
-      // The redelivery: the clawback finishes, and the receipt goes once.
+      // The redelivery: the clawback finishes, and the receipt goes once. It
+      // did not create the purchase, and still sends: the claim decides, not
+      // which delivery made the row.
+      await handleCheckoutCompleted(event, mockStripe, context);
+      // A third delivery finds the receipt claimed.
       await handleCheckoutCompleted(event, mockStripe, context);
 
       expect(sendEmailToWorker).toHaveBeenCalledTimes(1);
@@ -979,6 +1000,143 @@ describe('handleCheckoutCompleted', () => {
         expect.anything(),
         expect.anything(),
         expect.objectContaining({ templateName: 'purchase-receipt' })
+      );
+    });
+  });
+
+  // Codex-mat01 (owner decision 2026-10-25): ONE receipt per purchase,
+  // claimed on `purchases.receipt_sent_at` by whichever delivery first finds
+  // the purchase live. Not "only the delivery that created it".
+  describe('one receipt per purchase', () => {
+    const sessions = [
+      ['content', { customerId: 'user_123', contentId: 'content_456' }],
+      ['course', { kind: 'course', customerId: 'user_123', courseId: 'c_1' }],
+    ] as const;
+
+    function paidBy(
+      metadata: (typeof sessions)[number][1],
+      email: string | null = 'buyer@example.com'
+    ): Stripe.Event {
+      const event = createMockStripeCheckoutEvent({
+        sessionId: 'cs_receipt',
+        paymentIntentId: 'pi_receipt',
+        metadata: { ...metadata },
+      }) as unknown as Stripe.Event;
+      (event.data.object as Stripe.Checkout.Session).customer_details = {
+        email,
+        name: 'Buyer',
+      } as Stripe.Checkout.Session.CustomerDetails;
+      return event;
+    }
+
+    const receipts = () =>
+      vi
+        .mocked(sendEmailToWorker)
+        .mock.calls.filter(
+          ([, , email]) => email.templateName === 'purchase-receipt'
+        );
+
+    it.each(
+      sessions
+    )('the same %s checkout delivered twice sends one receipt', async (_kind, metadata) => {
+      const event = paidBy(metadata);
+
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+
+      expect(mockCompletePurchase).toHaveBeenCalledTimes(2);
+      expect(mockClaimReceipt).toHaveBeenCalledTimes(2);
+      expect(mockClaimReceipt).toHaveBeenCalledWith('purchase_123');
+      expect(receipts()).toHaveLength(1);
+      expect(receipts()[0]?.[2]).toMatchObject({
+        to: 'buyer@example.com',
+        data: expect.objectContaining({ priceFormatted: '£29.99' }),
+      });
+    });
+
+    it.each(
+      sessions
+    )('a %s purchase refunded in full before its checkout landed sends none', async (_kind, metadata) => {
+      // Rebuilt `refunded` by the refund (ensurePurchaseDataPresent): the
+      // claim finds no live purchase, as the database answers for it.
+      mockCompletePurchase.mockResolvedValueOnce({
+        id: 'purchase_refunded_first',
+        status: 'refunded',
+        duplicateOfPurchaseId: null,
+      });
+      mockClaimReceipt.mockResolvedValueOnce(false);
+      const { context, mock } = createContext();
+
+      await handleCheckoutCompleted(paidBy(metadata), mockStripe, context);
+
+      expect(mockClaimReceipt).toHaveBeenCalledWith('purchase_refunded_first');
+      expect(receipts()).toHaveLength(0);
+      expect(mock._obs.info).toHaveBeenCalledWith(
+        'Purchase receipt already sent or not due',
+        { purchaseId: 'purchase_refunded_first' }
+      );
+    });
+
+    it.each(
+      sessions
+    )('a %s purchase partly refunded first is still live and gets one receipt', async (_kind, metadata) => {
+      // The refund rebuilt it `completed`, so this delivery did not create
+      // it; under "only the creating delivery" this buyer got no receipt.
+      mockCompletePurchase.mockResolvedValue({
+        id: 'purchase_partly_refunded',
+        status: 'completed',
+        duplicateOfPurchaseId: null,
+      });
+      const event = paidBy(metadata);
+
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+
+      expect(receipts()).toHaveLength(1);
+    });
+
+    it('with no buyer email, nothing is claimed, so nothing is used up', async () => {
+      await handleCheckoutCompleted(
+        paidBy(sessions[0][1], null),
+        mockStripe,
+        createContext().context
+      );
+
+      expect(mockClaimReceipt).not.toHaveBeenCalled();
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+    });
+
+    it('a claim a retry can fix rejects with no receipt, so the redelivery claims and sends it', async () => {
+      const outage = Object.assign(new Error('Connection terminated'), {
+        code: 'ECONNRESET',
+      });
+      mockClaimReceipt.mockRejectedValueOnce(outage);
+      const event = paidBy(sessions[0][1]);
+
+      await expect(
+        handleCheckoutCompleted(event, mockStripe, createContext().context)
+      ).rejects.toBe(outage);
+      expect(isTransientError(outage)).toBe(true);
+      expect(receipts()).toHaveLength(0);
+
+      await handleCheckoutCompleted(event, mockStripe, createContext().context);
+      expect(receipts()).toHaveLength(1);
+    });
+
+    it('any other failed claim is logged and the receipt is not sent; the delivery still succeeds', async () => {
+      mockClaimReceipt.mockRejectedValueOnce(
+        new Error('column does not exist')
+      );
+      const { context, mock } = createContext();
+
+      await expect(
+        handleCheckoutCompleted(paidBy(sessions[0][1]), mockStripe, context)
+      ).resolves.toBeUndefined();
+
+      expect(receipts()).toHaveLength(0);
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Purchase receipt could not be claimed, so it was not sent',
+        expect.objectContaining({ purchaseId: 'purchase_123' })
       );
     });
   });

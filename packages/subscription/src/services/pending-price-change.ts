@@ -51,11 +51,18 @@ export interface PriceChangeTarget {
   noticeAt: Date;
 }
 
+/**
+ * `currentAmountCents` on `applied` and `pending` is what the subscriber is
+ * billed today: the live item's `unit_amount`, read before the swap. It is
+ * the notice's "from" figure, because a grandfathered subscriber does not pay
+ * the plan's previous list price (Codex-2hxff.40). Null only for a Price with
+ * no unit amount (tiered or custom), which the platform never creates.
+ */
 export type PriceChangeOutcome =
   /** Swapped now: the next renewal is already ≥ 30 days away and bills the new price. */
-  | { kind: 'applied'; effectiveAt: Date }
+  | { kind: 'applied'; effectiveAt: Date; currentAmountCents: number | null }
   /** Marked pending: a later renewal swaps it. `effectiveAt` is our estimate, for the email. */
-  | { kind: 'pending'; effectiveAt: Date }
+  | { kind: 'pending'; effectiveAt: Date; currentAmountCents: number | null }
   /** Same amount (e.g. a price set back): price id swapped silently, any pending change dropped. */
   | { kind: 'unchanged' }
   /** Not on the repriced interval, or nothing to bill. Left untouched. */
@@ -140,7 +147,11 @@ export async function schedulePriceChange(
         idempotencyKey: `price-change-now:${subscription.id}:${target.newPriceId}`,
       }
     );
-    return { kind: 'applied', effectiveAt: new Date(nextRenewal * 1000) };
+    return {
+      kind: 'applied',
+      effectiveAt: new Date(nextRenewal * 1000),
+      currentAmountCents: item.price.unit_amount,
+    };
   }
 
   // Latest wins: this overwrites any earlier pending change. No idempotency
@@ -163,6 +174,7 @@ export async function schedulePriceChange(
         earliest,
       }) * 1000
     ),
+    currentAmountCents: item.price.unit_amount,
   };
 }
 
