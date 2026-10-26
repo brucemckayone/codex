@@ -248,10 +248,15 @@
   }
 
   /* ── Identity (breadcrumb + count) ──────────────────────── */
+  /* Wraps rather than overflows: at 390px a longer live chip ("Updates every
+     minute", "Reload for live updates") squeezed the breadcrumb to 0 and ran
+     under the upload button. Lines break on natural widths, so the chip
+     drops to its own line and nothing shrinks. */
   .bar-identity {
     display: inline-flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-2) var(--space-3);
     min-width: 0;
   }
 
