@@ -24,13 +24,15 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 
-const { goto, page } = vi.hoisted(() => ({
-  goto: vi.fn(() => Promise.resolve()),
+const { goto, page, logger } = vi.hoisted(() => ({
+  goto: vi.fn((_href: string) => Promise.resolve()),
   page: { url: new URL('http://studio-alpha.lvh.me:3000/explore') },
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock('$app/navigation', () => ({ goto }));
 vi.mock('$app/state', () => ({ page }));
+vi.mock('$lib/observability', () => ({ logger }));
 
 import CommandPaletteSearch from './CommandPaletteSearch.svelte';
 
@@ -55,6 +57,8 @@ let component: ReturnType<typeof mount> | undefined;
 let fetchMock: ReturnType<typeof vi.fn>;
 let hrefSpy: Mock<(href: string) => void>;
 let originalLocation: Location;
+// A Storage method made to throw, restored after each test.
+let storageSpy: { mockRestore: () => void } | undefined;
 
 function openPalette() {
   component = mount(CommandPaletteSearch, {
@@ -86,6 +90,7 @@ const titles = () =>
 beforeEach(() => {
   vi.useFakeTimers();
   goto.mockClear();
+  for (const log of Object.values(logger)) log.mockClear();
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
   hrefSpy = vi.fn();
@@ -113,6 +118,8 @@ afterEach(() => {
   });
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  storageSpy?.mockRestore();
+  storageSpy = undefined;
 });
 
 describe('which results the palette shows (Codex-qhtw7)', () => {
@@ -240,6 +247,27 @@ describe('where a selection goes (Codex-ynktj)', () => {
     expect(goto).toHaveBeenCalledWith('/creators');
     expect(hrefSpy).not.toHaveBeenCalled();
   });
+
+  test('falls back to a full page load, and logs, when goto fails', async () => {
+    fetchMock.mockResolvedValue(answer({ content: [item('a')] }));
+    goto.mockRejectedValueOnce(new Error('render threw'));
+    openPalette();
+    await search('yoga');
+
+    click('.palette__item--content');
+    await vi.runAllTimersAsync();
+
+    expect(logger.error).toHaveBeenCalledWith(
+      'Palette navigation failed',
+      expect.objectContaining({
+        href: '/content/slug-a',
+        reason: 'render threw',
+      })
+    );
+    expect(hrefSpy).toHaveBeenCalledWith(
+      'http://studio-alpha.lvh.me:3000/content/slug-a'
+    );
+  });
 });
 
 // Both root layouts mount the palette, so a throw while it reads the recents
@@ -267,13 +295,57 @@ describe('recent searches it cannot read or save', () => {
   test.each([
     ['a value that is not JSON', '{not json'],
     ['JSON that is not a list', '{"q":"yoga"}'],
-  ])('mounts with no recents over %s', (_, stored) => {
+  ])('mounts with no recents over %s, and warns', (_, stored) => {
     localStorage.setItem(RECENT_KEY, stored);
 
     openPalette();
 
     expect(input()).not.toBeNull();
     expect(recents()).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Recent searches not read',
+      expect.anything()
+    );
+  });
+
+  test('mounts with no recents when storage is blocked, and warns', () => {
+    storageSpy = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(() => {
+        throw new DOMException('Access denied', 'SecurityError');
+      });
+
+    openPalette();
+
+    expect(input()).not.toBeNull();
+    expect(recents()).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith('Recent searches not read', {
+      // jsdom's DOMException is not an Error, so the reason is its String().
+      reason: expect.stringContaining('Access denied'),
+    });
+  });
+
+  test('normalises a stored list as saveRecent writes one', () => {
+    // A repeated term would be a repeated key in the keyed list, which
+    // throws when the palette opens.
+    localStorage.setItem(
+      RECENT_KEY,
+      JSON.stringify([
+        'yoga',
+        ' yoga ',
+        'yoga',
+        'a',
+        'b1x',
+        'c2x',
+        'd3x',
+        'e4x',
+        'f5x',
+      ])
+    );
+
+    openPalette();
+
+    expect(recents()).toEqual(['yoga', 'b1x', 'c2x', 'd3x', 'e4x']);
   });
 
   test('keeps only the string entries of a mixed list', () => {
@@ -294,6 +366,7 @@ describe('recent searches it cannot read or save', () => {
       .mockImplementation(() => {
         throw new DOMException('Quota exceeded', 'QuotaExceededError');
       });
+    storageSpy = setItem;
     openPalette();
     await search('yoga');
 
@@ -304,6 +377,9 @@ describe('recent searches it cannot read or save', () => {
 
     expect(goto).toHaveBeenCalledWith('/content/slug-a');
     expect(setItem).toHaveBeenCalled();
-    setItem.mockRestore();
+    expect(logger.warn).toHaveBeenCalledWith('Recent searches not saved', {
+      // jsdom's DOMException is not an Error, so the reason is its String().
+      reason: expect.stringContaining('Quota exceeded'),
+    });
   });
 });

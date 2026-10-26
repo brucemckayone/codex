@@ -63,15 +63,21 @@
 	// The read runs as the palette mounts, and both root layouts mount it, so
 	// a throw here would break every page, not just search. Blocked site
 	// storage throws on access and a hand-edited value may not parse or not be
-	// a list of strings: each reads as no recents.
+	// a list of strings: each reads as no recents. What is read is normalised
+	// as `saveRecent` writes it: trimmed, de-duplicated (the list is keyed by
+	// term, and a repeated key throws when the palette opens) and capped.
 	function readRecent(): string[] {
 		if (!browser) return [];
 		try {
 			const stored: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
-			if (!Array.isArray(stored)) return [];
-			return stored.filter(
-				(term): term is string => typeof term === 'string' && !!gateSearchQuery(term)
+			if (!Array.isArray(stored)) {
+				logger.warn('Recent searches not read', { reason: 'not a list' });
+				return [];
+			}
+			const terms = stored.flatMap((term) =>
+				typeof term === 'string' ? (gateSearchQuery(term) ?? []) : []
 			);
+			return [...new Set(terms)].slice(0, MAX_RECENT);
 		} catch (error) {
 			logger.warn('Recent searches not read', {
 				reason: error instanceof Error ? error.message : String(error),
@@ -221,12 +227,15 @@
 		if (target.origin === page.url.origin) {
 			// A guard's cancel and an overtaking navigation both RESOLVE goto()
 			// (SvelteKit settles only `navigation.complete` for those), so a
-			// rejection here is a real failure: a render or callback threw.
+			// rejection here is a real failure: a render or callback threw. The
+			// palette has already closed, so fall back to a full page load, which
+			// either arrives or shows the server's error page, never nothing.
 			goto(href).catch((error: unknown) => {
 				logger.error('Palette navigation failed', {
 					href,
 					reason: error instanceof Error ? error.message : String(error),
 				});
+				window.location.href = target.href;
 			});
 			return;
 		}
@@ -244,7 +253,7 @@
 		if (item.type === 'recent') {
 			saveRecent(item.term);
 			open = false;
-			goto(`${searchUrl}?q=${encodeURIComponent(item.term)}`);
+			navigate(`${searchUrl}?q=${encodeURIComponent(item.term)}`);
 		} else if (item.type === 'content') {
 			saveRecent(query.trim());
 			open = false;
@@ -293,7 +302,7 @@
 				if (!gatedQuery) break;
 				saveRecent(gatedQuery);
 				open = false;
-				goto(`${searchUrl}?q=${encodeURIComponent(gatedQuery)}`);
+				navigate(`${searchUrl}?q=${encodeURIComponent(gatedQuery)}`);
 				break;
 			}
 			case 'Escape':
