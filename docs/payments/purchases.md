@@ -117,10 +117,27 @@ charge stays on the platform account (see
 
 ## Completing the purchase
 
-Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
+Two callers complete a purchase, and both run the same function,
+`completeCheckoutSession`:
 
-1. The signature is checked against `STRIPE_WEBHOOK_SECRET_BOOKING`.
-2. The handler skips the event when:
+- **The webhook.** Stripe sends `checkout.session.completed` to
+  `/webhooks/stripe/booking`.
+- **The success page, the moment the buyer lands** (owner decision
+  2026-10-26, "Unlock on arrival"; Stripe's
+  [landing-page fulfilment](https://docs.stripe.com/checkout/fulfillment)).
+  It calls `POST /checkout/complete`, for content and course purchases alike.
+  - The route needs a session and uses the `strict` rate limit.
+  - It reads the Checkout Session from Stripe itself and acts only on the
+    signed-in buyer's own session in this environment. Another buyer's
+    session gets 403; another environment's gets 404.
+
+The webhook stays the backstop. Whichever caller comes second finds the work
+done (see [a second payment](#a-second-payment-for-an-owned-item) for the
+guards).
+
+1. On the webhook path, the signature is checked against
+   `STRIPE_WEBHOOK_SECRET_BOOKING`.
+2. Both paths skip the session when:
    - the session is not `mode: 'payment'` (subscription checkouts belong to the
      subscription handler);
    - the session carries another environment's tag (checked for every webhook
@@ -131,6 +148,9 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
      it completes. A delayed method (a bank debit) would complete `unpaid`
      and be paid on `checkout.session.async_payment_succeeded`, which nothing
      handles yet: adding such a method means handling that event first.
+
+   The page writes nothing for a skipped session. It reports the session's
+   state instead.
 3. The charge id is read from the PaymentIntent (`latest_charge`). If that
    lookup fails **temporarily** — an outage, or a Stripe key or permission
    misconfiguration — the webhook returns 500 so Stripe retries
@@ -146,7 +166,9 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
      the checkout session was **created** (`session.created`, passed as
      `offerAt`), not when the webhook arrives. A buyer who started checkout
      before a creator was removed still completes at the old split (owner
-     decision, `Codex-2hxff.64`). `purchasedAt` is still the payment time;
+     decision, `Codex-2hxff.64`). `purchasedAt` is still the payment time: the
+     event's `created` on the webhook path, and the charge's `created` on the
+     page path;
    - an entitlement is written — `content_purchase`, or `course_purchase` plus
      course enrolment — for organisation **and** orgless sales. An orgless
      sale's entitlement has no organisation.
@@ -169,9 +191,10 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
 6. Then, without holding up the response: the buyer's library version is
    bumped, and a receipt email is sent once per purchase, not once per webhook
    delivery (owner decision 2026-10-25, "One receipt per purchase";
-   `Codex-mat01`). The first delivery to find the purchase completed claims
-   `purchases.receipt_sent_at` and sends it; a later one finds it claimed and
-   sends nothing. A purchase refunded in full before its checkout is recorded
+   `Codex-mat01`). The first completion to find the purchase completed claims
+   `purchases.receipt_sent_at` and sends the receipt. That can be a webhook
+   delivery or the success page. A later one finds it claimed and sends
+   nothing. A purchase refunded in full before its checkout is recorded
    gets none, and a claim that fails transiently returns 500 so Stripe
    redelivers. A creator whose slice went pending is emailed to finish payouts
    setup — **gap**: `Codex-2hxff.7`.
@@ -179,7 +202,9 @@ Stripe sends `checkout.session.completed` to `/webhooks/stripe/booking`.
 **Errors.** A transient failure (database connection, Stripe outage) returns
 500 and Stripe retries. A failure writing the slices after the purchase has
 committed is logged as exactly that, with an errorId; a transient one returns
-500 and the redelivery re-records the missing slices.
+500 and the redelivery re-records the missing slices. On the page path, a
+failure after the commit never reaches the buyer as an error. The purchase is
+recorded, the page unlocks it, and the webhook finishes what is left.
 
 ### A second payment for an owned item
 
@@ -196,7 +221,8 @@ refund").
   and 0007 dropped it for exactly that case.
 - **Completion** takes an advisory lock per buyer and item, then looks for a
   completed purchase. (It first looks again for its own PaymentIntent, in case
-  a concurrent delivery of the same event wrote it meanwhile.) If one exists,
+  a concurrent delivery of the same event, or the success page, wrote it
+  meanwhile.) If one exists,
   the new row is a **duplicate**: `duplicate_of_purchase_id` names the purchase
   it repeats. It writes no access row, no entitlement and no payout slice, and
   is not a sale: Sales and its totals leave it out. Its split columns keep what
@@ -244,18 +270,35 @@ the new column can stay.
 
 ## After payment
 
-The buyer lands on a page that waits for **our** record, not just Stripe's:
+The buyer lands on a page that confirms against **our** record, not just
+Stripe's:
 
-| Return path | Waits for | Today |
-|---|---|---|
-| Content: `/checkout/success?session_id=…` (organisation and creator subdomains) | our purchase row, via `GET /checkout/verify` | stops at Stripe's `complete` — **gap**: `Codex-2hxff.22` |
-| Content bought from the player paywall | the same verifying page | goes to `/library?purchase=success`, which nothing reads — **gap**: `Codex-2hxff.22` |
-| Course or journey: `…/checkout/success?kind=…` | the course entitlement and our row for this session, then redirects to the course | meets the spec |
-| Subscription: `/subscription/success` | our subscription row | meets the spec |
+| Return path | What the page does |
+|---|---|
+| Content: `/checkout/success?session_id=…` (organisation and creator subdomains) | Records the purchase at once (`POST /checkout/complete`), then reads our row via `GET /checkout/verify` |
+| Content bought from the player paywall | The same page: the default `successUrl` is `/checkout/success?session_id={CHECKOUT_SESSION_ID}` |
+| Course or journey: `…/checkout/success?kind=…` | Records the purchase at once, the same way, then waits for the course entitlement and our row for this session, and redirects to the course |
+| Subscription: `/subscription/success` | Waits for our subscription row, which the subscription webhook writes |
 
-Polling is bounded. When it runs out, the page says the payment is still being
-processed and that we will email the buyer. After success the page refreshes
-the library and subscription collections itself — **gap**: `Codex-2hxff.22`.
+Stripe holds the redirect for up to 10 seconds while our webhook answers, so
+the purchase is usually recorded before the buyer arrives.
+- **While the page records it,** it shows "Payment received ✓ · Unlocking
+  your content…", then Start watching.
+- **When our record is late,** the page checks again a few times and then
+  stops (owner decision 2026-10-26, "Capped, then a button"):
+  - about 6 checks over the first minute, at roughly 2, 5, 10, 20, 40 and
+    60 seconds, and only while the tab is visible;
+  - then it says "Your payment went through. We're still finishing up; check
+    again in a minute.", with Check again (one check per click) and Go to
+    library.
+  - **The page never polls open-endedly**, because every check is a billed
+    request. This rule covers the content, course and subscription pages.
+- **No email is promised or sent** beyond the one receipt per purchase.
+- **A purchase that is no longer active,** refunded or paused by a bank
+  dispute, gets one plain notice: "This purchase is no longer active.", with
+  See your payment history. The page stops checking.
+- **After success** the page refreshes the library collection, and the
+  subscription page refreshes the subscription collection.
 
 **A second payment is never confirmed** (Codex-o4jvw; owner decision
 2026-10-22, "Say it plainly"). When our row for the session is a duplicate,
@@ -287,7 +330,9 @@ alone.
   (`content` or `course`) and carries that item's id and title; the other pair
   is `null`.
 - `GET /purchases/:id` returns 404 for someone else's purchase.
-- `GET /checkout/verify` only reveals a session to the buyer who started it.
+- `GET /checkout/verify` only reveals a session to the buyer who started it,
+  and `POST /checkout/complete` acts only on the signed-in buyer's own
+  session, in this environment.
 - `GET /sales` and `GET /sales/stats` show an organisation's content sales to
   its owner and admins.
 - `GET /sales/me` and `GET /sales/me/stats` show a creator their own orgless
@@ -585,6 +630,7 @@ The dispute endpoint needs `charge.dispute.funds_withdrawn` and
 |---|---|
 | Database or Stripe outage during completion, refund or dispute | 500; Stripe retries; the handler is idempotent |
 | Webhook delivered twice | Second delivery is a no-op (unique payment intent; deterministic transfer keys; unique ledger rows) |
+| Webhook slow or failing when the buyer returns | The success page records the purchase; the webhook later records nothing twice |
 | Payee not payable yet | Pending ledger row; drained when they become payable |
 | Transfer fails | Failed row with its charge id; retried by the drains |
 | Charge id lookup fails | 500 and retry; never complete without it |

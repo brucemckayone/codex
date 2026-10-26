@@ -210,7 +210,7 @@ per-user caches, so the library and the subscription badge never disagree:
 bumps both through `waitUntil`, and every `SubscriptionService` mutation ends by
 calling it. Webhooks bump the versions server-side; the browser notices through
 the version manifest and reloads its collections. A page that confirms a
-purchase or subscription also refreshes those collections itself — **gap**:
-`Codex-2hxff.22`. The account subscriptions page reloads through its own
+purchase or subscription also refreshes those collections itself: the library
+on a purchase, and the subscription on a subscription. The account subscriptions page reloads through its own
 `depends('account:subscriptions')` key after a change. The general caching model
 is in [docs/caching-strategy.md](../caching-strategy.md).

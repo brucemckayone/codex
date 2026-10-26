@@ -17,7 +17,7 @@ All routes use `procedure()`. Mounted in `src/index.ts`:
 
 | Mount | File | Routes |
 |---|---|---|
-| `/checkout` | `routes/checkout.ts` | `POST /create`, `/course`, `/course-subscription`, `/portal-session` · `GET /verify` |
+| `/checkout` | `routes/checkout.ts` | `POST /create`, `/course`, `/course-subscription`, `/portal-session`, `/complete` (the success page records the purchase on arrival; `strict`) · `GET /verify` |
 | `/purchases` | `routes/purchases.ts` | `GET /`, `/:id` (the buyer's own) |
 | `/sales` | `routes/sales.ts` | `GET /`, `/stats` (organisation management); `GET /me`, `/me/stats` (a session only: the creator's own orgless sales) |
 | `/subscriptions` | `routes/subscriptions.ts` | `POST /checkout`, `/preview-tier-change`, `/change-tier`, `/cancel`, `/reactivate`, `/resume` · `GET /verify`, `/current`, `/mine` · organisation management: `GET /stats`, `/subscribers`, `/payouts`, `/payouts/summary`, `/payouts/by-creator` · self: `GET /me/payouts`, `/me/earnings-summary` |
@@ -34,7 +34,7 @@ handler.
 
 | Path | Secret | Handler |
 |---|---|---|
-| `/webhooks/stripe/booking` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `handleCheckoutCompleted` (`handlers/checkout.ts`) |
+| `/webhooks/stripe/booking` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `handleCheckoutCompleted` → `completeCheckoutSession` (`handlers/checkout.ts`), the same completion `POST /checkout/complete` runs |
 | `/webhooks/stripe/payment` | `STRIPE_WEBHOOK_SECRET_PAYMENT` | `handlePaymentWebhook` (`handlers/payment-webhook.ts`) |
 | `/webhooks/stripe/dispute` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | `handlePaymentWebhook` |
 | `/webhooks/stripe/subscription` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` (`handlers/subscription-webhook.ts`) |

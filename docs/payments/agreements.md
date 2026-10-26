@@ -80,8 +80,11 @@ per organisation and revenue type before they look for an open thread and add
 up the shares. So two proposals for the same creator made at once open one
 thread, and two acceptances for different creators that together pass 100%
 cannot both succeed: the second waits, sees the first, and is refused.
-Admins can see an organisation's agreements but only the owner can act;
-the screen shows admins only what they can do — **gap**: `Codex-2hxff.20`.
+Admins can see an organisation's agreements, but only the owner can act.
+Admins get a read-only Revenue share page that says: "You can see every
+agreement and negotiation here. Only the owner can propose, change or end an
+agreement." Its group of open threads is "Waiting on the owner", and it has
+no actions.
 
 An agreement takes effect from its proposal's start date: the moment it was
 proposed, unless an API caller sends an earlier one (the Studio never sends
@@ -252,9 +255,16 @@ also require the caller to be an active owner.
 | `agreement-expiring-soon` | Both sides, 30 days before the review date |
 
 Every link in these emails opens a page that exists for that recipient — the
-owner's organisation Studio or the creator's negotiations page — **gap**:
-`Codex-2hxff.20` (today every link is dead). Copy always says "post-platform"
-revenue.
+owner's organisation Studio or the creator's negotiations page. The links are
+built with `buildOrgUrlFromEnv`.
+- The owner's links go to the organisation's Revenue share page.
+- The creator's links go to the thread.
+- A decline sends the creator to their negotiations list, because a thread
+  declined in its first round has no page.
+- **Gap**: a recipient whose platform role is `member` is refused by the
+  creators' Studio (`Codex-2hxff.76`).
+
+Copy always says "post-platform" revenue.
 
 ## Not planned yet
 

@@ -33,8 +33,6 @@ fixed by PR 2 below. The production checks to run around these releases
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
 | `Codex-2hxff.16` | P2 | Downgrades at period end; tier reorders warn first | [subscriptions](subscriptions.md#changing-tier) |
-| `Codex-2hxff.20` | P2 | Revenue screens and agreement emails show the real numbers and working links | [fees-and-splits](fees-and-splits.md#reporting) |
-| `Codex-2hxff.22` | P2 | Success pages wait for our record | [purchases](purchases.md) |
 | `Codex-2hxff.24` | P3 | Dev and CI Stripe setup mirrors production; customer stub removed | [operations](operations.md#local-development) |
 | `Codex-2hxff.25` | P2 | CI exercises real webhook round trips | [operations](operations.md#testing) |
 | `Codex-2hxff.29` | P2 | Creators' bank payouts are held for the 14-day refund window | [connect-and-payouts](connect-and-payouts.md#payout-timing) |
@@ -105,6 +103,25 @@ above:
   value + warn");
 - a refused platform-side payout raises one error per drain, not one per row;
   a transfer both sides reversed ends `reversed`.
+
+`Codex-2hxff.20`, `.22`, `.69`, `.74`, `.75` and `Codex-zsh2p` (the
+owner-facing numbers) are fixed in one pull request, with no migration, and so
+are not listed above:
+- revenue counts every kind from the payouts ledger, after refunds, by UTC
+  calendar day, with a per-kind line (owner, "Count everything now"); revenue
+  by creator is one row per creator with their real earnings (owner, "One row,
+  real earnings");
+- the share bar shows only what's left after Codex's fee (owner, "Only what's
+  left"); admins get a read-only Revenue share page, and agreement emails link
+  to pages that exist;
+- the success page records the purchase the moment the buyer lands (owner,
+  "Unlock on arrival"); a late record gets a few capped checks, then a Check
+  again button, and no page polls open-endedly (owner, "Capped, then a
+  button");
+- pricing refusals say plainly what happened and offer the action that helps
+  (owner, "Plain message + right action");
+- a list that fails to load says so, with Retry, never an empty state (owner,
+  "Same as payout read").
 
 `Codex-2hxff.7` (fee configuration on every sale path, including the 25p
 minimum), `.8` (partial refunds) and `.9` (disputes) were merged to `dev` and
