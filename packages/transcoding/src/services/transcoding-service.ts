@@ -698,8 +698,9 @@ export class TranscodingService extends BaseService {
         hlsPreviewKey: output.hlsPreviewKey,
         // The 'lg' poster. Every other size sits beside it in the same
         // folder (the web derives each from this key): sm/md/lg/xl in the
-        // sized layout `{w}x{h}-{nonce}/` a contract-2 job writes, sm/md/lg in
-        // the flat layout an older handler writes.
+        // sized layout `{w}x{h}-{nonce}/` when the job is contract 2 and the
+        // picture's size is known; otherwise sm/md/lg in the flat layout
+        // (an older handler always writes that).
         thumbnailKey: output.thumbnailKey,
         waveformKey: output.waveformKey,
         waveformImageKey: output.waveformImageKey,

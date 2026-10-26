@@ -123,13 +123,30 @@ _MISSING_DECODER = re.compile(r"Decoder \(codec [^)]*\) not found|Unknown decode
 FFMPEG_ERROR_RATE_EXIT = 69
 
 
+# ffmpeg ends on the line that stopped it. Earlier lines can be frames it
+# concealed and moved past (TOLERANT_DECODE prints "Invalid data found ..."
+# for each), which must not turn a later disk or memory failure into a
+# damaged file the creator cannot retry.
+_FATAL_TAIL_LINES = 5
+_OUT_OF_RESOURCES = ("No space left on device", "Cannot allocate memory")
+# A frame that failed to decode, as ffmpeg reports it; never the line that
+# stopped it (tolerated, or past the error rate, which is exit 69).
+_FRAME_ERROR = "Error while decoding stream"
+
+
 def classify_ffmpeg_failure(stderr: str, returncode: int | None = None) -> str:
-    """Map a failed ffmpeg/ffprobe run's stderr (and exit status) to a code."""
+    """Map a failed ffmpeg/ffprobe run's last lines (and exit status) to a code."""
+    if returncode is not None and returncode < 0:
+        return TranscodeErrorCode.INFRA_ERROR  # killed by a signal: OOM, a limit
     if returncode == FFMPEG_ERROR_RATE_EXIT:
         return TranscodeErrorCode.CORRUPT_INPUT
-    if _MISSING_DECODER.search(stderr):
+    lines = [line for line in stderr.strip().splitlines() if _FRAME_ERROR not in line]
+    tail = "\n".join(lines[-_FATAL_TAIL_LINES:])
+    if any(marker in tail for marker in _OUT_OF_RESOURCES):
+        return TranscodeErrorCode.INFRA_ERROR
+    if _MISSING_DECODER.search(tail):
         return TranscodeErrorCode.UNSUPPORTED_CODEC
-    if any(marker in stderr for marker in _CORRUPT_INPUT_MARKERS):
+    if any(marker in tail for marker in _CORRUPT_INPUT_MARKERS):
         return TranscodeErrorCode.CORRUPT_INPUT
     return TranscodeErrorCode.INFRA_ERROR
 
@@ -413,6 +430,16 @@ def _run_ffmpeg(
             classify_ffmpeg_failure(stderr, e.returncode),
             f"{description} failed (exit {e.returncode}): {stderr[-2000:]}",
         ) from e
+    except subprocess.TimeoutExpired as e:
+        # Captured output is bytes here whatever `text` says.
+        partial = e.stderr or b""
+        tail = (
+            partial.decode(errors="replace") if isinstance(partial, bytes) else partial
+        )
+        raise TranscodeError(
+            TranscodeErrorCode.INFRA_ERROR,
+            f"{description} timed out after {timeout} s: {tail[-1000:]}",
+        ) from e
 
 
 PROGRESS_POLL_SECONDS = 1.0
@@ -653,7 +680,7 @@ def probe_media(input_path: str) -> dict[str, Any]:
     cmd = [
         "ffprobe",
         "-v",
-        "quiet",
+        "error",
         "-print_format",
         "json",
         "-show_format",
@@ -663,11 +690,14 @@ def probe_media(input_path: str) -> dict[str, Any]:
     try:
         result = run_ffmpeg(cmd, timeout=30, description="ffprobe")
     except TranscodeError as e:
-        # ffprobe needs no decoders, so a file it refuses is unreadable.
-        code = e.code
-        if code == TranscodeErrorCode.INFRA_ERROR:
-            code = TranscodeErrorCode.CORRUPT_INPUT
-        raise TranscodeError(code, str(e)) from e
+        # ffprobe needs no decoders, so a file it refuses (exit > 0) is
+        # unreadable. A kill or a timeout is ours.
+        refused = isinstance(e.__cause__, subprocess.CalledProcessError) and (
+            e.__cause__.returncode > 0
+        )
+        if e.code == TranscodeErrorCode.INFRA_ERROR and refused:
+            raise TranscodeError(TranscodeErrorCode.CORRUPT_INPUT, str(e)) from e
+        raise
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as e:
@@ -682,14 +712,66 @@ def get_media_info(probe_data: dict[str, Any]) -> tuple[int, int | None, int | N
     A duration ffprobe can't state ("N/A", absent) comes back as 0, which the
     handler reports as INVALID_DURATION.
     """
-    try:
-        duration = int(float(probe_data.get("format", {}).get("duration", 0)))
-    except (TypeError, ValueError):
-        duration = 0
+    durations = [probe_data.get("format", {}).get("duration")] + [
+        stream.get("duration") for stream in probe_data.get("streams", [])
+    ]
+    duration = 0
+    for value in durations:  # the container's, else the longest stream's
+        try:
+            duration = max(duration, int(float(value)))
+        except (TypeError, ValueError):
+            continue
+        if value is durations[0]:
+            break
 
     video = first_video_stream(probe_data)
     width, height = display_dimensions(video) if video else (None, None)
     return duration, width, height
+
+
+def measure_duration(input_path: str) -> int:
+    """Seconds of media, from the last packet's end: for a file whose
+    container states no duration (a browser's MediaRecorder WebM). Demuxes
+    only, decodes nothing. 0 when there are no packets."""
+    out = run_ffmpeg(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "packet=pts_time,duration_time",
+            "-of",
+            "csv=p=0",
+            input_path,
+        ],
+        timeout=300,
+        description="ffprobe packets",
+    ).stdout
+    end = 0.0
+    for line in (out or "").splitlines():
+        pts, _, length = line.partition(",")
+        try:
+            end = max(end, float(pts) + (float(length) if length else 0.0))
+        except ValueError:
+            continue
+    return int(end)
+
+
+# What the service's completed-webhook schema accepts (runpodWebhookOutputSchema
+# in packages/validation/src/schemas/transcoding.ts; test_encode_settings
+# reads it). A source outside them is caught before it is encoded, not after.
+MAX_DURATION_SECONDS = 86400
+MAX_REPORTED_DIMENSION = 7680
+
+
+def reportable_dimensions(
+    width: int | None, height: int | None
+) -> tuple[int | None, int | None]:
+    """(width, height) if the service would accept them, else (None, None):
+    an anamorphic 4096x1716 squares to 8192 wide, and the size is optional."""
+    if width and height and 1 <= max(width, height) <= MAX_REPORTED_DIMENSION:
+        return width, height
+    return None, None
 
 
 def _ratio(value: Any) -> tuple[int, int] | None:
@@ -905,16 +987,6 @@ def create_mezzanine(
     )
 
 
-def _safe_loudness(value: float, default: float) -> float:
-    """Clamp non-finite loudness values (inf, -inf, NaN) to a safe default.
-
-    ffmpeg's loudnorm returns -inf for silent audio tracks — int(-inf) crashes.
-    """
-    if math.isfinite(value):
-        return value
-    return default
-
-
 def analyze_loudness(input_path: str) -> dict[str, float] | None:
     """Two-pass loudness analysis using loudnorm filter.
 
@@ -952,15 +1024,22 @@ def analyze_loudness(input_path: str) -> dict[str, float] | None:
     try:
         if json_start >= 0 and json_end > json_start:
             loudness_data = json.loads(output[json_start:json_end])
-            return {
-                "input_i": _safe_loudness(float(loudness_data["input_i"]), -70.0),
-                "input_tp": _safe_loudness(float(loudness_data["input_tp"]), -1.0),
-                "input_lra": _safe_loudness(float(loudness_data["input_lra"]), 0.0),
+            measured = {
+                key: float(loudness_data[key])
+                for key in ("input_i", "input_tp", "input_lra")
             }
+            # A silent track measures -inf: no loudness, not a made-up one.
+            if all(math.isfinite(value) for value in measured.values()):
+                return measured
+            print("Loudness: the audio is silent; reporting none")
+            return None
     except (json.JSONDecodeError, KeyError, TypeError, ValueError):
         pass
 
-    print("WARNING: No loudness data in ffmpeg output; reporting none")
+    print(
+        f"WARNING: No loudness data (ffmpeg exit {result.returncode}): "
+        f"{output[-300:]}; reporting none"
+    )
     return None
 
 
@@ -1038,11 +1117,38 @@ def _validate_hls_rung(
     validate_output(playlist_path, f"{what} playlist")
     stream_path = os.path.join(variant_dir, "stream.ts")
     validate_output(stream_path, f"{what} stream")
+    # A full disk does not fail ffmpeg 4.4 (exit 0), so a truncated stream.ts
+    # shows only here: its playlist points past the end of the file.
+    needed = playlist_byte_end(playlist_path)
+    if needed is not None and needed > os.path.getsize(stream_path):
+        raise TranscodeError(
+            TranscodeErrorCode.OUTPUT_VALIDATION_FAILED,
+            f"{what} stream is cut short: the playlist needs {needed} bytes",
+        )
     if picture and encoded_stream_tags(stream_path)[0] is None:
         raise TranscodeError(
             TranscodeErrorCode.CORRUPT_INPUT,
             f"{what}: no picture could be decoded from the source",
         )
+
+
+def playlist_byte_end(playlist_path: str) -> int | None:
+    """Where a single-file playlist's last #EXT-X-BYTERANGE ends, or None
+    when it has none (or cannot be read). A range without `@offset` starts
+    where the one before ended (RFC 8216 4.3.2.2)."""
+    end = None
+    try:
+        with open(playlist_path) as playlist:
+            for line in playlist:
+                if not line.startswith("#EXT-X-BYTERANGE:"):
+                    continue
+                spec = line[len("#EXT-X-BYTERANGE:") :].strip()
+                length, _, offset = spec.partition("@")
+                start = int(offset) if offset else (end or 0)
+                end = start + int(length)
+    except (OSError, ValueError):
+        return None
+    return end
 
 
 # H.264 profile_idc and constraint byte, for an RFC 6381 `avc1.PPCCLL` string.
@@ -1093,7 +1199,7 @@ def encoded_stream_tags(stream_path: str) -> tuple[str | None, str | None]:
                 [
                     "ffprobe",
                     "-v",
-                    "quiet",
+                    "error",
                     "-print_format",
                     "json",
                     "-show_streams",
@@ -1102,9 +1208,8 @@ def encoded_stream_tags(stream_path: str) -> tuple[str | None, str | None]:
                 timeout=30,
                 description="ffprobe output",
             ).stdout
-            or "{}"
         )
-    except (TranscodeError, json.JSONDecodeError) as e:
+    except (TranscodeError, json.JSONDecodeError, TypeError) as e:
         raise TranscodeError(
             TranscodeErrorCode.OUTPUT_VALIDATION_FAILED,
             f"encoded stream unreadable: {e}",
@@ -1112,6 +1217,7 @@ def encoded_stream_tags(stream_path: str) -> tuple[str | None, str | None]:
 
     resolution = None
     codecs: list[str] = []
+    video_codec_known = True
     for stream in probe.get("streams", []):
         if stream.get("codec_type") == "video" and resolution is None:
             if stream.get("width") and stream.get("height"):
@@ -1120,9 +1226,15 @@ def encoded_stream_tags(stream_path: str) -> tuple[str | None, str | None]:
             level = stream.get("level")
             if avc and isinstance(level, int) and level > 0:
                 codecs.insert(0, f"avc1.{avc[0]:02x}{avc[1]:02x}{level:02x}")
+            else:
+                video_codec_known = False
         elif stream.get("codec_type") == "audio" and stream.get("codec_name") == "aac":
             if AAC_LC_CODEC not in codecs:
                 codecs.append(AAC_LC_CODEC)
+    # CODECS naming only the audio would advertise a video rung as audio-only:
+    # better none, which a player then probes.
+    if not video_codec_known:
+        return resolution, None
     return resolution, ",".join(codecs) or None
 
 
@@ -1551,9 +1663,10 @@ def _signed_headers(payload: str, secret: str) -> dict[str, str]:
 
 
 def send_webhook(url: str, secret: str, result: dict) -> None:
-    """Send signed webhook with retry (3 attempts, exponential backoff).
-
-    On exhaustion, raises RuntimeError so RunPod can retry the entire job.
+    """Send a signed webhook: 3 attempts with backoff for a network failure,
+    a 5xx, a 408 or a 429; one for any other 4xx, which would be refused
+    again. Raises RuntimeError when it is not delivered (the handler then
+    reports or keeps the outputs, see `handler`).
     """
     max_attempts = 3
     backoff_base = 2
@@ -1561,23 +1674,49 @@ def send_webhook(url: str, secret: str, result: dict) -> None:
     payload = json.dumps(result)
     headers = _signed_headers(payload, secret)
 
-    last_error: Exception | None = None
+    last_error = "not sent"
     for attempt in range(max_attempts):
         try:
             response = requests.post(url, data=payload, headers=headers, timeout=30)
-            response.raise_for_status()
-            print(f"Webhook sent successfully (attempt {attempt + 1})")
-            return
         except Exception as e:
-            last_error = e
-            if attempt < max_attempts - 1:
-                delay = backoff_base**attempt
+            last_error = str(e)
+        else:
+            if response.ok:
+                print(f"Webhook sent successfully (attempt {attempt + 1})")
+                _note_rejection(response)
+                return
+            last_error = (
+                f"media-api answered {response.status_code}: {response.text[:300]}"
+            )
+            if response.status_code in (401, 403):
                 print(
-                    f"Webhook attempt {attempt + 1} failed: {e}. Retrying in {delay}s..."
+                    "Webhook refused as unsigned: WEBHOOK_SECRET or this worker's "
+                    "clock differs from media-api's"
                 )
-                time.sleep(delay)
+            if 400 <= response.status_code < 500 and response.status_code not in (
+                408,
+                429,
+            ):
+                break
+        if attempt < max_attempts - 1:
+            delay = backoff_base**attempt
+            print(
+                f"Webhook attempt {attempt + 1} failed: {last_error}. Retrying in {delay}s..."
+            )
+            time.sleep(delay)
 
-    raise RuntimeError(f"Webhook failed after {max_attempts} attempts: {last_error}")
+    raise RuntimeError(f"Webhook not delivered: {last_error}")
+
+
+def _note_rejection(response: Any) -> None:
+    """media-api answers 200 `{rejected: true}` to a completion its schema
+    refused, and fails the row: say so here, where the job's log is."""
+    try:
+        body = response.json()
+    except ValueError:
+        return
+    if isinstance(body, dict) and body.get("rejected") is True:
+        print(f"WARNING: media-api rejected the result: {body.get('error')}")
 
 
 def send_progress(
@@ -1603,9 +1742,11 @@ def send_progress(
     try:
         # Short: it is fire-and-forget, and the end of a rung waits for a
         # tick in flight.
-        requests.post(
+        answer = requests.post(
             url, data=payload, headers=_signed_headers(payload, secret), timeout=(2, 3)
         )
+        if not answer.ok:
+            print(f"Progress webhook answered {answer.status_code} (non-fatal)")
     except Exception as e:
         print(f"Progress webhook failed (non-fatal): {e}")
 
@@ -1665,6 +1806,12 @@ class ProgressReporter:
 # =============================================================================
 
 
+def _required(job_input: dict[str, Any], name: str) -> Any:
+    if name not in job_input:
+        raise ValueError(f"Job input is missing '{name}'")
+    return job_input[name]
+
+
 def handler(job: dict[str, Any]) -> dict[str, Any]:
     """RunPod serverless handler for transcoding jobs."""
     job_input = job.get("input") or {}
@@ -1696,10 +1843,10 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
     completion: dict[str, Any] | None = None
 
     try:
-        media_id = job_input["mediaId"]
-        creator_id = job_input["creatorId"]
-        media_type = job_input["type"]
-        input_key = job_input["inputKey"]
+        media_id = _required(job_input, "mediaId")
+        creator_id = _required(job_input, "creatorId")
+        media_type = _required(job_input, "type")
+        input_key = _required(job_input, "inputKey")
 
         # --- Input validation ---
         validate_path_component(creator_id, "creatorId")
@@ -1781,12 +1928,19 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         progress.report("probing", 5)
         probe_data = probe_media(input_path)
         duration, width, height = get_media_info(probe_data)
+        if duration <= 0:
+            duration = measure_duration(input_path)
         print(f"Media info: duration={duration}s, width={width}, height={height}")
 
         if duration <= 0:
             raise TranscodeError(
                 TranscodeErrorCode.INVALID_DURATION,
                 f"Invalid media duration: {duration}s. File may be corrupt or empty.",
+            )
+        if duration > MAX_DURATION_SECONDS:
+            raise TranscodeError(
+                TranscodeErrorCode.INVALID_DURATION,
+                f"Media is {duration}s long; the most is {MAX_DURATION_SECONDS}s.",
             )
 
         validate_streams(probe_data, media_type)
@@ -1940,8 +2094,9 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "waveformImageKey": waveform_image_key,
             "mezzanineKey": mezzanine_key,
             "durationSeconds": duration,
-            "width": width,
-            "height": height,
+            # The encodes use the real size; only an unreportable one is null.
+            "width": reportable_dimensions(width, height)[0],
+            "height": reportable_dimensions(width, height)[1],
             "readyVariants": ready_variants,
             "loudnessIntegrated": loudness_integrated,
             "loudnessPeak": loudness_peak,

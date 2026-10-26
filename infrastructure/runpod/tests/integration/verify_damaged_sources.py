@@ -39,6 +39,9 @@ EXPECTED = {
     "moov_lost": ("video", h.TranscodeErrorCode.CORRUPT_INPUT),
     # Audio is the whole content, and none of it decodes: exit 69.
     "broken_audio_only": ("audio", h.TranscodeErrorCode.CORRUPT_INPUT),
+    # A browser's MediaRecorder WebM, written as a stream: no duration in
+    # the container or its streams (it was refused as INVALID_DURATION).
+    "browser_recording": ("video", COMPLETES),
 }
 
 
@@ -144,6 +147,32 @@ def make_sources(work: str) -> dict:
     ffmpeg(*lavfi_tone, *sound, p("audio_only", "m4a"))
     scramble_packets(p("audio_only", "m4a"), p("broken_audio_only", "m4a"), "audio")
 
+    with open(p("browser_recording", "webm"), "wb") as recording:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=d=8:s=640x360:r=30",
+                *lavfi_tone,
+                "-c:v",
+                "libvpx",
+                "-deadline",
+                "realtime",
+                "-c:a",
+                "libopus",
+                "-f",
+                "webm",
+                "pipe:1",
+            ],
+            stdout=recording,
+            check=True,
+        )
+
     return {
         "healthy": p("healthy"),
         "truncated_tail": p("truncated_tail"),
@@ -152,6 +181,7 @@ def make_sources(work: str) -> dict:
         "no_decodable_picture": p("no_decodable_picture", "mov"),
         "moov_lost": p("moov_lost"),
         "broken_audio_only": p("broken_audio_only", "m4a"),
+        "browser_recording": p("browser_recording", "webm"),
     }
 
 
@@ -161,6 +191,10 @@ def outcome(path: str, media_type: str, work: str) -> str:
     try:
         probe = h.probe_media(path)
         duration, width, height = h.get_media_info(probe)
+        if duration <= 0:  # as the handler does
+            duration = h.measure_duration(path)
+        if duration <= 0:
+            return h.TranscodeErrorCode.INVALID_DURATION
         h.validate_streams(probe, media_type)
         if media_type == "audio":
             h.transcode_audio_hls(path, out)

@@ -1,6 +1,6 @@
 {
   "creatorId": null,
-  "error": "'creatorId'",
+  "error": "Job input is missing 'creatorId'",
   "errorCode": "INFRA_ERROR",
   "jobId": "job-broken",
   "mediaId": null,

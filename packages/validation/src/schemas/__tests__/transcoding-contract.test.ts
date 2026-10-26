@@ -28,6 +28,11 @@ const NAMES = [
   'progress',
 ] as const;
 
+/** The fixture as the handler sent it, before the schema strips anything. */
+function raw(name: (typeof NAMES)[number]): Record<string, unknown> {
+  return JSON.parse(readFileSync(new URL(`${name}.json`, FIXTURES), 'utf8'));
+}
+
 function parse(name: (typeof NAMES)[number]) {
   const body: unknown = JSON.parse(
     readFileSync(new URL(`${name}.json`, FIXTURES), 'utf8')
@@ -58,7 +63,12 @@ describe('transcoding handler contract fixtures', () => {
       width: body.output.width,
       height: body.output.height,
     });
-    expect(Object.keys(body.output.thumbnailVariants ?? {}).sort()).toEqual([
+    // Read off the raw body: the schema strips a key it doesn't know, so a
+    // size added in Python would pass a check of the parsed one.
+    const sent = raw('completed-video-sized').output as {
+      thumbnailVariants: Record<string, string>;
+    };
+    expect(Object.keys(sent.thumbnailVariants).sort()).toEqual([
       'lg',
       'md',
       'sm',

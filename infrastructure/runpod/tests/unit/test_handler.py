@@ -312,6 +312,8 @@ def test_handler_timeout_protection(
 
     result = handler_module.handler({"input": basic_job_input})
 
+    # A coded failure naming the step, so the GPU path's CPU retry covers a
+    # hung encode too.
     assert result["status"] == "error"
-    assert "Command" in result["error"]
-    assert "timed out" in result["error"]
+    assert result["errorCode"] == "INFRA_ERROR"
+    assert "timed out after 3600 s" in result["error"]

@@ -132,7 +132,7 @@ class TestEarlyFailuresAreReported:
         assert report == {
             "jobId": "job-7",
             "status": "failed",
-            "error": "'creatorId'",
+            "error": "Job input is missing 'creatorId'",
             "errorCode": "INFRA_ERROR",
             "mediaId": None,  # test-media-123 is no UUID: the service would refuse it
             "creatorId": None,

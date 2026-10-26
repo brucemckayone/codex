@@ -17,10 +17,10 @@ describe('Thumbnail Sizes', () => {
   /**
    * CRITICAL: This test ensures THUMBNAIL_SIZES stays in sync with Python.
    *
-   * If you modify THUMBNAIL_SIZES, you MUST also update:
-   * - infrastructure/runpod/handler/main.py:ALLOWED_THUMBNAIL_SIZES
-   *
-   * Both locations have cross-references in comments.
+   * If you modify THUMBNAIL_SIZES, you MUST also update
+   * infrastructure/runpod/handler/main.py FLAT_POSTER_SIZES (and POSTER_SIZES,
+   * which adds xl), then regenerate the contract fixtures
+   * (infrastructure/runpod/tests/fixtures/README.md).
    */
   it('should have exactly sm, md, lg variants (synced with Python)', () => {
     expect(THUMBNAIL_SIZES).toEqual(['sm', 'md', 'lg']);

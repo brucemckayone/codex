@@ -200,10 +200,12 @@ class TestLoudness:
                 "input_lra": 5.0,
             }
 
-    def test_silence_is_clamped_not_dropped(self):
+    def test_silence_is_no_measurement(self):
+        # loudnorm measures a silent track as -inf: reporting -70 LUFS and a
+        # -1 dBTP peak (the old clamp) invented a near-clipping peak.
         stderr = json.dumps({"input_i": "-inf", "input_tp": "-inf", "input_lra": "0.0"})
         with patch("subprocess.run", return_value=self._run(stderr)):
-            assert handler_module.analyze_loudness("in.mp4")["input_i"] == -70.0
+            assert handler_module.analyze_loudness("in.mp4") is None
 
     @pytest.mark.parametrize("stderr", ["", "no json here", '{"input_i": "-14.0"}'])
     def test_no_usable_measurement_is_none_not_invented(self, stderr):

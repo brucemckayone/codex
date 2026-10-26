@@ -27,7 +27,8 @@ always match the ffmpeg they run under:
   4:4:4, a no-audio screen recording, a timecode track, a 1.2 s clip).
 - `tests/integration/verify_damaged_sources.py`: a copy cut short, scattered
   holes, a broken audio track under a perfect picture, a picture that cannot
-  be decoded at all, a lost moov index, a broken audio-only file. Each must
+  be decoded at all, a lost moov index, a broken audio-only file, a browser
+  recording whose container states no duration. Each must
   complete, or fail with the code listed in its `EXPECTED` table.
 
 `runpod-ci.yml` runs both inside the built image (prod's ffmpeg 4.4.2).
