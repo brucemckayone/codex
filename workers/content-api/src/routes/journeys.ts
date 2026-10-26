@@ -150,13 +150,10 @@ app.get(
       const cdnBase = ctx.env.R2_PUBLIC_URL_BASE;
       warnOnMissingCdnBase(cdnBase, ctx.obs, 'journeys:courses');
 
-      const fetchCourses = () =>
-        ctx.services.courseJourney.listPublishedCourses(
-          organizationId,
-          cdnBase
-        );
+      const fetchCourses = (base: string | undefined) =>
+        ctx.services.courseJourney.listPublishedCourses(organizationId, base);
 
-      if (!ctx.env.CACHE_KV) return fetchCourses();
+      if (!ctx.env.CACHE_KV) return fetchCourses(cdnBase);
 
       // `waitUntil` is REQUIRED on every read path (Codex-e32xz): without it
       // the data-slot put is cancelled when the response returns and the cache
@@ -171,8 +168,8 @@ app.get(
       const courses = await getCachedPublishedCourses(
         cache,
         organizationId,
-        fetchCourses,
-        { cdnBase }
+        cdnBase,
+        fetchCourses
       );
       if (ctx.obs) {
         logCacheStats(cache, ctx.obs, { cacheType: 'journeys:courses' });
@@ -561,14 +558,14 @@ app.get(
       const cdnBase = ctx.env.R2_PUBLIC_URL_BASE;
       warnOnMissingCdnBase(cdnBase, ctx.obs, 'journeys:published');
 
-      const fetchJourneys = () =>
+      const fetchJourneys = (base: string | undefined) =>
         ctx.services.courseJourney.listPublishedJourneys(organizationId, {
           featured: isFeatured,
           limit,
-          r2PublicUrlBase: cdnBase,
+          r2PublicUrlBase: base,
         });
 
-      if (!ctx.env.CACHE_KV) return fetchJourneys();
+      if (!ctx.env.CACHE_KV) return fetchJourneys(cdnBase);
 
       // See `/courses` above — `waitUntil` is what makes the write survive.
       const cache = new VersionedCache({
@@ -579,7 +576,8 @@ app.get(
       const journeys = await getCachedPublishedJourneys(
         cache,
         organizationId,
-        { featured: isFeatured, limit, cdnBase },
+        { featured: isFeatured, limit },
+        cdnBase,
         fetchJourneys
       );
       if (ctx.obs) {

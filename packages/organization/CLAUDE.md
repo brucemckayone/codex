@@ -88,7 +88,7 @@ One owner per organisation — the DB enforces it (`uq_org_memberships_one_activ
 | Method | Signature | Notes |
 |---|---|---|
 | `getPublicMembers` | `(slug: string, query?)` | Public-safe: name/avatarUrl/role/joinedAt only. No emails. |
-| `getPublicCreators` | `(slug: string, pagination?, search?)` | Active creators (owner/admin/creator roles) with content counts, recent content (up to 4), and other org memberships. A course-only practice is neither counted nor listed (Codex-ot6vj). `search` keeps only the creators whose name or username contains it, case-insensitively, and the total counts only those (the search palette's, Codex-pd8m1). |
+| `getPublicCreators` | `(slug: string, query?: { page, limit, search? })` | Active creators (owner/admin/creator roles) with content counts, recent content (up to 4), and other org memberships. A course-only practice is neither counted nor listed (Codex-ot6vj). `search` keeps only the creators whose name or username contains it, case-insensitively, and the total counts only those (the search palette's, Codex-pd8m1). |
 | `getPublicStats` | `(slug: string)` | Aggregate stats: content counts by type, total duration, creator count, total views, categories. |
 
 ### Follower Operations

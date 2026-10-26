@@ -662,16 +662,15 @@ export class OrganizationService extends BaseService {
    * Only active members with owner/admin/creator roles are included.
    *
    * @param slug - Organization slug
-   * @param pagination - Optional pagination params { page, limit }
-   * @param search - Optional text a creator's name or username must contain
-   *   (case-insensitive); the total counts only the creators it matches
+   * @param query - Optional { page, limit, search }. `search` keeps only the
+   *   creators whose name or username contains it (case-insensitive), and the
+   *   total counts only those (Codex-pd8m1).
    * @returns Paginated list of public creator profiles with content counts
    * @throws {OrganizationNotFoundError} If organization doesn't exist
    */
   async getPublicCreators(
     slug: string,
-    pagination?: { page: number; limit: number },
-    search?: string
+    query?: { page: number; limit: number; search?: string }
   ): Promise<
     PaginatedListResponse<{
       id: string;
@@ -696,7 +695,7 @@ export class OrganizationService extends BaseService {
       }[];
     }>
   > {
-    const { page = 1, limit = PAGINATION.DEFAULT } = pagination ?? {};
+    const { page = 1, limit = PAGINATION.DEFAULT, search } = query ?? {};
     const { limit: queryLimit, offset } = withPagination({ page, limit });
 
     try {

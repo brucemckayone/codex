@@ -2,17 +2,18 @@
  * Keying a cached payload on the CDN base its URLs were built with
  * (Codex-yjyju).
  *
- * Three KV-cached public reads store URLs built from `R2_PUBLIC_URL_BASE`: the
- * topic categories' covers (public.ts) and the two journey card lists
- * (journeys.ts, where the service builds the cover URL). Their slots used to be
- * keyed on the org alone, so a missing or wrong base was frozen into the slot
- * for its TTL (2h): fixing the binding healed nothing until the slot expired or
- * a write bumped the org's version. With the base in the slot's key, a changed
- * base reads a slot of its own and the fix shows on the next request. The base
- * never changes in steady state, so this costs no hits.
+ * The two journey card lists (journeys.ts) KV-cache cover URLs built from
+ * `R2_PUBLIC_URL_BASE`: `CourseJourneyService` builds the URL, so the route
+ * never sees the key. Their slots used to be keyed on the org alone, so a
+ * missing or wrong base was frozen into the slot for its TTL (2h): fixing the
+ * binding healed nothing until the slot expired or a write bumped the org's
+ * version. With the base in the slot's key, a changed base reads a slot of its
+ * own and the fix shows on the next request. The base never changes in steady
+ * state, so this costs no hits.
  *
- * The org content list does not need it: it caches the service's rows and
- * builds its URLs after the read (`toWire` in public.ts).
+ * A read that sees the key itself does not need it: cache the key and build
+ * the URL after the read, as the org content list (`toWire`) and the topic
+ * categories do in public.ts. That keeps URLs out of KV altogether.
  */
 
 import type { Logger } from '@codex/observability';
@@ -39,7 +40,7 @@ export function cdnBaseSlot(base: string | undefined): string {
  * With no base every cover goes out as a null URL, which a page draws as "no
  * cover" rather than as an error, so a missing binding would otherwise go
  * unnoticed. Warns on every such request, cache hit or miss, until the binding
- * is set.
+ * is set. Shared by the journey lists and the topic categories.
  */
 export function warnOnMissingCdnBase(
   base: string | undefined,

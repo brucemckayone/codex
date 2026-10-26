@@ -124,11 +124,11 @@ describe('GET /public/:slug/creators?search=', () => {
     await readCreators(slug, '?search=priya&limit=5');
 
     expect(orgSpies.getPublicCreators).toHaveBeenCalledTimes(2);
-    expect(orgSpies.getPublicCreators).toHaveBeenCalledWith(
-      slug,
-      { page: 1, limit: 5 },
-      'priya'
-    );
+    expect(orgSpies.getPublicCreators).toHaveBeenCalledWith(slug, {
+      page: 1,
+      limit: 5,
+      search: 'priya',
+    });
   });
 
   it('writes no slot an unsearched read would then serve', async () => {

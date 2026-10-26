@@ -81,48 +81,44 @@ function createMockKV(): KVNamespace & {
 
 describe('buildPublishedJourneysCacheType', () => {
   it('is deterministic and includes both variant dimensions', () => {
-    expect(buildPublishedJourneysCacheType({ featured: true, limit: 4 })).toBe(
-      'journeys:published:featured:4:cdn:none'
-    );
+    expect(
+      buildPublishedJourneysCacheType({ featured: true, limit: 4 }, undefined)
+    ).toBe('journeys:published:featured:4:cdn:none');
   });
 
   it('names the absent case explicitly rather than emitting an empty segment', () => {
-    expect(buildPublishedJourneysCacheType({})).toBe(
+    expect(buildPublishedJourneysCacheType({}, undefined)).toBe(
       'journeys:published:all:default:cdn:none'
     );
   });
 
   it('keys the slot on the CDN base the covers are built with (Codex-yjyju)', () => {
     const query = { featured: true, limit: 4 };
-    const fixed = buildPublishedJourneysCacheType({
-      ...query,
-      cdnBase: 'https://cdn-assets.revelations.studio',
-    });
+    const prod = 'https://cdn-assets.revelations.studio';
+    const fixed = buildPublishedJourneysCacheType(query, prod);
 
-    expect(fixed).not.toBe(buildPublishedJourneysCacheType(query));
+    expect(fixed).not.toBe(buildPublishedJourneysCacheType(query, undefined));
     expect(fixed).not.toBe(
-      buildPublishedJourneysCacheType({
-        ...query,
-        cdnBase: 'https://cdn-assets.revelations.studi',
-      })
+      buildPublishedJourneysCacheType(
+        query,
+        'https://cdn-assets.revelations.studi'
+      )
     );
-    expect(fixed).toBe(
-      buildPublishedJourneysCacheType({
-        ...query,
-        cdnBase: 'https://cdn-assets.revelations.studio',
-      })
-    );
+    expect(fixed).toBe(buildPublishedJourneysCacheType(query, prod));
   });
 
   it('SLOT SPLIT: featured and unfiltered reads do not share a data slot', () => {
     // The landing page calls the endpoint TWICE in one render — featured picks
     // and the full rail. A key omitting `featured` would have the two serving
     // each other's rows (the exact latent bug the content key once had).
-    const featured = buildPublishedJourneysCacheType({
-      featured: true,
-      limit: 4,
-    });
-    const rail = buildPublishedJourneysCacheType({ limit: 12 });
+    const featured = buildPublishedJourneysCacheType(
+      {
+        featured: true,
+        limit: 4,
+      },
+      undefined
+    );
+    const rail = buildPublishedJourneysCacheType({ limit: 12 }, undefined);
     expect(featured).not.toBe(rail);
   });
 
@@ -131,15 +127,15 @@ describe('buildPublishedJourneysCacheType', () => {
     // query. They must share a slot or the rail caches twice under two keys and
     // one of them never gets a hit.
     expect(
-      buildPublishedJourneysCacheType({ featured: false, limit: 12 })
-    ).toBe(buildPublishedJourneysCacheType({ limit: 12 }));
+      buildPublishedJourneysCacheType({ featured: false, limit: 12 }, undefined)
+    ).toBe(buildPublishedJourneysCacheType({ limit: 12 }, undefined));
   });
 
   it('SLOT SPLIT: different limits do not share a data slot', () => {
     // A limit-4 read must never satisfy a limit-12 read — it would silently
     // truncate the rail to the featured carousel's length.
-    expect(buildPublishedJourneysCacheType({ limit: 4 })).not.toBe(
-      buildPublishedJourneysCacheType({ limit: 12 })
+    expect(buildPublishedJourneysCacheType({ limit: 4 }, undefined)).not.toBe(
+      buildPublishedJourneysCacheType({ limit: 12 }, undefined)
     );
   });
 });
@@ -172,6 +168,7 @@ describe('portal discovery cache-aside', () => {
       cache,
       orgId,
       { featured: true, limit: 4 },
+      undefined,
       fetcher
     );
 
@@ -180,7 +177,7 @@ describe('portal discovery cache-aside', () => {
     // the variant as `id` swaps the two halves of this exact string.
     const dataKey = buildVersionedCacheKey(
       'cache',
-      buildPublishedJourneysCacheType({ featured: true, limit: 4 }),
+      buildPublishedJourneysCacheType({ featured: true, limit: 4 }, undefined),
       CacheType.COLLECTION_ORG_JOURNEYS(orgId),
       BASE_VERSION
     );
@@ -198,8 +195,20 @@ describe('portal discovery cache-aside', () => {
   it('serves a repeat read of the same variant from cache', async () => {
     const fetcher = vi.fn().mockResolvedValue([{ pageId: 'p1' }]);
 
-    await getCachedPublishedJourneys(cache, 'org-1', { limit: 12 }, fetcher);
-    await getCachedPublishedJourneys(cache, 'org-1', { limit: 12 }, fetcher);
+    await getCachedPublishedJourneys(
+      cache,
+      'org-1',
+      { limit: 12 },
+      undefined,
+      fetcher
+    );
+    await getCachedPublishedJourneys(
+      cache,
+      'org-1',
+      { limit: 12 },
+      undefined,
+      fetcher
+    );
 
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
@@ -212,12 +221,14 @@ describe('portal discovery cache-aside', () => {
       cache,
       'org-1',
       { featured: true, limit: 4 },
+      undefined,
       featured
     );
     const railRows = await getCachedPublishedJourneys(
       cache,
       'org-1',
       { limit: 12 },
+      undefined,
       rail
     );
 
@@ -253,20 +264,34 @@ describe('portal discovery cache-aside', () => {
       cache,
       orgId,
       { featured: true, limit: 4 },
+      undefined,
       featured
     );
-    await getCachedPublishedJourneys(cache, orgId, { limit: 12 }, rail);
-    await getCachedPublishedCourses(cache, orgId, courses);
+    await getCachedPublishedJourneys(
+      cache,
+      orgId,
+      { limit: 12 },
+      undefined,
+      rail
+    );
+    await getCachedPublishedCourses(cache, orgId, undefined, courses);
 
     // All three hit cache on repeat.
     await getCachedPublishedJourneys(
       cache,
       orgId,
       { featured: true, limit: 4 },
+      undefined,
       featured
     );
-    await getCachedPublishedJourneys(cache, orgId, { limit: 12 }, rail);
-    await getCachedPublishedCourses(cache, orgId, courses);
+    await getCachedPublishedJourneys(
+      cache,
+      orgId,
+      { limit: 12 },
+      undefined,
+      rail
+    );
+    await getCachedPublishedCourses(cache, orgId, undefined, courses);
     expect(featured).toHaveBeenCalledTimes(1);
     expect(rail).toHaveBeenCalledTimes(1);
     expect(courses).toHaveBeenCalledTimes(1);
@@ -280,10 +305,17 @@ describe('portal discovery cache-aside', () => {
       cache,
       orgId,
       { featured: true, limit: 4 },
+      undefined,
       featured
     );
-    await getCachedPublishedJourneys(cache, orgId, { limit: 12 }, rail);
-    await getCachedPublishedCourses(cache, orgId, courses);
+    await getCachedPublishedJourneys(
+      cache,
+      orgId,
+      { limit: 12 },
+      undefined,
+      rail
+    );
+    await getCachedPublishedCourses(cache, orgId, undefined, courses);
     expect(featured).toHaveBeenCalledTimes(2);
     expect(rail).toHaveBeenCalledTimes(2);
     expect(courses).toHaveBeenCalledTimes(2);
@@ -293,15 +325,39 @@ describe('portal discovery cache-aside', () => {
     const a = vi.fn().mockResolvedValue(['a']);
     const b = vi.fn().mockResolvedValue(['b']);
 
-    await getCachedPublishedJourneys(cache, 'org-1', { limit: 12 }, a);
-    await getCachedPublishedJourneys(cache, 'org-2', { limit: 12 }, b);
+    await getCachedPublishedJourneys(
+      cache,
+      'org-1',
+      { limit: 12 },
+      undefined,
+      a
+    );
+    await getCachedPublishedJourneys(
+      cache,
+      'org-2',
+      { limit: 12 },
+      undefined,
+      b
+    );
     expect(a).toHaveBeenCalledTimes(1);
     expect(b).toHaveBeenCalledTimes(1);
 
     await cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS('org-1'));
 
-    await getCachedPublishedJourneys(cache, 'org-1', { limit: 12 }, a);
-    await getCachedPublishedJourneys(cache, 'org-2', { limit: 12 }, b);
+    await getCachedPublishedJourneys(
+      cache,
+      'org-1',
+      { limit: 12 },
+      undefined,
+      a
+    );
+    await getCachedPublishedJourneys(
+      cache,
+      'org-2',
+      { limit: 12 },
+      undefined,
+      b
+    );
     expect(a).toHaveBeenCalledTimes(2);
     expect(b).toHaveBeenCalledTimes(1);
   });
@@ -314,23 +370,47 @@ describe('portal discovery cache-aside', () => {
     const orgId = 'org-1';
     const portals = vi.fn().mockResolvedValue(['p']);
 
-    await getCachedPublishedJourneys(cache, orgId, { limit: 12 }, portals);
+    await getCachedPublishedJourneys(
+      cache,
+      orgId,
+      { limit: 12 },
+      undefined,
+      portals
+    );
     expect(portals).toHaveBeenCalledTimes(1);
 
     // Bumping ONLY the content key leaves the portal slot warm...
     await cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(orgId));
-    await getCachedPublishedJourneys(cache, orgId, { limit: 12 }, portals);
+    await getCachedPublishedJourneys(
+      cache,
+      orgId,
+      { limit: 12 },
+      undefined,
+      portals
+    );
     expect(portals).toHaveBeenCalledTimes(1);
 
     // ...so reaching it requires the portal key, as content.ts now does.
     await cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(orgId));
-    await getCachedPublishedJourneys(cache, orgId, { limit: 12 }, portals);
+    await getCachedPublishedJourneys(
+      cache,
+      orgId,
+      { limit: 12 },
+      undefined,
+      portals
+    );
     expect(portals).toHaveBeenCalledTimes(2);
   });
 
   it('uses the 7200s default TTL, matching the public content reads', async () => {
     const fetcher = vi.fn().mockResolvedValue([]);
-    await getCachedPublishedJourneys(cache, 'org-1', { limit: 12 }, fetcher);
+    await getCachedPublishedJourneys(
+      cache,
+      'org-1',
+      { limit: 12 },
+      undefined,
+      fetcher
+    );
 
     const dataPut = (mockKV.put as ReturnType<typeof vi.fn>).mock.calls.find(
       (call) => (call[0] as string).startsWith('cache:journeys:published:')
@@ -340,9 +420,16 @@ describe('portal discovery cache-aside', () => {
 
   it('accepts a ttl override', async () => {
     const fetcher = vi.fn().mockResolvedValue([]);
-    await getCachedPublishedJourneys(cache, 'org-1', { limit: 12 }, fetcher, {
-      ttl: 60,
-    });
+    await getCachedPublishedJourneys(
+      cache,
+      'org-1',
+      { limit: 12 },
+      undefined,
+      fetcher,
+      {
+        ttl: 60,
+      }
+    );
 
     const dataPut = (mockKV.put as ReturnType<typeof vi.fn>).mock.calls.find(
       (call) => (call[0] as string).startsWith('cache:journeys:published:')
@@ -358,9 +445,15 @@ describe('portal discovery cache-aside', () => {
       cache,
       'org-1',
       { limit: 12 },
+      undefined,
       journeys
     );
-    const b = await getCachedPublishedCourses(cache, 'org-1', courses);
+    const b = await getCachedPublishedCourses(
+      cache,
+      'org-1',
+      undefined,
+      courses
+    );
 
     // `JourneyCardView` and `CourseCardSummary` must never satisfy each other.
     expect(a).toEqual(['journey-shape']);
@@ -376,15 +469,20 @@ describe('portal discovery cache-aside', () => {
     const after = vi.fn().mockResolvedValue(['cover']);
     const cdnBase = 'https://cdn-assets.revelations.studio';
 
-    await getCachedPublishedCourses(cache, 'org-1', before);
-    const fixed = await getCachedPublishedCourses(cache, 'org-1', after, {
+    await getCachedPublishedCourses(cache, 'org-1', undefined, before);
+    const fixed = await getCachedPublishedCourses(
+      cache,
+      'org-1',
       cdnBase,
-    });
-    await getCachedPublishedCourses(cache, 'org-1', after, { cdnBase });
+      after
+    );
+    await getCachedPublishedCourses(cache, 'org-1', cdnBase, after);
 
     expect(fixed).toEqual(['cover']);
     expect(before).toHaveBeenCalledTimes(1);
     expect(after).toHaveBeenCalledTimes(1);
+    // The fetcher builds its URLs with the base the slot is keyed on.
+    expect(after).toHaveBeenCalledWith(cdnBase);
   });
 });
 
@@ -408,6 +506,7 @@ describe('TTL coupling with the public content list', () => {
       cache,
       'org-1',
       { limit: 12 },
+      undefined,
       async () => ['rail']
     );
     await getCachedPublicContent(
@@ -432,7 +531,9 @@ describe('TTL coupling with the public content list', () => {
     const cache = new VersionedCache({ kv: createMockKV() });
     const spy = vi.spyOn(cache, 'get');
 
-    await getCachedPublishedCourses(cache, 'org-1', async () => ['courses']);
+    await getCachedPublishedCourses(cache, 'org-1', undefined, async () => [
+      'courses',
+    ]);
 
     expect((spy.mock.calls[0]?.[3] as { ttl?: number } | undefined)?.ttl).toBe(
       7200
@@ -447,11 +548,11 @@ describe('cache type vs telemetry label', () => {
   // added there fails HERE rather than quietly widening the log schema.
   it('drops limit but keeps featured — bounded dimensions survive', () => {
     const types = [
-      buildPublishedJourneysCacheType({ limit: 12 }),
-      buildPublishedJourneysCacheType({ limit: 50 }),
-      buildPublishedJourneysCacheType({ featured: true, limit: 12 }),
-      buildPublishedJourneysCacheType({ featured: false, limit: 6 }),
-      buildPublishedJourneysCacheType({}),
+      buildPublishedJourneysCacheType({ limit: 12 }, undefined),
+      buildPublishedJourneysCacheType({ limit: 50 }, undefined),
+      buildPublishedJourneysCacheType({ featured: true, limit: 12 }, undefined),
+      buildPublishedJourneysCacheType({ featured: false, limit: 6 }, undefined),
+      buildPublishedJourneysCacheType({}, undefined),
     ];
 
     // `featured` survives (bounded: all | featured) and is worth keeping. `limit`

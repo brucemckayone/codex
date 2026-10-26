@@ -175,9 +175,12 @@ touching `handleInvoicePaymentSucceeded`, `executeTransfers`,
   `getUserSubscriptions` answer the subscriber (ecom-api `/subscriptions/current`,
   `/mine`, and the change-tier/cancel/reactivate/resume responses), so both
   exclude `SUBSCRIBER_HIDDEN_COLUMNS`: the three fee columns,
-  `duplicateOfSubscriptionId` and `churnReason` (owner, 2026-10-26,
-  Codex-mbs2l). Their org relation is the four display fields, never the
-  payee id (Codex-kk6zx).
+  `duplicateOfSubscriptionId`, `duplicateSettledAt` and `churnReason` (owner,
+  2026-10-26, Codex-mbs2l). A new `subscriptions` column fails the service
+  test's census until it is put on that list or the visible one, so decide
+  which. apps/web's wire types build on the exported `SubscriberSubscription`.
+  Their org relation is the four display fields, never the payee id
+  (Codex-kk6zx).
 - Amounts in **pence (GBP)**, never USD.
 
 ## Integration

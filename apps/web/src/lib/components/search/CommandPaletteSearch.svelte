@@ -7,6 +7,7 @@
 	import { SearchIcon, XIcon } from '$lib/components/ui/Icon';
 	import { Spinner } from '$lib/components/ui/Feedback/Spinner';
 	import { buildContentUrl, buildCreatorsUrl } from '$lib/utils/subdomain';
+	import { logger } from '$lib/observability';
 	import { gateSearchQuery } from '@codex/validation';
 	import * as m from '$paraglide/messages';
 
@@ -89,14 +90,19 @@
 		| { type: 'content'; item: SearchContentResult; index: number }
 		| { type: 'creator'; item: SearchCreatorResult; index: number };
 
+	// The template hides results while a search loads, and `results` still
+	// holds the previous query's then. The keys must not reach what is hidden,
+	// or Enter opens an earlier query's match (Codex-qhtw7).
+	const showResults = $derived(!!query.trim() && !loading);
+
 	const allItems = $derived<FlatItem[]>([
 		...(!query.trim()
 			? recentSearches.map((term, i) => ({ type: 'recent' as const, term, index: i }))
 			: []),
-		...(query.trim()
+		...(showResults
 			? results.content.map((item, i) => ({ type: 'content' as const, item, index: i }))
 			: []),
-		...(query.trim()
+		...(showResults
 			? results.creators.map((item, i) => ({ type: 'creator' as const, item, index: i }))
 			: []),
 	]);
@@ -117,8 +123,9 @@
 		//
 		// `gateSearchQuery` returns null for an empty AND for a below-floor
 		// query, and both cases are the same here: no request, no results, not
-		// loading. `/api/search` itself still answers a short `?q=` with 200 —
-		// the floor is a performance gate on the caller, not a validation rule.
+		// loading. `/api/search` applies the same gate for a caller that skips
+		// this one: a short `?q=` gets an empty 200 and calls no worker. The
+		// floor is a performance gate, not a validation rule.
 		const gatedQuery = gateSearchQuery(query);
 		if (!gatedQuery) {
 			resetSearch();
@@ -185,7 +192,14 @@
 	function navigate(href: string) {
 		const target = new URL(href, page.url);
 		if (target.origin === page.url.origin) {
-			goto(href);
+			// A same-origin goto() still rejects when a beforeNavigate guard
+			// cancels it or a newer navigation overtakes it. The guard has shown
+			// its own UI by then, so this is a trace, not an error.
+			goto(href).catch((error: unknown) => {
+				logger.debug('Palette navigation not completed', {
+					reason: error instanceof Error ? error.message : String(error),
+				});
+			});
 			return;
 		}
 		window.location.href = target.href;
@@ -385,7 +399,7 @@
 				</div>
 			{/if}
 
-			{#if query.trim() && !loading}
+			{#if showResults}
 				{#if results.content.length > 0}
 					<div class="palette__group">
 						<div class="palette__group-header">

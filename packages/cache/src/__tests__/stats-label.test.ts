@@ -116,8 +116,7 @@ describe('cacheStatsLabel', () => {
 
   it('labels a slot keyed on the CDN base as the read it was before (Codex-yjyju)', () => {
     // The hash is a deployment's config. These are the production labels the
-    // three reads carried before their slots were keyed on it.
-    expect(cacheStatsLabel('public:topics:cdn:3f1d2a9c')).toBe('public:topics');
+    // two journey reads carried before their slots were keyed on it.
     expect(cacheStatsLabel('journeys:courses:published:cdn:none')).toBe(
       'journeys:courses:published'
     );

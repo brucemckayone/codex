@@ -213,22 +213,28 @@ function endedAtStripeStatus(status: Stripe.Subscription.Status): boolean {
 /**
  * The columns a subscriber's own reads ({@link SubscriptionService.getSubscription},
  * {@link SubscriptionService.getUserSubscriptions}) leave out (Codex-mbs2l):
- * the org's revenue-share terms, which is what the fee split is, and two
+ * the org's revenue-share terms, which is what the fee split is, and the
  * internal bookkeeping fields. Every ecom route that returns these reads
  * answers the subscriber, never the org. A `false` entry excludes that column
- * and keeps the rest, so a column added later is read; `satisfies` catches a
- * misspelt key, which drizzle would drop without a word.
+ * and keeps the rest; `satisfies` catches a misspelt key, which drizzle would
+ * drop without a word. Because a column added later IS read, the service test
+ * fails until every column of `subscriptions` is listed here or on its
+ * visible list, so a new money column cannot reach subscribers unnoticed.
  */
-const SUBSCRIBER_HIDDEN_COLUMNS = {
+export const SUBSCRIBER_HIDDEN_COLUMNS = {
   platformFeeCents: false,
   organizationFeeCents: false,
   creatorPayoutCents: false,
   duplicateOfSubscriptionId: false,
+  duplicateSettledAt: false,
   churnReason: false,
 } as const satisfies Partial<Record<keyof Subscription, false>>;
 
-/** A subscription as its subscriber reads it. */
-type SubscriberSubscription = Omit<
+/**
+ * A subscription as its subscriber reads it. apps/web's wire types are built
+ * on this, so a column hidden here leaves the web's types too.
+ */
+export type SubscriberSubscription = Omit<
   Subscription,
   keyof typeof SUBSCRIBER_HIDDEN_COLUMNS
 >;

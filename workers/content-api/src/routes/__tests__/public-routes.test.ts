@@ -321,16 +321,37 @@ describe('GET /api/content/public/categories — cache write survives', () => {
 
     const unset = await dispatch(path, { R2_PUBLIC_URL_BASE: undefined });
     const set = await dispatch(path);
-    const again = await dispatch(path);
 
     expect(await coverOf(unset)).toBeNull();
     expect(await coverOf(set)).toBe(
       `${R2_PUBLIC_URL_BASE}/categories/c2/cover/md.webp`
     );
-    expect(await coverOf(again)).toBe(
-      `${R2_PUBLIC_URL_BASE}/categories/c2/cover/md.webp`
-    );
-    expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(2);
+    // The slot holds the key, so the fix is a cache HIT: the URL is built
+    // after the read, and the list is not read again.
+    expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(1);
+  });
+
+  it('never sends the raw cover key', async () => {
+    categorySpies.listPublicForOrg.mockResolvedValue([
+      {
+        id: '4d000000-0000-4000-8000-0000000000c3',
+        name: 'Rest',
+        slug: 'rest',
+        description: null,
+        icon: null,
+        sortOrder: 0,
+        coverImageKey: 'categories/c3/cover',
+      },
+    ]);
+    const path = `/api/content/public/categories?orgId=${ORG_ID}`;
+
+    const miss = await dispatch(path);
+    const hit = await dispatch(path);
+
+    for (const res of [miss, hit]) {
+      const [category] = ((await res.json()) as { data: object[] }).data;
+      expect(category).not.toHaveProperty('coverImageKey');
+    }
   });
 
   // Org delete invalidates under the lowercase DB id, so an uppercase read must

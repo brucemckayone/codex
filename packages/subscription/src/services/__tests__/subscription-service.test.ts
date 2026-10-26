@@ -51,7 +51,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, getTableColumns, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -70,7 +70,10 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../../errors';
-import { SubscriptionService } from '../subscription-service';
+import {
+  SUBSCRIBER_HIDDEN_COLUMNS,
+  SubscriptionService,
+} from '../subscription-service';
 
 /**
  * Empty the payouts ledger, for a test that reads it globally (the sweeps).
@@ -3104,13 +3107,47 @@ describe('SubscriptionService', () => {
 
   // ─── Subscriber reads leave out the fee split (Codex-mbs2l) ────────
 
-  const SUBSCRIBER_HIDDEN_KEYS = [
-    'platformFeeCents',
-    'organizationFeeCents',
-    'creatorPayoutCents',
-    'duplicateOfSubscriptionId',
-    'churnReason',
+  const SUBSCRIBER_HIDDEN_KEYS = Object.keys(SUBSCRIBER_HIDDEN_COLUMNS);
+
+  // Every other column, decided one by one. An exclusion list sends a column
+  // added later to subscribers by default, so the census below fails until a
+  // new column is put here or in SUBSCRIBER_HIDDEN_COLUMNS.
+  const SUBSCRIBER_VISIBLE_KEYS = [
+    'id',
+    'userId',
+    'organizationId',
+    'tierId',
+    'stripeSubscriptionId',
+    'stripeCustomerId',
+    'status',
+    'billingInterval',
+    'currentPeriodStart',
+    'currentPeriodEnd',
+    'cancelAtPeriodEnd',
+    'cancelledAt',
+    'cancelReason',
+    'disputedAt',
+    'endedAt',
+    'amountCents',
+    'createdAt',
+    'updatedAt',
   ];
+
+  it('decides every subscriptions column: hidden from the subscriber, or shown', () => {
+    expect(
+      [...SUBSCRIBER_HIDDEN_KEYS, ...SUBSCRIBER_VISIBLE_KEYS].sort()
+    ).toEqual(Object.keys(getTableColumns(subscriptions)).sort());
+  });
+
+  it("hides the org's fee split, as the owner decided (Codex-mbs2l)", () => {
+    expect(SUBSCRIBER_HIDDEN_KEYS).toEqual(
+      expect.arrayContaining([
+        'platformFeeCents',
+        'organizationFeeCents',
+        'creatorPayoutCents',
+      ])
+    );
+  });
 
   function expectNoSubscriberHiddenColumns(row: object) {
     for (const key of SUBSCRIBER_HIDDEN_KEYS) {

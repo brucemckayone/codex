@@ -18,7 +18,7 @@ import { orgIdQuerySchema, z } from '@codex/validation';
 import { cachedRead, PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { resolveCategoryCoverUrl } from './category-cover-url';
-import { cdnBaseSlot, warnOnMissingCdnBase } from './cdn-base-slot';
+import { warnOnMissingCdnBase } from './cdn-base-slot';
 import {
   getCachedPublicContent,
   shouldCachePublicContentQuery,
@@ -176,10 +176,12 @@ app.get(
  * Security: Public endpoint, API rate limit. Requires orgId.
  * Cache: KV cache-aside under CATEGORIES(orgId) — invalidated on category
  * mutation AND on content publish/unpublish/delete (which changes the
- * ≥1-published set). The slot is also keyed on the CDN base the cover URLs
- * are built with (`cdnBaseSlot`, Codex-yjyju). CDN `Cache-Control` is
- * `cache: 'public'` on the policy — the taxonomy is org chrome, identical for
- * every viewer.
+ * ≥1-published set). The slot holds each category's cover KEY and the URL is
+ * built after the read, as the content list does (`toWire`), so a fixed CDN
+ * base shows on the next request instead of after the TTL (Codex-yjyju). The
+ * `v2` marks that shape: a `public:topics` slot holds finished URLs. CDN
+ * `Cache-Control` is `cache: 'public'` on the policy — the taxonomy is org
+ * chrome, identical for every viewer.
  */
 app.get(
   '/categories',
@@ -188,11 +190,6 @@ app.get(
     input: { query: publicCategoriesQuerySchema },
     handler: async (ctx) => {
       const { orgId } = ctx.input.query;
-      // ASSETS base only, deliberately: a category cover is an uploaded image
-      // in the public assets bucket, never a media-bucket key. Nothing here
-      // needs `resolveR2PublicBases`.
-      const r2Base = ctx.env.R2_PUBLIC_URL_BASE;
-      warnOnMissingCdnBase(r2Base, ctx.obs, 'public:topics');
 
       const fetchCategories = async () => {
         const rows = await ctx.services.categories.listPublicForOrg(orgId);
@@ -203,18 +200,30 @@ app.get(
           description: row.description,
           icon: row.icon,
           sortOrder: row.sortOrder,
-          // Never expose the raw R2 key — resolve the md variant to a CDN URL.
-          coverImageUrl: resolveCategoryCoverUrl(row.coverImageKey, r2Base),
+          coverImageKey: row.coverImageKey,
         }));
       };
 
-      return cachedRead(
+      const categories = await cachedRead(
         ctx,
         CacheType.CATEGORIES(orgId),
-        `public:topics:${cdnBaseSlot(r2Base)}`,
+        'public:topics:v2',
         fetchCategories,
         { ttl: PUBLIC_CATEGORIES_CACHE_TTL }
       );
+
+      // ASSETS base only, deliberately: a category cover is an uploaded image
+      // in the public assets bucket, never a media-bucket key. Nothing here
+      // needs `resolveR2PublicBases`.
+      const r2Base = ctx.env.R2_PUBLIC_URL_BASE;
+      if (categories.some((category) => category.coverImageKey)) {
+        warnOnMissingCdnBase(r2Base, ctx.obs, 'public:topics');
+      }
+      // Never expose the raw R2 key — resolve the md variant to a CDN URL.
+      return categories.map(({ coverImageKey, ...category }) => ({
+        ...category,
+        coverImageUrl: resolveCategoryCoverUrl(coverImageKey, r2Base),
+      }));
     },
   })
 );

@@ -1,4 +1,4 @@
-import { createSlugSchema } from '@codex/validation';
+import { createSlugSchema, gateSearchQuery } from '@codex/validation';
 import { json } from '@sveltejs/kit';
 import { ApiError } from '$lib/api/errors';
 import { createServerApi } from '$lib/server/api';
@@ -93,7 +93,11 @@ function searchCreators(
 }
 
 export const GET: RequestHandler = async ({ url, platform, cookies }) => {
-  const q = url.searchParams.get('q')?.slice(0, 200) ?? '';
+  // The palette's own search floor, again here for a caller that skips it: a
+  // one- or two-character term gives every search a sequential scan
+  // (Codex-k618q), and the workers' rate limit cannot see a visitor behind
+  // this server's hop. So a short term answers empty and calls no worker.
+  const q = gateSearchQuery(url.searchParams.get('q')?.slice(0, 200));
   const scopeSlug = parseScopeSlug(url.searchParams.get('scope'));
   const limit = 5;
 

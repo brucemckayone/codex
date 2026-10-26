@@ -229,4 +229,24 @@ describe('GET /api/search', () => {
     expect(body.content.map((c) => c.id)).toEqual(['platform-hit']);
     expect(body.creators).toEqual([]);
   });
+
+  it.each([
+    ['one character', 'y'],
+    ['two characters', 'yo'],
+    ['a padded short term', '%20yo%20'],
+  ])('answers %s empty and calls no worker (the search floor)', async (_, q) => {
+    const body = await search(`q=${q}&scope=${ORG_SLUG}`);
+
+    expect(body).toEqual({ content: [], creators: [] });
+    expect(getPublicInfo).not.toHaveBeenCalled();
+    expect(getPublicContent).not.toHaveBeenCalled();
+    expect(getDiscoverContent).not.toHaveBeenCalled();
+    expect(getPublicCreators).not.toHaveBeenCalled();
+  });
+
+  it('searches with the term trimmed', async () => {
+    await search(`q=%20yoga%20&scope=${ORG_SLUG}`);
+
+    expect(getPublicContent.mock.calls[0][0].get('search')).toBe('yoga');
+  });
 });

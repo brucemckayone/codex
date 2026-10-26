@@ -1832,7 +1832,12 @@ describe('OrganizationService', () => {
       const people = [
         { id: ownerId!, name: 'Orla Owner', username: createUniqueSlug('oo') },
         { id: priyaId!, name: 'Priya Patel', username: priyaHandle },
-        { id: samId!, name: 'Sam 100% Real', username: createUniqueSlug('sr') },
+        // `%`, `_` and `\` are LIKE metacharacters: each must match itself.
+        {
+          id: samId!,
+          name: 'Sam 100% Real\\Deal',
+          username: createUniqueSlug('sr'),
+        },
         {
           id: subscriberId!,
           name: 'Priya Subscriber',
@@ -1876,39 +1881,42 @@ describe('OrganizationService', () => {
       ]);
     });
 
+    const SAM = 'Sam 100% Real\\Deal';
+    const searchFor = (search: string) =>
+      service.getPublicCreators(slug, { page: 1, limit: 20, search });
+
     it('lists every creator when there is no search', async () => {
       const result = await service.getPublicCreators(slug);
 
       expect(result.items.map((item) => item.name).sort()).toEqual([
         'Orla Owner',
         'Priya Patel',
-        'Sam 100% Real',
+        SAM,
       ]);
       expect(result.pagination.total).toBe(3);
     });
 
     it('matches a name case-insensitively, and the total counts only matches', async () => {
-      const result = await service.getPublicCreators(slug, undefined, 'PRIYA');
+      const result = await searchFor('PRIYA');
 
       expect(result.items.map((item) => item.name)).toEqual(['Priya Patel']);
       expect(result.pagination.total).toBe(1);
     });
 
     it('matches a username', async () => {
-      const result = await service.getPublicCreators(
-        slug,
-        undefined,
-        priyaHandle.slice(0, 10)
-      );
+      const result = await searchFor(priyaHandle.slice(0, 10));
 
       expect(result.items.map((item) => item.username)).toEqual([priyaHandle]);
     });
 
-    it('matches % and _ as themselves, not as wildcards', async () => {
-      const percent = await service.getPublicCreators(slug, undefined, '%');
-      const underscore = await service.getPublicCreators(slug, undefined, '_');
+    it('matches %, _ and \\ as themselves, not as LIKE syntax', async () => {
+      const percent = await searchFor('%');
+      const backslash = await searchFor('\\');
+      const underscore = await searchFor('_');
 
-      expect(percent.items.map((item) => item.name)).toEqual(['Sam 100% Real']);
+      expect(percent.items.map((item) => item.name)).toEqual([SAM]);
+      // Unescaped, `%\%` ends in a literal %, which this name does not.
+      expect(backslash.items.map((item) => item.name)).toEqual([SAM]);
       expect(underscore.items).toEqual([]);
       expect(underscore.pagination.total).toBe(0);
     });
