@@ -264,17 +264,22 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
     expect(items[0]?.contentBody).toBe(`article body ${token}`);
   });
 
-  const browse = (scope: 'studio' | 'browse') =>
-    service.list(
-      creatorId,
-      { organizationId: liveOrgId, status: 'published', search: token },
-      { page: 1, limit: 50 },
-      { scope }
-    );
+  // Two literal calls, not one helper taking the scope: each scope has its own
+  // `list` signature and row type, and a run-time scope matches neither.
+  const browseFilters = () => ({
+    organizationId: liveOrgId,
+    status: 'published' as const,
+    search: token,
+  });
 
   // Browse answers any signed-in viewer, entitled or not.
   it('the browse catalogue carries no body and no creator email', async () => {
-    const { items } = await browse('browse');
+    const { items } = await service.list(
+      creatorId,
+      browseFilters(),
+      { page: 1, limit: 50 },
+      { scope: 'browse' }
+    );
 
     expect(items.map((item) => item.id)).toContain(ids.followerOnly);
     for (const item of items) {
@@ -285,7 +290,12 @@ describe('ContentService.listPublic — no org in the filter (Codex-osuqt)', () 
   });
 
   it("the studio list keeps the creator's own bodies and email", async () => {
-    const { items } = await browse('studio');
+    const { items } = await service.list(
+      creatorId,
+      browseFilters(),
+      { page: 1, limit: 50 },
+      { scope: 'studio' }
+    );
     const followerOnly = items.find((item) => item.id === ids.followerOnly);
 
     expect(followerOnly?.contentBody).toBe(`article body ${token}`);

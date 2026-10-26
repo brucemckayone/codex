@@ -32,9 +32,20 @@ export type DatabaseTransaction = Parameters<
 import type {
   PaginatedListResponse,
   PaginationParams,
+  PublicContentCreator,
+  PublicContentOrganization,
+  PublicMediaItem,
   SingleItemResponse,
   SortOrder,
 } from '@codex/shared-types';
+
+// The catalogue's wire types live in shared-types, so content-api, this
+// package and apps/web compile against one contract (Codex-ve5eh).
+export type {
+  PublicContentCreator,
+  PublicContentOrganization,
+  PublicMediaItem,
+};
 
 /**
  * Content query filters
@@ -128,18 +139,50 @@ export type ContentResponse = SingleItemResponse<ContentWithRelations>;
 export type ContentListResponse = PaginatedListResponse<ContentWithRelations>;
 
 /**
- * Public content item with resolved media URLs.
- * The API boundary resolves raw R2 keys (hlsPreviewKey) into
- * full CDN URLs (hlsPreviewUrl) so clients never see raw keys.
+ * The media_items columns the anonymous public list (`listPublic`) selects
+ * (Codex-ve5eh). `durationSeconds` is the one field the web reads directly;
+ * the two keys are read on the server only, to build `thumbnailUrl` and
+ * `hlsPreviewUrl`, and never go on the wire. Anything else on the row (r2Key,
+ * hlsMasterPlaylistKey, runpodJobId, transcodingError, ...) is internal.
+ */
+export type PublicMediaItemSource = Pick<
+  MediaItem,
+  'durationSeconds' | 'thumbnailKey' | 'hlsPreviewKey'
+>;
+
+/**
+ * A catalogue row any viewer may read: the content row, its creator without an
+ * email, and the projected org and media item. `list({ scope: 'browse' })`
+ * returns these (Codex-1bdx0); `listPublic` adds the topic slugs. The org and
+ * creator are already their wire shapes (`@codex/shared-types`); the media
+ * item still holds the two keys the route resolves to URLs.
+ */
+export type CatalogueContentRow = Omit<
+  ContentWithRelations,
+  'mediaItem' | 'organization' | 'creator'
+> & {
+  mediaItem: PublicMediaItemSource | null;
+  organization: PublicContentOrganization | null;
+  creator: PublicContentCreator;
+};
+
+/**
+ * One `listPublic` row: a catalogue row and its org-scoped topic slugs.
+ */
+export type PublicContentRow = CatalogueContentRow & {
+  categorySlugs: string[];
+};
+
+/**
+ * Public content item with resolved media URLs and the org's public fields.
+ * It stays here, not in `@codex/shared-types`: it is built on the content row
+ * type from `@codex/database`, and shared-types sits below the database.
  */
 export interface PublicContentItem
-  extends Omit<ContentWithRelations, 'mediaItem'> {
-  mediaItem:
-    | (MediaItem & {
-        /** Resolved CDN URL for the 30-second HLS preview clip */
-        hlsPreviewUrl: string | null;
-      })
-    | null;
+  extends Omit<ContentWithRelations, 'mediaItem' | 'organization' | 'creator'> {
+  mediaItem: PublicMediaItem | null;
+  organization: PublicContentOrganization | null;
+  creator: PublicContentCreator;
 }
 
 /**

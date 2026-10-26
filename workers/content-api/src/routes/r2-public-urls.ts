@@ -1,15 +1,38 @@
 /**
- * Raw R2 keys to public CDN URLs, for every route that returns content rows
- * to a client: the public list (`public.ts`) and the withdrawn read
- * (`content-access.ts`, Codex-ov2ii), so a withdrawn item draws its thumbnail
- * and preview exactly as it did on the storefront. It ADDS the URLs; it does
- * not remove the media row's other columns, raw keys included (Codex-ve5eh).
+ * The catalogue wire item, and the R2 key -> public URL resolution it needs.
+ *
+ * Shared by the anonymous public content routes (public.ts), the signed-in
+ * browse route (content.ts) and the withdrawn read (content-access.ts,
+ * Codex-ov2ii), so a withdrawn item draws its thumbnail and preview exactly as
+ * it did on the storefront. It is a helper module, not a router, so those
+ * routes do not import a router file to reach it.
+ *
+ * Every relation on the item is BUILT field by field, never spread
+ * (Codex-ve5eh, Codex-567de, Codex-1bdx0). The routes used to spread the
+ * service's rows, so whatever `listPublic` selected went on the wire: whole
+ * media_items rows (the original upload's r2Key, the master playlist key, the
+ * RunPod job id, the transcoder's free-text error, the raw thumbnail and
+ * preview keys beside the URLs built from them) and whole organizations rows
+ * (the payee's `primaryConnectAccountUserId`). The service now selects only
+ * what is read here, and the allow-list is repeated HERE, at the boundary,
+ * typed against the `@codex/shared-types` contract, so a wider select later
+ * cannot widen the response.
+ *
+ * The org list KV-caches this output, so removing a field here needs a
+ * `PUBLIC_CONTENT_SHAPE_VERSION` bump (public-cache.ts), and apps/web's
+ * /explore caches the browse output under `content:auth:v*`.
  */
 
-import type { ContentWithRelations } from '@codex/content';
+import type { PublicMediaItemSource } from '@codex/content';
+import type { Logger } from '@codex/observability';
+import type {
+  PublicContentCreator,
+  PublicContentOrganization,
+  PublicMediaItem,
+} from '@codex/shared-types';
 
 /**
- * The two public hosts these routes resolve keys against.
+ * The two public hosts this route resolves keys against.
  *
  * TWO, NOT ONE, and that split is the point of the type (Codex-1g5lh.13).
  * `thumbnailKey` genuinely lives in the PUBLIC assets bucket. `hlsPreviewKey`
@@ -59,37 +82,80 @@ export function resolveR2PublicBases(env: {
   return { assets, mediaPreview: env.R2_PUBLIC_MEDIA_URL_BASE ?? assets };
 }
 
-/** Resolve one row's raw R2 keys to full CDN URLs */
-export function resolveR2Url<T extends ContentWithRelations>(
-  item: T,
+/** The three relations a catalogue row carries out of the service. */
+type CatalogueRelations = {
+  mediaItem: PublicMediaItemSource | null;
+  organization: PublicContentOrganization | null;
+  creator: PublicContentCreator;
+};
+
+/** A catalogue row as the client receives it. */
+export type PublicItem<T extends CatalogueRelations> = Omit<
+  T,
+  keyof CatalogueRelations
+> & {
+  mediaItem: PublicMediaItem | null;
+  organization: PublicContentOrganization | null;
+  creator: PublicContentCreator;
+};
+
+/** One row to its wire item: each relation rebuilt from named fields. */
+export function toPublicItem<T extends CatalogueRelations>(
+  row: T,
   bases: R2PublicBases
-) {
+): PublicItem<T> {
+  const { mediaItem, organization, creator, ...rest } = row;
   return {
-    ...item,
-    mediaItem: item.mediaItem
+    ...rest,
+    mediaItem: mediaItem
       ? {
-          ...item.mediaItem,
+          durationSeconds: mediaItem.durationSeconds,
           thumbnailUrl:
-            item.mediaItem.thumbnailKey && bases.assets
-              ? `${bases.assets}/${item.mediaItem.thumbnailKey}`
+            mediaItem.thumbnailKey && bases.assets
+              ? `${bases.assets}/${mediaItem.thumbnailKey}`
               : null,
           hlsPreviewUrl:
-            item.mediaItem.hlsPreviewKey && bases.mediaPreview
-              ? `${bases.mediaPreview}/${item.mediaItem.hlsPreviewKey}`
+            mediaItem.hlsPreviewKey && bases.mediaPreview
+              ? `${bases.mediaPreview}/${mediaItem.hlsPreviewKey}`
               : null,
         }
       : null,
+    organization: organization
+      ? {
+          id: organization.id,
+          name: organization.name,
+          slug: organization.slug,
+          logoUrl: organization.logoUrl,
+        }
+      : null,
+    creator: { id: creator.id, name: creator.name },
   };
 }
 
 /**
- * Resolve each row's thumbnail and preview keys to CDN URLs. The rest of the
- * media row passes through as selected: narrowing it is the query's job
- * (Codex-ve5eh).
+ * A page of rows to wire items. A key with no base to resolve it against is
+ * sent as a null URL, which reads on the page as "no poster" or "no preview",
+ * not as an error, so a missing binding would otherwise go unnoticed. One
+ * warning per call (per request), never per row.
  */
-export function resolveR2Urls<T extends ContentWithRelations>(
-  items: T[],
-  bases: R2PublicBases
-) {
-  return items.map((item) => resolveR2Url(item, bases));
+export function toPublicItems<T extends CatalogueRelations>(
+  rows: T[],
+  bases: R2PublicBases,
+  obs?: Logger
+): PublicItem<T>[] {
+  let unresolvedThumbnails = 0;
+  let unresolvedPreviews = 0;
+  for (const { mediaItem } of rows) {
+    if (mediaItem?.thumbnailKey && !bases.assets) unresolvedThumbnails++;
+    if (mediaItem?.hlsPreviewKey && !bases.mediaPreview) unresolvedPreviews++;
+  }
+  if (unresolvedThumbnails > 0 || unresolvedPreviews > 0) {
+    obs?.warn('r2_public_base.missing', {
+      assetsBaseSet: Boolean(bases.assets),
+      mediaPreviewBaseSet: Boolean(bases.mediaPreview),
+      unresolvedThumbnails,
+      unresolvedPreviews,
+    });
+  }
+  return rows.map((row) => toPublicItem(row, bases));
 }

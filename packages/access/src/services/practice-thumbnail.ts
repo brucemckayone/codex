@@ -5,7 +5,7 @@
  * already a full CDN URL to the `lg` variant, host-checked on write) and the
  * frame the transcode took (`media_items.thumbnailKey`, a bare R2 KEY to the
  * `lg` variant). The key needs the env-owned CDN base in front of it, the way
- * `routes/r2-public-urls.ts` `resolveR2Urls` and the sell preview resolve it.
+ * `routes/r2-public-urls.ts` `toPublicItem` and the sell preview resolve it.
  *
  * Every curriculum loader reads its practices' pictures through this ONE
  * function. Two of them used to hand the raw key to an `<img>` when an item

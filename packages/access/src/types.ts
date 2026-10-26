@@ -5,7 +5,7 @@
  * Previously in @codex/shared-types — moved here for domain ownership.
  */
 
-import type { ContentWithRelations } from '@codex/content';
+import type { PublicContentRow } from '@codex/content';
 import type { ContentBodySource, ProgressData } from '@codex/shared-types';
 
 // Defined in @codex/shared-types, which the in-course payload also carries it
@@ -70,12 +70,14 @@ export type ContentHeldBy = ContentHeld['by'];
  * public row's shape with no body (the body comes from `/stream?include=body`,
  * as for any gated piece). Every other case is a 404.
  *
- * NOT the wire shape: the route resolves the media's R2 keys to CDN URLs
- * before sending, as the public list does. The response is typed where it is
- * read, in the web's `WithdrawnContentItem`, as `PublicContentListItem` is.
+ * The public list's row (`PublicContentRow`, Codex-ve5eh): the same media and
+ * org columns, never the whole rows. NOT the wire shape: the route builds the
+ * public list's wire item from it (`toPublicItem`), resolving the media's R2
+ * keys to CDN URLs. The response is typed where it is read, in the web's
+ * `WithdrawnContentItem`, as `PublicContentListItem` is.
  */
 export interface WithdrawnContent {
-  content: ContentWithRelations & { categorySlugs: string[] };
+  content: PublicContentRow;
   held: ContentHeld;
 }
 

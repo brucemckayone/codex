@@ -84,9 +84,10 @@ export const load: PageServerLoad = async ({
     isAuthenticated: !!locals.user,
 
     // Catalogue sample for the marquee band (streamed). Projected down to the
-    // four fields the tile renders: `getPublicContent` returns a full nested
-    // `mediaItem` per row (~1.5KB), so 18 unprojected items would ship ~27KB
-    // of SSR payload for a band that reads a title, a type and one image URL.
+    // four fields the tile renders: `getPublicContent` returns the whole
+    // catalogue item per row (content metadata, access flags, creator, org,
+    // media item), all of which would ship in the SSR payload for a band that
+    // reads a title, a type and one image URL.
     // Items WITHOUT a thumbnail are kept — the tile paints a brand cover plate
     // with a type flair, so dropping them only makes a thin org look thinner.
     contentPreview: api.content

@@ -28,7 +28,7 @@ import {
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
-import { resolveR2PublicBases, resolveR2Url } from './r2-public-urls';
+import { resolveR2PublicBases, toPublicItem } from './r2-public-urls';
 
 const app = new Hono<HonoEnv>();
 
@@ -225,8 +225,10 @@ app.get(
  *
  * Every other case is a 404, the same one whether or not the item exists.
  * `private, no-store`: the answer is per reader, and nothing caches it.
- * @returns `{ content, held }`, the row's media with its R2 keys resolved (typed
- *   on the web as `WithdrawnContentItem`)
+ * @returns `{ content, held }`, `content` the public list's wire item
+ *   (`toPublicItem`), never the row: the same three media fields and four org
+ *   fields (Codex-ve5eh, Codex-567de). Typed on the web as
+ *   `WithdrawnContentItem`.
  */
 app.get(
   '/content/withdrawn',
@@ -238,10 +240,10 @@ app.get(
         ctx.user.id,
         ctx.input.query
       );
-      // Keys to CDN URLs, as the public list resolves them, so the page
-      // draws the thumbnail and preview it drew on the storefront.
+      // The public list's item, built the same way, so the page draws the
+      // thumbnail and preview it drew on the storefront.
       return {
-        content: resolveR2Url(content, resolveR2PublicBases(ctx.env)),
+        content: toPublicItem(content, resolveR2PublicBases(ctx.env)),
         held,
       };
     },

@@ -1,6 +1,11 @@
 import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
 import { CONTENT_STATUS, ENV_NAMES, type Env } from '@codex/constants';
+import {
+  PUBLIC_CREATOR_COLUMNS,
+  PUBLIC_MEDIA_ITEM_COLUMNS,
+  PUBLIC_ORGANIZATION_COLUMNS,
+} from '@codex/content';
 import { createPerRequestDbClient } from '@codex/database';
 import { content } from '@codex/database/schema';
 import {
@@ -602,11 +607,16 @@ export class ContentAccessService
         async (tx) => {
           const found = await tx.query.content.findFirst({
             where: and(...conditions),
+            // The public list's projection, not whole rows (Codex-ve5eh,
+            // Codex-567de): the route builds the same wire item from it.
             with: {
-              mediaItem: true,
-              // The public list's creator projection: no email.
-              creator: { columns: { id: true, name: true } },
-              organization: true,
+              mediaItem: { columns: PUBLIC_MEDIA_ITEM_COLUMNS },
+              creator: { columns: PUBLIC_CREATOR_COLUMNS },
+              // `deletedAt` is read by the check below, never sent: the
+              // route builds the org from its four public fields.
+              organization: {
+                columns: { ...PUBLIC_ORGANIZATION_COLUMNS, deletedAt: true },
+              },
             },
           });
           // A deleted org's pieces are gone with it, as on the public list.

@@ -447,8 +447,19 @@ reached.
 
 **Shape versions.** A data-slot key encodes the query, not the payload, so a
 read whose payload NARROWS needs a shape version in its `type`
-(`content:public:v3`, `content:auth:v2`, `org:creators:v2`) or old slots keep serving the removed
-fields until their TTL. See CLAUDE.md, Server-Side KV Caching.
+(`content:public:v4`, `content:auth:v3`, `org:creators:v2`) or old slots keep serving the removed
+fields until their TTL. See CLAUDE.md, Server-Side KV Caching. `content:public`
+v3 (Codex-039vo) dropped a gated row's body from a by-slug read. v4
+(Codex-ve5eh, Codex-567de) cut the public media item to `durationSeconds`,
+`thumbnailUrl` and `hlsPreviewUrl`, and the org to `id`, `name`, `slug` and
+`logoUrl`; both used to be the whole row. `content:auth:v3` (Codex-1bdx0,
+apps/web /explore) is the signed-in browse list taking the same item.
+
+**Two branches bumping the same version.** Whichever merges SECOND takes a
+version no deployed build has ever written, whatever the merge order. A value
+a shipped build wrote names slots holding that build's shape, so reusing it
+serves them as hits for the full TTL. If v4 has already shipped when a later
+narrowing lands, the later one takes v5.
 
 ### `CacheType` constants (in `@codex/cache`)
 

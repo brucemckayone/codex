@@ -52,6 +52,7 @@ import {
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { cleanupContentThumbnailOnDelete } from './content-cleanup';
+import { resolveR2PublicBases, toPublicItems } from './r2-public-urls';
 
 /**
  * Bump the org content version in KV after publish/unpublish/delete.
@@ -260,7 +261,15 @@ app.get(
         { page, limit },
         { scope: 'browse' }
       );
-      return new PaginatedResult(result.items, result.pagination);
+      // The public list's item, not the row (Codex-1bdx0): this route is any
+      // signed-in account, and it used to send whole media_items rows (raw R2
+      // keys, RunPod job id, transcoding error) and the whole organizations
+      // row, with no URL resolved. The cards read the poster as
+      // `mediaItem.thumbnailUrl`, which this resolves.
+      return new PaginatedResult(
+        toPublicItems(result.items, resolveR2PublicBases(ctx.env), ctx.obs),
+        result.pagination
+      );
     },
   })
 );

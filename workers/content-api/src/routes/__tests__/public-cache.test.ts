@@ -76,12 +76,12 @@ describe('buildPublicContentCacheType', () => {
         page: 1,
         contentType: 'video',
       })
-    ).toBe('content:public:v3:newest:20:1:video');
+    ).toBe('content:public:v4:newest:20:1:video');
   });
 
   it('uses sensible defaults for missing params', () => {
     expect(buildPublicContentCacheType({})).toBe(
-      'content:public:v3:newest:20:1:all'
+      'content:public:v4:newest:20:1:all'
     );
   });
 
@@ -167,7 +167,7 @@ describe('buildPublicContentCacheType', () => {
         category: 'fiction',
         featured: true,
       })
-    ).toBe('content:public:v3:newest:20:1:all:cat:fiction:feat:true');
+    ).toBe('content:public:v4:newest:20:1:all:cat:fiction:feat:true');
     // ...and a query with neither dimension adds nothing for them to the key.
     expect(
       buildPublicContentCacheType({
@@ -176,7 +176,7 @@ describe('buildPublicContentCacheType', () => {
         page: 1,
         contentType: 'video',
       })
-    ).toBe('content:public:v3:newest:20:1:video');
+    ).toBe('content:public:v4:newest:20:1:video');
   });
 });
 
@@ -500,8 +500,8 @@ describe('cache type vs telemetry label', () => {
     // would be asserting that the split is useless.
     expect(new Set(types).size).toBe(7);
     expect([...labels].sort()).toEqual([
-      'content:public:v3:newest',
-      'content:public:v3:oldest',
+      'content:public:v4:newest',
+      'content:public:v4:oldest',
     ]);
   });
 

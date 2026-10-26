@@ -244,6 +244,21 @@ describe('getWithdrawnContent: which rows the lookup can find (Codex-ov2ii)', ()
     expect(result.held).toEqual({ by: 'purchase', until: null });
   });
 
+  it('selects the public list’s columns, never the whole org row (Codex-567de)', async () => {
+    const result = await svc.getWithdrawnContent(buyerId, inOrg('unpublished'));
+
+    // `deletedAt` is the deleted-org check's; the route never sends it. The
+    // payee's primaryConnectAccountUserId is never selected at all.
+    expect(Object.keys(result.content.organization ?? {}).sort()).toEqual([
+      'deletedAt',
+      'id',
+      'logoUrl',
+      'name',
+      'slug',
+    ]);
+    expect(Object.keys(result.content.creator).sort()).toEqual(['id', 'name']);
+  });
+
   it('finds a departed creator’s item for a subscriber, until their period ends', async () => {
     const result = await svc.getWithdrawnContent(
       inPeriodSubId,

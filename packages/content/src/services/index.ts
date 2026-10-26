@@ -23,6 +23,9 @@ export {
 export {
   ContentService,
   type ContentServiceConfig,
+  PUBLIC_CREATOR_COLUMNS,
+  PUBLIC_MEDIA_ITEM_COLUMNS,
+  PUBLIC_ORGANIZATION_COLUMNS,
 } from './content-service';
 // Media Item Service
 export { MediaItemService } from './media-service';

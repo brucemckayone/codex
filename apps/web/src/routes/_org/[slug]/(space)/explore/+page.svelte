@@ -28,6 +28,7 @@
   import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
   import JourneyRailCard from '$lib/components/explore/JourneyRailCard.svelte';
   import type { CourseCardSummary } from '$lib/journeys/types';
+  import type { PublicContentOrganization } from '@codex/shared-types';
   import type { ContentWithRelations } from '$lib/types';
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import { gateSearchQuery, isSearchQueryBelowFloor } from '@codex/validation';
@@ -48,15 +49,16 @@
   import ExploreFilterDrawer from '$lib/components/explore/ExploreFilterDrawer.svelte';
   import type { PageData } from './$types';
 
-  // The public content collection carries a transcoded `mediaItem.thumbnailUrl`
-  // at runtime; the base `MediaItem` type omits it, so widen it locally for the
-  // grid's display-thumbnail lookup (matches getDisplayThumbnail's contract).
-  type ExploreItem = ContentWithRelations & {
-    mediaItem?:
-      | (NonNullable<ContentWithRelations['mediaItem']> & {
-          thumbnailUrl?: string | null;
-        })
-      | null;
+  // Both reads behind this grid, the public list and the signed-in browse
+  // list, send the same media item: R2 keys resolved to URLs and nothing else
+  // of the media_items row (Codex-ve5eh, Codex-1bdx0). These are the fields the
+  // grid reads off it, and the org is the four-field public org (Codex-567de).
+  type ExploreItem = Omit<ContentWithRelations, 'mediaItem' | 'organization'> & {
+    mediaItem?: {
+      durationSeconds?: number | null;
+      thumbnailUrl?: string | null;
+    } | null;
+    organization?: PublicContentOrganization | null;
   };
 
   const { data }: { data: PageData } = $props();

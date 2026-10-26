@@ -22,7 +22,7 @@ import {
   getCachedPublicContent,
   shouldCachePublicContentQuery,
 } from './public-cache';
-import { resolveR2PublicBases, resolveR2Urls } from './r2-public-urls';
+import { resolveR2PublicBases, toPublicItems } from './r2-public-urls';
 
 /**
  * TTL for the public topic-categories list (seconds). Invalidated on category
@@ -112,7 +112,11 @@ app.get(
       const fetchContent = async () => {
         const result = await ctx.services.content.listPublic(ctx.input.query);
         return {
-          items: resolveR2Urls(result.items, resolveR2PublicBases(ctx.env)),
+          items: toPublicItems(
+            result.items,
+            resolveR2PublicBases(ctx.env),
+            ctx.obs
+          ),
           pagination: result.pagination,
         };
       };
@@ -229,7 +233,7 @@ app.get(
     handler: async (ctx) => {
       const result = await ctx.services.content.listPublic(ctx.input.query);
       return new PaginatedResult(
-        resolveR2Urls(result.items, resolveR2PublicBases(ctx.env)),
+        toPublicItems(result.items, resolveR2PublicBases(ctx.env), ctx.obs),
         result.pagination
       );
     },

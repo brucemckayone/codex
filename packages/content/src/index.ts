@@ -76,6 +76,9 @@ export {
   invalidateContentAccess,
   invalidateOrgMembership,
   MediaItemService,
+  PUBLIC_CREATOR_COLUMNS,
+  PUBLIC_MEDIA_ITEM_COLUMNS,
+  PUBLIC_ORGANIZATION_COLUMNS,
 } from './services';
 
 // ============================================================================
@@ -103,8 +106,13 @@ export type {
   NewContent,
   NewMediaItem,
   PaginationParams,
+  PublicContentCreator,
   PublicContentItem,
   PublicContentListResponse,
+  PublicContentOrganization,
+  PublicContentRow,
+  PublicMediaItem,
+  PublicMediaItemSource,
   PublishContentResponse,
   SortOrder,
   UnpublishContentResponse,

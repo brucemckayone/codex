@@ -80,12 +80,53 @@ import {
   SlugConflictError,
 } from '../errors';
 import type {
+  CatalogueContentRow,
   Content,
   ContentFilters,
   ContentWithRelations,
   DatabaseTransaction,
   PaginationParams,
+  PublicContentCreator,
+  PublicContentOrganization,
+  PublicContentRow,
+  PublicMediaItemSource,
 } from '../types';
+
+/**
+ * The media_items columns `listPublic` selects (Codex-ve5eh). It used to load
+ * `mediaItem: true`, every column, into an anonymous, KV-cached list that each
+ * public page serialises into its HTML. `satisfies` ties this to
+ * `PublicMediaItemSource`, so the type and the SELECT cannot drift apart.
+ *
+ * Exported for the public list's twin, `ContentAccessService.
+ * getWithdrawnContent` (@codex/access), which serves the same item to a reader
+ * who still has a piece withdrawn from sale: one column list, so the two reads
+ * cannot drift apart either. The same holds for the two lists below.
+ */
+export const PUBLIC_MEDIA_ITEM_COLUMNS = {
+  durationSeconds: true,
+  thumbnailKey: true,
+  hlsPreviewKey: true,
+} as const satisfies Record<keyof PublicMediaItemSource, true>;
+
+/**
+ * The organizations columns `listPublic` selects (Codex-567de). It used to
+ * load `organization: true`, which put every column on the anonymous list,
+ * the payee's `primaryConnectAccountUserId` among them. Tied to
+ * `PublicContentOrganization` the same way.
+ */
+export const PUBLIC_ORGANIZATION_COLUMNS = {
+  id: true,
+  name: true,
+  slug: true,
+  logoUrl: true,
+} as const satisfies Record<keyof PublicContentOrganization, true>;
+
+/** The users columns a catalogue row's creator carries: never the email. */
+export const PUBLIC_CREATOR_COLUMNS = {
+  id: true,
+  name: true,
+} as const satisfies Record<keyof PublicContentCreator, true>;
 
 /**
  * Content Service Class
@@ -1131,7 +1172,23 @@ export class ContentService extends BaseService {
    * @param options.scope - 'studio' (default) | 'browse'
    * @returns Paginated content list with metadata
    * @throws ValidationError when scope='browse' and organizationId is missing
+   *
+   * The two scopes return different rows, so each has its own signature: a
+   * browse row is a {@link CatalogueContentRow} (Codex-1bdx0), a studio row
+   * the creator's own whole row.
    */
+  list(
+    creatorId: string,
+    filters: ContentFilters,
+    pagination: PaginationParams,
+    options: { scope: 'browse' }
+  ): Promise<PaginatedListResponse<CatalogueContentRow>>;
+  list(
+    creatorId: string,
+    filters?: ContentFilters,
+    paginationOrOptions?: PaginationParams | { scope?: 'studio' },
+    maybeOptions?: { scope?: 'studio' }
+  ): Promise<PaginatedListResponse<ContentWithRelations>>;
   async list(
     creatorId: string,
     filters: ContentFilters = {},
@@ -1140,7 +1197,9 @@ export class ContentService extends BaseService {
       limit: PAGINATION.DEFAULT,
     },
     maybeOptions?: { scope?: 'studio' | 'browse' }
-  ): Promise<PaginatedListResponse<ContentWithRelations>> {
+  ): Promise<
+    PaginatedListResponse<ContentWithRelations | CatalogueContentRow>
+  > {
     // Backwards-compatible argument handling: callers may pass either
     // (creatorId, filters, options) — new shape — or
     // (creatorId, filters, pagination, options?) — extended shape.
@@ -1254,26 +1313,42 @@ export class ContentService extends BaseService {
       return await paginatedQuery({
         page: pagination.page,
         limit: pagination.limit,
-        fetchItems: (limit, offset) =>
-          this.db.query.content.findMany({
-            where,
-            limit,
-            offset,
-            orderBy: [orderByClause],
-            with: {
-              mediaItem: true,
-              organization: true,
-              // The studio scope is the signed-in creator's own rows, email
-              // included. Browse spans every creator in an org for ANY
-              // signed-in viewer, so it carries no email.
-              creator: {
-                columns:
-                  scope === 'browse'
-                    ? { id: true, name: true }
-                    : { id: true, email: true, name: true },
-              },
-            },
-          }),
+        // Two reads, not one with conditional relations: drizzle types a
+        // `true | { columns }` relation as the narrow shape for BOTH scopes.
+        fetchItems: (
+          limit,
+          offset
+        ): Promise<Array<ContentWithRelations | CatalogueContentRow>> =>
+          scope === 'browse'
+            ? this.db.query.content.findMany({
+                where,
+                limit,
+                offset,
+                orderBy: [orderByClause],
+                // Browse spans every creator in an org for ANY signed-in
+                // viewer, so it selects what the anonymous public list
+                // selects: no creator email, and (Codex-1bdx0) no raw R2 key,
+                // RunPod job id or transcoding error on the media item, no
+                // payee id on the org.
+                with: {
+                  mediaItem: { columns: PUBLIC_MEDIA_ITEM_COLUMNS },
+                  organization: { columns: PUBLIC_ORGANIZATION_COLUMNS },
+                  creator: { columns: PUBLIC_CREATOR_COLUMNS },
+                },
+              })
+            : this.db.query.content.findMany({
+                where,
+                limit,
+                offset,
+                orderBy: [orderByClause],
+                // The studio scope is the signed-in creator's own rows, whole
+                // and with their email.
+                with: {
+                  mediaItem: true,
+                  organization: true,
+                  creator: { columns: { id: true, email: true, name: true } },
+                },
+              }),
         countQuery: { db: this.db, table: content, where },
         // Browse is a catalogue for any signed-in viewer (its route checks
         // sign-in, not entitlement), so it never carries a body. It used to
@@ -1302,6 +1377,8 @@ export class ContentService extends BaseService {
    *   it is /discover's platform-wide catalogue. The route schemas decide
    *   which a caller may send.
    * - The creator relation carries no email: this list is anonymous
+   * - The media item carries only PUBLIC_MEDIA_ITEM_COLUMNS, and the org only
+   *   PUBLIC_ORGANIZATION_COLUMNS, never the row
    *
    * Features:
    * - Optional contentType filter
@@ -1324,9 +1401,7 @@ export class ContentService extends BaseService {
     creatorId?: string;
     featured?: boolean;
     category?: string;
-  }): Promise<
-    PaginatedListResponse<ContentWithRelations & { categorySlugs: string[] }>
-  > {
+  }): Promise<PaginatedListResponse<PublicContentRow>> {
     // A topic is an org's, so only an org-scoped read can filter by one. The
     // public route refuses this already (publicContentQuerySchema); this is the
     // service-level seatbelt, as in list()'s browse scope. Without an org there
@@ -1450,17 +1525,14 @@ export class ContentService extends BaseService {
             offset,
             orderBy: [orderByClause],
             with: {
-              mediaItem: true,
+              // Three columns, not the row: see PUBLIC_MEDIA_ITEM_COLUMNS.
+              mediaItem: { columns: PUBLIC_MEDIA_ITEM_COLUMNS },
               // No email: this list is anonymous, and every public page that
               // lists content (creator pages, /discover, the org landing,
               // /explore, the related strips) serialises each item into its HTML.
-              creator: {
-                columns: {
-                  id: true,
-                  name: true,
-                },
-              },
-              organization: true,
+              creator: { columns: PUBLIC_CREATOR_COLUMNS },
+              // Four columns, not the row: see PUBLIC_ORGANIZATION_COLUMNS.
+              organization: { columns: PUBLIC_ORGANIZATION_COLUMNS },
             },
           }),
         countQuery: { db: this.db, table: content, where },

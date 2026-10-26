@@ -45,22 +45,16 @@ export const GET: RequestHandler = async ({ url, platform, cookies }) => {
 
   const content =
     contentRes.status === 'fulfilled'
-      ? (contentRes.value?.items ?? []).map((item) => {
-          // The creator's custom thumbnail first, then the video poster
-          // resolveR2Urls put on mediaItem (Codex-une9r). The base MediaItem
-          // type omits the resolved thumbnailUrl, so widen it here.
-          const mediaItem = item.mediaItem as
-            | (typeof item.mediaItem & { thumbnailUrl?: string | null })
-            | null;
-          return {
-            id: item.id,
-            title: item.title,
-            slug: item.slug,
-            contentType: item.contentType,
-            thumbnailUrl: getDisplayThumbnail({ ...item, mediaItem }),
-            organizationSlug: item.organization?.slug ?? null,
-          };
-        })
+      ? (contentRes.value?.items ?? []).map((item) => ({
+          id: item.id,
+          title: item.title,
+          slug: item.slug,
+          contentType: item.contentType,
+          // The creator's custom thumbnail first, then the video poster the
+          // worker resolved onto mediaItem (Codex-une9r).
+          thumbnailUrl: getDisplayThumbnail(item),
+          organizationSlug: item.organization?.slug ?? null,
+        }))
       : [];
 
   const creators =

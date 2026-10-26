@@ -20,15 +20,15 @@
   import { deriveContentAccessKind } from '$lib/utils/content-access';
   import type { ContentWithRelations } from '$lib/types';
 
-  // Same "mediaItem with resolved URLs" shape used by ContentDetailView — the
-  // public content API resolves R2 keys to full CDN URLs (thumbnailUrl) that
-  // aren't on the base MediaItem schema type.
-  type RelatedItem = ContentWithRelations & {
-    mediaItem?:
-      | (NonNullable<ContentWithRelations['mediaItem']> & {
-          thumbnailUrl?: string | null;
-        })
-      | null;
+  // The media item and org fields a card and its link read. The public content
+  // API sends the media fields with the R2 keys already resolved to CDN URLs
+  // (Codex-ve5eh) and the org as four fields (Codex-567de).
+  type RelatedItem = Omit<ContentWithRelations, 'mediaItem' | 'organization'> & {
+    mediaItem?: {
+      durationSeconds?: number | null;
+      thumbnailUrl?: string | null;
+    } | null;
+    organization?: { slug: string } | null;
   };
 
   interface Props {

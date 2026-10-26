@@ -58,12 +58,25 @@ const PUBLIC_CONTENT_CACHE_TTL = 7200;
  * code stays a valid hit after deploy and keeps serving what was removed, for
  * up to the TTL. v2 (Codex-osuqt): no creator email, and no body on a
  * catalogue read. v3 (Codex-039vo): no body on a by-slug read of a gated row,
- * which a course-only practice flagged free used to keep. Old slots are never
- * read again and age out. A bump also renames the cache-stats series
- * (`cacheStatsLabel` keeps four segments, so `content:public:newest` became
- * `content:public:v2:newest`, and now `content:public:v3:newest`).
+ * which a course-only practice flagged free used to keep. v4 (Codex-ve5eh,
+ * Codex-567de, one bump for both): the media item is three fields
+ * (durationSeconds, thumbnailUrl, hlsPreviewUrl), no longer the whole
+ * media_items row with its raw R2 keys, RunPod job id and transcoding error,
+ * and the org is four fields (id, name, slug, logoUrl), no longer the whole
+ * organizations row.
+ *
+ * THE RULE WHEN TWO BRANCHES BUMP AT ONCE, whatever order they merge in: the
+ * one that merges SECOND takes a version no deployed build has ever written.
+ * A value a shipped build wrote names slots full of THAT build's shape, so
+ * reusing it serves them as hits. If v4 has already shipped when a later
+ * narrowing lands, the later one takes v5, not v4.
+ *
+ * Old slots are never read again and age out. A bump also
+ * renames the cache-stats series (`cacheStatsLabel` keeps four segments, so
+ * `content:public:newest` became `content:public:v2:newest`, now
+ * `content:public:v4:newest`).
  */
-const PUBLIC_CONTENT_SHAPE_VERSION = 'v3';
+const PUBLIC_CONTENT_SHAPE_VERSION = 'v4';
 
 /**
  * KV refuses a key over 512 bytes. A data-slot key is this type plus about 70

@@ -69,7 +69,10 @@ import type {
   OrganizationWithRole,
   PaginatedListResponse,
   PublicBrandingResponse,
+  PublicContentCreator,
+  PublicContentOrganization,
   PublicCreatorProfile,
+  PublicMediaItem,
   SessionData,
   UserData,
   UserProfile,
@@ -184,8 +187,13 @@ import { ApiError } from './errors';
 /**
  * One item from `GET /api/content/public`, typed to match what the endpoint
  * ACTUALLY returns — not the raw DB row. The worker resolves R2 keys to CDN
- * URLs (`resolveR2Urls` adds `thumbnailUrl` + `hlsPreviewUrl` to `mediaItem`)
- * and `listPublic` attaches `categorySlugs`; `content_type` is a `varchar`
+ * URLs and sends `mediaItem` as three fields, never the media_items row: no
+ * raw key, job id or transcoding error reaches a page (Codex-ve5eh). The org
+ * is four fields, never the organizations row (Codex-567de), and the creator
+ * is its id and name. All three are the `@codex/shared-types` contract the
+ * worker's mapper is typed against; reading anything else off them needs a
+ * worker change. `listPublic` attaches
+ * `categorySlugs`; `content_type` is a `varchar`
  * column (so `ContentWithRelations` widens it to `string`) but is constrained
  * to its enum, so we narrow it here. The SPEC §6.1 access-policy flags
  * (`isFree` / `isPurchasable` + `priceCents` / `includedInTierId` /
@@ -195,14 +203,11 @@ import { ApiError } from './errors';
  */
 export type PublicContentListItem = Omit<
   ContentWithRelations,
-  'mediaItem' | 'contentType'
+  'mediaItem' | 'organization' | 'creator' | 'contentType'
 > & {
-  mediaItem:
-    | (MediaItem & {
-        thumbnailUrl: string | null;
-        hlsPreviewUrl: string | null;
-      })
-    | null;
+  mediaItem: PublicMediaItem | null;
+  organization: PublicContentOrganization | null;
+  creator: PublicContentCreator;
   contentType: 'video' | 'audio' | 'written';
   categorySlugs: string[];
 };
@@ -237,6 +242,13 @@ export type InCoursePracticeResponse = Omit<
   /** @deprecated The pre-Codex-woj7k markdown column; read `body`. */
   bodyHtml?: string | null;
 };
+
+/**
+ * One item from `GET /api/content/browse` (the signed-in /explore sorts, the
+ * studio grant picker): the public list's item without its topic slugs. It
+ * was the whole row, media_items and organizations included (Codex-1bdx0).
+ */
+export type BrowseContentItem = Omit<PublicContentListItem, 'categorySlugs'>;
 
 /**
  * Resolve API URL for a worker
@@ -859,7 +871,7 @@ export function createServerApi(
        * dropping orgId and leaking another org's data.
        */
       browse: (params: URLSearchParams) =>
-        request<PaginatedListResponse<ContentWithRelations>>(
+        request<PaginatedListResponse<BrowseContentItem>>(
           'content',
           `/api/content/browse?${params}`
         ),
@@ -1002,7 +1014,7 @@ export function createServerApi(
        * No org scoping — returns content from all organizations.
        */
       getDiscoverContent: (params?: URLSearchParams) =>
-        request<PaginatedListResponse<ContentWithRelations>>(
+        request<PaginatedListResponse<PublicContentListItem>>(
           'content',
           `/api/content/public/discover${params ? `?${params}` : ''}`
         ),

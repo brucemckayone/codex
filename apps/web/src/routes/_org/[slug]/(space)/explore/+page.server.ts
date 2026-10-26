@@ -17,7 +17,7 @@ import { logger } from '$lib/observability';
 import { getPublicCategories } from '$lib/remote/categories.remote';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { getPublicCreators } from '$lib/remote/org.remote';
-import { createServerApi } from '$lib/server/api';
+import { type BrowseContentItem, createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { logReadFailure } from '$lib/server/read-failure';
 import type { PageServerLoad } from './$types';
@@ -224,8 +224,10 @@ export const load: PageServerLoad = async ({
       });
 
   // Fork API call: authenticated endpoint for popularity/sales sort, public otherwise
+  // Both reads send the same catalogue item (a public-list item carries its
+  // topic slugs as well), so the page's cast to its own item type is checked.
   let contentResult: {
-    items?: unknown[];
+    items?: BrowseContentItem[];
     pagination?: { total?: number };
   } | null = null;
   if (AUTH_ONLY_SORTS.has(sort) && locals.user) {
@@ -254,16 +256,17 @@ export const load: PageServerLoad = async ({
         obs: logger,
       });
       // Every param that varies the RESULT must vary the key, or two filter
-      // combinations read each other's cached payload. `v2` is the item shape:
+      // combinations read each other's cached payload. `v3` is the item shape:
       // bump it whenever the browse list NARROWS, or slots the old code wrote
       // keep serving the removed fields until their TTL (v2, Codex-osuqt: no
-      // body, no creator email).
+      // body, no creator email; v3, Codex-1bdx0: the public list's media item
+      // and org, no longer the whole media_items and organizations rows).
       // The category is a `:cat:` suffix only when set, as in public-cache.ts.
       // An `all` placeholder let `?category=all` (a filter that matches
       // nothing) share the unfiltered slot, so one signed-in visitor blanked
       // that sort's grid for every viewer until the TTL.
       const categoryKey = category ? `:cat:${category}` : '';
-      const dataType = `content:auth:v2:${sort}:${contentType ?? 'all'}:${page}${categoryKey}`;
+      const dataType = `content:auth:v3:${sort}:${contentType ?? 'all'}:${page}${categoryKey}`;
       contentResult = await cache.get(
         CacheType.COLLECTION_ORG_CONTENT(org.id),
         dataType,
