@@ -3976,7 +3976,11 @@ export class PurchaseService extends BaseService {
       if (purchase && result.state === 'recording') {
         // Nothing writes a `pending` or `failed` row that is not a duplicate
         // today, so one is an old row. The page keeps checking; this says why.
-        this.obs.warn('Checkout session has a purchase it cannot confirm', {
+        // The buyer has paid and will be told to wait for something that
+        // won't come, so it is an error. Only the verify and the success
+        // page's completion read here, never the webhook.
+        this.obs.error('Checkout session has a purchase it cannot confirm', {
+          errorId: crypto.randomUUID(),
           sessionId: session.id,
           purchaseId: purchase.id,
           status: purchase.status,

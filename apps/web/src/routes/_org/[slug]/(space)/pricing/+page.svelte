@@ -790,7 +790,19 @@
       // re-seeds from the fresh payload. Fixed copy (Codex-2hxff.69).
       switchTierError = m.pricing_refusal_change_unconfirmed();
       switchTierRetryable = false;
-      await invalidateAll();
+      try {
+        await invalidateAll();
+      } catch (refreshError) {
+        // The re-read failed too: still "couldn't confirm", but the page was
+        // not refreshed, so the copy asks for a reload instead of saying so.
+        logger.warn('pricing: re-reading the plan after an unconfirmed change failed', {
+          error:
+            refreshError instanceof Error
+              ? refreshError.message
+              : String(refreshError),
+        });
+        switchTierError = m.pricing_refusal_change_unconfirmed_reload();
+      }
     } finally {
       switchTierLoading = null;
     }

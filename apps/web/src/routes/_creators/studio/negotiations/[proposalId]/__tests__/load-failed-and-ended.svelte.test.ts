@@ -17,6 +17,7 @@
  * mocked.
  */
 
+import { error as kitError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import * as m from '$paraglide/messages';
 import {
@@ -83,6 +84,25 @@ const pill = () =>
   q('.agreement-detail__status-pill')?.textContent?.trim() ?? null;
 const NO_ACCESS = "You don't have access to this agreement";
 
+/**
+ * What `getMyAgreementThread` rejects with on a worker 403/404: the
+ * `HttpError` that `forwardClientErrors` throws through kit's `error()`.
+ * `lib/remote/agreements-thread-forwarding.test.ts` pins that the remote
+ * produces exactly this from the worker's real answer (review N1: a
+ * pre-shaped `{ status }` here once hid that it reached the browser as a
+ * sanitised 500).
+ */
+function remoteRefusal(status: 403 | 404): unknown {
+  try {
+    kitError(status, {
+      message: 'Proposal thread not found',
+      code: status === 404 ? 'NOT_FOUND' : 'FORBIDDEN',
+    });
+  } catch (refusal) {
+    return refusal;
+  }
+}
+
 describe('a failed portfolio read', () => {
   function mountWithPortfolioFailed() {
     setMyThread([proposal]);
@@ -139,7 +159,7 @@ describe('a failed thread read', () => {
   test('a 404 is "no access", with no load error', () => {
     setPortfolio([portfolioActiveRow()]);
     mountPage();
-    fail(myThreadSlot(), httpError(404));
+    fail(myThreadSlot(), remoteRefusal(404));
     flushSync();
 
     expect(text()).toContain(NO_ACCESS);
@@ -149,7 +169,7 @@ describe('a failed thread read', () => {
   test('a 403 is "no access" too', () => {
     setPortfolio([portfolioActiveRow()]);
     mountPage();
-    fail(myThreadSlot(), httpError(403));
+    fail(myThreadSlot(), remoteRefusal(403));
     flushSync();
 
     expect(text()).toContain(NO_ACCESS);

@@ -580,6 +580,7 @@ describe('POST /checkout/complete', () => {
       expect.objectContaining({
         sessionId: 'cs_landing_1',
         errorId: expect.any(String),
+        state: 'recording',
         cause: expect.objectContaining({ code: 'ECONNRESET' }),
       })
     );
@@ -609,9 +610,61 @@ describe('POST /checkout/complete', () => {
       expect.objectContaining({
         sessionId: 'cs_landing_1',
         errorId: expect.any(String),
+        state: 'recording',
         cause: expect.objectContaining({ message: 'Content not found' }),
       })
     );
+  });
+
+  // After a throw, a row of ours in another state than `unlocked` is still a
+  // recorded purchase: the line names its state, never "could not record".
+  it.each([
+    [
+      'a duplicate being refunded',
+      'duplicate',
+      () =>
+        wrapError(
+          Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
+        ),
+      503,
+      'warn',
+    ],
+    [
+      'a purchase refunded',
+      'refunded',
+      () => new NotFoundError('Content not found', { contentId: CONTENT_ID }),
+      404,
+      'error',
+    ],
+  ] as const)('a failure that leaves %s: the line names the state, and says the session has a purchase', async (_label, state, failure, status, level) => {
+    const purchase = purchaseServiceOver(createStore(), sessionFor('content'));
+    purchase.completePurchase.mockRejectedValueOnce(failure());
+    purchase.readCheckoutSession
+      .mockImplementationOnce(async () => ({
+        recorded: false,
+        result: { sessionStatus: 'complete', state: 'recording' },
+      }))
+      .mockImplementationOnce(
+        async () =>
+          ({
+            recorded: true,
+            result: { sessionStatus: 'complete', state },
+          }) as never
+      );
+    const { app, obs } = buildApp(purchase);
+
+    const res = await complete(app);
+
+    expect(res.status).toBe(status);
+    expect(obs[level]).toHaveBeenCalledWith(
+      'A completion from the success page failed; the session already has a purchase',
+      expect.objectContaining({ errorId: expect.any(String), state })
+    );
+    const said = JSON.stringify([
+      ...vi.mocked(obs.warn).mock.calls,
+      ...vi.mocked(obs.error).mock.calls,
+    ]);
+    expect(said).not.toContain('could not record');
   });
 
   it('a paid session the completion skips (bad metadata): an error line with the reason', async () => {

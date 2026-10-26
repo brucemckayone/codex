@@ -543,6 +543,7 @@
   "pricing_refusal_checkout_refused": "We couldn't start checkout for this plan.",
   "pricing_refusal_change_refused": "We couldn't change your plan.",
   "pricing_refusal_change_unconfirmed": "We couldn't confirm the change. We've refreshed the page to show your current plan.",
+  "pricing_refusal_change_unconfirmed_reload": "We couldn't confirm the change. Reload the page to see your current plan.",
   "pricing_refusal_subscription_unknown": "We couldn't check your current subscription, so checkout can't start. Reload the page to check again.",
   "pricing_refusal_payment_declined": "Payment was declined. Update your payment method and try again.",
   "pricing_refusal_close": "Close",

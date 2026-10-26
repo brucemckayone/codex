@@ -387,31 +387,40 @@ checkout.post(
           });
           return after.result;
         }
-        // Not recorded. A failure a retry can fix (an outage, the
-        // duplicate's refund still in flight) is "not yet" to the page,
-        // which checks again; the webhook records it meanwhile.
-        if (isTransientError(error)) {
+        // Not unlocked. The line is worded by what the re-read found: a row
+        // of ours in another state (a duplicate being refunded, a purchase
+        // refunded or paused) is recorded, so it is never "could not record";
+        // no row, or no re-read, is. Its `state` is on the line either way.
+        const transient = isTransientError(error);
+        const line = { errorId, sessionId, state: after?.result.state, cause };
+        if (after?.recorded) {
+          const message =
+            'A completion from the success page failed; the session already has a purchase';
+          if (transient) ctx.obs?.warn(message, line);
+          else ctx.obs?.error(message, line);
+        } else if (transient) {
           ctx.obs?.warn(
             'The success page could not record a paid session yet',
-            {
-              errorId,
-              sessionId,
-              cause,
-            }
+            line
           );
+        } else {
+          // A refusal no retry changes (an unsupported currency, an item
+          // gone): the buyer has paid and nothing records it.
+          ctx.obs?.error(
+            'The success page could not record a paid session',
+            line
+          );
+        }
+        // A failure a retry can fix (an outage, the duplicate's refund still
+        // in flight) is "not yet" to the page, which checks again; the
+        // webhook records it meanwhile.
+        if (transient) {
           throw new ServiceUnavailableError(
             'The purchase could not be recorded yet',
             { sessionId, errorId },
             { cause: error }
           );
         }
-        // A refusal no retry changes (an unsupported currency, an item gone):
-        // the buyer has paid and nothing records it.
-        ctx.obs?.error('The success page could not record a paid session', {
-          errorId,
-          sessionId,
-          cause,
-        });
         throw error;
       }
 

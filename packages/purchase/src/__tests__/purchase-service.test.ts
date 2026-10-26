@@ -5862,9 +5862,23 @@ describe('PurchaseService Integration', () => {
         expect(result.state).toBe('paused');
       });
 
-      it('an old row neither completed nor refunded is still recording', async () => {
-        const result = await stateFor({ status: 'failed' });
-        expect(result.state).toBe('recording');
+      it('an old row neither completed nor refunded is still recording, logged at error with an errorId', async () => {
+        // biome-ignore lint/suspicious/noExplicitAny: spy protected obs.error
+        const errorSpy = vi.spyOn((purchaseService as any).obs, 'error');
+        try {
+          const result = await stateFor({ status: 'failed' });
+          expect(result.state).toBe('recording');
+          expect(errorSpy).toHaveBeenCalledWith(
+            'Checkout session has a purchase it cannot confirm',
+            expect.objectContaining({
+              errorId: expect.any(String),
+              sessionId: 'cs_test_verify_state',
+              status: 'failed',
+            })
+          );
+        } finally {
+          errorSpy.mockRestore();
+        }
       });
 
       it('a complete session that is not paid is unpaid, and reads no row', async () => {

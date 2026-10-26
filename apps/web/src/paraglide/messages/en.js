@@ -4367,6 +4367,14 @@ export const pricing_refusal_change_unconfirmed = () => `We couldn't confirm the
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const pricing_refusal_change_unconfirmed_reload = () => `We couldn't confirm the change. Reload the page to see your current plan.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const pricing_refusal_subscription_unknown = () => `We couldn't check your current subscription, so checkout can't start. Reload the page to check again.`
 
 

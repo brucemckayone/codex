@@ -384,6 +384,43 @@ describe('Change plan refused', () => {
     expect(byTestId('tier-change-dialog-close')).not.toBeNull();
   });
 
+  // The re-read can fail too: it must not reject unhandled, and the page,
+  // not refreshed, must not say it was. Still "couldn't confirm", still Close.
+  test('a switch with no answer whose re-read fails too: caught, logged, and the page asks for a reload', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      remote.previewSubscriptionTierChange.mockResolvedValueOnce({
+        success: true,
+        data: PREVIEW,
+      });
+      remote.changeSubscriptionTier.mockRejectedValueOnce(
+        new TypeError('Failed to fetch')
+      );
+      invalidateAllMock.mockRejectedValueOnce(new Error('load failed'));
+      await openPreview();
+      byTestId('tier-change-dialog-confirm')?.click();
+      await settle();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(loggerWarnMock).toHaveBeenCalledWith(
+        'pricing: re-reading the plan after an unconfirmed change failed',
+        { error: 'load failed' }
+      );
+      expect(clean(document.body)).toContain(
+        m.pricing_refusal_change_unconfirmed_reload()
+      );
+      expect(clean(document.body)).not.toContain(
+        m.pricing_refusal_change_unconfirmed()
+      );
+      expect(byTestId('tier-change-dialog-confirm')).toBeNull();
+      expect(byTestId('tier-change-dialog-close')).not.toBeNull();
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
   test('a switch refused at Confirm for a lasting reason: the reason, and Close in place of Confirm', async () => {
     remote.previewSubscriptionTierChange.mockResolvedValueOnce({
       success: true,
