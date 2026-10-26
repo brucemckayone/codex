@@ -57,6 +57,7 @@ This ensures:
 - `SESSION_SECRET` - Session signing key (UNIQUE to production)
 - `STRIPE_SECRET_KEY` - Live mode Stripe key (sk_live_*)
 - `ADMIN_API_STRIPE_RESTRICTED_KEY` - Optional. admin-api's own restricted live key (rk_live_*) for support refunds, uploaded as its `STRIPE_SECRET_KEY` (Codex-2hxff.28, Codex-5vvwj.2). Skipped when unset or empty
+- `STRIPE_PORTAL_CONFIGURATION_ID` - ecom-api's locked Billing Portal configuration (bpc_*); without it the billing portal refuses to open. Uploaded only when set and a `bpc_` id (Codex-2hxff.41). Unset is a warning on the run, any other value an error and not sent; either way the deploy carries on and ecom-api keeps the value it already holds
 - `STRIPE_WEBHOOK_SECRET_BOOKING`
 - `STRIPE_WEBHOOK_SECRET_CONNECT`
 - `STRIPE_WEBHOOK_SECRET_CUSTOMER`

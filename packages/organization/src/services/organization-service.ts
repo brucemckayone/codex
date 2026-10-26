@@ -944,6 +944,12 @@ export class OrganizationService extends BaseService {
    * Returns null for role/joinedAt if not a member (graceful degradation).
    * Does not throw errors for "not found" - this is intentional for frontend convenience.
    *
+   * The ownership-offer banner is read apart from the membership it decorates
+   * (Codex-2hxff.42): a failed offer read is logged and answered as "no
+   * offer", so the owner still gets their studio and the next load brings
+   * the banner back. A failed MEMBERSHIP read still throws: that is the
+   * access check, and the studio layout turns it into a retry page.
+   *
    * @param organizationId - Organization ID
    * @param userId - User ID to check membership for
    * @returns Membership lookup response with role and joinedAt (both null if not a member)
@@ -983,7 +989,17 @@ export class OrganizationService extends BaseService {
               organizationId,
               userId,
               new Date()
-            )
+            ).catch((error: unknown) => {
+              this.obs.error(
+                'Ownership offer read failed; membership answered without it',
+                {
+                  organizationId,
+                  userId,
+                  error: error instanceof Error ? error.message : String(error),
+                }
+              );
+              return null;
+            })
           : null,
       };
     } catch (error) {

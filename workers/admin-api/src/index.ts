@@ -66,7 +66,7 @@ import {
 import {
   createKvCheck,
   createWorker,
-  membershipCacheKey,
+  invalidateMemberCaches,
   PaginatedResult,
   procedure,
   standardDatabaseCheck,
@@ -823,23 +823,14 @@ app.post(
         reason: ctx.input.body.reason,
       });
 
-      // Both users' roles changed. Delete the membership entry the policy
-      // reads (a bare `kv.get` with no version check — a bump would be dead)
-      // and their library caches, as organization-api's role change does.
-      const kv = ctx.env.CACHE_KV;
+      // Both users' roles changed. Bust what organization-api's accept path
+      // busts for each: the membership entry the policy reads (deleted — a
+      // version bump would be dead), the org's slug-keyed public caches and
+      // the user's library. One shared helper, so the two cannot drift again
+      // (Codex-2hxff.44).
       for (const userId of [change.ownerUserId, change.previousOwnerUserId]) {
         if (!userId) continue;
-        if (kv) {
-          ctx.executionCtx.waitUntil(
-            kv.delete(membershipCacheKey(orgId, userId)).catch(() => {})
-          );
-        }
-        invalidateUserLibrary({
-          kv,
-          waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
-          userId,
-          logger: ctx.obs,
-        });
+        invalidateMemberCaches(ctx, orgId, userId, ctx.obs);
       }
       return change;
     },

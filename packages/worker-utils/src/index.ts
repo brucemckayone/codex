@@ -14,10 +14,15 @@ export {
 export { createBodyParsingMiddleware } from './body-parsing-middleware';
 // Cache-fanout helpers (R14: cache helpers belong in @codex/cache OR
 // @codex/worker-utils — DB-touching ones live here so @codex/cache stays
-// thin/standalone)
+// thin/standalone). The membership fan-out is shared by organization-api and
+// admin-api (Codex-2hxff.44).
 export {
+  dispatchOrgSlugInvalidation,
   type InvalidateOrgSlugCacheArgs,
+  invalidateMemberCaches,
+  invalidateMembershipCache,
   invalidateOrgSlugCache,
+  type MemberCacheCtx,
 } from './cache-fanout';
 // Email sending helper (worker-to-worker)
 export {

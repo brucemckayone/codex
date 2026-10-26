@@ -22,10 +22,9 @@
 
 import type { HonoEnv } from '@codex/shared-types';
 import { offerOwnershipSchema, uuidSchema } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { invalidateMemberCaches, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { invalidateMemberCaches } from '../utils/membership-invalidation';
 
 const app = new Hono<HonoEnv>();
 
