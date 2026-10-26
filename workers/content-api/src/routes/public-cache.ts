@@ -59,11 +59,13 @@ const PUBLIC_CONTENT_CACHE_TTL = 7200;
  * up to the TTL. v2 (Codex-osuqt): no creator email, and no body on a
  * catalogue read. v3 (Codex-039vo): no body on a by-slug read of a gated row,
  * which a course-only practice flagged free used to keep. v4 (Codex-ve5eh,
- * Codex-567de, one bump for both): the media item is three fields
- * (durationSeconds, thumbnailUrl, hlsPreviewUrl), no longer the whole
- * media_items row with its raw R2 keys, RunPod job id and transcoding error,
- * and the org is four fields (id, name, slug, logoUrl), no longer the whole
- * organizations row.
+ * Codex-567de, one bump for both): the slot holds listPublic's narrowed row,
+ * the media item three columns (durationSeconds, thumbnailKey, hlsPreviewKey)
+ * where it held the whole media_items row with its raw R2 keys, RunPod job id
+ * and transcoding error, and the org four (id, name, slug, logoUrl) where it
+ * held the whole organizations row. The wire item (`toPublicItems`) is built
+ * AFTER the cache, so a change to it alone needs no bump; a change to
+ * listPublic's select does.
  *
  * THE RULE WHEN TWO BRANCHES BUMP AT ONCE, whatever order they merge in: the
  * one that merges SECOND takes a version no deployed build has ever written.

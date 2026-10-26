@@ -5,7 +5,8 @@
  * the real routes in public-routes.test.ts and content-browse-projection.test.ts.
  * This file pins the two things only the helper itself can show: the creator is
  * rebuilt from named fields too, and a key that no configured base can resolve
- * is reported once per call rather than silently sent as a null URL.
+ * is reported once per call rather than silently sent as a null URL. The single
+ * builder reports it too: the withdrawn read sends one item through it.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -76,6 +77,31 @@ describe('toPublicItems — a key no base can resolve is reported', () => {
     const obs = { warn: vi.fn() };
 
     toPublicItems([row('a'), row('b')], BOTH_BASES, obs);
+
+    expect(obs.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('toPublicItem — the single item is reported the same way', () => {
+  it('warns when its key has no base', () => {
+    const obs = { warn: vi.fn() };
+
+    const item = toPublicItem(row('a'), NO_BASES, obs);
+
+    expect(item.mediaItem?.thumbnailUrl).toBeNull();
+    expect(obs.warn).toHaveBeenCalledOnce();
+    expect(obs.warn).toHaveBeenCalledWith('r2_public_base.missing', {
+      assetsBaseSet: false,
+      mediaPreviewBaseSet: false,
+      unresolvedThumbnails: 1,
+      unresolvedPreviews: 1,
+    });
+  });
+
+  it('does not warn when its keys resolve', () => {
+    const obs = { warn: vi.fn() };
+
+    toPublicItem(row('a'), BOTH_BASES, obs);
 
     expect(obs.warn).not.toHaveBeenCalled();
   });

@@ -34,6 +34,9 @@ the creator `id` and `name` (Codex-ve5eh, Codex-567de). No raw R2 key, RunPod
 job id, transcoding error or payee id reaches a client. `listPublic` selects
 only those columns (`PUBLIC_*_COLUMNS` in `@codex/content`), and a narrowing
 of either needs a `PUBLIC_CONTENT_SHAPE_VERSION` bump (`public-cache.ts`).
+A key with no CDN base is sent as a null URL and logged once per request as
+`r2_public_base.missing`, by `toPublicItems` and the single `toPublicItem`
+alike; pass `ctx.obs` to either.
 `GET /api/content/browse` (signed-in) sends the same item (Codex-1bdx0).
 
 | Method | Path | Policy | Notes |

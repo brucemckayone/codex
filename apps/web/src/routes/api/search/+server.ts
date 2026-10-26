@@ -1,5 +1,7 @@
 import { json } from '@sveltejs/kit';
+import { ApiError } from '$lib/api/errors';
 import { createServerApi } from '$lib/server/api';
+import { logReadFailure } from '$lib/server/read-failure';
 import { getDisplayThumbnail } from '$lib/utils/thumbnail';
 import type { RequestHandler } from './$types';
 
@@ -15,24 +17,39 @@ export const GET: RequestHandler = async ({ url, platform, cookies }) => {
   // Resolve org slug → orgId so the content-api can scope by organization.
   // The `slug` param in publicContentQuerySchema is a content slug filter,
   // not an org slug — we must pass `orgId` for org-scoped searches.
+  //
+  // Only a 404 (no such org) falls back to the platform-wide search. Any other
+  // failure leaves the visitor's org unknown, and answering an org-scoped
+  // search with every org's content would put other orgs' work in this org's
+  // palette, so the content search is skipped instead.
   let orgId: string | undefined;
+  let orgLookupFailed = false;
   if (scope) {
     try {
       const org = await api.org.getPublicInfo(scope);
       orgId = org?.id;
-    } catch {
-      // Org not found — fall back to platform-wide search
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 404)) {
+        logReadFailure('Search scope org not loaded', { scope }, error);
+        orgLookupFailed = true;
+      }
     }
   }
 
   const params = new URLSearchParams({ search: q, limit: String(limit) });
 
+  const searchContent = () => {
+    if (orgId) {
+      return api.content.getPublicContent(
+        new URLSearchParams({ ...Object.fromEntries(params), orgId })
+      );
+    }
+    if (orgLookupFailed) return Promise.resolve(null);
+    return api.content.getDiscoverContent(params);
+  };
+
   const [contentRes, creatorsRes] = await Promise.allSettled([
-    orgId
-      ? api.content.getPublicContent(
-          new URLSearchParams({ ...Object.fromEntries(params), orgId })
-        )
-      : api.content.getDiscoverContent(params),
+    searchContent(),
     scope
       ? api.org.getPublicCreators(
           scope,
@@ -42,6 +59,15 @@ export const GET: RequestHandler = async ({ url, platform, cookies }) => {
           items: [] as Array<{ name: string; avatarUrl: string | null }>,
         }),
   ]);
+
+  // The palette answers with what did load; these logs are the only trace of
+  // what did not.
+  if (contentRes.status === 'rejected') {
+    logReadFailure('Search content not loaded', { scope }, contentRes.reason);
+  }
+  if (creatorsRes.status === 'rejected') {
+    logReadFailure('Search creators not loaded', { scope }, creatorsRes.reason);
+  }
 
   const content =
     contentRes.status === 'fulfilled'

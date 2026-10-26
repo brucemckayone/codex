@@ -450,9 +450,11 @@ read whose payload NARROWS needs a shape version in its `type`
 (`content:public:v4`, `content:auth:v3`, `org:creators:v2`) or old slots keep serving the removed
 fields until their TTL. See CLAUDE.md, Server-Side KV Caching. `content:public`
 v3 (Codex-039vo) dropped a gated row's body from a by-slug read. v4
-(Codex-ve5eh, Codex-567de) cut the public media item to `durationSeconds`,
-`thumbnailUrl` and `hlsPreviewUrl`, and the org to `id`, `name`, `slug` and
-`logoUrl`; both used to be the whole row. `content:auth:v3` (Codex-1bdx0,
+(Codex-ve5eh, Codex-567de) caches `listPublic`'s narrowed row: the media item
+`durationSeconds`, `thumbnailKey` and `hlsPreviewKey`, the org `id`, `name`,
+`slug` and `logoUrl`; both used to be the whole row. The wire item, with its
+CDN URLs, is built after the cache, so a missing CDN base is never frozen
+into a slot. `content:auth:v3` (Codex-1bdx0,
 apps/web /explore) is the signed-in browse list taking the same item.
 
 **Two branches bumping the same version.** Whichever merges SECOND takes a

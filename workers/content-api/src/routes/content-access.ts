@@ -243,7 +243,7 @@ app.get(
       // The public list's item, built the same way, so the page draws the
       // thumbnail and preview it drew on the storefront.
       return {
-        content: toPublicItem(content, resolveR2PublicBases(ctx.env)),
+        content: toPublicItem(content, resolveR2PublicBases(ctx.env), ctx.obs),
         held,
       };
     },

@@ -100,7 +100,7 @@ export type PublicItem<T extends CatalogueRelations> = Omit<
 };
 
 /** One row to its wire item: each relation rebuilt from named fields. */
-export function toPublicItem<T extends CatalogueRelations>(
+function buildPublicItem<T extends CatalogueRelations>(
   row: T,
   bases: R2PublicBases
 ): PublicItem<T> {
@@ -133,16 +133,16 @@ export function toPublicItem<T extends CatalogueRelations>(
 }
 
 /**
- * A page of rows to wire items. A key with no base to resolve it against is
- * sent as a null URL, which reads on the page as "no poster" or "no preview",
- * not as an error, so a missing binding would otherwise go unnoticed. One
- * warning per call (per request), never per row.
+ * A key with no base to resolve it against is sent as a null URL, which reads
+ * on the page as "no poster" or "no preview", not as an error, so a missing
+ * binding would otherwise go unnoticed. One warning per call (per request),
+ * never per row.
  */
-export function toPublicItems<T extends CatalogueRelations>(
-  rows: T[],
+function warnOnUnresolvedKeys(
+  rows: readonly CatalogueRelations[],
   bases: R2PublicBases,
   obs?: Logger
-): PublicItem<T>[] {
+): void {
   let unresolvedThumbnails = 0;
   let unresolvedPreviews = 0;
   for (const { mediaItem } of rows) {
@@ -157,5 +157,24 @@ export function toPublicItems<T extends CatalogueRelations>(
       unresolvedPreviews,
     });
   }
-  return rows.map((row) => toPublicItem(row, bases));
+}
+
+/** One row to its wire item, warning when a key has no base to resolve it. */
+export function toPublicItem<T extends CatalogueRelations>(
+  row: T,
+  bases: R2PublicBases,
+  obs?: Logger
+): PublicItem<T> {
+  warnOnUnresolvedKeys([row], bases, obs);
+  return buildPublicItem(row, bases);
+}
+
+/** A page of rows to wire items, with at most one warning for the page. */
+export function toPublicItems<T extends CatalogueRelations>(
+  rows: T[],
+  bases: R2PublicBases,
+  obs?: Logger
+): PublicItem<T>[] {
+  warnOnUnresolvedKeys(rows, bases, obs);
+  return rows.map((row) => buildPublicItem(row, bases));
 }

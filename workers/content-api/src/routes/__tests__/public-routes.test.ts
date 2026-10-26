@@ -337,7 +337,8 @@ describe('GET /api/content/public/categories — cache write survives', () => {
 // move to a media-preview host, and the thumbnail may NOT follow it there.
 //
 // `/discover` is used for the split assertions on purpose — it is the one
-// uncached branch, so no KV slot can carry a URL built under a different env.
+// uncached branch. No KV slot carries a URL anyway: the org list caches the
+// row and builds its URLs after the cache, against the env of that request.
 // ═══════════════════════════════════════════════════════════════════════════
 
 const MEDIA_PREVIEW_BASE = 'https://cdn-media-preview.test';
@@ -416,6 +417,18 @@ describe('toPublicItem — the assets host and the preview host are separate', (
 
     expect(media.hlsPreviewUrl).toBe(`${MEDIA_PREVIEW_BASE}/${PREVIEW_KEY}`);
     expect(media.thumbnailUrl).toBe(`${R2_PUBLIC_URL_BASE}/${THUMB_KEY}`);
+  });
+
+  it('a slot cached while the assets base was missing serves the poster once it is set', async () => {
+    // The slot holds the row, not the URL, so a missing CDN base is never
+    // frozen into KV as a null poster for the slot's whole TTL.
+    const path = `/api/content/public?orgId=${ORG_ID}`;
+    const miss = await firstMediaItem(path, { R2_PUBLIC_URL_BASE: undefined });
+    const hit = await firstMediaItem(path);
+
+    expect(contentSpies.listPublic).toHaveBeenCalledTimes(1); // proves it hit
+    expect(miss.thumbnailUrl).toBeNull();
+    expect(hit.thumbnailUrl).toBe(`${R2_PUBLIC_URL_BASE}/${THUMB_KEY}`);
   });
 
   it('no base at all yields nulls, never a raw R2 key on the wire', async () => {
@@ -591,7 +604,7 @@ describe('the anonymous media item carries no internal column (Codex-ve5eh)', ()
     }
   });
 
-  it('a KV cache HIT serves the same narrowed item, because the slot holds it', async () => {
+  it('a KV cache HIT serves the same narrowed item, built from the cached row', async () => {
     await dispatch(`/api/content/public?orgId=${ORG_ID}`);
     const hit = await dispatch(`/api/content/public?orgId=${ORG_ID}`);
 
