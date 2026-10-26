@@ -47,7 +47,6 @@ import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
 import type {
   Category,
   CourseSubscriptionPlan,
-  MediaItem,
   ServedMediaItem,
 } from '@codex/database/schema';
 import type { AvatarUploadResponse } from '@codex/identity';
