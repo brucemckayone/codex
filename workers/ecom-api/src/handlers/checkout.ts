@@ -28,6 +28,7 @@ import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
 import {
+  describeRootCause,
   isTransientError,
   rethrowIfTransient,
   settleAfterCommit,
@@ -352,7 +353,9 @@ async function recordSessionPaid(
  * partial refund that arrived first, still sends it once. A purchase refunded
  * in full first gets none. A failed claim a retry can fix is rethrown, so
  * Stripe redelivers and the redelivery claims it; any other is logged and
- * the receipt is not sent.
+ * the receipt is not sent. That line is the receipt's only trace, so it
+ * carries the root cause: the service's wrap says only "An unexpected error
+ * occurred", and handleError's own line has no purchaseId.
  */
 async function claimReceipt(
   purchaseService: { claimReceipt(purchaseId: string): Promise<boolean> },
@@ -368,8 +371,10 @@ async function claimReceipt(
   } catch (error) {
     if (isTransientError(error)) throw error;
     obs?.error('Purchase receipt could not be claimed, so it was not sent', {
+      errorId: crypto.randomUUID(),
       purchaseId,
       error: error instanceof Error ? error.message : String(error),
+      cause: describeRootCause(error),
     });
     return false;
   }

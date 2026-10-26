@@ -4604,8 +4604,9 @@ export class SubscriptionService extends BaseService {
    * organisation plus the payee's orgless rows (`null`: orgless only).
    *
    * Platform-side failures (a short balance, a bad key) are each a warning
-   * and ONE error for the run (Codex-r094t): this drain's, or the sweep's
-   * when it passes `sweepFailures`, which it then reports itself.
+   * and ONE error for the run, raised at its first (Codex-r094t): this
+   * drain's run, or the sweep's when it passes `sweepFailures`, which then
+   * logs the run's summary itself.
    */
   private async drainPayee(
     stripeAccountId: string,
@@ -6226,7 +6227,7 @@ export class SubscriptionService extends BaseService {
     let groupsSkipped = 0;
     let errors = 0;
     // A short platform balance fails every payee's rows alike: one error for
-    // the sweep, not one per payee (Codex-r094t).
+    // the sweep, at its first failure, not one per payee (Codex-r094t).
     const platformFailures = platformFailureTally();
 
     if (groupsScanned === 0) {

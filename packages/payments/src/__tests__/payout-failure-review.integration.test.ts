@@ -464,12 +464,34 @@ describe('payouts Stripe keeps refusing wait for support', () => {
   });
 
   // Codex-r094t: with 200 owed rows, an error per row per drain buried the
-  // one line a person needs.
-  it("in a drain, three rows failing on the platform side are three warnings and ONE error with the run's count, pence and codes", async () => {
+  // one line a person needs. The one error comes at the FIRST failure, so a
+  // run the runtime cuts short still alerts.
+  it("in a drain, three rows failing on the platform side are ONE error at the first, three warnings, and a summary with the run's count, pence and codes", async () => {
     const ids = [await failedRow(), await failedRow(), await failedRow()];
     const tally = platformFailureTally();
+    const [first, ...rest] = ids;
+    if (!first) throw new Error('no first row');
 
-    for (const id of ids) {
+    await recordTransferFailure(
+      deps,
+      attemptOn(first),
+      balanceInsufficient(),
+      context,
+      tally
+    );
+    // The first failure raises the run's error, with its code and message.
+    expect(obs.error).toHaveBeenCalledOnce();
+    expect(obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('failing on the platform side'),
+      expect.objectContaining({
+        errorId: tally.errorId,
+        payoutId: first,
+        code: 'balance_insufficient',
+        error: 'StripeInvalidRequestError balance_insufficient',
+      })
+    );
+
+    for (const id of rest) {
       await recordTransferFailure(
         deps,
         attemptOn(id),
@@ -478,8 +500,8 @@ describe('payouts Stripe keeps refusing wait for support', () => {
         tally
       );
     }
-    // Each row, at warn, with the run's errorId: no error yet.
-    expect(obs.error).not.toHaveBeenCalled();
+    // Still one error; each row, at warn, with the run's errorId.
+    expect(obs.error).toHaveBeenCalledOnce();
     expect(obs.warn).toHaveBeenCalledTimes(3);
     for (const [, fields] of obs.warn.mock.calls) {
       expect(fields).toMatchObject({
@@ -488,17 +510,19 @@ describe('payouts Stripe keeps refusing wait for support', () => {
       });
     }
 
-    // The drain's one report.
+    // The end of the run: a summary at warn, under the same errorId.
     reportPlatformFailures(deps, tally, context);
 
     expect(obs.error).toHaveBeenCalledOnce();
-    expect(obs.error).toHaveBeenCalledWith(
-      expect.stringContaining('failed on the platform side'),
+    expect(obs.warn).toHaveBeenCalledTimes(4);
+    expect(obs.warn).toHaveBeenLastCalledWith(
+      expect.stringContaining('failed on the platform side this run'),
       expect.objectContaining({
         errorId: tally.errorId,
         count: 3,
         totalCents: 2700,
         codes: ['balance_insufficient'],
+        error: 'StripeInvalidRequestError balance_insufficient',
       })
     );
     // As outside a drain: no attempt used, never flagged, still drainable.
@@ -528,6 +552,52 @@ describe('payouts Stripe keeps refusing wait for support', () => {
 
     expect(tally.count).toBe(0);
     expect(obs.error).not.toHaveBeenCalled();
+    // The outage row's own warning, and no summary.
+    expect(obs.warn).toHaveBeenCalledOnce();
+  });
+
+  // A `platform` failure also covers a fault that is not Stripe's, with code
+  // `unknown`: only the message says what it was, so both run lines carry the
+  // FIRST row's.
+  it("the run's error and its summary carry the first row's message, not a later row's", async () => {
+    const [first, second] = [await failedRow(), await failedRow()];
+    if (!first || !second) throw new Error('rows not inserted');
+    const tally = platformFailureTally();
+
+    await recordTransferFailure(
+      deps,
+      attemptOn(first),
+      new TypeError('payout amount is not a number'),
+      context,
+      tally
+    );
+    await recordTransferFailure(
+      deps,
+      attemptOn(second),
+      balanceInsufficient(),
+      context,
+      tally
+    );
+    reportPlatformFailures(deps, tally, context);
+
+    expect(obs.error).toHaveBeenCalledOnce();
+    expect(obs.error).toHaveBeenCalledWith(
+      expect.stringContaining('failing on the platform side'),
+      expect.objectContaining({
+        errorId: tally.errorId,
+        code: 'unknown',
+        error: 'payout amount is not a number',
+      })
+    );
+    expect(obs.warn).toHaveBeenLastCalledWith(
+      expect.stringContaining('failed on the platform side this run'),
+      expect.objectContaining({
+        errorId: tally.errorId,
+        count: 2,
+        codes: ['balance_insufficient', 'unknown'],
+        error: 'payout amount is not a number',
+      })
+    );
   });
 
   it('a flagged row is still owed: a refund cancels it', async () => {
@@ -830,26 +900,27 @@ describe('payouts Stripe keeps refusing wait for support', () => {
       vi.mocked(stripe.transfers.createReversal).mockRejectedValueOnce(
         stripeError({ type: 'StripeInvalidRequestError', statusCode: 400 })
       );
+      const refundId = `re_review_${crypto.randomUUID().slice(0, 12)}`;
       await reverseCharge(deps, {
         charge: { id: stripeChargeId, amountCents: 900 },
         source: { sourceType: 'subscription' },
-        refunds: [
-          {
-            id: `re_review_${crypto.randomUUID().slice(0, 12)}`,
-            amountCents: 900,
-            createdAt: 1,
-          },
-        ],
+        refunds: [{ id: refundId, amountCents: 900, createdAt: 1 }],
       });
       const steps = await db
         .select()
         .from(payoutReversals)
         .where(eq(payoutReversals.payoutId, row.id));
-      return { payoutId: row.id, transferId: transfer.id, steps };
+      return {
+        payoutId: row.id,
+        transferId: transfer.id,
+        chargeId: stripeChargeId,
+        refundId,
+        steps,
+      };
     }
 
-    it('the transfer is reversed in full already: the step is done, and the row records its transfer, reversed', async () => {
-      const { payoutId, transferId, steps } =
+    it('the transfer is reversed in full already: the step is done, logged at warn, and the row records its transfer, reversed', async () => {
+      const { payoutId, transferId, chargeId, refundId, steps } =
         await cancelledByRefundWithLandedTransfer(true);
 
       expect(stripe.transfers.createReversal).toHaveBeenCalledOnce();
@@ -862,6 +933,19 @@ describe('payouts Stripe keeps refusing wait for support', () => {
         stripeTransferId: transferId,
       });
       expect(obs.error).not.toHaveBeenCalled();
+      // The step holds no reversal id: only this line says the transfer
+      // landed and came back, rather than never reaching the slice.
+      expect(obs.warn).toHaveBeenCalledWith(
+        expect.stringContaining('already reversed in full'),
+        expect.objectContaining({
+          chargeId,
+          refundId,
+          payoutId,
+          payoutReversalId: steps[0]?.id,
+          stripeTransferId: transferId,
+          error: expect.stringContaining('StripeInvalidRequestError'),
+        })
+      );
     });
 
     it('a refused reversal of a transfer still out leaves the step failed for the hourly retry, as before', async () => {

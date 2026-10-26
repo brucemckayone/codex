@@ -201,6 +201,45 @@ const emailDate = new Intl.DateTimeFormat('en-GB', {
 const notTheActiveOwner = () =>
   sql`not (${organizationMemberships.role} = 'owner' and ${organizationMemberships.status} = 'active')`;
 
+/** How far down a cause chain to look (and the guard against a cycle). */
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * The innermost error under `error`, for a log line: its name, its message
+ * and the deepest string `code` on the way down (a SQLSTATE or socket code).
+ * Drizzle wraps a failed query in an error whose message is the SQL and its
+ * bound values; the driver's error under it says what went wrong. A
+ * `Failed query:` message is never logged. The same reading as payments'
+ * clawback `rootCauseOf` and ecom-api's `describeRootCause`.
+ */
+function rootCauseOf(error: unknown): {
+  errorName: string;
+  errorMessage: string;
+  code: string | undefined;
+} {
+  let current: unknown = error;
+  let code: string | undefined;
+  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+    if (!(current instanceof Error)) break;
+    const own = (current as { code?: unknown }).code;
+    if (typeof own === 'string') code = own;
+    const inner =
+      current.cause ?? (current as { sourceError?: unknown }).sourceError;
+    if (!(inner instanceof Error)) break;
+    current = inner;
+  }
+  if (!(current instanceof Error)) {
+    return { errorName: typeof current, errorMessage: String(current), code };
+  }
+  return {
+    errorName: current.name,
+    errorMessage: current.message.startsWith('Failed query:')
+      ? '(query omitted)'
+      : current.message,
+    code,
+  };
+}
+
 export class OrganizationService extends BaseService {
   /**
    * Narrowed `logoUrl` schema, bound to this worker's asset CDN base.
@@ -993,9 +1032,10 @@ export class OrganizationService extends BaseService {
               this.obs.error(
                 'Ownership offer read failed; membership answered without it',
                 {
+                  errorId: crypto.randomUUID(),
                   organizationId,
                   userId,
-                  error: error instanceof Error ? error.message : String(error),
+                  ...rootCauseOf(error),
                 }
               );
               return null;

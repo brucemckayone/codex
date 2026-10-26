@@ -108,12 +108,14 @@ case "$WORKER" in
     # step runs, so an abort would leave its new code on stale secrets and skip
     # every worker deployed after it. Unset is a warning; any other value an
     # error and not sent. A bpc_ id carries no live/test mode, so there is no
-    # mode check like admin-api's.
+    # mode check like admin-api's. The whole value must be bpc_ and letters or
+    # digits: a prefix glob let a trailing space or a quote through, which the
+    # JSON below carries to ecom-api and the portal then refuses.
     PORTAL_JSON=""
     if [ -z "${STRIPE_PORTAL_CONFIGURATION_ID:-}" ]; then
       echo "::warning title=ecom-api portal config::STRIPE_PORTAL_CONFIGURATION_ID is not set: ecom-api's value is left as it is, and the billing portal refuses to open without one"
-    elif [[ "$STRIPE_PORTAL_CONFIGURATION_ID" != bpc_* ]]; then
-      echo "::error title=ecom-api portal config::STRIPE_PORTAL_CONFIGURATION_ID does not start with bpc_: not uploaded, ecom-api's value is left as it is"
+    elif [[ ! "$STRIPE_PORTAL_CONFIGURATION_ID" =~ ^bpc_[A-Za-z0-9]+$ ]]; then
+      echo "::error title=ecom-api portal config::STRIPE_PORTAL_CONFIGURATION_ID is not a bpc_ id (bpc_ then letters and digits only): not uploaded, ecom-api's value is left as it is"
     else
       PORTAL_JSON=",
   \"STRIPE_PORTAL_CONFIGURATION_ID\":\"${STRIPE_PORTAL_CONFIGURATION_ID}\""

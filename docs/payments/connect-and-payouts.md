@@ -405,7 +405,7 @@ failed (`classifyTransferFailure` in `packages/payments/src/payout-ledger.ts`):
 | Failure | Uses an attempt | What happens |
 |---|---|---|
 | Stripe could not answer: a connection error, a 5xx, a rate limit, a lock or key conflict | No | Retried by the next drain; a warning |
-| The platform's side: `balance_insufficient`, the platform's keys or Connect setup, or a fault of ours | No | Retried by the next drain. A warning per row and **one error per drain run** (for the hourly sweep, one per sweep), with the run's errorId, row count, total pence and codes, because a person may need to act (top up the balance, fix a key). The write path's own attempt is an error at once (`Codex-r094t`) |
+| The platform's side: `balance_insufficient`, the platform's keys or Connect setup, or a fault of ours | No | Retried by the next drain. A warning per row and **one error per drain run** (for the hourly sweep, one per sweep), because a person may need to act (top up the balance, fix a key). The error is raised at the run's first platform failure, with its errorId, code and message, so a run cut short still alerts; the end of the run logs a summary at warn under the same errorId (row count, total pence, codes, the first message). The write path's own attempt is an error at once (`Codex-r094t`) |
 | A refusal no retry can fix: `transfers_not_allowed`, or `resource_missing` on the `destination` (the payee's account no longer exists) | No | **Flagged at once** |
 | Any other refusal | Yes (`failure_count`) | Retried; the **fifth** (`MAX_PAYOUT_FAILURES`, the same cap as refund clawbacks) flags it |
 

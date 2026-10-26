@@ -1325,9 +1325,22 @@ async function reverseTransfer(
     ) {
       // The late transfer's own settle found it too and reversed it first
       // (Codex-pqsfg). Stripe refuses a second full reversal, but the money is
-      // back, so the step is done, whoever reversed it.
+      // back, so the step is done, whoever reversed it. Logged as
+      // settleTransfer's twin branch is: the step records no reversal id, so
+      // without this line it reads like a slice no transfer ever reached.
       await markDone(deps, record);
       await recordCancelledSliceReversed(deps, row, transferId);
+      deps.obs.warn(
+        `${causeLabel(cause)} clawback: the late transfer was already reversed in full, so the step is done`,
+        {
+          chargeId: charge.id,
+          ...causeFields(cause),
+          payoutId: row.id,
+          payoutReversalId: record.id,
+          stripeTransferId: transferId,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
       return {};
     }
     const code = errorCodeOf(error);

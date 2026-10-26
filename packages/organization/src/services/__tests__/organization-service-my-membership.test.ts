@@ -106,11 +106,45 @@ describe('OrganizationService.getMyMembership', () => {
     expect(error).toHaveBeenCalledWith(
       'Ownership offer read failed; membership answered without it',
       {
+        errorId: expect.any(String),
         organizationId: ORG_ID,
         userId: USER_ID,
-        error: 'offer read boom',
+        errorName: 'Error',
+        errorMessage: 'offer read boom',
+        code: undefined,
       }
     );
+  });
+
+  it("a failed offer read logs the driver's error under drizzle's wrapper, never the query", async () => {
+    // drizzle 0.44 throws a plain-named Error whose message is the SQL and
+    // every bound value; its cause is the driver's error.
+    const dropped = Object.assign(new Error('Connection terminated'), {
+      code: '08006',
+    });
+    const { service, error } = makeService({
+      offerError: Object.assign(
+        new Error(`Failed query: select 1\nparams: ${ORG_ID},${USER_ID}`),
+        { cause: dropped }
+      ),
+    });
+
+    const result = await service.getMyMembership(ORG_ID, USER_ID);
+
+    expect(result.pendingOwnershipOffer).toBeNull();
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(
+      'Ownership offer read failed; membership answered without it',
+      {
+        errorId: expect.any(String),
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        errorName: 'Error',
+        errorMessage: 'Connection terminated',
+        code: '08006',
+      }
+    );
+    expect(JSON.stringify(error.mock.calls)).not.toContain('Failed query');
   });
 
   it('a failed membership read still throws, and the offer is never read', async () => {

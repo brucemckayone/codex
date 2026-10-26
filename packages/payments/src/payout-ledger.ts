@@ -1181,15 +1181,24 @@ export interface TransferAttempt {
  * A drain run's platform-side failures (Codex-r094t). A short platform
  * balance fails every owed row on every drain: logged at error per row, 200
  * rows made 200 error lines an hour and buried the one a person needs. Given
- * a tally, `recordTransferFailure` logs each row at warn with the run's
- * errorId, and the drain reports the run once (`reportPlatformFailures`).
+ * a tally, `recordTransferFailure` logs the run's ONE error at its first
+ * platform failure and each row at warn, all with the run's errorId, and the
+ * drain ends with a summary at warn (`reportPlatformFailures`).
+ *
+ * The error comes at the first failure, not the end: a run the runtime cuts
+ * short (a CPU limit, an eviction, a deploy) would otherwise leave only warns.
  */
 export interface PlatformFailureTally {
-  /** The run's errorId: on each row's warning, and on its one error. */
+  /** The run's errorId: on its one error, each row's warning and the summary. */
   readonly errorId: string;
   count: number;
   totalCents: number;
   codes: Set<string>;
+  /**
+   * The first row's error message. A `platform` failure also covers a fault
+   * that is not Stripe's (code `unknown`), and only the message says which.
+   */
+  firstError: string | undefined;
 }
 
 export function platformFailureTally(): PlatformFailureTally {
@@ -1198,24 +1207,29 @@ export function platformFailureTally(): PlatformFailureTally {
     count: 0,
     totalCents: 0,
     codes: new Set(),
+    firstError: undefined,
   };
 }
 
-/** One error for a drain run's platform-side failures, if it had any. */
+/**
+ * The summary of a drain run's platform-side failures, if it had any: at
+ * warn, under the errorId of the error its first failure raised.
+ */
 export function reportPlatformFailures(
   deps: Pick<LedgerDeps, 'obs'>,
   tally: PlatformFailureTally,
   context: Record<string, unknown>
 ): void {
   if (tally.count === 0) return;
-  deps.obs.error(
-    'Payout transfers failed on the platform side; they are retried, but a person must act',
+  deps.obs.warn(
+    'Payout transfers failed on the platform side this run; they are retried, and its first failure raised the error',
     {
       errorId: tally.errorId,
       ...context,
       count: tally.count,
       totalCents: tally.totalCents,
       codes: [...tally.codes].sort(),
+      error: tally.firstError,
     }
   );
 }
@@ -1241,9 +1255,9 @@ function mayHaveLanded(failure: TransferFailure): boolean {
  * - flagged for support by this failure: ONE error, with an errorId;
  * - the platform's side (`balance_insufficient`, keys, setup, or a fault of
  *   ours), as a person must act: given a drain's `platformFailures`, a
- *   warning with the run's errorId, added to the tally the drain reports
- *   once; without one (the write path's own attempt), an error with an
- *   errorId;
+ *   warning with the run's errorId, added to its tally, and the run's one
+ *   error if it is the run's first; without one (the write path's own
+ *   attempt), an error with an errorId;
  * - anything else (an outage, a refusal below the cap): a warning, as the
  *   drains retry it.
  *
@@ -1313,8 +1327,15 @@ export async function recordTransferFailure(
     platformFailures.count++;
     platformFailures.totalCents += attempt.amountCents;
     platformFailures.codes.add(failure.code);
+    if (platformFailures.count === 1) {
+      platformFailures.firstError = message;
+      deps.obs.error(
+        'Payout transfers are failing on the platform side; they are retried, but a person must act',
+        { errorId: platformFailures.errorId, ...fields }
+      );
+    }
     deps.obs.warn(
-      'A payout transfer failed on the platform side; it is retried, and the drain reports it once',
+      'A payout transfer failed on the platform side; it is retried, under the one error of its run',
       { errorId: platformFailures.errorId, ...fields }
     );
     return null;

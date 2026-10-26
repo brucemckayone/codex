@@ -6,7 +6,7 @@
  *   - the delete hits the key the policy reader reads (`membershipCacheKey`);
  *   - a failed delete is LOGGED with the org and user ids and never thrown
  *     (it was an empty catch: an ex-owner kept their cached role for up to
- *     the 60s TTL with no trace);
+ *     the 60s TTL with no trace), even when the caller's `obs` is undefined;
  *   - `invalidateMemberCaches` busts all three: the membership entry, the
  *     org's slug-keyed public caches, and the user's library.
  *
@@ -16,7 +16,7 @@
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
-import type { ObservabilityClient } from '@codex/observability';
+import { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -123,10 +123,35 @@ describe('invalidateMembershipCache', () => {
     });
   });
 
+  // `ctx.obs` is typed `ObservabilityClient | undefined`: an undefined one
+  // must not bring the empty catch back.
+  it('a failed delete with no obs is still logged, through a client of its own', async () => {
+    const { kv } = makeKv(new Error('KV unavailable'));
+    const { ctx, drain } = makeCtx(kv);
+    const ownWarn = vi
+      .spyOn(ObservabilityClient.prototype, 'warn')
+      .mockImplementation(() => {});
+
+    try {
+      invalidateMembershipCache(ctx, ORG_ID, USER_ID, undefined);
+      await drain();
+
+      expect(ownWarn).toHaveBeenCalledTimes(1);
+      expect(ownWarn).toHaveBeenCalledWith('cache: membership delete failed', {
+        orgId: ORG_ID,
+        userId: USER_ID,
+        error: 'KV unavailable',
+      });
+    } finally {
+      ownWarn.mockRestore();
+    }
+  });
+
   it('does nothing without a CACHE_KV binding', () => {
     const { ctx, pending } = makeCtx(undefined);
+    const { obs } = makeObs();
 
-    invalidateMembershipCache(ctx, ORG_ID, USER_ID);
+    invalidateMembershipCache(ctx, ORG_ID, USER_ID, obs);
 
     expect(pending).toHaveLength(0);
   });

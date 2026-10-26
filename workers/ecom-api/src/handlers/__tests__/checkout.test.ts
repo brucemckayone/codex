@@ -17,6 +17,7 @@ import { CURRENCY } from '@codex/constants';
 import {
   AfterCommitError,
   UnsupportedCurrencyError,
+  wrapError,
 } from '@codex/service-errors';
 import {
   createMockHonoContext,
@@ -1137,6 +1138,47 @@ describe('handleCheckoutCompleted', () => {
       expect(mock._obs.error).toHaveBeenCalledWith(
         'Purchase receipt could not be claimed, so it was not sent',
         expect.objectContaining({ purchaseId: 'purchase_123' })
+      );
+    });
+
+    // The receipt is lost by design here, so this line is its only trace.
+    // The service's handleError wraps the failure as "An unexpected error
+    // occurred", and drizzle's own message is the SQL and its bound values.
+    it("a failed claim's log carries an errorId and the driver's root cause, never the query", async () => {
+      const missingColumn = Object.assign(
+        new Error('column "receipt_sent_at" does not exist'),
+        { code: '42703' }
+      );
+      mockClaimReceipt.mockRejectedValueOnce(
+        wrapError(
+          Object.assign(
+            new Error('Failed query: update "purchases"\nparams: purchase_123'),
+            { cause: missingColumn }
+          )
+        )
+      );
+      const { context, mock } = createContext();
+
+      await handleCheckoutCompleted(
+        paidBy(sessions[0][1]),
+        mockStripe,
+        context
+      );
+
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Purchase receipt could not be claimed, so it was not sent',
+        expect.objectContaining({
+          errorId: expect.any(String),
+          purchaseId: 'purchase_123',
+          cause: {
+            name: 'Error',
+            message: 'column "receipt_sent_at" does not exist',
+            code: '42703',
+          },
+        })
+      );
+      expect(JSON.stringify(mock._obs.error.mock.calls)).not.toContain(
+        'Failed query'
       );
     });
   });
