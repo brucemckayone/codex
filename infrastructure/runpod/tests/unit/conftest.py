@@ -29,12 +29,6 @@ def mock_upload_file():
 
 
 @pytest.fixture
-def mock_upload_directory():
-    with patch("handler.main.upload_directory") as mock:
-        yield mock
-
-
-@pytest.fixture
 def mock_upload_directory_tracked():
     # The handler uploads HLS output via upload_directory_tracked (returns the
     # list of (client, bucket, key) tuples used for failure cleanup).

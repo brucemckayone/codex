@@ -514,30 +514,6 @@ def upload_file(
     )
 
 
-def upload_directory(client: Any, bucket: str, key_prefix: str, local_dir: str) -> None:
-    """Upload all files in a directory to S3-compatible storage."""
-    for root, _, files in os.walk(local_dir):
-        for filename in files:
-            local_path = os.path.join(root, filename)
-            relative_path = os.path.relpath(local_path, local_dir)
-            key = f"{key_prefix}{relative_path}"
-
-            # Determine content type
-            content_type = None
-            if filename.endswith(".m3u8"):
-                content_type = "application/vnd.apple.mpegurl"
-            elif filename.endswith(".ts"):
-                content_type = "video/MP2T"
-            elif filename.endswith(".json"):
-                content_type = "application/json"
-            elif filename.endswith(".png"):
-                content_type = "image/png"
-            elif filename.endswith(".jpg") or filename.endswith(".jpeg"):
-                content_type = "image/jpeg"
-
-            upload_file(client, bucket, key, local_path, content_type)
-
-
 def upload_directory_tracked(
     client: Any, bucket: str, key_prefix: str, local_dir: str
 ) -> list[tuple[Any, str, str]]:
@@ -1483,29 +1459,6 @@ def create_preview(
         "preview",
         timeout=120,
     )
-
-
-def extract_thumbnail(input_path: str, output_path: str, duration: int) -> None:
-    """Extract thumbnail at 10% mark."""
-    print("Extracting thumbnail...")
-
-    timestamp = max(1, int(duration * 0.1))
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-ss",
-        str(timestamp),
-        "-i",
-        input_path,
-        "-vframes",
-        "1",
-        "-q:v",
-        "2",
-        output_path,
-    ]
-
-    run_ffmpeg(cmd, timeout=60, description="thumbnail extraction")
 
 
 # Poster sizes, by width: lossy libwebp, each at min(width, the picture's

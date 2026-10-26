@@ -206,7 +206,6 @@ def test_handler_audio_flow(
     mock_s3_client,
     mock_download_file,
     mock_upload_file,
-    mock_upload_directory,
     mock_subprocess,
     mock_requests,
     mock_check_gpu,
