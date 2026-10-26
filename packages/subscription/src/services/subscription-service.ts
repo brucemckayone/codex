@@ -210,11 +210,34 @@ function endedAtStripeStatus(status: Stripe.Subscription.Status): boolean {
   return status === 'canceled' || status === 'incomplete_expired';
 }
 
-interface SubscriptionWithTier extends Subscription {
+/**
+ * The columns a subscriber's own reads ({@link SubscriptionService.getSubscription},
+ * {@link SubscriptionService.getUserSubscriptions}) leave out (Codex-mbs2l):
+ * the org's revenue-share terms, which is what the fee split is, and two
+ * internal bookkeeping fields. Every ecom route that returns these reads
+ * answers the subscriber, never the org. A `false` entry excludes that column
+ * and keeps the rest, so a column added later is read; `satisfies` catches a
+ * misspelt key, which drizzle would drop without a word.
+ */
+const SUBSCRIBER_HIDDEN_COLUMNS = {
+  platformFeeCents: false,
+  organizationFeeCents: false,
+  creatorPayoutCents: false,
+  duplicateOfSubscriptionId: false,
+  churnReason: false,
+} as const satisfies Partial<Record<keyof Subscription, false>>;
+
+/** A subscription as its subscriber reads it. */
+type SubscriberSubscription = Omit<
+  Subscription,
+  keyof typeof SUBSCRIBER_HIDDEN_COLUMNS
+>;
+
+interface SubscriptionWithTier extends SubscriberSubscription {
   tier: SubscriptionTier;
 }
 
-interface SubscriptionWithOrg extends Subscription {
+interface SubscriptionWithOrg extends SubscriberSubscription {
   tier: SubscriptionTier;
   organization: {
     id: string;
@@ -3702,13 +3725,15 @@ export class SubscriptionService extends BaseService {
   // ─── Queries ───────────────────────────────────────────────────────────────
 
   /**
-   * Get a user's current subscription for an org (with tier details).
+   * Get a user's current subscription for an org (with tier details), without
+   * the fee split ({@link SUBSCRIBER_HIDDEN_COLUMNS}).
    */
   async getSubscription(
     userId: string,
     orgId: string
   ): Promise<SubscriptionWithTier | null> {
     const result = await this.db.query.subscriptions.findFirst({
+      columns: SUBSCRIBER_HIDDEN_COLUMNS,
       where: and(
         eq(subscriptions.userId, userId),
         eq(subscriptions.organizationId, orgId),
@@ -3721,14 +3746,16 @@ export class SubscriptionService extends BaseService {
       with: { tier: true },
     });
 
-    return (result as SubscriptionWithTier) ?? null;
+    return result ?? null;
   }
 
   /**
-   * Get all of a user's active subscriptions across orgs.
+   * Get all of a user's active subscriptions across orgs, without the fee
+   * split ({@link SUBSCRIBER_HIDDEN_COLUMNS}).
    */
   async getUserSubscriptions(userId: string): Promise<SubscriptionWithOrg[]> {
     const results = await this.db.query.subscriptions.findMany({
+      columns: SUBSCRIBER_HIDDEN_COLUMNS,
       where: and(
         eq(subscriptions.userId, userId),
         inArray(subscriptions.status, [

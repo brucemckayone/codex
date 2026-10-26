@@ -171,6 +171,13 @@ touching `handleInvoicePaymentSucceeded`, `executeTransfers`,
   (`AlreadySubscribedError`) — and handle a duplicate that completes anyway.
 - **NEVER** process a webhook before the ecom-api worker has verified its
   signature.
+- **NEVER** send a subscriber the org's fee split. `getSubscription` and
+  `getUserSubscriptions` answer the subscriber (ecom-api `/subscriptions/current`,
+  `/mine`, and the change-tier/cancel/reactivate/resume responses), so both
+  exclude `SUBSCRIBER_HIDDEN_COLUMNS`: the three fee columns,
+  `duplicateOfSubscriptionId` and `churnReason` (owner, 2026-10-26,
+  Codex-mbs2l). Their org relation is the four display fields, never the
+  payee id (Codex-kk6zx).
 - Amounts in **pence (GBP)**, never USD.
 
 ## Integration

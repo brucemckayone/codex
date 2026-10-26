@@ -3102,6 +3102,38 @@ describe('SubscriptionService', () => {
     });
   });
 
+  // ─── Subscriber reads leave out the fee split (Codex-mbs2l) ────────
+
+  const SUBSCRIBER_HIDDEN_KEYS = [
+    'platformFeeCents',
+    'organizationFeeCents',
+    'creatorPayoutCents',
+    'duplicateOfSubscriptionId',
+    'churnReason',
+  ];
+
+  function expectNoSubscriberHiddenColumns(row: object) {
+    for (const key of SUBSCRIBER_HIDDEN_KEYS) {
+      expect(row).not.toHaveProperty(key);
+    }
+  }
+
+  // The row the read left them out of does hold them: the factory's split.
+  async function expectStoredFeeSplit(userId: string, orgId: string) {
+    const stored = await db.query.subscriptions.findFirst({
+      where: and(
+        eq(subscriptions.userId, userId),
+        eq(subscriptions.organizationId, orgId)
+      ),
+    });
+    expect(stored).toMatchObject({
+      platformFeeCents: 50,
+      organizationFeeCents: 67,
+      creatorPayoutCents: 382,
+      churnReason: 'other',
+    });
+  }
+
   // ─── getSubscription ──────────────────────────────────────────────
 
   describe('getSubscription', () => {
@@ -3123,6 +3155,24 @@ describe('SubscriptionService', () => {
       const { org } = await createFullOrg('get-null');
       const result = await service.getSubscription(thirdUserId, org.id);
       expect(result).toBeNull();
+    });
+
+    it("never sends the subscriber the org's fee split (Codex-mbs2l)", async () => {
+      const { org, tier1 } = await createFullOrg('get-sub-fees');
+      const subscriber = takeFirst(await seedTestUsers(db, 1), 'subscriber');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(subscriber, org.id, tier1.id, {
+          churnReason: 'other',
+        })
+      );
+
+      const result = await service.getSubscription(subscriber, org.id);
+
+      expect(result).not.toBeNull();
+      expectNoSubscriberHiddenColumns(result!);
+      // The calibration: the row holds a split, and the rest of it is read.
+      await expectStoredFeeSplit(subscriber, org.id);
+      expect(result!.amountCents).toBe(499);
     });
   });
 
@@ -3166,6 +3216,23 @@ describe('SubscriptionService', () => {
         'slug',
       ]);
       expect(mine!.organization.id).toBe(org.id);
+    });
+
+    it("never sends the subscriber the org's fee split (Codex-mbs2l)", async () => {
+      const { org, tier1 } = await createFullOrg('mine-fees');
+      const subscriber = takeFirst(await seedTestUsers(db, 1), 'subscriber');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(subscriber, org.id, tier1.id, {
+          churnReason: 'other',
+        })
+      );
+
+      const [mine] = await service.getUserSubscriptions(subscriber);
+
+      expect(mine).toBeDefined();
+      expectNoSubscriberHiddenColumns(mine!);
+      await expectStoredFeeSplit(subscriber, org.id);
+      expect(mine!.amountCents).toBe(499);
     });
   });
 
