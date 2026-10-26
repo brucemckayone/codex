@@ -1,7 +1,7 @@
 import { TRANSCODING_ERROR_MAX_LENGTH } from '@codex/constants';
 import { z } from 'zod';
 import { readStillFolderName } from '../image';
-import { uuidSchema } from '../primitives';
+import { creatorIdSchema, uuidSchema } from '../primitives';
 
 /**
  * Transcoding Validation Schemas
@@ -281,7 +281,7 @@ export const runpodProgressWebhookSchema = z.object({
   // creator's status shard; it never decides who sees it (the object shows a
   // tick only on the row it already holds). A value this can't take is
   // dropped rather than costing the tick; an older handler sends none.
-  creatorId: z.string().min(1).max(64).nullish().catch(undefined),
+  creatorId: creatorIdSchema.nullish().catch(undefined),
 });
 
 export type RunPodProgressWebhookPayload = z.infer<

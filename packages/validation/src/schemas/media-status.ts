@@ -10,7 +10,7 @@
 
 import { z } from 'zod';
 import { mediaStatusEnum } from '../content/content-schemas';
-import { uuidSchema } from '../primitives';
+import { creatorIdSchema, uuidSchema } from '../primitives';
 import { transcodingStepEnum } from './transcoding';
 
 /** Bumped when a message changes shape; a client drops other versions. */
@@ -27,12 +27,6 @@ export const MEDIA_STATUS_SUBPROTOCOL = 'media-status.v1';
  * URL: request URLs are logged, headers are not.
  */
 export const MEDIA_STATUS_TICKET_PROTOCOL_PREFIX = 'ticket.';
-
-/**
- * A creator, as `media_items.creator_id` holds it. users.id is text:
- * BetterAuth ids are alphanumeric, test users' are uuids.
- */
-const creatorIdSchema = z.string().min(1).max(64);
 
 // ============================================================================
 // Service → object
@@ -91,6 +85,9 @@ export const mediaStatusEventSchema = z.discriminatedUnion('event', [
 ]);
 
 export type MediaStatusEvent = z.infer<typeof mediaStatusEventSchema>;
+
+/** The object's /removed body: the Worker has already routed on the creator. */
+export const mediaStatusRemovedSchema = z.object({ mediaId: uuidSchema });
 
 // ============================================================================
 // Object ↔ studio tab

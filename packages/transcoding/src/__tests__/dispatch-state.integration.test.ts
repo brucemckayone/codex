@@ -415,7 +415,7 @@ describe.skipIf(!HAS_DB)('dispatch state machine (database)', () => {
             changes.push(change);
           },
           removed: vi.fn(),
-          progress: vi.fn(async () => true),
+          progress: vi.fn(async () => {}),
           resync: vi.fn(async () => {}),
         };
         const publishing = new TranscodingService({

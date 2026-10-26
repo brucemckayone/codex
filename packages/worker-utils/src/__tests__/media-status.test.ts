@@ -95,14 +95,20 @@ describe('deliverMediaStatusEvent', () => {
     ]);
   });
 
-  it('posts a removal', async () => {
+  it('posts a removal, routed on its creator', async () => {
     const { namespace, calls } = fakeNamespace();
     await deliverMediaStatusEvent(namespace, {
       event: 'removed',
       mediaId: change.mediaId,
       creatorId: change.creatorId,
     });
-    expect(calls[0]?.path).toBe(MEDIA_STATUS_OBJECT_PATHS.removed);
+    expect(calls).toEqual([
+      {
+        name: `media-status:${mediaStatusShardOf(change.creatorId)}`,
+        path: MEDIA_STATUS_OBJECT_PATHS.removed,
+        body: { mediaId: change.mediaId },
+      },
+    ]);
   });
 
   it('throws when the object refuses, for the caller to report', async () => {
@@ -132,12 +138,13 @@ describe('DurableObjectMediaStatusFeed', () => {
     );
   });
 
-  it('answers false for a tick the object did not take', async () => {
+  it('logs a tick the object did not take, and never rejects', async () => {
     const { namespace } = fakeNamespace(500);
+    const obs = fakeObs();
     const feed = new DurableObjectMediaStatusFeed(
       namespace,
       collector().waitUntil,
-      fakeObs()
+      obs
     );
     const tick = {
       mediaId: change.mediaId,
@@ -145,7 +152,13 @@ describe('DurableObjectMediaStatusFeed', () => {
       step: 'encoding_variants' as const,
       progress: 40,
     };
-    expect(await feed.progress(tick, change.creatorId)).toBe(false);
+    await expect(
+      feed.progress(tick, change.creatorId)
+    ).resolves.toBeUndefined();
+    expect(obs.warn).toHaveBeenCalledWith(
+      'media_status.progress_not_delivered',
+      expect.objectContaining({ mediaId: change.mediaId })
+    );
   });
 
   it('resyncs every shard, each with its own rows', async () => {

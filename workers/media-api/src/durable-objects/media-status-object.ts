@@ -50,6 +50,7 @@ import {
   mediaProgressTickSchema,
   mediaStatusChangeSchema,
   mediaStatusClientMessageSchema,
+  mediaStatusRemovedSchema,
   mediaStatusResyncSchema,
   type TranscodingStep,
 } from '@codex/validation';
@@ -72,11 +73,6 @@ const CLIENT_MESSAGE_INTERVAL_MS = 1_000;
 /** Close code for a socket whose session ended (4000-4999 are ours). */
 const SESSION_EXPIRED_CLOSE = 4401;
 
-const removedSchema = z.object({
-  mediaId: z.string().min(1),
-  creatorId: z.string().min(1),
-});
-
 interface Row extends Record<string, string | number | null> {
   media_id: string;
   creator_id: string;
@@ -87,8 +83,8 @@ interface Row extends Record<string, string | number | null> {
   step: string | null;
   progress: number | null;
   upload_pct: number | null;
+  /** Null with a % held: the uploading tab closed ("Upload stopped"). */
   upload_socket: string | null;
-  upload_stopped: number;
   retry_at: number | null;
   retries: number;
   version: number;
@@ -126,10 +122,56 @@ function itemState(row: Row, socketId: string): MediaItemState {
         : {
             pct: row.upload_pct,
             here: row.upload_socket === socketId,
-            stopped: row.upload_stopped === 1,
+            stopped: row.upload_socket === null,
           },
     retryAt: row.retry_at,
     version: row.version,
+  };
+}
+
+/** A change the held row already reflects. */
+function isSameChange(held: Row, change: MediaStatusChange): boolean {
+  return (
+    change.at === held.updated_at &&
+    held.lifecycle === change.lifecycle &&
+    held.error_code === change.errorCode &&
+    held.attempts === change.attempts &&
+    held.job_id === change.jobId
+  );
+}
+
+/** The row a change leaves. A new claim starts at 0; the job-id write keeps its ticks. */
+function nextRow(held: Row | null, change: MediaStatusChange): Row {
+  const transcoding = change.lifecycle === MEDIA_STATUS.TRANSCODING;
+  const uploading = change.lifecycle === MEDIA_STATUS.UPLOADING;
+  const sameJob =
+    held?.lifecycle === MEDIA_STATUS.TRANSCODING &&
+    (held.job_id === null || held.job_id === change.jobId);
+  const retries = held?.retries ?? 0;
+  let retryAt: number | null = null;
+  if (isWaitingForTranscoder(change.lifecycle, change.errorCode)) {
+    // An alarm already due keeps its time; a new wait takes the next delay.
+    retryAt =
+      held?.retry_at ??
+      (retries < RETRY_DELAYS_MS.length
+        ? Date.now() + RETRY_DELAYS_MS[retries]
+        : null);
+  }
+  return {
+    media_id: change.mediaId,
+    creator_id: change.creatorId,
+    lifecycle: change.lifecycle,
+    error_code: change.errorCode,
+    attempts: change.attempts,
+    job_id: change.jobId,
+    step: transcoding && sameJob ? (held?.step ?? null) : null,
+    progress: transcoding ? (sameJob ? (held?.progress ?? 0) : 0) : null,
+    upload_pct: uploading ? (held?.upload_pct ?? null) : null,
+    upload_socket: uploading ? (held?.upload_socket ?? null) : null,
+    retry_at: retryAt,
+    retries,
+    version: (held?.version ?? 0) + 1,
+    updated_at: change.at,
   };
 }
 
@@ -166,7 +208,6 @@ export class MediaStatusObject {
       progress INTEGER,
       upload_pct INTEGER,
       upload_socket TEXT,
-      upload_stopped INTEGER NOT NULL DEFAULT 0,
       retry_at INTEGER,
       retries INTEGER NOT NULL DEFAULT 0,
       version INTEGER NOT NULL,
@@ -198,7 +239,9 @@ export class MediaStatusObject {
           );
           return new Response(null, { status: 204 });
         case MEDIA_STATUS_OBJECT_PATHS.removed: {
-          const { mediaId } = removedSchema.parse(await request.json());
+          const { mediaId } = mediaStatusRemovedSchema.parse(
+            await request.json()
+          );
           await this.applyRemoved(mediaId);
           return new Response(null, { status: 204 });
         }
@@ -274,99 +317,55 @@ export class MediaStatusObject {
   // Writes
   // ==========================================================================
 
-  /** A guarded write's row. Older than what is held: ignored. */
+  /**
+   * A guarded write's row. Older than what is held: ignored. The same again
+   * (the hourly resync, a repeated delivery): nothing to tell anyone.
+   */
   async applyChange(change: MediaStatusChange): Promise<void> {
     const held = this.row(change.mediaId);
-    if (held && change.at < held.updated_at) return;
-
+    if (held && (change.at < held.updated_at || isSameChange(held, change))) {
+      return;
+    }
+    const row = nextRow(held, change);
     if (TERMINAL.has(change.lifecycle)) {
       // The final state goes out, then the row: nothing to keep.
-      this.broadcast({
-        ...(held ?? this.blankRow(change)),
-        lifecycle: change.lifecycle,
-        error_code: change.errorCode,
-        attempts: change.attempts,
-        job_id: change.jobId,
-        step: null,
-        progress: null,
-        upload_pct: null,
-        upload_socket: null,
-        upload_stopped: 0,
-        retry_at: null,
-        version: (held?.version ?? 0) + 1,
-        updated_at: change.at,
-      });
+      this.broadcast(row);
       this.state.storage.sql.exec(
         'DELETE FROM items WHERE media_id = ?',
         change.mediaId
       );
-      await this.rescheduleAlarm();
+      if ((held?.retry_at ?? null) !== null) await this.rescheduleAlarm();
       return;
     }
-
-    const sameJob =
-      held?.lifecycle === MEDIA_STATUS.TRANSCODING &&
-      (held.job_id === null || held.job_id === change.jobId);
-    const transcoding = change.lifecycle === MEDIA_STATUS.TRANSCODING;
-    const uploading = change.lifecycle === MEDIA_STATUS.UPLOADING;
-    const retries = held?.retries ?? 0;
-    let retryAt: number | null = null;
-    if (isWaitingForTranscoder(change.lifecycle, change.errorCode)) {
-      // An alarm already due keeps its time; a new wait takes the next delay.
-      retryAt =
-        held?.retry_at ??
-        (retries < RETRY_DELAYS_MS.length
-          ? Date.now() + RETRY_DELAYS_MS[retries]
-          : null);
-    }
-
-    const row: Row = {
-      ...(held ?? this.blankRow(change)),
-      creator_id: change.creatorId,
-      lifecycle: change.lifecycle,
-      error_code: change.errorCode,
-      attempts: change.attempts,
-      job_id: change.jobId,
-      // A new claim starts at 0; the job-id write keeps the ticks so far.
-      step: transcoding && sameJob ? (held?.step ?? null) : null,
-      progress: transcoding ? (sameJob ? (held?.progress ?? 0) : 0) : null,
-      upload_pct: uploading ? (held?.upload_pct ?? null) : null,
-      upload_socket: uploading ? (held?.upload_socket ?? null) : null,
-      upload_stopped: uploading ? (held?.upload_stopped ?? 0) : 0,
-      retry_at: retryAt,
-      retries,
-      version: (held?.version ?? 0) + 1,
-      updated_at: change.at,
-    };
     this.write(row);
     this.broadcast(row);
-    await this.rescheduleAlarm();
+    if ((held?.retry_at ?? null) !== row.retry_at) await this.rescheduleAlarm();
   }
 
   async applyRemoved(mediaId: string): Promise<void> {
     const held = this.row(mediaId);
-    if (!held) return;
-    this.state.storage.sql.exec(
-      'DELETE FROM items WHERE media_id = ?',
-      mediaId
-    );
-    this.broadcastRemoved(held);
-    await this.rescheduleAlarm();
+    if (held) await this.remove(held);
   }
 
+  /** A tick for the row's own job (or one not yet stored), when it moves. */
   applyProgress(tick: MediaProgressTick): void {
-    const held = this.row(tick.mediaId);
-    if (!held || held.lifecycle !== MEDIA_STATUS.TRANSCODING) return;
-    if (held.job_id !== null && held.job_id !== tick.jobId) return;
-    if (held.step === tick.step && held.progress === tick.progress) return;
-    const row: Row = {
-      ...held,
-      step: tick.step,
-      progress: tick.progress,
-      version: held.version + 1,
-    };
-    this.write(row);
-    this.broadcast(row);
+    const rows = this.state.storage.sql
+      .exec<Row>(
+        `UPDATE items SET step = ?, progress = ?, version = version + 1
+         WHERE media_id = ? AND lifecycle = ?
+           AND (job_id IS NULL OR job_id = ?)
+           AND (step IS NOT ? OR progress IS NOT ?)
+         RETURNING *`,
+        tick.step,
+        tick.progress,
+        tick.mediaId,
+        MEDIA_STATUS.TRANSCODING,
+        tick.jobId,
+        tick.step,
+        tick.progress
+      )
+      .toArray();
+    for (const row of rows) this.broadcast(row);
   }
 
   async applyResync({
@@ -382,8 +381,21 @@ export class MediaStatusObject {
       if (listed.has(held.media_id)) continue;
       if (held.updated_at > asOf - RESYNC_GRACE_MS) continue;
       // Terminal or deleted, and its publish was lost: the tab refetches.
-      await this.applyRemoved(held.media_id);
+      await this.remove(held);
     }
+  }
+
+  private async remove(held: Row): Promise<void> {
+    this.state.storage.sql.exec(
+      'DELETE FROM items WHERE media_id = ?',
+      held.media_id
+    );
+    this.toCreator(held.creator_id, () => ({
+      v: MEDIA_STATUS_PROTOCOL_VERSION,
+      type: 'removed',
+      mediaId: held.media_id,
+    }));
+    if (held.retry_at !== null) await this.rescheduleAlarm();
   }
 
   // ==========================================================================
@@ -414,24 +426,20 @@ export class MediaStatusObject {
     const upload = mediaStatusClientMessageSchema.safeParse(parsed);
     if (!upload.success) return;
 
-    const held = this.row(upload.data.mediaId);
     // Only the creator's own item, and only while it uploads.
-    if (
-      !held ||
-      held.creator_id !== attachment.creatorId ||
-      held.lifecycle !== MEDIA_STATUS.UPLOADING
-    ) {
-      return;
-    }
-    const row: Row = {
-      ...held,
-      upload_pct: upload.data.pct,
-      upload_socket: attachment.socketId,
-      upload_stopped: 0,
-      version: held.version + 1,
-    };
-    this.write(row);
-    this.broadcast(row);
+    const rows = this.state.storage.sql
+      .exec<Row>(
+        `UPDATE items SET upload_pct = ?, upload_socket = ?, version = version + 1
+         WHERE media_id = ? AND creator_id = ? AND lifecycle = ?
+         RETURNING *`,
+        upload.data.pct,
+        attachment.socketId,
+        upload.data.mediaId,
+        attachment.creatorId,
+        MEDIA_STATUS.UPLOADING
+      )
+      .toArray();
+    for (const row of rows) this.broadcast(row);
   }
 
   webSocketClose(ws: WebSocket, code: number, reason: string): void {
@@ -455,21 +463,14 @@ export class MediaStatusObject {
     if (!attachment) return;
     const rows = this.state.storage.sql
       .exec<Row>(
-        'SELECT * FROM items WHERE upload_socket = ? AND lifecycle = ?',
+        `UPDATE items SET upload_socket = NULL, version = version + 1
+         WHERE upload_socket = ? AND lifecycle = ?
+         RETURNING *`,
         attachment.socketId,
         MEDIA_STATUS.UPLOADING
       )
       .toArray();
-    for (const held of rows) {
-      const row: Row = {
-        ...held,
-        upload_socket: null,
-        upload_stopped: 1,
-        version: held.version + 1,
-      };
-      this.write(row);
-      this.broadcast(row);
-    }
+    for (const row of rows) this.broadcast(row);
   }
 
   // ==========================================================================
@@ -536,7 +537,6 @@ export class MediaStatusObject {
     },
     progress: async (tick) => {
       this.applyProgress(tick);
-      return true;
     },
     resync: (resync) => this.applyResync(resync),
   };
@@ -578,39 +578,18 @@ export class MediaStatusObject {
     return this.state.storage.sql.exec<Row>('SELECT * FROM items').toArray();
   }
 
-  private blankRow(change: MediaStatusChange): Row {
-    return {
-      media_id: change.mediaId,
-      creator_id: change.creatorId,
-      lifecycle: change.lifecycle,
-      error_code: null,
-      attempts: 0,
-      job_id: null,
-      step: null,
-      progress: null,
-      upload_pct: null,
-      upload_socket: null,
-      upload_stopped: 0,
-      retry_at: null,
-      retries: 0,
-      version: 0,
-      updated_at: change.at,
-    };
-  }
-
   private write(row: Row): void {
     this.state.storage.sql.exec(
       `INSERT INTO items (media_id, creator_id, lifecycle, error_code, attempts,
-         job_id, step, progress, upload_pct, upload_socket, upload_stopped,
-         retry_at, retries, version, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         job_id, step, progress, upload_pct, upload_socket, retry_at,
+         retries, version, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (media_id) DO UPDATE SET
          creator_id = excluded.creator_id, lifecycle = excluded.lifecycle,
          error_code = excluded.error_code, attempts = excluded.attempts,
          job_id = excluded.job_id, step = excluded.step,
          progress = excluded.progress, upload_pct = excluded.upload_pct,
-         upload_socket = excluded.upload_socket,
-         upload_stopped = excluded.upload_stopped, retry_at = excluded.retry_at,
+         upload_socket = excluded.upload_socket, retry_at = excluded.retry_at,
          retries = excluded.retries, version = excluded.version,
          updated_at = excluded.updated_at`,
       row.media_id,
@@ -623,7 +602,6 @@ export class MediaStatusObject {
       row.progress,
       row.upload_pct,
       row.upload_socket,
-      row.upload_stopped,
       row.retry_at,
       row.retries,
       row.version,
@@ -638,31 +616,26 @@ export class MediaStatusObject {
       : null;
   }
 
-  /** Every socket of the row's creator, each with its own `upload.here`. */
-  private broadcast(row: Row): void {
-    for (const ws of this.state.getWebSockets(creatorTag(row.creator_id))) {
+  /** One message to each of a creator's tabs, made for that tab. */
+  private toCreator(
+    creatorId: string,
+    message: (socketId: string) => MediaStatusServerMessage
+  ): void {
+    for (const ws of this.state.getWebSockets(creatorTag(creatorId))) {
       const socket = ws as unknown as WebSocket;
       const attachment = this.attachmentOf(socket);
-      if (!attachment) continue;
-      this.send(socket, attachment, {
-        v: MEDIA_STATUS_PROTOCOL_VERSION,
-        type: 'item',
-        item: itemState(row, attachment.socketId),
-      });
+      if (attachment)
+        this.send(socket, attachment, message(attachment.socketId));
     }
   }
 
-  private broadcastRemoved(row: Row): void {
-    for (const ws of this.state.getWebSockets(creatorTag(row.creator_id))) {
-      const socket = ws as unknown as WebSocket;
-      const attachment = this.attachmentOf(socket);
-      if (!attachment) continue;
-      this.send(socket, attachment, {
-        v: MEDIA_STATUS_PROTOCOL_VERSION,
-        type: 'removed',
-        mediaId: row.media_id,
-      });
-    }
+  /** A row to its creator's tabs, each with its own `upload.here`. */
+  private broadcast(row: Row): void {
+    this.toCreator(row.creator_id, (socketId) => ({
+      v: MEDIA_STATUS_PROTOCOL_VERSION,
+      type: 'item',
+      item: itemState(row, socketId),
+    }));
   }
 
   /** Send, unless the session has ended: then say so and close. */

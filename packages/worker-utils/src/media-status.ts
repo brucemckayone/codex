@@ -121,7 +121,7 @@ export async function deliverMediaStatusEvent(
   await postToObject(
     statusObjectFor(namespace, event.creatorId),
     MEDIA_STATUS_OBJECT_PATHS.removed,
-    { mediaId: event.mediaId, creatorId: event.creatorId }
+    { mediaId: event.mediaId }
   );
 }
 
@@ -165,21 +165,19 @@ export class DurableObjectMediaStatusFeed implements MediaStatusFeed {
   async progress(
     tick: MediaProgressTick,
     creatorId: string | null
-  ): Promise<boolean> {
+  ): Promise<void> {
     try {
       await postToObject(
         statusObjectFor(this.namespace, creatorId),
         MEDIA_STATUS_OBJECT_PATHS.progress,
         tick
       );
-      return true;
     } catch (error) {
       // Advisory: the next tick, or the completion, supersedes it.
       this.obs?.warn('media_status.progress_not_delivered', {
         mediaId: tick.mediaId,
         error: messageForLog(error),
       });
-      return false;
     }
   }
 

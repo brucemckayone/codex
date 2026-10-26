@@ -482,7 +482,7 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
         mediaStatus: {
           changed: vi.fn(),
           removed: vi.fn(),
-          progress: vi.fn(async () => true),
+          progress: vi.fn(async () => {}),
           resync,
         },
       });

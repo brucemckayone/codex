@@ -60,9 +60,7 @@ export {
 export {
   type MediaStatusFeed,
   type MediaStatusPublisher,
-  type MediaStatusRow,
   publishMediaStatus,
-  toMediaStatusChange,
 } from './media-status';
 // Path utilities (SINGLE SOURCE OF TRUTH for R2/B2 keys)
 export {

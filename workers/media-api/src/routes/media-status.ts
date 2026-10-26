@@ -102,15 +102,13 @@ async function connectAllowed(
   c: Context<HonoEnv>,
   claims: TicketClaims
 ): Promise<Response | null> {
-  let allowed = false;
+  // The middleware answers only when it refuses; a pass calls `next`.
   const refused = await rateLimit({
     preset: 'api',
     binding: c.env.RATE_LIMIT_API,
     subject: () => ({ kind: 'session', value: claims.creatorId }),
-  })(c, async () => {
-    allowed = true;
-  });
-  return allowed ? null : (refused ?? null);
+  })(c, async () => {});
+  return refused ?? null;
 }
 
 /** GET /api/media-status/live: verified here, accepted by the object. */

@@ -29,9 +29,9 @@ export interface MediaStatusFeed extends MediaStatusPublisher {
   /**
    * A progress webhook. The object is its only store (Postgres no longer
    * holds progress); a webhook without the creator routes to shard 0.
-   * Resolves false when the object could not be told.
+   * Never rejects: a lost tick is logged, and the next one supersedes it.
    */
-  progress(tick: MediaProgressTick, creatorId: string | null): Promise<boolean>;
+  progress(tick: MediaProgressTick, creatorId: string | null): Promise<void>;
   /** Every non-terminal row, for the objects to correct themselves against. */
   resync(resync: MediaStatusResync): Promise<void>;
 }

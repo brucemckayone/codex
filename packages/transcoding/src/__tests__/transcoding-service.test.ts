@@ -123,7 +123,6 @@ function recordingFeed() {
     removed: vi.fn(),
     progress: async (progressTick, creatorId) => {
       ticks.push({ tick: progressTick, creatorId });
-      return true;
     },
     resync: vi.fn(async () => {}),
   };

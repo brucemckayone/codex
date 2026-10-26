@@ -89,7 +89,6 @@ interface HeldRow {
   progress: number | null;
   upload_pct: number | null;
   upload_socket: string | null;
-  upload_stopped: number;
   retry_at: number | null;
   retries: number;
 }
@@ -250,6 +249,27 @@ describe('MediaStatusObject: who sees what', () => {
 });
 
 describe('MediaStatusObject: what it holds', () => {
+  it('tells no one of a change it already holds (the hourly resync)', async () => {
+    const a = creator();
+    const c = change({ creatorId: a, lifecycle: 'transcoding', jobId: 'j' });
+    await publish(c);
+    const tab = await openTab(a);
+    const version = snapshotOf(tab)[0]?.version;
+
+    await publish(c);
+    await post(MEDIA_STATUS_OBJECT_PATHS.resync, {
+      rows: [c],
+      asOf: Date.now(),
+      complete: false,
+    });
+    await settle();
+
+    expect(tab.messages.map((m) => m.type)).toEqual(['snapshot']);
+    await openTab(a).then((again) =>
+      expect(snapshotOf(again)[0]?.version).toBe(version)
+    );
+  });
+
   it('ignores a change older than the one it holds', async () => {
     const newer = change({ lifecycle: 'transcoding', jobId: 'job-1' });
     await publish(newer);
@@ -304,7 +324,6 @@ describe('MediaStatusObject: what it holds', () => {
 
     const res = await post(MEDIA_STATUS_OBJECT_PATHS.removed, {
       mediaId: c.mediaId,
-      creatorId: a,
     });
     expect(res.status).toBe(204);
     await vi.waitFor(() =>

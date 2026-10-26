@@ -14,6 +14,9 @@
  * secret itself as the key).
  */
 
+import { creatorIdSchema } from '@codex/validation';
+import { z } from 'zod';
+
 const TICKET_LIFETIME_MS = 60_000;
 const KEY_LABEL = 'media-status-ticket/v1';
 
@@ -23,12 +26,12 @@ export interface TicketClaims {
   sessionExpiresAt: number;
 }
 
-interface TicketPayload {
-  c: string;
-  s: number;
-  e: number;
-  n: string;
-}
+/** Creator, session expiry, ticket expiry. */
+const payloadSchema = z.object({
+  c: creatorIdSchema,
+  s: z.number(),
+  e: z.number(),
+});
 
 const encoder = new TextEncoder();
 
@@ -79,11 +82,10 @@ export async function mintTicket(
   now = Date.now()
 ): Promise<{ ticket: string; expiresAt: number }> {
   const expiresAt = now + TICKET_LIFETIME_MS;
-  const payload: TicketPayload = {
+  const payload: z.infer<typeof payloadSchema> = {
     c: claims.creatorId,
     s: claims.sessionExpiresAt,
     e: expiresAt,
-    n: crypto.randomUUID(),
   };
   const body = toBase64Url(encoder.encode(JSON.stringify(payload)));
   const signature = await crypto.subtle.sign(
@@ -119,21 +121,15 @@ export async function verifyTicket(
 
   const bytes = fromBase64Url(body);
   if (!bytes) return null;
-  let payload: Partial<TicketPayload>;
+  let decoded: unknown;
   try {
-    payload = JSON.parse(new TextDecoder().decode(bytes));
+    decoded = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     return null;
   }
-  if (
-    typeof payload.c !== 'string' ||
-    payload.c.length === 0 ||
-    typeof payload.s !== 'number' ||
-    typeof payload.e !== 'number' ||
-    payload.e <= now ||
-    payload.s <= now
-  ) {
+  const payload = payloadSchema.safeParse(decoded);
+  if (!payload.success || payload.data.e <= now || payload.data.s <= now) {
     return null;
   }
-  return { creatorId: payload.c, sessionExpiresAt: payload.s };
+  return { creatorId: payload.data.c, sessionExpiresAt: payload.data.s };
 }

@@ -10,6 +10,7 @@
  * - Typed error handling
  */
 
+import { updateMediaItemSchema } from '@codex/validation';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -88,11 +89,8 @@ export const createMedia = command(createMediaSchema, async (data) => {
 
 const updateMediaSchema = z.object({
   id: z.string().uuid(),
-  // What a creator may edit; content-api refuses any other field.
-  data: z.object({
-    title: z.string().min(1).max(255).optional(),
-    description: z.string().max(2000).optional().nullable(),
-  }),
+  // Content-api's own: it refuses any other field.
+  data: updateMediaItemSchema,
 });
 
 /**
