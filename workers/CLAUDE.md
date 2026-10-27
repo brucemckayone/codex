@@ -119,7 +119,7 @@ Create Draft → Upload Media → media-api Transcodes → Publish (requires med
 
 ### Purchase Flow
 ```
-User → /checkout/create (ecom-api) → Stripe → /webhooks/stripe/booking → Purchase + Access Grant → Stream
+User → /checkout/create (ecom-api) → Stripe → /webhooks/stripe/booking and the success page's /checkout/complete (one shared, idempotent completion) → Purchase + Access Grant → Stream
 ```
 
 ### Session Validation

@@ -237,13 +237,40 @@ effective dates (`Codex-2hxff.33`).
 
 ## Reporting
 
-Every screen that shows revenue uses the same rules as the split:
+Every screen that shows revenue uses the same rules as the split. The owner
+decided these on 2026-10-26: "Count everything now", "After refunds", "UTC,
+like the rest", "Only what's left" and "One row, real earnings".
 
-- the revenue headline includes every kind of revenue — one-off, course,
-  organisation subscriptions, course subscriptions and orgless sales — **gap**:
-  `Codex-2hxff.20` (Studio Billing counts one-off sales only);
-- a creator's share is shown as the share they actually have — **gap**:
-  `Codex-2hxff.20` (revenue by creator shows it inverted);
-- charts plot shares of the post-platform pool, using the fee actually
-  configured rather than a hard-coded 10% — **gap**: `Codex-2hxff.20`;
-- payout totals exclude the platform's own fee rows.
+- **The headline counts every kind of revenue.**
+  - It reads from the payouts ledger, so it covers one-off sales, courses,
+    organisation subscriptions and course plans.
+  - A per-kind line splits it: One-off · Courses · Subscriptions · Course
+    plans. The four sum to the headline.
+  - Each payment counts what the organisation keeps, after its standing
+    refunds and lost chargebacks.
+  - Each payment counts on the UTC day it was first recorded.
+- **Billing's "What Codex charged"** is the platform fee on every kind,
+  subscriptions included, less its share of those refunds. Purchases and
+  Average order stay sales-only (One-off and Courses), because a subscription
+  payment isn't an order.
+- **Charts** plot one point per UTC calendar day, oldest first, with empty
+  days as zero. This holds for the revenue, subscriber and follower series
+  alike.
+  - A "last N days" window covers exactly N days, today included.
+  - "Earned today" is today's UTC date.
+  - The dashboard's week-on-week change compares the last 7 days with the
+    7 before them.
+- **Revenue by creator** has one row per creator: Creator · Earned ·
+  Subscription share · Sales share · Last payout · Pending.
+  - **Earned** is their cut of the period's sales, sent or not, after refunds.
+    The Payouts page's "Earned" stays the money already sent, so the two can
+    differ.
+  - A creator with no agreement shows "None" for the shares, and a missing
+    share shows "—", never 0%.
+- **The share bar** plots only what's left after Codex's fee, with no fee
+  slice. It warns only when shares pass 100%: "Shares add up to 105% of
+  what's left after Codex's fee, 5% more than there is. Amend one or more
+  agreements." The creator's page shows the first sentence only.
+- **A read that fails says so.** It shows "We couldn't load …" with Retry, and
+  never £0 or an empty list.
+- Payout totals exclude the platform's own fee rows.

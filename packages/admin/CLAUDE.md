@@ -52,11 +52,15 @@ const service = new AdminAnalyticsService({ db, environment });
 
 | Method | Signature | Notes |
 |---|---|---|
-| `getRevenueStats` | `(organizationId: string, options?: RevenueQueryOptions)` | Aggregate revenue: total, platform fee, org fee, creator payout, avg order value, daily breakdown. Only `COMPLETED` purchases. Optional `startDate`/`endDate` filter. |
-| `getCustomerStats` | `(organizationId: string)` | Total unique customers + new customers in last `ANALYTICS.TREND_DAYS_DEFAULT` days. Uses CTE subquery. |
-| `getTopContent` | `(organizationId: string, options?)` | Revenue-ranked content list. Default limit from `DEFAULT_TOP_CONTENT_LIMIT` constant. |
+| `getRevenueStats` | `(organizationId: string, options?: RevenueQueryOptions)` | From the payouts ledger (`orgCharges`), every kind of payment: one-off, course, subscription and course-plan charges, each first recorded in the window, each counting what the buyer kept (standing refunds and lost chargebacks off; every slice off by its share, the clawback's rounding). `revenueByKind`; `platformFeeCents` on every kind; `organizationFeeCents` is the remainder; `totalPurchases` / `averageOrderValueCents` are sales only. Optional compare window → `previous`. |
+| `getSubscriberStats` / `getFollowerStats` | `(organizationId: string, options?)` | Active/new/churned, total/new, with a daily series. |
+| `getCustomerStats` | `(organizationId: string)` | Total unique customers, and customers whose first purchase was in the last 30 and the last 7 UTC calendar days (`newCustomersLast30Days`, `newCustomersLast7Days`). Uses CTE subquery. |
+| `getTopContent` | `(organizationId: string, options?)` | Revenue-ranked content list (purchases of content; courses and invoices have no row). Default limit from `DEFAULT_TOP_CONTENT_LIMIT` constant. |
+| `getRevenueByCreator` | `(organizationId: string, options?: CreatorRevenueQueryOptions)` | One row per creator with an active agreement, Earned in the window, or money owed: `earnedCents` (their `creator_payout` slices, every kind, after refunds; the owner pool is not a creator's cut), `subscriptionShare` / `salesShare` (`AgreementShare`: `none`, `unreadable`, or a display %), `lastPayoutAt`, `pendingPayoutCents` (owed, not yet sent: pending and failed rows, held ones included, less done `pending_reduction` steps; one org-scoped aggregate). |
 | `getRecentActivity` | `(organizationId: string, input: AdminActivityQueryInput)` | Paginated activity feed (purchases, etc.). |
 | `getDashboardStats` | `(organizationId: string, options?: DashboardStatsOptions)` | Combined dashboard summary. |
+
+Windows and days (`services/analytics-window.ts`, Codex-2hxff.75): every daily series is one entry per UTC calendar day, oldest first, zero-filled. An end date at exactly midnight UTC (a `YYYY-MM-DD`) is read through the end of that day; no start means the trailing `ANALYTICS.TREND_DAYS_DEFAULT` calendar days, today included. Readers take "today" by date, never `.slice(-1)`.
 
 ## `AdminContentManagementService`
 

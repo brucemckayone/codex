@@ -2,11 +2,14 @@
  * WP-10 Scenario 5 — Multi-creator pie math
  *
  * Three creators with subscription agreements at 30 / 20 / 10 % each
- * (60% total to creators, 10% platform fee, 30% org residual).
+ * (60% total to creators, 40% org residual), all of what's left after
+ * Codex's fee.
  *
- * The owner's revenue-share page renders a RevenueSplitPie with all
- * five slices (platform + 3 creators + org residual). The pie copy
- * explicitly references "post-platform" math (Decision Q1 / C1).
+ * The owner's revenue-share page renders a RevenueSplitPie with four
+ * slices (3 creators + org residual) and no fee slice: 100% is what's
+ * left after Codex's fee (owner decision 2026-10-26, "Only what's left";
+ * Codex-2hxff.20). The pie copy explicitly references "post-platform"
+ * math (Decision Q1 / C1).
  *
  * This spec exercises the full UI propose → accept flow per creator so
  * the resulting agreement set is real (no DB shortcuts). Each accept
@@ -108,7 +111,7 @@ test.describe('Agreements — Multi-creator pie math', () => {
         ).toBeVisible({ timeout: 10_000 });
       }
 
-      // ─── Pie reflects all three creators + platform + org residual ─
+      // ─── Pie reflects all three creators + org residual ─
       await ownerPage.goto(ownerRevenueSharePath(orgSlug), {
         waitUntil: 'load',
       });

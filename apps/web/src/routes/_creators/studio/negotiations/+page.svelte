@@ -18,11 +18,23 @@
   All share % copy explicitly says "of post-platform [type] revenue" per
   the C1 math semantic (see project_revenue_share_decisions.md).
   Currency GBP throughout.
+
+  A FAILED portfolio read is not an empty portfolio (Codex-2hxff.74, the .45
+  pattern). It used to say "No revenue-share agreements yet" to a creator
+  who holds agreements, and agreement emails send creators here (a decline,
+  and a terminate or review-date email with no thread to open). Now: "We
+  couldn't load your agreements." with Retry in place of every section, and
+  the raw error goes to the logger, never the DOM.
 -->
 <script lang="ts">
   import { browser } from '$app/environment';
   import AgreementShare from '$lib/components/agreements/AgreementShare.svelte';
+  import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
+  import { logger } from '$lib/observability';
+  import { queryErrorMessage } from '$lib/remote/query-result';
+  import { connectQueryState } from '$lib/utils/connect-readiness';
+  import * as m from '$paraglide/messages';
   import {
     acceptAgreement,
     declineAgreement,
@@ -36,8 +48,21 @@
   // ─── Data ─────────────────────────────────────────────────────────────────
   const portfolioQuery = $derived(browser ? getMyAgreementPortfolio() : null);
 
-  const portfolio = $derived(portfolioQuery?.current ?? null);
-  const isLoading = $derived(portfolioQuery?.loading ?? true);
+  // loading / failed / ok. `failed` is its own state, never "no agreements";
+  // a value survives a refresh, so a refresh does not flash the skeletons.
+  const portfolioState = $derived(connectQueryState(portfolioQuery));
+  const portfolio = $derived(
+    portfolioState.kind === 'ok' ? portfolioState.status : null
+  );
+  const isLoading = $derived(portfolioState.kind === 'loading');
+
+  $effect(() => {
+    if (portfolioState.kind === 'failed') {
+      logger.error('creator-studio/negotiations: portfolio failed to load', {
+        reason: queryErrorMessage(portfolioQuery?.error),
+      });
+    }
+  });
 
   const pendingActionRequired = $derived(portfolio?.pendingActionRequired ?? []);
   const pendingWaitingOnOrg = $derived(portfolio?.pendingWaitingOnOrg ?? []);
@@ -45,7 +70,7 @@
   const past = $derived(portfolio?.past ?? []);
 
   const isEmpty = $derived(
-    !isLoading &&
+    portfolioState.kind === 'ok' &&
       pendingActionRequired.length === 0 &&
       pendingWaitingOnOrg.length === 0 &&
       active.length === 0 &&
@@ -159,7 +184,19 @@
     </p>
   </header>
 
-  {#if isLoading}
+  <!-- Mounted unconditionally: it renders nothing until the read fails, and
+       its status line must persist to announce a Retry that loaded. -->
+  <LoadFailedAlert
+    query={portfolioQuery}
+    message={m.agreement_load_failed()}
+    againMessage={m.agreement_load_failed_again()}
+    loadedMessage={m.agreement_load_retry_ok()}
+    data-testid="portfolio-load-error"
+  />
+
+  {#if portfolioState.kind === 'failed'}
+    <!-- The alert above stands in for every section and its actions. -->
+  {:else if isLoading}
     <div class="negotiations-page__loading">
       <Skeleton width="100%" height="var(--space-24)" />
       <Skeleton width="100%" height="var(--space-24)" />

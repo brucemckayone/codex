@@ -16,6 +16,12 @@
   import { page } from '$app/state';
   import { Popover, Switch } from '$lib/components/ui';
   import * as m from '$paraglide/messages';
+  import {
+    presetOf,
+    previousRange,
+    trailingRange,
+    utcToday,
+  } from './analytics-range';
 
   interface Props {
     startDate: string;
@@ -26,33 +32,12 @@
 
   const { startDate, endDate, compareFrom, compareTo }: Props = $props();
 
-  // ─── URL helpers ──────────────────────────────────────────────────────
-  const MS_PER_DAY = 1000 * 60 * 60 * 24;
-
-  function toISODate(date: Date): string {
-    return date.toISOString().split('T')[0];
-  }
-
   /**
-   * Derive which preset (if any) the current URL window matches.
-   * Uses a small ±1-day tolerance to survive clock boundary drift.
+   * Which preset (if any) the current URL window is: it ends today and covers
+   * exactly the preset's calendar days (analytics-range.ts). Ranges are
+   * inclusive UTC days, as the admin API reads them.
    */
-  const activePreset = $derived.by((): '7d' | '30d' | '90d' | 'year' | null => {
-    const now = new Date();
-    const from = new Date(startDate);
-    const to = new Date(endDate);
-    const diffDays = Math.round((now.getTime() - from.getTime()) / MS_PER_DAY);
-    const toDiff = Math.round((now.getTime() - to.getTime()) / MS_PER_DAY);
-
-    // endDate must be within 1 day of today for a preset to be "active"
-    if (toDiff > 1) return null;
-
-    if (diffDays >= 6 && diffDays <= 8) return '7d';
-    if (diffDays >= 29 && diffDays <= 31) return '30d';
-    if (diffDays >= 89 && diffDays <= 91) return '90d';
-    if (diffDays >= 364 && diffDays <= 366) return 'year';
-    return null;
-  });
+  const activePreset = $derived(presetOf(startDate, endDate));
 
   const compareEnabled = $derived(Boolean(compareFrom && compareTo));
 
@@ -86,39 +71,18 @@
     });
   }
 
-  /**
-   * Compute the window immediately preceding [from, to] with the same duration.
-   * Inclusive-day semantics: a 30-day window's previous-period sits 30 days earlier.
-   */
-  function previousPeriod(
-    from: string,
-    to: string
-  ): { compareFrom: string; compareTo: string } {
-    const fromDate = new Date(from);
-    const toDate = new Date(to);
-    const durationDays = Math.max(
-      1,
-      Math.round((toDate.getTime() - fromDate.getTime()) / MS_PER_DAY) + 1
-    );
-    const prevTo = new Date(fromDate);
-    prevTo.setDate(prevTo.getDate() - 1);
-    const prevFrom = new Date(prevTo);
-    prevFrom.setDate(prevFrom.getDate() - (durationDays - 1));
-    return { compareFrom: toISODate(prevFrom), compareTo: toISODate(prevTo) };
-  }
-
   // ─── Preset actions ───────────────────────────────────────────────────
+  // "Last N days" is today and the N − 1 days before it: exactly N calendar
+  // days, the window Billing and the dashboard read (review I-1).
   function applyPreset(days: number) {
-    const now = new Date();
-    const from = new Date(now);
-    from.setDate(from.getDate() - days);
+    const range = trailingRange(days);
 
     const params = baseParams();
-    params.set('startDate', toISODate(from));
-    params.set('endDate', toISODate(now));
+    params.set('startDate', range.startDate);
+    params.set('endDate', range.endDate);
 
     if (compareEnabled) {
-      const prev = previousPeriod(toISODate(from), toISODate(now));
+      const prev = previousRange(range.startDate, range.endDate);
       params.set('compareFrom', prev.compareFrom);
       params.set('compareTo', prev.compareTo);
     }
@@ -149,7 +113,7 @@
     params.set('endDate', draftEnd);
 
     if (compareEnabled) {
-      const prev = previousPeriod(draftStart, draftEnd);
+      const prev = previousRange(draftStart, draftEnd);
       params.set('compareFrom', prev.compareFrom);
       params.set('compareTo', prev.compareTo);
     }
@@ -170,7 +134,7 @@
     params.set('endDate', endDate);
 
     if (next) {
-      const prev = previousPeriod(startDate, endDate);
+      const prev = previousRange(startDate, endDate);
       params.set('compareFrom', prev.compareFrom);
       params.set('compareTo', prev.compareTo);
     }
@@ -314,7 +278,7 @@
             class="range-popover__input"
             bind:value={draftEnd}
             min={draftStart || undefined}
-            max={toISODate(new Date())}
+            max={utcToday()}
           />
         </div>
         <div class="range-popover__actions">
@@ -583,7 +547,10 @@
     color: var(--color-text-secondary);
   }
 
-  .compare-custom-link {
+  /* The class lands on Popover.Trigger's own button, outside this
+     component's scope, so it is reached through the bar (it was dropped as
+     an unused selector and the link rendered unstyled). */
+  .bar-actions :global(.compare-custom-link) {
     appearance: none;
     background: transparent;
     border: 0;
@@ -599,11 +566,11 @@
     transition: var(--transition-colors);
   }
 
-  .compare-custom-link:hover {
+  .bar-actions :global(.compare-custom-link):hover {
     color: var(--color-interactive-hover);
   }
 
-  .compare-custom-link:focus-visible {
+  .bar-actions :global(.compare-custom-link):focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
   }

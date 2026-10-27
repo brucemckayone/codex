@@ -4,7 +4,8 @@
   Studio settings → revenue-share tab (Codex-s80r6 — WP-7).
 
   Owner-facing UI for managing per-creator revenue-share agreements. Shows:
-    1. Team Budget pie — platform fee + per-creator slices + org residual
+    1. Team Budget pie — per-creator slices + org residual, as shares of
+       what's left after Codex's fee (no fee slice, Codex-2hxff.20 AGR-11)
     2. Per-creator cards — subscription + content_purchase rows, side-by-side
     3. Counter Proposals Received — accept / counter / decline action buttons
     4. Pending Proposals (Waiting on Creator) — withdraw button
@@ -12,6 +13,21 @@
 
   Studio uses `ssr = false`, so all data is fetched client-side via remote
   queries. Role guard runs client-side (admin / owner only).
+
+  Admins get the page READ-ONLY (Codex-2hxff.20 AGR-14, agreements.md §Who
+  sees what): every share, name and thread, but no Propose, Amend, Review
+  counter, Accept, Counter, Decline, Withdraw or Terminate. Every one of those
+  is owner-only on the server, so an admin used to be offered each of them and
+  then refused with a 403.
+
+  A list that FAILED to load is not an empty list (Codex-2hxff.74). Each read
+  goes through `connectQueryState`; a failure shows "We couldn't load your …"
+  with Retry (LoadFailedAlert) in place of what depends on it, and the raw
+  error goes to the logger, never the DOM:
+    - agreements or members → the bar, the roster and the active list all
+      need them, so the alert stands in for all three;
+    - pending proposals → only the roster needs them (it decides who is
+      waiting on the owner), so the alert stands in for the roster.
 
   All share % copy explicitly says "of post-platform [type] revenue" per
   the C1 math semantic (see project_revenue_share_decisions.md). Currency
@@ -24,7 +40,6 @@
     type AgreementWithShare,
     formatRevenueTypeLabel,
   } from '@codex/agreements';
-  import { FEES } from '@codex/constants';
   import AgreementCard from '$lib/components/agreements/AgreementCard.svelte';
   import AgreementShare from '$lib/components/agreements/AgreementShare.svelte';
   import { isShareMissing } from '$lib/components/agreements/agreement-share';
@@ -34,7 +49,11 @@
   import NegotiationThread from '$lib/components/agreements/NegotiationThread.svelte';
   import ProposeAgreementDialog from '$lib/components/agreements/ProposeAgreementDialog.svelte';
   import RevenueSplitPie from '$lib/components/agreements/RevenueSplitPie.svelte';
-  import type { RevenueSplitSlice } from '$lib/components/agreements/types';
+  import {
+    BP_MAX,
+    type RevenueSplitSlice,
+  } from '$lib/components/agreements/types';
+  import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
   import * as m from '$paraglide/messages';
   import { Alert, Button, PageHeader } from '$lib/components/ui';
   import * as Dialog from '$lib/components/ui/Dialog';
@@ -52,7 +71,9 @@
     withdrawAgreement,
   } from '$lib/remote/agreements.remote';
   import { getOrgMembers } from '$lib/remote/org.remote';
+  import { queryErrorMessage } from '$lib/remote/query-result';
   import { logger } from '$lib/observability';
+  import { connectQueryState } from '$lib/utils/connect-readiness';
 
   let { data } = $props();
 
@@ -80,6 +101,14 @@
   const isAuthorized = $derived(
     data.userRole === 'admin' || data.userRole === 'owner'
   );
+  // Only the owner acts; an admin sees the page read-only (see the header).
+  // Keyed on the ADMIN role, not on "not owner": before the role is known
+  // (ssr=false) the viewer is neither, and an owner must never be shown the
+  // admin's note. Nothing renders then anyway (`isAuthorized` is false), so
+  // no action is on screen until the role is known. Actions themselves stay
+  // gated on `isOwner`.
+  const isOwner = $derived(data.userRole === 'owner');
+  const readOnly = $derived(data.userRole === 'admin');
   // Optional chain: `data.org` is undefined on first render under ssr=false
   // (server-load hasn't yet streamed); throwing here breaks all downstream
   // deriveds and the page never mounts (heading invisible to E2E).
@@ -106,6 +135,46 @@
   const membersQuery = $derived(
     isAuthorized ? getOrgMembers({ orgId, limit: 100 }) : null
   );
+
+  // loading / failed / ok for each read. `failed` is its own state: the
+  // `?? []` defaults below only fill the gap while a read is loading or
+  // failed, and the template never renders a failed read as an empty one.
+  // `connectQueryState` keeps a value through a refresh and `failed` through
+  // a Retry, so neither flips the page back to skeletons.
+  const agreementsState = $derived(connectQueryState(agreementsQuery));
+  const pendingState = $derived(connectQueryState(pendingProposalsQuery));
+  const membersState = $derived(connectQueryState(membersQuery));
+
+  /** The bar, the roster and the active list all need both of these. */
+  const listsFailed = $derived(
+    agreementsState.kind === 'failed' || membersState.kind === 'failed'
+  );
+  const listsLoading = $derived(
+    agreementsState.kind === 'loading' || membersState.kind === 'loading'
+  );
+
+  // The real error goes to the logger (which redacts), never into the DOM.
+  function logLoadFailure(what: string, error: unknown) {
+    logger.error(`studio/revenue-share: ${what} failed to load`, {
+      organizationId: orgId,
+      reason: queryErrorMessage(error),
+    });
+  }
+  $effect(() => {
+    if (agreementsState.kind === 'failed') {
+      logLoadFailure('agreements', agreementsQuery?.error);
+    }
+  });
+  $effect(() => {
+    if (pendingState.kind === 'failed') {
+      logLoadFailure('pending proposals', pendingProposalsQuery?.error);
+    }
+  });
+  $effect(() => {
+    if (membersState.kind === 'failed') {
+      logLoadFailure('members', membersQuery?.error);
+    }
+  });
 
   // ─── Derived: per-creator + pending proposal maps ────────────────────────
 
@@ -195,18 +264,13 @@
 
   // ─── Pie data ────────────────────────────────────────────────────────────
 
-  // Illustrative — real payouts read from feeConfigService per WP-4 (the
-  // org may run a custom rate). Sourced here from @codex/constants so the
-  // default-rate display can't drift from the SDK constant. Per Decision
-  // Q2 the platform fee is the platform's operational lever, not
-  // snapshotted on agreements.
-  // TODO(codex-hrqz6 follow-up): pipe the live FeeConfigService rate to
-  // this remote so per-org overrides also show through here.
-  const platformFeeBp = FEES.PLATFORM_PERCENT;
-
   /**
    * Pie slices for the "Team Budget" overview. Each active creator on the
    * subscription pool gets one slice; the org residual is the remainder.
+   * Every share is basis points of what's left after Codex's fee, so the
+   * whole bar is that pool and there is no fee slice: the hard-coded 10% this
+   * used to subtract first drew each share against the whole sale
+   * (Codex-2hxff.20 AGR-11).
    * Content-purchase agreements are NOT pooled (Decision Q1 — creator's
    * own content), so they aren't shown in the team-budget pie.
    *
@@ -222,8 +286,6 @@
     );
     const memberById = new Map(teamMembers.map((m) => [m.id, m]));
 
-    // Pool of available basis points after platform fee
-    const availableBp = 10000 - platformFeeBp;
     const slices: RevenueSplitSlice[] = subscriptionRows.map((a, i) => {
       const share = a.creatorSharePercent ?? 0;
       const member = memberById.get(a.creatorId);
@@ -246,11 +308,11 @@
 
     // Org residual — whatever's left of the available pool
     const allocated = slices.reduce((sum, s) => sum + s.percent, 0);
-    const orgResidual = Math.max(0, availableBp - allocated);
+    const orgResidual = Math.max(0, BP_MAX - allocated);
     if (orgResidual > 0) {
       slices.push({
         id: '__org_residual__',
-        label: 'Org residual',
+        label: m.agreement_split_organisation(),
         percent: orgResidual,
         color: 'var(--color-surface-tertiary)',
         locked: true,
@@ -334,6 +396,16 @@
         })
       : null
   );
+
+  // A failed thread read used to leave the dialog empty and unlogged; every
+  // countered-by-creator email lands on this page, and Review counter opens
+  // this dialog (Codex-2hxff.74).
+  const threadState = $derived(connectQueryState(threadQuery));
+  $effect(() => {
+    if (threadState.kind === 'failed') {
+      logLoadFailure('thread', threadQuery?.error);
+    }
+  });
 
   function openThreadDialog(
     creatorId: string,
@@ -586,8 +658,15 @@
     return [
       {
         id: 'attention' as const,
-        heading: m.monetisation_revshare_group_attention(),
-        lede: m.monetisation_revshare_group_attention_lede(),
+        // An admin cannot accept, counter or decline: the counters are
+        // waiting on the OWNER, and "Needs your attention" told the admin
+        // to act.
+        heading: readOnly
+          ? m.monetisation_revshare_group_attention_readonly()
+          : m.monetisation_revshare_group_attention(),
+        lede: readOnly
+          ? m.monetisation_revshare_group_attention_readonly_lede()
+          : m.monetisation_revshare_group_attention_lede(),
         members: attention,
       },
       { id: 'agreed' as const, heading: m.monetisation_revshare_group_agreed(), members: agreed },
@@ -626,6 +705,30 @@
       description={m.monetisation_revenue_share_description()}
     />
 
+    {#if readOnly}
+      <Alert variant="info" data-testid="revenue-share-readonly-note">
+        {m.monetisation_revshare_readonly_note()}
+      </Alert>
+    {/if}
+
+    <!-- Mounted unconditionally: each renders nothing until its read fails,
+         and its status line must persist to announce a Retry that loaded. -->
+    <LoadFailedAlert
+      query={agreementsQuery}
+      message={m.agreement_load_failed()}
+      againMessage={m.agreement_load_failed_again()}
+      loadedMessage={m.agreement_load_retry_ok()}
+      data-testid="agreements-load-error"
+    />
+    <LoadFailedAlert
+      query={membersQuery}
+      message={m.monetisation_revshare_team_load_failed()}
+      againMessage={m.monetisation_revshare_team_load_failed_again()}
+      loadedMessage={m.monetisation_revshare_team_load_retry_ok()}
+      data-testid="members-load-error"
+    />
+
+    {#if !listsFailed}
     <!-- ─── Section 1: Team Budget pie ─────────────────────────────────── -->
     <section class="revenue-share-page__section" aria-labelledby="team-budget-heading">
       <h3 id="team-budget-heading" class="revenue-share-page__section-heading">
@@ -634,14 +737,15 @@
       <p class="revenue-share-page__section-lede">
         {m.monetisation_revshare_budget_lede()}
       </p>
-      {#if agreementsQuery?.loading}
+      <!-- Waits for the members too: the slices are labelled with names. -->
+      {#if listsLoading}
         <Skeleton width="100%" height="var(--space-16)" />
       {:else}
         <RevenueSplitPie
           mode="owner"
-          platformFeePercent={platformFeeBp}
           slices={pieSlices}
           readOnly
+          canAmend={isOwner}
         />
       {/if}
     </section>
@@ -651,13 +755,13 @@
       <div class="revenue-share-page__section-head">
         <h3 id="creators-heading" class="revenue-share-page__section-heading">
           {m.monetisation_revshare_creators_title()}
-          {#if !membersQuery?.loading && teamMembers.length > 0}
+          {#if membersState.kind === 'ok' && teamMembers.length > 0}
             <span class="revenue-share-page__count">
               {groupCount(teamMembers.length)}
             </span>
           {/if}
         </h3>
-        {#if !membersQuery?.loading && teamMembers.length > SEARCH_THRESHOLD}
+        {#if membersState.kind === 'ok' && teamMembers.length > SEARCH_THRESHOLD}
           <!-- Appears only past 8 creators; below that, scanning beats typing. -->
           <input
             class="revenue-share-page__search"
@@ -672,10 +776,26 @@
       <!-- Said ONCE, at section level. It used to be repeated inside all 32
            no-agreement card panels. -->
       <p class="revenue-share-page__section-lede">
-        {m.monetisation_revshare_default_split()}
+        {readOnly
+          ? m.monetisation_revshare_default_split_readonly()
+          : m.monetisation_revshare_default_split()}
       </p>
 
-      {#if membersQuery?.loading || agreementsQuery?.loading}
+      <!-- The roster decides who is waiting on the owner, so without the
+           pending proposals it would hide a live counter and offer Propose
+           over it. The alert stands in for the roster alone: the bar and the
+           active list do not read them. -->
+      <LoadFailedAlert
+        query={pendingProposalsQuery}
+        message={m.monetisation_revshare_proposals_load_failed()}
+        againMessage={m.monetisation_revshare_proposals_load_failed_again()}
+        loadedMessage={m.monetisation_revshare_proposals_load_retry_ok()}
+        data-testid="pending-proposals-load-error"
+      />
+
+      {#if pendingState.kind === 'failed'}
+        <!-- The alert above stands in for the roster. -->
+      {:else if listsLoading || pendingState.kind === 'loading'}
         <div class="revenue-share-page__cards-grid">
           {#each Array(3) as _, i (i)}
             <Skeleton width="100%" height="var(--space-32)" />
@@ -737,6 +857,7 @@
                       </Avatar>
                       <span class="revenue-share-page__roster-name">{creator.name}</span>
                     </span>
+                    {#if isOwner}
                     <span class="revenue-share-page__roster-actions">
                       <span class="revenue-share-page__roster-prefix">
                         {m.monetisation_revshare_propose_prefix()}
@@ -766,6 +887,7 @@
                         {m.monetisation_revshare_type_content()}
                       </button>
                     </span>
+                    {/if}
                   </li>
                 {/each}
               </ul>
@@ -775,6 +897,7 @@
                 <AgreementCard
                   {creator}
                   headingLevel={5}
+                  readOnly={!isOwner}
                   subscriptionAgreement={getAgreementFor(creator.id, 'subscription')}
                   contentPurchaseAgreement={getAgreementFor(creator.id, 'content_purchase')}
                   pendingSubscriptionProposal={getPendingFor(creator.id, 'subscription')}
@@ -811,7 +934,9 @@
           {m.monetisation_revshare_active_title()}
         </h3>
         <p class="revenue-share-page__section-lede">
-          {m.monetisation_revshare_active_lede()}
+          {readOnly
+            ? m.monetisation_revshare_active_lede_readonly()
+            : m.monetisation_revshare_active_lede()}
         </p>
         <ul class="revenue-share-page__active-list">
           {#each activeAgreements as agreement (agreement.id)}
@@ -845,18 +970,21 @@
                 >
                   {m.monetisation_revshare_view_thread()}
                 </button>
-                <button
-                  type="button"
-                  class="revenue-share-page__btn revenue-share-page__btn--danger"
-                  onclick={() => askTerminate(agreement.id, creatorName, revLabel)}
-                >
-                  {m.monetisation_revshare_terminate()}
-                </button>
+                {#if isOwner}
+                  <button
+                    type="button"
+                    class="revenue-share-page__btn revenue-share-page__btn--danger"
+                    onclick={() => askTerminate(agreement.id, creatorName, revLabel)}
+                  >
+                    {m.monetisation_revshare_terminate()}
+                  </button>
+                {/if}
               </div>
             </li>
           {/each}
         </ul>
       </section>
+    {/if}
     {/if}
   </div>
 
@@ -939,21 +1067,35 @@
           </Dialog.Description>
         </Dialog.Header>
         <Dialog.Body>
-          {#if threadQuery?.loading}
+          <LoadFailedAlert
+            query={threadQuery}
+            message={m.agreement_thread_load_failed()}
+            againMessage={m.agreement_thread_load_failed_again()}
+            loadedMessage={m.agreement_thread_load_retry_ok()}
+            data-testid="thread-load-error"
+          />
+          {#if threadState.kind === 'loading'}
             <Skeleton width="100%" height="var(--space-32)" />
           {:else if threadQuery?.current}
             {@const thread = threadQuery.current}
             {@const latest = thread.at(-1)}
             {@const latestIsOpen = latest?.status === 'open'}
             {@const ownerProposedLatest = latest?.proposedByRole === 'owner'}
+            {@const ownerCanRespond = isOwner && latestIsOpen && !ownerProposedLatest}
+            {@const ownerCanWithdraw = isOwner && latestIsOpen && ownerProposedLatest}
+            <!-- An admin reads the thread with no actions: "You" would be
+                 the owner, so the owner's turns are labelled "Owner". -->
             <NegotiationThread
               proposals={thread}
               revenueType={threadRevenueType}
-              roleLabels={{ owner: m.monetisation_revshare_you(), creator: threadCreatorName }}
-              onAccept={latestIsOpen && !ownerProposedLatest ? handleAccept : undefined}
-              onCounter={latestIsOpen && !ownerProposedLatest ? handleCounter : undefined}
-              onDecline={latestIsOpen && !ownerProposedLatest ? handleDecline : undefined}
-              onWithdraw={latestIsOpen && ownerProposedLatest ? handleWithdraw : undefined}
+              roleLabels={{
+                owner: isOwner ? m.monetisation_revshare_you() : m.team_role_owner(),
+                creator: threadCreatorName,
+              }}
+              onAccept={ownerCanRespond ? handleAccept : undefined}
+              onCounter={ownerCanRespond ? handleCounter : undefined}
+              onDecline={ownerCanRespond ? handleDecline : undefined}
+              onWithdraw={ownerCanWithdraw ? handleWithdraw : undefined}
             />
           {/if}
         </Dialog.Body>

@@ -9,9 +9,10 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import { invalid, isRedirect, redirect } from '@sveltejs/kit';
+import { error, invalid, isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { ApiError } from '$lib/server/errors';
 
@@ -373,6 +374,18 @@ const getNotificationPreferences = query(async () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * A billing portal URL we may send the browser to: a Stripe page only, so a
+ * bad answer can never become an open redirect.
+ */
+function isStripePortalUrl(href: string): boolean {
+  try {
+    return new URL(href).hostname.endsWith('.stripe.com');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Open Stripe Customer Portal
  * No user input needed — returnUrl is derived from the current page URL.
  * Redirects directly to the Stripe billing portal on success.
@@ -388,8 +401,7 @@ export const portalSessionForm = form(z.object({}), async (_data) => {
     });
 
     // Validate the redirect URL to prevent open redirect attacks
-    const portalUrl = new URL(result.url);
-    if (!portalUrl.hostname.endsWith('.stripe.com')) {
+    if (!isStripePortalUrl(result.url)) {
       throw new Error('Invalid billing portal URL');
     }
 
@@ -417,9 +429,30 @@ const billingPortalSchema = z.object({
 /**
  * Open Stripe Billing Portal programmatically (returns URL for client-side redirect).
  * Used by subscription management page for "Update Payment" on past_due subscriptions.
+ *
+ * The caller sends the browser to the URL, so it is checked as
+ * `portalSessionForm` checks it: a Stripe page only (Codex-2hxff.22 WEB-06).
  */
 export const openBillingPortal = command(billingPortalSchema, async (input) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
-  return api.checkout.createPortalSession({ returnUrl: input.returnUrl });
+  const result = await api.checkout.createPortalSession({
+    returnUrl: input.returnUrl,
+  });
+  if (!isStripePortalUrl(result.url)) {
+    logger.error('openBillingPortal: refused a non-Stripe portal URL', {
+      host: hostOf(result.url),
+    });
+    error(502, 'Invalid billing portal URL');
+  }
+  return result;
 });
+
+/** A URL's host for a log line, never the URL itself (it can carry a token). */
+function hostOf(href: string): string | undefined {
+  try {
+    return new URL(href).host;
+  } catch {
+    return undefined;
+  }
+}

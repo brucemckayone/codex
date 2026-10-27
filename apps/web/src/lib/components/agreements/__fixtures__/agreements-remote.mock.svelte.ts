@@ -14,7 +14,7 @@
  */
 
 import type { AgreementProposal, AgreementWithShare } from '@codex/agreements';
-import { vi } from 'vitest';
+import { type Mock, vi } from 'vitest';
 
 export const ORG_ID = '33333333-3333-4333-8333-333333333333';
 export const CREATOR_ID = 'creator-maya';
@@ -96,11 +96,16 @@ export function acceptedProposal(): AgreementProposal {
   } as AgreementProposal;
 }
 
-interface Slot<T> {
+/**
+ * A query's slot. `refresh` is a spy that changes nothing by itself: a test
+ * drives a Retry the way kit does, landing an answer or a rejection with
+ * `fail` / the `set*` helpers.
+ */
+export interface Slot<T> {
   current: T | undefined;
   error: unknown;
   loading: boolean;
-  refresh: () => Promise<void>;
+  refresh: Mock<() => Promise<void>>;
 }
 
 function makeSlot<T>(current?: T): Slot<T> {
@@ -108,9 +113,22 @@ function makeSlot<T>(current?: T): Slot<T> {
     current,
     error: undefined,
     loading: current === undefined,
-    refresh: async () => {},
+    refresh: vi.fn(async () => {}),
   });
   return slot;
+}
+
+/** The shape SvelteKit rejects a remote query with: `{ status, body }`. */
+export const httpError = (status = 500) => ({
+  status,
+  body: { message: 'Internal Error' },
+});
+
+/** Land a rejection on a slot, as kit does when the read fails. */
+export function fail<T>(slot: Slot<T>, error: unknown = httpError()) {
+  slot.current = undefined;
+  slot.error = error;
+  slot.loading = false;
 }
 
 type Page<T> = {
@@ -157,8 +175,22 @@ export function reset() {
 /** Answer the org's active-agreements list. */
 export function setActiveAgreements(rows: AgreementWithShare[]) {
   active.current = page(rows);
+  active.error = undefined;
   active.loading = false;
 }
+
+/** Answer the org's pending-proposals list. */
+export function setPendingProposals(rows: Partial<AgreementProposal>[]) {
+  pending.current = page<unknown>(rows);
+  pending.error = undefined;
+  pending.loading = false;
+}
+
+export const activeSlot = () => active;
+export const pendingSlot = () => pending;
+export const portfolioSlot = () => portfolio;
+export const orgThreadSlot = () => orgThread;
+export const myThreadSlot = () => myThread;
 
 /** Answer the creator's portfolio with these active rows. */
 export function setPortfolio(rows: ReturnType<typeof portfolioActiveRow>[]) {
@@ -168,6 +200,7 @@ export function setPortfolio(rows: ReturnType<typeof portfolioActiveRow>[]) {
     pendingWaitingOnOrg: [],
     past: [],
   };
+  portfolio.error = undefined;
   portfolio.loading = false;
 }
 

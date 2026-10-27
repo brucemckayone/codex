@@ -52,6 +52,7 @@ import {
   ContentNotPurchasableError,
   CourseNotPurchasableError,
   ForbiddenError,
+  NotFoundError,
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
@@ -5439,6 +5440,7 @@ describe('PurchaseService Integration', () => {
       vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
         id: sessionId,
         status: 'complete',
+        payment_status: 'paid',
         payment_intent: paymentIntentId,
         metadata: {
           contentId: verifyContentId,
@@ -5455,10 +5457,15 @@ describe('PurchaseService Integration', () => {
         verifyUserId
       );
 
-      expect(result).toEqual({
-        sessionStatus: 'complete',
-        purchase: undefined, // No purchase record yet
-        content: undefined,
+      // Paid, and no purchase record yet: the page records it, and shows the
+      // item the session names meanwhile (Codex-2hxff.22).
+      expect(result.sessionStatus).toBe('complete');
+      expect(result.state).toBe('recording');
+      expect(result.purchase).toBeUndefined();
+      expect(result.content).toMatchObject({
+        id: verifyContentId,
+        title: 'Verify Test Content',
+        contentType: 'video',
       });
     });
 
@@ -5478,6 +5485,7 @@ describe('PurchaseService Integration', () => {
       vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
         id: sessionId,
         status: 'complete',
+        payment_status: 'paid',
         payment_intent: paymentIntentId,
         metadata: {
           contentId: verifyContentId,
@@ -5493,6 +5501,7 @@ describe('PurchaseService Integration', () => {
       );
 
       expect(result.sessionStatus).toBe('complete');
+      expect(result.state).toBe('unlocked');
       expect(result.purchase).toBeDefined();
       expect(result.purchase?.contentId).toBe(verifyContentId);
       expect(result.purchase?.amountPaidCents).toBe(999);
@@ -5566,6 +5575,7 @@ describe('PurchaseService Integration', () => {
         vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
           id: 'cs_test_verify_duplicate',
           status: 'complete',
+          payment_status: 'paid',
           payment_intent: paymentIntentId,
           metadata: { customerId },
         } as unknown as Stripe.Response<Stripe.Checkout.Session>);
@@ -5582,6 +5592,7 @@ describe('PurchaseService Integration', () => {
           verifyOtherUserId
         );
         expect(forDuplicate.duplicatePayment).toBe(true);
+        expect(forDuplicate.state).toBe('duplicate');
         expect(forDuplicate.purchase?.id).toBe(duplicate.id);
         expect(forDuplicate.content?.title).toBe('Verify Test Content');
 
@@ -5591,6 +5602,7 @@ describe('PurchaseService Integration', () => {
           verifyOtherUserId
         );
         expect(forOriginal.duplicatePayment).toBeUndefined();
+        expect(forOriginal.state).toBe('unlocked');
         expect(forOriginal.purchase?.id).toBe(original.id);
 
         await removePurchases({
@@ -5625,6 +5637,7 @@ describe('PurchaseService Integration', () => {
         );
         expect(forDuplicate).toEqual({
           sessionStatus: 'complete',
+          state: 'duplicate',
           course: { id: course.id, title: 'Verify Test Course' },
           duplicatePayment: true,
         });
@@ -5636,6 +5649,7 @@ describe('PurchaseService Integration', () => {
         );
         expect(forOriginal).toEqual({
           sessionStatus: 'complete',
+          state: 'unlocked',
           course: { id: course.id, title: 'Verify Test Course' },
         });
 
@@ -5656,7 +5670,10 @@ describe('PurchaseService Integration', () => {
           'cs_test_verify_duplicate',
           verifyUserId
         );
-        expect(result).toEqual({ sessionStatus: 'complete' });
+        expect(result).toEqual({
+          sessionStatus: 'complete',
+          state: 'recording',
+        });
 
         await removePurchases({
           duplicate: duplicate.id,
@@ -5684,6 +5701,7 @@ describe('PurchaseService Integration', () => {
       );
 
       expect(result.sessionStatus).toBe('open');
+      expect(result.state).toBe('open');
       expect(result.purchase).toBeUndefined();
       expect(result.content).toBeUndefined();
     });
@@ -5707,6 +5725,7 @@ describe('PurchaseService Integration', () => {
       );
 
       expect(result.sessionStatus).toBe('expired');
+      expect(result.state).toBe('expired');
     });
 
     it('should throw ForbiddenError when session belongs to different user', async () => {
@@ -5733,10 +5752,13 @@ describe('PurchaseService Integration', () => {
       ).rejects.toThrow('does not belong to authenticated user');
     });
 
-    it('should throw PaymentProcessingError for invalid session ID', async () => {
+    // A 404, as the route always documented: it was a 500, which the
+    // success page read as "try again" for a session that will never exist
+    // (Codex-2hxff.22).
+    it('should throw NotFoundError for a session Stripe does not know', async () => {
       const invalidSessionId = 'cs_invalid_session';
 
-      const stripeError = new Error('Invalid API key') as Error & {
+      const stripeError = new Error('No such checkout.session') as Error & {
         type?: string;
       };
       stripeError.type = 'StripeInvalidRequestError';
@@ -5747,7 +5769,171 @@ describe('PurchaseService Integration', () => {
 
       await expect(
         purchaseService.verifyCheckoutSession(invalidSessionId, verifyUserId)
-      ).rejects.toThrow(PaymentProcessingError);
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    // Local development and production share one Stripe sandbox, so a
+    // session tagged for another environment is not this one's (Codex-2hxff.5).
+    it("should treat another environment's session as not found", async () => {
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: 'cs_test_other_env',
+        status: 'complete',
+        payment_status: 'paid',
+        payment_intent: 'pi_other_env',
+        metadata: { customerId: verifyUserId, codex_env: 'production' },
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
+
+      await expect(
+        purchaseService.verifyCheckoutSession('cs_test_other_env', verifyUserId)
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    it('should accept a session tagged for its own environment', async () => {
+      vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+        id: 'cs_test_own_env',
+        status: 'open',
+        payment_intent: null,
+        metadata: { customerId: verifyUserId, codex_env: 'test' },
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
+
+      const result = await purchaseService.verifyCheckoutSession(
+        'cs_test_own_env',
+        verifyUserId
+      );
+
+      expect(result).toEqual({ sessionStatus: 'open', state: 'open' });
+    });
+
+    /**
+     * The state the success page acts on (Codex-2hxff.22). Each row is
+     * written directly for the other buyer, read, and deleted at once.
+     */
+    describe('the state the page acts on (Codex-2hxff.22)', () => {
+      async function stateFor(
+        values: Partial<typeof schema.purchases.$inferInsert>
+      ) {
+        const row = takeFirst(
+          await db
+            .insert(schema.purchases)
+            .values({
+              customerId: verifyOtherUserId,
+              contentId: verifyContentId,
+              organizationId: verifyOrgId,
+              amountPaidCents: 999,
+              creatorPayoutCents: 999,
+              currency: 'gbp',
+              stripePaymentIntentId: `pi_verify_state_${crypto.randomUUID()}`,
+              status: 'completed',
+              purchasedAt: new Date(),
+              ...values,
+            })
+            .returning(),
+          'purchase'
+        );
+        try {
+          vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+            id: 'cs_test_verify_state',
+            status: 'complete',
+            payment_status: 'paid',
+            payment_intent: row.stripePaymentIntentId,
+            metadata: { customerId: verifyOtherUserId },
+          } as unknown as Stripe.Response<Stripe.Checkout.Session>);
+          return await purchaseService.verifyCheckoutSession(
+            'cs_test_verify_state',
+            verifyOtherUserId
+          );
+        } finally {
+          await db
+            .delete(schema.purchases)
+            .where(eq(schema.purchases.id, row.id));
+        }
+      }
+
+      it('a refunded purchase is refunded, never confirmed', async () => {
+        const result = await stateFor({
+          status: 'refunded',
+          refundedAt: new Date(),
+        });
+        expect(result.state).toBe('refunded');
+      });
+
+      it('a purchase an open bank dispute holds is paused', async () => {
+        const result = await stateFor({ disputedAt: new Date() });
+        expect(result.state).toBe('paused');
+      });
+
+      it('an old row neither completed nor refunded is still recording, logged at error with an errorId', async () => {
+        // biome-ignore lint/suspicious/noExplicitAny: spy protected obs.error
+        const errorSpy = vi.spyOn((purchaseService as any).obs, 'error');
+        try {
+          const result = await stateFor({ status: 'failed' });
+          expect(result.state).toBe('recording');
+          expect(errorSpy).toHaveBeenCalledWith(
+            'Checkout session has a purchase it cannot confirm',
+            expect.objectContaining({
+              errorId: expect.any(String),
+              sessionId: 'cs_test_verify_state',
+              status: 'failed',
+            })
+          );
+        } finally {
+          errorSpy.mockRestore();
+        }
+      });
+
+      it('a complete session that is not paid is unpaid, and reads no row', async () => {
+        vi.mocked(mockStripe.checkout.sessions.retrieve).mockResolvedValue({
+          id: 'cs_test_verify_unpaid',
+          status: 'complete',
+          payment_status: 'unpaid',
+          payment_intent: `pi_verify_unpaid_${crypto.randomUUID()}`,
+          metadata: { customerId: verifyUserId },
+        } as unknown as Stripe.Response<Stripe.Checkout.Session>);
+
+        const result = await purchaseService.verifyCheckoutSession(
+          'cs_test_verify_unpaid',
+          verifyUserId
+        );
+
+        expect(result).toEqual({ sessionStatus: 'complete', state: 'unpaid' });
+      });
+    });
+
+    describe('retrievePaymentIntentCharge (Codex-2hxff.22)', () => {
+      it('expands the charge, and returns its id, the fee and when it was made', async () => {
+        vi.mocked(mockStripe.paymentIntents.retrieve).mockResolvedValueOnce({
+          application_fee_amount: 120,
+          latest_charge: { id: 'ch_verify_charge', created: 1_793_000_000 },
+        } as unknown as Stripe.Response<Stripe.PaymentIntent>);
+
+        await expect(
+          purchaseService.retrievePaymentIntentCharge('pi_verify_charge')
+        ).resolves.toEqual({
+          stripeChargeId: 'ch_verify_charge',
+          stripeApplicationFeeCents: 120,
+          chargedAt: new Date(1_793_000_000_000),
+        });
+        expect(mockStripe.paymentIntents.retrieve).toHaveBeenCalledWith(
+          'pi_verify_charge',
+          { expand: ['latest_charge'] }
+        );
+      });
+
+      it("throws a failure with Stripe's error as its cause, for the caller to judge", async () => {
+        const stripeError = Object.assign(new Error('Connection error'), {
+          type: 'StripeConnectionError',
+        });
+        vi.mocked(mockStripe.paymentIntents.retrieve).mockRejectedValueOnce(
+          stripeError
+        );
+
+        const thrown = await purchaseService
+          .retrievePaymentIntentCharge('pi_verify_charge_down')
+          .catch((error: unknown) => error);
+
+        expect(thrown).toBeInstanceOf(InternalServiceError);
+        expect((thrown as Error).cause).toBe(stripeError);
+      });
     });
 
     it('should handle metadata key correctly - camelCase customerId', async () => {

@@ -5,6 +5,10 @@
  * Extracts session_id from URL, calls the ecom-api verify endpoint,
  * and returns the purchase status + content details for display.
  *
+ * Unlock on arrival (Codex-2hxff.22): while Stripe says paid and our record
+ * is missing, the load also streams the completion (`unlock`), as the org
+ * /checkout/success does.
+ *
  * A failed verify is logged. A 5xx, a network failure (including the client's
  * own timeout) or a rate limit is treated as pending and retried; any other
  * 4xx will not change on retry, so the page stops polling and shows its error
@@ -14,7 +18,10 @@ import { error, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
-import { isTransientFailure } from '$lib/server/checkout-verify';
+import {
+  completeOnArrival,
+  isTransientFailure,
+} from '$lib/server/checkout-verify';
 import { ApiError } from '$lib/server/errors';
 import type { PageServerLoad } from './$types';
 
@@ -50,6 +57,10 @@ export const load: PageServerLoad = async ({
     return {
       verification: result,
       verifyFailed: false,
+      unlock:
+        result.state === 'recording'
+          ? completeOnArrival(api, sessionId, 'creator-checkout-success')
+          : null,
       contentSlug,
       username,
     };
@@ -64,6 +75,7 @@ export const load: PageServerLoad = async ({
     return {
       verification: null,
       verifyFailed: !transient,
+      unlock: null,
       contentSlug,
       username,
     };

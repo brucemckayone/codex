@@ -140,37 +140,31 @@ test.describe('Studio Team Page', () => {
   });
 
   /**
-   * Regression guard for the strict-mode violation that turned E2E Web red on
-   * main (run 33913062789). It proves BOTH halves: that the hazard is real,
-   * and that {@link headerInviteButton} is immune to it.
-   *
-   * Failing `getOrgMembers` is the shortest way to put both CTAs on screen.
-   * That is not a contrived state — a REJECTED remote query reports
-   * `loading === false` while `current` stays `undefined` (SvelteKit 2.55's
-   * Query sets `#ready` only on the resolve path; `.catch()` clears
-   * `#loading` and leaves it false — the same trap studio/settings documents),
-   * so the page's `{#if membersQuery?.loading}` skeleton is skipped and
-   * <MemberTable> falls through to its empty-state branch. Measured locally
-   * against this stack: 2 buttons match the bare accessible name, 1 matches
-   * the scoped locator.
+   * A failed members read says so (owner decision 2026-10-26, "Same as payout
+   * read"; Codex-2hxff.74). It used to fall through to MemberTable's empty
+   * state, "No team members" plus a second Invite CTA, because a REJECTED
+   * remote query reports `loading === false` while `current` stays
+   * `undefined` (SvelteKit 2.55's Query sets `#ready` only on the resolve
+   * path). This replaces the guard that kept the header CTA addressable
+   * beside that empty-state CTA (run 33913062789): an organisation always has
+   * its owner as a member, so a failed read was the only way to reach it.
    *
    * The route matcher keys on the PATH, not the query string: SvelteKit sends
    * remote-query arguments as a base64 `?payload=`, so the org id does not
-   * appear verbatim in the URL and a search-string matcher silently never
-   * fires (it did not, on the first attempt at this test — the query then
-   * succeeded and the empty state never appeared).
+   * appear verbatim in the URL, and a search-string matcher silently never
+   * fires.
    */
-  test('header invite CTA stays uniquely addressable beside the empty-state CTA', async ({
+  test('a failed members read shows the load error, and Retry brings the team back', async ({
     page,
   }) => {
-    await page.route(
-      (url) => /\/_app\/remote\/[^/]+\/getOrgMembers$/.test(url.pathname),
-      (route) =>
-        route.fulfill({
-          status: 500,
-          contentType: 'application/json',
-          body: '{}',
-        })
+    const membersRead = (url: URL) =>
+      /\/_app\/remote\/[^/]+\/getOrgMembers$/.test(url.pathname);
+    await page.route(membersRead, (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: '{}',
+      })
     );
 
     await navigateToStudioPage(
@@ -179,13 +173,19 @@ test.describe('Studio Team Page', () => {
       '/team'
     );
 
-    // The ambiguity is real, not hypothetical — this is the count Playwright
-    // refused to click through on main.
+    const loadError = page.getByTestId('team-members-load-error');
+    await expect(loadError).toBeVisible({ timeout: 15_000 });
+    await expect(loadError).toContainText("We couldn't load your team.");
+    // Nothing that depends on the list shows: no table, no empty state and
+    // no Invite, in the header or the body.
     await expect(
       page.getByRole('button', { name: /Invite Member/i })
-    ).toHaveCount(2);
+    ).toHaveCount(0);
 
-    // ...and the scoped locator still resolves to exactly one, and still works.
+    await page.unroute(membersRead);
+    await loadError.getByRole('button', { name: 'Retry' }).click();
+
+    await expect(loadError).toBeHidden({ timeout: 15_000 });
     await expect(headerInviteButton(page)).toHaveCount(1);
     await headerInviteButton(page).click();
     await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 });

@@ -34,14 +34,20 @@ export interface AdminContentItem {
   creator?: { id: string; email: string; name: string | null };
 }
 
+/** One UTC calendar day; a window has one per day, oldest first, zero-filled. */
 export interface DailyRevenue {
   date: string;
   revenueCents: number;
   purchaseCount: number;
 }
 
+/** Every kind of payment the revenue figures count (Codex-2hxff.20). */
+export type RevenueKind = 'one_off' | 'course' | 'subscription' | 'course_plan';
+
+/** Read from the payouts ledger: every kind, after refunds and lost chargebacks. */
 export interface RevenueStats {
   totalRevenueCents: number;
+  revenueByKind: Record<RevenueKind, number>;
   totalPurchases: number;
   averageOrderValueCents: number;
   platformFeeCents: number;
@@ -53,6 +59,7 @@ export interface RevenueStats {
 export interface CustomerStats {
   totalCustomers: number;
   newCustomersLast30Days: number;
+  newCustomersLast7Days: number;
 }
 
 export interface TopContentItem {

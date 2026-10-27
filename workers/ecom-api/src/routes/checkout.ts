@@ -5,6 +5,8 @@
  *
  * Endpoints:
  * - POST /checkout/create - Create Stripe Checkout session
+ * - POST /checkout/complete - Record a paid session's purchase on arrival
+ * - GET /checkout/verify - Where a session stands, for the success page
  *
  * Security:
  * - Requires authentication (user must be logged in)
@@ -17,8 +19,13 @@
  * - Access control - Prevents duplicate purchases
  */
 
+import { invalidateUserLibrary } from '@codex/cache';
+import type { ObservabilityClient } from '@codex/observability';
+import type { CheckoutSessionVerifyResult } from '@codex/purchase';
+import { ServiceUnavailableError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import {
+  completeCheckoutSessionSchema,
   createCheckoutSchema,
   createCourseCheckoutSchema,
   createCourseSubscriptionCheckoutSchema,
@@ -27,6 +34,15 @@ import {
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import {
+  type CheckoutCompletion,
+  completeCheckoutSession,
+  resolvePaymentIntentCharge,
+} from '../handlers/checkout';
+import {
+  describeRootCause,
+  isTransientError,
+} from '../utils/error-classification';
 
 // ============================================================================
 // Types
@@ -39,6 +55,59 @@ import { Hono } from 'hono';
 interface CheckoutSessionResponse {
   sessionUrl: string;
   sessionId: string;
+}
+
+/**
+ * The purchase is recorded, and a completion from the success page failed.
+ * Only what is known is said:
+ * - `stage: 'after_commit'`: the completion returned the purchase and a step
+ *   after it failed (a clawback).
+ * - `stage: 'unknown'`: it threw, and our row reads `unlocked` after. It may
+ *   have failed after its own commit (a payout slice not written), or before
+ *   it while the webhook committed. The line names no one as the recorder.
+ * A transient cause is a warn. A permanent one is a bug or a data problem
+ * whoever committed, so it is an error.
+ */
+function logRecordedDespiteFailure(
+  obs: ObservabilityClient | undefined,
+  fields: {
+    errorId: string;
+    sessionId: string;
+    purchaseId?: string;
+    stage: 'after_commit' | 'unknown';
+    failure: unknown;
+  }
+) {
+  const transient = isTransientError(fields.failure);
+  const line = {
+    errorId: fields.errorId,
+    sessionId: fields.sessionId,
+    purchaseId: fields.purchaseId,
+    stage: fields.stage,
+    transient,
+    cause: causeOf(fields.failure),
+  };
+  const message =
+    'The purchase is recorded; a completion from the success page failed';
+  if (transient) obs?.warn(message, line);
+  else obs?.error(message, line);
+}
+
+/**
+ * What failed, for a log line: the innermost error under `error`, or the error
+ * itself when it wraps nothing (a ServiceError thrown as is, whose message is
+ * fixed text, not data).
+ */
+function causeOf(error: unknown) {
+  const root = describeRootCause(error);
+  if (root) return root;
+  if (!(error instanceof Error)) return { name: typeof error };
+  const code = (error as { code?: unknown }).code;
+  return {
+    name: error.name,
+    message: error.message,
+    code: typeof code === 'string' ? code : undefined,
+  };
 }
 
 // ============================================================================
@@ -196,6 +265,202 @@ checkout.post(
 );
 
 /**
+ * POST /checkout/complete
+ *
+ * Record the purchase a paid checkout session stands for, the moment the
+ * buyer lands on the success page (Codex-2hxff.22; owner decision 2026-10-26,
+ * "Unlock on arrival"; Stripe's "trigger fulfillment on your landing page").
+ * It runs `completeCheckoutSession`, the webhook's own completion, for content
+ * and course purchases alike. The webhook stays the backstop: whichever runs
+ * second finds the work done.
+ *
+ * Request Body:
+ * - sessionId: Stripe checkout session ID (cs_xxx)
+ *
+ * Response (200): the same `{ data }` as GET /checkout/verify, read after.
+ * - Our row already there (the usual case: Stripe holds the redirect while
+ *   our webhook answers), or nothing paid: nothing is written.
+ * - Paid with no row: recorded, then read again.
+ * - A completion that fails while our row records the purchase (a payout
+ *   slice not written, a clawback not sent, or a webhook that committed
+ *   first) is logged, never answered as an error: the purchase and its access
+ *   stand, so the page gets `unlocked` (purchases.md, Errors). The webhook's
+ *   own delivery replays the slices and the clawback.
+ * - Every failure is logged here with an errorId: the error mapper logs no
+ *   ServiceError. A paid session nothing records is an error.
+ *
+ * Error Responses:
+ * - 400 Bad Request: Invalid body
+ * - 401 Unauthorized: Not authenticated
+ * - 403 Forbidden: Session belongs to different user
+ * - 404 Not Found: Stripe does not know the session, or another environment's
+ * - 429 Too Many Requests: over the `strict` rate limit
+ * - 503 Service Unavailable: a failure a retry can fix, with nothing committed
+ *
+ * Security:
+ * - Only the session id comes from the client. The session is read from
+ *   Stripe here, and the item, amount and payment status come from it
+ * - Rate limiting: strict (20 req/min)
+ */
+checkout.post(
+  '/complete',
+  procedure({
+    policy: { auth: 'required', rateLimit: 'strict' },
+    input: { body: completeCheckoutSessionSchema },
+    handler: async (ctx): Promise<CheckoutSessionVerifyResult> => {
+      const startedAt = Date.now();
+      const { sessionId } = ctx.input.body;
+      const purchase = ctx.services.purchase;
+      const session = await purchase.retrieveCheckoutSession(
+        sessionId,
+        ctx.user.id
+      );
+
+      const arrival = await purchase.readCheckoutSession(session, ctx.user.id);
+      if (arrival.recorded || arrival.result.state !== 'recording') {
+        ctx.obs?.info('Checkout completed from the success page', {
+          sessionId,
+          trigger: 'landing',
+          outcome: arrival.recorded ? 'already_recorded' : 'not_paid',
+          durationMs: Date.now() - startedAt,
+        });
+        return arrival.result;
+      }
+
+      let completion: CheckoutCompletion;
+      try {
+        completion = await completeCheckoutSession(session, {
+          env: ctx.env,
+          executionCtx: ctx.executionCtx,
+          obs: ctx.obs,
+          trigger: 'landing',
+          resolveCharge: (paymentIntentId) =>
+            resolvePaymentIntentCharge(
+              () => purchase.retrievePaymentIntentCharge(paymentIntentId),
+              paymentIntentId,
+              ctx.obs
+            ),
+          withPurchaseService: (run) => run(purchase),
+        });
+      } catch (error) {
+        // mapErrorToResponse logs no ServiceError, so every way out of here
+        // writes its own line, under one errorId.
+        const errorId = crypto.randomUUID();
+        const cause = causeOf(error);
+        // Only a clawback's failure comes back as `completion.failure`; a
+        // payout slice that could not be written is thrown, after the
+        // purchase committed. Whatever threw, a purchase our row records is
+        // the buyer's, and it must not reach them as an error (purchases.md,
+        // Errors). If the read fails too, the original error is the answer.
+        let after:
+          | Awaited<ReturnType<typeof purchase.readCheckoutSession>>
+          | undefined;
+        try {
+          after = await purchase.readCheckoutSession(session, ctx.user.id);
+        } catch (readError) {
+          ctx.obs?.warn(
+            'Could not re-read a checkout session after its completion failed',
+            { errorId, sessionId, cause: causeOf(readError) }
+          );
+        }
+        if (after?.result.state === 'unlocked') {
+          logRecordedDespiteFailure(ctx.obs, {
+            errorId,
+            sessionId,
+            purchaseId: after.result.purchase?.id,
+            stage: 'unknown',
+            failure: error,
+          });
+          // The completion threw before its own library bump.
+          invalidateUserLibrary({
+            kv: ctx.env.CACHE_KV,
+            waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+            userId: ctx.user.id,
+            logger: ctx.obs,
+          });
+          ctx.obs?.info('Checkout completed from the success page', {
+            sessionId,
+            trigger: 'landing',
+            outcome: 'recorded_despite_failure',
+            purchaseId: after.result.purchase?.id,
+            durationMs: Date.now() - startedAt,
+          });
+          return after.result;
+        }
+        // Not unlocked. The line is worded by what the re-read found: a row
+        // of ours in another state (a duplicate being refunded, a purchase
+        // refunded or paused) is recorded, so it is never "could not record";
+        // no row, or no re-read, is. Its `state` is on the line either way.
+        const transient = isTransientError(error);
+        const line = { errorId, sessionId, state: after?.result.state, cause };
+        if (after?.recorded) {
+          const message =
+            'A completion from the success page failed; the session already has a purchase';
+          if (transient) ctx.obs?.warn(message, line);
+          else ctx.obs?.error(message, line);
+        } else if (transient) {
+          ctx.obs?.warn(
+            'The success page could not record a paid session yet',
+            line
+          );
+        } else {
+          // A refusal no retry changes (an unsupported currency, an item
+          // gone): the buyer has paid and nothing records it.
+          ctx.obs?.error(
+            'The success page could not record a paid session',
+            line
+          );
+        }
+        // A failure a retry can fix (an outage, the duplicate's refund still
+        // in flight) is "not yet" to the page, which checks again; the
+        // webhook records it meanwhile.
+        if (transient) {
+          throw new ServiceUnavailableError(
+            'The purchase could not be recorded yet',
+            { sessionId, errorId },
+            { cause: error }
+          );
+        }
+        throw error;
+      }
+
+      if (completion.kind === 'completed' && completion.failure) {
+        logRecordedDespiteFailure(ctx.obs, {
+          errorId: crypto.randomUUID(),
+          sessionId,
+          purchaseId: completion.purchase.id,
+          stage: 'after_commit',
+          failure: completion.failure,
+        });
+      }
+      if (completion.kind === 'skipped') {
+        // Only a paid session with no row reaches the completion, so a skip
+        // is a paid session nothing records (bad metadata, no amount).
+        ctx.obs?.error('The success page could not record a paid session', {
+          errorId: crypto.randomUUID(),
+          sessionId,
+          reason: completion.reason,
+        });
+      }
+
+      const recorded = await purchase.readCheckoutSession(session, ctx.user.id);
+      ctx.obs?.info('Checkout completed from the success page', {
+        sessionId,
+        trigger: 'landing',
+        outcome:
+          completion.kind === 'skipped'
+            ? `skipped:${completion.reason}`
+            : 'recorded',
+        purchaseId:
+          completion.kind === 'completed' ? completion.purchase.id : undefined,
+        durationMs: Date.now() - startedAt,
+      });
+      return recorded.result;
+    },
+  })
+);
+
+/**
  * GET /checkout/verify
  *
  * Verify Stripe checkout session status for success page display
@@ -207,6 +472,7 @@ checkout.post(
  * {
  *   "data": {
  *     "sessionStatus": "complete",
+ *     "state": "unlocked",
  *     "purchase": { ... },
  *     "content": { ... }
  *   }
@@ -216,13 +482,13 @@ checkout.post(
  * - 400 Bad Request: Invalid session_id format
  * - 401 Unauthorized: Not authenticated
  * - 403 Forbidden: Session belongs to different user
- * - 404 Not Found: Session not found (Stripe API error)
+ * - 404 Not Found: Stripe does not know the session, or another environment's
  * - 500 Internal Server Error: Stripe API failure
  *
  * Security:
  * - Requires authentication (withPolicy)
- * - Rate limiting: auth (100 req/min default)
- * - Validates session ownership via metadata.customer_id
+ * - Rate limiting: api (100 req/min, the default)
+ * - Validates session ownership via metadata.customerId
  */
 checkout.get(
   '/verify',

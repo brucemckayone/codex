@@ -10,7 +10,12 @@
   The compare overlay is drawn on a normalised index-based time axis:
   main range day N aligns with compare range day N. The two windows may
   have different calendar dates but we guarantee equal duration upstream
-  (AnalyticsCommandBar's `previousPeriod`).
+  (`previousRange` in analytics-range.ts).
+
+  A failed read is not a flat line (review N-3, M4): a series in
+  `unavailable` gets no tab, and the chart opens on the first tab left. The
+  page shows "We couldn't load your …" for each, and drops the chart when
+  every series failed.
 
   @prop {RevenueStats}    revenue            Current + previous revenue block
   @prop {SubscriberStats} subscribers        Current + previous subscribers block
@@ -18,6 +23,7 @@
   @prop {boolean}         hasCompareWindow   When true AND the active tab's block has `previous`, overlay renders
   @prop {boolean}         [loading=false]    Shimmer skeleton state
   @prop {'revenue'|'subscribers'|'followers'} [initialTab='revenue']  Initial active tab
+  @prop {TabKey[]}        [unavailable=[]]   Series whose read failed: no tab for them
 -->
 <script lang="ts">
   import type {
@@ -38,6 +44,7 @@
     hasCompareWindow: boolean;
     loading?: boolean;
     initialTab?: TabKey;
+    unavailable?: readonly TabKey[];
   }
 
   const {
@@ -47,9 +54,21 @@
     hasCompareWindow,
     loading = false,
     initialTab = 'revenue',
+    unavailable = [],
   }: Props = $props();
 
-  let activeTab = $state<string | undefined>(initialTab);
+  const TAB_ORDER: readonly TabKey[] = ['revenue', 'subscribers', 'followers'];
+
+  /** The tabs on offer: every series whose read did not fail. */
+  const tabs = $derived(TAB_ORDER.filter((tab) => !unavailable.includes(tab)));
+
+  // The tab the chart opens on: `initialTab`, unless its read failed.
+  const openingTab = $derived<TabKey>(
+    tabs.includes(initialTab) ? initialTab : (tabs[0] ?? initialTab)
+  );
+
+  // The Tabs value; undefined until Tabs reports the tab it opened on.
+  let activeTab = $state<string | undefined>();
 
   // ─── Formatters ─────────────────────────────────────────────────────────
   const numberFormatter = new Intl.NumberFormat('en-GB');
@@ -111,18 +130,23 @@
       })) ?? null,
   });
 
+  const activeKey = $derived.by<TabKey>(() => {
+    const tab = activeTab ?? openingTab;
+    return tabs.find((key) => key === tab) ?? openingTab;
+  });
+
+  function tabLabel(tab: TabKey): string {
+    if (tab === 'subscribers') return m.analytics_chart_tab_subscribers();
+    if (tab === 'followers') return m.analytics_chart_tab_followers();
+    return m.analytics_chart_tab_revenue();
+  }
+
   const activeSeries = $derived<Series>(
-    activeTab === 'subscribers'
+    activeKey === 'subscribers'
       ? subscriberSeries
-      : activeTab === 'followers'
+      : activeKey === 'followers'
         ? followerSeries
         : revenueSeries
-  );
-
-  const activeKey = $derived<TabKey>(
-    activeTab === 'subscribers' || activeTab === 'followers'
-      ? activeTab
-      : 'revenue'
   );
 
   const isMoney = $derived(activeKey === 'revenue');
@@ -367,34 +391,24 @@
     </div>
     <div class="hero-chart__skeleton-body" aria-hidden="true"></div>
   {:else}
-    <Tabs.Root bind:value={activeTab} class="hero-chart__tabs">
+    <Tabs.Root
+      bind:value={activeTab}
+      defaultValue={openingTab}
+      class="hero-chart__tabs"
+    >
       <Tabs.List class="hero-chart__tabs-list">
-        <Tabs.Trigger value="revenue">
-          {m.analytics_chart_tab_revenue()}
-        </Tabs.Trigger>
-        <Tabs.Trigger value="subscribers">
-          {m.analytics_chart_tab_subscribers()}
-        </Tabs.Trigger>
-        <Tabs.Trigger value="followers">
-          {m.analytics_chart_tab_followers()}
-        </Tabs.Trigger>
+        {#each tabs as tab (tab)}
+          <Tabs.Trigger value={tab}>{tabLabel(tab)}</Tabs.Trigger>
+        {/each}
       </Tabs.List>
 
-      <Tabs.Content value="revenue" class="hero-chart__panel">
-        {#if activeKey === 'revenue'}
-          {@render chartBody()}
-        {/if}
-      </Tabs.Content>
-      <Tabs.Content value="subscribers" class="hero-chart__panel">
-        {#if activeKey === 'subscribers'}
-          {@render chartBody()}
-        {/if}
-      </Tabs.Content>
-      <Tabs.Content value="followers" class="hero-chart__panel">
-        {#if activeKey === 'followers'}
-          {@render chartBody()}
-        {/if}
-      </Tabs.Content>
+      {#each tabs as tab (tab)}
+        <Tabs.Content value={tab} class="hero-chart__panel">
+          {#if activeKey === tab}
+            {@render chartBody()}
+          {/if}
+        </Tabs.Content>
+      {/each}
     </Tabs.Root>
   {/if}
 </div>

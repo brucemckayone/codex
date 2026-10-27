@@ -4,18 +4,22 @@
  * The same rule as the org /checkout/success: every failure is logged; a 5xx,
  * a network failure (including the client's own 408 timeout) or a 429 rate
  * limit is transient and retried; any other 4xx reports `verifyFailed`, and
- * the page shows its error state.
+ * the page shows its error state. A paid session with no record of ours
+ * streams the completion on arrival, as there (Codex-2hxff.22).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/server/errors';
 
-const { verifyMock, warnMock } = vi.hoisted(() => ({
+const { verifyMock, completeMock, warnMock } = vi.hoisted(() => ({
   verifyMock: vi.fn(),
+  completeMock: vi.fn(),
   warnMock: vi.fn(),
 }));
 
 vi.mock('$lib/server/api', () => ({
-  createServerApi: () => ({ checkout: { verify: verifyMock } }),
+  createServerApi: () => ({
+    checkout: { verify: verifyMock, complete: completeMock },
+  }),
 }));
 vi.mock('$lib/observability', () => ({ logger: { warn: warnMock } }));
 
@@ -87,6 +91,57 @@ describe('creator checkout success load — a failed verify', () => {
         transient: false,
         error: 'Refused',
       }
+    );
+  });
+});
+
+describe('creator checkout success load — unlock on arrival (Codex-2hxff.22)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('paid with no record of ours: the completion is asked for once, and streamed', async () => {
+    const unlocked = { sessionStatus: 'complete', state: 'unlocked' };
+    verifyMock.mockResolvedValueOnce({
+      sessionStatus: 'complete',
+      state: 'recording',
+    });
+    completeMock.mockResolvedValueOnce(unlocked);
+    const { load } = await import('../+page.server');
+
+    const data = (await load(makeEvent())) as LoadData;
+
+    expect(completeMock).toHaveBeenCalledWith('cs_test_abc');
+    await expect(data.unlock).resolves.toEqual(unlocked);
+  });
+
+  it('a session already recorded asks for no completion', async () => {
+    verifyMock.mockResolvedValueOnce({
+      sessionStatus: 'complete',
+      state: 'unlocked',
+    });
+    const { load } = await import('../+page.server');
+
+    const data = (await load(makeEvent())) as LoadData;
+
+    expect(data.unlock).toBeNull();
+    expect(completeMock).not.toHaveBeenCalled();
+  });
+
+  it('a failed completion is logged and resolves to null', async () => {
+    verifyMock.mockResolvedValueOnce({
+      sessionStatus: 'complete',
+      state: 'recording',
+    });
+    completeMock.mockRejectedValueOnce(new TypeError('fetch failed'));
+    const { load } = await import('../+page.server');
+
+    const data = (await load(makeEvent())) as LoadData;
+
+    await expect(data.unlock).resolves.toBeNull();
+    expect(warnMock).toHaveBeenCalledWith(
+      'creator-checkout-success: completion on arrival failed',
+      expect.objectContaining({ sessionId: 'cs_test_abc', transient: true })
     );
   });
 });

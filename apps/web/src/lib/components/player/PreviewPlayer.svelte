@@ -63,6 +63,46 @@
   let previewEnded = $state(false);
   let showCta = $derived(previewEnded || accessState.status === 'locked');
 
+  // Buy returns the way the content page's own purchase form does (each
+  // detail page's `buildSuccessUrl`), naming the piece so the success page's
+  // Start Watching opens it. The checkout's default return names nothing, and
+  // the creators host finds a piece by username and slug only (Codex-2hxff.22).
+  // Off a detail page there is no slug, and the default stands.
+  const successUrl = $derived.by(() => {
+    const contentSlug = page.params?.contentSlug;
+    if (!contentSlug) return undefined;
+    const username = page.params?.username;
+    const creator = username ? `&username=${encodeURIComponent(username)}` : '';
+    return `${page.url.origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}&contentSlug=${encodeURIComponent(contentSlug)}${creator}`;
+  });
+  // Cancel at Stripe comes back here, as the detail page's form does
+  // (`url.href`). The default, `/content/{id}`, matches no route on the
+  // creators host (Codex-2hxff.78).
+  const cancelUrl = $derived(page.url.href);
+
+  // A refused Buy says so in plain words, never the worker's message (the
+  // pricing page's rule, Codex-2hxff.69): already owned, then reload; a
+  // failure a retry can fix, then the Buy button is the retry; anything else,
+  // plainly, with no "try again". The remote logs it.
+  const refusal = $derived.by(() => {
+    const result = createCheckout.result;
+    if (!result || result.success !== false || createCheckout.pending > 0) {
+      return null;
+    }
+    if (result.code === 'ALREADY_PURCHASED') {
+      return { message: m.checkout_refusal_owned(), reload: true };
+    }
+    const status = result.status;
+    const retryable =
+      status === undefined || status >= 500 || status === 408 || status === 429;
+    return {
+      message: retryable
+        ? m.checkout_refusal_problem()
+        : m.checkout_refusal_refused(),
+      reload: false,
+    };
+  });
+
   // Reactive video state mirrors DOM so template reads flip when the user
   // pauses/mutes/enters fullscreen via any path (button OR native controls).
   // Mirrors the VideoPlayer pattern (ref 03 §"Reactive state driven by DOM events").
@@ -335,14 +375,28 @@
             {:else if canPurchase}
               <form {...createCheckout}>
                 <input type="hidden" name="contentId" value={contentId} />
+                {#if successUrl}
+                  <input type="hidden" name="successUrl" value={successUrl} />
+                {/if}
+                <input type="hidden" name="cancelUrl" value={cancelUrl} />
                 <button
                   type="submit"
                   class="preview-player__cta-button"
-                  disabled={createCheckout.pending}
+                  disabled={createCheckout.pending > 0}
                 >
                   {createCheckout.pending ? m.common_loading() : m.purchase_cta_title()}
                 </button>
               </form>
+              {#if refusal}
+                <p class="preview-player__cta-refusal" role="alert">
+                  {refusal.message}
+                  {#if refusal.reload}
+                    <a href={cancelUrl} class="preview-player__cta-refusal-link">
+                      {m.checkout_refusal_reload()}
+                    </a>
+                  {/if}
+                </p>
+              {/if}
             {/if}
           </div>
         </div>
@@ -565,6 +619,23 @@
   .preview-player__cta-button:disabled {
     opacity: var(--opacity-60);
     cursor: not-allowed;
+  }
+
+  .preview-player__cta-refusal {
+    font-size: var(--text-sm);
+    color: var(--color-text-inverse);
+    margin: 0;
+    line-height: var(--leading-normal);
+  }
+
+  .preview-player__cta-refusal-link {
+    color: inherit;
+    text-decoration: underline;
+  }
+
+  .preview-player__cta-refusal-link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   /* Responsive */

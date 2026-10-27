@@ -17,6 +17,11 @@
     - Pending proposal waiting on creator → "View thread" + status pill
     - Pending counter received → "View thread" with action emphasis
 
+  `readOnly` (an admin on the owner's page, Codex-2hxff.20 AGR-14): every
+  agreement action is owner-only, so the card offers "View thread" alone and
+  never Propose, Amend or Review counter, each of which an admin was shown and
+  then refused with a 403.
+
   All share % copy explicitly says "of post-platform [type] revenue" so the
   user understands the math. Currency GBP throughout.
 
@@ -73,6 +78,8 @@
       * creator names SIBLINGS of the heading that contains them and flattened
       * the document outline. Mirrors `ui/PageHeader`'s `headingLevel`. */
     headingLevel?: 3 | 4 | 5;
+    /** The viewer can see but not act: "View thread" is the only action. */
+    readOnly?: boolean;
     /** Optional composition seam — forwarded to the root element. */
     class?: string;
   }
@@ -87,6 +94,7 @@
     onAmend,
     onViewThread,
     headingLevel = 4,
+    readOnly = false,
     class: className,
   }: Props = $props();
 
@@ -289,8 +297,17 @@
           {/if}
         </div>
 
+        {#if !(readOnly && row.state.kind === 'none')}
         <div class="agreement-card__row-actions">
-          {#if row.state.kind === 'none'}
+          {#if readOnly}
+            <button
+              type="button"
+              class="agreement-card__btn agreement-card__btn--ghost"
+              onclick={() => onViewThread(row.revType)}
+            >
+              View thread
+            </button>
+          {:else if row.state.kind === 'none'}
             <!-- SECONDARY, not primary. 32 filled brand-coloured buttons on one
                  page made nothing a decision because everything was equally
                  loud. Primary emphasis is reserved below for the rows that
@@ -331,6 +348,7 @@
             </button>
           {/if}
         </div>
+        {/if}
       </section>
     {/each}
   </div>

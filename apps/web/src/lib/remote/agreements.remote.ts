@@ -18,6 +18,7 @@
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
+import { forwardClientErrors } from '$lib/server/forward-client-errors';
 
 // ─── Schemas ──────────────────────────────────────────────────────────────
 
@@ -163,13 +164,20 @@ export const getMyAgreementPortfolio = query(async () => {
  * Worker enumerates threads where the caller is the named creator,
  * including pending-only threads (round-1 owner proposals not yet
  * accepted).
+ *
+ * The worker's 4xx is forwarded WITH its status (`forwardClientErrors`): the
+ * page shows "You don't have access to this agreement" only on a 403 or 404,
+ * and every creator email links here (Codex-2hxff.20 AGR-10). Let through as
+ * an `ApiError`, a stale or foreign link reached the browser as a sanitised
+ * 500 and read as "We couldn't load this negotiation." with a Retry that
+ * could never succeed. A 5xx stays unexpected, so `handleError` sanitises it.
  */
 export const getMyAgreementThread = query(
   proposalIdArgSchema,
   async ({ proposalId }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.agreements.getMyThread(proposalId);
+    return forwardClientErrors(() => api.agreements.getMyThread(proposalId));
   }
 );
 

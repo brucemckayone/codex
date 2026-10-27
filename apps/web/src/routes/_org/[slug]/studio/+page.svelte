@@ -12,10 +12,15 @@
     03  Two-column: FocusRail + ActivityStream
                                            — what needs you / what just happened
 
-  Role gating preserves the original rules:
+  Role gating:
    - Admin/owner see revenue + customers stats and the revenue-feature tile
-   - All roles see content + views
+   - All roles see content + views (read only for admin/owner: the figures
+     route requires org management, so other roles see "–")
    - Admin-only actions (Create, branding focus) hidden for members
+   - The activity stream is admin/owner only (its route requires org
+     management); other roles get the focus rail across the row
+   - Agreement nudges are the owner's only: every agreement change is
+     (Codex-2hxff.20 AGR-14)
 
   All remote function calls and request shapes are preserved —
   getDashboardStats(orgId) + getActivityFeed({ organizationId, limit }).
@@ -27,6 +32,9 @@
   import ActivityStream from '$lib/components/studio/dashboard/ActivityStream.svelte';
   import type { FocusItem } from '$lib/components/studio/dashboard/FocusRail.svelte';
   import { buildOwnerAgreementFocusItems } from '$lib/components/studio/dashboard/agreement-focus-items';
+  import { revenueSparkline } from '$lib/components/studio/dashboard/dashboard-figures';
+  import RevenueKindsLine from '$lib/components/studio/analytics/RevenueKindsLine.svelte';
+  import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
   import {
     PlusIcon,
     EditIcon,
@@ -35,6 +43,8 @@
   } from '$lib/components/ui/Icon';
   import { dismiss, isDismissed } from '$lib/collections/dismissals';
   import { formatPrice } from '$lib/utils/format';
+  import { connectQueryState } from '$lib/utils/connect-readiness';
+  import type { QueryResult } from '$lib/remote/query-result';
   import { getDashboardStats, getActivityFeed } from '$lib/remote/admin.remote';
   import {
     listActiveAgreements,
@@ -48,28 +58,36 @@
   const isAdmin = $derived(
     data.userRole === 'admin' || data.userRole === 'owner'
   );
+  // Every agreement change is the owner's alone (agreements.md §Who sees
+  // what; Codex-2hxff.20 AGR-14), so only the owner gets the nudges to make
+  // one. An admin would be sent to a page that refuses them.
+  const isOwner = $derived(data.userRole === 'owner');
 
-  // Preserve original remote function calls and param shapes exactly.
+  // The figures route requires org management: a creator or member would get
+  // a guaranteed 403, which used to come back as "0 content". Their tiles
+  // read "–" instead.
   const statsQuery = $derived(
-    data.org?.id ? getDashboardStats(data.org.id) : null
+    isAdmin && data.org?.id ? getDashboardStats(data.org.id) : null
   );
+  // The activity route requires org management too: other roles got a 403
+  // shown as "No activity yet", so the stream is for owners and admins only.
   const activitiesQuery = $derived(
-    data.org?.id
+    isAdmin && data.org?.id
       ? getActivityFeed({ organizationId: data.org.id, limit: 12 })
       : null
   );
 
   // ── Revenue-share signal data (WP-9 — Codex-k9no0) ──────────────────────
-  // Only admin/owner see agreement focus items — the worker route gates
-  // both endpoints with requireOrgManagement. Skipping the query for
-  // creator/non-admin roles avoids a guaranteed 403.
+  // Only the owner sees agreement focus items (see `isOwner`). The worker
+  // routes gate both endpoints with requireOrgManagement, so skipping the
+  // query for every other role also avoids a guaranteed 403.
   const agreementsQuery = $derived(
-    isAdmin && data.org?.id
+    isOwner && data.org?.id
       ? listActiveAgreements({ organizationId: data.org.id })
       : null
   );
   const pendingCountersQuery = $derived(
-    isAdmin && data.org?.id
+    isOwner && data.org?.id
       ? listPendingProposals({
           organizationId: data.org.id,
           proposedByRole: 'creator',
@@ -79,7 +97,7 @@
   // Team members feed the propose-nudge — every non-subscriber creator
   // without a subscription agreement gets a card.
   const teamMembersQuery = $derived(
-    isAdmin && data.org?.id
+    isOwner && data.org?.id
       ? getOrgMembers({ orgId: data.org.id, limit: 100 })
       : null
   );
@@ -96,30 +114,54 @@
     dismissTick += 1;
   }
 
-  const stats = $derived(statsQuery?.current ?? null);
-  const statsLoading = $derived(statsQuery?.loading ?? false);
+  // Loading, failed or ok. A failed read has `current: undefined`, which the
+  // tiles used to cover as £0; the stat grid gives way to "We couldn't load
+  // your revenue." with Retry instead (Codex-2hxff.74's pattern).
+  const statsState = $derived(
+    connectQueryState(
+      statsQuery as QueryResult<
+        NonNullable<typeof statsQuery>['current']
+      > | null
+    )
+  );
+  const stats = $derived(statsState.kind === 'ok' ? statsState.status : null);
+  const statsFailed = $derived(statsState.kind === 'failed');
+  // Only a query still on its way is loading; one never made (a creator's)
+  // or failed is not.
+  const statsLoading = $derived(
+    statsQuery !== null && statsState.kind === 'loading'
+  );
   const activities = $derived(activitiesQuery?.current?.items ?? []);
   const activitiesLoading = $derived(activitiesQuery?.loading ?? false);
+  // A failed feed is not an empty one (review N-3): the stream gives way to
+  // "We couldn't load your recent activity." with Retry.
+  const activitiesFailed = $derived(
+    connectQueryState(
+      activitiesQuery as QueryResult<
+        NonNullable<typeof activitiesQuery>['current']
+      > | null
+    ).kind === 'failed'
+  );
 
-  // ── Sparkline series (14-day revenue for the admin feature tile) ──────────
-  const revenueSeries = $derived.by(() => {
-    const days = stats?.revenue?.revenueByDay ?? [];
-    return days.slice(-14).map((d) => d.revenueCents ?? 0);
-  });
+  // ── Sparkline series: the last 14 calendar days, oldest first ─────────────
+  const revenueSeries = $derived(
+    revenueSparkline(stats?.revenue.revenueByDay ?? [])
+  );
 
   // ── Today narrative ───────────────────────────────────────────────────────
   // Single-line English summary. Graceful for missing fields.
   // TODO i18n — key: studio_dashboard_narrative_placeholder
   const narrative = $derived.by(() => {
-    if (!stats) return 'Pulling today\u2019s numbers together…';
+    if (statsLoading) return 'Pulling today\u2019s numbers together…';
 
     const parts: string[] = [];
     const drafts = data.badgeCounts?.draftContent ?? 0;
-    const todayRevenue = (stats.revenue?.revenueByDay ?? []).slice(-1)[0]
-      ?.revenueCents ?? 0;
-    const newCustomers = stats.customers?.change ?? 0;
+    // Today's UTC date, never "the last day that had a sale" (Codex-2hxff.75).
+    // `null` when the series has no entry for today: unknown, not £0 (L7).
+    const todayRevenue = stats?.revenue.todayCents ?? null;
+    const newCustomers = stats?.customers.newThisWeek ?? 0;
 
-    if (isAdmin && todayRevenue > 0) {
+    if (isAdmin && todayRevenue !== null && todayRevenue > 0) {
       parts.push(`${formatPrice(todayRevenue)} earned today`);
     }
     if (drafts > 0) {
@@ -134,7 +176,9 @@
     }
 
     if (parts.length === 0) {
-      return isAdmin
+      // "Quiet so far" is a claim about today's sales: never make it on
+      // figures that failed to load, or with no figure for today.
+      return isAdmin && !statsFailed && todayRevenue !== null
         ? 'Quiet so far. A good time to publish something new.'
         : 'Nothing pressing — plenty of room to create.';
     }
@@ -166,8 +210,9 @@
       });
     }
 
-    // Empty-state nudges — only shown when there's nothing else pressing
-    if (items.length === 0 && (stats?.contentCount?.value ?? 0) === 0) {
+    // Empty-state nudges — only shown when there's nothing else pressing, and
+    // only on a count we have: an unread one is not zero.
+    if (items.length === 0 && stats !== null && stats.contentCount.value === 0) {
       items.push({
         id: 'first-content',
         eyebrow: 'First step',
@@ -181,14 +226,15 @@
     }
 
     if (isAdmin) {
-      // WP-9 revenue-share signals — only when all three data sources
-      // have resolved. We deliberately don't render partial sets while
-      // queries are still loading; the rest of the rail covers the
-      // skeleton state.
+      // WP-9 revenue-share signals, the owner's only (AGR-14) — and only
+      // when all three data sources have resolved. We deliberately don't
+      // render partial sets while queries are still loading; the rest of the
+      // rail covers the skeleton state.
       const activeAgreements = agreementsQuery?.current?.items ?? [];
       const pendingCounters = pendingCountersQuery?.current?.items ?? [];
       const teamMembers = teamMembersQuery?.current?.items ?? [];
       const dataReady =
+        isOwner &&
         agreementsQuery?.current != null &&
         pendingCountersQuery?.current != null &&
         teamMembersQuery?.current != null;
@@ -270,7 +316,8 @@
           ordinal: '01',
           label: m.studio_stat_revenue(),
           value: stats ? formatPrice(stats.revenue.value) : '£–',
-          change: stats?.revenue.change,
+          // Calendar weeks; `null` (no badge) with nothing to compare with.
+          change: stats?.revenue.change ?? undefined,
           series: revenueSeries,
           variant: 'feature' as const,
         },
@@ -278,7 +325,8 @@
           ordinal: '02',
           label: m.studio_stat_customers(),
           value: stats?.customers.value ?? '–',
-          change: stats?.customers.change,
+          // This week's growth of the customer base; was always 0.
+          change: stats?.customers.change ?? undefined,
           variant: 'inline' as const,
         },
         {
@@ -335,40 +383,75 @@
     {isAdmin}
   />
 
-  <!-- ── 02  Stat tiles (feature + inline row) ── -->
-  <section class="stat-grid" aria-label="Dashboard statistics">
-    <div class="stat-feature">
-      <TodayStat
-        ordinal={featureStat.ordinal}
-        label={featureStat.label}
-        value={featureStat.value}
-        change={featureStat.change}
-        series={'series' in featureStat ? featureStat.series : undefined}
-        loading={statsLoading || !stats}
-        variant="feature"
-      />
-    </div>
-    <div class="stat-inline-row">
-      {#each inlineStats as stat (stat.ordinal)}
+  <!-- ── 02  Stat tiles (feature + inline row) ──
+       A failed read shows the alert in place of the tiles, whose every figure
+       came from it; mounted unconditionally (see LoadFailedAlert). -->
+  <LoadFailedAlert
+    query={statsQuery}
+    message={m.dashboard_revenue_load_failed()}
+    againMessage={m.dashboard_revenue_load_failed_again()}
+    loadedMessage={m.dashboard_revenue_load_retry_ok()}
+    data-testid="dashboard-stats-load-error"
+  />
+  {#if !statsFailed}
+    <section class="stat-grid" aria-label="Dashboard statistics">
+      <div class="stat-feature">
         <TodayStat
-          ordinal={stat.ordinal}
-          label={stat.label}
-          value={stat.value}
-          change={stat.change}
-          loading={statsLoading || !stats}
-          variant="inline"
+          ordinal={featureStat.ordinal}
+          label={featureStat.label}
+          value={featureStat.value}
+          change={featureStat.change}
+          series={'series' in featureStat ? featureStat.series : undefined}
+          detail={isAdmin && stats ? revenueKinds : undefined}
+          loading={statsLoading}
+          variant="feature"
         />
-      {/each}
-    </div>
-  </section>
+      </div>
+      <div class="stat-inline-row" data-single={inlineStats.length === 1 || undefined}>
+        {#each inlineStats as stat (stat.ordinal)}
+          <TodayStat
+            ordinal={stat.ordinal}
+            label={stat.label}
+            value={stat.value}
+            change={stat.change}
+            loading={statsLoading}
+            variant="inline"
+          />
+        {/each}
+      </div>
+    </section>
+  {/if}
 
-  <!-- ── 03  Split: Focus rail + Activity stream ── -->
-  <section class="below-fold">
+  <!-- Every kind of payment the Revenue figure counts, in exact pence like
+       the figure (Codex-2hxff.20 WEB-02). -->
+  {#snippet revenueKinds()}
+    {#if stats}
+      <RevenueKindsLine kinds={stats.revenue.byKind} format="exact" />
+    {/if}
+  {/snippet}
+
+  <!-- ── 03  Split: Focus rail + Activity stream ──
+       The stream is the org's activity, owners' and admins' only; for anyone
+       else the rail takes the row. -->
+  <section class="below-fold" data-single={!isAdmin || undefined}>
     <FocusRail items={focusItems} onDismiss={handleFocusDismiss} />
-    <ActivityStream
-      activities={activities}
-      loading={activitiesLoading}
-    />
+    {#if isAdmin}
+      <div class="activity-column">
+        <LoadFailedAlert
+          query={activitiesQuery}
+          message={m.dashboard_activity_load_failed()}
+          againMessage={m.dashboard_activity_load_failed_again()}
+          loadedMessage={m.dashboard_activity_load_retry_ok()}
+          data-testid="dashboard-activity-load-error"
+        />
+        {#if !activitiesFailed}
+          <ActivityStream
+            activities={activities}
+            loading={activitiesLoading}
+          />
+        {/if}
+      </div>
+    {/if}
   </section>
 </div>
 
@@ -419,9 +502,11 @@
     }
   }
 
-  /* Non-admin path only has one supporting stat — keep it single-column on lg */
+  /* Non-admin path only has one supporting stat — keep it single-column on lg.
+     An attribute, not `:has(> :only-child)`: the children are components, so
+     Svelte could not see them, called that selector unused and dropped it. */
   @media (--breakpoint-lg) {
-    .stat-inline-row:has(> :only-child) {
+    .stat-inline-row[data-single] {
       grid-template-columns: 1fr;
     }
   }
@@ -441,5 +526,18 @@
       gap: var(--space-5);
       align-items: start;
     }
+
+    /* The rail alone (no activity stream for this role) takes the row. */
+    .below-fold[data-single] {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* The alert and the stream share the activity column. */
+  .activity-column {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
   }
 </style>

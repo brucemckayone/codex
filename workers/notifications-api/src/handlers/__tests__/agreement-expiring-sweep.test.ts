@@ -71,6 +71,7 @@ const sharedMockState: {
     agreement: ReturnType<typeof mockAgreement>;
     creator: { id: string; email: string; name: string };
     orgName: string;
+    orgSlug: string;
   }>;
   ownerLookup: (orgId: string) => Promise<{
     id: string;
@@ -149,6 +150,7 @@ describe('runAgreementExpiringSweep', () => {
           name: 'Creator One',
         },
         orgName: 'Org One',
+        orgSlug: 'org-one',
       },
     ];
     sharedMockState.ownerLookup = async () => ({
@@ -165,7 +167,6 @@ describe('runAgreementExpiringSweep', () => {
       db: {} as any,
       obs,
       environment: 'test',
-      webAppUrl: 'https://app.example.test',
       workerSecret: 'unused',
       notificationsUrl: 'http://notifications.test',
       daysAhead: 30,
@@ -208,6 +209,7 @@ describe('runAgreementExpiringSweep', () => {
           name: 'Creator Two',
         },
         orgName: 'Orphan Org',
+        orgSlug: 'orphan-org',
       },
     ];
     sharedMockState.ownerLookup = async () => null; // no active owner
@@ -220,7 +222,6 @@ describe('runAgreementExpiringSweep', () => {
       db: {} as any,
       obs,
       environment: 'test',
-      webAppUrl: 'https://app.example.test',
       workerSecret: 'unused',
       notificationsUrl: 'http://notifications.test',
       mailer,
@@ -252,6 +253,7 @@ describe('runAgreementExpiringSweep', () => {
           name: 'A',
         },
         orgName: 'Org A',
+        orgSlug: 'org-a',
       },
       {
         agreement: agB,
@@ -261,6 +263,7 @@ describe('runAgreementExpiringSweep', () => {
           name: 'B',
         },
         orgName: 'Org B',
+        orgSlug: 'org-b',
       },
     ];
     sharedMockState.ownerLookup = async () => ({
@@ -284,7 +287,6 @@ describe('runAgreementExpiringSweep', () => {
       db: {} as any,
       obs,
       environment: 'test',
-      webAppUrl: 'https://app.example.test',
       workerSecret: 'unused',
       notificationsUrl: 'http://notifications.test',
       mailer,
@@ -321,6 +323,7 @@ describe('runAgreementExpiringSweep', () => {
           name: 'Creator',
         },
         orgName: 'Acme Studios',
+        orgSlug: 'acme-studios',
       },
     ];
     sharedMockState.ownerLookup = async () => ({
@@ -337,7 +340,6 @@ describe('runAgreementExpiringSweep', () => {
       db: {} as any,
       obs,
       environment: 'test',
-      webAppUrl: 'https://app.example.test',
       workerSecret: 'unused',
       notificationsUrl: 'http://notifications.test',
       mailer,
@@ -350,10 +352,92 @@ describe('runAgreementExpiringSweep', () => {
     expect(data.revenueTypeLabel).toBe('content-purchase');
     expect(data.termMonthsDisplay).toBe('6 months');
     expect(data.expiryDate).toBe('2026-07-01');
-    expect(data.deepLinkUrl).toContain(
-      'https://app.example.test/studio/negotiations'
-    );
     expect(data.orgName).toBe('Acme Studios');
+  });
+
+  /**
+   * Each side's link opens a page that exists for THEM (Codex-2hxff.20
+   * AGR-10). Both used to be `${WEB_APP_URL}/studio/negotiations?orgId=…`
+   * on the apex host, which has no Studio, so every link was dead.
+   */
+  describe('the link each side gets', () => {
+    async function sweepOne(
+      environment: 'test' | 'staging' | 'production',
+      currentProposalId: string | null
+    ) {
+      resetState();
+      sharedMockState.enrichedCandidates = [
+        {
+          agreement: mockAgreement({ id: 'agr-1', currentProposalId }),
+          creator: {
+            id: 'creator-1',
+            email: 'creator@example.test',
+            name: 'Creator',
+          },
+          orgName: 'Acme Studios',
+          orgSlug: 'acme-studios',
+        },
+      ];
+      sharedMockState.ownerLookup = async () => ({
+        id: 'owner-1',
+        email: 'owner@example.test',
+        name: 'Owner',
+      });
+      const mailer = vi.fn<MailerFn>(async () => undefined);
+      await runAgreementExpiringSweep({
+        // biome-ignore lint/suspicious/noExplicitAny: db is unused by the mocked service
+        db: {} as any,
+        obs: buildObs().obs,
+        environment,
+        workerSecret: 'unused',
+        notificationsUrl: 'http://notifications.test',
+        mailer,
+      });
+      const linkFor = (to: string) =>
+        mailer.mock.calls.find(([p]) => p.to === to)?.[0].data.deepLinkUrl;
+      return {
+        creator: linkFor('creator@example.test'),
+        owner: linkFor('owner@example.test'),
+      };
+    }
+
+    it("the creator opens the agreement's thread on the creators subdomain", async () => {
+      const links = await sweepOne('production', 'proposal-accepted-1');
+      expect(links.creator).toBe(
+        'https://creators.revelations.studio/studio/negotiations/proposal-accepted-1'
+      );
+    });
+
+    it("the owner opens their organisation Studio's revenue-share page", async () => {
+      const links = await sweepOne('production', 'proposal-accepted-1');
+      expect(links.owner).toBe(
+        'https://acme-studios.revelations.studio/studio/monetisation/revenue-share'
+      );
+    });
+
+    it('a creator whose agreement has no proposal link opens the negotiations list', async () => {
+      const links = await sweepOne('production', null);
+      expect(links.creator).toBe(
+        'https://creators.revelations.studio/studio/negotiations'
+      );
+    });
+
+    it('staging links stay on staging, never the production apex', async () => {
+      const links = await sweepOne('staging', 'proposal-accepted-1');
+      expect(links.creator).toBe(
+        'https://creators-staging.revelations.studio/studio/negotiations/proposal-accepted-1'
+      );
+      expect(links.owner).toBe(
+        'https://acme-studios-staging.revelations.studio/studio/monetisation/revenue-share'
+      );
+    });
+
+    it('local links use the lvh.me host and port', async () => {
+      const links = await sweepOne('test', 'proposal-accepted-1');
+      expect(links.owner).toBe(
+        'http://acme-studios.lvh.me:3000/studio/monetisation/revenue-share'
+      );
+    });
   });
 
   it('zero candidates → no emails, no marks, no errors', async () => {
@@ -367,7 +451,6 @@ describe('runAgreementExpiringSweep', () => {
       db: {} as any,
       obs,
       environment: 'test',
-      webAppUrl: 'https://app.example.test',
       workerSecret: 'unused',
       notificationsUrl: 'http://notifications.test',
       mailer,

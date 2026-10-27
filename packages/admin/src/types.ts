@@ -23,24 +23,47 @@ export type { PaginatedListResponse, PaginationMetadata, PaginationParams };
 // ============================================================================
 
 /**
+ * The four kinds of payment an organisation's revenue is made of
+ * (Codex-2hxff.20 WEB-02): one-off content sales, course sales, organisation
+ * subscription payments and course-plan (course subscription) payments.
+ */
+export type RevenueKind = 'one_off' | 'course' | 'subscription' | 'course_plan';
+
+/**
  * Revenue figures for a single period. The standalone block shape is
  * reused inside `RevenueStats.previous` when a comparison period is
  * requested, so the type must stay flat (no nested `previous`).
+ *
+ * Read from the payouts ledger, one row per Stripe charge of the organisation
+ * whose first ledger row falls in the window (owner decision Q1, "Count
+ * everything now", 2026-10-26). Each payment counts what the buyer kept: its
+ * standing refunds and lost chargebacks come off on the sale's day, and every
+ * slice comes off by its share, by the clawback's own rounding (Q-C).
  */
 export interface RevenueBlock {
-  /** Total revenue in cents (gross) */
+  /** Every kind of payment, in cents, after refunds and lost chargebacks */
   totalRevenueCents: number;
-  /** Total number of completed purchases */
+  /** The same total by kind; the four add up to `totalRevenueCents` */
+  revenueByKind: Record<RevenueKind, number>;
+  /** One-off and course sales not refunded in full (sales only, S1) */
   totalPurchases: number;
-  /** Average order value in cents */
+  /** One-off and course revenue over `totalPurchases`, in cents (sales only) */
   averageOrderValueCents: number;
-  /** Platform fee collected in cents */
+  /** Codex's fee on every kind, subscriptions included, after its share of refunds */
   platformFeeCents: number;
-  /** Organization fee in cents */
+  /**
+   * What is left once Codex's fee and the creators' cut are taken: the
+   * organisation's own share. It absorbs the rounding pennies of a partial
+   * refund, so the statement adds up to the penny.
+   */
   organizationFeeCents: number;
-  /** Creator payout amount in cents */
+  /** The creators' cut of every kind, after its share of refunds */
   creatorPayoutCents: number;
-  /** Daily revenue breakdown across the queried period */
+  /**
+   * One entry per UTC calendar day of the window, oldest first, zero-filled
+   * (Codex-2hxff.75). `revenueCents` counts every kind; `purchaseCount`
+   * counts sales only, like `totalPurchases`.
+   */
   revenueByDay: DailyRevenue[];
 }
 
@@ -55,7 +78,8 @@ export interface RevenueStats extends RevenueBlock {
 }
 
 /**
- * Daily revenue breakdown
+ * One UTC calendar day of revenue. A block's list has one per day of its
+ * window, oldest first, with days that had no payment at zero.
  */
 export interface DailyRevenue {
   date: string; // ISO date string YYYY-MM-DD
@@ -64,7 +88,8 @@ export interface DailyRevenue {
 }
 
 /**
- * Daily new-subscriber breakdown
+ * One UTC calendar day of new subscribers; a block's list has one per day of
+ * its window, oldest first, zero-filled (Codex-2hxff.75).
  */
 export interface DailySubscribers {
   date: string; // ISO date string YYYY-MM-DD
@@ -110,7 +135,8 @@ export interface SubscriberQueryOptions {
 }
 
 /**
- * Daily new-follower breakdown
+ * One UTC calendar day of new followers; a block's list has one per day of
+ * its window, oldest first, zero-filled (Codex-2hxff.75).
  */
 export interface DailyFollowers {
   date: string; // ISO date string YYYY-MM-DD
@@ -168,6 +194,11 @@ export interface CustomerStats {
   totalCustomers: number;
   /** Customers whose first purchase was in last 30 days */
   newCustomersLast30Days: number;
+  /**
+   * Customers whose first purchase was in the last 7 UTC calendar days, today
+   * included: the dashboard's "new customers this week".
+   */
+  newCustomersLast7Days: number;
 }
 
 /**
@@ -264,36 +295,48 @@ export interface RevenueQueryOptions {
 }
 
 /**
- * Per-creator revenue split row for org-owner visibility on the studio
- * analytics page (Codex-mtv05). Surfaces the same fan-out that
- * `SubscriptionService.executeTransfers` performs in production, so an
- * org-owner can verify each creator's share before it lands in Stripe.
+ * A creator's share under one kind of agreement, in a shape that cannot be
+ * mistaken for 0% (Codex-zsh2p).
  *
- * Notes on semantics:
- *  - `totalRevenueCents` is the SUM of `purchases.creatorPayoutCents` for the
- *    creator's content in the org+window. Subscription invoice revenue is
- *    NOT included in Phase 1 — there is no per-creator immutable invoice
- *    row today, only dynamic fan-out at transfer time. A future revenue
- *    ledger will close that gap (Phase 2).
- *  - `splitPercent` is a display percentage (0..100): the creator's share
- *    from their active agreement's accepted proposal
- *    (`proposed_creator_share_percent`, basis points / 100), never the legacy
- *    `organizationFeePercentage` (Codex-2hxff.19). It is the present share,
- *    not historical.
- *  - `lastPayoutAt` is the most-recent `payouts.resolvedAt` for `status='paid'`
- *    rows belonging to the (creator, org) pair; `null` when nothing has paid
- *    out yet.
- *  - `pendingPayoutCents` is the SUM of `amountCents` for `payouts` rows
- *    where `status IN ('pending', 'failed')`, joined on BOTH `userId` AND
- *    `organizationId` — multi-org membership safety.
+ * - `none`: no active agreement of this kind. Shown "None" (owner decision
+ *   2026-10-26).
+ * - `unreadable`: an active agreement with no current proposal, so no share
+ *   on record: it pays nothing. Shown "—", never "0%" (fazy6, 2026-10-25).
+ * - `share`: a display percentage (0..100), never basis points.
+ */
+export type AgreementShare =
+  | { kind: 'none' }
+  | { kind: 'unreadable' }
+  | { kind: 'share'; percent: number };
+
+/**
+ * One creator on Studio > Analytics "Revenue by creator" (Codex-zsh2p, owner
+ * decisions Q3 and Q-E, 2026-10-26). One row per creator who holds an active
+ * agreement in the organisation, earned a slice in the window, or is still
+ * owed money.
+ *
+ *  - `earnedCents`: their `creator_payout` slices on the organisation's
+ *    charges in the window, every kind, sent or not, less the share their
+ *    refunds and lost chargebacks took (the revenue block's rule). The owner
+ *    pool (`creator_payout_to_owner`) is the organisation's money, not a
+ *    creator's cut. The Payouts page's "earned" stays money sent.
+ *  - `subscriptionShare` / `salesShare`: from their active `subscription` /
+ *    `content_purchase` agreement's current proposal, as the payment resolver
+ *    reads it. Sales covers one-off and course sales.
+ *  - `lastPayoutAt`: the latest `resolved_at` of their paid `creator_payout`
+ *    rows in this organisation, ever; `null` when nothing has been sent.
+ *  - `pendingPayoutCents`: money this organisation owes them and has not yet
+ *    sent: their pending and failed `creator_payout` rows (those held for
+ *    review or by an open dispute included), less what partial refunds
+ *    already took off each (done `pending_reduction` steps).
  */
 export interface CreatorRevenueSplitItem {
   creatorId: string;
   name: string;
   avatarUrl: string | null;
-  totalRevenueCents: number;
-  /** Display percent (0..100), NOT basis points. */
-  splitPercent: number;
+  earnedCents: number;
+  subscriptionShare: AgreementShare;
+  salesShare: AgreementShare;
   lastPayoutAt: string | null; // ISO string for JSON-safe transport
   pendingPayoutCents: number;
 }
@@ -432,6 +475,7 @@ export interface RevenueByDay {
  */
 export interface RevenueAnalyticsResponse {
   totalRevenueCents: number;
+  revenueByKind: Record<RevenueKind, number>;
   totalPurchases: number;
   averageOrderValueCents: number;
   platformFeeCents: number;

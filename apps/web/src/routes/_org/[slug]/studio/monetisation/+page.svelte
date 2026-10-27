@@ -23,6 +23,7 @@
   import { goto, invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
+  import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
   import MoneySetupPrompt from '$lib/components/studio/MoneySetupPrompt.svelte';
   import MoneyStatBand from '$lib/components/studio/MoneyStatBand.svelte';
   import type { MoneyStat } from '$lib/components/studio/money-stat';
@@ -100,6 +101,33 @@
     ((tiersQuery as QueryResult<SubscriptionTier[]> | null)?.current ?? [])
   );
 
+  // A failed tiers or settings read is not "no tiers" / "subscriptions off"
+  // (Codex-2hxff.74, the .45 pattern). The `?? []` above and the `?? false`
+  // below only fill the gap while a read is loading or failed. A failed tiers
+  // read used to render "No subscription tiers yet." with Create Tier enabled,
+  // so an owner with three tiers could make a duplicate first one; a failed
+  // settings read showed the toggle OFF, and switching it "on" wrote a
+  // setting the owner never saw. Each now shows "We couldn't load your …"
+  // with Retry in place of what it feeds, and hides the action.
+  const tiersState = $derived(
+    connectQueryState(tiersQuery as QueryResult<SubscriptionTier[]> | null)
+  );
+  const tiersFailed = $derived(tiersState.kind === 'failed');
+  const settingsState = $derived(
+    connectQueryState(settingsQuery as QueryResult<unknown> | null)
+  );
+  const settingsFailed = $derived(settingsState.kind === 'failed');
+  // A failed stats read is an UNKNOWN subscriber count, not 0. Read as 0 it
+  // turned off the "money arriving with nowhere to land" prompt, hid the
+  // band and left every tier with no subscribers, all silently. The alert
+  // stands in for the band and says the numbers are missing; the stranded-
+  // money prompt can't be shown honestly without them, and the Connect card
+  // still states the account's own status.
+  const statsState = $derived(
+    connectQueryState(statsQuery as QueryResult<SubscriptionStats> | null)
+  );
+  const statsFailed = $derived(statsState.kind === 'failed');
+
   type ConnectStatusPayload = {
     isConnected: boolean; accountId: string | null;
     chargesEnabled: boolean; payoutsEnabled: boolean; status: string | null;
@@ -130,6 +158,30 @@
       logRawError(
         'payout account status failed to load',
         queryErrorMessage((connectQuery as QueryResult<unknown>).error)
+      );
+    }
+  });
+  $effect(() => {
+    if (tiersFailed) {
+      logRawError(
+        'tiers failed to load',
+        queryErrorMessage((tiersQuery as QueryResult<unknown> | null)?.error)
+      );
+    }
+  });
+  $effect(() => {
+    if (settingsFailed) {
+      logRawError(
+        'settings failed to load',
+        queryErrorMessage((settingsQuery as QueryResult<unknown> | null)?.error)
+      );
+    }
+  });
+  $effect(() => {
+    if (statsFailed) {
+      logRawError(
+        'subscription stats failed to load',
+        queryErrorMessage((statsQuery as QueryResult<unknown> | null)?.error)
       );
     }
   });
@@ -243,7 +295,9 @@
    */
   const readiness = $derived(
     moneyReadiness(connectStatus, {
-      hasTiers: tiers.length > 0,
+      // Only a list that LOADED empty means "no tiers": a failed read is not
+      // a verdict, so it never nudges the owner to add a first tier.
+      hasTiers: tiersState.kind !== 'ok' || tiers.length > 0,
       subscriberCount: stats.activeSubscribers,
     })
   );
@@ -448,8 +502,13 @@
     syncMyConnect()
       .then(() => getMyConnectStatus().refresh())
       .then(() => {
-        // Read the freshly-synced status, not the pre-sync snapshot.
-        if (isConnectReady(connectStatus) && tiers.length === 0) {
+        // Read the freshly-synced status, not the pre-sync snapshot. Only a
+        // tier list that loaded empty means "add your first tier".
+        if (
+          isConnectReady(connectStatus) &&
+          tiersState.kind === 'ok' &&
+          tiers.length === 0
+        ) {
           connectJustWentLive = true;
         }
       })
@@ -546,10 +605,11 @@
   // ─── Tier Dialog ────────────────────────────────────────────────────────
 
   function openCreateTier() {
-    // Defense-in-depth: the button is disabled when !connectReady, but guard
-    // the handler too so a stray programmatic call can't open a dialog that
-    // would only fail on submit.
-    if (!connectReady) return;
+    // Defense-in-depth: the button is disabled when !connectReady, and hidden
+    // while the tiers failed to load, but guard the handler too so a stray
+    // programmatic call can't open a dialog that would only fail on submit,
+    // or make a tier over a list nobody has seen.
+    if (!connectReady || tiersFailed) return;
     editingTier = null;
     tierFormError = '';
     if (unsettledCreate && !resumable(unsettledCreate)) unsettledCreate = null;
@@ -1110,6 +1170,17 @@
        1920 the control had lost all association with the thing it controls. -->
   <Card.Root>
     <Card.Content>
+      <!-- In place of the toggle when the settings read failed: an OFF switch
+           there would be a guess, and switching it would write over a
+           setting the owner never saw. -->
+      <LoadFailedAlert
+        query={settingsQuery}
+        message={m.monetisation_settings_load_failed()}
+        againMessage={m.monetisation_settings_load_failed_again()}
+        loadedMessage={m.monetisation_settings_load_retry_ok()}
+        data-testid="settings-load-error"
+      />
+      {#if !settingsFailed}
       <div class="feature-toggle-row">
         <Switch
           id="enable-subscriptions"
@@ -1128,10 +1199,11 @@
           <span class="feature-toggle-description">{m.monetisation_feature_toggle_description()}</span>
         </div>
       </div>
+      {/if}
       {#if featureToggleError}
         <Alert variant="error" style="margin-top: var(--space-3)">{featureToggleError}</Alert>
       {/if}
-      {#if !dataLoading && !connectFailed && (!connectStatus.isConnected || connectStatus.status !== 'active')}
+      {#if !dataLoading && !connectFailed && !settingsFailed && (!connectStatus.isConnected || connectStatus.status !== 'active')}
         <p class="feature-toggle-disabled-hint">{m.monetisation_feature_requires_connect()}</p>
       {/if}
     </Card.Content>
@@ -1141,7 +1213,14 @@
        behind the number — there was previously no path at all from the stats to
        /studio/subscribers. Treatment matches studio/customers' band rather than
        StatCard, which measures visibly flatter on a dark page. -->
-  {#if stats.totalSubscribers > 0}
+  <LoadFailedAlert
+    query={statsQuery}
+    message={m.monetisation_stats_load_failed()}
+    againMessage={m.monetisation_stats_load_failed_again()}
+    loadedMessage={m.monetisation_stats_load_retry_ok()}
+    data-testid="stats-load-error"
+  />
+  {#if statsState.kind === 'ok' && stats.totalSubscribers > 0}
     <MoneyStatBand stats={statBand} label={m.monetisation_stats_title()} />
   {/if}
 
@@ -1153,10 +1232,14 @@
           <Card.Title level={3}>{m.monetisation_tiers_title()}</Card.Title>
           <Card.Description>{m.monetisation_tiers_description()}</Card.Description>
         </div>
-        <Button onclick={openCreateTier} size="sm" disabled={dataLoading || !connectReady}>
-          <PlusIcon size={14} />
-          {m.monetisation_tiers_create()}
-        </Button>
+        <!-- Hidden while the tiers failed to load: a "first" tier made over a
+             list nobody has seen can be a duplicate. -->
+        {#if !tiersFailed}
+          <Button onclick={openCreateTier} size="sm" disabled={dataLoading || !connectReady}>
+            <PlusIcon size={14} />
+            {m.monetisation_tiers_create()}
+          </Button>
+        {/if}
       </div>
     </Card.Header>
     <Card.Content>
@@ -1165,7 +1248,18 @@
           {m.monetisation_tiers_requires_connect()}
         </Alert>
       {/if}
-      {#if dataLoading}
+      <LoadFailedAlert
+        query={tiersQuery}
+        message={m.monetisation_tiers_load_failed()}
+        againMessage={m.monetisation_tiers_load_failed_again()}
+        loadedMessage={m.monetisation_tiers_load_retry_ok()}
+        data-testid="tiers-load-error"
+      />
+      <!-- `tiersFailed` before `dataLoading`, so the alert and its focused
+           Retry stay mounted while a Connect read is still loading. -->
+      {#if tiersFailed}
+        <!-- The alert above stands in for the tier list. -->
+      {:else if dataLoading}
         <!-- Shaped like the row it replaces — rank, name/description, the
              recommended control, two prices, two actions. It used to promise a
              three-part row and deliver a six-part one. -->

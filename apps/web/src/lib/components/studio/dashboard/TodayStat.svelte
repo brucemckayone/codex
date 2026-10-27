@@ -15,8 +15,12 @@
   @prop series   Optional numeric series for the sparkline (14 points recommended)
   @prop loading  True while data is pending
   @prop variant  'feature' (primary tile, taller) or 'inline' (compact row)
+  @prop detail   Optional line under the value, such as what the figure is
+                 made of. Absent, the tile renders exactly as before.
 -->
 <script lang="ts">
+  import type { Snippet } from 'svelte';
+
   interface Props {
     ordinal: string;
     label: string;
@@ -25,6 +29,7 @@
     series?: number[];
     loading?: boolean;
     variant?: 'feature' | 'inline';
+    detail?: Snippet;
   }
 
   const {
@@ -35,6 +40,7 @@
     series = [],
     loading = false,
     variant = 'inline',
+    detail,
   }: Props = $props();
 
   // Build a simple polyline path for the sparkline.
@@ -96,6 +102,10 @@
       <span class="stat-value">{value}</span>
     {/if}
   </div>
+
+  {#if detail && !loading}
+    {@render detail()}
+  {/if}
 
   {#if variant === 'feature'}
     <div class="stat-spark" aria-hidden="true">

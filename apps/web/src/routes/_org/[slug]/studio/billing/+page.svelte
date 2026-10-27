@@ -27,8 +27,10 @@
   @prop data - Org info and userRole from parent studio layout
 -->
 <script lang="ts">
+  import type { RevenueKind } from '@codex/admin';
   import { goto } from '$app/navigation';
   import * as m from '$paraglide/messages';
+  import RevenueKindsLine from '$lib/components/studio/analytics/RevenueKindsLine.svelte';
   import StatCard from '$lib/components/studio/StatCard.svelte';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import * as Table from '$lib/components/ui/Table';
@@ -44,6 +46,7 @@
   // `RevenueStats` contract.
   type RevenueBlock = {
     totalRevenueCents: number;
+    revenueByKind: Record<RevenueKind, number>;
     totalPurchases: number;
     averageOrderValueCents: number;
     platformFeeCents: number;
@@ -114,12 +117,14 @@
   const avgOrder = $derived(revenue?.averageOrderValueCents ?? 0);
 
   // ── The fee ledger ───────────────────────────────────────────────────
-  // `platformFeeCents` is the platform's slice, summed per purchase over the
-  // window. Everything that is NOT the platform's slice stayed on the
-  // organisation's side of the boundary — verified as an identity in the DB
-  // for all three seeded orgs (gross − platform fee === org fee + creator
-  // payout), so deriving it by subtraction is both simpler and robust to a
-  // writer that leaves one of the two component columns null.
+  // Every figure is read from the payouts ledger, for every kind of payment:
+  // one-off and course sales, subscription and course-plan invoices
+  // (Codex-2hxff.20 WEB-02). Each payment counts what the buyer kept, and
+  // `platformFeeCents` is Codex's slice of each, less its share of refunds.
+  // Everything that is NOT the platform's slice stayed on the organisation's
+  // side of the boundary, and the service makes the identity exact (gross −
+  // platform fee === org fee + creator payout), so the subtraction below
+  // adds up to the penny.
   const platformFee = $derived(revenue?.platformFeeCents ?? 0);
   const orgFee = $derived(revenue?.organizationFeeCents ?? 0);
   const creatorPayout = $derived(revenue?.creatorPayoutCents ?? 0);
@@ -144,6 +149,15 @@
   <title>{m.billing_title()} | {data.org.name}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
+
+{#snippet grossKinds()}
+  {#if revenue}
+    <RevenueKindsLine
+      kinds={revenue.revenueByKind}
+      label={m.billing_gross_kinds_label()}
+    />
+  {/if}
+{/snippet}
 
 {#if !isOwner}
   <!-- Redirecting... -->
@@ -179,10 +193,15 @@
          i18n: billing_stat_gross_30d / billing_stat_purchases_30d /
          billing_stat_avg_order / billing_stats_region_label. -->
     <section class="stats-grid" aria-label="Revenue summary">
+      <!-- Gross counts every kind of payment, with what it is made of beneath
+           (Codex-2hxff.20 WEB-02). Purchases and Average order stay
+           sales-only: a subscription payment is not an order (owner
+           decision S1). -->
       <StatCard
         label="Gross · last 30 days"
         value={formatPrice(totalRevenue)}
         loading={revenueLoading}
+        detail={revenue ? grossKinds : undefined}
       />
       <StatCard
         label="Purchases · last 30 days"
@@ -203,10 +222,9 @@
     <Card.Root>
       <Card.Header>
         <Card.Title level={2}>What Codex charged</Card.Title>
-        <Card.Description>
-          Codex takes a percentage of each sale. Nothing else is billed to
-          this organisation — there is no plan or subscription fee.
-        </Card.Description>
+        <!-- "no plan or subscription fee" read as if subscriptions were free
+             of fees; Codex's fee is taken on every subscription payment. -->
+        <Card.Description>{m.billing_fee_description()}</Card.Description>
       </Card.Header>
       <Card.Content>
         {#if revenueLoading}
@@ -218,7 +236,18 @@
         {:else}
           <dl class="fee-ledger">
             <div class="fee-ledger__row">
-              <dt>Gross · last 30 days</dt>
+              <!-- The kinds line sits in the <dt>, under its label: a list
+                   straight inside the <dl> would be invalid markup. -->
+              <dt>
+                Gross · last 30 days
+                {#if revenue}
+                  <RevenueKindsLine
+                    kinds={revenue.revenueByKind}
+                    label={m.billing_gross_kinds_label()}
+                    class="fee-ledger__kinds"
+                  />
+                {/if}
+              </dt>
               <dd>{formatPrice(totalRevenue)}</dd>
             </div>
             <div class="fee-ledger__row">
@@ -318,14 +347,11 @@
       </div>
       <!-- `AnalyticsService.getTopContent` inner-joins `content`, so course and
            portal purchases are counted in the totals above but have no row
-           here. On of-blood-and-bones that is 2 of 4 purchases (£24.99 + £24.99
-           of £82.96) — 60% of the money, absent and unexplained, which reads as
-           data loss. Fixing the join is a change to packages/admin and would
-           benefit the dashboard and analytics page too; until then, say so. -->
-      <p class="table-note">
-        Course and portal sales count towards the totals above but are not
-        listed here.
-      </p>
+           here, and neither do subscription payments, which have no title
+           (Codex-2hxff.20). On of-blood-and-bones that is 2 of 4 purchases
+           (£24.99 + £24.99 of £82.96) — 60% of the money, absent and
+           unexplained, which reads as data loss; so say so. -->
+      <p class="table-note">{m.billing_top_content_note()}</p>
     {:else}
       <!-- billing_top_content_empty_description was written and never wired
            (zero call sites outside en.json). It is rendered here in the `action`
@@ -460,6 +486,12 @@
 
   .fee-ledger__rate {
     color: var(--color-text-secondary);
+  }
+
+  /* The Gross row's label stacks its kinds line beneath it; the amount stays
+     on the label's baseline (the row is `align-items: baseline`). */
+  .fee-ledger__row dt :global(.fee-ledger__kinds) {
+    margin-top: var(--space-1);
   }
 
   .fee-ledger__row--total {

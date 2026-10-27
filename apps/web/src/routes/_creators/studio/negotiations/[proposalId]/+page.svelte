@@ -7,13 +7,26 @@
   so we can show:
     - Org name + revenue type + thread status
     - Anonymised revenue split (creator's slice + peer aggregate +
-      platform fee) via RevenueSplitPie in `mode='creator'`
+      organisation, of what's left after Codex's fee) via RevenueSplitPie in
+      `mode='creator'`
     - Full chronological NegotiationThread, role-agnostic
     - Action bar appropriate to current state (accept / counter /
       decline / withdraw / terminate)
 
   Cross-tenant access — if `proposalId` doesn't belong to the caller,
-  the worker returns 404 and we render an access-denied state.
+  the worker returns 404 and we render an access-denied state. ONLY a 403 or
+  404 means that: any other failed read is a load error with Retry
+  (Codex-2hxff.74), never "you don't have access … may have been removed".
+
+  Every creator agreement email but a decline lands here (Codex-2hxff.20
+  AGR-10), so a failed read must not read as a verdict:
+    - the thread failed → "We couldn't load this negotiation." with Retry;
+    - the portfolio failed → "We couldn't load this agreement." with Retry in
+      place of the header, the split and Terminate. Drawn without it, the bar
+      lost the other creators and gave their share to the organisation.
+  An agreement that has ENDED (its accepted proposal is the latest, and it is
+  no longer active: a terminate email lands here) says "Ended", not
+  "Accepted", and draws no live split.
 
   Studio is `ssr = false`, so all data is fetched client-side. The
   anonymisation contract is enforced server-side by the worker (peer
@@ -32,9 +45,16 @@
   import CounterProposalDialog from '$lib/components/agreements/CounterProposalDialog.svelte';
   import NegotiationThread from '$lib/components/agreements/NegotiationThread.svelte';
   import RevenueSplitPie from '$lib/components/agreements/RevenueSplitPie.svelte';
-  import type { RevenueSplitSlice } from '$lib/components/agreements/types';
+  import {
+    BP_MAX,
+    type RevenueSplitSlice,
+  } from '$lib/components/agreements/types';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
+  import LoadFailedAlert from '$lib/components/studio/LoadFailedAlert.svelte';
+  import { logger } from '$lib/observability';
+  import { queryErrorMessage } from '$lib/remote/query-result';
+  import { connectQueryState } from '$lib/utils/connect-readiness';
   import {
     acceptAgreement,
     counterAgreement,
@@ -44,13 +64,9 @@
     terminateAgreement,
     withdrawAgreement,
   } from '$lib/remote/agreements.remote';
+  import * as m from '$paraglide/messages';
 
   type RevenueType = 'subscription' | 'content_purchase';
-
-  // Platform fee — read fresh from constants. Matches FEES.PLATFORM_PERCENT.
-  // Per Decision Q2, platform fee is the platform's operational lever; agreements
-  // don't snapshot it. WP-7 mirror.
-  const PLATFORM_FEE_BP = 1000;
 
   // ─── URL state ────────────────────────────────────────────────────────────
   const proposalId = $derived(page.params.proposalId ?? '');
@@ -61,12 +77,44 @@
   );
   const portfolioQuery = $derived(browser ? getMyAgreementPortfolio() : null);
 
-  const thread = $derived(threadQuery?.current ?? null);
-  const portfolio = $derived(portfolioQuery?.current ?? null);
-  const isLoading = $derived(
-    (threadQuery?.loading ?? true) || (portfolioQuery?.loading ?? true)
+  // loading / failed / ok per read. A value survives a refresh, and a
+  // failure stays `failed` through its Retry (connectQueryState).
+  const threadState = $derived(connectQueryState(threadQuery));
+  const portfolioState = $derived(connectQueryState(portfolioQuery));
+  const thread = $derived(threadState.kind === 'ok' ? threadState.status : null);
+  const portfolio = $derived(
+    portfolioState.kind === 'ok' ? portfolioState.status : null
   );
-  const threadError = $derived(threadQuery?.error ?? null);
+  const isLoading = $derived(
+    threadState.kind === 'loading' || portfolioState.kind === 'loading'
+  );
+
+  /** Only a 403 or 404 says the caller has no thread here. */
+  const threadRefused = $derived.by(() => {
+    if (threadState.kind !== 'failed') return false;
+    const status = (threadQuery?.error as { status?: unknown } | undefined)
+      ?.status;
+    return status === 403 || status === 404;
+  });
+
+  // The real error goes to the logger (which redacts), never into the DOM. A
+  // refusal is an expected answer, so it is not logged as a failure.
+  $effect(() => {
+    if (threadState.kind === 'failed' && !threadRefused) {
+      logger.error('creator-studio/negotiation: thread failed to load', {
+        proposalId,
+        reason: queryErrorMessage(threadQuery?.error),
+      });
+    }
+  });
+  $effect(() => {
+    if (portfolioState.kind === 'failed') {
+      logger.error('creator-studio/negotiation: portfolio failed to load', {
+        proposalId,
+        reason: queryErrorMessage(portfolioQuery?.error),
+      });
+    }
+  });
 
   // The thread is chronological — first proposal carries the org+type
   // identity; the latest proposal is the actionable one (if open).
@@ -99,6 +147,29 @@
   const revenueLabel = $derived(
     revenueType === 'subscription' ? 'subscription' : 'content-purchase'
   );
+
+  /**
+   * The agreement this thread made has ENDED: its accepted proposal is the
+   * latest one, and no active agreement holds the pool (Codex-2hxff.20, a
+   * terminate email lands here). Terminate leaves the proposal `accepted`,
+   * so the pill used to read "Accepted" over a live-looking split. Only with
+   * the portfolio loaded: without it, "not active" is unknown.
+   */
+  const hasEnded = $derived(
+    portfolio !== null &&
+      !activeAgreement &&
+      latestProposal?.status === 'accepted'
+  );
+
+  /** When it ended, from the portfolio's past rows (kept for 90 days). */
+  const endedAt = $derived.by(() => {
+    if (!hasEnded || !portfolio || !thread) return null;
+    const ids = new Set(thread.map((p) => p.id));
+    const row = portfolio.past.find(
+      (p) => p.status === 'terminated' && ids.has(p.proposalId)
+    );
+    return row?.endedAt ?? null;
+  });
 
   // Resolve the org name from the portfolio (any matching row, active or pending).
   const organizationName = $derived.by(() => {
@@ -145,18 +216,19 @@
     return 0;
   });
 
-  // Build the anonymised pie slices for `mode='creator'`. Slice order:
-  // platform fee (locked, handled by component) → my slice → anonymised
-  // peer aggregate (single slice) → org residual. No peer identifiers
-  // present anywhere in this array — defensive against any future
-  // server-side leak. A missing share gets no slice: the legend would
-  // label it "0%".
+  // Build the anonymised pie slices for `mode='creator'`, as shares of the
+  // post-platform pool: 100% is what's left after Codex's fee, the unit every
+  // share is agreed in, so no fee slice (Codex-2hxff.20 AGR-11). This used to
+  // hard-code a 10% fee and draw the shares against the whole sale. Slice
+  // order: my slice → anonymised peer aggregate (single slice) → org
+  // residual. No peer identifiers present anywhere in this array — defensive
+  // against any future server-side leak. A missing share gets no slice: the
+  // legend would label it "0%".
   const pieSlices = $derived.by((): RevenueSplitSlice[] => {
-    const availableBp = 10000 - PLATFORM_FEE_BP;
     const peerAggregate = peersForPool?.aggregateSharePercent ?? 0;
     const orgResidual = Math.max(
       0,
-      availableBp - (mySharePercent ?? 0) - peerAggregate
+      BP_MAX - (mySharePercent ?? 0) - peerAggregate
     );
 
     const slices: RevenueSplitSlice[] = [];
@@ -173,17 +245,22 @@
     if (peersForPool && peersForPool.count > 0) {
       slices.push({
         id: '__peers__',
-        label: `Other creators (${peersForPool.count})`,
+        // Creator mode labels it from `peerCount` ("Other creators (2)"),
+        // never from `label`.
+        label: m.agreement_split_other_creators({
+          count: String(peersForPool.count),
+        }),
         percent: peerAggregate,
         color: 'var(--color-info-600)',
         locked: true,
         anonymous: true,
+        peerCount: peersForPool.count,
       });
     }
     if (orgResidual > 0) {
       slices.push({
         id: '__org_residual__',
-        label: 'Org residual',
+        label: m.agreement_split_organisation(),
         percent: orgResidual,
         color: 'var(--color-surface-tertiary)',
         locked: true,
@@ -199,6 +276,11 @@
   function formatPercent(bp: number): string {
     const pct = bp / 100;
     return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
+  }
+
+  /** ISO date (YYYY-MM-DD), as the negotiations list shows it. */
+  function formatDate(date: string | Date): string {
+    return new Date(date).toISOString().slice(0, 10);
   }
 
   // ─── Counter dialog state ────────────────────────────────────────────────
@@ -308,6 +390,7 @@
   // ─── Display helpers (cont.) ─────────────────────────────────────────────
   function statusLabel(): string {
     if (activeAgreement) return 'Active';
+    if (hasEnded) return m.agreement_ended();
     if (!latestProposal) return 'Unknown';
     switch (latestProposal.status) {
       case 'open':
@@ -339,13 +422,34 @@
     <span>{organizationName ?? 'Detail'}</span>
   </nav>
 
-  {#if isLoading}
+  <!-- Mounted unconditionally: each renders nothing until its read fails,
+       and its status line must persist to announce a Retry that loaded. A
+       refused thread is not a load failure: it gets the no-access state. -->
+  <LoadFailedAlert
+    query={threadRefused ? null : threadQuery}
+    message={m.agreement_thread_load_failed()}
+    againMessage={m.agreement_thread_load_failed_again()}
+    loadedMessage={m.agreement_thread_load_retry_ok()}
+    data-testid="thread-load-error"
+  />
+  <LoadFailedAlert
+    query={portfolioQuery}
+    message={m.agreement_detail_load_failed()}
+    againMessage={m.agreement_detail_load_failed_again()}
+    loadedMessage={m.agreement_detail_load_retry_ok()}
+    data-testid="portfolio-load-error"
+  />
+
+  {#if threadState.kind === 'failed' && !threadRefused}
+    <!-- The alert above stands in for the whole page: every section needs
+         the thread. -->
+  {:else if isLoading}
     <div class="agreement-detail__loading">
       <Skeleton width="60%" height="var(--space-8)" />
       <Skeleton width="100%" height="var(--space-16)" />
       <Skeleton width="100%" height="var(--space-32)" />
     </div>
-  {:else if threadError || !thread || thread.length === 0 || !revenueType}
+  {:else if threadRefused || !thread || thread.length === 0 || !revenueType}
     <section
       class="agreement-detail__section agreement-detail__section--error"
       aria-labelledby="error-heading"
@@ -366,6 +470,7 @@
       </a>
     </section>
   {:else}
+    {#if portfolioState.kind === 'ok'}
     <header class="agreement-detail__header">
       <h2 class="agreement-detail__heading">
         {organizationName ?? 'Organisation'}
@@ -378,9 +483,20 @@
         >
           {statusLabel()}
         </span>
+        {#if endedAt}
+          <span class="agreement-detail__ended-on">
+            {m.agreement_ended_on({ date: formatDate(endedAt) })}
+          </span>
+        {/if}
       </p>
     </header>
 
+    {#if hasEnded}
+      <!-- No live split for an ended agreement: its shares no longer apply. -->
+      <p class="agreement-detail__ended-note" data-testid="agreement-ended-note">
+        {m.agreement_ended_note()}
+      </p>
+    {:else}
     <section
       class="agreement-detail__section"
       aria-labelledby="split-heading"
@@ -392,12 +508,7 @@
         How {revenueLabel} revenue is split with this org. The platform fee is
         taken first; your share applies to what remains.
       </p>
-      <RevenueSplitPie
-        mode="creator"
-        platformFeePercent={PLATFORM_FEE_BP}
-        slices={pieSlices}
-        readOnly
-      />
+      <RevenueSplitPie mode="creator" slices={pieSlices} readOnly />
       <p class="agreement-detail__split-summary">
         Your share: <strong><AgreementShare bps={mySharePercent} /></strong>
         of post-platform {revenueLabel} revenue.
@@ -409,6 +520,8 @@
         {/if}
       </p>
     </section>
+    {/if}
+    {/if}
 
     <section
       class="agreement-detail__section"
@@ -582,6 +695,23 @@
     background: var(--color-surface-secondary);
     color: var(--color-text-secondary);
     border: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  .agreement-detail__ended-on {
+    margin-inline-start: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .agreement-detail__ended-note {
+    margin: 0;
+    padding: var(--space-4) var(--space-5);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    background: var(--color-surface-secondary);
+    border: var(--border-width) var(--border-style) var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+    max-width: var(--measure-lede);
   }
 
   .agreement-detail__status-pill[data-active='true'] {

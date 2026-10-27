@@ -18,7 +18,13 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 
-vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
+const { invalidateMock } = vi.hoisted(() => ({
+  invalidateMock: vi.fn(() => Promise.resolve()),
+}));
+vi.mock('$app/navigation', () => ({
+  goto: vi.fn(),
+  invalidate: invalidateMock,
+}));
 vi.mock('$app/state', () => ({
   page: {
     get url() {
@@ -67,7 +73,7 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-function mountPage(items: PurchaseListItem[]) {
+function mountPage(items: PurchaseListItem[], loadFailed = false) {
   component = mount(PaymentPage, {
     target: document.body,
     props: {
@@ -82,6 +88,7 @@ function mountPage(items: PurchaseListItem[]) {
           },
         },
         filters: { status: null },
+        loadFailed,
       },
     } as never,
   });
@@ -114,6 +121,63 @@ describe('purchase history', () => {
     // The other columns are untouched: the course row's amount and status.
     expect(clean(courseRow)).toContain('£49.00');
     expect(clean(courseRow)).toContain(m.account_payments_status_complete());
+  });
+});
+
+// A failed read is not "no purchases" (Codex-2hxff.22 WEB-05; owner decision
+// 2026-10-26, the .45 pattern).
+describe('purchase history: a failed read', () => {
+  test('says it could not load them, with Retry, in place of the list and the empty state', () => {
+    mountPage([], true);
+
+    const alert = document.querySelector(
+      '[data-testid="purchases-load-failed"]'
+    );
+    expect(clean(alert?.querySelector('.load-failed__message'))).toBe(
+      m.account_payments_load_failed()
+    );
+    expect(clean(alert?.querySelector('button'))).toBe(
+      m.money_setup_load_failed_retry()
+    );
+    expect(clean(document.body)).not.toContain(
+      m.account_payments_none_history()
+    );
+    expect(document.querySelector('.filters')).toBeNull();
+    expect(document.querySelector('table')).toBeNull();
+  });
+
+  test('Retry re-runs the load; a Retry that fails again says so and takes focus', async () => {
+    mountPage([], true);
+    const retry = document.querySelector(
+      '[data-testid="purchases-load-failed"] button'
+    ) as HTMLButtonElement;
+
+    retry.click();
+    flushSync();
+    expect(clean(retry)).toBe(m.money_setup_load_failed_retrying());
+    await Promise.resolve();
+    await Promise.resolve();
+    flushSync();
+
+    expect(invalidateMock).toHaveBeenCalledOnce();
+    expect(invalidateMock).toHaveBeenCalledWith('account:purchases');
+    expect(clean(document.querySelector('.load-failed__message'))).toBe(
+      m.account_payments_load_failed_again()
+    );
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(
+        document.querySelector('.load-failed')
+      )
+    );
+  });
+
+  test('a list that loaded empty still says no purchases yet', () => {
+    mountPage([]);
+
+    expect(
+      document.querySelector('[data-testid="purchases-load-failed"]')
+    ).toBeNull();
+    expect(clean(document.body)).toContain(m.account_payments_none_history());
   });
 });
 
