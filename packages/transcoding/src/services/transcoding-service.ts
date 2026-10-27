@@ -347,6 +347,9 @@ export class TranscodingService extends BaseService {
     const nonRetryableCodes = Object.values(TRANSCODING_ERROR_CODES).filter(
       (code) => !transcodingErrorInfo(code).retryable
     );
+    // A bound instant, not the SQL clock: the query text stays the same on
+    // every request, so Hyperdrive can cache it (data-access contract rule 6).
+    const now = new Date();
     const [claimed] = await this.db
       .update(mediaItems)
       .set({
@@ -359,8 +362,8 @@ export class TranscodingService extends BaseService {
         ...(options.priority !== undefined && {
           transcodingPriority: options.priority,
         }),
-        uploadedAt: sql`CASE WHEN ${mediaItems.status} = ${MEDIA_STATUS.FAILED} THEN now() ELSE ${mediaItems.uploadedAt} END`,
-        updatedAt: new Date(),
+        uploadedAt: sql`CASE WHEN ${mediaItems.status} = ${MEDIA_STATUS.FAILED} THEN ${now} ELSE ${mediaItems.uploadedAt} END`,
+        updatedAt: now,
       })
       .where(
         and(

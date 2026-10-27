@@ -258,9 +258,19 @@ describe('claimForDispatch', () => {
       creatorId: CREATOR_ID,
     });
 
-    expect(render(fake.writes[0]?.set.uploadedAt)).toMatch(
-      /CASE WHEN "media_items"\."status" = \$\d+ THEN now\(\) ELSE "media_items"\."uploaded_at" END/
+    const set = fake.writes[0]?.set;
+    expect(render(set?.uploadedAt)).toMatch(
+      /CASE WHEN "media_items"\."status" = \$\d+ THEN \$\d+ ELSE "media_items"\."uploaded_at" END/
     );
+    // The restart time is a bound parameter, never the SQL clock (data-access
+    // contract rule 6), and the same instant the write stamps on updated_at.
+    const { params } = dialect.sqlToQuery(
+      (set?.uploadedAt as { getSQL(): SQL }).getSQL()
+    );
+    expect(params).toHaveLength(2);
+    expect(params[0]).toBe('failed');
+    expect(set?.updatedAt).toBeInstanceOf(Date);
+    expect(params[1]).toBe(set?.updatedAt);
   });
 
   it('returns null when nothing matched', async () => {
