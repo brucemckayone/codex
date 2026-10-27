@@ -111,15 +111,15 @@ which a webhook's DB pool waits for before closing.
 
 - `mediaFailed(row)`: the creator (existing `transcoding-failed` template:
   per-category `errorSummary`, `retryUrl` = the creator studio's media page
-  built from `WEB_APP_URL` with `buildCreatorsUrl`) and every platform owner
+  built from `WEB_APP_URL` with `buildCreatorsUrl`) and the owner
   (`transcoding-owner-alert`, with the creator, code, attempts and the
   handler's own text), read from the row. Called ONLY with the row a guarded
   write just failed, so a webhook delivered 3 times emails once; never
   deduped beyond that. Nothing for a category with `notify: false` (an
   abandoned upload), and nothing while an upload is only waiting. The two
-  sends are independent: a failed creator lookup still mails the owners
+  sends are independent: a failed creator lookup still mails the owner
   (`(lookup failed)`), and one recipient's throw never stops the next.
-- Setup faults, owners only: `dispatchRefused(mediaId, outcome)` (a refusal
+- Setup faults, the owner only: `dispatchRefused(mediaId, outcome)` (a refusal
   whose code is `alertOwnerOnEntry`), `endpointStuck(outcome)` (paused and
   cannot be raised, or its settings cannot be read), `pingRefused(reason)`
   and `uploadsIncomplete(count)`. Callers report EVERY outcome (every
@@ -131,9 +131,12 @@ which a webhook's DB pool waits for before closing.
   duplicate beats a lost alert.
 - Subjects: a creator's title is stripped of `<`, `>` and line breaks, since
   the renderer refuses a subject holding `<` or `>` (the email is lost).
-- Owners are looked up once per request (the drizzle query is materialised
-  with `.then`, since awaiting the builder runs it again). No owner at all
-  logs `transcoding.owner_alert_no_recipient` at error.
+- The owner is an ADDRESS, never an account: `PLATFORM_SUPPORT_EMAIL`
+  (`@codex/constants`), with no `userId` (Codex-l2c48.10). Do not go back to
+  looking up `users.role = 'platform_owner'`: production had no such
+  account, so every owner alert was dropped, and promoting the owner's own
+  account would lock it out of the studio, because `enforceRole` is an
+  exact match and content/media routes admit only `creator` and `admin`.
 
 Creator copy is fixed and owner-approved; RunPod's or the handler's raw text
 never reaches a creator. `transcoding-failed` itself cannot be edited in place
