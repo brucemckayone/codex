@@ -53,6 +53,7 @@ export {
 export {
   AlreadyPurchasedError,
   BusinessLogicError,
+  CheckoutNotRecordedError,
   ConflictError,
   ContentNotPurchasableError,
   CourseAlreadyOwnedError,
@@ -104,6 +105,7 @@ export {
 } from './services/fee-config-service';
 // Service
 export {
+  type BuyerPurchase,
   isDuplicatePayment,
   type PurchaseMailer,
   PurchaseService,

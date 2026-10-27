@@ -155,6 +155,26 @@ function isStripeError(error: unknown): error is Error & { type: string } {
   );
 }
 
+/**
+ * A Stripe failure that a retry clears by itself: no connection, a rate
+ * limit, or Stripe's own 5xx. These are warnings. An authentication or
+ * permission error also clears on a retry, which is why ecom-api's
+ * `isTransientError` counts it as transient, but only once someone fixes the
+ * key or the account. It needs a person, so it is not a blip and is logged
+ * as an error.
+ */
+function isStripeBlip(error: Error & { type: string }): boolean {
+  if (
+    error.type === 'StripeConnectionError' ||
+    error.type === 'StripeRateLimitError'
+  ) {
+    return true;
+  }
+  if (error.type !== 'StripeAPIError') return false;
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  return typeof statusCode === 'number' && statusCode >= 500;
+}
+
 const REFUND_STATUSES: ReadonlySet<string> = new Set<RefundStatus>([
   'pending',
   'requires_action',
@@ -372,6 +392,30 @@ function purchaseOutcomeFields(duplicateOfPurchaseId: string | undefined) {
     ? { status: PURCHASE_STATUS.PENDING, duplicateOfPurchaseId }
     : { status: PURCHASE_STATUS.COMPLETED };
 }
+
+/**
+ * The columns a buyer's own read of a purchase ({@link PurchaseService.getPurchase},
+ * `GET /purchases/:id`) leaves out (Codex-kn94e; owner 2026-10-27, "Hide it,
+ * same as subs"): the fee split, which is the org's revenue-share terms, the
+ * two agreements it was paid under, the purchase a duplicate repeats, and the
+ * dispute's Stripe id and reason. `disputedAt` stays: the buyer's purchase
+ * list shows it. A `false` entry excludes that column and keeps the rest, so
+ * a column added later is read; `satisfies` catches a misspelt key, which
+ * drizzle would drop without a word.
+ */
+const BUYER_HIDDEN_COLUMNS = {
+  platformFeeCents: false,
+  organizationFeeCents: false,
+  creatorPayoutCents: false,
+  platformAgreementId: false,
+  creatorOrgAgreementId: false,
+  duplicateOfPurchaseId: false,
+  disputeReason: false,
+  stripeDisputeId: false,
+} as const satisfies Partial<Record<keyof Purchase, false>>;
+
+/** A purchase as its buyer reads it. */
+export type BuyerPurchase = Omit<Purchase, keyof typeof BUYER_HIDDEN_COLUMNS>;
 
 /**
  * A second payment for an item the buyer already owned (Codex-2hxff.14):
@@ -2358,29 +2402,33 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Get single purchase by ID
+   * Get single purchase by ID, as its buyer reads it: without the fee split
+   * or the internal bookkeeping fields ({@link BUYER_HIDDEN_COLUMNS}).
    *
    * Security:
    * - Verifies purchase belongs to customer
-   * - Returns 404 if purchase doesn't exist
-   * - Returns 403 if purchase exists but belongs to different customer
+   * - Returns 404 if the purchase doesn't exist or belongs to another
+   *   customer, so its existence is never revealed
    *
    * @param purchaseId - Purchase ID
    * @param customerId - Customer ID for authorization
-   * @returns Purchase record
-   * @throws {PurchaseNotFoundError} If purchase doesn't exist (404)
-   * @throws {ForbiddenError} If purchase exists but user doesn't own it (403)
+   * @returns The buyer's view of the purchase record
+   * @throws {PurchaseNotFoundError} If no purchase of this customer has the id (404)
    *
    * @example
    * const purchase = await purchaseService.getPurchase('purchase-123', 'customer-456');
    * // Automatically throws if not found or not authorized
    */
-  async getPurchase(purchaseId: string, customerId: string): Promise<Purchase> {
+  async getPurchase(
+    purchaseId: string,
+    customerId: string
+  ): Promise<BuyerPurchase> {
     const validated = getPurchaseSchema.parse({ id: purchaseId });
 
     try {
       // Query scoped by both ID and customer — prevents cross-user access
       const purchase = await this.db.query.purchases.findFirst({
+        columns: BUYER_HIDDEN_COLUMNS,
         where: and(
           eq(purchases.id, validated.id),
           eq(purchases.customerId, customerId)
@@ -4028,6 +4076,9 @@ export class PurchaseService extends BaseService {
    *
    * A failure is thrown, with Stripe's error as its cause, and the caller
    * judges whether a retry can fix it.
+   *
+   * @throws {PaymentProcessingError} Stripe failed or could not be reached;
+   *   logged with an errorId (Codex-2hxff.80)
    */
   async retrievePaymentIntentCharge(
     paymentIntentId: string
@@ -4050,6 +4101,27 @@ export class PurchaseService extends BaseService {
             : undefined,
       };
     } catch (error) {
+      // Logged by level with an errorId, as retrieveCheckoutSession does; the
+      // success page's completion asks up to 7 times per page open, so a blip
+      // logged at error raised an alert each time (Codex-2hxff.80). Stripe's
+      // own message is logged, never sent (SEC-02). It stays the cause, so
+      // the caller's isTransientError judges it exactly as before.
+      if (isStripeError(error)) {
+        const context = { paymentIntentId };
+        throw new PaymentProcessingError(
+          'Failed to retrieve the payment',
+          {
+            ...context,
+            errorId: this.logStripeFailure(
+              'Stripe failed to retrieve a PaymentIntent charge',
+              error,
+              context,
+              isStripeBlip(error) ? 'warn' : 'error'
+            ),
+          },
+          { cause: error }
+        );
+      }
       this.handleError(error, 'retrievePaymentIntentCharge');
     }
   }

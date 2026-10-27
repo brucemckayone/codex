@@ -18,7 +18,11 @@ import type {
   SendResult,
 } from '../providers/types';
 import { TemplateRepository } from '../repositories/template-repository';
-import { getAllowedTokens, renderTemplate } from '../templates/renderer';
+import {
+  getAllowedTokens,
+  getTokensThatMayRenderBlank,
+  renderTemplate,
+} from '../templates/renderer';
 import type {
   EmailCategory,
   NotificationsServiceConfig,
@@ -280,6 +284,16 @@ export class NotificationsService extends BaseService {
       allowedTokens,
       escapeValues: false,
     });
+    this.warnUnknownTokens(template.name, organizationId, [
+      subjectResult,
+      htmlResult,
+      textResult,
+    ]);
+    this.warnMissingTokens(template.name, organizationId, [
+      subjectResult,
+      htmlResult,
+      textResult,
+    ]);
 
     // 5. Send Email with audit logging
     // Audit log is created OUTSIDE the transaction so it persists even if sending fails
@@ -455,25 +469,87 @@ export class NotificationsService extends BaseService {
     const mergedData = { ...brandTokens, ...data };
     const allowedTokens = getAllowedTokens(template.name);
 
+    const subject = renderTemplate({
+      template: template.subject,
+      data: mergedData,
+      allowedTokens,
+      escapeValues: false,
+    });
+    const html = renderTemplate({
+      template: template.htmlBody,
+      data: mergedData,
+      allowedTokens,
+      escapeValues: true,
+    });
+    const text = renderTemplate({
+      template: template.textBody,
+      data: mergedData,
+      allowedTokens,
+      escapeValues: false,
+    });
+    this.warnUnknownTokens(template.name, organizationId, [
+      subject,
+      html,
+      text,
+    ]);
+
     return {
-      subject: renderTemplate({
-        template: template.subject,
-        data: mergedData,
-        allowedTokens,
-        escapeValues: false,
-      }).content,
-      html: renderTemplate({
-        template: template.htmlBody,
-        data: mergedData,
-        allowedTokens,
-        escapeValues: true,
-      }).content,
-      text: renderTemplate({
-        template: template.textBody,
-        data: mergedData,
-        allowedTokens,
-        escapeValues: false,
-      }).content,
+      subject: subject.content,
+      html: html.content,
+      text: text.content,
     };
+  }
+
+  /**
+   * A token the template uses but the template's allowlist does not name
+   * renders as nothing. A stale or customised row then ships a blank: an
+   * empty button link, "expires in  days". Warned once per render, with every
+   * such token across the subject and both bodies.
+   */
+  private warnUnknownTokens(
+    templateName: string,
+    organizationId: string | null | undefined,
+    results: ReadonlyArray<ReturnType<typeof renderTemplate>>
+  ): void {
+    const unknownTokens = [
+      ...new Set(results.flatMap((result) => result.unknownTokens)),
+    ];
+    if (unknownTokens.length === 0) return;
+    this.obs.warn(
+      'Email template uses tokens it does not allow; they render as nothing',
+      {
+        templateName,
+        organizationId: organizationId ?? null,
+        unknownTokens,
+      }
+    );
+  }
+
+  /**
+   * A token the template allows but the data lacks renders as nothing too:
+   * a sender that stops passing `acceptUrl` while a row still links its
+   * button to it. Warned once per send, with every such token, except those
+   * whose copy reads well without them (`getTokensThatMayRenderBlank`). Not
+   * on a preview: that renders an editor's sample data, where a gap is
+   * expected and shows in the preview itself.
+   */
+  private warnMissingTokens(
+    templateName: string,
+    organizationId: string | null | undefined,
+    results: ReadonlyArray<ReturnType<typeof renderTemplate>>
+  ): void {
+    const mayRenderBlank = getTokensThatMayRenderBlank(templateName);
+    const missingTokens = [
+      ...new Set(results.flatMap((result) => result.missingTokens)),
+    ].filter((token) => !mayRenderBlank.includes(token));
+    if (missingTokens.length === 0) return;
+    this.obs.warn(
+      'Email data lacks tokens its template uses; they render as nothing',
+      {
+        templateName,
+        organizationId: organizationId ?? null,
+        missingTokens,
+      }
+    );
   }
 }

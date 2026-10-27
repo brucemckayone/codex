@@ -273,11 +273,12 @@ If you have any questions, please contact our support team at {{supportEmail}}.
   {
     name: 'org-member-invitation',
     scope: 'global' as const,
-    subject: "You've been invited to {{orgName}}",
-    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>You've been invited!</h1><p><strong>{{inviterName}}</strong> has invited you to join <strong>{{orgName}}</strong> as a <strong>{{roleName}}</strong>.</p><p style="text-align:center;margin:30px 0;"><a href="{{acceptUrl}}" class="button" style="color:white;">Accept Invitation</a></p><p style="color:#666;font-size:13px;">This invitation expires in {{expiryDays}} days.</p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
-    textBody: `{{inviterName}} has invited you to join {{orgName}} as a {{roleName}}.\n\nAccept your invitation: {{acceptUrl}}\n\nThis invitation expires in {{expiryDays}} days.\n\n{{platformName}}`,
+    subject: "You've been added to {{orgName}}",
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>You've been added to {{orgName}}</h1><p><strong>{{inviterName}}</strong> has added you to <strong>{{orgName}}</strong> as <strong>{{roleLabel}}</strong>.</p><p style="text-align:center;margin:30px 0;"><a href="{{orgUrl}}" class="button" style="color:white;">Open {{orgName}}</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `{{inviterName}} has added you to {{orgName}} as {{roleLabel}}.\n\nOpen {{orgName}}: {{orgUrl}}\n\n{{platformName}}`,
     status: 'active' as const,
-    description: 'Sent when a user is invited to join an organization',
+    description:
+      'Sent when someone is added to an organization. Adding makes them a member at once, so there is nothing to accept: the button opens the org Studio for an admin or creator, or the org home page for a member (Codex-bnxhw).',
   },
   {
     name: 'member-role-changed',

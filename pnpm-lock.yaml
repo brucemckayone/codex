@@ -1874,6 +1874,9 @@ importers:
       '@codex/subscription':
         specifier: workspace:*
         version: link:../../packages/subscription
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../../packages/urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation

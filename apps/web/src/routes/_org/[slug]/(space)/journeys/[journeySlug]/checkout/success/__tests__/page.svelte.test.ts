@@ -7,13 +7,15 @@
  * in. It is final, so the page stops polling. Without one, the waiting room is
  * unchanged, but its checks are capped: about six over the first minute, then
  * Check again (Codex-2hxff.22; owner decision 2026-10-26). A course purchase
- * no longer active gets one plain notice.
+ * no longer active gets one plain notice. So does a payment nothing will
+ * record (`notRecorded`, Codex-2hxff.81): support is on it, with no checks.
  *
  * Mounts the real `+page.svelte`; `$app/navigation` and `$app/state` are
  * mocked.
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { supportMailto } from '$lib/utils/support-mailto';
 import * as m from '$paraglide/messages';
 import {
   flushSync,
@@ -60,7 +62,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function mountWith(duplicate: Duplicate, inactive = false) {
+function mountWith(
+  duplicate: Duplicate,
+  inactive = false,
+  notRecorded: { kind: 'not_recorded'; reference: string } | null = null
+) {
   component = mount(JourneyCheckoutSuccess, {
     target: document.body,
     props: {
@@ -72,6 +78,7 @@ function mountWith(duplicate: Duplicate, inactive = false) {
         arrivedFromStripe: true,
         duplicate,
         inactive,
+        notRecorded,
       } as never,
     },
   });
@@ -190,6 +197,31 @@ describe('journey checkout success — capped, then a button (Codex-2hxff.22)', 
         'http://lvh.me:3000/account/payment',
       ],
     ]);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(invalidateMock).not.toHaveBeenCalled();
+  });
+
+  test("a payment nothing will record: we're on it, Contact support and Go to library, no checks (Codex-2hxff.81)", async () => {
+    mountWith(null, false, {
+      kind: 'not_recorded',
+      reference: 'cs_test_abc / 3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+    });
+
+    expect(clean(document.querySelector('h1'))).toBe(
+      m.checkout_not_recorded_title()
+    );
+    expect(paragraphs()).toEqual([m.checkout_not_recorded_description()]);
+    expect(links()).toEqual([
+      // The subject quotes the reference support matches to the alert.
+      [
+        m.checkout_contact_support(),
+        supportMailto(
+          'Checkout help, reference cs_test_abc / 3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f'
+        ),
+      ],
+      [m.checkout_success_go_to_library(), '/library'],
+    ]);
+    expect(document.querySelector('button')).toBeNull();
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(invalidateMock).not.toHaveBeenCalled();
   });

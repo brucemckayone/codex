@@ -14,21 +14,19 @@
  * reactive — mirrors `useAccessContext` in `access-context.svelte.ts`.
  */
 
-import { AUTH_ROLES } from '@codex/constants';
+import { STUDIO_ROLES } from '@codex/constants';
 
 import type { LayoutUser } from '$lib/types';
 
 import { buildCreatorsUrl, extractSubdomain } from './subdomain';
 
 /**
- * Roles permitted to view/use the creator studio. Single source of truth —
- * adding a new role (e.g. 'manager') here propagates to every menu surface.
+ * Roles permitted to view/use the creator studio. The list lives in
+ * `@codex/constants`, so the server reads the same one: a revenue-share
+ * proposal names only these accounts (Codex-2hxff.76). Re-exported for the
+ * callers that import it from here.
  */
-export const STUDIO_ROLES: ReadonlySet<string> = new Set<string>([
-  AUTH_ROLES.CREATOR,
-  AUTH_ROLES.ADMIN,
-  AUTH_ROLES.PLATFORM_OWNER,
-]);
+export { STUDIO_ROLES };
 
 /**
  * Pure helper — does this user hold a studio-eligible role?

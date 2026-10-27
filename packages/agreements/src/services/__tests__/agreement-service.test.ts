@@ -28,7 +28,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import {
   afterAll,
   beforeAll,
@@ -106,6 +106,12 @@ async function seedOrgFixture(
       status: 'active',
     },
   ]);
+  // A new proposal goes only to a creator account (Codex-2hxff.76), and
+  // `seedTestUsers` makes customers.
+  await db
+    .update(schema.users)
+    .set({ role: 'creator' })
+    .where(inArray(schema.users.id, [creatorAId, creatorBId]));
 
   return {
     orgId: org.id,

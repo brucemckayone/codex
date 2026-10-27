@@ -5270,10 +5270,14 @@ describe('PurchaseService Integration', () => {
         await purchaseService.verifyPurchase(content.id, otherUserId)
       ).toBe(false);
 
-      // disputedAt set; purchase.status unchanged (still 'completed')
-      const updated = await purchaseService.getPurchase(
-        purchase.id,
-        otherUserId
+      // disputedAt set; purchase.status unchanged (still 'completed'). The
+      // row itself: the buyer's getPurchase leaves the dispute's id and
+      // reason out (Codex-kn94e).
+      const updated = takeFirst(
+        await db
+          .select()
+          .from(schema.purchases)
+          .where(eq(schema.purchases.id, purchase.id))
       );
       expect(updated.disputedAt).not.toBeNull();
       expect(updated.stripeDisputeId).toBe('dp_test_123');

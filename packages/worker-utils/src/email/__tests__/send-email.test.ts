@@ -163,4 +163,49 @@ describe('sendEmailToWorker', () => {
       errorSpy.mockRestore();
     }
   });
+
+  it.each([
+    400, 500,
+  ])('logs a %i from notifications-api with the status and template, never the address', async (status) => {
+    // workerFetch resolves on any status, so a refused send used to vanish:
+    // the catch only sees transport failures.
+    vi.mocked(workerFetch).mockResolvedValueOnce(
+      new Response('{}', { status })
+    );
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      sendEmailToWorker(mockEnv, mockExecutionCtx, {
+        ...validParams,
+        userId: 'user_abc123',
+      });
+      await waitUntilPromise();
+
+      expect(errorSpy).toHaveBeenCalledWith('[sendEmailToWorker] refused', {
+        templateName: 'purchase-receipt',
+        userId: 'user_abc123',
+        status,
+      });
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(
+        'user@example.com'
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('logs nothing for an accepted send', async () => {
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    try {
+      sendEmailToWorker(mockEnv, mockExecutionCtx, validParams);
+      await waitUntilPromise();
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 });

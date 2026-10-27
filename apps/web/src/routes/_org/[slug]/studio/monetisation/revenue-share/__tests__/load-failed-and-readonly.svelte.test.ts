@@ -63,6 +63,7 @@ const MAYA = {
   role: 'creator',
   status: 'active',
   joinedAt: '2026-08-01T00:00:00.000Z',
+  hasCreatorAccount: true,
 };
 const SAM = {
   ...MAYA,

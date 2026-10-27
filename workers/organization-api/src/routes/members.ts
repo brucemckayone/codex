@@ -15,8 +15,12 @@
  */
 
 import { invalidateUserLibrary as invalidateUserLibraryShared } from '@codex/cache';
+import { ENV_NAMES } from '@codex/constants';
+import { NotFoundError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
+import { buildOrgUrlFromEnv, type EnvName } from '@codex/urls';
 import {
+  type InviteMemberInput,
   inviteMemberSchema,
   listMembersQuerySchema,
   updateMemberRoleSchema,
@@ -36,17 +40,42 @@ import { z } from 'zod';
 const app = new Hono<HonoEnv>();
 
 /**
+ * What the invitation email says for each role, and where its one button
+ * goes (owner decision 2026-10-27, "Open the org", Codex-bnxhw). Adding
+ * someone makes them a member at once, so there is nothing to accept. An admin
+ * or creator works in the org Studio. A member opens the organisation's home
+ * page, because the Studio turns a member away.
+ */
+const INVITATION_BY_ROLE = {
+  admin: { roleLabel: 'an admin', path: '/studio' },
+  creator: { roleLabel: 'a creator', path: '/studio' },
+  member: { roleLabel: 'a member', path: '/' },
+} as const satisfies Record<
+  InviteMemberInput['role'],
+  { roleLabel: string; path: string }
+>;
+
+const ENV_NAME_VALUES: readonly string[] = Object.values(ENV_NAMES);
+
+function isEnvName(value: string): value is EnvName {
+  return ENV_NAME_VALUES.includes(value);
+}
+
+/**
  * GET /api/organizations/:id/members
  * List organization members with pagination and optional filters
  *
  * Query: page, limit, role?, status?
  * Returns: Paginated list of members (200)
- * Security: Authenticated, org membership required
+ * Security: Authenticated, org management (owner/admin) required
+ * (Codex-2hxff.82). The list carries every member's email. Membership alone
+ * also admitted subscribers, who hold membership rows. Every web caller is
+ * already owner or admin only (Team, Revenue share, the dashboard nudge).
  */
 app.get(
   '/',
   procedure({
-    policy: { auth: 'required', requireOrgMembership: true },
+    policy: { auth: 'required', requireOrgManagement: true },
     input: {
       params: z.object({ id: uuidSchema }),
       query: listMembersQuerySchema,
@@ -79,8 +108,16 @@ app.post(
     },
     successStatus: 201,
     handler: async (ctx) => {
+      const organizationId = ctx.input.params.id;
+      // Read before the invite, so a missing organisation adds nobody. The
+      // email names the organisation and links to it.
+      const org = await ctx.services.organization.get(organizationId);
+      if (!org) {
+        throw new NotFoundError('Organization not found', { organizationId });
+      }
+
       const result = await ctx.services.organization.inviteMember(
-        ctx.input.params.id,
+        organizationId,
         ctx.input.body,
         ctx.user.id
       );
@@ -104,19 +141,59 @@ app.post(
         logger: ctx.obs,
       });
 
-      // Send invitation email (fire-and-forget)
-      sendEmailToWorker(ctx.env, ctx.executionCtx, {
-        to: ctx.input.body.email,
-        templateName: 'org-member-invitation',
-        category: 'transactional',
-        data: {
-          inviterName: ctx.user.name || 'A team member',
-          orgName: 'the organisation', // TODO: resolve from ctx.services.organization.getById()
-          roleName: ctx.input.body.role,
-          acceptUrl: `${ctx.env.WEB_APP_URL || ''}/accept-invite`,
-          expiryDays: '7',
-        },
-      });
+      // Send the invitation email (fire-and-forget). Its link is built from
+      // the env name, never WEB_APP_URL or a request host: the apex has no
+      // Studio, and on staging `parseHost` reports the production apex.
+      if (!ctx.env.ENVIRONMENT) {
+        // Unset outside local dev means a misconfigured deploy: the link
+        // would point at a dev host.
+        ctx.obs?.warn(
+          'ENVIRONMENT is unset; the invitation email links to development',
+          { organizationId, userId: result.userId }
+        );
+      }
+      const environment = ctx.env.ENVIRONMENT ?? 'development';
+      if (isEnvName(environment)) {
+        const invitation = INVITATION_BY_ROLE[ctx.input.body.role];
+        const orgUrl = buildOrgUrlFromEnv(
+          environment,
+          org.slug,
+          invitation.path
+        );
+        sendEmailToWorker(ctx.env, ctx.executionCtx, {
+          to: ctx.input.body.email,
+          templateName: 'org-member-invitation',
+          category: 'transactional',
+          userId: result.userId,
+          organizationId,
+          data: {
+            inviterName: ctx.user.name || 'A team member',
+            orgName: org.name,
+            // The plain role, as before: the stock row production has reads
+            // "as a {{roleName}}". The new copy reads "as {{roleLabel}}".
+            roleName: ctx.input.body.role,
+            roleLabel: invitation.roleLabel,
+            orgUrl,
+            // Transitional (Codex-2hxff.83). The previous notifications-api
+            // requires these, and the stock row links its button to
+            // `acceptUrl` and says it expires, until migration 0117 rewrites
+            // it, one release after this code (Codex-2hxff.84).
+            acceptUrl: orgUrl,
+            expiryDays: '7',
+          },
+        });
+      } else {
+        // The member is added either way; only the email has no link to give.
+        ctx.obs?.error(
+          'Member added, but no invitation email: unknown ENVIRONMENT',
+          {
+            errorId: crypto.randomUUID(),
+            organizationId,
+            userId: result.userId,
+            environment,
+          }
+        );
+      }
 
       return result;
     },

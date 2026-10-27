@@ -91,6 +91,7 @@ function createMockOrganizationService() {
           role: 'owner',
           status: 'active',
           joinedAt: new Date('2024-01-01'),
+          hasCreatorAccount: true,
         },
         {
           id: 'membership-2',
@@ -101,6 +102,7 @@ function createMockOrganizationService() {
           role: 'admin',
           status: 'active',
           joinedAt: new Date('2024-01-02'),
+          hasCreatorAccount: false,
         },
       ],
       pagination: {

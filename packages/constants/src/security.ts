@@ -51,6 +51,18 @@ export const AUTH_ROLES = {
   PLATFORM_OWNER: 'platform_owner',
 } as const;
 
+/**
+ * Platform roles that can enter the creators' Studio. The one list for the web
+ * app's Studio guard and menus, and for the server: a revenue-share proposal
+ * names only these accounts, because a creator negotiates there
+ * (Codex-2hxff.76).
+ */
+export const STUDIO_ROLES: ReadonlySet<string> = new Set<string>([
+  AUTH_ROLES.CREATOR,
+  AUTH_ROLES.ADMIN,
+  AUTH_ROLES.PLATFORM_OWNER,
+]);
+
 export const BRAND_COLORS = {
   DEFAULT_BLUE: '#3B82F6',
 } as const;

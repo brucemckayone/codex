@@ -67,6 +67,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // ─── Seam 1: the service registry's OrganizationService ──────────────────────
 
 const orgSpies = {
+  // The invite reads the organisation for its email (Codex-bnxhw).
+  get: vi.fn(),
   listMembers: vi.fn(),
   inviteMember: vi.fn(),
   updateMemberRole: vi.fn(),
@@ -282,6 +284,11 @@ beforeEach(() => {
   dbStub.query.organizationMemberships.findFirst.mockResolvedValue(undefined);
   dbStub.query.organizations.findFirst.mockResolvedValue(undefined);
 
+  orgSpies.get.mockResolvedValue({
+    id: ORG_ID,
+    name: 'Cache Org',
+    slug: 'cache-org',
+  });
   orgSpies.inviteMember.mockResolvedValue({
     id: 'membership-new',
     userId: INVITEE_ID,
