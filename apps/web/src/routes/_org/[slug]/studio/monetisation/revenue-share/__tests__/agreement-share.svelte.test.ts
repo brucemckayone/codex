@@ -38,6 +38,7 @@ vi.mock('$lib/remote/org.remote', () => ({
           role: 'creator',
           status: 'active',
           joinedAt: '2026-08-01T00:00:00.000Z',
+          hasCreatorAccount: true,
         },
       ],
       pagination: { page: 1, limit: 100, total: 1, totalPages: 1 },

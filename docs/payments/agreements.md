@@ -14,6 +14,16 @@ A **gap** marker means the code does not behave this way yet; see
 
 - It is between an **organisation** (acting through its owner) and **one
   creator** who is an active member of that organisation.
+- That creator needs a **creator account**: a platform role that can enter the
+  creators' Studio (`creator`, `admin` or `platform_owner`), where a creator
+  negotiates. A subscriber and the owner can never hold one. Owner decisions
+  2026-10-27, "Creator accounts only" (`Codex-2hxff.76`) and the owner off the
+  roster (`Codex-2hxff.77`). Joining an organisation does not change the
+  platform role: an invited customer stays a customer until the become-creator
+  wizard. The owner already gets the creator slice and the organisation slice
+  of their own sales, and with no subscription agreements the whole pool too
+  ([fees-and-splits.md](fees-and-splits.md#how-each-sale-is-split)), so an
+  agreement with themselves would change nothing.
 - It covers one **revenue type**: `subscription` (the organisation's tier
   revenue) or `content_purchase` (one-off sales of that creator's own content and
   courses).
@@ -80,6 +90,20 @@ per organisation and revenue type before they look for an open thread and add
 up the shares. So two proposals for the same creator made at once open one
 thread, and two acceptances for different creators that together pass 100%
 cannot both succeed: the second waits, sees the first, and is refused.
+**Who a proposal can name.** `proposeAgreement` refuses anyone who cannot
+hold an agreement, before it stores or emails anything, with
+`RecipientCannotHoldAgreementError` (422). The error's context is only the
+`reason`:
+
+- `self`: the owner proposing to themselves;
+- `subscriber`: the recipient is a subscriber;
+- `no_creator_account`: the recipient's account can't enter the creators'
+  Studio.
+
+A non-member is refused as before (403). The Revenue share roster never lists
+the owner or subscribers. A member without a creator account shows "Needs a
+creator account first" and no Propose action.
+
 Admins can see an organisation's agreements, but only the owner can act.
 Admins get a read-only Revenue share page that says: "You can see every
 agreement and negotiation here. Only the owner can propose, change or end an
@@ -261,8 +285,8 @@ built with `buildOrgUrlFromEnv`.
 - The creator's links go to the thread.
 - A decline sends the creator to their negotiations list, because a thread
   declined in its first round has no page.
-- **Gap**: a recipient whose platform role is `member` is refused by the
-  creators' Studio (`Codex-2hxff.76`).
+- The creators' Studio admits every recipient, because a proposal names only
+  creator accounts (`Codex-2hxff.76`).
 
 Copy always says "post-platform" revenue.
 

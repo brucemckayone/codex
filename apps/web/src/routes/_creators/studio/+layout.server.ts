@@ -5,7 +5,7 @@
  * Redirects unauthenticated users to login and non-creators to homepage.
  * Loads creator profile and organization list for the sidebar/switcher.
  */
-import { AUTH_ROLES } from '@codex/constants';
+import { STUDIO_ROLES } from '@codex/constants';
 import { redirect } from '@sveltejs/kit';
 import { shouldResumeInWizard } from '$lib/onboarding/onboarding-flow';
 import { getProfile } from '$lib/remote/account.remote';
@@ -15,13 +15,6 @@ import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { buildPlatformUrl } from '$lib/utils/subdomain';
 import type { LayoutServerLoad } from './$types';
-
-/** Roles permitted to access the creator studio */
-const STUDIO_ROLES = new Set([
-  AUTH_ROLES.CREATOR,
-  AUTH_ROLES.ADMIN,
-  AUTH_ROLES.PLATFORM_OWNER,
-]);
 
 export const load: LayoutServerLoad = async ({
   locals,
@@ -38,7 +31,7 @@ export const load: LayoutServerLoad = async ({
   }
 
   // Role gate: must be a creator, admin, or platform_owner
-  if (!(STUDIO_ROLES as Set<string>).has(locals.user.role)) {
+  if (!STUDIO_ROLES.has(locals.user.role)) {
     redirect(302, '/?error=access_denied');
   }
 

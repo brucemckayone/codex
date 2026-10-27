@@ -9727,6 +9727,30 @@ export const checkout_late_description = () => `We're still finishing up; check 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const checkout_not_recorded_title = () => `Your payment went through, but we couldn't finish setting up your purchase.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_not_recorded_description = () => `We've been alerted and will sort it out. You don't need to pay again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_contact_support = () => `Contact support`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const checkout_check_again = () => `Check again`
 
 
@@ -13520,6 +13544,14 @@ export const agreement_load_failed_again = () => `We still couldn't load your ag
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const agreement_load_retry_ok = () => `Agreements loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_needs_creator_account = () => `Needs a creator account first`
 
 
 /**

@@ -108,3 +108,38 @@ export class FutureStartNotAllowedError extends BusinessLogicError {
     this.name = 'FutureStartNotAllowedError';
   }
 }
+
+/** Why a proposal's recipient cannot hold an agreement. */
+export type AgreementRecipientRefusal =
+  | 'self'
+  | 'subscriber'
+  | 'no_creator_account';
+
+const RECIPIENT_REFUSAL_MESSAGES: Record<AgreementRecipientRefusal, string> = {
+  self: 'You cannot propose an agreement to yourself',
+  subscriber: 'A subscriber cannot hold a revenue-share agreement',
+  no_creator_account:
+    'This member needs a creator account before they can hold an agreement',
+};
+
+/**
+ * Thrown when a new proposal names someone who cannot hold an agreement
+ * (owner decisions 2026-10-27, Codex-2hxff.76 and .77):
+ *   - `self`: the owner proposing to themselves. An owner selling their own
+ *     content already gets the creator slice and the organisation slice, and
+ *     with no subscription agreements the whole pool too
+ *     (docs/payments/fees-and-splits.md), so such an agreement changes nothing;
+ *   - `subscriber`: a subscriber is audience, not team;
+ *   - `no_creator_account`: a platform role that cannot enter the creators'
+ *     Studio, where a creator negotiates, so every link in the agreement's
+ *     emails would open a refusal.
+ *
+ * Maps to 422 (BusinessLogicError). The context is sent to the client, so it
+ * carries the reason only.
+ */
+export class RecipientCannotHoldAgreementError extends BusinessLogicError {
+  constructor(reason: AgreementRecipientRefusal) {
+    super(RECIPIENT_REFUSAL_MESSAGES[reason], { reason });
+    this.name = 'RecipientCannotHoldAgreementError';
+  }
+}

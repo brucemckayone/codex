@@ -326,6 +326,9 @@ export interface OrgMemberItem {
   role: string;
   status: string;
   joinedAt: string;
+  /** Their account can enter the creators' Studio, so they can hold a
+   * revenue-share agreement (Codex-2hxff.76). Not the membership role. */
+  hasCreatorAccount: boolean;
 }
 
 /**

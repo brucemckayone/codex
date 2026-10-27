@@ -17,7 +17,11 @@ import {
   terminateAgreementsOnDeparture,
   withdrawProposalsOnDeparture,
 } from '@codex/agreements';
-import { isReservedSubdomain, PAGINATION } from '@codex/constants';
+import {
+  isReservedSubdomain,
+  PAGINATION,
+  STUDIO_ROLES,
+} from '@codex/constants';
 import {
   isUniqueViolation,
   listedCreatorConditions,
@@ -911,6 +915,13 @@ export class OrganizationService extends BaseService {
       role: string;
       status: string;
       joinedAt: Date;
+      /**
+       * Their platform role can enter the creators' Studio (`STUDIO_ROLES`),
+       * so they can hold a revenue-share agreement (Codex-2hxff.76). A
+       * boolean, never the role itself: other members needn't learn who is a
+       * platform admin.
+       */
+      hasCreatorAccount: boolean;
     }>
   > {
     try {
@@ -950,6 +961,7 @@ export class OrganizationService extends BaseService {
           role: organizationMemberships.role,
           status: organizationMemberships.status,
           joinedAt: organizationMemberships.createdAt,
+          platformRole: users.role,
         })
         .from(organizationMemberships)
         .innerJoin(users, eq(organizationMemberships.userId, users.id))
@@ -983,6 +995,7 @@ export class OrganizationService extends BaseService {
           role: m.role,
           status: m.status,
           joinedAt: m.joinedAt,
+          hasCreatorAccount: STUDIO_ROLES.has(m.platformRole),
         })),
         pagination: {
           page: query.page,

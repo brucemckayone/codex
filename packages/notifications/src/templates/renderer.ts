@@ -222,13 +222,7 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
   ],
 
   // Organization
-  'org-member-invitation': [
-    'inviterName',
-    'orgName',
-    'roleName',
-    'acceptUrl',
-    'expiryDays',
-  ],
+  'org-member-invitation': ['inviterName', 'orgName', 'roleName', 'orgUrl'],
   'member-role-changed': ['userName', 'orgName', 'oldRole', 'newRole'],
   'member-removed': ['userName', 'orgName'],
 

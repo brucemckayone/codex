@@ -263,12 +263,17 @@ export const refundProcessedDataSchema = z.object({
 // Organization Templates
 // ============================================
 
+/**
+ * Adding someone makes them a member at once, so nothing is accepted and
+ * nothing expires (Codex-bnxhw). `orgUrl` opens the organisation: its Studio
+ * for an admin or creator, its home page for a member. `roleName` reads after
+ * "as": "an admin", "a creator", "a member".
+ */
 export const orgMemberInvitationDataSchema = z.object({
   inviterName: z.string(),
   orgName: z.string(),
   roleName: z.string(),
-  acceptUrl: z.string().url(),
-  expiryDays: z.string(),
+  orgUrl: z.string().url(),
 });
 
 export const memberRoleChangedDataSchema = z.object({

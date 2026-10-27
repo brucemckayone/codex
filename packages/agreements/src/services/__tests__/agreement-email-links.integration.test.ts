@@ -24,7 +24,7 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import {
   afterAll,
   beforeAll,
@@ -93,6 +93,11 @@ describe('agreement email links (AGR-10)', () => {
         status: 'active',
       },
     ]);
+    // A new proposal goes only to a creator account (Codex-2hxff.76).
+    await db
+      .update(schema.users)
+      .set({ role: 'creator' })
+      .where(eq(schema.users.id, creatorId));
     return { orgId: org.id, slug, ownerId, creatorId };
   }
 

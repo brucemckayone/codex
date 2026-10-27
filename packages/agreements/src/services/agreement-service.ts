@@ -39,6 +39,7 @@
  * AGR-08), which acceptance still writes.
  */
 
+import { STUDIO_ROLES } from '@codex/constants';
 import { whereNotDeleted } from '@codex/database';
 import {
   agreementProposals,
@@ -72,6 +73,7 @@ import {
   AgreementNotFoundError,
   FutureStartNotAllowedError,
   InvalidProposalStateError,
+  RecipientCannotHoldAgreementError,
 } from '../errors';
 import type {
   AgreementProposal,
@@ -344,10 +346,9 @@ export class AgreementService extends BaseService {
    *
    * Validates:
    *   1. proposer is an active owner of the org
-   *   2. creator is an active member of the org (any role; org may have
-   *      promoted a member to "creator" or kept them as "member" — we
-   *      gate on membership, not on role, to allow paying any team
-   *      member out of pooled revenue)
+   *   2. the recipient can hold an agreement (`assertProposableRecipient`):
+   *      not the owner themselves, an active member who is not a
+   *      subscriber, with a creator account (Codex-2hxff.76, .77)
    *   3. no other proposal in this (org, creator, revenue_type) thread
    *      is currently `open` or `countered` (one negotiation at a time
    *      per bucket — keeps the UI sane)
@@ -366,10 +367,11 @@ export class AgreementService extends BaseService {
           input.organizationId,
           input.proposedByUserId
         );
-        await this.assertActiveMember(
+        await this.assertProposableRecipient(
           tx,
           input.organizationId,
-          input.creatorId
+          input.creatorId,
+          input.proposedByUserId
         );
         // Before the open-thread check: there is no row to lock yet, so two
         // proposes for one creator would otherwise both open a thread.
@@ -1953,10 +1955,9 @@ export class AgreementService extends BaseService {
   }
 
   /**
-   * Membership existence check — the creator must be on the team. Any
-   * active role qualifies; we don't gate on `role='creator'` so an
-   * owner can propose to themselves (single-creator-orgs do this to
-   * pre-empt the org-keeps-100% fallback path).
+   * Membership existence check for a thread already under way (counter,
+   * accept): the creator must still be on the team (AGR-09). A new proposal
+   * checks more, in `assertProposableRecipient`.
    *
    * Takes a SHARE lock on the membership row, so a removal running at the
    * same moment waits for this transaction (and then ends what it created),
@@ -1983,6 +1984,57 @@ export class AgreementService extends BaseService {
         'Target user is not an active member of this organization',
         { organizationId, userId }
       );
+    }
+  }
+
+  /**
+   * Who a new proposal can name (owner decisions 2026-10-27):
+   *   - never the owner making it (Codex-2hxff.77): they are already paid
+   *     both the creator and the organisation slice of their own sales, and
+   *     the whole pool when there are no subscription agreements;
+   *   - an active member, as `assertActiveMember`, under the same SHARE lock
+   *     on the membership row and only that row (AGR-09);
+   *   - not a subscriber: audience, not team (Codex-2hxff.76);
+   *   - with a platform role that can enter the creators' Studio
+   *     (`STUDIO_ROLES`), where every link in an agreement's emails goes.
+   *     Joining an organisation does not change the platform role: an
+   *     invited customer stays one until the become-creator wizard.
+   */
+  private async assertProposableRecipient(
+    tx: Tx,
+    organizationId: string,
+    userId: string,
+    proposedByUserId: string
+  ): Promise<void> {
+    if (userId === proposedByUserId) {
+      throw new RecipientCannotHoldAgreementError('self');
+    }
+    const [recipient] = await tx
+      .select({
+        membershipRole: organizationMemberships.role,
+        platformRole: users.role,
+      })
+      .from(organizationMemberships)
+      .innerJoin(users, eq(users.id, organizationMemberships.userId))
+      .where(
+        and(
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.userId, userId),
+          eq(organizationMemberships.status, 'active')
+        )
+      )
+      .for('share', { of: organizationMemberships });
+    if (!recipient) {
+      throw new ForbiddenError(
+        'Target user is not an active member of this organization',
+        { organizationId, userId }
+      );
+    }
+    if (recipient.membershipRole === 'subscriber') {
+      throw new RecipientCannotHoldAgreementError('subscriber');
+    }
+    if (!STUDIO_ROLES.has(recipient.platformRole)) {
+      throw new RecipientCannotHoldAgreementError('no_creator_account');
     }
   }
 

@@ -129,9 +129,8 @@
     isAuthorized ? listPendingProposals({ organizationId: orgId }) : null
   );
 
-  // Org members — needed to render one card per team creator. We filter
-  // out subscribers; everyone else may hold an agreement (per
-  // assertActiveMember in the service: any active role qualifies).
+  // Org members: the roster's people, and the names every agreement is
+  // labelled with.
   const membersQuery = $derived(
     isAuthorized ? getOrgMembers({ orgId, limit: 100 }) : null
   );
@@ -190,15 +189,28 @@
     (agreementsQuery?.current?.items ?? []) as ActiveAgreementRow[]
   );
 
-  const teamMembers = $derived(
+  // Everyone on the team (subscribers are audience, not team), by name. The
+  // bar and the active list label agreements from this, the owner's included:
+  // one made before the owner left the roster must still show their name.
+  const namedMembers = $derived(
     (membersQuery?.current?.items ?? [])
       .filter((m) => m.role !== 'subscriber')
       .map((m) => ({
         id: m.userId,
         name: m.name ?? m.email,
         avatarUrl: m.avatarUrl,
+        role: m.role,
+        hasCreatorAccount: m.hasCreatorAccount,
       }))
   );
+
+  // The roster: never the owner (Codex-2hxff.77). An owner selling their own
+  // work already gets the creator slice and the organisation slice, and the
+  // whole pool with no subscription agreements, so the server refuses a
+  // proposal to yourself. A member without a creator account stays listed
+  // but is offered no Propose or Amend (Codex-2hxff.76): the server refuses
+  // those too, because a creator negotiates in the creators' Studio.
+  const teamMembers = $derived(namedMembers.filter((m) => m.role !== 'owner'));
 
   // The org-members remote caps at 100 rows per page (no pagination UI
   // here yet — TODO once orgs grow large enough). When we receive a full
@@ -284,7 +296,7 @@
       (a) =>
         a.revenueType === 'subscription' && !isShareMissing(a.creatorSharePercent)
     );
-    const memberById = new Map(teamMembers.map((m) => [m.id, m]));
+    const memberById = new Map(namedMembers.map((m) => [m.id, m]));
 
     const slices: RevenueSplitSlice[] = subscriptionRows.map((a, i) => {
       const share = a.creatorSharePercent ?? 0;
@@ -599,7 +611,7 @@
   }
 
   function getCreatorName(creatorId: string): string {
-    return teamMembers.find((m) => m.id === creatorId)?.name ?? 'Creator';
+    return namedMembers.find((m) => m.id === creatorId)?.name ?? 'Creator';
   }
 
   // ─── Roster shape ─────────────────────────────────────────────────────────
@@ -857,7 +869,14 @@
                       </Avatar>
                       <span class="revenue-share-page__roster-name">{creator.name}</span>
                     </span>
-                    {#if isOwner}
+                    {#if !creator.hasCreatorAccount}
+                    <!-- A fact about the member, so an admin sees it too. -->
+                    <span class="revenue-share-page__roster-actions">
+                      <span class="revenue-share-page__roster-prefix">
+                        {m.agreement_needs_creator_account()}
+                      </span>
+                    </span>
+                    {:else if isOwner}
                     <span class="revenue-share-page__roster-actions">
                       <span class="revenue-share-page__roster-prefix">
                         {m.monetisation_revshare_propose_prefix()}
@@ -898,6 +917,7 @@
                   {creator}
                   headingLevel={5}
                   readOnly={!isOwner}
+                  canPropose={creator.hasCreatorAccount}
                   subscriptionAgreement={getAgreementFor(creator.id, 'subscription')}
                   contentPurchaseAgreement={getAgreementFor(creator.id, 'content_purchase')}
                   pendingSubscriptionProposal={getPendingFor(creator.id, 'subscription')}
