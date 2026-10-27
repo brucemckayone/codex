@@ -33,8 +33,9 @@ describe('Free Content Access Flow', () => {
       role: 'creator',
     });
 
-    // Create media item (using test files uploaded to R2 in global setup)
-    // R2 structure: {creatorId}/originals/{mediaId}/original.mp4
+    // Create media item. The server names the original's key in the
+    // creator's own folder (Codex-58h6c); the HLS and thumbnail keys set below
+    // point at the fixtures global setup uploaded to R2.
     const testCreatorId = 'e2e-test-creator';
     const testMediaId = 'e2e-test-video-001';
     const mediaResponse = await httpClient.post(
@@ -48,7 +49,6 @@ describe('Free Content Access Flow', () => {
           title: 'Free Video Media',
           description: 'Media for free content',
           mediaType: 'video',
-          r2Key: `${testCreatorId}/originals/${testMediaId}/original.mp4`,
           fileSizeBytes: 1048576,
           mimeType: 'video/mp4',
         },
@@ -274,7 +274,6 @@ describe('Free Content Access Flow', () => {
           title: 'Popular Video Media',
           description: 'Media for popular content',
           mediaType: 'video',
-          r2Key: `${testCreatorId}/originals/${testMediaId}/original.mp4`,
           fileSizeBytes: 1048576,
           mimeType: 'video/mp4',
         },

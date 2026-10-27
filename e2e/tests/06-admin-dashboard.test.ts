@@ -250,7 +250,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Revenue Test Media',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -423,7 +422,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Scope Test Media',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -586,7 +584,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Distinct Test Media',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -639,7 +636,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Distinct Test Media 2',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId2}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -1223,7 +1219,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Customers Test Media',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -1363,7 +1358,6 @@ describe('Admin Dashboard', () => {
             data: {
               title: 'Details Test Media',
               mediaType: 'video',
-              r2Key: `e2e/originals/${testMediaId}/original.mp4`,
               fileSizeBytes: 1048576,
               mimeType: 'video/mp4',
             },
@@ -1503,7 +1497,6 @@ describe('Admin Dashboard', () => {
           data: {
             title: 'Grant Test Media 1',
             mediaType: 'video',
-            r2Key: `e2e/originals/${testMediaId1}/original.mp4`,
             fileSizeBytes: 1048576,
             mimeType: 'video/mp4',
           },
@@ -1580,7 +1573,6 @@ describe('Admin Dashboard', () => {
           data: {
             title: 'Grant Test Media 2',
             mediaType: 'video',
-            r2Key: `e2e/originals/${testMediaId2}/original.mp4`,
             fileSizeBytes: 1048576,
             mimeType: 'video/mp4',
           },
@@ -1733,7 +1725,6 @@ describe('Admin Dashboard', () => {
           data: {
             title: 'Idem Test Media',
             mediaType: 'video',
-            r2Key: `e2e/originals/${testMediaId}/original.mp4`,
             fileSizeBytes: 1048576,
             mimeType: 'video/mp4',
           },

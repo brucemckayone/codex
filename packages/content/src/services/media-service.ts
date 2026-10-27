@@ -28,7 +28,13 @@ import {
   ValidationError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
-import { getHlsPrefix, getOriginalKey, isValidR2Key } from '@codex/transcoding';
+import {
+  getHlsPrefix,
+  getOriginalKey,
+  isValidR2Key,
+  PATH_CONFIG,
+  parseR2Key,
+} from '@codex/transcoding';
 import type {
   CreateMediaItemInput,
   UpdateMediaItemInput,
@@ -45,6 +51,21 @@ import type {
   MediaItemWithRelations,
   PaginationParams,
 } from '../types';
+
+/**
+ * A key the caller named is used only inside the caller's OWN originals
+ * folder. The key is the file a presigned PUT and the upload fallback
+ * overwrite, and the file transcoding reads: another creator's key would
+ * overwrite their original, or copy it into this creator's library
+ * (Codex-58h6c).
+ */
+function isOwnOriginalKey(r2Key: string, creatorId: string): boolean {
+  const parsed = parseR2Key(r2Key);
+  return (
+    parsed?.creatorId === creatorId &&
+    parsed.folder === PATH_CONFIG.ORIGINALS_FOLDER
+  );
+}
 
 interface MediaItemServiceConfig extends ServiceConfig {
   /** R2Service with signing config for presigned upload URLs. Optional in dev. */
@@ -74,7 +95,8 @@ export class MediaItemService extends BaseService {
    *
    * Security:
    * - Scoped to creator
-   * - Validates R2 key format
+   * - Validates R2 key format; a key the caller names must be in its own
+   *   originals folder
    * - Starts with 'uploading' status
    *
    * @param input - Media item creation data
@@ -95,13 +117,21 @@ export class MediaItemService extends BaseService {
         `Unsupported MIME type '${validated.mimeType}' — no file extension mapping exists`
       );
     }
+    if (
+      validated.r2Key !== undefined &&
+      !isOwnOriginalKey(validated.r2Key, creatorId)
+    ) {
+      throw new ValidationError(
+        'The storage key must be in your own originals folder'
+      );
+    }
 
     try {
       const mediaId = crypto.randomUUID();
 
       // Generate R2 key server-side using SSOT path helper.
       // Media items are creator-scoped: {creatorId}/originals/{mediaId}/media.{ext}
-      // If r2Key is provided (e.g. in tests), use it; otherwise generate from SSOT.
+      // A key the caller named (tests do) was checked above to be its own.
       const r2Key =
         validated.r2Key ?? getOriginalKey(creatorId, mediaId, `media.${ext}`);
 

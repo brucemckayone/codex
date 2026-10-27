@@ -88,7 +88,6 @@ describe('Paid Content Purchase Flow', () => {
           title: 'Premium Video Media',
           description: 'Media for paid content',
           mediaType: 'video',
-          r2Key: `${testCreatorId}/originals/${testMediaId}/original.mp4`,
           fileSizeBytes: 1048576,
           mimeType: 'video/mp4',
         },
@@ -352,7 +351,6 @@ describe('Paid Content Purchase Flow', () => {
         data: {
           title: 'Idempotency Test Media',
           mediaType: 'video',
-          r2Key: `e2e/originals/${testMediaId}/original.mp4`,
           fileSizeBytes: 1048576,
           mimeType: 'video/mp4',
         },
@@ -555,7 +553,6 @@ describe('Paid Content Purchase Flow', () => {
         data: {
           title: '409 Test Media',
           mediaType: 'video',
-          r2Key: `e2e/originals/${testMediaId}/original.mp4`,
           fileSizeBytes: 1048576,
           mimeType: 'video/mp4',
         },
