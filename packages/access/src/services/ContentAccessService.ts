@@ -7,7 +7,10 @@ import {
   PUBLIC_MEDIA_ITEM_COLUMNS,
   PUBLIC_ORGANIZATION_COLUMNS,
 } from '@codex/content';
-import { createPerRequestDbClient } from '@codex/database';
+import {
+  createPerRequestDbClient,
+  MEDIA_ITEM_RESPONSE_COLUMNS,
+} from '@codex/database';
 import { content } from '@codex/database/schema';
 import {
   createLazyStripeClient,
@@ -464,7 +467,7 @@ export class ContentAccessService
               isNull(content.deletedAt)
             ),
             with: {
-              mediaItem: true, // Includes r2_key, content_type, duration
+              mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS }, // Includes r2_key, content_type, duration
               organization: { columns: { deletedAt: true } },
             },
           });

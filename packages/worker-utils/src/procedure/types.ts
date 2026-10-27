@@ -56,7 +56,10 @@ import type {
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
-import type { TranscodingService } from '@codex/transcoding';
+import type {
+  TranscodingMaintenance,
+  TranscodingService,
+} from '@codex/transcoding';
 import type { ExecutionContext, MiddlewareHandler } from 'hono';
 import type { ZodSchema, z } from 'zod';
 
@@ -208,6 +211,8 @@ export interface ServiceRegistry {
 
   // Media & Processing domain
   transcoding: TranscodingService;
+  /** The hourly transcoding maintenance run (media-api's cron). */
+  transcodingMaintenance: TranscodingMaintenance;
   images: ImageProcessingService;
 
   // Admin domain

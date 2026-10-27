@@ -24,6 +24,8 @@ export default defineConfig({
       // Workers
       'workers/auth',
       'workers/media-api',
+      // Its socket suites, on shared storage (see that config).
+      'workers/media-api/vitest.sockets.config.ts',
       'workers/ecom-api',
       'workers/content-api',
       'workers/identity-api',

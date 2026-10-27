@@ -18,32 +18,8 @@ interface ErrorResponse {
   };
 }
 
+import { signRunpodPayload as generateSignature } from '../../__tests__/runpod-signature';
 import { verifyRunpodSignature } from '../verify-runpod-signature';
-
-// Helper to generate HMAC-SHA256 signature
-async function generateSignature(
-  payload: string,
-  secret: string,
-  timestamp?: number
-): Promise<string> {
-  const encoder = new TextEncoder();
-  const message = timestamp ? `${timestamp}.${payload}` : payload;
-  const data = encoder.encode(message);
-
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-
-  const signature = await crypto.subtle.sign('HMAC', key, data);
-
-  return Array.from(new Uint8Array(signature))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
 
 describe('verifyRunpodSignature middleware', () => {
   const TEST_SECRET = 'test-webhook-secret-32-chars-min';

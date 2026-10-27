@@ -112,7 +112,6 @@ def save_template(api_key, registry_auth_id=None):
             {"key": "ENABLE_MEZZANINE", "value": "false"},
             {"key": "ENABLE_LOUDNESS_ANALYSIS", "value": "true"},
             {"key": "ENABLE_WAVEFORM_IMAGE", "value": "true"},
-            {"key": "ENABLE_THUMBNAIL_VARIANTS", "value": "true"},
             {"key": "ENABLE_VIDEO_PREVIEW", "value": "true"},
         ],
         "isServerless": True,
@@ -210,7 +209,8 @@ def main():
             )
 
         print(
-            f'\nAdd to GitHub: gh secret set RUNPOD_ENDPOINT_ID --body "{endpoint_id}"'
+            "\nAdd to GitHub: gh secret set RUNPOD_ENDPOINT_ID "
+            f'--env production --body "{endpoint_id}"'
         )
 
     except Exception as e:

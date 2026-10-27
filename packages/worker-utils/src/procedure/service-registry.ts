@@ -74,9 +74,20 @@ import {
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
-import { TranscodingService } from '@codex/transcoding';
+import {
+  type AlertLedger,
+  type MediaStatusFeed,
+  type MediaStatusPublisher,
+  TranscodingAlerts,
+  TranscodingMaintenance,
+  TranscodingService,
+} from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
 import { sendEmailToWorker } from '../email/send-email';
+import {
+  DurableObjectMediaStatusFeed,
+  WorkerMediaStatusPublisher,
+} from '../media-status';
 import { followUpMemberDeparture } from './member-departure';
 import type { ServiceRegistry } from './types';
 import type { BackgroundTracker } from './upload-shared';
@@ -263,6 +274,27 @@ export interface ServiceRegistryOverrides {
    * change, verified on its own.
    */
   skipHyperdrive?: boolean;
+  /**
+   * Where media lifecycle changes go (Codex-l2c48.9). MediaStatusObject's
+   * alarm passes a feed into itself, so a retry it runs reports straight
+   * back to it rather than through a stub to itself.
+   */
+  mediaStatus?: MediaStatusFeed;
+}
+
+/**
+ * Setup-fault alerts go once per fault per UTC day (Codex-l2c48.6): a KV key
+ * that outlives its day. Not atomic, so two first reports racing may both
+ * mail, which beats losing one.
+ */
+function kvAlertLedger(kv: NonNullable<Bindings['CACHE_KV']>): AlertLedger {
+  return {
+    async claim(key) {
+      if ((await kv.get(key)) !== null) return false;
+      await kv.put(key, '1', { expirationTtl: 36 * 60 * 60 });
+      return true;
+    },
+  };
 }
 
 export async function createServiceRegistry(
@@ -403,6 +435,7 @@ export async function createServiceRegistry(
   let _purchase: PurchaseService | undefined;
   let _feeConfig: FeeConfigService | undefined;
   let _transcoding: TranscodingService | undefined;
+  let _transcodingMaintenance: TranscodingMaintenance | undefined;
   let _adminAnalytics: AdminAnalyticsService | undefined;
   let _adminContent: AdminContentManagementService | undefined;
   let _adminCustomer: AdminCustomerManagementService | undefined;
@@ -439,6 +472,66 @@ export async function createServiceRegistry(
       cleanupFns.push(_sharedDbClient.cleanup);
     }
     return _sharedDbClient.db;
+  }
+
+  // Not a `ctx.services` entry: shared by the two transcoding getters.
+  let _transcodingAlerts: TranscodingAlerts | undefined;
+  /**
+   * Transcoding's failure and setup-fault emails (Codex-l2c48.6), one shared
+   * by the transcoding and transcodingMaintenance getters. None without an
+   * execution context to send from. The lookups run after the response on
+   * dbWaitUntil, which a webhook's pool waits for before closing.
+   */
+  function getTranscodingAlerts(): TranscodingAlerts | undefined {
+    const ctx = executionCtx;
+    if (!ctx || !dbWaitUntil) return undefined;
+    if (!_transcodingAlerts) {
+      _transcodingAlerts = new TranscodingAlerts({
+        db: getSharedDb(),
+        environment: getEnvironment(),
+        mailer: (params) => {
+          sendEmailToWorker(env, ctx, params);
+        },
+        webAppUrl: env.WEB_APP_URL,
+        waitUntil: dbWaitUntil,
+        ledger: env.CACHE_KV ? kvAlertLedger(env.CACHE_KV) : undefined,
+      });
+    }
+    return _transcodingAlerts;
+  }
+
+  // Not a `ctx.services` entry: shared by the media and transcoding getters.
+  let _mediaStatusFeed: MediaStatusFeed | undefined;
+  /**
+   * The status object's feed (Codex-l2c48.9): media-api binds MEDIA_STATUS.
+   * None without an execution context to send from. A publish touches no
+   * pool, so it rides plain waitUntil (`cacheWaitUntil`), as a KV put does.
+   */
+  function getMediaStatusFeed(): MediaStatusFeed | undefined {
+    if (overrides?.mediaStatus) return overrides.mediaStatus;
+    if (!env.MEDIA_STATUS || !cacheWaitUntil) return undefined;
+    _mediaStatusFeed ??= new DurableObjectMediaStatusFeed(
+      env.MEDIA_STATUS,
+      cacheWaitUntil,
+      _obs
+    );
+    return _mediaStatusFeed;
+  }
+
+  /**
+   * MediaItemService's publisher. A worker without the binding (content-api,
+   * organization-api's intro video) publishes through media-api.
+   */
+  function getMediaStatusPublisher(): MediaStatusPublisher | undefined {
+    const feed = getMediaStatusFeed();
+    if (feed) return feed;
+    if (!env.WORKER_SHARED_SECRET || !cacheWaitUntil) return undefined;
+    return new WorkerMediaStatusPublisher(
+      buildServiceUrl('media', env),
+      env.WORKER_SHARED_SECRET,
+      cacheWaitUntil,
+      _obs
+    );
   }
 
   /**
@@ -582,6 +675,7 @@ export async function createServiceRegistry(
           db: getSharedDb(),
           environment: getEnvironment(),
           r2: mediaR2,
+          mediaStatus: getMediaStatusPublisher(),
         });
       }
       return _media;
@@ -1257,9 +1351,36 @@ export async function createServiceRegistry(
           webhookBaseUrl: transcodingWebhookUrl,
           runpodApiBaseUrl: env.RUNPOD_API_URL,
           runpodDirectUrl: env.RUNPOD_DIRECT_URL,
+          // Unset means the default; a bad value is the service's to
+          // report (it logs at error and uses the default).
+          runpodWorkersMax: env.RUNPOD_WORKERS_MAX
+            ? Number(env.RUNPOD_WORKERS_MAX)
+            : undefined,
+          alerts: getTranscodingAlerts(),
+          mediaStatus: getMediaStatusFeed(),
         });
       }
       return _transcoding;
+    },
+
+    get transcodingMaintenance() {
+      if (!_transcodingMaintenance) {
+        // Originals live in MEDIA_BUCKET. A HEAD needs no signing config.
+        const originals = env.MEDIA_BUCKET
+          ? new R2Service(env.MEDIA_BUCKET)
+          : undefined;
+        _transcodingMaintenance = new TranscodingMaintenance({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          transcoding: this.transcoding,
+          originalExists: originals
+            ? async (key) => (await originals.head(key)) !== null
+            : undefined,
+          alerts: getTranscodingAlerts(),
+          mediaStatus: getMediaStatusFeed(),
+        });
+      }
+      return _transcodingMaintenance;
     },
 
     get images() {

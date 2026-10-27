@@ -13,11 +13,20 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
-import { MEDIA_STATUS, MIME_TO_EXTENSION, PAGINATION } from '@codex/constants';
 import {
+  MEDIA_STATUS,
+  MIME_TO_EXTENSION,
+  PAGINATION,
+  TRANSCODING_ERROR_CODES,
+  TRANSCODING_ERROR_MAX_LENGTH,
+} from '@codex/constants';
+import {
+  MEDIA_ITEM_RESPONSE_COLUMNS,
+  messageForLog,
   paginatedQuery,
   scopedNotDeleted,
   withCreatorScope,
+  withoutTranscodingDetail,
 } from '@codex/database';
 import { mediaItems } from '@codex/database/schema';
 import {
@@ -32,8 +41,11 @@ import {
   getHlsPrefix,
   getOriginalKey,
   isValidR2Key,
+  type MediaStatusPublisher,
   PATH_CONFIG,
   parseR2Key,
+  publishMediaRemoved,
+  publishMediaStatus,
 } from '@codex/transcoding';
 import type {
   CreateMediaItemInput,
@@ -43,14 +55,30 @@ import {
   createMediaItemSchema,
   updateMediaItemSchema,
 } from '@codex/validation';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { MediaNotFoundError } from '../errors';
 import type {
   MediaItem,
   MediaItemFilters,
   MediaItemWithRelations,
   PaginationParams,
+  ServedMediaItem,
 } from '../types';
+
+/** The columns applyUpdate writes: the creator's two, or a lifecycle write's. */
+type MediaRowUpdate = Partial<
+  Pick<
+    typeof mediaItems.$inferInsert,
+    | 'title'
+    | 'description'
+    | 'status'
+    | 'durationSeconds'
+    | 'width'
+    | 'height'
+    | 'hlsMasterPlaylistKey'
+    | 'thumbnailKey'
+  >
+>;
 
 /**
  * A key the caller named is used only inside the caller's OWN originals
@@ -70,6 +98,11 @@ function isOwnOriginalKey(r2Key: string, creatorId: string): boolean {
 interface MediaItemServiceConfig extends ServiceConfig {
   /** R2Service with signing config for presigned upload URLs. Optional in dev. */
   r2?: R2Service;
+  /**
+   * Live status for the creator's studio tabs (Codex-l2c48.9): told after a
+   * write returned its row. Absent: nothing is published.
+   */
+  mediaStatus?: MediaStatusPublisher;
 }
 
 /**
@@ -85,10 +118,12 @@ interface MediaItemServiceConfig extends ServiceConfig {
  */
 export class MediaItemService extends BaseService {
   private readonly r2?: R2Service;
+  private readonly mediaStatus?: MediaStatusPublisher;
 
   constructor(config: MediaItemServiceConfig) {
     super(config);
     this.r2 = config.r2;
+    this.mediaStatus = config.mediaStatus;
   }
   /**
    * Create new media item
@@ -106,7 +141,7 @@ export class MediaItemService extends BaseService {
   async create(
     input: CreateMediaItemInput,
     creatorId: string
-  ): Promise<MediaItem & { presignedUrl: string | null }> {
+  ): Promise<ServedMediaItem & { presignedUrl: string | null }> {
     const validated = createMediaItemSchema.parse(input);
 
     // Resolve file extension from MIME type using the validation schema's enum as SSOT.
@@ -164,6 +199,8 @@ export class MediaItemService extends BaseService {
           mediaId,
         });
       }
+      // The uploading tab reports its % against this row (owner's choice 2A).
+      publishMediaStatus(this.mediaStatus, newMediaItem, this.obs);
 
       // Generate presigned upload URL if R2 signing is available.
       // Null in local dev (no S3 creds) — client uses fallback upload endpoint.
@@ -184,7 +221,7 @@ export class MediaItemService extends BaseService {
         }
       }
 
-      return { ...newMediaItem, presignedUrl };
+      return { ...withoutTranscodingDetail(newMediaItem), presignedUrl };
     } catch (error) {
       this.handleError(error, 'create');
     }
@@ -256,6 +293,7 @@ export class MediaItemService extends BaseService {
           eq(mediaItems.id, id),
           scopedNotDeleted(mediaItems, creatorId)
         ),
+        columns: MEDIA_ITEM_RESPONSE_COLUMNS,
         with: {
           creator: {
             columns: {
@@ -274,32 +312,33 @@ export class MediaItemService extends BaseService {
   }
 
   /**
-   * Update media item
-   *
-   * Security:
-   * - Validates creator ownership before update
-   * - Used by transcoding service to update status/metadata
-   *
-   * Common updates:
-   * - Set status to 'transcoding', 'ready', or 'failed'
-   * - Add HLS playlist key and thumbnail key
-   * - Set duration, width, height metadata
+   * Update what a creator may edit: title and description (PATCH
+   * /api/media/:id). Lifecycle, keys and dimensions are written only by the
+   * upload and transcoding paths, whose guarded writes publish to the live
+   * status object (Codex-l2c48.9).
    *
    * @param id - Media item ID
    * @param input - Partial update data
    * @param creatorId - Creator ID (for authorization)
    * @returns Updated media item
-   * @throws {MediaNotFoundError} If media doesn't exist
-   * @throws {ForbiddenError} If media doesn't belong to creator
+   * @throws {MediaNotFoundError} If media doesn't exist or isn't the creator's
    */
   async update(
     id: string,
     input: UpdateMediaItemInput,
     creatorId: string
-  ): Promise<MediaItem> {
-    // Validate input
-    const validated = updateMediaItemSchema.parse(input);
+  ): Promise<ServedMediaItem> {
+    return withoutTranscodingDetail(
+      await this.applyUpdate(id, updateMediaItemSchema.parse(input), creatorId)
+    );
+  }
 
+  /** One scoped write of the given columns; the row it wrote. */
+  private async applyUpdate(
+    id: string,
+    fields: MediaRowUpdate,
+    creatorId: string
+  ): Promise<MediaItem> {
     try {
       const result = await this.db.transaction(async (tx) => {
         // Verify media exists and belongs to creator
@@ -318,7 +357,7 @@ export class MediaItemService extends BaseService {
         const [updated] = await tx
           .update(mediaItems)
           .set({
-            ...validated,
+            ...fields,
             updatedAt: new Date(),
           })
           .where(
@@ -399,6 +438,8 @@ export class MediaItemService extends BaseService {
             and(eq(mediaItems.id, id), withCreatorScope(mediaItems, creatorId))
           );
       });
+      // After commit: a rolled-back delete must not vanish from the studio.
+      publishMediaRemoved(this.mediaStatus, id, creatorId, this.obs);
 
       // After commit: hard-delete R2 objects across all four prefixes.
       // The helper swallows internally so a list/delete failure on one
@@ -527,6 +568,7 @@ export class MediaItemService extends BaseService {
             limit,
             offset,
             orderBy: [orderByClause],
+            columns: MEDIA_ITEM_RESPONSE_COLUMNS,
             with: {
               creator: {
                 columns: {
@@ -574,7 +616,74 @@ export class MediaItemService extends BaseService {
     // 2. TranscodingService atomic WHERE (eq(status, 'transcoding')) for webhook updates
     // 3. upload-complete handler checking current status before calling this
     // No extra DB roundtrip here — avoids Neon proxy hang in workerd.
-    return this.update(id, { status }, creatorId);
+    const updated = await this.applyUpdate(id, { status }, creatorId);
+    publishMediaStatus(this.mediaStatus, updated, this.obs);
+    return updated;
+  }
+
+  /**
+   * Record the uploading tab's own measurement of the file's runtime, so the
+   * runtime badge shows before transcoding completes. Only into an empty
+   * column, in the same statement: the completion webhook's figure, measured
+   * off the transcoded output, is the better authority and is never
+   * overwritten, even by an upload-complete re-POST racing it.
+   *
+   * Advisory, so it never throws: a badge must not cost the upload its
+   * `uploaded` step (upload-complete calls this first). A failure is logged.
+   */
+  async recordClientDuration(
+    id: string,
+    creatorId: string,
+    durationSeconds: number
+  ): Promise<void> {
+    try {
+      await this.db
+        .update(mediaItems)
+        .set({ durationSeconds, updatedAt: new Date() })
+        .where(
+          and(
+            eq(mediaItems.id, id),
+            scopedNotDeleted(mediaItems, creatorId),
+            isNull(mediaItems.durationSeconds)
+          )
+        );
+    } catch (error) {
+      this.obs.error('media.client_duration_not_recorded', {
+        mediaId: id,
+        error: messageForLog(error),
+      });
+    }
+  }
+
+  /**
+   * Record that the upload finished: `uploading` -> `uploaded`, stamping
+   * `uploaded_at`. The maintenance cron gives up on an upload 24 h after that
+   * stamp, so it must be the time the file arrived.
+   *
+   * Guarded on `uploading`: upload-complete is idempotent (a re-POST
+   * re-triggers transcoding), and a repeat must not move the stamp.
+   */
+  async markUploaded(id: string, creatorId: string): Promise<void> {
+    try {
+      const [uploaded] = await this.db
+        .update(mediaItems)
+        .set({
+          status: MEDIA_STATUS.UPLOADED,
+          uploadedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(mediaItems.id, id),
+            scopedNotDeleted(mediaItems, creatorId),
+            eq(mediaItems.status, MEDIA_STATUS.UPLOADING)
+          )
+        )
+        .returning();
+      if (uploaded) publishMediaStatus(this.mediaStatus, uploaded, this.obs);
+    } catch (error) {
+      this.handleError(error, 'markUploaded');
+    }
   }
 
   /**
@@ -598,7 +707,7 @@ export class MediaItemService extends BaseService {
     },
     creatorId: string
   ): Promise<MediaItem> {
-    return this.update(
+    const ready = await this.applyUpdate(
       id,
       {
         status: MEDIA_STATUS.READY,
@@ -607,43 +716,54 @@ export class MediaItemService extends BaseService {
         durationSeconds: metadata.durationSeconds,
         width: metadata.width,
         height: metadata.height,
-        uploadedAt: new Date(),
       },
       creatorId
     );
+    publishMediaStatus(this.mediaStatus, ready, this.obs);
+    return ready;
   }
 
   /**
    * Record that triggering transcoding failed.
    *
-   * The upload-complete handler dispatches the media-api transcode call in the
-   * background (waitUntil) and returns immediately, so a dispatch failure
-   * (media-api unreachable, HMAC rejected, RunPod endpoint dead) would
-   * otherwise be invisible — the media row sits in 'uploaded' forever with no
-   * signal. Persisting the error makes it diagnosable: the transcoding-status
-   * endpoint surfaces `transcodingError`, and the row stays in 'uploaded' so
+   * The upload-complete handler makes the media-api transcode call in the
+   * background (ctx.background) and returns immediately, so a failed hop
+   * (media-api unreachable or down, worker auth refusing it) would otherwise
+   * be invisible — the media row sits in 'uploaded' with no signal. Persisting the error makes it diagnosable: the row records
+   * `transcodingError` (for the logs and the owner, never served; the studio
+   * shows the sentence for the code), and the row stays in 'uploaded' so
    * re-POSTing /upload-complete re-dispatches (the existing idempotent recovery
-   * path). On a successful (re)trigger the transcoding service flips status →
-   * 'transcoding' and clears this field.
+   * path). The code TRANSCODER_UNAVAILABLE marks the row as waiting, so the
+   * maintenance cron re-dispatches it too. The transcoding service's claim
+   * flips status → 'transcoding' and clears both fields.
    *
-   * Deliberately a single scoped UPDATE (no transaction) so it can run on a
-   * stateless HTTP db client created inside `waitUntil`, after the request's
-   * own db lifecycle has ended.
+   * Guarded on 'uploaded': when media-api answered late, after it had already
+   * claimed the row, this must not stamp an error on a running transcode.
+   *
+   * A single scoped UPDATE: it runs after the response, and ctx.background
+   * holds the registry's db cleanup off until it settles.
    */
   async recordTranscodingTriggerFailure(
     id: string,
     creatorId: string,
     error: string
   ): Promise<void> {
-    await this.db
+    const [waiting] = await this.db
       .update(mediaItems)
       .set({
-        // Cap at the column limit (2KB) to prevent oversized error payloads.
-        transcodingError: error.slice(0, 2000),
+        transcodingError: error.slice(0, TRANSCODING_ERROR_MAX_LENGTH),
+        transcodingErrorCode: TRANSCODING_ERROR_CODES.TRANSCODER_UNAVAILABLE,
         updatedAt: new Date(),
       })
       .where(
-        and(eq(mediaItems.id, id), scopedNotDeleted(mediaItems, creatorId))
-      );
+        and(
+          eq(mediaItems.id, id),
+          scopedNotDeleted(mediaItems, creatorId),
+          eq(mediaItems.status, MEDIA_STATUS.UPLOADED)
+        )
+      )
+      .returning();
+    // A waiting row: the status object retries it within minutes.
+    if (waiting) publishMediaStatus(this.mediaStatus, waiting, this.obs);
   }
 }

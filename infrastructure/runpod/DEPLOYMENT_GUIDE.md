@@ -47,8 +47,9 @@ git push origin main
 
 # 3. Monitor GitHub Actions workflow
 # Go to: https://github.com/brucemckayone/e2e/actions
-# Wait for "Build and Push Transcoder Image" workflow to complete
-# New image tag will be pushed to: ghcr.io/brucemckayone/codex-transcoder:latest
+# Wait for the "RunPod Transcoder CI/CD" workflow to complete. It publishes
+# ghcr.io/brucemckayone/codex-transcoder:src-<hash> (plus sha-<commit>, latest);
+# the next production deploy points the endpoint at the src- tag.
 ```
 
 **Expected Output**: Docker image successfully built and pushed to GHCR
@@ -149,7 +150,7 @@ Creating Endpoint: codex-transcoder-endpoint...
 🎉 Success!
 RunPod Endpoint ID: <endpoint-id>
 
-Add to GitHub: gh secret set RUNPOD_ENDPOINT_ID --body "<endpoint-id>"
+Add to GitHub: gh secret set RUNPOD_ENDPOINT_ID --env production --body "<endpoint-id>"
 ```
 
 ---
@@ -161,7 +162,8 @@ Add to GitHub: gh secret set RUNPOD_ENDPOINT_ID --body "<endpoint-id>"
 1. Go to **"Endpoints"** in RunPod console
 2. Click on **"codex-transcoder-endpoint"**
 3. Verify the endpoint shows **"Active"** status
-4. Check that the Docker image is `ghcr.io/brucemckayone/codex-transcoder:latest`
+4. Check that the Docker image is `ghcr.io/brucemckayone/codex-transcoder:src-<hash>`, where `<hash>` is
+   what `.github/scripts/runpod-image-tag.sh` prints on the deployed commit
 
 #### 4.2. Test with a Real Transcoding Job
 
@@ -268,19 +270,17 @@ If transcoding fails after deployment, follow these steps:
 ### Immediate Rollback
 
 ```bash
-# 1. Revert code changes
-git revert HEAD
-git push origin main
+# 1. Revert the change on main (via a PR from dev, as for any release)
+git revert <bad-commit>
 
-# 2. Wait for GitHub Actions to build previous image
-# Previous Docker image will be pushed to GHCR
-
-# 3. In RunPod console, update template to use previous image:
-# - Go to Templates → codex-transcoder-template → Edit
-# - Change image tag to previous version (e.g., :previous or specific commit SHA)
-# - Remove R2 environment variables (keep only B2)
-# - Save template
+# 2. Deploy. A revert restores the inputs of an earlier image, so when that
+# image was published under a src- tag, the production deploy points the
+# endpoint straight back at it with no rebuild (otherwise runpod-ci builds it).
 ```
+
+Do not roll back by editing the image in the RunPod console: the next
+production deploy replaces it with the image for the deployed commit (the run's
+annotations show the replacement).
 
 ### Investigate Issues
 
@@ -404,7 +404,7 @@ echo "R2 credentials last rotated: $(date)" >> infrastructure/runpod/audit.log
 
 - **RunPod Documentation**: https://docs.runpod.io
 - **Cloudflare R2 Documentation**: https://developers.cloudflare.com/r2
-- **GitHub Actions Workflow**: `.github/workflows/build-transcoder.yml`
+- **GitHub Actions Workflows**: `.github/workflows/runpod-ci.yml` (test + publish), `.github/workflows/deploy-production.yml` (points the endpoint at the image)
 - **Handler Code**: `infrastructure/runpod/handler/main.py`
 - **Setup Script**: `infrastructure/runpod/scripts/setup_endpoint.py`
 

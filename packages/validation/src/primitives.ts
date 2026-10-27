@@ -52,6 +52,13 @@ export const userIdSchema = z
   });
 
 /**
+ * A creator's users.id as one service hands it to another: text up to 64.
+ * Looser than userIdSchema, which takes letters and digits only, because
+ * test users' ids are uuids; it only ever keys a lookup or a WHERE.
+ */
+export const creatorIdSchema = z.string().min(1).max(64);
+
+/**
  * Slug validation
  * - Lowercase alphanumeric + hyphens only
  * - No leading/trailing hyphens

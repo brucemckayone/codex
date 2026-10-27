@@ -27,6 +27,7 @@ import {
 } from '@codex/constants';
 import {
   isUniqueViolation,
+  MEDIA_ITEM_RESPONSE_COLUMNS,
   paginatedQuery,
   scopedNotDeleted,
   withCreatorScope,
@@ -551,7 +552,7 @@ export class ContentService extends BaseService {
       const result = await this.db.query.content.findFirst({
         where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
         with: {
-          mediaItem: true,
+          mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
           organization: { columns: READABLE_ORGANIZATION_COLUMNS },
           creator: {
             columns: {
@@ -963,7 +964,7 @@ export class ContentService extends BaseService {
         const existing = await tx.query.content.findFirst({
           where: and(eq(content.id, id), scopedNotDeleted(content, creatorId)),
           with: {
-            mediaItem: true,
+            mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
           },
         });
 
@@ -1367,7 +1368,7 @@ export class ContentService extends BaseService {
                 // The studio scope is the signed-in creator's own rows, whole
                 // and with their email. The org is not theirs: no payee id.
                 with: {
-                  mediaItem: true,
+                  mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
                   organization: { columns: READABLE_ORGANIZATION_COLUMNS },
                   creator: { columns: { id: true, email: true, name: true } },
                 },

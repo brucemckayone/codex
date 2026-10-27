@@ -116,6 +116,13 @@ export type Bindings = {
   RATE_LIMIT_DO?: import('@cloudflare/workers-types').DurableObjectNamespace;
 
   /**
+   * media-api's MediaStatusObject namespace (Codex-l2c48.9): live media
+   * status for studio tabs. Bound on media-api only; reach it through
+   * statusObjectFor() in @codex/worker-utils, never directly.
+   */
+  MEDIA_STATUS?: import('@cloudflare/workers-types').DurableObjectNamespace;
+
+  /**
    * Session caching KV namespace
    * Used for caching authenticated sessions to reduce database load
    */
@@ -290,6 +297,13 @@ export type Bindings = {
    * RunPod serverless endpoint ID
    */
   RUNPOD_ENDPOINT_ID?: string;
+
+  /**
+   * The max workers the RunPod endpoint should have (default 5). RunPod
+   * scales an idle endpoint down (2 after 3 days, 0 = paused after 7);
+   * media-api raises it back to this.
+   */
+  RUNPOD_WORKERS_MAX?: string;
 
   /**
    * RunPod webhook signing secret (HMAC-SHA256)

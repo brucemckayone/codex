@@ -113,7 +113,7 @@ async function runCount(input: CountQuery): Promise<number> {
  *       orderBy: [orderByClause],
  *       // Never `organization: true`: it carries the payee's user id.
  *       with: {
- *         mediaItem: true,
+ *         mediaItem: { columns: MEDIA_ITEM_RESPONSE_COLUMNS },
  *         organization: { columns: READABLE_ORGANIZATION_COLUMNS },
  *         creator: { columns: { id: true, email: true, name: true } },
  *       },

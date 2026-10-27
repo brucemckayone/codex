@@ -245,6 +245,7 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'errorSummary',
     'retryUrl',
   ],
+  'transcoding-owner-alert': ['headline', 'summary', 'details'],
 
   // Creator
   'new-sale': [
@@ -427,6 +428,8 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'member-removed',
   'transcoding-complete',
   'transcoding-failed',
+  // To the platform owner about the pipeline itself (Codex-l2c48.6).
+  'transcoding-owner-alert',
   'connect-account-status',
   // Payout notifications (WP-10 — Codex-69t7c.10): touch billing state.
   'creator-connect-needed',

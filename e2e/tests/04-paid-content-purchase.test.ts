@@ -30,6 +30,7 @@ import {
 } from '@codex/test-utils/e2e';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, describe, expect, test } from 'vitest';
+import { markVideoReady } from '../helpers/media';
 import {
   createCheckoutCompletedEvent,
   sendSignedWebhook,
@@ -97,25 +98,13 @@ describe('Paid Content Purchase Flow', () => {
     const media = unwrapApiResponse(await mediaResponse.json());
 
     // Mark media as ready
-    const readyMediaResponse = await httpClient.patch(
-      `${WORKER_URLS.content}/api/media/${media.id}`,
-      {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-          Origin: WORKER_URLS.content,
-        },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `${testCreatorId}/hls/${testMediaId}/master.m3u8`,
-          thumbnailKey: `${testCreatorId}/thumbnails/${testMediaId}/thumb.jpg`,
-          durationSeconds: 300,
-          width: 1920,
-          height: 1080,
-        },
-      }
-    );
-    await expectSuccessResponse(readyMediaResponse);
+    await markVideoReady(media.id, {
+      hlsMasterPlaylistKey: `${testCreatorId}/hls/${testMediaId}/master.m3u8`,
+      thumbnailKey: `${testCreatorId}/thumbnails/${testMediaId}/thumb.jpg`,
+      durationSeconds: 300,
+      width: 1920,
+      height: 1080,
+    });
 
     // Create PAID content (priceCents > 0)
     const contentResponse = await httpClient.post(
@@ -358,18 +347,10 @@ describe('Paid Content Purchase Flow', () => {
     );
     const media = unwrapApiResponse(await mediaResponse.json());
 
-    await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-      headers: {
-        Cookie: creatorCookie,
-        'Content-Type': 'application/json',
-        Origin: WORKER_URLS.content,
-      },
-      data: {
-        status: 'ready',
-        hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-        thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
-        durationSeconds: 300,
-      },
+    await markVideoReady(media.id, {
+      hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+      thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+      durationSeconds: 300,
     });
 
     const contentResponse = await httpClient.post(
@@ -560,18 +541,10 @@ describe('Paid Content Purchase Flow', () => {
     );
     const media = unwrapApiResponse(await mediaResponse.json());
 
-    await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-      headers: {
-        Cookie: creatorCookie,
-        'Content-Type': 'application/json',
-        Origin: WORKER_URLS.content,
-      },
-      data: {
-        status: 'ready',
-        hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-        thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
-        durationSeconds: 300,
-      },
+    await markVideoReady(media.id, {
+      hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+      thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+      durationSeconds: 300,
     });
 
     const contentResponse = await httpClient.post(

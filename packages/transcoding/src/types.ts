@@ -10,8 +10,6 @@ import type { TranscodingStep } from '@codex/validation';
 
 // Re-export all transcoding schemas and types from validation package
 export {
-  type GetTranscodingStatusInput,
-  getTranscodingStatusSchema,
   hlsVariantSchema,
   mezzanineStatusEnum,
   type RetryTranscodingInput,
@@ -27,11 +25,9 @@ export {
   // Schemas
   runpodWebhookSchema,
   runpodWebhookUnionSchema,
-  type TranscodingStatusResponse,
   type TranscodingStep,
   type TriggerTranscodingInput,
   transcodingPrioritySchema,
-  transcodingStatusResponseSchema,
   transcodingStepEnum,
   triggerTranscodingSchema,
 } from '@codex/validation';
@@ -50,17 +46,6 @@ export type MediaStatus =
   | 'transcoding'
   | 'ready'
   | 'failed';
-
-/**
- * HLS variant quality levels
- */
-export type HlsVariant =
-  | '1080p'
-  | '720p'
-  | '480p'
-  | '360p'
-  | 'source'
-  | 'audio';
 
 /**
  * RunPod job request payload
@@ -82,15 +67,14 @@ export interface RunPodJobRequest {
     inputKey: string;
     webhookUrl: string;
     priority?: number;
+    /** TRANSCODING_JOB_CONTRACT: what this build expects the handler to do */
+    contract: number;
   };
-}
-
-/**
- * RunPod API response when triggering a job
- */
-export interface RunPodJobResponse {
-  id: string;
-  status: string;
+  /** RunPod per-request limits, in ms (see transcodingJobPolicy) */
+  policy: {
+    executionTimeout: number;
+    ttl: number;
+  };
 }
 
 /**
@@ -123,6 +107,8 @@ export interface TranscodingMediaItem {
   transcodingAttempts: number;
   runpodJobId: string | null;
   transcodingError: string | null;
+  /** Why transcoding is waiting or failed, as a TRANSCODING_ERROR_CODES code */
+  transcodingErrorCode: string | null;
   transcodingPriority: number;
   hlsMasterPlaylistKey: string | null;
   hlsPreviewKey: string | null;

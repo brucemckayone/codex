@@ -1,5 +1,7 @@
+import { TRANSCODING_ERROR_MAX_LENGTH } from '@codex/constants';
 import { z } from 'zod';
-import { uuidSchema } from '../primitives';
+import { readStillFolderName } from '../image';
+import { creatorIdSchema, uuidSchema } from '../primitives';
 
 /**
  * Transcoding Validation Schemas
@@ -65,7 +67,8 @@ export type TranscodingStep = z.infer<typeof transcodingStepEnum>;
 /**
  * Canonical thumbnail size variants
  * Used by: transcoding paths, RunPod handler, webhook validation
- * Python mirror: infrastructure/runpod/handler/main.py ALLOWED_THUMBNAIL_SIZES
+ * Python mirror: infrastructure/runpod/handler/main.py FLAT_POSTER_SIZES (sm/md/lg)
+ * and POSTER_SIZES (+ xl); the contract fixtures pin both to this schema.
  */
 export const THUMBNAIL_SIZES = ['sm', 'md', 'lg'] as const;
 export const thumbnailSizeSchema = z.enum(THUMBNAIL_SIZES);
@@ -122,76 +125,107 @@ export const hlsVariantPathSchema = z.enum([
  * RunPod webhook output payload (on success)
  * Contains transcoded asset locations and metadata
  */
-export const runpodWebhookOutputSchema = z.object({
-  // Media identification
-  mediaId: uuidSchema,
-  type: z.enum(['video', 'audio']),
+export const runpodWebhookOutputSchema = z
+  .object({
+    // Media identification
+    mediaId: uuidSchema,
+    type: z.enum(['video', 'audio']),
 
-  // HLS outputs
-  hlsMasterKey: z.string().max(500).nullable().optional(),
-  hlsPreviewKey: z.string().max(500).nullable().optional(),
+    // HLS outputs
+    hlsMasterKey: z.string().max(500).nullable().optional(),
+    hlsPreviewKey: z.string().max(500).nullable().optional(),
 
-  // Visual assets
-  thumbnailKey: z.string().max(500).nullable().optional(),
-  waveformKey: z.string().max(500).nullable().optional(),
-  waveformImageKey: z.string().max(500).nullable().optional(),
+    // Visual assets
+    thumbnailKey: z.string().max(500).nullable().optional(),
+    waveformKey: z.string().max(500).nullable().optional(),
+    waveformImageKey: z.string().max(500).nullable().optional(),
 
-  // B2 archival mezzanine key (video only)
-  mezzanineKey: z.string().max(500).nullable().optional(),
+    // B2 archival mezzanine key (video only)
+    mezzanineKey: z.string().max(500).nullable().optional(),
 
-  // Multi-size thumbnail variants
-  // Keys MUST match THUMBNAIL_SIZES constant above. If sizes change,
-  // update both this schema and the THUMBNAIL_SIZES array.
-  // Also update: infrastructure/runpod/handler/main.py ALLOWED_THUMBNAIL_SIZES
-  thumbnailVariants: z
-    .object({
-      sm: z.string().max(500),
-      md: z.string().max(500),
-      lg: z.string().max(500),
-    })
-    .nullable()
-    .optional(),
+    // Multi-size thumbnail variants
+    // sm/md/lg MUST match THUMBNAIL_SIZES constant above. If sizes change,
+    // update both this schema and the THUMBNAIL_SIZES array.
+    // Also update main.py POSTER_SIZES / FLAT_POSTER_SIZES, and regenerate the
+    // contract fixtures (infrastructure/runpod/tests/fixtures/README.md).
+    // `xl` comes only from a handler writing posters in the sized image layout
+    // (job input contract 2, Codex-l2c48); an older image sends three sizes.
+    thumbnailVariants: z
+      .object({
+        sm: z.string().max(500),
+        md: z.string().max(500),
+        lg: z.string().max(500),
+        xl: z.string().max(500).optional(),
+      })
+      .nullable()
+      .optional(),
 
-  // Media metadata
-  // NOTE: nullable() is required because Python sends None → JSON null for audio
-  // files (no video dimensions). Zod .optional() only accepts undefined, not null.
-  durationSeconds: z.number().int().min(1).max(86400).nullable().optional(), // Max 24 hours
-  width: z.number().int().min(1).max(7680).nullable().optional(), // Max 8K
-  height: z.number().int().min(1).max(4320).nullable().optional(), // Max 8K
+    // Media metadata
+    // NOTE: nullable() is required because Python sends None → JSON null for audio
+    // files (no video dimensions). Zod .optional() only accepts undefined, not null.
+    durationSeconds: z.number().int().min(1).max(86400).nullable().optional(), // Max 24 hours
+    // Max 8K in either orientation: the handler reports the picture as shown
+    // (upright), so a portrait 8K clip is 4320x7680 (Codex-l2c48.8).
+    width: z.number().int().min(1).max(7680).nullable().optional(),
+    height: z.number().int().min(1).max(7680).nullable().optional(),
 
-  // HLS variants that are ready (bounded to prevent DoS via unbounded array)
-  readyVariants: z.array(hlsVariantSchema).min(1).max(10),
+    // HLS variants that are ready (bounded to prevent DoS via unbounded array)
+    readyVariants: z.array(hlsVariantSchema).min(1).max(10),
 
-  // Audio loudness (×100 for precision)
-  // Integrated Loudness (LUFS × 100): Range -10000 to 1000 (-100.00 to +10.00 LUFS)
-  // Upper bound is generous: ffmpeg can measure positive LUFS for heavily clipped audio.
-  loudnessIntegrated: z
-    .number()
-    .int()
-    .min(-10000)
-    .max(1000)
-    .optional()
-    .describe('Integrated loudness in LUFS * 100 (e.g. -1400 = -14.0 LUFS)'),
+    // Audio loudness (×100 for precision). nullable(): the handler sends None
+    // when ENABLE_LOUDNESS_ANALYSIS is off, which would otherwise reject the
+    // whole completion webhook.
+    // Integrated Loudness (LUFS × 100): Range -10000 to 1000 (-100.00 to +10.00 LUFS)
+    // Upper bound is generous: ffmpeg can measure positive LUFS for heavily clipped audio.
+    loudnessIntegrated: z
+      .number()
+      .int()
+      .min(-10000)
+      .max(1000)
+      .nullable()
+      .optional()
+      .describe('Integrated loudness in LUFS * 100 (e.g. -1400 = -14.0 LUFS)'),
 
-  // True Peak (dBTP × 100): Range -10000 to 2000 (-100.00 to +20.00 dBTP)
-  // Upper bound is generous: clipped audio can measure true peaks above +2 dBTP.
-  loudnessPeak: z
-    .number()
-    .int()
-    .min(-10000)
-    .max(2000)
-    .optional()
-    .describe('True peak in dBTP * 100 (e.g. -100 = -1.0 dBTP)'),
+    // True Peak (dBTP × 100): Range -10000 to 2000 (-100.00 to +20.00 dBTP)
+    // Upper bound is generous: clipped audio can measure true peaks above +2 dBTP.
+    loudnessPeak: z
+      .number()
+      .int()
+      .min(-10000)
+      .max(2000)
+      .nullable()
+      .optional()
+      .describe('True peak in dBTP * 100 (e.g. -100 = -1.0 dBTP)'),
 
-  // Loudness Range (LU × 100): Range 0 to 50000 (0.00 to 500.00 LU)
-  loudnessRange: z
-    .number()
-    .int()
-    .min(0)
-    .max(50000)
-    .optional()
-    .describe('Loudness range in LU * 100 (e.g. 700 = 7.0 LU)'),
-});
+    // Loudness Range (LU × 100): Range 0 to 50000 (0.00 to 500.00 LU)
+    loudnessRange: z
+      .number()
+      .int()
+      .min(0)
+      .max(50000)
+      .nullable()
+      .optional()
+      .describe('Loudness range in LU * 100 (e.g. 700 = 7.0 LU)'),
+  })
+  .superRefine((output, ctx) => {
+    // A poster in the sized image layout (`{w}x{h}-{nonce}/`) promises all four
+    // sizes: the web lists xl for any such folder from its NAME alone, so a
+    // missing file would be a broken srcset candidate nobody logs. The flat
+    // layout an older handler writes has no xl and no promise.
+    const key = output.thumbnailKey;
+    if (!key) return;
+    const folder = key.slice(0, key.lastIndexOf('/'));
+    if (!readStillFolderName(folder.slice(folder.lastIndexOf('/') + 1))) return;
+    for (const size of [...THUMBNAIL_SIZES, 'xl'] as const) {
+      if (output.thumbnailVariants?.[size] !== `${folder}/${size}.webp`) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['thumbnailVariants', size],
+          message: `A sized poster folder needs ${folder}/${size}.webp`,
+        });
+      }
+    }
+  });
 
 export type RunPodWebhookOutput = z.infer<typeof runpodWebhookOutputSchema>;
 
@@ -214,8 +248,21 @@ export const runpodWebhookSchema = z.object({
   // Output data (present on success)
   output: runpodWebhookOutputSchema.optional(),
 
-  // Error message (present on failure, max 2KB to match DB constraint)
-  error: z.string().max(2000).optional(),
+  // Error message (present on failure). Truncated to the 2KB column rather
+  // than bounded: Python cuts at 2000 code points, Zod counts UTF-16 units, so
+  // ffmpeg stderr carrying emoji metadata would otherwise reject the whole
+  // failure webhook and lose the failure it reports.
+  error: z
+    .string()
+    .transform((message) => message.slice(0, TRANSCODING_ERROR_MAX_LENGTH))
+    .optional(),
+
+  // Why the job failed, ideally a job-side TRANSCODING_ERROR_CODES value
+  // (@codex/constants). Accepted as ANYTHING: the handler deploys separately,
+  // and Python sends None as null, so any bound here would reject the failure
+  // webhook it rides on. The service maps it with toJobErrorCode and logs a
+  // raw value it does not recognise (isTranscodingErrorCode).
+  errorCode: z.unknown().optional(),
 });
 
 export type RunPodWebhookPayload = z.infer<typeof runpodWebhookSchema>;
@@ -230,6 +277,11 @@ export const runpodProgressWebhookSchema = z.object({
   progress: z.number().int().min(0).max(100),
   step: transcodingStepEnum,
   mediaId: uuidSchema.optional(),
+  // Echoed by the handler since Codex-l2c48.8 so the tick routes to the
+  // creator's status shard; it never decides who sees it (the object shows a
+  // tick only on the row it already holds). A value this can't take is
+  // dropped rather than costing the tick; an older handler sends none.
+  creatorId: creatorIdSchema.nullish().catch(undefined),
 });
 
 export type RunPodProgressWebhookPayload = z.infer<
@@ -245,8 +297,9 @@ export const runpodWebhookUnionSchema = z.discriminatedUnion('status', [
   runpodWebhookSchema.extend({
     status: z.literal('failed'),
     // Python handler includes mediaId on failure so the service can find the
-    // media item even when runpodJobId hasn't been stored yet (local /runsync)
-    mediaId: uuidSchema.optional(),
+    // media item even when runpodJobId hasn't been stored yet (local /runsync).
+    // nullish(): a failure raised before mediaId is read arrives as null.
+    mediaId: uuidSchema.nullish(),
   }),
   runpodProgressWebhookSchema,
 ]);
@@ -270,17 +323,6 @@ export const retryTranscodingSchema = z.object({
 export type RetryTranscodingInput = z.infer<typeof retryTranscodingSchema>;
 
 /**
- * Get transcoding status request
- */
-export const getTranscodingStatusSchema = z.object({
-  mediaId: uuidSchema,
-});
-
-export type GetTranscodingStatusInput = z.infer<
-  typeof getTranscodingStatusSchema
->;
-
-/**
  * Trigger transcoding request (internal/service use)
  */
 export const triggerTranscodingSchema = z.object({
@@ -289,25 +331,3 @@ export const triggerTranscodingSchema = z.object({
 });
 
 export type TriggerTranscodingInput = z.infer<typeof triggerTranscodingSchema>;
-
-// ============================================================================
-// Response Types (for documentation/type safety)
-// ============================================================================
-
-/**
- * Transcoding status response
- */
-export const transcodingStatusResponseSchema = z.object({
-  status: z.enum(['uploading', 'uploaded', 'transcoding', 'ready', 'failed']),
-  transcodingAttempts: z.number().int().min(0),
-  transcodingError: z.string().nullable(),
-  runpodJobId: z.string().nullable(),
-  transcodingPriority: z.number().int().min(0).max(4),
-  transcodingProgress: z.number().int().min(0).max(100).nullable(),
-  transcodingStep: transcodingStepEnum.nullable(),
-  readyVariants: z.array(hlsVariantSchema).nullable(),
-});
-
-export type TranscodingStatusResponse = z.infer<
-  typeof transcodingStatusResponseSchema
->;

@@ -11,6 +11,7 @@ import type {
   MediaItem,
   NewContent,
   NewMediaItem,
+  ServedMediaItem,
 } from '@codex/database/schema';
 import type { ReadableOrganization } from '@codex/organization';
 
@@ -96,7 +97,7 @@ export interface ContentWithRelations extends Content {
   };
   /** Never the payee's user id: every read leaves it out (Codex-kk6zx). */
   organization?: ReadableOrganization | null;
-  mediaItem?: MediaItem | null;
+  mediaItem?: ServedMediaItem | null;
   /**
    * Ids of the `categories` (topic taxonomy) this content belongs to (WP-5).
    * Populated by `ContentService.get` so the studio edit form can pre-select
@@ -105,10 +106,12 @@ export interface ContentWithRelations extends Content {
   categoryIds?: string[];
 }
 
+export type { ServedMediaItem };
+
 /**
  * Media item with populated relations
  */
-export interface MediaItemWithRelations extends MediaItem {
+export interface MediaItemWithRelations extends ServedMediaItem {
   creator?: {
     id: string;
     email: string;
@@ -241,13 +244,13 @@ export type MediaListResponse = PaginatedListResponse<MediaItemWithRelations>;
  * Response for POST /api/media
  * Returns newly created media item
  */
-export type CreateMediaResponse = SingleItemResponse<MediaItem>;
+export type CreateMediaResponse = SingleItemResponse<ServedMediaItem>;
 
 /**
  * Response for PATCH /api/media/:id
  * Returns updated media item
  */
-export type UpdateMediaResponse = SingleItemResponse<MediaItem>;
+export type UpdateMediaResponse = SingleItemResponse<ServedMediaItem>;
 
 /**
  * Response for DELETE /api/media/:id

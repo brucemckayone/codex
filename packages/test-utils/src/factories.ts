@@ -179,7 +179,8 @@ export function createTestMediaItemInput(
       isReady && mediaType === MEDIA_TYPES.AUDIO
         ? `waveforms/${tempId}.json`
         : null, // Required for audio
-    uploadedAt: isReady ? new Date() : null,
+    // Every row past `uploading` has it (migration 0116 backfilled the rest).
+    uploadedAt: status === MEDIA_STATUS.UPLOADING ? null : new Date(),
     ...overrides,
   };
 }
@@ -221,6 +222,7 @@ export function createTestMediaItem(
       mediaType === MEDIA_TYPES.AUDIO ? `waveforms/${id}/waveform.png` : null,
     runpodJobId: null, // Transcoding Phase 1 field
     transcodingError: null, // Transcoding Phase 1 field
+    transcodingErrorCode: null,
     transcodingAttempts: 0, // Transcoding Phase 1 field
     transcodingPriority: 2, // Transcoding Phase 1 field (normal priority)
     mezzanineKey: null, // Transcoding Phase 1 field

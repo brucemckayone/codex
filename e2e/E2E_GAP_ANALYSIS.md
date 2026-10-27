@@ -29,7 +29,7 @@ This document analyzes the current state of E2E testing in `@codex/e2e` and iden
 **Worker**: `media-api`
 **Status**: Skipped. Current tests simulate media readiness by directly patching the database status to `ready`.
 **Missing Scenarios**:
-- **Status Endpoint**: `GET /api/transcoding/status/:id`.
+- **Status**: `GET /api/media/:id` (the per-item status route was retired in Codex-l2c48; live state comes over the media-status socket).
 - **Retry Logic**: `POST /api/transcoding/retry/:id` for failed items.
 - **Webhook Processing**: Sending a mock RunPod webhook to `media-api` (instead of direct DB patch) to verify the actual webhook handler logic updates the database correctly.
 
@@ -65,7 +65,7 @@ This document analyzes the current state of E2E testing in `@codex/e2e` and iden
 2. **Create `09-media-workflow.test.ts`**:
    - Create media item.
    - Call `upload-complete` (triggering internal worker call).
-   - Poll `transcoding/status/:id`.
+   - Read `GET /api/media/:id`.
    - Simulate RunPod webhook failure.
    - Test `retry` endpoint.
    - Simulate RunPod webhook success.

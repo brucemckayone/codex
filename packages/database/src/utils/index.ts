@@ -14,6 +14,8 @@ export * from './date-window';
 export * from './db-errors';
 // ISO-date serialisation helper
 export * from './iso-date';
+// What a media_items row may serve (no raw transcoder detail)
+export * from './media-item-columns';
 // Paginated query helper
 export * from './paginated-query';
 // Query helper utilities

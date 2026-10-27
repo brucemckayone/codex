@@ -35,6 +35,8 @@ export * from './schemas/file-upload';
 export * from './schemas/journeys';
 // Page-kit v2 vocabulary — zod twin of kit/model/ids.ts (landing-builder contract §2)
 export * from './schemas/landing-page';
+// Live media status (Codex-l2c48.9)
+export * from './schemas/media-status';
 // Notification schemas
 export * from './schemas/notifications';
 // Organization member schemas

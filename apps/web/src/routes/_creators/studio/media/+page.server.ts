@@ -38,9 +38,11 @@ export const load: PageServerLoad = async ({ url }) => {
       total: 0,
       totalPages: 0,
     },
+    // `as const`: a bare 'all' widens to string, and the page's refetch
+    // passes these back to listMedia.
     filters: {
-      status: status ?? 'all',
-      mediaType: mediaType ?? 'all',
+      status: status ?? ('all' as const),
+      mediaType: mediaType ?? ('all' as const),
     },
   };
 };

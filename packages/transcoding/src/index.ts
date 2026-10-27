@@ -26,14 +26,17 @@
  *   webhookBaseUrl: 'https://media-api.codex.com',
  * });
  *
- * // Trigger transcoding (async - returns immediately)
- * await service.triggerJob(mediaId, creatorId);
+ * // Claim an uploaded item; the RunPod call runs after the reply
+ * const result = await service.triggerJobInternal(mediaId, creatorId);
+ * if (!result.alreadyQueued) ctx.background(result.dispatchPromise);
  *
  * // Handle webhook callback (when RunPod completes)
  * await service.handleWebhook(validatedPayload);
  * ```
  */
 
+// Dispatch rules (the webhook route classifies payloads before the service)
+export { classifyWebhookPayload } from './dispatch';
 // Errors
 export {
   // Re-exported base errors
@@ -46,14 +49,20 @@ export {
   InvalidWebhookSignatureError,
   isTranscodingServiceError,
   MaxRetriesExceededError,
-  MediaOwnershipError,
   NotFoundError,
-  RunPodApiError,
   TranscodingJobNotFoundError,
   TranscodingMediaNotFoundError,
+  TranscodingNotRetryableError,
   TranscodingServiceError,
   ValidationError,
 } from './errors';
+// Live media status (Codex-l2c48.9): where lifecycle changes are published
+export {
+  type MediaStatusFeed,
+  type MediaStatusPublisher,
+  publishMediaRemoved,
+  publishMediaStatus,
+} from './media-status';
 // Path utilities (SINGLE SOURCE OF TRUTH for R2/B2 keys)
 export {
   // B2 paths (mezzanine archival)
@@ -85,15 +94,18 @@ export {
 } from './paths';
 // Services
 export {
+  type AlertLedger,
+  type MaintenanceReport,
+  type RetryDueReport,
+  TranscodingAlerts,
+  type TranscodingMailer,
+  TranscodingMaintenance,
   TranscodingService,
   type TranscodingServiceFullConfig,
 } from './services';
 
 // Types
 export {
-  type GetTranscodingStatusInput,
-  getTranscodingStatusSchema,
-  type HlsVariant,
   hlsVariantSchema,
   type MediaStatus,
   // Package-specific types
@@ -102,7 +114,6 @@ export {
   mezzanineStatusEnum,
   type RetryTranscodingInput,
   type RunPodJobRequest,
-  type RunPodJobResponse,
   type RunPodProgressWebhookPayload,
   type RunPodWebhookOutput,
   type RunPodWebhookPayload,
@@ -116,11 +127,9 @@ export {
   runpodWebhookUnionSchema,
   type TranscodingMediaItem,
   type TranscodingServiceConfig,
-  type TranscodingStatusResponse,
   type TranscodingStep,
   type TriggerTranscodingInput,
   transcodingPrioritySchema,
-  transcodingStatusResponseSchema,
   transcodingStepEnum,
   triggerTranscodingSchema,
 } from './types';

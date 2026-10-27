@@ -5,10 +5,10 @@
  * Extends base errors from @codex/service-errors.
  */
 
+import { MAX_TRANSCODING_ATTEMPTS } from '@codex/constants';
 import {
   BusinessLogicError,
   ForbiddenError,
-  InternalServiceError,
   NotFoundError,
   ValidationError,
 } from '@codex/service-errors';
@@ -72,7 +72,7 @@ export class MaxRetriesExceededError extends BusinessLogicError {
     super('Maximum transcoding retry attempts exceeded', {
       mediaId,
       attempts,
-      maxAttempts: 1,
+      maxAttempts: MAX_TRANSCODING_ATTEMPTS,
       code: 'MAX_RETRIES_EXCEEDED',
       ...context,
     });
@@ -80,18 +80,19 @@ export class MaxRetriesExceededError extends BusinessLogicError {
 }
 
 /**
- * RunPod API call failed
+ * The last failure was the file itself (corrupt, unsupported, no usable
+ * stream): a retry would fail the same way, so the creator re-uploads.
  */
-export class RunPodApiError extends InternalServiceError {
+export class TranscodingNotRetryableError extends BusinessLogicError {
   constructor(
-    operation: string,
-    statusCode?: number,
+    mediaId: string,
+    transcodingErrorCode: string,
     context?: Record<string, unknown>
   ) {
-    super(`RunPod API error during ${operation}`, {
-      operation,
-      statusCode,
-      code: 'RUNPOD_API_ERROR',
+    super('This file cannot be transcoded again. Upload a new file instead.', {
+      mediaId,
+      transcodingErrorCode,
+      code: 'TRANSCODING_NOT_RETRYABLE',
       ...context,
     });
   }
@@ -104,24 +105,6 @@ export class InvalidWebhookSignatureError extends ForbiddenError {
   constructor(context?: Record<string, unknown>) {
     super('Invalid webhook signature', {
       code: 'INVALID_WEBHOOK_SIGNATURE',
-      ...context,
-    });
-  }
-}
-
-/**
- * Media not owned by the requesting user
- */
-export class MediaOwnershipError extends ForbiddenError {
-  constructor(
-    mediaId: string,
-    userId: string,
-    context?: Record<string, unknown>
-  ) {
-    super('User does not own this media item', {
-      mediaId,
-      userId,
-      code: 'MEDIA_OWNERSHIP_ERROR',
       ...context,
     });
   }

@@ -47,7 +47,7 @@ import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
 import type {
   Category,
   CourseSubscriptionPlan,
-  MediaItem,
+  ServedMediaItem,
 } from '@codex/database/schema';
 import type { AvatarUploadResponse } from '@codex/identity';
 import type { NotificationPreferencesResponse } from '@codex/notifications';
@@ -99,6 +99,7 @@ import type {
   CreatePortalSessionInput,
   CreateSubscriptionCheckoutInput,
   CreateTierInput,
+  MediaStatusTicket,
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
   SupportChargeSearchQuery,
@@ -1976,7 +1977,7 @@ export function createServerApi(
             | 'failed';
           introVideoUrl: string | null;
           progress: number | null;
-          error: string | null;
+          errorCode: string | null;
         }>(
           'org',
           `/api/organizations/${id}/settings/branding/intro-video/status`
@@ -2623,10 +2624,14 @@ export function createServerApi(
        * @returns Created media item
        */
       create: (data: Record<string, unknown>) =>
-        request<MediaItem>('content', '/api/media', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        }),
+        request<ServedMediaItem & { presignedUrl: string | null }>(
+          'content',
+          '/api/media',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
 
       /**
        * List media items with filters and pagination
@@ -2655,7 +2660,7 @@ export function createServerApi(
        * Update media item metadata
        */
       update: (id: string, data: unknown) =>
-        request<MediaItem>('content', `/api/media/${id}`, {
+        request<ServedMediaItem>('content', `/api/media/${id}`, {
           method: 'PATCH',
           body: JSON.stringify(data),
         }),
@@ -2669,17 +2674,25 @@ export function createServerApi(
         }),
 
       /**
-       * Get transcoding status and progress for a media item
-       * Calls media-api worker (not content-api)
+       * A one-minute ticket for the studio's live status socket, and the URL
+       * to open it on (media-api's own public origin). Single-use: every
+       * connect needs a fresh one.
        */
-      transcodingStatus: (id: string) =>
-        request<{
-          status: string;
-          transcodingProgress: number | null;
-          transcodingStep: string | null;
-          transcodingAttempts: number;
-          transcodingError: string | null;
-        }>('media', `/api/transcoding/status/${id}`),
+      statusTicket: () =>
+        request<MediaStatusTicket>('media', '/api/media-status/ticket', {
+          method: 'POST',
+        }),
+
+      /**
+       * The creator's Try again: claims the item for one more attempt. The
+       * RunPod call runs after the reply; the live channel reports how it went.
+       */
+      retryTranscoding: (id: string) =>
+        request<{ message: string; mediaId: string }>(
+          'media',
+          `/api/transcoding/retry/${id}`,
+          { method: 'POST' }
+        ),
 
       /**
        * Mark upload as complete and trigger transcoding

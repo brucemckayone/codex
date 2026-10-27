@@ -344,6 +344,16 @@ export const transcodingFailedDataSchema = z.object({
   retryUrl: z.string().url(),
 });
 
+/** To every platform owner (Codex-l2c48.6): `details` is preformatted lines. */
+export const transcodingOwnerAlertDataSchema = z.object({
+  headline: z.string(),
+  summary: z.string(),
+  details: z.string(),
+});
+export type TranscodingOwnerAlertData = z.infer<
+  typeof transcodingOwnerAlertDataSchema
+>;
+
 // ============================================
 // Creator Templates
 // ============================================
@@ -515,6 +525,7 @@ export const templateDataSchemas = {
   // Media
   'transcoding-complete': transcodingCompleteDataSchema,
   'transcoding-failed': transcodingFailedDataSchema,
+  'transcoding-owner-alert': transcodingOwnerAlertDataSchema,
   // Creator
   'new-sale': newSaleDataSchema,
   'connect-account-status': connectAccountStatusDataSchema,

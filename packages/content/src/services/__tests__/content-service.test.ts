@@ -791,6 +791,39 @@ describe('ContentService', () => {
       expect(result?.mediaItem?.id).toBe(media.id);
     });
 
+    it("serves its media without the transcoder's raw detail", async () => {
+      // A row that still holds detail (Codex-l2c48): the database keeps it,
+      // no response may carry it.
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+              transcodingError: 'botocore: https://internal.example said 503',
+            })
+          )
+          .returning()
+      );
+      const created = await service.create(
+        {
+          title: 'Detail test',
+          slug: createUniqueSlug('detail-test'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          priceCents: 0,
+          tags: [],
+        },
+        creatorId
+      );
+
+      const result = await service.get(created.id, creatorId);
+
+      expect(result?.mediaItem?.id).toBe(media.id);
+      expect(result?.mediaItem).not.toHaveProperty('transcodingError');
+    });
+
     it('should return null for non-existent content', async () => {
       // Act
       const result = await service.get(

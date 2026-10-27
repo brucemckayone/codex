@@ -77,3 +77,28 @@ export function isFirstLoad(
   if (!query) return false;
   return query.current === undefined && queryErrorMessage(query.error) === null;
 }
+
+/**
+ * The worker's `error.code`, wherever the rejection carries it: under `body`
+ * for an `HttpError`, at the top for anything code-bearing.
+ */
+export function remoteErrorCode(error: unknown): string | undefined {
+  if (error === null || typeof error !== 'object') return undefined;
+  const body = (error as { body?: unknown }).body;
+  if (body !== null && typeof body === 'object') {
+    const nested = (body as { code?: unknown }).code;
+    if (typeof nested === 'string') return nested;
+  }
+  const direct = (error as { code?: unknown }).code;
+  return typeof direct === 'string' ? direct : undefined;
+}
+
+/**
+ * The HTTP status a remote call's rejection carries (an `HttpError`'s
+ * `status`), or undefined for a network failure or a plain `Error`.
+ */
+export function remoteErrorStatus(error: unknown): number | undefined {
+  if (error === null || typeof error !== 'object') return undefined;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === 'number' ? status : undefined;
+}
