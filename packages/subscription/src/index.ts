@@ -111,6 +111,7 @@ export type {
   PropagateTierPriceOptions,
   PropagateTierPriceResult,
   SubscriberListItem,
+  SubscriberSubscription,
   SubscriptionCheckoutVerifyResult,
   TierChangePreview,
   WebhookEmailPayload,
@@ -118,6 +119,7 @@ export type {
 } from './services/subscription-service';
 export {
   type PayoutReleasedMailer,
+  SUBSCRIBER_HIDDEN_COLUMNS,
   SubscriptionService,
 } from './services/subscription-service';
 export {

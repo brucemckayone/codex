@@ -58,11 +58,11 @@ function buildApp() {
   return app;
 }
 
-async function readCreators(slug: string): Promise<Response> {
+async function readCreators(slug: string, query = ''): Promise<Response> {
   const ec = createExecutionContext();
   const res = await buildApp().fetch(
     new Request(
-      `http://organization-api.test/api/organizations/public/${slug}/creators`
+      `http://organization-api.test/api/organizations/public/${slug}/creators${query}`
     ),
     testEnv,
     ec
@@ -111,5 +111,45 @@ describe('GET /public/:slug/creators reads under the creators id', () => {
     await readCreators(slug);
 
     expect(orgSpies.getPublicCreators).toHaveBeenCalledTimes(2);
+  });
+});
+
+// Codex-pd8m1: the search palette's creators search. Every typed term would be
+// its own KV slot, so a search reads the database, as the content lists do.
+describe('GET /public/:slug/creators?search=', () => {
+  it('passes the search to the service and never serves it from the cache', async () => {
+    const slug = freshSlug();
+
+    await readCreators(slug, '?search=priya&limit=5');
+    await readCreators(slug, '?search=priya&limit=5');
+
+    expect(orgSpies.getPublicCreators).toHaveBeenCalledTimes(2);
+    expect(orgSpies.getPublicCreators).toHaveBeenCalledWith(slug, {
+      page: 1,
+      limit: 5,
+      search: 'priya',
+    });
+  });
+
+  it('writes no slot an unsearched read would then serve', async () => {
+    const slug = freshSlug();
+
+    await readCreators(slug, '?search=priya');
+    await readCreators(slug);
+
+    expect(orgSpies.getPublicCreators).toHaveBeenCalledTimes(2);
+    expect(orgSpies.getPublicCreators).toHaveBeenLastCalledWith(slug, {
+      page: 1,
+      limit: 20,
+    });
+  });
+
+  it('reads a blank search as none, from the cache', async () => {
+    const slug = freshSlug();
+
+    await readCreators(slug, '?search=%20%20');
+    await readCreators(slug);
+
+    expect(orgSpies.getPublicCreators).toHaveBeenCalledTimes(1);
   });
 });

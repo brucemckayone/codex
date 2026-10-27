@@ -6,7 +6,8 @@
 	import { fade, fly } from 'svelte/transition';
 	import { SearchIcon, XIcon } from '$lib/components/ui/Icon';
 	import { Spinner } from '$lib/components/ui/Feedback/Spinner';
-	import { buildContentUrl } from '$lib/utils/subdomain';
+	import { buildContentUrl, buildCreatorsUrl } from '$lib/utils/subdomain';
+	import { logger } from '$lib/observability';
 	import { gateSearchQuery } from '@codex/validation';
 	import * as m from '$paraglide/messages';
 
@@ -41,10 +42,16 @@
 
 	interface SearchCreatorResult {
 		name: string;
+		username: string | null;
 		avatarUrl: string | null;
 	}
 
-	let results = $state<{ content: SearchContentResult[]; creators: SearchCreatorResult[] }>({
+	interface SearchResults {
+		content: SearchContentResult[];
+		creators: SearchCreatorResult[];
+	}
+
+	let results = $state<SearchResults>({
 		content: [],
 		creators: [],
 	});
@@ -52,13 +59,46 @@
 	// Recents are replayed as `?q=` navigations by `selectItem`, so a term
 	// persisted before the search floor landed (Codex-k618q) would still be one
 	// click away from a below-floor scan. Filter on READ as well as on write.
-	let recentSearches = $state<string[]>(
-		browser
-			? ((JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as string[]) ?? []).filter(
-					(term) => !!gateSearchQuery(term)
-				)
-			: []
-	);
+	//
+	// The read runs as the palette mounts, and both root layouts mount it, so
+	// a throw here would break every page, not just search. Blocked site
+	// storage throws on access and a hand-edited value may not parse or not be
+	// a list of strings: each reads as no recents. What is read is normalised
+	// as `saveRecent` writes it: trimmed, de-duplicated (the list is keyed by
+	// term, and a repeated key throws when the palette opens) and capped.
+	function readRecent(): string[] {
+		if (!browser) return [];
+		try {
+			const stored: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
+			if (!Array.isArray(stored)) {
+				logger.warn('Recent searches not read', { reason: 'not a list' });
+				return [];
+			}
+			const terms = stored.flatMap((term) =>
+				typeof term === 'string' ? (gateSearchQuery(term) ?? []) : []
+			);
+			return [...new Set(terms)].slice(0, MAX_RECENT);
+		} catch (error) {
+			logger.warn('Recent searches not read', {
+				reason: error instanceof Error ? error.message : String(error),
+			});
+			return [];
+		}
+	}
+
+	// A write that fails (storage blocked or full) only loses the recents.
+	function writeRecent(terms: string[]) {
+		try {
+			if (terms.length > 0) localStorage.setItem(RECENT_KEY, JSON.stringify(terms));
+			else localStorage.removeItem(RECENT_KEY);
+		} catch (error) {
+			logger.warn('Recent searches not saved', {
+				reason: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	let recentSearches = $state<string[]>(readRecent());
 
 	// ── Reduced-motion preference (WCAG 2.3.3) ────────────────
 	// Svelte JS transitions bypass CSS media queries — gate fly translate
@@ -83,14 +123,19 @@
 		| { type: 'content'; item: SearchContentResult; index: number }
 		| { type: 'creator'; item: SearchCreatorResult; index: number };
 
+	// The template hides results while a search loads, and `results` still
+	// holds the previous query's then. The keys must not reach what is hidden,
+	// or Enter opens an earlier query's match (Codex-qhtw7).
+	const showResults = $derived(!!query.trim() && !loading);
+
 	const allItems = $derived<FlatItem[]>([
 		...(!query.trim()
 			? recentSearches.map((term, i) => ({ type: 'recent' as const, term, index: i }))
 			: []),
-		...(query.trim()
+		...(showResults
 			? results.content.map((item, i) => ({ type: 'content' as const, item, index: i }))
 			: []),
-		...(query.trim()
+		...(showResults
 			? results.creators.map((item, i) => ({ type: 'creator' as const, item, index: i }))
 			: []),
 	]);
@@ -111,30 +156,47 @@
 		//
 		// `gateSearchQuery` returns null for an empty AND for a below-floor
 		// query, and both cases are the same here: no request, no results, not
-		// loading. `/api/search` itself still answers a short `?q=` with 200 —
-		// the floor is a performance gate on the caller, not a validation rule.
+		// loading. `/api/search` applies the same gate for a caller that skips
+		// this one: a short `?q=` gets an empty 200 and calls no worker. The
+		// floor is a performance gate, not a validation rule.
 		const gatedQuery = gateSearchQuery(query);
 		if (!gatedQuery) {
-			results = { content: [], creators: [] };
-			loading = false;
+			resetSearch();
 			return;
 		}
 
 		loading = true;
 		debounceTimer = setTimeout(async () => {
-			try {
-				const params = new URLSearchParams({ q: gatedQuery, limit: '5' });
-				if (scope === 'org' && orgSlug) params.set('scope', orgSlug);
-				const res = await fetch(`/api/search?${params}`);
-				if (res.ok) {
-					results = await res.json();
-				}
-			} catch {
-				results = { content: [], creators: [] };
-			} finally {
-				loading = false;
-			}
+			const found = await fetchResults(gatedQuery);
+			// The box has moved on since this search was sent: a newer query, a
+			// cleared box or a reopened palette. Showing these would list an
+			// earlier query's matches under the new text (Codex-qhtw7).
+			if (gateSearchQuery(query) !== gatedQuery) return;
+			results = found;
+			loading = false;
 		}, DEBOUNCE_MS);
+	}
+
+	// Nothing to search: cancel a pending search and list nothing. A request
+	// already sent is dropped when it lands, because the box no longer holds
+	// its query, so the spinner is turned off here.
+	function resetSearch() {
+		if (debounceTimer) clearTimeout(debounceTimer);
+		results = { content: [], creators: [] };
+		loading = false;
+	}
+
+	// A failed search answers with no results, never the last query's.
+	async function fetchResults(q: string): Promise<SearchResults> {
+		try {
+			const params = new URLSearchParams({ q, limit: '5' });
+			if (scope === 'org' && orgSlug) params.set('scope', orgSlug);
+			const res = await fetch(`/api/search?${params}`);
+			if (res.ok) return await res.json();
+		} catch {
+			// A network failure reads as no results, as a non-OK answer does.
+		}
+		return { content: [], creators: [] };
 	}
 
 	// ── Recent searches ───────────────────────────────────────
@@ -147,28 +209,58 @@
 			0,
 			MAX_RECENT
 		);
-		localStorage.setItem(RECENT_KEY, JSON.stringify(recentSearches));
+		writeRecent(recentSearches);
 	}
 
 	function clearRecent() {
 		recentSearches = [];
-		if (browser) localStorage.removeItem(RECENT_KEY);
+		if (browser) writeRecent([]);
 	}
 
 	// ── Navigation ────────────────────────────────────────────
+	// goto() refuses a URL on another origin (it returns a rejected promise and
+	// does nothing), and a result often lives on another subdomain: an item on
+	// another org's, a creator's profile on the creators host. Those need a full
+	// page load (Codex-ynktj).
+	function navigate(href: string) {
+		const target = new URL(href, page.url);
+		if (target.origin === page.url.origin) {
+			// A guard's cancel and an overtaking navigation both RESOLVE goto()
+			// (SvelteKit settles only `navigation.complete` for those), so a
+			// rejection here is a real failure: a render or callback threw. The
+			// palette has already closed, so fall back to a full page load, which
+			// either arrives or shows the server's error page, never nothing.
+			goto(href).catch((error: unknown) => {
+				logger.error('Palette navigation failed', {
+					href,
+					reason: error instanceof Error ? error.message : String(error),
+				});
+				window.location.href = target.href;
+			});
+			return;
+		}
+		window.location.href = target.href;
+	}
+
+	// A creator with no username has no profile page, so their result opens
+	// the org's creators page, which lists them.
+	function creatorHref(creator: SearchCreatorResult): string {
+		if (!creator.username) return '/creators';
+		return buildCreatorsUrl(page.url, `/@${encodeURIComponent(creator.username)}`);
+	}
+
 	function selectItem(item: FlatItem) {
 		if (item.type === 'recent') {
 			saveRecent(item.term);
 			open = false;
-			goto(`${searchUrl}?q=${encodeURIComponent(item.term)}`);
+			navigate(`${searchUrl}?q=${encodeURIComponent(item.term)}`);
 		} else if (item.type === 'content') {
 			saveRecent(query.trim());
 			open = false;
-			// buildContentUrl handles cross-org subdomain hops — when the
-			// content lives on a different org than the current host, it
-			// returns a full URL via buildOrgUrl so goto navigates correctly
-			// instead of 404ing on `/content/{slug}` of the wrong subdomain.
-			goto(
+			// buildContentUrl returns a full URL on the item's own org subdomain
+			// when that is not the current host, so it never 404s on
+			// `/content/{slug}` of the wrong org.
+			navigate(
 				buildContentUrl(page.url, {
 					slug: item.item.slug,
 					id: item.item.id,
@@ -178,7 +270,7 @@
 		} else if (item.type === 'creator') {
 			saveRecent(query.trim());
 			open = false;
-			goto(`/creators/${encodeURIComponent(item.item.name)}`);
+			navigate(creatorHref(item.item));
 		}
 	}
 
@@ -210,7 +302,7 @@
 				if (!gatedQuery) break;
 				saveRecent(gatedQuery);
 				open = false;
-				goto(`${searchUrl}?q=${encodeURIComponent(gatedQuery)}`);
+				navigate(`${searchUrl}?q=${encodeURIComponent(gatedQuery)}`);
 				break;
 			}
 			case 'Escape':
@@ -240,7 +332,7 @@
 			requestAnimationFrame(() => inputEl?.focus());
 			query = '';
 			activeIndex = -1;
-			results = { content: [], creators: [] };
+			resetSearch();
 		}
 	});
 
@@ -303,7 +395,7 @@
 					onclick={() => {
 						query = '';
 						inputEl?.focus();
-						results = { content: [], creators: [] };
+						resetSearch();
 					}}
 				>
 					<XIcon size={16} />
@@ -344,7 +436,7 @@
 				</div>
 			{/if}
 
-			{#if query.trim() && !loading}
+			{#if showResults}
 				{#if results.content.length > 0}
 					<div class="palette__group">
 						<div class="palette__group-header">
@@ -379,7 +471,7 @@
 						<div class="palette__group-header">
 							<span>{m.command_palette_creators()}</span>
 						</div>
-						{#each results.creators as creator, i (creator.name)}
+						{#each results.creators as creator, i (creator.username ?? creator.name)}
 							{@const flatIdx = creatorFlatIndex(i)}
 							<button
 								class="palette__item palette__item--creator"

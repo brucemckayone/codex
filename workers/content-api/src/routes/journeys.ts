@@ -43,6 +43,7 @@ import {
 } from '@codex/validation';
 import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import { warnOnMissingCdnBase } from './cdn-base-slot';
 import {
   bumpOrgJourneysVersion,
   getCachedPublishedCourses,
@@ -146,14 +147,13 @@ app.get(
     },
     handler: async (ctx): Promise<CourseCardSummary[]> => {
       const { organizationId } = ctx.input.query;
+      const cdnBase = ctx.env.R2_PUBLIC_URL_BASE;
+      warnOnMissingCdnBase(cdnBase, ctx.obs, 'journeys:courses');
 
-      const fetchCourses = () =>
-        ctx.services.courseJourney.listPublishedCourses(
-          organizationId,
-          ctx.env.R2_PUBLIC_URL_BASE
-        );
+      const fetchCourses = (base: string | undefined) =>
+        ctx.services.courseJourney.listPublishedCourses(organizationId, base);
 
-      if (!ctx.env.CACHE_KV) return fetchCourses();
+      if (!ctx.env.CACHE_KV) return fetchCourses(cdnBase);
 
       // `waitUntil` is REQUIRED on every read path (Codex-e32xz): without it
       // the data-slot put is cancelled when the response returns and the cache
@@ -163,9 +163,12 @@ app.get(
         waitUntil: (p) => ctx.executionCtx.waitUntil(p),
         obs: ctx.obs,
       });
+      // Keyed on the base the covers are built with, so a fixed binding shows
+      // on the next read (Codex-yjyju).
       const courses = await getCachedPublishedCourses(
         cache,
         organizationId,
+        cdnBase,
         fetchCourses
       );
       if (ctx.obs) {
@@ -552,15 +555,17 @@ app.get(
     handler: async (ctx): Promise<JourneyCardView[]> => {
       const { organizationId, featured, limit } = ctx.input.query;
       const isFeatured = featured === 'true';
+      const cdnBase = ctx.env.R2_PUBLIC_URL_BASE;
+      warnOnMissingCdnBase(cdnBase, ctx.obs, 'journeys:published');
 
-      const fetchJourneys = () =>
+      const fetchJourneys = (base: string | undefined) =>
         ctx.services.courseJourney.listPublishedJourneys(organizationId, {
           featured: isFeatured,
           limit,
-          r2PublicUrlBase: ctx.env.R2_PUBLIC_URL_BASE,
+          r2PublicUrlBase: base,
         });
 
-      if (!ctx.env.CACHE_KV) return fetchJourneys();
+      if (!ctx.env.CACHE_KV) return fetchJourneys(cdnBase);
 
       // See `/courses` above — `waitUntil` is what makes the write survive.
       const cache = new VersionedCache({
@@ -572,6 +577,7 @@ app.get(
         cache,
         organizationId,
         { featured: isFeatured, limit },
+        cdnBase,
         fetchJourneys
       );
       if (ctx.obs) {

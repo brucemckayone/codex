@@ -691,6 +691,51 @@ describe('portal public reads — KV cache-aside through the real route', () => 
       expect.objectContaining({ featured: false, limit: 12 })
     );
   });
+
+  // Codex-yjyju: both lists cache cover URLs built from R2_PUBLIC_URL_BASE.
+  // A slot keyed on the org alone served a missing base's null covers for the
+  // 2h TTL after the binding was set.
+  const noBase = { ...testEnv, R2_PUBLIC_URL_BASE: undefined } as typeof env;
+
+  it('/courses reads afresh once the CDN base is set, then serves that from cache', async () => {
+    const path = `/api/journeys/courses?organizationId=${ORG_ID}`;
+
+    await dispatch(buildApp(USER), getReq(path), noBase);
+    await dispatch(buildApp(USER), getReq(path));
+    await dispatch(buildApp(USER), getReq(path));
+
+    expect(journeySpies.listPublishedCourses).toHaveBeenCalledTimes(2);
+    expect(journeySpies.listPublishedCourses).toHaveBeenNthCalledWith(
+      1,
+      ORG_ID,
+      undefined
+    );
+    expect(journeySpies.listPublishedCourses).toHaveBeenNthCalledWith(
+      2,
+      ORG_ID,
+      R2_PUBLIC_URL_BASE
+    );
+  });
+
+  it('/published reads afresh once the CDN base is set, then serves that from cache', async () => {
+    const path = `/api/journeys/published?organizationId=${ORG_ID}&limit=12`;
+
+    await dispatch(buildApp(USER), getReq(path), noBase);
+    await dispatch(buildApp(USER), getReq(path));
+    await dispatch(buildApp(USER), getReq(path));
+
+    expect(journeySpies.listPublishedJourneys).toHaveBeenCalledTimes(2);
+    expect(journeySpies.listPublishedJourneys).toHaveBeenNthCalledWith(
+      1,
+      ORG_ID,
+      expect.objectContaining({ r2PublicUrlBase: undefined })
+    );
+    expect(journeySpies.listPublishedJourneys).toHaveBeenNthCalledWith(
+      2,
+      ORG_ID,
+      expect.objectContaining({ r2PublicUrlBase: R2_PUBLIC_URL_BASE })
+    );
+  });
 });
 
 /**

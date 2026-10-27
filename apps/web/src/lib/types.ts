@@ -17,10 +17,10 @@ import type {
   Content,
   Organization,
   ServedMediaItem,
-  Subscription,
   SubscriptionTier,
 } from '@codex/database/schema';
 import type { MyMembershipResponse } from '@codex/shared-types';
+import type { SubscriberSubscription } from '@codex/subscription';
 import type { HeroLayout } from '@codex/validation';
 
 export interface ContentWithRelations extends Content {
@@ -106,6 +106,11 @@ type DateAsString<T> = {
 };
 
 // ─── Subscription Types ────────────────────────────────────────────────────
+//
+// Both reads below are built on `SubscriberSubscription` from
+// @codex/subscription: the row without the org's fee split or the internal
+// bookkeeping fields, which the service leaves out of what a subscriber
+// receives (`SUBSCRIBER_HIDDEN_COLUMNS`, Codex-mbs2l).
 
 /**
  * Subscription with tier and org info, matching backend SubscriptionWithOrg shape.
@@ -117,7 +122,8 @@ type DateAsString<T> = {
  * the row → wire transformation at the type level so `formatDate(...)`
  * call sites never need `as unknown as string`.
  */
-export interface UserOrgSubscription extends DateAsString<Subscription> {
+export interface UserOrgSubscription
+  extends DateAsString<SubscriberSubscription> {
   tier: DateAsString<SubscriptionTier>;
   organization: {
     id: string;
@@ -133,7 +139,8 @@ export interface UserOrgSubscription extends DateAsString<Subscription> {
  *
  * Wire shape: see `UserOrgSubscription` above for rationale.
  */
-export interface CurrentSubscription extends DateAsString<Subscription> {
+export interface CurrentSubscription
+  extends DateAsString<SubscriberSubscription> {
   tier: DateAsString<SubscriptionTier>;
 }
 

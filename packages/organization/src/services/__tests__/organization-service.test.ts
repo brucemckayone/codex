@@ -1817,6 +1817,111 @@ describe('OrganizationService', () => {
     });
   });
 
+  // Codex-pd8m1: the search palette sent a search the list ignored, so its
+  // Creators section showed the org's first five whatever was typed.
+  describe('searching the creators list', () => {
+    let slug: string;
+    let priyaHandle: string;
+
+    beforeAll(async () => {
+      const [ownerId, priyaId, samId, subscriberId] = await seedTestUsers(
+        db,
+        4
+      );
+      priyaHandle = createUniqueSlug('ppatel');
+      const people = [
+        { id: ownerId!, name: 'Orla Owner', username: createUniqueSlug('oo') },
+        { id: priyaId!, name: 'Priya Patel', username: priyaHandle },
+        // `%`, `_` and `\` are LIKE metacharacters: each must match itself.
+        {
+          id: samId!,
+          name: 'Sam 100% Real\\Deal',
+          username: createUniqueSlug('sr'),
+        },
+        {
+          id: subscriberId!,
+          name: 'Priya Subscriber',
+          username: createUniqueSlug('ps'),
+        },
+      ];
+      for (const { id, name, username } of people) {
+        await db
+          .update(schema.users)
+          .set({ name, username })
+          .where(eq(schema.users.id, id));
+      }
+      const org = await service.create(
+        {
+          name: 'Creator Search Org',
+          slug: createUniqueSlug('creator-search'),
+        },
+        ownerId!
+      );
+      slug = org.slug;
+      await db.insert(schema.organizationMemberships).values([
+        {
+          organizationId: org.id,
+          userId: priyaId!,
+          role: 'creator',
+          status: 'active',
+        },
+        {
+          organizationId: org.id,
+          userId: samId!,
+          role: 'creator',
+          status: 'active',
+        },
+        // Matches the search, but a subscriber is never on the list.
+        {
+          organizationId: org.id,
+          userId: subscriberId!,
+          role: 'subscriber',
+          status: 'active',
+        },
+      ]);
+    });
+
+    const SAM = 'Sam 100% Real\\Deal';
+    const searchFor = (search: string) =>
+      service.getPublicCreators(slug, { page: 1, limit: 20, search });
+
+    it('lists every creator when there is no search', async () => {
+      const result = await service.getPublicCreators(slug);
+
+      expect(result.items.map((item) => item.name).sort()).toEqual([
+        'Orla Owner',
+        'Priya Patel',
+        SAM,
+      ]);
+      expect(result.pagination.total).toBe(3);
+    });
+
+    it('matches a name case-insensitively, and the total counts only matches', async () => {
+      const result = await searchFor('PRIYA');
+
+      expect(result.items.map((item) => item.name)).toEqual(['Priya Patel']);
+      expect(result.pagination.total).toBe(1);
+    });
+
+    it('matches a username', async () => {
+      const result = await searchFor(priyaHandle.slice(0, 10));
+
+      expect(result.items.map((item) => item.username)).toEqual([priyaHandle]);
+    });
+
+    it('matches %, _ and \\ as themselves, not as LIKE syntax', async () => {
+      const percent = await searchFor('%');
+      const backslash = await searchFor('\\');
+      const underscore = await searchFor('_');
+
+      expect(percent.items.map((item) => item.name)).toEqual([SAM]);
+      // Unescaped, `%\%` ends in a literal %, which this name does not.
+      expect(backslash.items.map((item) => item.name)).toEqual([SAM]);
+      expect(underscore.items).toEqual([]);
+      expect(underscore.pagination.total).toBe(0);
+    });
+  });
+
   describe('getPublicMembers', () => {
     let membersTestOrgId: string;
     let membersTestOrgSlug: string;

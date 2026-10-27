@@ -44,6 +44,10 @@
  *
  * Bare segments only — `.split(':')` means `user:username-to-id` yields
  * `username-to-id`, which is not `id` and is correctly kept.
+ *
+ * `cdn` precedes a hash of the CDN base a slot's URLs were built with
+ * (content-api's `cdnBaseSlot`, Codex-yjyju): a deployment's config, not a
+ * dimension.
  */
 // `/* @__PURE__ */` is load-bearing, not decoration: a module-scope CALL
 // marks this module impure, which defeats tree-shaking of the @codex/cache
@@ -56,6 +60,7 @@ const VALUE_MARKERS = /* @__PURE__ */ new Set([
   'search',
   'q',
   'id',
+  'cdn',
 ]);
 
 /**

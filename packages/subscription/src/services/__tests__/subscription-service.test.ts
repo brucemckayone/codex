@@ -51,7 +51,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, getTableColumns, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -70,7 +70,10 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../../errors';
-import { SubscriptionService } from '../subscription-service';
+import {
+  SUBSCRIBER_HIDDEN_COLUMNS,
+  SubscriptionService,
+} from '../subscription-service';
 
 /**
  * Empty the payouts ledger, for a test that reads it globally (the sweeps).
@@ -3102,6 +3105,72 @@ describe('SubscriptionService', () => {
     });
   });
 
+  // ─── Subscriber reads leave out the fee split (Codex-mbs2l) ────────
+
+  const SUBSCRIBER_HIDDEN_KEYS = Object.keys(SUBSCRIBER_HIDDEN_COLUMNS);
+
+  // Every other column, decided one by one. An exclusion list sends a column
+  // added later to subscribers by default, so the census below fails until a
+  // new column is put here or in SUBSCRIBER_HIDDEN_COLUMNS.
+  const SUBSCRIBER_VISIBLE_KEYS = [
+    'id',
+    'userId',
+    'organizationId',
+    'tierId',
+    'stripeSubscriptionId',
+    'stripeCustomerId',
+    'status',
+    'billingInterval',
+    'currentPeriodStart',
+    'currentPeriodEnd',
+    'cancelAtPeriodEnd',
+    'cancelledAt',
+    'cancelReason',
+    'disputedAt',
+    'endedAt',
+    'amountCents',
+    'createdAt',
+    'updatedAt',
+  ];
+
+  it('decides every subscriptions column: hidden from the subscriber, or shown', () => {
+    expect(
+      [...SUBSCRIBER_HIDDEN_KEYS, ...SUBSCRIBER_VISIBLE_KEYS].sort()
+    ).toEqual(Object.keys(getTableColumns(subscriptions)).sort());
+  });
+
+  it("hides the org's fee split, as the owner decided (Codex-mbs2l)", () => {
+    expect(SUBSCRIBER_HIDDEN_KEYS).toEqual(
+      expect.arrayContaining([
+        'platformFeeCents',
+        'organizationFeeCents',
+        'creatorPayoutCents',
+      ])
+    );
+  });
+
+  function expectNoSubscriberHiddenColumns(row: object) {
+    for (const key of SUBSCRIBER_HIDDEN_KEYS) {
+      expect(row).not.toHaveProperty(key);
+    }
+  }
+
+  // The row the read left them out of does hold them: the factory's split.
+  async function expectStoredFeeSplit(userId: string, orgId: string) {
+    const stored = await db.query.subscriptions.findFirst({
+      where: and(
+        eq(subscriptions.userId, userId),
+        eq(subscriptions.organizationId, orgId)
+      ),
+    });
+    expect(stored).toMatchObject({
+      platformFeeCents: 50,
+      organizationFeeCents: 67,
+      creatorPayoutCents: 382,
+      churnReason: 'other',
+    });
+  }
+
   // ─── getSubscription ──────────────────────────────────────────────
 
   describe('getSubscription', () => {
@@ -3123,6 +3192,24 @@ describe('SubscriptionService', () => {
       const { org } = await createFullOrg('get-null');
       const result = await service.getSubscription(thirdUserId, org.id);
       expect(result).toBeNull();
+    });
+
+    it("never sends the subscriber the org's fee split (Codex-mbs2l)", async () => {
+      const { org, tier1 } = await createFullOrg('get-sub-fees');
+      const subscriber = takeFirst(await seedTestUsers(db, 1), 'subscriber');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(subscriber, org.id, tier1.id, {
+          churnReason: 'other',
+        })
+      );
+
+      const result = await service.getSubscription(subscriber, org.id);
+
+      expect(result).not.toBeNull();
+      expectNoSubscriberHiddenColumns(result!);
+      // The calibration: the row holds a split, and the rest of it is read.
+      await expectStoredFeeSplit(subscriber, org.id);
+      expect(result!.amountCents).toBe(499);
     });
   });
 
@@ -3166,6 +3253,23 @@ describe('SubscriptionService', () => {
         'slug',
       ]);
       expect(mine!.organization.id).toBe(org.id);
+    });
+
+    it("never sends the subscriber the org's fee split (Codex-mbs2l)", async () => {
+      const { org, tier1 } = await createFullOrg('mine-fees');
+      const subscriber = takeFirst(await seedTestUsers(db, 1), 'subscriber');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(subscriber, org.id, tier1.id, {
+          churnReason: 'other',
+        })
+      );
+
+      const [mine] = await service.getUserSubscriptions(subscriber);
+
+      expect(mine).toBeDefined();
+      expectNoSubscriberHiddenColumns(mine!);
+      await expectStoredFeeSplit(subscriber, org.id);
+      expect(mine!.amountCents).toBe(499);
     });
   });
 
