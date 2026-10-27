@@ -183,10 +183,11 @@ describe('sendEmailToWorker', () => {
       });
       await waitUntilPromise();
 
-      expect(errorSpy).toHaveBeenCalledWith(
-        '[sendEmailToWorker] refused',
-        { templateName: 'purchase-receipt', userId: 'user_abc123', status }
-      );
+      expect(errorSpy).toHaveBeenCalledWith('[sendEmailToWorker] refused', {
+        templateName: 'purchase-receipt',
+        userId: 'user_abc123',
+        status,
+      });
       expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(
         'user@example.com'
       );
