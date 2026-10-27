@@ -47,12 +47,12 @@ const app = new Hono<HonoEnv>();
  * page, because the Studio turns a member away.
  */
 const INVITATION_BY_ROLE = {
-  admin: { roleName: 'an admin', path: '/studio' },
-  creator: { roleName: 'a creator', path: '/studio' },
-  member: { roleName: 'a member', path: '/' },
+  admin: { roleLabel: 'an admin', path: '/studio' },
+  creator: { roleLabel: 'a creator', path: '/studio' },
+  member: { roleLabel: 'a member', path: '/' },
 } as const satisfies Record<
   InviteMemberInput['role'],
-  { roleName: string; path: string }
+  { roleLabel: string; path: string }
 >;
 
 const ENV_NAME_VALUES: readonly string[] = Object.values(ENV_NAMES);
@@ -169,11 +169,15 @@ app.post(
           data: {
             inviterName: ctx.user.name || 'A team member',
             orgName: org.name,
-            roleName: invitation.roleName,
+            // The plain role, as before: the stock row production has reads
+            // "as a {{roleName}}". The new copy reads "as {{roleLabel}}".
+            roleName: ctx.input.body.role,
+            roleLabel: invitation.roleLabel,
             orgUrl,
-            // Transitional, for one release (Codex-2hxff.83): the old
-            // notifications-api requires these, and a template row 0117 has
-            // not rewritten still renders them. Drop both once it is live.
+            // Transitional (Codex-2hxff.83). The previous notifications-api
+            // requires these, and the stock row links its button to
+            // `acceptUrl` and says it expires, until migration 0117 rewrites
+            // it, one release after this code (Codex-2hxff.84).
             acceptUrl: orgUrl,
             expiryDays: '7',
           },

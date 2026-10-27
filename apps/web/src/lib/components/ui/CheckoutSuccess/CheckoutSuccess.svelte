@@ -111,6 +111,20 @@
    */
   let notRecorded = $state.raw<NotRecorded | null>(null);
 
+  /**
+   * A `NotRecorded`, told apart by its literal, never by the field alone:
+   * a `kind` a verify result gains later must not read as "we're on it".
+   * The same test as `isNotRecorded` in $lib/server/checkout-verify, which a
+   * component cannot import at runtime.
+   */
+  function isNotRecorded(
+    answer: Verification | NotRecorded | null
+  ): answer is NotRecorded {
+    return (
+      answer !== null && (answer as { kind?: unknown }).kind === 'not_recorded'
+    );
+  }
+
   $effect(() => {
     const pending = unlock;
     if (!pending) return;
@@ -119,7 +133,7 @@
       (result) => {
         if (!live) return;
         unlockAnswer = { for: pending, result };
-        if (result && 'kind' in result) notRecorded = result;
+        if (isNotRecorded(result)) notRecorded = result;
       },
       () => {
         if (live) unlockAnswer = { for: pending, result: null };
@@ -143,7 +157,8 @@
   const current = $derived.by(() => {
     const answered =
       unlock && unlockAnswer?.for === unlock ? unlockAnswer.result : null;
-    const fresh = answered && !('kind' in answered) ? answered : verification;
+    const fresh =
+      answered && !isNotRecorded(answered) ? answered : verification;
     if (fresh) lastKnown = fresh;
     return fresh ?? lastKnown;
   });

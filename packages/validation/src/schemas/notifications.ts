@@ -266,18 +266,21 @@ export const refundProcessedDataSchema = z.object({
 /**
  * Adding someone makes them a member at once, so nothing is accepted and
  * nothing expires (Codex-bnxhw). `orgUrl` opens the organisation: its Studio
- * for an admin or creator, its home page for a member. `roleName` reads after
- * "as": "an admin", "a creator", "a member".
+ * for an admin or creator, its home page for a member. `roleLabel` reads
+ * after "as": "an admin", "a creator", "a member". `roleName` is the plain
+ * role, which the stock row production has today reads as "as a {{roleName}}".
  */
 export const orgMemberInvitationDataSchema = z.object({
   inviterName: z.string(),
   orgName: z.string(),
   roleName: z.string(),
+  roleLabel: z.string(),
   orgUrl: z.string().url(),
-  // Transitional, for one release (Codex-2hxff.83). organization-api deploys
-  // before notifications-api, and a template row that 0117 has not rewritten
-  // still uses these, so the sender keeps them, optional here. Drop both
-  // once the release is live.
+  // Transitional (Codex-2hxff.83). Until migration 0117 rewrites it, one
+  // release after this code (Codex-2hxff.84), the stock row production has
+  // links its button to `acceptUrl` and says it "expires in {{expiryDays}}
+  // days". Optional, so the sender can later stop passing them without
+  // waiting for notifications-api, which deploys after organization-api.
   acceptUrl: z.string().url().optional(),
   expiryDays: z.string().optional(),
 });

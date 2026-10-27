@@ -57,11 +57,18 @@ export type ArrivalCompletion =
   | NotRecorded
   | null;
 
-/** The completion was refused for good: a {@link NotRecorded}. */
+/**
+ * The completion was refused for good: a {@link NotRecorded}. Told apart by
+ * its literal, never by the field alone, so a `kind` a verify result gains
+ * later never reads as "we're on it". CheckoutSuccess applies the same test.
+ */
 export function isNotRecorded(
   completion: ArrivalCompletion
 ): completion is NotRecorded {
-  return completion !== null && 'kind' in completion;
+  return (
+    completion !== null &&
+    (completion as { kind?: unknown }).kind === 'not_recorded'
+  );
 }
 
 /** ecom-api's errorIds are `crypto.randomUUID()`; nothing else is quoted. */

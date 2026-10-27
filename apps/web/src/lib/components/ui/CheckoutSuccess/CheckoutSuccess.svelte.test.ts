@@ -230,6 +230,27 @@ describe('CheckoutSuccess — unlock on arrival', () => {
     expect(invalidateMock).not.toHaveBeenCalled();
   });
 
+  // Told apart by its literal: a `kind` the verify result gains later must
+  // not read as "we're on it" (Codex-2hxff.81).
+  test('a verify answer carrying some other kind is the session, not a refusal', async () => {
+    vi.useFakeTimers();
+    mountWith({
+      verification: RECORDING,
+      unlock: Promise.resolve({
+        ...UNLOCKED,
+        kind: 'content',
+      } as CheckoutSessionVerifyResult),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(clean(document.querySelector('h1'))).toBe(
+      m.checkout_success_title()
+    );
+    expect(clean(document.body)).not.toContain(m.checkout_contact_support());
+  });
+
   test('the completion records it: Start watching, the library refreshed once, and no checks', async () => {
     vi.useFakeTimers();
     mountWith({ verification: RECORDING, unlock: Promise.resolve(UNLOCKED) });

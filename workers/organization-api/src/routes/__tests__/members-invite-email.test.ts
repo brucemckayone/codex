@@ -31,6 +31,7 @@ import { ObservabilityClient } from '@codex/observability';
 import { orgMemberInvitationDataSchema } from '@codex/validation';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 const orgSpies = {
   get: vi.fn(),
@@ -176,13 +177,15 @@ describe('POST /invite: the invitation email (Codex-bnxhw)', () => {
     ['admin', 'an admin', 'http://invite-org.lvh.me:3000/studio'],
     ['creator', 'a creator', 'http://invite-org.lvh.me:3000/studio'],
     ['member', 'a member', 'http://invite-org.lvh.me:3000/'],
-  ])('an invited %s is added as "%s" and opens %s', async (role, roleName, orgUrl) => {
+  ])('an invited %s is added as "%s" and opens %s', async (role, roleLabel, orgUrl) => {
     const res = await invite(role);
     expect(res.status).toBe(201);
     expect(invitationData()).toEqual({
       inviterName: 'Sam Owner',
       orgName: 'Invite Org',
-      roleName,
+      // The plain role, as before: the stock row reads "as a {{roleName}}".
+      roleName: role,
+      roleLabel,
       orgUrl,
       // Transitional (Codex-2hxff.83): the same link under the old name.
       acceptUrl: orgUrl,
@@ -190,15 +193,33 @@ describe('POST /invite: the invitation email (Codex-bnxhw)', () => {
     });
   });
 
-  it("sends exactly the template's data shape, with the old fields for one release (Codex-2hxff.83)", async () => {
+  it("sends exactly the template's data shape, with the old fields until 0117 has run (Codex-2hxff.83, .84)", async () => {
     await invite('creator');
     const data = invitationData();
     expect(orgMemberInvitationDataSchema.strict().parse(data)).toEqual(data);
-    // The previous notifications-api requires both. A template row 0117
-    // has not rewritten links its button to `acceptUrl`, so it must be the
-    // same link.
+    // The stock row production has links its button to `acceptUrl`, so it
+    // must be the same link.
     expect(data.acceptUrl).toBe(data.orgUrl);
     expect(data.expiryDays).toBe('7');
+  });
+
+  it('the previous notifications-api accepts it: organization-api deploys first', async () => {
+    // That release's schema, verbatim (origin/dev 5bc603f7).
+    const previousSchema = z.object({
+      inviterName: z.string(),
+      orgName: z.string(),
+      roleName: z.string(),
+      acceptUrl: z.string().url(),
+      expiryDays: z.string(),
+    });
+    await invite('admin');
+    expect(previousSchema.parse(invitationData())).toEqual({
+      inviterName: 'Sam Owner',
+      orgName: 'Invite Org',
+      roleName: 'admin',
+      acceptUrl: 'http://invite-org.lvh.me:3000/studio',
+      expiryDays: '7',
+    });
   });
 
   it('an unset ENVIRONMENT warns, and the email links to development', async () => {

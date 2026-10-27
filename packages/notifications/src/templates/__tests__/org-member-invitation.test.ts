@@ -11,6 +11,11 @@
  * The old email's button went to `{{acceptUrl}}`, and it said the invitation
  * "expires in {{expiryDays}} days". Adding someone makes them a member at
  * once, so the email now names the organisation and its one button opens it.
+ *
+ * The seed changes no row that already exists, so production keeps the OLD
+ * row until migration 0117 rewrites it, one release after this code
+ * (Codex-2hxff.84). The same payload must render that row as it reads today,
+ * with its button opening the organisation.
  */
 
 import { readFileSync } from 'node:fs';
@@ -50,12 +55,27 @@ const brand = {
   contactUrl: 'https://example.test/contact',
 };
 
+const ORG_URL = 'https://studio-alpha.revelations.studio/studio';
+
+/** What organization-api sends (members-invite-email.test.ts pins it). */
 const data = orgMemberInvitationDataSchema.parse({
   inviterName: 'Sam',
   orgName: 'Studio Alpha',
-  roleName: 'a creator',
-  orgUrl: 'https://studio-alpha.revelations.studio/studio',
+  roleName: 'creator',
+  roleLabel: 'a creator',
+  orgUrl: ORG_URL,
+  acceptUrl: ORG_URL,
+  expiryDays: '7',
 });
+
+/** The stock row production has today (the seed at origin/dev 5bc603f7). */
+const PRODUCTION_ROW = {
+  subject: "You've been invited to {{orgName}}",
+  htmlBody:
+    '<h1>You\'ve been invited!</h1><p><strong>{{inviterName}}</strong> has invited you to join <strong>{{orgName}}</strong> as a <strong>{{roleName}}</strong>.</p><p style="text-align:center;margin:30px 0;"><a href="{{acceptUrl}}" class="button" style="color:white;">Accept Invitation</a></p><p style="color:#666;font-size:13px;">This invitation expires in {{expiryDays}} days.</p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div>',
+  textBody:
+    '{{inviterName}} has invited you to join {{orgName}} as a {{roleName}}.\n\nAccept your invitation: {{acceptUrl}}\n\nThis invitation expires in {{expiryDays}} days.\n\n{{platformName}}',
+};
 
 describe('org-member-invitation (Codex-bnxhw)', () => {
   const seed = seedEntry();
@@ -104,5 +124,25 @@ describe('org-member-invitation (Codex-bnxhw)', () => {
     for (const body of [rendered.html.content, rendered.text.content]) {
       expect(body).not.toMatch(/accept|expire|invited/i);
     }
+  });
+
+  it("renders production's row as it reads today, its button opening the org (until 0117, Codex-2hxff.84)", () => {
+    const old = renderEmailTemplate({
+      htmlTemplate: PRODUCTION_ROW.htmlBody,
+      textTemplate: PRODUCTION_ROW.textBody,
+      data: { ...brand, ...data },
+      allowedTokens,
+    });
+    for (const part of [old.html, old.text]) {
+      expect(part.unknownTokens).toEqual([]);
+      expect(part.missingTokens).toEqual([]);
+    }
+    expect(old.text.content).toBe(
+      `Sam has invited you to join Studio Alpha as a creator.\n\nAccept your invitation: ${ORG_URL}\n\nThis invitation expires in 7 days.\n\nCodex`
+    );
+    expect(old.html.content).toContain('as a <strong>creator</strong>.</p>');
+    expect(old.html.content).toContain(
+      `<a href="${ORG_URL}" class="button" style="color:white;">Accept Invitation</a>`
+    );
   });
 });

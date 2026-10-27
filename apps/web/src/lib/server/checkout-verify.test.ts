@@ -9,7 +9,11 @@
  * `CHECKOUT_NOT_RECORDED`, or null for any other failure.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { completeOnArrival, isTransientFailure } from './checkout-verify';
+import {
+  completeOnArrival,
+  isNotRecorded,
+  isTransientFailure,
+} from './checkout-verify';
 import { ApiError } from './errors';
 
 const { warnMock } = vi.hoisted(() => ({ warnMock: vi.fn() }));
@@ -35,6 +39,27 @@ describe('isTransientFailure', () => {
     ['a 422', 422],
   ])('does not retry %s', (_label, status) => {
     expect(isTransientFailure(new ApiError(status, 'Refused'))).toBe(false);
+  });
+});
+
+// Told apart by its literal, never by the field alone: a `kind` the verify
+// result gains later must not read as "we're on it".
+describe('isNotRecorded', () => {
+  it('a NotRecorded is one', () => {
+    expect(
+      isNotRecorded({ kind: 'not_recorded', reference: 'cs_test_abc' })
+    ).toBe(true);
+  });
+
+  it.each([
+    ['null', null],
+    ['a verify result', { sessionStatus: 'complete', state: 'recording' }],
+    [
+      'a verify result with some other kind',
+      { sessionStatus: 'complete', state: 'unlocked', kind: 'content' },
+    ],
+  ])('%s is not', (_label, completion) => {
+    expect(isNotRecorded(completion as never)).toBe(false);
   });
 });
 
