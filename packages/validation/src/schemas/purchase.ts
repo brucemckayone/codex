@@ -22,10 +22,10 @@ import { paginationSchema } from '../shared/pagination-schema';
  */
 
 /**
- * Allowed domains for checkout redirect URLs
- * Prevents open redirect attacks by whitelisting trusted domains
+ * The platform's own domains, for checkout redirect URLs. Prevents open
+ * redirect attacks by whitelisting trusted domains.
  */
-const ALLOWED_REDIRECT_DOMAINS = [
+const TRUSTED_REDIRECT_DOMAINS = [
   // Production
   'revelations.studio',
   'codex.revelations.studio',
@@ -33,11 +33,31 @@ const ALLOWED_REDIRECT_DOMAINS = [
   // Staging
   'codex-staging.revelations.studio',
   'app-staging.revelations.studio',
-  // Development (localhost/127.0.0.1 are unreachable externally; lvh.me resolves to 127.0.0.1)
-  'localhost',
-  '127.0.0.1',
-  'lvh.me',
 ];
+
+/**
+ * Development hosts: localhost and 127.0.0.1 are unreachable externally, and
+ * lvh.me resolves to 127.0.0.1. Development, test and CI return to them
+ * (e2e runs on them); production refuses them ({@link isProductionRedirectUrl}).
+ */
+const DEV_REDIRECT_HOSTS = ['localhost', '127.0.0.1', 'lvh.me'];
+
+/** Allowed domains for checkout redirect URLs, in every environment. */
+const ALLOWED_REDIRECT_DOMAINS = [
+  ...TRUSTED_REDIRECT_DOMAINS,
+  ...DEV_REDIRECT_HOSTS,
+];
+
+/**
+ * The hostname is one of `domains`, or a subdomain of one
+ * (e.g., preview-123.revelations.studio).
+ */
+function isOnDomain(url: URL, domains: readonly string[]): boolean {
+  const hostname = url.hostname.toLowerCase();
+  return domains.some(
+    (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
+  );
+}
 
 /**
  * Checkout redirect URL schema with domain whitelisting
@@ -46,22 +66,14 @@ const ALLOWED_REDIRECT_DOMAINS = [
  * Security:
  * - HTTP/HTTPS protocol only (prevents javascript:, data: URIs)
  * - Domain whitelist prevents redirects to untrusted sites
- * - Localhost allowed for development
+ * - Localhost allowed, in every environment: this schema does not know which
+ *   it runs in. A production worker also applies
+ *   {@link isProductionRedirectUrl} (Codex-2hxff.79)
  */
 export const checkoutRedirectUrlSchema = urlSchema.refine(
   (url) => {
     try {
-      const parsed = new URL(url);
-      const hostname = parsed.hostname.toLowerCase();
-
-      // Check if hostname exactly matches or is subdomain of allowed domains
-      return ALLOWED_REDIRECT_DOMAINS.some((allowedDomain) => {
-        // Exact match
-        if (hostname === allowedDomain) return true;
-        // Subdomain match (e.g., preview-123.revelations.studio)
-        if (hostname.endsWith(`.${allowedDomain}`)) return true;
-        return false;
-      });
+      return isOnDomain(new URL(url), ALLOWED_REDIRECT_DOMAINS);
     } catch {
       return false;
     }
@@ -70,6 +82,25 @@ export const checkoutRedirectUrlSchema = urlSchema.refine(
     message: `Redirect URL must be on a trusted domain (${ALLOWED_REDIRECT_DOMAINS.join(', ')})`,
   }
 );
+
+/**
+ * Whether a production checkout may return to `url` (Codex-2hxff.79): https,
+ * and on one of the platform's own domains, so never a development host
+ * (localhost, 127.0.0.1, lvh.me). The schema above stays the same in every
+ * environment, because it cannot tell them apart. The worker knows its
+ * environment, so it applies this rule on top, in production only.
+ */
+export function isProductionRedirectUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === 'https:' &&
+      isOnDomain(parsed, TRUSTED_REDIRECT_DOMAINS)
+    );
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Purchase status enum

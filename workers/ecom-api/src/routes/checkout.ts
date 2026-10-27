@@ -21,7 +21,10 @@
 
 import { invalidateUserLibrary } from '@codex/cache';
 import type { ObservabilityClient } from '@codex/observability';
-import type { CheckoutSessionVerifyResult } from '@codex/purchase';
+import {
+  CheckoutNotRecordedError,
+  type CheckoutSessionVerifyResult,
+} from '@codex/purchase';
 import { ServiceUnavailableError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import {
@@ -43,6 +46,7 @@ import {
   describeRootCause,
   isTransientError,
 } from '../utils/error-classification';
+import { refuseDevReturnUrls } from '../utils/return-urls';
 
 // ============================================================================
 // Types
@@ -166,6 +170,7 @@ checkout.post(
     handler: async (ctx): Promise<CheckoutSessionResponse> => {
       // Extract validated input
       const { contentId, successUrl, cancelUrl } = ctx.input.body;
+      refuseDevReturnUrls(ctx.env.ENVIRONMENT, { successUrl, cancelUrl });
 
       // Create checkout session (uses authenticated user's ID as customerId)
       const session = await ctx.services.purchase.createCheckoutSession(
@@ -200,6 +205,7 @@ checkout.post(
     input: { body: createCourseCheckoutSchema },
     handler: async (ctx): Promise<CheckoutSessionResponse> => {
       const { courseId, successUrl, cancelUrl } = ctx.input.body;
+      refuseDevReturnUrls(ctx.env.ENVIRONMENT, { successUrl, cancelUrl });
       const session = await ctx.services.purchase.createCourseCheckoutSession(
         { courseId, successUrl, cancelUrl },
         ctx.user.id
@@ -221,6 +227,8 @@ checkout.post(
     policy: { auth: 'required', rateLimit: 'strict' },
     input: { body: createCourseSubscriptionCheckoutSchema },
     handler: async (ctx): Promise<CheckoutSessionResponse> => {
+      const { successUrl, cancelUrl } = ctx.input.body;
+      refuseDevReturnUrls(ctx.env.ENVIRONMENT, { successUrl, cancelUrl });
       const session =
         await ctx.services.courseSubscription.createCheckoutSession(
           ctx.user.id,
@@ -255,6 +263,9 @@ checkout.post(
     },
     input: { body: createPortalSessionSchema },
     handler: async (ctx) => {
+      refuseDevReturnUrls(ctx.env.ENVIRONMENT, {
+        returnUrl: ctx.input.body.returnUrl,
+      });
       return await ctx.services.purchase.createPortalSession(
         ctx.user.email,
         ctx.user.id,
@@ -295,6 +306,10 @@ checkout.post(
  * - 403 Forbidden: Session belongs to different user
  * - 404 Not Found: Stripe does not know the session, or another environment's
  * - 429 Too Many Requests: over the `strict` rate limit
+ * - 500 `CHECKOUT_NOT_RECORDED`: paid, refused before the commit by a failure
+ *   no retry changes (or skipped), and no row of ours records it. Its details
+ *   are the session id and the errorId support was alerted under. The page
+ *   says "we're on it" and stops checking (Codex-2hxff.81)
  * - 503 Service Unavailable: a failure a retry can fix, with nothing committed
  *
  * Security:
@@ -421,6 +436,16 @@ checkout.post(
             { cause: error }
           );
         }
+        // Refused for good, and the re-read found no row of ours: nothing
+        // will record this payment, so the page says "we're on it" and stops
+        // checking (Codex-2hxff.81). A re-read that failed may have missed
+        // the webhook's row, so that case answers as before.
+        if (after && !after.recorded) {
+          throw new CheckoutNotRecordedError(
+            { sessionId, errorId },
+            { cause: error }
+          );
+        }
         throw error;
       }
 
@@ -433,11 +458,13 @@ checkout.post(
           failure: completion.failure,
         });
       }
+      let skipErrorId: string | undefined;
       if (completion.kind === 'skipped') {
         // Only a paid session with no row reaches the completion, so a skip
         // is a paid session nothing records (bad metadata, no amount).
+        skipErrorId = crypto.randomUUID();
         ctx.obs?.error('The success page could not record a paid session', {
-          errorId: crypto.randomUUID(),
+          errorId: skipErrorId,
           sessionId,
           reason: completion.reason,
         });
@@ -455,6 +482,11 @@ checkout.post(
           completion.kind === 'completed' ? completion.purchase.id : undefined,
         durationMs: Date.now() - startedAt,
       });
+      // A skip is the same refusal for good, unless the webhook's row is
+      // there by now (Codex-2hxff.81).
+      if (skipErrorId && !recorded.recorded) {
+        throw new CheckoutNotRecordedError({ sessionId, errorId: skipErrorId });
+      }
       return recorded.result;
     },
   })

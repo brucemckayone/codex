@@ -112,7 +112,7 @@ vi.mock('@codex/cache', async (importOriginal) => {
 });
 
 import { invalidateUserLibrary } from '@codex/cache';
-import type { Purchase } from '@codex/purchase';
+import { PaymentProcessingError, type Purchase } from '@codex/purchase';
 import type { WebhookServices } from '@codex/worker-utils';
 import { createWebhookServices, sendEmailToWorker } from '@codex/worker-utils';
 import { Hono } from 'hono';
@@ -562,6 +562,50 @@ describe('POST /checkout/complete', () => {
     expect(purchase.completePurchase).not.toHaveBeenCalled();
   });
 
+  // The lookup's own failure, as it throws it since Codex-2hxff.80: a
+  // PaymentProcessingError with the Stripe error as its cause, in place of
+  // handleError's InternalServiceError. Judged by that cause, so the outcome
+  // is the same as for the wrapped shapes above.
+  it.each([
+    [
+      'temporary',
+      Object.assign(new Error('Connection to Stripe failed'), {
+        type: 'StripeConnectionError',
+      }),
+      503,
+    ],
+    [
+      'permanent',
+      Object.assign(new Error('No such payment_intent'), {
+        type: 'StripeInvalidRequestError',
+        statusCode: 404,
+      }),
+      200,
+    ],
+  ] as const)('a %s Stripe failure, as the lookup throws it now, gets the same outcome', async (_label, stripeError, status) => {
+    const purchase = purchaseServiceOver(createStore(), sessionFor('content'));
+    purchase.retrievePaymentIntentCharge.mockRejectedValueOnce(
+      new PaymentProcessingError(
+        'Failed to retrieve the payment',
+        { paymentIntentId: PAYMENT_INTENT, errorId: 'err_lookup' },
+        { cause: stripeError }
+      )
+    );
+    const { app } = buildApp(purchase);
+
+    const res = await complete(app);
+
+    expect(res.status).toBe(status);
+    if (status === 200) {
+      expect(purchase.completePurchase).toHaveBeenCalledWith(
+        PAYMENT_INTENT,
+        expect.objectContaining({ stripeChargeId: null })
+      );
+    } else {
+      expect(purchase.completePurchase).not.toHaveBeenCalled();
+    }
+  });
+
   it('a temporary failure before the commit is a 503, logged at warn with the errorId it carries', async () => {
     const purchase = purchaseServiceOver(createStore(), sessionFor('content'));
     purchase.completePurchase.mockRejectedValueOnce(
@@ -594,8 +638,10 @@ describe('POST /checkout/complete', () => {
   });
 
   // mapErrorToResponse logs no ServiceError: without the route's own line, a
-  // paid session that is never recorded left no trace in ecom.
-  it('a permanent refusal before the commit: an error line with an errorId and the root cause', async () => {
+  // paid session that is never recorded left no trace in ecom. The page is
+  // told it is for good (CHECKOUT_NOT_RECORDED, Codex-2hxff.81), under the
+  // errorId support was alerted with, and with nothing of the refusal's.
+  it('a permanent refusal before the commit: an error line with an errorId and the root cause, and CHECKOUT_NOT_RECORDED to the page', async () => {
     const purchase = purchaseServiceOver(createStore(), sessionFor('content'));
     purchase.completePurchase.mockRejectedValueOnce(
       new NotFoundError('Content not found', { contentId: CONTENT_ID })
@@ -604,7 +650,7 @@ describe('POST /checkout/complete', () => {
 
     const res = await complete(app);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(500);
     expect(obs.error).toHaveBeenCalledWith(
       'The success page could not record a paid session',
       expect.objectContaining({
@@ -613,6 +659,49 @@ describe('POST /checkout/complete', () => {
         state: 'recording',
         cause: expect.objectContaining({ message: 'Content not found' }),
       })
+    );
+    const [, line] =
+      vi
+        .mocked(obs.error)
+        .mock.calls.find(([message]) =>
+          message.startsWith('The success page could not record')
+        ) ?? [];
+    expect(await res.json()).toEqual({
+      error: {
+        code: 'CHECKOUT_NOT_RECORDED',
+        message: 'The purchase could not be recorded',
+        details: {
+          sessionId: 'cs_landing_1',
+          errorId: (line as { errorId: string }).errorId,
+        },
+      },
+    });
+  });
+
+  // Only a re-read that found no row says "for good": one that failed may
+  // have missed the webhook's row.
+  it('a permanent refusal whose re-read fails: the original error answers, never CHECKOUT_NOT_RECORDED', async () => {
+    const purchase = purchaseServiceOver(createStore(), sessionFor('content'));
+    purchase.completePurchase.mockRejectedValueOnce(
+      new NotFoundError('Content not found', { contentId: CONTENT_ID })
+    );
+    purchase.readCheckoutSession
+      .mockImplementationOnce(async () => ({
+        recorded: false,
+        result: { sessionStatus: 'complete', state: 'recording' },
+      }))
+      .mockRejectedValueOnce(
+        wrapError(
+          Object.assign(new Error('read ETIMEDOUT'), { code: 'ETIMEDOUT' })
+        )
+      );
+    const { app } = buildApp(purchase);
+
+    const res = await complete(app);
+
+    expect(res.status).toBe(404);
+    expect(JSON.stringify(await res.json())).not.toContain(
+      'CHECKOUT_NOT_RECORDED'
     );
   });
 
@@ -667,7 +756,7 @@ describe('POST /checkout/complete', () => {
     expect(said).not.toContain('could not record');
   });
 
-  it('a paid session the completion skips (bad metadata): an error line with the reason', async () => {
+  it('a paid session the completion skips (bad metadata): an error line with the reason, and CHECKOUT_NOT_RECORDED under its errorId', async () => {
     const purchase = purchaseServiceOver(
       createStore(),
       sessionFor('content', { metadata: { customerId: BUYER } })
@@ -676,8 +765,7 @@ describe('POST /checkout/complete', () => {
 
     const res = await complete(app);
 
-    expect(res.status).toBe(200);
-    expect(await stateOf(res)).toBe('recording');
+    expect(res.status).toBe(500);
     expect(purchase.completePurchase).not.toHaveBeenCalled();
     expect(obs.error).toHaveBeenCalledWith(
       'The success page could not record a paid session',
@@ -687,6 +775,47 @@ describe('POST /checkout/complete', () => {
         reason: 'bad_metadata',
       })
     );
+    const [, line] =
+      vi
+        .mocked(obs.error)
+        .mock.calls.find(([message]) =>
+          message.startsWith('The success page could not record')
+        ) ?? [];
+    expect(await res.json()).toEqual({
+      error: {
+        code: 'CHECKOUT_NOT_RECORDED',
+        message: 'The purchase could not be recorded',
+        details: {
+          sessionId: 'cs_landing_1',
+          errorId: (line as { errorId: string }).errorId,
+        },
+      },
+    });
+  });
+
+  it('a skip while the webhook records the session: the row answers, as a 200', async () => {
+    const purchase = purchaseServiceOver(
+      createStore(),
+      sessionFor('content', { metadata: { customerId: BUYER } })
+    );
+    purchase.readCheckoutSession
+      .mockImplementationOnce(async () => ({
+        recorded: false,
+        result: { sessionStatus: 'complete', state: 'recording' },
+      }))
+      .mockImplementationOnce(
+        async () =>
+          ({
+            recorded: true,
+            result: { sessionStatus: 'complete', state: 'unlocked' },
+          }) as never
+      );
+    const { app } = buildApp(purchase);
+
+    const res = await complete(app);
+
+    expect(res.status).toBe(200);
+    expect(await stateOf(res)).toBe('unlocked');
   });
 
   it('a failure whose re-read fails too: both logged under one errorId, and the original error answers', async () => {

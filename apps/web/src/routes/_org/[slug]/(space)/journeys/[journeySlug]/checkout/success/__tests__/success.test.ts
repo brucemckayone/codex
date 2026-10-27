@@ -469,6 +469,8 @@ describe('journey checkout success load', () => {
 
       expect(data.duplicate).toBeNull();
       expect(data.inactive).toBe(false);
+      // A failure a retry can fix keeps today's slow path (Codex-2hxff.81).
+      expect(data.notRecorded).toBe(false);
       expect(warnMock).toHaveBeenCalledWith(
         'journey-checkout-success: completion on arrival failed',
         expect.objectContaining({ sessionId: 'cs_test_abc', status: 503 })
@@ -476,6 +478,39 @@ describe('journey checkout success load', () => {
       expect(warnMock).not.toHaveBeenCalledWith(
         'journey-checkout-success: session verify failed',
         expect.anything()
+      );
+    });
+
+    // Codex-2hxff.81: refused for good, so the page says support is on it.
+    // Never forwarded, though entitled some other way: this payment is not
+    // recorded, and the grant read is not repeated.
+    it('a completion refused for good: notRecorded, and never forwarded', async () => {
+      offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+      purchaseVerifyMock.mockResolvedValueOnce({
+        sessionStatus: 'complete',
+        state: 'recording',
+      });
+      purchaseCompleteMock.mockRejectedValueOnce(
+        new ApiError(
+          500,
+          'The purchase could not be recorded',
+          'CHECKOUT_NOT_RECORDED',
+          { sessionId: 'cs_test_abc', errorId: 'err-123' }
+        )
+      );
+      const { load } = await import('../+page.server');
+
+      const data = (await load(
+        makeEvent({ kind: 'purchase' }).event
+      )) as LoadData;
+
+      expect(data.notRecorded).toBe(true);
+      expect(data.duplicate).toBeNull();
+      expect(data.inactive).toBe(false);
+      expect(offerMock).toHaveBeenCalledOnce();
+      expect(warnMock).toHaveBeenCalledWith(
+        'journey-checkout-success: the purchase could not be recorded',
+        { sessionId: 'cs_test_abc', errorId: 'err-123' }
       );
     });
 

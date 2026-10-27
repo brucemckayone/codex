@@ -323,7 +323,7 @@ function buildApp(args: BuildAppArgs = {}): AppBundle {
     __testUser: { id: string } | null | undefined;
     __testServices: { subscription: SubscriptionServiceMock };
     __testObs: undefined;
-    __testEnv: { CACHE_KV: KVMock | null };
+    __testEnv: { CACHE_KV: KVMock | null; ENVIRONMENT: string };
     __testExecCtx: { waitUntil: typeof waitUntil };
   };
   const app = new Hono<{ Variables: TestVars }>();
@@ -331,7 +331,10 @@ function buildApp(args: BuildAppArgs = {}): AppBundle {
     c.set('__testUser', args.user === undefined ? { id: 'user_1' } : args.user);
     c.set('__testServices', services);
     c.set('__testObs', undefined);
-    c.set('__testEnv', { CACHE_KV: kv });
+    // As the worker's test env sets it: a missing ENVIRONMENT counts as
+    // production, which refuses this file's lvh.me return links
+    // (Codex-2hxff.79).
+    c.set('__testEnv', { CACHE_KV: kv, ENVIRONMENT: 'test' });
     c.set('__testExecCtx', { waitUntil });
     await next();
   });

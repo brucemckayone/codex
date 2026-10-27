@@ -86,6 +86,11 @@ emails — the open defect `Codex-2hxff.7`.
   [docs/payments/README.md](../../docs/payments/README.md#how-money-moves).
 - **NEVER** expose Stripe secret keys or raw Stripe error messages in responses
   or logs.
+- **NEVER** send a buyer the org's fee split. `getPurchase` answers the buyer
+  (ecom-api `GET /purchases/:id`), so it excludes `BUYER_HIDDEN_COLUMNS`: the
+  three fee columns, both agreement ids, `duplicateOfPurchaseId`,
+  `disputeReason` and `stripeDisputeId` (owner, 2026-10-27, Codex-kn94e). Its
+  return type is `BuyerPurchase`.
 
 ## Integration
 

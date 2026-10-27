@@ -25,6 +25,7 @@ import {
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import { refuseDevReturnUrls } from '../utils/return-urls';
 
 const app = new Hono<HonoEnv>();
 
@@ -68,7 +69,8 @@ app.get(
 /**
  * POST /connect/me/onboard
  * Create (or reuse) the current creator's Connect account and return the
- * Stripe onboarding URL.
+ * Stripe onboarding URL. In production, a return or refresh link on a
+ * development host or over plain http is refused (Codex-2hxff.79).
  */
 app.post(
   '/me/onboard',
@@ -80,10 +82,12 @@ app.post(
     input: { body: connectMeOnboardSchema },
     successStatus: 201,
     handler: async (ctx) => {
+      const { returnUrl, refreshUrl } = ctx.input.body;
+      refuseDevReturnUrls(ctx.env.ENVIRONMENT, { returnUrl, refreshUrl });
       return await ctx.services.connect.createAccountForUser(
         ctx.user.id,
-        ctx.input.body.returnUrl,
-        ctx.input.body.refreshUrl
+        returnUrl,
+        refreshUrl
       );
     },
   })

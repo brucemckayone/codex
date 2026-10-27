@@ -16,7 +16,10 @@
   A second payment for access the buyer already held (`data.duplicate`,
   Codex-o4jvw) is final: a calm notice that it is being refunded, the way in,
   and no more polling. So is a course purchase no longer active
-  (`data.inactive`: refunded, or paused by a dispute).
+  (`data.inactive`: refunded, or paused by a dispute), and so is a payment
+  nothing will record (`data.notRecorded`; Codex-2hxff.81, owner decision
+  2026-10-27, "Say we're on it"): support was alerted, and the page says so
+  with Contact support and Go to library.
 -->
 <script lang="ts">
   import { invalidate } from '$app/navigation';
@@ -24,6 +27,7 @@
   import * as m from '$paraglide/messages';
   import { CappedChecks } from '$lib/utils/capped-checks.svelte';
   import { buildPlatformUrl } from '$lib/utils/subdomain';
+  import { supportMailto } from '$lib/utils/support-mailto';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -74,11 +78,15 @@
 
   // Only check when a payment actually happened; a direct visit has nothing
   // pending and checking it would be a pointless request loop. A duplicate
-  // notice, or a purchase no longer active, is final. A boolean, so the
-  // effect restarts only when it flips: every check hands the page a new
-  // `data`, and an effect reading `data` itself would restart on each one.
+  // notice, a purchase no longer active, or a payment nothing will record is
+  // final: a check on that last one would ask again and alert support again.
+  // A boolean, so the effect restarts only when it flips: every check hands
+  // the page a new `data`, and an effect reading `data` itself would restart
+  // on each one.
   const waiting = $derived(
-    Boolean(data.arrivedFromStripe && !notice && !data.inactive)
+    Boolean(
+      data.arrivedFromStripe && !notice && !data.inactive && !data.notRecorded
+    )
   );
 
   $effect(() => {
@@ -92,6 +100,8 @@
     <title>{notice.title}</title>
   {:else if data.inactive}
     <title>{m.checkout_inactive_title()}</title>
+  {:else if data.notRecorded}
+    <title>{m.checkout_late_title()}</title>
   {:else}
     <title>Confirming your place in {data.courseTitle}</title>
   {/if}
@@ -120,6 +130,19 @@
     <div class="ret__actions">
       <a class="ret__cta" href={buildPlatformUrl(page.url, '/account/payment')}>
         {m.checkout_inactive_payment_history()}
+      </a>
+    </div>
+  {:else if data.notRecorded}
+    <!-- Paid, and nothing will record it: support was alerted
+         (Codex-2hxff.81). No checks. -->
+    <h1 class="ret__title">{m.checkout_not_recorded_title()}</h1>
+    <p class="ret__body">{m.checkout_not_recorded_description()}</p>
+    <div class="ret__actions">
+      <a class="ret__cta" href={supportMailto('Checkout help')}>
+        {m.checkout_contact_support()}
+      </a>
+      <a class="ret__link" href={data.libraryPath}>
+        {m.checkout_success_go_to_library()}
       </a>
     </div>
   {:else if !data.arrivedFromStripe}

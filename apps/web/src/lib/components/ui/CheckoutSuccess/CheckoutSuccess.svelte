@@ -13,6 +13,13 @@
   - late: still `recording` after the capped checks. "Your payment went
     through. We're still finishing up; check again in a minute." with Check
     again (one check per click) and Go to library.
+  - unrecorded: the completion was refused for good (`unlock` resolved to
+    `'not_recorded'`; Codex-2hxff.81, owner decision 2026-10-27, "Say we're
+    on it"). Support was alerted. "Your payment went through, but we couldn't
+    finish setting up your purchase. We've been alerted and will sort it out.
+    You don't need to pay again." with Contact support and Go to library. It
+    shows at once, and no more checks run: each one would ask again and alert
+    support again.
   - duplicate: a second payment for an item the buyer owns, being refunded
     (Codex-o4jvw): a calm notice, no confirmation.
   - inactive (`refunded` / `paused`): "This purchase is no longer active.",
@@ -33,6 +40,7 @@
   import { invalidateCollection } from '$lib/collections';
   import { CappedChecks } from '$lib/utils/capped-checks.svelte';
   import { formatPrice } from '$lib/utils/format';
+  import { supportMailto } from '$lib/utils/support-mailto';
   import {
     AlertCircleIcon,
     CheckCircleIcon,
@@ -60,9 +68,11 @@
     /**
      * The arrival's completion (`POST /checkout/complete`), streamed by the
      * load while our record is missing. It resolves to the session as read
-     * after, or to null when the call failed (the checks carry on).
+     * after; to `'not_recorded'` when it was refused for good (the page says
+     * so and stops checking); or to null when the call failed otherwise (the
+     * checks carry on).
      */
-    unlock?: Promise<Verification | null> | null;
+    unlock?: Promise<Verification | 'not_recorded' | null> | null;
     /** URL to the purchased content (for "Start Watching/Listening/Reading" CTA) */
     contentUrl: string;
     /** URL for "Continue Browsing" CTA */
@@ -90,9 +100,14 @@
   // The answer of the load's completion call, for the promise it answered:
   // each check re-runs the load, which streams a new one while still recording.
   let unlockAnswer = $state.raw<{
-    for: Promise<Verification | null>;
-    result: Verification | null;
+    for: Promise<Verification | 'not_recorded' | null>;
+    result: Verification | 'not_recorded' | null;
   } | null>(null);
+  /**
+   * A completion was refused for good: nothing will record this payment
+   * (Codex-2hxff.81). It stands for the life of the page.
+   */
+  let notRecorded = $state(false);
 
   $effect(() => {
     const pending = unlock;
@@ -100,7 +115,9 @@
     let live = true;
     pending.then(
       (result) => {
-        if (live) unlockAnswer = { for: pending, result };
+        if (!live) return;
+        unlockAnswer = { for: pending, result };
+        if (result === 'not_recorded') notRecorded = true;
       },
       () => {
         if (live) unlockAnswer = { for: pending, result: null };
@@ -122,10 +139,10 @@
    * so "Payment received" never drops back to "Confirming…".
    */
   const current = $derived.by(() => {
+    const answered =
+      unlock && unlockAnswer?.for === unlock ? unlockAnswer.result : null;
     const fresh =
-      unlock && unlockAnswer?.for === unlock && unlockAnswer.result
-        ? unlockAnswer.result
-        : verification;
+      answered && answered !== 'not_recorded' ? answered : verification;
     if (fresh) lastKnown = fresh;
     return fresh ?? lastKnown;
   });
@@ -138,9 +155,11 @@
   // --- Capped checks ---
   // Waiting: paid and not recorded yet, an `open` session, or no answer yet
   // (a transient verify failure). Paused while a completion call is out, so a
-  // check never races the one before it.
+  // check never races the one before it. Never once a completion was refused
+  // for good: each check would ask again, and alert support again.
   const waiting = $derived(
     !verifyFailed &&
+      !notRecorded &&
       (current === null ||
         current.state === 'recording' ||
         current.state === 'open')
@@ -157,6 +176,7 @@
     | 'unlocked'
     | 'arriving'
     | 'late'
+    | 'unrecorded'
     | 'inactive'
     | 'expired'
     | 'error'
@@ -179,14 +199,18 @@
       case 'unpaid':
         return 'error';
       case 'recording':
+        if (notRecorded) return 'unrecorded';
         return checks.exhausted ? 'late' : 'arriving';
       default:
         return checks.exhausted ? 'almost' : 'confirming';
     }
   });
-  /** The three views of a payment Stripe took: one checkmark across them. */
+  /** The views of a payment Stripe took: one checkmark across them. */
   const paid = $derived(
-    view === 'arriving' || view === 'unlocked' || view === 'late'
+    view === 'arriving' ||
+      view === 'unlocked' ||
+      view === 'late' ||
+      view === 'unrecorded'
   );
 
   // --- Library refresh (WEB-04) ---
@@ -203,7 +227,9 @@
       ? m.checkout_duplicate_title({ item: content.title })
       : view === 'inactive'
         ? m.checkout_inactive_title()
-        : m.checkout_success_title()
+        : view === 'unrecorded'
+          ? m.checkout_late_title()
+          : m.checkout_success_title()
   );
 
   // --- Content-type-aware CTA label ---
@@ -294,6 +320,9 @@
           <span class="checkout-success__status-spinner" aria-hidden="true"></span>
           <span>{m.checkout_arrival_unlocking()}</span>
         </p>
+      {:else if view === 'unrecorded'}
+        <h1 class="checkout-success__title">{m.checkout_not_recorded_title()}</h1>
+        <p class="checkout-success__description">{m.checkout_not_recorded_description()}</p>
       {:else}
         <h1 class="checkout-success__title">{m.checkout_late_title()}</h1>
         <p class="checkout-success__description">{m.checkout_late_description()}</p>
@@ -343,6 +372,13 @@
             <span class="checkout-success__btn-spinner" aria-hidden="true"></span>
             <span class="checkout-success__btn-label">{ctaLabel}</span>
           </span>
+        {:else if view === 'unrecorded'}
+          <a href={supportMailto('Checkout help')} class="checkout-success__btn checkout-success__btn--primary">
+            {m.checkout_contact_support()}
+          </a>
+          <a href={libraryUrl} class="checkout-success__btn checkout-success__btn--secondary">
+            {m.checkout_success_go_to_library()}
+          </a>
         {:else}
           {@render checkAgain(m.checkout_check_again())}
           <a href={libraryUrl} class="checkout-success__btn checkout-success__btn--secondary">

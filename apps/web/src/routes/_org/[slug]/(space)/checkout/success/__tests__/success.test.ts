@@ -167,6 +167,27 @@ describe('org checkout success load — unlock on arrival (Codex-2hxff.22)', () 
     );
   });
 
+  // Codex-2hxff.81: the page says support is on it, and stops checking.
+  it("a completion refused for good streams 'not_recorded'", async () => {
+    verifyMock.mockResolvedValueOnce({
+      sessionStatus: 'complete',
+      state: 'recording',
+    });
+    completeMock.mockRejectedValueOnce(
+      new ApiError(
+        500,
+        'The purchase could not be recorded',
+        'CHECKOUT_NOT_RECORDED',
+        { sessionId: 'cs_test_abc', errorId: 'err-123' }
+      )
+    );
+    const { load } = await import('../+page.server');
+
+    const data = (await load(makeEvent())) as LoadData;
+
+    await expect(data.unlock).resolves.toBe('not_recorded');
+  });
+
   it('a failed verify asks for no completion', async () => {
     const data = await loadWith(new ApiError(503, 'Service unavailable'));
 

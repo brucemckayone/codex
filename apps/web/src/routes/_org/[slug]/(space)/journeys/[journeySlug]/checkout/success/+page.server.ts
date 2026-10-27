@@ -39,6 +39,14 @@
  * (`POST /checkout/complete`), and the entitlement read again, so the buyer
  * is forwarded at once. A purchase no longer active (refunded, or paused by a
  * dispute) gets one plain notice instead of a wait.
+ *
+ * A COMPLETION REFUSED FOR GOOD (Codex-2hxff.81; owner decision 2026-10-27,
+ * "Say we're on it")
+ * The buyer has paid, and nothing will record it: the completion answered
+ * `CHECKOUT_NOT_RECORDED`, and support was alerted. The load reports
+ * `notRecorded`, and the page says so at once, with Contact support and Go to
+ * library. It stops checking, because each check would ask again and alert
+ * support again.
  */
 import { error, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
@@ -75,6 +83,8 @@ interface SessionRecord {
   inactive?: boolean;
   /** This load recorded it (unlock on arrival): the entitlement is new. */
   recordedNow?: boolean;
+  /** Paid, and the completion was refused for good (Codex-2hxff.81). */
+  notRecorded?: boolean;
 }
 
 const OFFER_PATH_KINDS: readonly OfferPathKind[] = [
@@ -124,6 +134,10 @@ async function readSession(
       const completed = recordedNow
         ? await completeOnArrival(api, sessionId, 'journey-checkout-success')
         : null;
+      // Refused for good: nothing will record it, so nothing to wait for.
+      if (completed === 'not_recorded') {
+        return { settled: false, duplicate: null, notRecorded: true };
+      }
       const v = completed ?? verified;
       const ours = v.course?.id === courseId;
       return {
@@ -226,13 +240,25 @@ export const load: PageServerLoad = async (event) => {
   };
 
   if (record?.duplicate) {
-    return { ...base, duplicate: record.duplicate, inactive: false };
+    return {
+      ...base,
+      duplicate: record.duplicate,
+      inactive: false,
+      notRecorded: false,
+    };
   }
 
   // Refunded, or paused by a bank dispute: one plain notice, and nothing
   // more to wait for (owner decision 2026-10-26).
   if (record?.inactive) {
-    return { ...base, duplicate: null, inactive: true };
+    return { ...base, duplicate: null, inactive: true, notRecorded: false };
+  }
+
+  // Paid, and nothing will record it: one notice that support is on it, and
+  // nothing more to wait for (Codex-2hxff.81). Never forwarded, though a
+  // buyer entitled some other way would be: this payment is not recorded.
+  if (record?.notRecorded) {
+    return { ...base, duplicate: null, inactive: false, notRecorded: true };
   }
 
   // The grant has landed — hand them straight to the journey. With a record to
@@ -242,5 +268,5 @@ export const load: PageServerLoad = async (event) => {
     redirect(303, base.dashboardPath);
   }
 
-  return { ...base, duplicate: null, inactive: false };
+  return { ...base, duplicate: null, inactive: false, notRecorded: false };
 };
