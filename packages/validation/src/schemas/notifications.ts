@@ -358,7 +358,7 @@ export const transcodingFailedDataSchema = z.object({
   retryUrl: z.string().url(),
 });
 
-/** To every platform owner (Codex-l2c48.6): `details` is preformatted lines. */
+/** To the platform support mailbox (Codex-l2c48.6, .10): `details` is preformatted lines. */
 export const transcodingOwnerAlertDataSchema = z.object({
   headline: z.string(),
   summary: z.string(),

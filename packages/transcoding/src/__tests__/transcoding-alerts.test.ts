@@ -1,3 +1,4 @@
+import { PLATFORM_SUPPORT_EMAIL } from '@codex/constants';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   type AlertLedger,
@@ -11,7 +12,6 @@ const CREATOR = {
   name: 'Jane Doe',
   email: 'jane@example.test',
 };
-const OWNER = { id: 'owner-1', name: 'Owner', email: 'owner@example.test' };
 const WEB_APP_URL = 'https://revelations.studio';
 const RETRY_URL = 'https://creators.revelations.studio/studio/media';
 
@@ -25,27 +25,6 @@ function failed(code: string, detail = 'moov atom not found'): FailedMedia {
     transcodingErrorCode: code,
     transcodingError: detail,
   };
-}
-
-/**
- * Drizzle's query builder is lazy: every `then` runs the query again. A
- * plain resolved promise would hide a memo that keeps the builder instead
- * of its result.
- */
-function lazyQuery<T>(answers: Array<() => Promise<T>>) {
-  let executions = 0;
-  const query = {
-    // biome-ignore lint/suspicious/noThenProperty: drizzle's QueryPromise is a thenable
-    then<R1, R2>(
-      onFulfilled?: (value: T) => R1 | PromiseLike<R1>,
-      onRejected?: (reason: unknown) => R2 | PromiseLike<R2>
-    ) {
-      const answer = answers[Math.min(executions, answers.length - 1)];
-      executions += 1;
-      return (answer as () => Promise<T>)().then(onFulfilled, onRejected);
-    },
-  };
-  return { query, executions: () => executions };
 }
 
 /** The KV ledger's contract, in memory: true once per key. */
@@ -80,7 +59,6 @@ afterEach(() => {
 function setup(
   options: {
     creator?: typeof CREATOR | undefined;
-    owners?: Array<() => Promise<(typeof OWNER)[]>>;
     webAppUrl?: string | undefined;
     ledger?: AlertLedger | undefined;
   } = {}
@@ -88,15 +66,15 @@ function setup(
   const creator = 'creator' in options ? options.creator : CREATOR;
   const webAppUrl = 'webAppUrl' in options ? options.webAppUrl : WEB_APP_URL;
   const ledger = 'ledger' in options ? options.ledger : memoryLedger();
-  const owners = lazyQuery(options.owners ?? [async () => [OWNER]]);
   const findFirst = vi.fn(async () => creator);
-  const findMany = vi.fn(() => owners.query);
   const mailer = vi.fn<TranscodingMailer>();
   const error = vi.spyOn(obsPrototype, 'error');
   const warn = vi.spyOn(obsPrototype, 'warn');
   const pending: Promise<unknown>[] = [];
   const alerts = new TranscodingAlerts({
-    db: { query: { users: { findFirst, findMany } } } as never,
+    // Only the creator lookup: an owner lookup would throw, so the owner
+    // alert would never be sent.
+    db: { query: { users: { findFirst } } } as never,
     environment: 'test',
     mailer,
     webAppUrl,
@@ -109,8 +87,6 @@ function setup(
     alerts,
     mailer,
     findFirst,
-    findMany,
-    ownerQueries: owners.executions,
     error,
     warn,
     settled: () => Promise.all(pending),
@@ -129,7 +105,7 @@ const STUCK = {
 } as const;
 
 describe('mediaFailed', () => {
-  it('emails the creator their reason and Retry link, and every owner the facts', async () => {
+  it('emails the creator their reason and Retry link, and the owner the facts', async () => {
     const { alerts, mailer, settled } = setup();
 
     alerts.mediaFailed(failed('CORRUPT_INPUT'));
@@ -147,8 +123,15 @@ describe('mediaFailed', () => {
         errorSummary: expect.stringContaining("We couldn't convert this file"),
       },
     });
-    const [ownerEmail] = sent(mailer, 'transcoding-owner-alert');
-    expect(ownerEmail?.to).toBe(OWNER.email);
+    const ownerEmails = sent(mailer, 'transcoding-owner-alert');
+    expect(ownerEmails).toHaveLength(1);
+    const [ownerEmail] = ownerEmails;
+    expect(ownerEmail).toMatchObject({
+      to: PLATFORM_SUPPORT_EMAIL,
+      category: 'transactional',
+    });
+    // An address, not an account: no preferences to check, no user to name.
+    expect(ownerEmail?.userId).toBeUndefined();
     expect(ownerEmail?.data.headline).toBe('A video failed: Morning flow');
     expect(ownerEmail?.data.summary).toContain(
       'CORRUPT_INPUT (the file), after 1 of 3 attempts'
@@ -190,13 +173,13 @@ describe('mediaFailed', () => {
   });
 
   it('sends nothing for an abandoned upload, and looks nothing up', async () => {
-    const { alerts, mailer, findMany, settled } = setup();
+    const { alerts, mailer, findFirst, settled } = setup();
 
     alerts.mediaFailed(failed('UPLOAD_INCOMPLETE'));
     await settled();
 
     expect(mailer).not.toHaveBeenCalled();
-    expect(findMany).not.toHaveBeenCalled();
+    expect(findFirst).not.toHaveBeenCalled();
   });
 
   it('keeps markup and line breaks a creator typed out of both subjects', async () => {
@@ -289,35 +272,19 @@ describe('mediaFailed', () => {
     expect(details).not.toContain('x'.repeat(1001));
   });
 
-  it('runs the owner query once, however many alerts one request sends', async () => {
-    const { alerts, findMany, ownerQueries, mailer, settled } = setup();
+  it('mails the support mailbox for every alert one request sends', async () => {
+    const { alerts, mailer, settled } = setup();
 
     alerts.mediaFailed(failed('WEBHOOK_LOST'));
     alerts.mediaFailed({ ...failed('WEBHOOK_LOST'), id: 'media-2' });
     alerts.uploadsIncomplete(5);
     await settled();
 
-    expect(findMany).toHaveBeenCalledTimes(1);
-    expect(ownerQueries()).toBe(1);
-    expect(sent(mailer, 'transcoding-owner-alert')).toHaveLength(3);
-  });
-
-  it('asks for the owners again after a failed lookup', async () => {
-    const { alerts, mailer, settled } = setup({
-      owners: [
-        async () => {
-          throw new Error('db down');
-        },
-        async () => [OWNER],
-      ],
-    });
-
-    alerts.mediaFailed(failed('WEBHOOK_LOST'));
-    await settled();
-    alerts.mediaFailed({ ...failed('WEBHOOK_LOST'), id: 'media-2' });
-    await settled();
-
-    expect(sent(mailer, 'transcoding-owner-alert')).toHaveLength(1);
+    expect(sent(mailer, 'transcoding-owner-alert').map((p) => p.to)).toEqual([
+      PLATFORM_SUPPORT_EMAIL,
+      PLATFORM_SUPPORT_EMAIL,
+      PLATFORM_SUPPORT_EMAIL,
+    ]);
   });
 
   it('is never deduped: each failed video is its own email', async () => {
@@ -332,77 +299,59 @@ describe('mediaFailed', () => {
     expect(ledger.claim).not.toHaveBeenCalled();
   });
 
-  it('logs at error when there is no platform owner to tell', async () => {
-    const { alerts, error, settled } = setup({ owners: [async () => []] });
-
-    alerts.mediaFailed(failed('WEBHOOK_LOST'));
-    await settled();
-
-    expect(error).toHaveBeenCalledWith(
-      'transcoding.owner_alert_no_recipient',
-      expect.objectContaining({ event: 'media_failed', mediaId: 'media-1' })
-    );
-  });
-
-  it('still mails the next owner when one send throws, and logs it at error', async () => {
-    const s = setup({
-      owners: [
-        async () => [OWNER, { ...OWNER, id: 'owner-2', email: 'two@x.test' }],
-      ],
-    });
+  it('still mails the owner when the creator send throws, and logs it at error', async () => {
+    const s = setup();
     s.mailer.mockImplementation((params) => {
-      if (params.userId === OWNER.id) throw new Error('send failed');
+      if (params.userId === CREATOR.id) throw new Error('send failed');
     });
 
     expect(() => s.alerts.mediaFailed(failed('WEBHOOK_LOST'))).not.toThrow();
     await s.settled();
 
     expect(sent(s.mailer, 'transcoding-owner-alert').map((p) => p.to)).toEqual([
-      OWNER.email,
-      'two@x.test',
+      PLATFORM_SUPPORT_EMAIL,
     ]);
     expect(s.error).toHaveBeenCalledWith(
       'transcoding.alert_failed',
-      expect.objectContaining({ event: 'media_failed', recipientId: OWNER.id })
+      expect.objectContaining({
+        event: 'media_failed',
+        recipientId: CREATOR.id,
+      })
     );
   });
 
-  it('never throws when the owner lookup fails, and logs it at error', async () => {
-    const s = setup({
-      owners: [
-        async () => {
-          throw new Error('db down');
-        },
-      ],
+  it('never throws when the owner send throws, and logs it at error', async () => {
+    const s = setup();
+    s.mailer.mockImplementation((params) => {
+      if (params.templateName === 'transcoding-owner-alert') {
+        throw new Error('send failed');
+      }
     });
 
     expect(() => s.alerts.mediaFailed(failed('WEBHOOK_LOST'))).not.toThrow();
     await s.settled();
 
+    expect(sent(s.mailer, 'transcoding-failed')).toHaveLength(1);
     expect(s.error).toHaveBeenCalledWith(
       'transcoding.alert_failed',
-      expect.objectContaining({ event: 'media_failed', mediaId: 'media-1' })
+      expect.objectContaining({
+        event: 'media_failed',
+        mediaId: 'media-1',
+        recipient: 'owner',
+      })
     );
   });
 });
 
 describe('setup faults', () => {
-  it('tells every owner, never a creator', async () => {
-    const { alerts, mailer, findFirst, settled } = setup({
-      owners: [
-        async () => [
-          OWNER,
-          { ...OWNER, id: 'owner-2', email: 'two@example.test' },
-        ],
-      ],
-    });
+  it('tells the owner, never a creator', async () => {
+    const { alerts, mailer, findFirst, settled } = setup();
 
     alerts.uploadsIncomplete(6);
     await settled();
 
     expect(sent(mailer, 'transcoding-owner-alert').map((p) => p.to)).toEqual([
-      OWNER.email,
-      'two@example.test',
+      PLATFORM_SUPPORT_EMAIL,
     ]);
     expect(sent(mailer, 'transcoding-failed')).toHaveLength(0);
     expect(findFirst).not.toHaveBeenCalled();
@@ -569,15 +518,15 @@ describe('setup faults: once per fault per UTC day', () => {
     expect(mailer).toHaveBeenCalledTimes(2);
   });
 
-  it('looks nobody up for a fault already mailed today', async () => {
-    const { alerts, findMany, settled } = setup({
+  it('mails nothing for a fault already mailed today', async () => {
+    const { alerts, mailer, settled } = setup({
       ledger: { claim: vi.fn(async () => false) },
     });
 
     alerts.endpointStuck(STUCK);
     await settled();
 
-    expect(findMany).not.toHaveBeenCalled();
+    expect(mailer).not.toHaveBeenCalled();
   });
 
   it('mails anyway, and warns, when the ledger fails', async () => {

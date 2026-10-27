@@ -2,11 +2,11 @@
  * Transcoding emails (Codex-l2c48.6).
  *
  * - A video that fails for good: the creator (the existing
- *   `transcoding-failed` template) and every platform owner
+ *   `transcoding-failed` template) and the owner
  *   (`transcoding-owner-alert`). Callers pass only the row a guarded UPDATE
  *   just failed, so it is sent once however many times a webhook is
  *   delivered.
- * - A setup fault that stops every upload: the owners only, at most ONCE per
+ * - A setup fault that stops every upload: the owner only, at most ONCE per
  *   fault per UTC day (owner decision, 2026-10-25). Any check that finds one
  *   may report it, the hourly run included; the ledger keeps the rest of the
  *   day quiet. This class decides WHETHER an outcome is a fault.
@@ -14,14 +14,20 @@
  * Nothing for an upload that is only waiting, or one that was abandoned
  * (`notify: false`).
  *
+ * The owner is an ADDRESS, the platform's support mailbox, never an account
+ * (owner decision, 2026-10-27, Codex-l2c48.10). Production had no
+ * `platform_owner` account, so every owner alert was dropped; and giving the
+ * owner's own account that role would lock it out of the studio, whose
+ * routes admit only `creator` and `admin` (the role check is exact).
+ *
  * NEVER THROWS, and never delays its caller: the lookups and the send run
  * after the response, through `waitUntil`. The row is the source of truth;
  * an email is an observation of it.
  */
 
 import {
-  AUTH_ROLES,
   MAX_TRANSCODING_ATTEMPTS,
+  PLATFORM_SUPPORT_EMAIL,
   type TranscodingErrorCategory,
   toTranscodingErrorCode,
   transcodingErrorInfo,
@@ -135,8 +141,6 @@ export class TranscodingAlerts extends BaseService {
   private readonly retryUrl?: string;
   private readonly waitUntil: (promise: Promise<unknown>) => void;
   private readonly ledger?: AlertLedger;
-  /** One lookup per request, however many alerts it sends. */
-  private owners?: Promise<Contact[]>;
 
   constructor(config: TranscodingAlertsConfig) {
     super(config);
@@ -146,7 +150,7 @@ export class TranscodingAlerts extends BaseService {
     this.retryUrl = this.studioMediaUrl(config.webAppUrl);
   }
 
-  /** A video failed for good: its creator and every owner, once. */
+  /** A video failed for good: its creator and the owner, once. */
   mediaFailed(media: FailedMedia): void {
     const code = toTranscodingErrorCode(media.transcodingErrorCode);
     if (!transcodingErrorInfo(code).notify) return;
@@ -222,14 +226,14 @@ export class TranscodingAlerts extends BaseService {
     );
   }
 
-  /** A setup fault: the owners, the first time today. */
+  /** A setup fault: the owner, the first time today. */
   private setupFault(
     context: SendContext,
     data: TranscodingOwnerAlertData
   ): void {
     this.send(context, async () => {
       if (!(await this.firstToday(context.event))) return;
-      await this.toOwners(context, data);
+      this.toOwner(context, data);
     });
   }
 
@@ -268,7 +272,7 @@ export class TranscodingAlerts extends BaseService {
     );
   }
 
-  /** The creator's email and the owners' are independent: one failing never costs the other. */
+  /** The creator's email and the owner's are independent: one failing never costs the other. */
   private async sendFailure(
     media: FailedMedia,
     context: SendContext
@@ -298,7 +302,7 @@ export class TranscodingAlerts extends BaseService {
       0,
       OWNER_DETAIL_MAX_LENGTH
     );
-    await this.toOwners(context, {
+    this.toOwner(context, {
       headline: subjectSafe(`A video failed: ${media.title}`),
       summary: `${creator?.name ?? 'A creator'}'s upload failed: ${code} (${CATEGORY_LABEL[category]}), after ${media.transcodingAttempts} of ${MAX_TRANSCODING_ATTEMPTS} attempts.`,
       details: [
@@ -339,43 +343,17 @@ export class TranscodingAlerts extends BaseService {
     });
   }
 
-  private async toOwners(
-    context: SendContext,
-    data: TranscodingOwnerAlertData
-  ): Promise<void> {
-    // `.then` turns drizzle's lazy query (which runs again on every await)
-    // into one result; a failed lookup is forgotten, so the next alert in
-    // this request asks again.
-    this.owners ??= this.db.query.users
-      .findMany({
-        columns: { id: true, name: true, email: true },
-        where: and(
-          eq(users.role, AUTH_ROLES.PLATFORM_OWNER),
-          isNull(users.deletedAt)
-        ),
-      })
-      .then(
-        (rows) => rows,
-        (error: unknown) => {
-          this.owners = undefined;
-          throw error;
-        }
-      );
-    const owners = await this.owners;
-    if (owners.length === 0) {
-      this.obs.error('transcoding.owner_alert_no_recipient', context);
-      return;
-    }
-    for (const owner of owners) {
-      this.mail(context, {
-        to: owner.email,
-        toName: owner.name,
+  /** The support mailbox: an address, so there is nothing to look up. */
+  private toOwner(context: SendContext, data: TranscodingOwnerAlertData): void {
+    this.mail(
+      { ...context, recipient: 'owner' },
+      {
+        to: PLATFORM_SUPPORT_EMAIL,
         templateName: 'transcoding-owner-alert',
         category: 'transactional',
-        userId: owner.id,
         data,
-      });
-    }
+      }
+    );
   }
 
   /** One recipient: a throw is logged and never stops the next. */

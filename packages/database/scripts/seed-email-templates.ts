@@ -336,7 +336,7 @@ If you have any questions, please contact our support team at {{supportEmail}}.
     textBody: `{{headline}}\n\n{{summary}}\n\n{{details}}\n\n{{platformName}}`,
     status: 'active' as const,
     description:
-      'Sent to every platform owner when a transcode fails for good, or a setup fault stops every upload (Codex-l2c48.6)',
+      'Sent to the platform support mailbox when a transcode fails for good, or a setup fault stops every upload (Codex-l2c48.6, .10)',
   },
   // ============ Creator (P2) ============
   {
