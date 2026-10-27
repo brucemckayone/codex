@@ -111,7 +111,12 @@ async function runCount(input: CountQuery): Promise<number> {
  *       limit,
  *       offset,
  *       orderBy: [orderByClause],
- *       with: { mediaItem: true, organization: true, creator: { columns: { id: true, email: true, name: true } } },
+ *       // Never `organization: true`: it carries the payee's user id.
+ *       with: {
+ *         mediaItem: true,
+ *         organization: { columns: READABLE_ORGANIZATION_COLUMNS },
+ *         creator: { columns: { id: true, email: true, name: true } },
+ *       },
  *     }),
  *   countQuery: { db: this.db, table: content, where },
  * });
@@ -119,14 +124,15 @@ async function runCount(input: CountQuery): Promise<number> {
  *
  * @example
  * ```typescript
- * // ContentService.listPublic — with row mapper for body sanitisation
+ * // ContentService.listPublic — with row mapper for body sanitisation: only a
+ * // by-slug read (a detail page) of a public row keeps its body
  * return paginatedQuery({
  *   page: params.page,
  *   limit: params.limit,
  *   fetchItems: (limit, offset) => this.db.query.content.findMany({ ... }),
  *   countQuery: { db: this.db, table: content, where },
  *   mapItem: (item) =>
- *     item.accessType === CONTENT_ACCESS_TYPE.FREE
+ *     params.slug && isPublicContent(item)
  *       ? item
  *       : { ...item, contentBody: null, contentBodyJson: null },
  * });

@@ -3739,12 +3739,18 @@ export class SubscriptionService extends BaseService {
       ),
       with: {
         tier: true,
-        organization: true,
+        // The four fields the account page shows, never the row: a
+        // subscriber is not a member, and the row carried the payee's user id
+        // (Codex-kk6zx). The `as SubscriptionWithOrg[]` cast this replaced
+        // let the whole row pass for these four.
+        organization: {
+          columns: { id: true, name: true, slug: true, logoUrl: true },
+        },
       },
       orderBy: [desc(subscriptions.createdAt)],
     });
 
-    return results as SubscriptionWithOrg[];
+    return results;
   }
 
   /**

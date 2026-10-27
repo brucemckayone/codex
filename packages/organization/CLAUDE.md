@@ -34,11 +34,11 @@ the gate fails closed: no logo can be set at all.
 | Method | Signature | Notes |
 |---|---|---|
 | `create` | `(input: CreateOrganizationInput, userId: string)` | Transaction. Auto-creates `owner` membership AND the creator's ownership period (`source='created'`) for `userId`. Throws `ConflictError` on slug collision. |
-| `get` | `(id: string)` | Returns `Organization \| null`. Not scoped by user — caller must check ownership. |
-| `getBySlug` | `(slug: string)` | Used for subdomain resolution. Normalizes to lowercase. |
-| `update` | `(id: string, input: UpdateOrganizationInput)` | Transaction. Throws `ConflictError` on slug collision. Caller must verify ownership. |
+| `get` | `(id: string)` | Returns `ReadableOrganization \| null`: every column but the payee's `primaryConnectAccountUserId` (Codex-kk6zx). Not scoped by user — caller must check ownership. |
+| `getBySlug` | `(slug: string)` | Used for subdomain resolution. Normalizes to lowercase. Returns `ReadableOrganization \| null`, as `get` does. |
+| `update` | `(id: string, input: UpdateOrganizationInput)` | Transaction. Throws `ConflictError` on slug collision. Caller must verify ownership. `create` and `update` return the WHOLE row, payee id included: `create` answers the org's new owner, and `update`'s route requires org management, so only the org's own owner or admin reads it. |
 | `delete` | `(id: string)` | Soft delete via `deletedAt`. Caller must verify ownership. |
-| `list` | `(filters: OrganizationFilters, pagination?)` | Paginated. Supports search (name/description) + sort. NOT scoped by user — caller applies membership filter. |
+| `list` | `(filters: OrganizationFilters, pagination?)` | Paginated `ReadableOrganization`s. Supports search (name/description) + sort. NOT scoped by user — caller applies membership filter. |
 | `isSlugAvailable` | `(slug: string)` | Checks `RESERVED_SUBDOMAINS_SET` + DB uniqueness. |
 
 ### Membership Management

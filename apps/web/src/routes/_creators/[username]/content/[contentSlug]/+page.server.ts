@@ -31,7 +31,6 @@ import {
   withoutRawBody,
 } from '$lib/server/content-detail';
 import { logReadFailure } from '$lib/server/read-failure';
-import type { ContentWithRelations } from '$lib/types';
 import { buildContentUrl } from '$lib/utils/subdomain';
 import { creatorHandle } from '../../creator-handle';
 import type { Actions, PageServerLoad } from './$types';
@@ -94,7 +93,7 @@ export const load: PageServerLoad = async ({
   contentParams.set('limit', '50');
 
   const contentResult = await api.content.getPublicContent(contentParams);
-  const matches = contentResult.items as ContentWithRelations[];
+  const matches = contentResult.items;
   const personalPiece =
     matches.find((item) => item.organizationId == null) ?? null;
 

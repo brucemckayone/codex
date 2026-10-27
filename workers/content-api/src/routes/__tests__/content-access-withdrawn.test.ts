@@ -62,16 +62,30 @@ async function withdrawn(query: string): Promise<Response> {
   );
 }
 
+// Wider than the service selects on purpose: the route builds the item from
+// named fields (`toPublicItem`), so internal columns stay off the wire even
+// if the select ever widens (Codex-ve5eh, Codex-567de).
 const held = {
   content: {
     id: 'content_123',
     slug: 'breathing',
     contentBody: null,
     mediaItem: {
-      id: 'media_1',
+      durationSeconds: 300,
       thumbnailKey: 'creator/thumbs/media_1/md.webp',
       hlsPreviewKey: 'creator/hls/media_1/preview/preview.m3u8',
+      r2Key: 'creator/originals/media_1/source.mov',
+      runpodJobId: 'job_1',
     },
+    organization: {
+      id: ORG_ID,
+      name: 'Studio Alpha',
+      slug: 'studio-alpha',
+      logoUrl: null,
+      deletedAt: null,
+      primaryConnectAccountUserId: 'payee_1',
+    },
+    creator: { id: 'a62da3ad5c94736a', name: 'Alex' },
   },
   held: { by: 'purchase', until: null },
 };
@@ -86,18 +100,28 @@ describe('GET /api/access/content/withdrawn (Codex-ov2ii)', () => {
     const res = await withdrawn(`?orgId=${ORG_ID}&slug=breathing`);
 
     expect(res.status).toBe(200);
-    // R2 keys resolved to CDN URLs, as the public list resolves them.
+    // The public list's item: R2 keys resolved to CDN URLs, and only the
+    // public media and org fields, never a key, a job id or the payee.
     expect(await res.json()).toEqual({
       data: {
-        ...held,
+        held: held.held,
         content: {
-          ...held.content,
+          id: 'content_123',
+          slug: 'breathing',
+          contentBody: null,
           mediaItem: {
-            ...held.content.mediaItem,
+            durationSeconds: 300,
             thumbnailUrl: 'https://cdn.test/creator/thumbs/media_1/md.webp',
             hlsPreviewUrl:
               'https://cdn.test/creator/hls/media_1/preview/preview.m3u8',
           },
+          organization: {
+            id: ORG_ID,
+            name: 'Studio Alpha',
+            slug: 'studio-alpha',
+            logoUrl: null,
+          },
+          creator: { id: 'a62da3ad5c94736a', name: 'Alex' },
         },
       },
     });

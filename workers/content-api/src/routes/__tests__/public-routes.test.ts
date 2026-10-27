@@ -73,7 +73,11 @@ const ORG_ID = '4d111111-1111-4111-8111-111111111111';
 const OTHER_ORG_ID = '4d222222-2222-4222-8222-222222222222';
 const R2_PUBLIC_URL_BASE = 'http://localhost:4100';
 
-/** The `listPublic` projection — `mediaItem: null` keeps `resolveR2Urls` a no-op. */
+/**
+ * The `listPublic` projection — `mediaItem: null` keeps `toPublicItem` a
+ * no-op. `organization: null` is a personal piece: the relation is always
+ * present on a real row, null when the piece has no org.
+ */
 const ROWS = {
   items: [
     {
@@ -81,7 +85,9 @@ const ROWS = {
       title: 'First light',
       slug: 'first-light',
       contentType: 'video',
+      creator: { id: 'creator-1', name: 'Ada' },
       mediaItem: null,
+      organization: null,
     },
   ],
   pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
@@ -322,15 +328,17 @@ describe('GET /api/content/public/categories — cache write survives', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // Codex-1g5lh.13 — thumbnailUrl and hlsPreviewUrl come from DIFFERENT buckets
 //
-// `resolveR2Urls` builds both fields in one function, and before this change it
-// built both from `R2_PUBLIC_URL_BASE` — the ASSETS host. But `hlsPreviewKey`
+// `toPublicItem` (r2-public-urls.ts) builds both fields in one function, and
+// before Codex-1g5lh.13 it built both from `R2_PUBLIC_URL_BASE` — the ASSETS
+// host. But `hlsPreviewKey`
 // is a MEDIA-bucket key, so the assets host had no object to serve and every
 // public HLS preview 404'd on its manifest in production while its poster
 // loaded fine. These cases pin the split, in both directions: the preview may
 // move to a media-preview host, and the thumbnail may NOT follow it there.
 //
 // `/discover` is used for the split assertions on purpose — it is the one
-// uncached branch, so no KV slot can carry a URL built under a different env.
+// uncached branch. No KV slot carries a URL anyway: the org list caches the
+// row and builds its URLs after the cache, against the env of that request.
 // ═══════════════════════════════════════════════════════════════════════════
 
 const MEDIA_PREVIEW_BASE = 'https://cdn-media-preview.test';
@@ -345,6 +353,7 @@ const ROWS_WITH_MEDIA = {
       title: 'Bone Deep',
       slug: 'bone-deep',
       contentType: 'video',
+      creator: { id: 'creator-1', name: 'Ada' },
       mediaItem: {
         id: '4d000000-0000-4000-8000-0000000000b1',
         thumbnailKey: THUMB_KEY,
@@ -371,7 +380,7 @@ async function firstMediaItem(
   return first.mediaItem;
 }
 
-describe('resolveR2Urls — the assets host and the preview host are separate', () => {
+describe('toPublicItem — the assets host and the preview host are separate', () => {
   beforeEach(() => {
     contentSpies.listPublic.mockResolvedValue(ROWS_WITH_MEDIA);
   });
@@ -410,6 +419,18 @@ describe('resolveR2Urls — the assets host and the preview host are separate', 
     expect(media.thumbnailUrl).toBe(`${R2_PUBLIC_URL_BASE}/${THUMB_KEY}`);
   });
 
+  it('a slot cached while the assets base was missing serves the poster once it is set', async () => {
+    // The slot holds the row, not the URL, so a missing CDN base is never
+    // frozen into KV as a null poster for the slot's whole TTL.
+    const path = `/api/content/public?orgId=${ORG_ID}`;
+    const miss = await firstMediaItem(path, { R2_PUBLIC_URL_BASE: undefined });
+    const hit = await firstMediaItem(path);
+
+    expect(contentSpies.listPublic).toHaveBeenCalledTimes(1); // proves it hit
+    expect(miss.thumbnailUrl).toBeNull();
+    expect(hit.thumbnailUrl).toBe(`${R2_PUBLIC_URL_BASE}/${THUMB_KEY}`);
+  });
+
   it('no base at all yields nulls, never a raw R2 key on the wire', async () => {
     const media = await firstMediaItem('/api/content/public/discover', {
       R2_PUBLIC_URL_BASE: undefined,
@@ -429,6 +450,253 @@ describe('resolveR2Urls — the assets host and the preview host are separate', 
 
     expect(media.thumbnailUrl).toBeNull();
     expect(media.hlsPreviewUrl).toBe(`${MEDIA_PREVIEW_BASE}/${PREVIEW_KEY}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Codex-ve5eh — the anonymous media item is an ALLOW-LIST, not the row
+//
+// The route used to spread `...item.mediaItem`, and `listPublic` loaded
+// `mediaItem: true`, so the whole media_items row went to every anonymous
+// visitor: the original upload's key, the master playlist key, the RunPod job
+// id, the transcoder's free-text error. The mock returns that whole row, plus a
+// column that is not in the schema yet (`transcodingErrorCode`, as a later
+// migration adds one), so this pins the ROUTE's allow-list on its own, whatever
+// the service selects.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ORIGINAL_KEY = 'creator-1/originals/media-1/media.mp4';
+const MASTER_KEY = 'creator-1/hls/media-1/master.m3u8';
+const MEZZANINE_KEY = 'creator-1/mezzanine/media-1/mezzanine.mov';
+const RUNPOD_JOB_ID = 'runpod-job-7f3c91';
+const TRANSCODER_ERROR = 'ffmpeg exited 1: moov atom not found in /work/in.mp4';
+
+/** Every media_items column, as `mediaItem: true` loaded it, and one more. */
+const FULL_MEDIA_ROW = {
+  id: '4d000000-0000-4000-8000-0000000000b2',
+  creatorId: 'creator-1',
+  title: 'raw-upload-final-v3.mp4',
+  description: 'Studio-only notes on this upload',
+  mediaType: 'video',
+  status: 'ready',
+  r2Key: ORIGINAL_KEY,
+  fileSizeBytes: 104857600,
+  mimeType: 'video/mp4',
+  durationSeconds: 1325,
+  width: 1920,
+  height: 1080,
+  hlsMasterPlaylistKey: MASTER_KEY,
+  hlsPreviewKey: PREVIEW_KEY,
+  thumbnailKey: THUMB_KEY,
+  waveformKey: 'creator-1/waveforms/media-1/waveform.json',
+  waveformImageKey: 'creator-1/waveforms/media-1/waveform.png',
+  runpodJobId: RUNPOD_JOB_ID,
+  transcodingError: TRANSCODER_ERROR,
+  transcodingErrorCode: 'DECODE_FAILED',
+  transcodingAttempts: 2,
+  transcodingPriority: 2,
+  transcodingProgress: null,
+  transcodingStep: null,
+  mezzanineKey: MEZZANINE_KEY,
+  mezzanineStatus: 'ready',
+  readyVariants: ['1080p', '720p'],
+  loudnessIntegrated: -1400,
+  loudnessPeak: -100,
+  loudnessRange: 700,
+  uploadedAt: '2026-10-01T00:00:00.000Z',
+  createdAt: '2026-10-01T00:00:00.000Z',
+  updatedAt: '2026-10-02T00:00:00.000Z',
+  deletedAt: null,
+};
+
+const ROWS_WITH_FULL_MEDIA = {
+  items: [
+    {
+      id: '4d000000-0000-4000-8000-0000000000a2',
+      title: 'Bone Deep',
+      slug: 'bone-deep',
+      contentType: 'video',
+      creator: { id: 'creator-1', name: 'Ada' },
+      mediaItem: FULL_MEDIA_ROW,
+    },
+  ],
+  pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+};
+
+/** The three fields the web reads: cards, the detail shell, the hero. */
+const PUBLIC_MEDIA_FIELDS = [
+  'durationSeconds',
+  'hlsPreviewUrl',
+  'thumbnailUrl',
+];
+
+/** Every path that runs `listPublic` through `toPublicItem`. */
+const PUBLIC_LIST_PATHS: Array<[string, string]> = [
+  ['org list', `/api/content/public?orgId=${ORG_ID}`],
+  ['org detail by slug', `/api/content/public?orgId=${ORG_ID}&slug=bone-deep`],
+  ['creator profile', '/api/content/public?creatorId=creator1'],
+  ['discover', '/api/content/public/discover'],
+];
+
+describe('the anonymous media item carries no internal column (Codex-ve5eh)', () => {
+  beforeEach(() => {
+    contentSpies.listPublic.mockResolvedValue(ROWS_WITH_FULL_MEDIA);
+  });
+
+  it.each(
+    PUBLIC_LIST_PATHS
+  )('%s: the media item is exactly the three public fields', async (_name, path) => {
+    const res = await dispatch(path);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { mediaItem: Record<string, unknown> }[];
+    };
+    expect(Object.keys(body.items[0]?.mediaItem ?? {}).sort()).toEqual(
+      PUBLIC_MEDIA_FIELDS
+    );
+  });
+
+  it.each(
+    PUBLIC_LIST_PATHS
+  )('%s: the fields the web reads are present and resolved', async (_name, path) => {
+    const res = await dispatch(path);
+
+    const body = (await res.json()) as {
+      items: { mediaItem: Record<string, unknown> }[];
+    };
+    expect(body.items[0]?.mediaItem).toEqual({
+      durationSeconds: 1325,
+      thumbnailUrl: `${R2_PUBLIC_URL_BASE}/${THUMB_KEY}`,
+      hlsPreviewUrl: `${R2_PUBLIC_URL_BASE}/${PREVIEW_KEY}`,
+    });
+  });
+
+  it.each(
+    PUBLIC_LIST_PATHS
+  )('%s: no raw key, job id or transcoder text is anywhere in the body', async (_name, path) => {
+    const text = await (await dispatch(path)).text();
+
+    for (const secret of [
+      ORIGINAL_KEY,
+      MASTER_KEY,
+      MEZZANINE_KEY,
+      RUNPOD_JOB_ID,
+      TRANSCODER_ERROR,
+      'DECODE_FAILED',
+      'waveform.json',
+    ]) {
+      expect(text).not.toContain(secret);
+    }
+    // The two keys the URLs are built from are read on the server only.
+    for (const field of [
+      'r2Key',
+      'thumbnailKey',
+      'hlsPreviewKey',
+      'hlsMasterPlaylistKey',
+      'runpodJobId',
+      'transcodingError',
+      'transcodingErrorCode',
+      'mezzanineKey',
+      'fileSizeBytes',
+    ]) {
+      expect(text).not.toContain(`"${field}"`);
+    }
+  });
+
+  it('a KV cache HIT serves the same narrowed item, built from the cached row', async () => {
+    await dispatch(`/api/content/public?orgId=${ORG_ID}`);
+    const hit = await dispatch(`/api/content/public?orgId=${ORG_ID}`);
+
+    expect(contentSpies.listPublic).toHaveBeenCalledTimes(1); // proves it hit
+    const body = (await hit.json()) as {
+      items: { mediaItem: Record<string, unknown> }[];
+    };
+    expect(Object.keys(body.items[0]?.mediaItem ?? {}).sort()).toEqual(
+      PUBLIC_MEDIA_FIELDS
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Codex-567de — the anonymous org is an ALLOW-LIST too
+//
+// `listPublic` loaded `organization: true` and the route spread the row, so
+// every anonymous list carried the whole organizations row: the payee's
+// `primaryConnectAccountUserId`, websiteUrl, description, timestamps. The mock
+// returns that whole row plus a column the schema does not have yet, so this
+// pins the route's copy-by-name on its own, whatever the service selects.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const PAYEE_USER_ID = 'payeeuser7f3c91';
+
+/** Every organizations column, as `organization: true` loaded it, and one more. */
+const FULL_ORG_ROW = {
+  id: ORG_ID,
+  name: 'Bone Deep Studio',
+  slug: 'bone-deep-studio',
+  description: 'An internal description nobody asked for',
+  logoUrl: `${R2_PUBLIC_URL_BASE}/org-1/logo/md.webp`,
+  websiteUrl: 'https://bone-deep.example',
+  primaryConnectAccountUserId: PAYEE_USER_ID,
+  stripeAccountStatus: 'restricted',
+  createdAt: '2026-09-01T00:00:00.000Z',
+  updatedAt: '2026-10-01T00:00:00.000Z',
+  deletedAt: null,
+};
+
+const ROWS_WITH_FULL_ORG = {
+  items: [
+    {
+      id: '4d000000-0000-4000-8000-0000000000a3',
+      title: 'Bone Deep',
+      slug: 'bone-deep',
+      contentType: 'video',
+      creator: { id: 'creator-1', name: 'Ada' },
+      mediaItem: null,
+      organization: FULL_ORG_ROW,
+    },
+  ],
+  pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+};
+
+describe('the anonymous org carries only its four public fields (Codex-567de)', () => {
+  beforeEach(() => {
+    contentSpies.listPublic.mockResolvedValue(ROWS_WITH_FULL_ORG);
+  });
+
+  it.each(
+    PUBLIC_LIST_PATHS
+  )('%s: the org is exactly id, name, slug and logoUrl, with their values', async (_name, path) => {
+    const res = await dispatch(path);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { organization: Record<string, unknown> }[];
+    };
+    expect(body.items[0]?.organization).toEqual({
+      id: ORG_ID,
+      name: 'Bone Deep Studio',
+      slug: 'bone-deep-studio',
+      logoUrl: `${R2_PUBLIC_URL_BASE}/org-1/logo/md.webp`,
+    });
+  });
+
+  it.each(
+    PUBLIC_LIST_PATHS
+  )('%s: no payee id or other internal org column is anywhere in the body', async (_name, path) => {
+    const text = await (await dispatch(path)).text();
+
+    expect(text).not.toContain(PAYEE_USER_ID);
+    // `description` is left out: a content row has one of its own. The exact
+    // toEqual above already refuses it on the org.
+    for (const field of [
+      'primaryConnectAccountUserId',
+      'stripeAccountStatus',
+      'websiteUrl',
+    ]) {
+      expect(text).not.toContain(`"${field}"`);
+    }
   });
 });
 

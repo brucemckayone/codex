@@ -27,6 +27,27 @@ The 60s bound is the KV invalidation window; see `CACHE_PRESETS` in
 `@codex/constants`. Never set `Cache-Control` by hand here — the static-analysis
 gate rejects it.
 
+Every RELATION on a list item is BUILT field by field by `toPublicItems`
+(`r2-public-urls.ts`), never spread from the service's row: the media item is
+`durationSeconds`, `thumbnailUrl` and `hlsPreviewUrl`, the org `id`, `name`,
+`slug` and `logoUrl`, the creator `id` and `name` (Codex-ve5eh, Codex-567de).
+No raw R2 key, RunPod job id, transcoding error or payee id reaches a client.
+The content row's OWN columns pass through as `listPublic` selects them, so a
+content column is kept off the wire in the service: `CATALOGUE_CONTENT_COLUMNS`
+leaves out `purchaseCount` (owner, 2026-10-26), and a new internal content
+column needs an exclusion there too. `listPublic` selects only those columns
+(`PUBLIC_*_COLUMNS` and `CATALOGUE_CONTENT_COLUMNS` in `@codex/content`).
+The org list's KV slot holds those ROWS and the item is built after the read,
+so ANY change to `listPublic`'s select needs a `PUBLIC_CONTENT_SHAPE_VERSION`
+bump (`public-cache.ts`), and a change to the builder alone does not. apps/web
+/explore caches the browse route's response (`content:auth:vN`), so a change
+to the browse select (the same shared column lists) OR a field removed from
+the builder needs a bump there.
+A key with no CDN base is sent as a null URL and logged once per request as
+`r2_public_base.missing`, by `toPublicItems` and the single `toPublicItem`
+alike; both take `ctx.obs` as a required argument.
+`GET /api/content/browse` (signed-in) sends the same item (Codex-1bdx0).
+
 | Method | Path | Policy | Notes |
 |---|---|---|---|
 | GET | `/api/content/public` | `auth: 'none'` | List published content for an org or a creator (orgId, creatorId or slug required; `category` needs orgId). Only a by-slug read of a PUBLIC piece (`isPublicContent`: free and no gate) carries its body; an entitled reader gets a gated body from `/stream?include=body` (Codex-039vo) |
@@ -49,7 +70,7 @@ gate rejects it.
 | Method | Path | Policy | Rate Limit | Notes |
 |---|---|---|---|---|
 | GET | `/api/access/content/:id/stream` | `auth: 'required'` | `streaming` (60/min) | Returns signed streaming URL + waveformUrl + contentType; `private, no-store`. `?include=body` also returns `body: { contentBody, contentBodyJson }` once access is granted (a row never released is granted to no one, Codex-nacky): the detail pages' body for a gated piece (Codex-039vo). No `body` means not returned; a piece with no body is both fields null. Never pass it from a remote query or the player refresh |
-| GET | `/api/access/content/withdrawn` | `auth: 'required'` | `api` | `?slug` + exactly one of `orgId` or `creatorId` (`withdrawnContentQuerySchema`, strict). An item withdrawn from sale that this reader still has: `{ content, held }`, the row with R2 keys resolved as `/api/content/public` resolves them (`r2-public-urls.ts`) and no body. Every other case is the same 404; `private, no-store`. The detail pages ask for it when the public lookup misses for a signed-in reader (Codex-ov2ii) |
+| GET | `/api/access/content/withdrawn` | `auth: 'required'` | `api` | `?slug` + exactly one of `orgId` or `creatorId` (`withdrawnContentQuerySchema`, strict). An item withdrawn from sale that this reader still has: `{ content, held }`, `content` the public list's item (`toPublicItem` in `r2-public-urls.ts`, from the same `PUBLIC_*_COLUMNS` select), never the row, and no body. Every other case is the same 404; `private, no-store`. The detail pages ask for it when the public lookup misses for a signed-in reader (Codex-ov2ii) |
 | POST | `/api/access/content/:id/progress` | `auth: 'required'` | `api` | Save playback progress; 204 |
 | GET | `/api/access/content/:id/progress` | `auth: 'required'` | `api` | Get playback progress |
 | GET | `/api/access/user/library` | `auth: 'required'` | `api` | User's purchased content (paginated) |

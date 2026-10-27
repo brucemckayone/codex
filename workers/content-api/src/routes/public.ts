@@ -22,7 +22,7 @@ import {
   getCachedPublicContent,
   shouldCachePublicContentQuery,
 } from './public-cache';
-import { resolveR2PublicBases, resolveR2Urls } from './r2-public-urls';
+import { resolveR2PublicBases, toPublicItems } from './r2-public-urls';
 
 /**
  * TTL for the public topic-categories list (seconds). Invalidated on category
@@ -109,13 +109,19 @@ app.get(
       // the data slot never landed, so there was never a hit. Cache the plain
       // shape and re-wrap AFTER the cache, exactly as
       // `organization-api /public/:slug/creators` already does.
+      //
+      // The cache holds the narrowed ROWS, and the wire items are built after
+      // it: a URL built inside the fetcher froze a missing CDN base into the
+      // slot as a null poster for its whole TTL, warned about only on a miss.
       const fetchContent = async () => {
         const result = await ctx.services.content.listPublic(ctx.input.query);
-        return {
-          items: resolveR2Urls(result.items, resolveR2PublicBases(ctx.env)),
-          pagination: result.pagination,
-        };
+        return { items: result.items, pagination: result.pagination };
       };
+      const toWire = (rows: Awaited<ReturnType<typeof fetchContent>>) =>
+        new PaginatedResult(
+          toPublicItems(rows.items, resolveR2PublicBases(ctx.env), ctx.obs),
+          rows.pagination
+        );
 
       // KV cache-aside for org-scoped browse queries only.
       // getCachedPublicContent keys every filter combo under a shared
@@ -150,11 +156,10 @@ app.get(
         if (ctx.obs) {
           logCacheStats(cache, ctx.obs, { cacheType: 'public:content' });
         }
-        return new PaginatedResult(cached.items, cached.pagination);
+        return toWire(cached);
       }
 
-      const uncached = await fetchContent();
-      return new PaginatedResult(uncached.items, uncached.pagination);
+      return toWire(await fetchContent());
     },
   })
 );
@@ -229,7 +234,7 @@ app.get(
     handler: async (ctx) => {
       const result = await ctx.services.content.listPublic(ctx.input.query);
       return new PaginatedResult(
-        resolveR2Urls(result.items, resolveR2PublicBases(ctx.env)),
+        toPublicItems(result.items, resolveR2PublicBases(ctx.env), ctx.obs),
         result.pagination
       );
     },

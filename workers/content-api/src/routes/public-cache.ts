@@ -52,18 +52,43 @@ import { CacheType, type VersionedCache } from '@codex/cache';
 const PUBLIC_CONTENT_CACHE_TTL = 7200;
 
 /**
- * The shape of a cached item. Bump it whenever listPublic's projection NARROWS
- * (a column or relation dropped, a field stripped). The data-slot key encodes
- * the query, not the payload, so without a bump every slot written by the old
- * code stays a valid hit after deploy and keeps serving what was removed, for
- * up to the TTL. v2 (Codex-osuqt): no creator email, and no body on a
- * catalogue read. v3 (Codex-039vo): no body on a by-slug read of a gated row,
- * which a course-only practice flagged free used to keep. Old slots are never
- * read again and age out. A bump also renames the cache-stats series
- * (`cacheStatsLabel` keeps four segments, so `content:public:newest` became
- * `content:public:v2:newest`, and now `content:public:v3:newest`).
+ * The shape of a cached row. Bump it whenever listPublic's SELECT changes.
+ * The data-slot key encodes the query, not the payload, so without a bump
+ * every slot written by the old code stays a valid hit after deploy for up to
+ * the TTL. A NARROWED select (a column or relation dropped, a field stripped)
+ * keeps serving what was removed: the content row's own columns go on the
+ * wire as cached. A WIDENED one that the wire item reads (a column added to
+ * PUBLIC_MEDIA_ITEM_COLUMNS, say) is missing from the old slots, and the wire
+ * omits it, while `satisfies` tells TypeScript the row has it.
+ *
+ * v2 (Codex-osuqt): no creator email, and no body on a catalogue read.
+ * v3 (Codex-039vo): no body on a by-slug read of a gated row, which a
+ * course-only practice flagged free used to keep. v4 (Codex-ve5eh,
+ * Codex-567de, one bump for both): the slot holds listPublic's narrowed row,
+ * the media item three columns (durationSeconds, thumbnailKey, hlsPreviewKey)
+ * where it held the whole media_items row with its raw R2 keys, RunPod job id
+ * and transcoding error, and the org four (id, name, slug, logoUrl) where it
+ * held the whole organizations row; the content row has no `purchaseCount`.
+ *
+ * The wire item (`toPublicItems`) is built AFTER the cache, so a change to it
+ * alone needs no bump here. apps/web's /explore caches the browse route's
+ * response (`content:auth:vN`), so a change to the shared column lists
+ * (`PUBLIC_*_COLUMNS`, `CATALOGUE_CONTENT_COLUMNS`, which listPublic and
+ * browse both select) or a field removed from the builder needs a bump THERE
+ * too.
+ *
+ * THE RULE WHEN TWO BRANCHES BUMP AT ONCE, whatever order they merge in: the
+ * one that merges SECOND takes a version no deployed build has ever written.
+ * A value a shipped build wrote names slots full of THAT build's shape, so
+ * reusing it serves them as hits. If v4 has already shipped when a later
+ * narrowing lands, the later one takes v5, not v4.
+ *
+ * Old slots are never read again and age out. A bump also
+ * renames the cache-stats series (`cacheStatsLabel` keeps four segments, so
+ * `content:public:newest` became `content:public:v2:newest`, now
+ * `content:public:v4:newest`).
  */
-const PUBLIC_CONTENT_SHAPE_VERSION = 'v3';
+const PUBLIC_CONTENT_SHAPE_VERSION = 'v4';
 
 /**
  * KV refuses a key over 512 bytes. A data-slot key is this type plus about 70

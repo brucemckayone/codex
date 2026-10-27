@@ -74,9 +74,9 @@
   import type { ContentWithRelations } from '$lib/types';
 
   /**
-   * Extended content type that includes runtime-resolved media fields.
-   * The public content API resolves R2 keys to full CDN URLs (thumbnailUrl,
-   * hlsPreviewUrl) that don't exist on the base MediaItem schema type.
+   * The media item fields this view reads. The public content API sends the
+   * first three and nothing else (Codex-ve5eh): R2 keys are resolved to CDN
+   * URLs on the server, and the rest of the media_items row stays there.
    *
    * `captions` is the list of `<track>` entries forwarded to VideoPlayer (Ref 05 §Media
    * Elements §2). Back-end delivery is pending but the prop wiring + empty-array default
@@ -88,16 +88,20 @@
     label: string;
     default?: boolean;
   };
-  type ContentDetail = ContentWithRelations & {
-    mediaItem?: (ContentWithRelations['mediaItem'] extends infer M
-      ? M extends object
-        ? M & {
-            thumbnailUrl?: string | null;
-            hlsPreviewUrl?: string | null;
-            captions?: CaptionTrack[] | null;
-          }
-        : M
-      : never) | null;
+  type ContentDetailMedia = {
+    durationSeconds?: number | null;
+    thumbnailUrl?: string | null;
+    hlsPreviewUrl?: string | null;
+    captions?: CaptionTrack[] | null;
+  };
+  // No `organization`: this view never reads it, and the public API sends
+  // only four of its fields (Codex-567de).
+  // No `purchaseCount`: the public and browse lists never send it.
+  type ContentDetail = Omit<
+    ContentWithRelations,
+    'mediaItem' | 'organization' | 'purchaseCount'
+  > & {
+    mediaItem?: ContentDetailMedia | null;
   };
 
   /**
