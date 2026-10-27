@@ -119,7 +119,11 @@ subscriptions.post(
     successStatus: 201,
     handler: async (ctx) => {
       const { successUrl, cancelUrl } = ctx.input.body;
-      refuseDevReturnUrls(ctx.env.ENVIRONMENT, { successUrl, cancelUrl });
+      refuseDevReturnUrls(
+        ctx.env.ENVIRONMENT,
+        { successUrl, cancelUrl },
+        ctx.obs
+      );
       return await ctx.services.subscription.createCheckoutSession(
         ctx.user.id,
         ctx.input.body.organizationId,

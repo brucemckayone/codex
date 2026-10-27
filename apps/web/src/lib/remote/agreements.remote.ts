@@ -187,13 +187,20 @@ export const getMyAgreementThread = query(
  * Owner round-1 propose. `organizationId` is in the query string per the
  * `procedure()` resolver contract (body org would 400 with
  * ORG_CONTEXT_REQUIRED).
+ *
+ * Propose, counter and accept forward a 4xx (`forwardClientErrors`): a
+ * recipient who can't hold an agreement is a 422 whose `reason` the dialog
+ * names (Codex-2hxff.76/.77). Let through as an `ApiError`, it reached the
+ * browser as a sanitised 500.
  */
 export const proposeAgreement = command(
   proposeAgreementArgsSchema,
   async ({ organizationId, ...input }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.agreements.propose(organizationId, input);
+    return forwardClientErrors(() =>
+      api.agreements.propose(organizationId, input)
+    );
   }
 );
 
@@ -206,7 +213,7 @@ export const counterAgreement = command(
   async ({ proposalId, ...input }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.agreements.counter(proposalId, input);
+    return forwardClientErrors(() => api.agreements.counter(proposalId, input));
   }
 );
 
@@ -216,7 +223,7 @@ export const acceptAgreement = command(
   async ({ proposalId }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.agreements.accept(proposalId);
+    return forwardClientErrors(() => api.agreements.accept(proposalId));
   }
 );
 

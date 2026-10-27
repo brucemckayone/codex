@@ -109,6 +109,9 @@ describe('the member invitation copy migration (Codex-bnxhw)', () => {
       const CUSTOM_HTML =
         '<p>Welcome aboard!</p><a href="{{acceptUrl}}">Come in</a>';
       const CUSTOM_TEXT = 'Welcome aboard! {{acceptUrl}}';
+      // Its own expiry wording: nothing can reword it, so it keeps the token,
+      // and the migration's NOTICE counts it (Codex-2hxff.83).
+      const OWN_EXPIRY = '<p>Join within {{expiryDays}} days!</p>';
 
       let rows: Array<typeof emailTemplates.$inferSelect> = [];
       let ids: Record<string, string> = {};
@@ -126,51 +129,71 @@ describe('the member invitation copy migration (Codex-bnxhw)', () => {
                 isNull(emailTemplates.deletedAt)
               )
             );
-          const [orgA, orgB, orgC] = await tx
+          const [orgA, orgB, orgC, orgD] = await tx
             .insert(organizations)
             .values([
               { name: 'Invite Copy Org A', slug: `invite-copy-a-${suffix}` },
               { name: 'Invite Copy Org B', slug: `invite-copy-b-${suffix}` },
               { name: 'Invite Copy Org C', slug: `invite-copy-c-${suffix}` },
+              { name: 'Invite Copy Org D', slug: `invite-copy-d-${suffix}` },
             ])
             .returning({ id: organizations.id });
-          if (!orgA || !orgB || !orgC) {
+          if (!orgA || !orgB || !orgC || !orgD) {
             throw new Error('fixture orgs not inserted');
           }
 
-          const [stale, orgCopy, custom, edited, deleted, other] = await tx
-            .insert(emailTemplates)
-            .values([
-              { ...row(TEMPLATE, OLD_HTML, OLD_TEXT), scope: 'global' },
-              {
-                ...row(TEMPLATE, OLD_HTML, OLD_TEXT),
-                scope: 'organization',
-                organizationId: orgA.id,
-              },
-              {
-                ...row(TEMPLATE, CUSTOM_HTML, CUSTOM_TEXT),
-                subject: 'Welcome to {{orgName}}',
-                scope: 'organization',
-                organizationId: orgB.id,
-              },
-              {
-                ...row(TEMPLATE, '<p>Our own wording.</p>', 'Our own wording.'),
-                subject: 'Our own subject',
-                scope: 'organization',
-                organizationId: orgC.id,
-              },
-              {
-                ...row(TEMPLATE, OLD_HTML, OLD_TEXT),
-                scope: 'global',
-                deletedAt: stamp,
-              },
-              {
-                ...row(`${TEMPLATE}-other-${suffix}`, OLD_HTML, OLD_TEXT),
-                scope: 'global',
-              },
-            ])
-            .returning({ id: emailTemplates.id });
-          if (!stale || !orgCopy || !custom || !edited || !deleted || !other) {
+          const [stale, orgCopy, custom, edited, deleted, other, ownExpiry] =
+            await tx
+              .insert(emailTemplates)
+              .values([
+                { ...row(TEMPLATE, OLD_HTML, OLD_TEXT), scope: 'global' },
+                {
+                  ...row(TEMPLATE, OLD_HTML, OLD_TEXT),
+                  scope: 'organization',
+                  organizationId: orgA.id,
+                },
+                {
+                  ...row(TEMPLATE, CUSTOM_HTML, CUSTOM_TEXT),
+                  subject: 'Welcome to {{orgName}}',
+                  scope: 'organization',
+                  organizationId: orgB.id,
+                },
+                {
+                  ...row(
+                    TEMPLATE,
+                    '<p>Our own wording.</p>',
+                    'Our own wording.'
+                  ),
+                  subject: 'Our own subject',
+                  scope: 'organization',
+                  organizationId: orgC.id,
+                },
+                {
+                  ...row(TEMPLATE, OLD_HTML, OLD_TEXT),
+                  scope: 'global',
+                  deletedAt: stamp,
+                },
+                {
+                  ...row(`${TEMPLATE}-other-${suffix}`, OLD_HTML, OLD_TEXT),
+                  scope: 'global',
+                },
+                {
+                  ...row(TEMPLATE, OWN_EXPIRY, 'Join soon.'),
+                  subject: 'Join us',
+                  scope: 'organization',
+                  organizationId: orgD.id,
+                },
+              ])
+              .returning({ id: emailTemplates.id });
+          if (
+            !stale ||
+            !orgCopy ||
+            !custom ||
+            !edited ||
+            !deleted ||
+            !other ||
+            !ownExpiry
+          ) {
             throw new Error('fixture templates not inserted');
           }
           ids = {
@@ -180,11 +203,22 @@ describe('the member invitation copy migration (Codex-bnxhw)', () => {
             edited: edited.id,
             deleted: deleted.id,
             other: other.id,
+            ownExpiry: ownExpiry.id,
           };
 
-          await tx.execute(sql.raw(MIGRATION));
+          // As the migrator runs it: one statement per breakpoint (the
+          // UPDATE, then the DO block that RAISEs the NOTICE).
+          const statements = MIGRATION.split('--> statement-breakpoint')
+            .map((statement) => statement.trim())
+            .filter(Boolean);
+          expect(statements).toHaveLength(2);
+          for (const statement of statements) {
+            await tx.execute(sql.raw(statement));
+          }
           // Safe to run again: no old phrase is left to replace.
-          await tx.execute(sql.raw(MIGRATION));
+          for (const statement of statements) {
+            await tx.execute(sql.raw(statement));
+          }
 
           rows = await tx
             .select()
@@ -222,7 +256,11 @@ describe('the member invitation copy migration (Codex-bnxhw)', () => {
         expect(untouched?.textBody).toBe(OLD_TEXT);
         expect(untouched?.updatedAt.getTime()).toBe(stamp.getTime());
       }
-      expect(rows).toHaveLength(6);
+      // Left as it was: the NOTICE is what tells someone to reword it.
+      const ownExpiry = byId(ids.ownExpiry);
+      expect(ownExpiry?.htmlBody).toBe(OWN_EXPIRY);
+      expect(ownExpiry?.updatedAt.getTime()).toBe(stamp.getTime());
+      expect(rows).toHaveLength(7);
     }
   );
 });

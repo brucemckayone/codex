@@ -41,6 +41,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import AgreementShare from '$lib/components/agreements/AgreementShare.svelte';
+  import { agreementErrorMessage } from '$lib/components/agreements/agreement-refusal';
   import { isShareMissing } from '$lib/components/agreements/agreement-share';
   import CounterProposalDialog from '$lib/components/agreements/CounterProposalDialog.svelte';
   import NegotiationThread from '$lib/components/agreements/NegotiationThread.svelte';
@@ -327,7 +328,7 @@
     } catch (err) {
       toast.error(
         'Could not accept proposal',
-        err instanceof Error ? err.message : 'Unknown error'
+        agreementErrorMessage(err, 'Unknown error')
       );
     }
   }

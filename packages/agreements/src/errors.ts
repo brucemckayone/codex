@@ -111,21 +111,23 @@ export class FutureStartNotAllowedError extends BusinessLogicError {
 
 /** Why a proposal's recipient cannot hold an agreement. */
 export type AgreementRecipientRefusal =
-  | 'self'
+  | 'owner'
   | 'subscriber'
   | 'no_creator_account';
 
 const RECIPIENT_REFUSAL_MESSAGES: Record<AgreementRecipientRefusal, string> = {
-  self: 'You cannot propose an agreement to yourself',
+  owner: "The organisation's owner cannot hold an agreement with it",
   subscriber: 'A subscriber cannot hold a revenue-share agreement',
   no_creator_account:
     'This member needs a creator account before they can hold an agreement',
 };
 
 /**
- * Thrown when a new proposal names someone who cannot hold an agreement
- * (owner decisions 2026-10-27, Codex-2hxff.76 and .77):
- *   - `self`: the owner proposing to themselves. An owner selling their own
+ * Thrown when a proposal, a counter or an accept would give an agreement to
+ * someone who cannot hold one (owner decisions 2026-10-27, Codex-2hxff.76 and
+ * .77):
+ *   - `owner`: the organisation's owner, whether proposing to themselves or a
+ *     creator who has since become the owner. An owner selling their own
  *     content already gets the creator slice and the organisation slice, and
  *     with no subscription agreements the whole pool too
  *     (docs/payments/fees-and-splits.md), so such an agreement changes nothing;

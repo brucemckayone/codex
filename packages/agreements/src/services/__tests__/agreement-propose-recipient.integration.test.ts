@@ -8,9 +8,13 @@
  *   organisation leaves the platform role alone, so an invited customer used
  *   to receive a proposal they could never open ("Creator accounts only").
  * - Never a subscriber, whatever their account (accepted until now).
- * - Never the owner making it. They are already paid the creator and the
- *   organisation slice of their own sales, and the whole pool with no
- *   subscription agreements, so an agreement with yourself changes nothing.
+ * - Never the owner. They are already paid the creator and the organisation
+ *   slice of their own sales, and the whole pool with no subscription
+ *   agreements, so an agreement with yourself changes nothing.
+ *
+ * Counter and accept check the same three things (review of .76/.77). A
+ * thread opened before these rules, or one whose creator has since become the
+ * owner, must not end in an agreement the rules refuse.
  *
  * Each refusal is a 422 whose client-facing context is the reason only,
  * written before anything is stored or emailed.
@@ -48,6 +52,11 @@ describe('who a proposal can name (Codex-2hxff.76, .77)', () => {
 
   afterAll(async () => {
     if (orgIds.length > 0) {
+      await db
+        .delete(schema.creatorOrganizationAgreements)
+        .where(
+          inArray(schema.creatorOrganizationAgreements.organizationId, orgIds)
+        );
       await db
         .delete(schema.agreementProposals)
         .where(inArray(schema.agreementProposals.organizationId, orgIds));
@@ -131,9 +140,8 @@ describe('who a proposal can name (Codex-2hxff.76, .77)', () => {
       .where(eq(schema.agreementProposals.organizationId, orgId));
   }
 
-  /** The refusal, its 422, its client-facing context, and nothing written. */
-  async function expectRefused(
-    fx: Awaited<ReturnType<typeof team>>,
+  /** The refusal: a 422 whose client-facing context is the reason only. */
+  async function expectRefusal(
     attempt: Promise<unknown>,
     reason: AgreementRecipientRefusal
   ) {
@@ -150,6 +158,15 @@ describe('who a proposal can name (Codex-2hxff.76, .77)', () => {
     expect(Object.keys((error as { context: object }).context)).toEqual([
       'reason',
     ]);
+  }
+
+  /** A refused proposal: the refusal, and nothing stored or emailed. */
+  async function expectRefused(
+    fx: Awaited<ReturnType<typeof team>>,
+    attempt: Promise<unknown>,
+    reason: AgreementRecipientRefusal
+  ) {
+    await expectRefusal(attempt, reason);
     expect(await proposalsIn(fx.orgId)).toHaveLength(0);
     expect(fx.mailer).not.toHaveBeenCalled();
   }
@@ -190,7 +207,7 @@ describe('who a proposal can name (Codex-2hxff.76, .77)', () => {
       membershipRole: 'creator',
       platformRole: 'creator',
     });
-    await expectRefused(fx, propose(fx, fx.ownerId), 'self');
+    await expectRefused(fx, propose(fx, fx.ownerId), 'owner');
   });
 
   it('someone outside the organisation is still refused as a non-member', async () => {
@@ -208,5 +225,149 @@ describe('who a proposal can name (Codex-2hxff.76, .77)', () => {
       ForbiddenError
     );
     expect(await proposalsIn(fx.orgId)).toHaveLength(0);
+  });
+
+  // ── A thread opened before these rules: counter and accept check too ──
+
+  /**
+   * An open proposal written straight to the table, as one made before the
+   * rules was. `by: 'creator'` makes it the creator's counter-offer, which
+   * the OWNER accepts or counters.
+   */
+  async function openThread(
+    fx: Awaited<ReturnType<typeof team>>,
+    by: 'owner' | 'creator' = 'owner'
+  ) {
+    const [proposal] = await db
+      .insert(schema.agreementProposals)
+      .values({
+        organizationId: fx.orgId,
+        creatorId: fx.recipientId,
+        revenueType: 'subscription',
+        roundNumber: 1,
+        proposedByUserId: by === 'owner' ? fx.ownerId : fx.recipientId,
+        proposedByRole: by,
+        proposedCreatorSharePercent: 3000,
+        proposedTermMonths: 6,
+        proposedEffectiveFrom: new Date(Date.now() - 60_000),
+        status: 'open',
+      })
+      .returning();
+    if (!proposal) throw new Error('proposal not seeded');
+    return proposal;
+  }
+
+  /** The thread is as it was: still open, and no agreement came of it. */
+  async function expectUnchanged(
+    fx: Awaited<ReturnType<typeof team>>,
+    proposalId: string
+  ) {
+    const [row] = await db
+      .select({ status: schema.agreementProposals.status })
+      .from(schema.agreementProposals)
+      .where(eq(schema.agreementProposals.id, proposalId));
+    expect(row?.status).toBe('open');
+    expect(await proposalsIn(fx.orgId)).toHaveLength(1);
+    const agreements = await db
+      .select({ id: schema.creatorOrganizationAgreements.id })
+      .from(schema.creatorOrganizationAgreements)
+      .where(eq(schema.creatorOrganizationAgreements.organizationId, fx.orgId));
+    expect(agreements).toHaveLength(0);
+    expect(fx.mailer).not.toHaveBeenCalled();
+  }
+
+  const accept = (
+    fx: Awaited<ReturnType<typeof team>>,
+    proposalId: string,
+    by: string
+  ) => fx.service.acceptProposal({ proposalId, acceptedByUserId: by });
+  const counter = (
+    fx: Awaited<ReturnType<typeof team>>,
+    proposalId: string,
+    by: string
+  ) =>
+    fx.service.counterPropose({
+      proposalId,
+      sharePercent: 3500,
+      termMonths: 6,
+      counteredByUserId: by,
+    });
+
+  it('a customer-account member cannot accept or counter a proposal made before the rules', async () => {
+    const fx = await team({
+      membershipRole: 'creator',
+      platformRole: 'customer',
+    });
+    const proposal = await openThread(fx);
+    await expectRefusal(
+      accept(fx, proposal.id, fx.recipientId),
+      'no_creator_account'
+    );
+    await expectRefusal(
+      counter(fx, proposal.id, fx.recipientId),
+      'no_creator_account'
+    );
+    await expectUnchanged(fx, proposal.id);
+  });
+
+  it("the owner cannot accept or counter such a member's counter-offer either", async () => {
+    const fx = await team({
+      membershipRole: 'creator',
+      platformRole: 'customer',
+    });
+    const proposal = await openThread(fx, 'creator');
+    await expectRefusal(
+      accept(fx, proposal.id, fx.ownerId),
+      'no_creator_account'
+    );
+    await expectRefusal(
+      counter(fx, proposal.id, fx.ownerId),
+      'no_creator_account'
+    );
+    await expectUnchanged(fx, proposal.id);
+  });
+
+  it('a subscriber cannot accept a proposal made before the rules', async () => {
+    const fx = await team({
+      membershipRole: 'subscriber',
+      platformRole: 'creator',
+    });
+    const proposal = await openThread(fx);
+    await expectRefusal(accept(fx, proposal.id, fx.recipientId), 'subscriber');
+    await expectUnchanged(fx, proposal.id);
+  });
+
+  it('a creator who has since become the owner cannot accept or counter their own proposal', async () => {
+    const fx = await team({
+      membershipRole: 'creator',
+      platformRole: 'creator',
+    });
+    const proposal = await openThread(fx);
+    // Ownership passes to the creator: one active owner at a time, so the
+    // old owner steps down first.
+    await db
+      .update(schema.organizationMemberships)
+      .set({ role: 'admin' })
+      .where(eq(schema.organizationMemberships.userId, fx.ownerId));
+    await db
+      .update(schema.organizationMemberships)
+      .set({ role: 'owner' })
+      .where(eq(schema.organizationMemberships.userId, fx.recipientId));
+    await expectRefusal(accept(fx, proposal.id, fx.recipientId), 'owner');
+    await expectRefusal(counter(fx, proposal.id, fx.recipientId), 'owner');
+    await expectUnchanged(fx, proposal.id);
+  });
+
+  it('a creator account still accepts (control)', async () => {
+    const fx = await team({
+      membershipRole: 'creator',
+      platformRole: 'creator',
+    });
+    const proposal = await openThread(fx);
+    const agreement = await accept(fx, proposal.id, fx.recipientId);
+    expect(agreement).toMatchObject({
+      creatorId: fx.recipientId,
+      status: 'active',
+    });
   });
 });

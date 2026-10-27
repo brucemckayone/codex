@@ -13559,6 +13559,30 @@ export const agreement_needs_creator_account = () => `Needs a creator account fi
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const agreement_refused_owner = () => `The owner can't hold an agreement with their own organisation.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_refused_subscriber = () => `Subscribers can't hold a revenue-share agreement.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const agreement_refused_no_creator_account = () => `This member needs a creator account before they can hold an agreement.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const agreement_split_basis = () => `100% is what's left after Codex's fee.`
 
 

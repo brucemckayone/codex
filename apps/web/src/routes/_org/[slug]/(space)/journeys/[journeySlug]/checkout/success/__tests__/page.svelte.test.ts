@@ -65,7 +65,7 @@ afterEach(() => {
 function mountWith(
   duplicate: Duplicate,
   inactive = false,
-  notRecorded = false
+  notRecorded: { kind: 'not_recorded'; reference: string } | null = null
 ) {
   component = mount(JourneyCheckoutSuccess, {
     target: document.body,
@@ -202,14 +202,23 @@ describe('journey checkout success — capped, then a button (Codex-2hxff.22)', 
   });
 
   test("a payment nothing will record: we're on it, Contact support and Go to library, no checks (Codex-2hxff.81)", async () => {
-    mountWith(null, false, true);
+    mountWith(null, false, {
+      kind: 'not_recorded',
+      reference: 'cs_test_abc / 3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+    });
 
     expect(clean(document.querySelector('h1'))).toBe(
       m.checkout_not_recorded_title()
     );
     expect(paragraphs()).toEqual([m.checkout_not_recorded_description()]);
     expect(links()).toEqual([
-      [m.checkout_contact_support(), supportMailto('Checkout help')],
+      // The subject quotes the reference support matches to the alert.
+      [
+        m.checkout_contact_support(),
+        supportMailto(
+          'Checkout help, reference cs_test_abc / 3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f'
+        ),
+      ],
       [m.checkout_success_go_to_library(), '/library'],
     ]);
     expect(document.querySelector('button')).toBeNull();

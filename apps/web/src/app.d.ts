@@ -58,6 +58,13 @@ declare global {
        * hour turns (Codex-2hxff.66); the browser shows it in local time.
        */
       retryAfter?: string;
+      /**
+       * Why a write was refused, from the worker's `details.reason` (a
+       * ServiceError context field, client-facing by design). Set by
+       * `forwardClientErrors`; the agreement dialogs read it
+       * (`RecipientCannotHoldAgreementError`, Codex-2hxff.76/.77).
+       */
+      reason?: string;
     }
 
     interface PageData {

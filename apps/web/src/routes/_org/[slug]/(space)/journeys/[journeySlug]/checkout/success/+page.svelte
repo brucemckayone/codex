@@ -138,7 +138,12 @@
     <h1 class="ret__title">{m.checkout_not_recorded_title()}</h1>
     <p class="ret__body">{m.checkout_not_recorded_description()}</p>
     <div class="ret__actions">
-      <a class="ret__cta" href={supportMailto('Checkout help')}>
+      <!-- The subject quotes the reference, so support can match it to the
+           alert. -->
+      <a
+        class="ret__cta"
+        href={supportMailto(`Checkout help, reference ${data.notRecorded.reference}`)}
+      >
         {m.checkout_contact_support()}
       </a>
       <a class="ret__link" href={data.libraryPath}>

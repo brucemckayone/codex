@@ -247,6 +247,7 @@
               name: m.name,
               email: m.email,
               role: m.role,
+              hasCreatorAccount: m.hasCreatorAccount,
             })),
           activeAgreements: activeAgreements.map((a) => ({
             id: a.id,

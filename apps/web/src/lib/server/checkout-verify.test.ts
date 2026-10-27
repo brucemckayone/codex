@@ -5,7 +5,7 @@
  * `subscription/success`, each under `__tests__/success.test.ts`.
  *
  * completeOnArrival — what the completion on arrival comes to (Codex-2hxff.22,
- * .81): the session as read after, `'not_recorded'` for ecom-api's
+ * .81): the session as read after, a `NotRecorded` for ecom-api's
  * `CHECKOUT_NOT_RECORDED`, or null for any other failure.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -59,23 +59,52 @@ describe('completeOnArrival', () => {
     expect(warnMock).not.toHaveBeenCalled();
   });
 
-  it("CHECKOUT_NOT_RECORDED is 'not_recorded', logged with the errorId support was alerted under", async () => {
+  // The reference is what the buyer's support email quotes, so support can
+  // match it to the alert (Codex-2hxff.81).
+  it('CHECKOUT_NOT_RECORDED is NotRecorded, quoting the session id and the errorId support was alerted under', async () => {
     const api = apiAnswering(async () => {
       throw new ApiError(
         500,
         'The purchase could not be recorded',
         'CHECKOUT_NOT_RECORDED',
-        { sessionId: 'cs_test_abc', errorId: 'err-123' }
+        {
+          sessionId: 'cs_test_abc',
+          errorId: '3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+        }
       );
     });
 
     await expect(
       completeOnArrival(api, 'cs_test_abc', 'checkout-success')
-    ).resolves.toBe('not_recorded');
+    ).resolves.toEqual({
+      kind: 'not_recorded',
+      reference: 'cs_test_abc / 3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+    });
     expect(warnMock).toHaveBeenCalledWith(
       'checkout-success: the purchase could not be recorded',
-      { sessionId: 'cs_test_abc', errorId: 'err-123' }
+      {
+        sessionId: 'cs_test_abc',
+        errorId: '3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+      }
     );
+  });
+
+  it.each([
+    ['no errorId', { sessionId: 'cs_test_abc' }],
+    ['an errorId that is not one', { errorId: 'Your card was declined' }],
+  ])('CHECKOUT_NOT_RECORDED with %s quotes the session id only', async (_label, details) => {
+    const api = apiAnswering(async () => {
+      throw new ApiError(
+        500,
+        'The purchase could not be recorded',
+        'CHECKOUT_NOT_RECORDED',
+        details
+      );
+    });
+
+    await expect(
+      completeOnArrival(api, 'cs_test_abc', 'checkout-success')
+    ).resolves.toEqual({ kind: 'not_recorded', reference: 'cs_test_abc' });
   });
 
   it.each([

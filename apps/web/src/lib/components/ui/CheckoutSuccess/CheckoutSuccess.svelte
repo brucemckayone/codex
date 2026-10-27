@@ -13,12 +13,13 @@
   - late: still `recording` after the capped checks. "Your payment went
     through. We're still finishing up; check again in a minute." with Check
     again (one check per click) and Go to library.
-  - unrecorded: the completion was refused for good (`unlock` resolved to
-    `'not_recorded'`; Codex-2hxff.81, owner decision 2026-10-27, "Say we're
-    on it"). Support was alerted. "Your payment went through, but we couldn't
+  - unrecorded: the completion was refused for good (`unlock` resolved to a
+    `NotRecorded`; Codex-2hxff.81, owner decision 2026-10-27, "Say we're on
+    it"). Support was alerted. "Your payment went through, but we couldn't
     finish setting up your purchase. We've been alerted and will sort it out.
-    You don't need to pay again." with Contact support and Go to library. It
-    shows at once, and no more checks run: each one would ask again and alert
+    You don't need to pay again." with Contact support, whose subject quotes
+    the reference support matches to the alert, and Go to library. It shows
+    at once, and no more checks run: each one would ask again and alert
     support again.
   - duplicate: a second payment for an item the buyer owns, being refunded
     (Codex-o4jvw): a calm notice, no confirmation.
@@ -34,6 +35,7 @@
 -->
 <script lang="ts">
   import type { CheckoutSessionVerifyResult } from '@codex/purchase';
+  import type { NotRecorded } from '$lib/server/checkout-verify';
   import { coverCropSizes, getThumbnailSrcset } from '$lib/utils/image';
   import { invalidate } from '$app/navigation';
   import * as m from '$paraglide/messages';
@@ -68,11 +70,11 @@
     /**
      * The arrival's completion (`POST /checkout/complete`), streamed by the
      * load while our record is missing. It resolves to the session as read
-     * after; to `'not_recorded'` when it was refused for good (the page says
-     * so and stops checking); or to null when the call failed otherwise (the
-     * checks carry on).
+     * after; to a `NotRecorded` when it was refused for good (the page says
+     * so, with the reference support needs, and stops checking); or to null
+     * when the call failed otherwise (the checks carry on).
      */
-    unlock?: Promise<Verification | 'not_recorded' | null> | null;
+    unlock?: Promise<Verification | NotRecorded | null> | null;
     /** URL to the purchased content (for "Start Watching/Listening/Reading" CTA) */
     contentUrl: string;
     /** URL for "Continue Browsing" CTA */
@@ -100,14 +102,14 @@
   // The answer of the load's completion call, for the promise it answered:
   // each check re-runs the load, which streams a new one while still recording.
   let unlockAnswer = $state.raw<{
-    for: Promise<Verification | 'not_recorded' | null>;
-    result: Verification | 'not_recorded' | null;
+    for: Promise<Verification | NotRecorded | null>;
+    result: Verification | NotRecorded | null;
   } | null>(null);
   /**
    * A completion was refused for good: nothing will record this payment
    * (Codex-2hxff.81). It stands for the life of the page.
    */
-  let notRecorded = $state(false);
+  let notRecorded = $state.raw<NotRecorded | null>(null);
 
   $effect(() => {
     const pending = unlock;
@@ -117,7 +119,7 @@
       (result) => {
         if (!live) return;
         unlockAnswer = { for: pending, result };
-        if (result === 'not_recorded') notRecorded = true;
+        if (result && 'kind' in result) notRecorded = result;
       },
       () => {
         if (live) unlockAnswer = { for: pending, result: null };
@@ -141,8 +143,7 @@
   const current = $derived.by(() => {
     const answered =
       unlock && unlockAnswer?.for === unlock ? unlockAnswer.result : null;
-    const fresh =
-      answered && answered !== 'not_recorded' ? answered : verification;
+    const fresh = answered && !('kind' in answered) ? answered : verification;
     if (fresh) lastKnown = fresh;
     return fresh ?? lastKnown;
   });
@@ -211,6 +212,17 @@
       view === 'unlocked' ||
       view === 'late' ||
       view === 'unrecorded'
+  );
+  /**
+   * Contact support for a payment nothing will record: its subject quotes the
+   * reference, so support can match the email to the alert.
+   */
+  const supportHref = $derived(
+    supportMailto(
+      notRecorded
+        ? `Checkout help, reference ${notRecorded.reference}`
+        : 'Checkout help'
+    )
   );
 
   // --- Library refresh (WEB-04) ---
@@ -373,7 +385,7 @@
             <span class="checkout-success__btn-label">{ctaLabel}</span>
           </span>
         {:else if view === 'unrecorded'}
-          <a href={supportMailto('Checkout help')} class="checkout-success__btn checkout-success__btn--primary">
+          <a href={supportHref} class="checkout-success__btn checkout-success__btn--primary">
             {m.checkout_contact_support()}
           </a>
           <a href={libraryUrl} class="checkout-success__btn checkout-success__btn--secondary">

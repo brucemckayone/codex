@@ -83,7 +83,11 @@ app.post(
     successStatus: 201,
     handler: async (ctx) => {
       const { returnUrl, refreshUrl } = ctx.input.body;
-      refuseDevReturnUrls(ctx.env.ENVIRONMENT, { returnUrl, refreshUrl });
+      refuseDevReturnUrls(
+        ctx.env.ENVIRONMENT,
+        { returnUrl, refreshUrl },
+        ctx.obs
+      );
       return await ctx.services.connect.createAccountForUser(
         ctx.user.id,
         returnUrl,

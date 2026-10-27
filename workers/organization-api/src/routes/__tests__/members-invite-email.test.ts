@@ -27,6 +27,7 @@ import {
   env,
   waitOnExecutionContext,
 } from 'cloudflare:test';
+import { ObservabilityClient } from '@codex/observability';
 import { orgMemberInvitationDataSchema } from '@codex/validation';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -99,7 +100,11 @@ function makeKv() {
   };
 }
 
-async function invite(role: string, environment = 'test'): Promise<Response> {
+/** `environment: null` leaves the ENVIRONMENT binding unset. */
+async function invite(
+  role: string,
+  environment: string | null = 'test'
+): Promise<Response> {
   const kv = makeKv();
   kv.store.set(
     membershipCacheKey(ORG_ID, INVITER.id),
@@ -110,6 +115,8 @@ async function invite(role: string, environment = 'test'): Promise<Response> {
     c.set('user', INVITER);
     // Its own rate-limit bucket: `singleWorker` shares one limiter.
     c.set('session', { id: 'sess_members_invite_email', userId: INVITER.id });
+    // `createWorker` sets this in production; `ctx.obs` reads it.
+    c.set('obs', obs);
     await next();
   });
   app.route('/api/organizations/:id/members', members);
@@ -123,7 +130,11 @@ async function invite(role: string, environment = 'test'): Promise<Response> {
         body: JSON.stringify({ email: 'invitee@test.com', role }),
       }
     ),
-    { ...env, ENVIRONMENT: environment, CACHE_KV: kv } as unknown as typeof env,
+    {
+      ...env,
+      ENVIRONMENT: environment ?? undefined,
+      CACHE_KV: kv,
+    } as unknown as typeof env,
     ec
   );
   await waitOnExecutionContext(ec);
@@ -144,8 +155,12 @@ function invitationData(): Record<string, unknown> {
   return params.data;
 }
 
+let obs: ObservabilityClient;
+
 beforeEach(() => {
   vi.clearAllMocks();
+  obs = new ObservabilityClient('organization-api', 'test');
+  vi.spyOn(obs, 'warn');
   orgSpies.get.mockResolvedValue(ORG);
   orgSpies.inviteMember.mockResolvedValue({
     id: 'membership-invited',
@@ -169,15 +184,41 @@ describe('POST /invite: the invitation email (Codex-bnxhw)', () => {
       orgName: 'Invite Org',
       roleName,
       orgUrl,
+      // Transitional (Codex-2hxff.83): the same link under the old name.
+      acceptUrl: orgUrl,
+      expiryDays: '7',
     });
   });
 
-  it("sends exactly the template's data shape: nothing to accept, nothing that expires", async () => {
+  it("sends exactly the template's data shape, with the old fields for one release (Codex-2hxff.83)", async () => {
     await invite('creator');
     const data = invitationData();
     expect(orgMemberInvitationDataSchema.strict().parse(data)).toEqual(data);
-    expect(data).not.toHaveProperty('acceptUrl');
-    expect(data).not.toHaveProperty('expiryDays');
+    // The previous notifications-api requires both. A template row 0117
+    // has not rewritten links its button to `acceptUrl`, so it must be the
+    // same link.
+    expect(data.acceptUrl).toBe(data.orgUrl);
+    expect(data.expiryDays).toBe('7');
+  });
+
+  it('an unset ENVIRONMENT warns, and the email links to development', async () => {
+    const res = await invite('creator', null);
+    expect(res.status).toBe(201);
+    expect(obs.warn).toHaveBeenCalledWith(
+      'ENVIRONMENT is unset; the invitation email links to development',
+      expect.objectContaining({ organizationId: ORG_ID, userId: INVITEE_ID })
+    );
+    expect(invitationData().orgUrl).toBe(
+      'http://invite-org.lvh.me:3000/studio'
+    );
+  });
+
+  it('a set ENVIRONMENT does not warn', async () => {
+    await invite('creator');
+    expect(obs.warn).not.toHaveBeenCalledWith(
+      'ENVIRONMENT is unset; the invitation email links to development',
+      expect.anything()
+    );
   });
 
   it('on staging, the link stays on the staging host', async () => {

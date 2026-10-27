@@ -59,7 +59,8 @@ interface RenderResult {
  * - HTML escapes all injected values by default
  * - Only allows whitelisted tokens
  * - Missing tokens become empty strings (no error)
- * - Unknown tokens become empty strings (logged)
+ * - Unknown tokens become empty strings, and are returned in
+ *   `unknownTokens`: NotificationsService warns them once per render
  */
 export function renderTemplate(options: RenderOptions): RenderResult {
   const {
@@ -222,7 +223,17 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
   ],
 
   // Organization
-  'org-member-invitation': ['inviterName', 'orgName', 'roleName', 'orgUrl'],
+  'org-member-invitation': [
+    'inviterName',
+    'orgName',
+    'roleName',
+    'orgUrl',
+    // Transitional, for one release (Codex-2hxff.83): a template row that
+    // migration 0117 has not rewritten yet still uses these. Drop them with
+    // the sender's copies once the release is live.
+    'acceptUrl',
+    'expiryDays',
+  ],
   'member-role-changed': ['userName', 'orgName', 'oldRole', 'newRole'],
   'member-removed': ['userName', 'orgName'],
 

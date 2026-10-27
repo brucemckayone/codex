@@ -21,7 +21,7 @@
  * the error state ("couldn't verify", not "still processing") and never
  * checks; a transient one stays pending and checks, capped.
  *
- * A completion refused for good (`unlock` resolves to `'not_recorded'`,
+ * A completion refused for good (`unlock` resolves to a `NotRecorded`,
  * Codex-2hxff.81; owner decision 2026-10-27, "Say we're on it") says support
  * is on it, at once, with Contact support and Go to library, and runs no
  * checks. Any other failed completion keeps today's slow path.
@@ -97,7 +97,11 @@ afterEach(() => {
 function mountWith(props: {
   verification: CheckoutSessionVerifyResult | null;
   verifyFailed?: boolean;
-  unlock?: Promise<CheckoutSessionVerifyResult | 'not_recorded' | null> | null;
+  unlock?: Promise<
+    | CheckoutSessionVerifyResult
+    | { kind: 'not_recorded'; reference: string }
+    | null
+  > | null;
 }) {
   component = mount(CheckoutSuccess, {
     target: document.body,
@@ -314,7 +318,10 @@ describe('CheckoutSuccess — a payment nothing will record (Codex-2hxff.81)', (
     vi.useFakeTimers();
     mountWith({
       verification: RECORDING,
-      unlock: Promise.resolve('not_recorded'),
+      unlock: Promise.resolve({
+        kind: 'not_recorded' as const,
+        reference: 'cs_test_abc / 3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f',
+      }),
     });
     const checkmark = document.querySelector('.checkmark');
 
@@ -328,7 +335,13 @@ describe('CheckoutSuccess — a payment nothing will record (Codex-2hxff.81)', (
       clean(document.querySelector('.checkout-success__description'))
     ).toBe(m.checkout_not_recorded_description());
     expect(links()).toEqual([
-      [m.checkout_contact_support(), supportMailto('Checkout help')],
+      // The subject quotes the reference support matches to the alert.
+      [
+        m.checkout_contact_support(),
+        supportMailto(
+          'Checkout help, reference cs_test_abc / 3f2a9c1e-7b4d-4e8a-9c2f-1a2b3c4d5e6f'
+        ),
+      ],
       [m.checkout_success_go_to_library(), '/library'],
     ]);
     expect(button(m.checkout_check_again())).toBeUndefined();

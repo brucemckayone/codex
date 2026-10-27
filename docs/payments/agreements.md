@@ -90,19 +90,27 @@ per organisation and revenue type before they look for an open thread and add
 up the shares. So two proposals for the same creator made at once open one
 thread, and two acceptances for different creators that together pass 100%
 cannot both succeed: the second waits, sees the first, and is refused.
-**Who a proposal can name.** `proposeAgreement` refuses anyone who cannot
-hold an agreement, before it stores or emails anything, with
-`RecipientCannotHoldAgreementError` (422). The error's context is only the
-`reason`:
+**Who a proposal can name.** Propose, counter and accept each refuse a
+thread whose creator cannot hold an agreement, before anything is stored or
+emailed, with `RecipientCannotHoldAgreementError` (422). Counter and accept
+check too, so a thread opened before these rules, or one whose creator has
+since become the owner, cannot end in an agreement. The error's context is
+only the `reason`:
 
-- `self`: the owner proposing to themselves;
-- `subscriber`: the recipient is a subscriber;
-- `no_creator_account`: the recipient's account can't enter the creators'
+- `owner`: the creator is the organisation's owner (a proposal to
+  yourself, or a creator who has since become the owner);
+- `subscriber`: the creator is a subscriber;
+- `no_creator_account`: the creator's account can't enter the creators'
   Studio.
 
-A non-member is refused as before (403). The Revenue share roster never lists
-the owner or subscribers. A member without a creator account shows "Needs a
-creator account first" and no Propose action.
+A non-member is refused as before (403). Decline and withdraw are not
+checked, so such a thread can still be closed. The Studio names the reason
+in plain words: the propose, counter and accept remotes forward the 422 with
+its `reason` (`forwardClientErrors`).
+- The Revenue share roster never lists the owner or subscribers.
+- A member without a creator account shows "Needs a creator account first",
+  with no Propose or Amend.
+- The dashboard does not suggest proposing to them.
 
 Admins can see an organisation's agreements, but only the owner can act.
 Admins get a read-only Revenue share page that says: "You can see every

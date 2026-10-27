@@ -170,7 +170,11 @@ checkout.post(
     handler: async (ctx): Promise<CheckoutSessionResponse> => {
       // Extract validated input
       const { contentId, successUrl, cancelUrl } = ctx.input.body;
-      refuseDevReturnUrls(ctx.env.ENVIRONMENT, { successUrl, cancelUrl });
+      refuseDevReturnUrls(
+        ctx.env.ENVIRONMENT,
+        { successUrl, cancelUrl },
+        ctx.obs
+      );
 
       // Create checkout session (uses authenticated user's ID as customerId)
       const session = await ctx.services.purchase.createCheckoutSession(
@@ -205,7 +209,11 @@ checkout.post(
     input: { body: createCourseCheckoutSchema },
     handler: async (ctx): Promise<CheckoutSessionResponse> => {
       const { courseId, successUrl, cancelUrl } = ctx.input.body;
-      refuseDevReturnUrls(ctx.env.ENVIRONMENT, { successUrl, cancelUrl });
+      refuseDevReturnUrls(
+        ctx.env.ENVIRONMENT,
+        { successUrl, cancelUrl },
+        ctx.obs
+      );
       const session = await ctx.services.purchase.createCourseCheckoutSession(
         { courseId, successUrl, cancelUrl },
         ctx.user.id
@@ -228,7 +236,11 @@ checkout.post(
     input: { body: createCourseSubscriptionCheckoutSchema },
     handler: async (ctx): Promise<CheckoutSessionResponse> => {
       const { successUrl, cancelUrl } = ctx.input.body;
-      refuseDevReturnUrls(ctx.env.ENVIRONMENT, { successUrl, cancelUrl });
+      refuseDevReturnUrls(
+        ctx.env.ENVIRONMENT,
+        { successUrl, cancelUrl },
+        ctx.obs
+      );
       const session =
         await ctx.services.courseSubscription.createCheckoutSession(
           ctx.user.id,
@@ -263,9 +275,11 @@ checkout.post(
     },
     input: { body: createPortalSessionSchema },
     handler: async (ctx) => {
-      refuseDevReturnUrls(ctx.env.ENVIRONMENT, {
-        returnUrl: ctx.input.body.returnUrl,
-      });
+      refuseDevReturnUrls(
+        ctx.env.ENVIRONMENT,
+        { returnUrl: ctx.input.body.returnUrl },
+        ctx.obs
+      );
       return await ctx.services.purchase.createPortalSession(
         ctx.user.email,
         ctx.user.id,

@@ -10,13 +10,17 @@
  * - the billing portal's return link;
  * - Connect onboarding's return and refresh links.
  * Development, test, dev and staging keep today's list. A missing or unknown
- * ENVIRONMENT counts as production.
+ * ENVIRONMENT counts as production. Each refusal is logged at warn, with the
+ * field, protocol, hostname and environment, never the path or the query:
+ * a production misconfiguration would otherwise refuse every checkout with
+ * no alert.
  *
  * Harness: `procedure` is replaced by a recorder, and each route's handler is
  * called with its body parsed by the route's own schema, as `procedure` does.
  */
 
 import { ValidationError } from '@codex/service-errors';
+import { createMockObservability } from '@codex/test-utils';
 import type { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -156,6 +160,8 @@ function configFor(router: Hono<never>, path: string): ProcedureConfig {
   return config;
 }
 
+let obs: ReturnType<typeof createMockObservability>['obs'];
+
 /** Call a route's handler as procedure would, in `environment`. */
 function call(
   router: Hono<never>,
@@ -169,11 +175,15 @@ function call(
     input: { body: config.input?.body?.parse(body) },
     env: { ENVIRONMENT: environment },
     services,
+    obs,
   });
 }
 
+const REFUSED_LINE = 'A return link was refused: not https on a trusted domain';
+
 beforeEach(() => {
   vi.clearAllMocks();
+  obs = createMockObservability().obs;
 });
 
 describe.each(ROUTES)('$route: return links (Codex-2hxff.79)', ({
@@ -206,10 +216,38 @@ describe.each(ROUTES)('$route: return links (Codex-2hxff.79)', ({
     expect(stripeCall).not.toHaveBeenCalled();
   });
 
-  it('production accepts https on the platform', async () => {
+  // Otherwise a production misconfiguration refuses every checkout with no
+  // alert: the error mapper logs no ServiceError.
+  it('production logs each refused field at warn: field, protocol, hostname and environment, never the path or query', async () => {
+    await call(
+      router,
+      path,
+      body('http://of-blood-and-bones.lvh.me:3000'),
+      'production'
+    ).catch(() => undefined);
+
+    expect(vi.mocked(obs.warn).mock.calls).toEqual(
+      fields.map((field) => [
+        REFUSED_LINE,
+        {
+          field,
+          protocol: 'http:',
+          hostname: 'of-blood-and-bones.lvh.me',
+          environment: 'production',
+        },
+      ])
+    );
+    const logged = JSON.stringify(vi.mocked(obs.warn).mock.calls);
+    expect(logged).not.toMatch(
+      /session_id|kind=|connect=|\/checkout|\/account|\/pricing|\/content|\/journeys|\/subscription|\/creators/
+    );
+  });
+
+  it('production accepts https on the platform, and logs nothing', async () => {
     await call(router, path, body(LIVE), 'production');
 
     expect(stripeCall).toHaveBeenCalledOnce();
+    expect(obs.warn).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -226,17 +264,22 @@ describe.each(ROUTES)('$route: return links (Codex-2hxff.79)', ({
     );
 
     expect(stripeCall).toHaveBeenCalledOnce();
+    expect(obs.warn).not.toHaveBeenCalled();
   });
 
   it.each([
     undefined,
     '',
     'Production',
-  ])('an ENVIRONMENT of %j counts as production', async (environment) => {
+  ])('an ENVIRONMENT of %j counts as production, and the line says which', async (environment) => {
     await expect(
       call(router, path, body('http://localhost:3000'), environment)
     ).rejects.toBeInstanceOf(ValidationError);
     expect(stripeCall).not.toHaveBeenCalled();
+    expect(obs.warn).toHaveBeenCalledWith(
+      REFUSED_LINE,
+      expect.objectContaining({ environment: environment ?? null })
+    );
   });
 });
 

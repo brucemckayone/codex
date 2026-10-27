@@ -144,9 +144,22 @@ app.post(
       // Send the invitation email (fire-and-forget). Its link is built from
       // the env name, never WEB_APP_URL or a request host: the apex has no
       // Studio, and on staging `parseHost` reports the production apex.
+      if (!ctx.env.ENVIRONMENT) {
+        // Unset outside local dev means a misconfigured deploy: the link
+        // would point at a dev host.
+        ctx.obs?.warn(
+          'ENVIRONMENT is unset; the invitation email links to development',
+          { organizationId, userId: result.userId }
+        );
+      }
       const environment = ctx.env.ENVIRONMENT ?? 'development';
       if (isEnvName(environment)) {
         const invitation = INVITATION_BY_ROLE[ctx.input.body.role];
+        const orgUrl = buildOrgUrlFromEnv(
+          environment,
+          org.slug,
+          invitation.path
+        );
         sendEmailToWorker(ctx.env, ctx.executionCtx, {
           to: ctx.input.body.email,
           templateName: 'org-member-invitation',
@@ -157,7 +170,12 @@ app.post(
             inviterName: ctx.user.name || 'A team member',
             orgName: org.name,
             roleName: invitation.roleName,
-            orgUrl: buildOrgUrlFromEnv(environment, org.slug, invitation.path),
+            orgUrl,
+            // Transitional, for one release (Codex-2hxff.83): the old
+            // notifications-api requires these, and a template row 0117 has
+            // not rewritten still renders them. Drop both once it is live.
+            acceptUrl: orgUrl,
+            expiryDays: '7',
           },
         });
       } else {

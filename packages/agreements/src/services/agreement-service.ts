@@ -346,9 +346,9 @@ export class AgreementService extends BaseService {
    *
    * Validates:
    *   1. proposer is an active owner of the org
-   *   2. the recipient can hold an agreement (`assertProposableRecipient`):
-   *      not the owner themselves, an active member who is not a
-   *      subscriber, with a creator account (Codex-2hxff.76, .77)
+   *   2. the recipient can hold an agreement (`assertCanHoldAgreement`):
+   *      an active member who is not the owner or a subscriber, with a
+   *      creator account (Codex-2hxff.76, .77)
    *   3. no other proposal in this (org, creator, revenue_type) thread
    *      is currently `open` or `countered` (one negotiation at a time
    *      per bucket — keeps the UI sane)
@@ -367,11 +367,10 @@ export class AgreementService extends BaseService {
           input.organizationId,
           input.proposedByUserId
         );
-        await this.assertProposableRecipient(
+        await this.assertCanHoldAgreement(
           tx,
           input.organizationId,
-          input.creatorId,
-          input.proposedByUserId
+          input.creatorId
         );
         // Before the open-thread check: there is no row to lock yet, so two
         // proposes for one creator would otherwise both open a thread.
@@ -483,9 +482,10 @@ export class AgreementService extends BaseService {
           );
         }
 
-        // Neither side can keep negotiating once the creator has left
-        // the organisation (AGR-09).
-        await this.assertActiveMember(
+        // Neither side can keep negotiating once the creator has left the
+        // organisation (AGR-09), or with a creator who can't hold an
+        // agreement (Codex-2hxff.76/.77): a thread from before those rules.
+        await this.assertCanHoldAgreement(
           tx,
           parent.organizationId,
           parent.creatorId
@@ -652,8 +652,10 @@ export class AgreementService extends BaseService {
         }
 
         // A removed creator's proposals are withdrawn on removal; this
-        // also closes the race with a removal in flight (AGR-09).
-        await this.assertActiveMember(
+        // also closes the race with a removal in flight (AGR-09). An accept
+        // is also refused for a creator who can't hold an agreement
+        // (Codex-2hxff.76/.77), so no older thread ends in one.
+        await this.assertCanHoldAgreement(
           tx,
           proposal.organizationId,
           proposal.creatorId
@@ -1955,60 +1957,30 @@ export class AgreementService extends BaseService {
   }
 
   /**
-   * Membership existence check for a thread already under way (counter,
-   * accept): the creator must still be on the team (AGR-09). A new proposal
-   * checks more, in `assertProposableRecipient`.
-   *
-   * Takes a SHARE lock on the membership row, so a removal running at the
-   * same moment waits for this transaction (and then ends what it created),
-   * or wins and this check fails (owner decision AGR-09).
-   */
-  private async assertActiveMember(
-    tx: Tx,
-    organizationId: string,
-    userId: string
-  ): Promise<void> {
-    const [membership] = await tx
-      .select({ id: organizationMemberships.id })
-      .from(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.organizationId, organizationId),
-          eq(organizationMemberships.userId, userId),
-          eq(organizationMemberships.status, 'active')
-        )
-      )
-      .for('share');
-    if (!membership) {
-      throw new ForbiddenError(
-        'Target user is not an active member of this organization',
-        { organizationId, userId }
-      );
-    }
-  }
-
-  /**
-   * Who a new proposal can name (owner decisions 2026-10-27):
-   *   - never the owner making it (Codex-2hxff.77): they are already paid
-   *     both the creator and the organisation slice of their own sales, and
-   *     the whole pool when there are no subscription agreements;
-   *   - an active member, as `assertActiveMember`, under the same SHARE lock
-   *     on the membership row and only that row (AGR-09);
+   * Whether this thread's creator can hold an agreement, checked by propose,
+   * counter AND accept (owner decisions 2026-10-27). Counter and accept
+   * check too, so a thread opened before these rules, or a creator who has
+   * since become the owner, cannot end in an agreement the rules refuse:
+   *   - an active member, or a 403 (AGR-09: neither side keeps negotiating
+   *     once the creator has left). The SHARE lock is on the membership row
+   *     and only that row, so a removal running at the same moment waits for
+   *     this transaction (and then ends what it created), or wins and this
+   *     check fails;
+   *   - never the owner (Codex-2hxff.77). They are already paid both the
+   *     creator and the organisation slice of their own sales, and the whole
+   *     pool when there are no subscription agreements. The one-active-owner
+   *     index makes a proposal to yourself exactly this case;
    *   - not a subscriber: audience, not team (Codex-2hxff.76);
    *   - with a platform role that can enter the creators' Studio
    *     (`STUDIO_ROLES`), where every link in an agreement's emails goes.
    *     Joining an organisation does not change the platform role: an
    *     invited customer stays one until the become-creator wizard.
    */
-  private async assertProposableRecipient(
+  private async assertCanHoldAgreement(
     tx: Tx,
     organizationId: string,
-    userId: string,
-    proposedByUserId: string
+    userId: string
   ): Promise<void> {
-    if (userId === proposedByUserId) {
-      throw new RecipientCannotHoldAgreementError('self');
-    }
     const [recipient] = await tx
       .select({
         membershipRole: organizationMemberships.role,
@@ -2029,6 +2001,9 @@ export class AgreementService extends BaseService {
         'Target user is not an active member of this organization',
         { organizationId, userId }
       );
+    }
+    if (recipient.membershipRole === 'owner') {
+      throw new RecipientCannotHoldAgreementError('owner');
     }
     if (recipient.membershipRole === 'subscriber') {
       throw new RecipientCannotHoldAgreementError('subscriber');

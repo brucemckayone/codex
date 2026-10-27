@@ -42,6 +42,7 @@
   } from '@codex/agreements';
   import AgreementCard from '$lib/components/agreements/AgreementCard.svelte';
   import AgreementShare from '$lib/components/agreements/AgreementShare.svelte';
+  import { agreementErrorMessage } from '$lib/components/agreements/agreement-refusal';
   import { isShareMissing } from '$lib/components/agreements/agreement-share';
   import Avatar from '$lib/components/ui/Avatar/Avatar.svelte';
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
@@ -450,7 +451,7 @@
     } catch (err) {
       toast.error(
         m.monetisation_revshare_accept_error(),
-        err instanceof Error ? err.message : m.monetisation_revshare_unknown_error()
+        agreementErrorMessage(err, m.monetisation_revshare_unknown_error())
       );
     }
   }

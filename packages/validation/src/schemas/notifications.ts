@@ -274,6 +274,12 @@ export const orgMemberInvitationDataSchema = z.object({
   orgName: z.string(),
   roleName: z.string(),
   orgUrl: z.string().url(),
+  // Transitional, for one release (Codex-2hxff.83). organization-api deploys
+  // before notifications-api, and a template row that 0117 has not rewritten
+  // still uses these, so the sender keeps them, optional here. Drop both
+  // once the release is live.
+  acceptUrl: z.string().url().optional(),
+  expiryDays: z.string().optional(),
 });
 
 export const memberRoleChangedDataSchema = z.object({
