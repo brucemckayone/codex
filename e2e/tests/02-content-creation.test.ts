@@ -11,6 +11,7 @@ import {
   unwrapApiResponse,
 } from '@codex/test-utils/e2e';
 import { afterAll, describe, expect, test } from 'vitest';
+import { markVideoReady } from '../helpers/media';
 import { WORKER_URLS } from '../helpers/worker-urls';
 
 describe('Content Creation Flow', () => {
@@ -51,34 +52,27 @@ describe('Content Creation Flow', () => {
     expect(media.id).toBeDefined();
     expect(media.status).toBe('uploading');
 
-    // Step 3: Update media status to 'ready' (simulating transcoding completion)
-    // DB constraint requires hlsMasterPlaylistKey, thumbnailKey, and durationSeconds when status='ready'
-    const updateMediaResponse = await httpClient.patch(
+    // Step 3: The creator cannot mark media ready: status and the transcode's
+    // outputs belong to the pipeline (Codex-l2c48.9).
+    const refusedResponse = await httpClient.patch(
       `${WORKER_URLS.content}/api/media/${media.id}`,
       {
         headers: {
           Cookie: cookie,
           Origin: WORKER_URLS.content,
         },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
-          thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
-          durationSeconds: 120,
-        },
+        data: { status: 'ready' },
       }
     );
+    expect(refusedResponse.status).toBe(400);
+    expect((await refusedResponse.json()).error.code).toBe('VALIDATION_ERROR');
 
-    if (!updateMediaResponse.ok) {
-      const errorBody = await updateMediaResponse.text();
-      console.log(
-        '[TEST DEBUG] Media update failed:',
-        updateMediaResponse.status,
-        errorBody
-      );
-    }
-    await expectSuccessResponse(updateMediaResponse);
-    const updatedMedia = unwrapApiResponse(await updateMediaResponse.json());
+    // So the test stands in for a finished transcode.
+    const updatedMedia = await markVideoReady(media.id, {
+      hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
+      thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
+      durationSeconds: 120,
+    });
     expect(updatedMedia.status).toBe('ready');
 
     // Step 4: Create draft content with media
@@ -237,17 +231,10 @@ describe('Content Creation Flow', () => {
     const media = unwrapApiResponse(await mediaResponse.json());
 
     // DB constraint requires hlsMasterPlaylistKey, thumbnailKey, and durationSeconds when status='ready'
-    await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-      headers: {
-        Cookie: creator1Cookie,
-        Origin: WORKER_URLS.content,
-      },
-      data: {
-        status: 'ready',
-        hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
-        thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
-        durationSeconds: 120,
-      },
+    await markVideoReady(media.id, {
+      hlsMasterPlaylistKey: `hls/${media.id}/master.m3u8`,
+      thumbnailKey: `thumbnails/${media.id}/thumb.jpg`,
+      durationSeconds: 120,
     });
 
     const contentResponse = await httpClient.post(

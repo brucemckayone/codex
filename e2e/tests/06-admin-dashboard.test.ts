@@ -28,6 +28,7 @@ import {
 import { and, eq } from 'drizzle-orm';
 import { afterAll, describe, expect, test } from 'vitest';
 import { adminFixture } from '../fixtures';
+import { markVideoReady } from '../helpers/media';
 import {
   createCheckoutCompletedEvent,
   sendSignedWebhook,
@@ -257,17 +258,10 @@ describe('Admin Dashboard', () => {
         );
         const media = unwrapApiResponse(await mediaResponse.json());
 
-        await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-          headers: {
-            Cookie: creatorCookie,
-            'Content-Type': 'application/json',
-          },
-          data: {
-            status: 'ready',
-            hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-            thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
-            durationSeconds: 300,
-          },
+        await markVideoReady(media.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+          durationSeconds: 300,
         });
 
         // Create paid content under admin's organization
@@ -429,16 +423,10 @@ describe('Admin Dashboard', () => {
         );
         const media = unwrapApiResponse(await mediaResponse.json());
 
-        await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-          headers: {
-            Cookie: creatorCookie,
-            'Content-Type': 'application/json',
-          },
-          data: {
-            status: 'ready',
-            hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-            durationSeconds: 300,
-          },
+        await markVideoReady(media.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+          durationSeconds: 300,
         });
 
         // Content in admin1's org
@@ -591,16 +579,10 @@ describe('Admin Dashboard', () => {
         );
         const media = unwrapApiResponse(await mediaResponse.json());
 
-        await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-          headers: {
-            Cookie: creatorCookie,
-            'Content-Type': 'application/json',
-          },
-          data: {
-            status: 'ready',
-            hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-            durationSeconds: 300,
-          },
+        await markVideoReady(media.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+          durationSeconds: 300,
         });
 
         // Create two content items
@@ -643,20 +625,11 @@ describe('Admin Dashboard', () => {
         );
         const media2 = unwrapApiResponse(await media2Response.json());
 
-        await httpClient.patch(
-          `${WORKER_URLS.content}/api/media/${media2.id}`,
-          {
-            headers: {
-              Cookie: creatorCookie,
-              'Content-Type': 'application/json',
-            },
-            data: {
-              status: 'ready',
-              hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
-              durationSeconds: 300,
-            },
-          }
-        );
+        await markVideoReady(media2.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId2}/thumb.jpg`,
+          durationSeconds: 300,
+        });
 
         const content2Response = await httpClient.post(
           `${WORKER_URLS.content}/api/content`,
@@ -1226,16 +1199,10 @@ describe('Admin Dashboard', () => {
         );
         const media = unwrapApiResponse(await mediaResponse.json());
 
-        await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-          headers: {
-            Cookie: creatorCookie,
-            'Content-Type': 'application/json',
-          },
-          data: {
-            status: 'ready',
-            hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-            durationSeconds: 300,
-          },
+        await markVideoReady(media.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+          durationSeconds: 300,
         });
 
         const contentResponse = await httpClient.post(
@@ -1365,16 +1332,10 @@ describe('Admin Dashboard', () => {
         );
         const media = unwrapApiResponse(await mediaResponse.json());
 
-        await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-          headers: {
-            Cookie: creatorCookie,
-            'Content-Type': 'application/json',
-          },
-          data: {
-            status: 'ready',
-            hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-            durationSeconds: 300,
-          },
+        await markVideoReady(media.id, {
+          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+          thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+          durationSeconds: 300,
         });
 
         const contentResponse = await httpClient.post(
@@ -1504,16 +1465,10 @@ describe('Admin Dashboard', () => {
       );
       const media1 = unwrapApiResponse(await media1Response.json());
 
-      await httpClient.patch(`${WORKER_URLS.content}/api/media/${media1.id}`, {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-        },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `e2e/hls/${testMediaId1}/master.m3u8`,
-          durationSeconds: 300,
-        },
+      await markVideoReady(media1.id, {
+        hlsMasterPlaylistKey: `e2e/hls/${testMediaId1}/master.m3u8`,
+        thumbnailKey: `e2e/thumbnails/${testMediaId1}/thumb.jpg`,
+        durationSeconds: 300,
       });
 
       const content1Response = await httpClient.post(
@@ -1580,16 +1535,10 @@ describe('Admin Dashboard', () => {
       );
       const media2 = unwrapApiResponse(await media2Response.json());
 
-      await httpClient.patch(`${WORKER_URLS.content}/api/media/${media2.id}`, {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-        },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
-          durationSeconds: 300,
-        },
+      await markVideoReady(media2.id, {
+        hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
+        thumbnailKey: `e2e/thumbnails/${testMediaId2}/thumb.jpg`,
+        durationSeconds: 300,
       });
 
       const content2Response = await httpClient.post(
@@ -1732,16 +1681,10 @@ describe('Admin Dashboard', () => {
       );
       const media = unwrapApiResponse(await mediaResponse.json());
 
-      await httpClient.patch(`${WORKER_URLS.content}/api/media/${media.id}`, {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-        },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
-          durationSeconds: 300,
-        },
+      await markVideoReady(media.id, {
+        hlsMasterPlaylistKey: `e2e/hls/${testMediaId}/master.m3u8`,
+        thumbnailKey: `e2e/thumbnails/${testMediaId}/thumb.jpg`,
+        durationSeconds: 300,
       });
 
       const contentResponse = await httpClient.post(

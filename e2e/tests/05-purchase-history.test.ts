@@ -23,6 +23,7 @@ import {
 } from '@codex/test-utils/e2e';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { markVideoReady } from '../helpers/media';
 import {
   createCheckoutCompletedEvent,
   sendSignedWebhook,
@@ -131,31 +132,15 @@ describe('Purchase History API', () => {
       '[Setup] 4/12 Marking both media items as ready in parallel...'
     );
     await Promise.all([
-      httpClient.patch(`${WORKER_URLS.content}/api/media/${media1.id}`, {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-          Origin: WORKER_URLS.content,
-        },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `e2e/hls/${testMediaId1}/master.m3u8`,
-          thumbnailKey: `e2e/thumbnails/${testMediaId1}/thumb.jpg`,
-          durationSeconds: 300,
-        },
+      markVideoReady(media1.id, {
+        hlsMasterPlaylistKey: `e2e/hls/${testMediaId1}/master.m3u8`,
+        thumbnailKey: `e2e/thumbnails/${testMediaId1}/thumb.jpg`,
+        durationSeconds: 300,
       }),
-      httpClient.patch(`${WORKER_URLS.content}/api/media/${media2.id}`, {
-        headers: {
-          Cookie: creatorCookie,
-          'Content-Type': 'application/json',
-          Origin: WORKER_URLS.content,
-        },
-        data: {
-          status: 'ready',
-          hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
-          thumbnailKey: `e2e/thumbnails/${testMediaId2}/thumb.jpg`,
-          durationSeconds: 600,
-        },
+      markVideoReady(media2.id, {
+        hlsMasterPlaylistKey: `e2e/hls/${testMediaId2}/master.m3u8`,
+        thumbnailKey: `e2e/thumbnails/${testMediaId2}/thumb.jpg`,
+        durationSeconds: 600,
       }),
     ]);
     console.log('[Setup] 4/12 Both media items ready');
